@@ -1,0 +1,40 @@
+B.2 spec evidence — CP-pos-order-flows-remediation
+Branch: develop (SHARED checkout — HEAD moved during run, see per-suite HEAD)
+Skill: buildcheck-dev (scoped single-spec runs only, no builds)
+
+=== SUITE 1 ===
+command: npm --prefix apps/backend run test:path -- src/domains/store/payments/payments.service.spec.ts
+exit code: 0
+Suites: 1 passed, 1 total
+Tests: 118 passed, 118 total
+UTC start: 2026-09-24T01:07:35Z
+UTC end:   2026-09-24T01:07:51Z
+git HEAD:  db689e73aeef098f1e8ba1570b38fff0ebb959e6
+verdict: PASS (118/118)
+
+=== SUITE 2 ===
+command: npm --prefix apps/backend run test:path -- src/domains/store/tables/split-account-payment.service.spec.ts
+exit code: 0
+Suites: 1 passed, 1 total
+Tests: 27 passed, 27 total
+UTC start: 2026-09-24T01:07:55Z
+UTC end:   2026-09-24T01:08:08Z
+git HEAD:  cab0194fc1acf4cce7de54fd110c16574f325686
+verdict: PASS (27/27)
+
+=== SUITE 3 ===
+command: npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-flow.service.spec.ts
+exit code: 1
+Suites: 1 failed, 1 total
+Tests: 2 failed, 146 passed, 148 total
+UTC start: 2026-09-24T01:08:11Z
+UTC end:   2026-09-24T01:08:30Z
+git HEAD:  cab0194fc1acf4cce7de54fd110c16574f325686
+verdict: FAIL (146/148)
+failing tests (both in OrderFlowService.cancelDeliveredOrderItem — reversa 1060 paso 2):
+  1. restock: devuelve stock, cancela suave y audita con destino
+     expected cancellation_type "before_fire", received "after_fire_reused"
+  2. waste: NO toca stock, deja merma auditada
+     expected cancellation_type "before_fire", received "after_fire_waste"
+
+NOTE: HEAD drifted db689e73 -> cab0194fc between suite 1 and suite 2 (other agents active on shared checkout).

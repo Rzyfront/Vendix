@@ -404,7 +404,10 @@ export class FinancialAnalyticsService {
     const breakdown = taxRows.map((b) => ({
       tax_name: b.tax_name,
       tax_type: b.tax_type,
-      tax_rate: this.round2(Number(b.tax_rate)),
+      // FRACCIÓN (0.08 = 8%); el XLSX `percent` la necesita así; la pantalla la
+      // convierte con transform. 5 decimales = Decimal(6,5) de la columna
+      // (round2 la aplastaba: 0.08 -> 0.08 pero 0.00966 -> 0.01).
+      tax_rate: Math.round(Number(b.tax_rate) * 1e5) / 1e5,
       total_tax: this.round2(Number(b.total_tax)),
       taxable_amount: this.round2(Number(b.taxable_amount)),
       is_compound: b.is_compound,

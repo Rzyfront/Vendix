@@ -108,6 +108,67 @@ describe('DispatchNotesService — createFromOrder prorratea el impuesto de lín
 
   afterEach(() => jest.restoreAllMocks());
 
+  it('blocks whole-order remisión while a prepared line still waits for kitchen, even alongside a direct product', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue(orderWith([
+      orderItem({ products: { product_type: 'prepared' }, kitchen_ticket_items: [{ status: 'pending' }] }),
+      orderItem({ id: 12, product_id: 353, products: { product_type: 'physical' }, kitchen_ticket_items: [] }),
+    ]));
+    await expect(service.createFromOrder(ORDER_ID, { items: [] } as any)).rejects.toMatchObject({
+      errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    });
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it('rechaza remisionar una orden con envío por asignar (other sin método) con ORD_SHIP_REQUIRED_001', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      ...orderWith([orderItem({ products: { product_type: 'physical' }, kitchen_ticket_items: [] })]),
+      state: 'pending_payment',
+      delivery_type: 'other',
+      shipping_method_id: null,
+    });
+    await expect(service.createFromOrder(ORDER_ID, { items: [] } as any)).rejects.toMatchObject({
+      errorCode: 'ORD_SHIP_REQUIRED_001',
+    });
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it('still permits an explicit direct-product line while a different dish waits in KDS', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue(orderWith([
+      orderItem({ id: 12, product_id: 353, products: { product_type: 'prepared' }, kitchen_ticket_items: [{ status: 'pending' }] }),
+      orderItem({ products: { product_type: 'physical' }, kitchen_ticket_items: [] }),
+    ]));
+    await service.createFromOrder(ORDER_ID, {
+      items: [{ order_item_id: ORDER_ITEM_ID, dispatched_quantity: 1, location_id: LOCATION_ID }],
+    } as any);
+    expect(txCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not recheck stock already committed on a delivered direct line or consumed at kitchen fire', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue(orderWith([
+      orderItem({
+        inventory_committed: true,
+        products: { product_type: 'physical' },
+        kitchen_ticket_items: [],
+      }),
+      orderItem({
+        id: 12,
+        product_id: 353,
+        inventory_consumed_at_fire: true,
+        products: { product_type: 'prepared' },
+        kitchen_ticket_items: [{ status: 'delivered' }],
+      }),
+    ]));
+    prismaMock.dispatch_notes = { findMany: jest.fn().mockResolvedValue([]) };
+
+    await service.createFromOrder(ORDER_ID, { items: [] } as any);
+
+    expect((service as any).validateDispatchItemsStock).toHaveBeenCalledWith(
+      STORE_ID, ORDER_ID, [],
+    );
+    expect(txCreate).toHaveBeenCalledTimes(1);
+    expect(txCreate.mock.calls[0][0].data.dispatch_note_items.create).toHaveLength(2);
+  });
+
   it('despacho completo qty 5 base 50.000 IVA 19 % persiste tax 47.500 y total 297.500', async () => {
     const { persisted } = await runCreate([orderItem()], 5);
 
@@ -118,6 +179,63 @@ describe('DispatchNotesService — createFromOrder prorratea el impuesto de lín
     // El encabezado hereda la coherencia: Σ tax_amount y grand_total.
     expect(persisted.tax_amount).toBe(47500);
     expect(persisted.grand_total).toBe(297500);
+  });
+
+  it('copia alias y dirección de entrega sin crear cliente para una venta con nombre de referencia', async () => {
+    const address = {
+      address_line1: 'Cra 7 # 1-3',
+      city: 'Bogotá',
+      latitude: 4.61,
+      longitude: -74.08,
+    };
+    prismaMock.orders.findFirst.mockResolvedValue({
+      ...orderWith([orderItem()]),
+      delivery_type: 'home_delivery',
+      customer_id: null,
+      customer_alias: 'Portería Torre Norte',
+      users: null,
+      shipping_address_snapshot: address,
+    });
+
+    await service.createFromOrder(ORDER_ID, {
+      items: [{ order_item_id: ORDER_ITEM_ID, dispatched_quantity: 5, location_id: LOCATION_ID }],
+    } as any);
+
+    const persisted = txCreate.mock.calls[0][0].data;
+    expect(persisted.customer_id).toBeNull();
+    expect(persisted.customer_name).toBe('Portería Torre Norte');
+    expect(persisted.customer_address).toEqual(address);
+    expect(persisted.customer_tax_id).toBeNull();
+  });
+
+  it('conserva el gate de dirección para una venta con alias sin destino', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      ...orderWith([orderItem()]),
+      delivery_type: 'home_delivery',
+      customer_id: null,
+      customer_alias: 'Portería Torre Norte',
+      users: null,
+    });
+
+    await expect(service.createFromOrder(ORDER_ID, { items: [] } as any)).rejects.toThrow();
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it('re-snapshotear la dirección no modifica el nombre copiado', async () => {
+    jest.spyOn(service, 'findOne').mockResolvedValue({ id: 7, customer_name: 'Portería Torre Norte' } as any);
+    const update = jest.fn().mockResolvedValue({ id: 7, customer_name: 'Portería Torre Norte' });
+    prismaMock.dispatch_notes = { update };
+
+    await expect(service.updateCustomerAddressSnapshot(7, {
+      address_line_1: 'Cra 7 # 1-3',
+      city: 'Bogotá',
+    } as any)).resolves.toMatchObject({ customer_name: 'Portería Torre Norte' });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        customer_address: expect.objectContaining({ address_line1: 'Cra 7 # 1-3' }),
+      }),
+    }));
+    expect(update.mock.calls[0][0].data).not.toHaveProperty('customer_name');
   });
 
   it('despacho parcial qty 10 → 4 persiste tax = lineTax × 0.4', async () => {

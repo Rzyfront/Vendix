@@ -1,16 +1,9 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
 import { CustomersService } from '../../../domains/store/customers/customers.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { fullName, formatDocument } from '../_adapters/customer.adapter';
 
 export interface CustomerToolDeps {
   customersService: CustomersService;
-  /**
-   * `StorePrismaService` and never `GlobalPrismaService`: every read here is
-   * tenant data. Note that its `users` getter returns the **unscoped** base
-   * client (see `vendix-prisma-scopes`), so every `users` query in this file
-   * carries the store filter explicitly via `customerScope()`.
-   */
-  prisma: StorePrismaService;
 }
 
 /**
@@ -53,18 +46,6 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function fullName(user: { first_name?: string; last_name?: string }): string {
-  return [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-}
-
-function formatDocument(user: {
-  document_type?: string | null;
-  document_number?: string | null;
-}): string | null {
-  if (!user.document_number) return null;
-  return [user.document_type, user.document_number].filter(Boolean).join(' ');
-}
-
 function isoDate(value: unknown): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -92,18 +73,6 @@ function customerScope(storeId: number, includeArchived: boolean) {
     ...(includeArchived ? {} : { state: { not: 'archived' as const } }),
   };
 }
-
-const CUSTOMER_CARD_SELECT = {
-  id: true,
-  first_name: true,
-  last_name: true,
-  email: true,
-  phone: true,
-  document_type: true,
-  document_number: true,
-  state: true,
-  created_at: true,
-} as const;
 
 /**
  * Quintile score (1..5) of `value` inside an ascending sorted population.
@@ -172,7 +141,7 @@ interface CustomerAggregate {
 }
 
 export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
-  const { customersService, prisma } = deps;
+  const { customersService } = deps;
 
   /**
    * Purchase aggregates for a bounded set of customers. Only `finished`
@@ -186,13 +155,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
     const stats = new Map<number, CustomerAggregate>();
     if (!customerIds.length) return stats;
 
-    const grouped = await prisma.orders.groupBy({
-      by: ['customer_id'],
-      where: { customer_id: { in: customerIds }, state: 'finished' },
-      _count: { _all: true },
-      _sum: { grand_total: true },
-      _max: { created_at: true },
-    });
+    const grouped = await customersService.getPurchaseStatsForAgent(customerIds);
 
     for (const row of grouped as any[]) {
       if (row.customer_id == null) continue;
@@ -213,18 +176,14 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
    * amounts in this response were actually recorded in.
    */
   async function resolveCurrencyFromOrders(): Promise<string | null> {
-    const latest = await prisma.orders.findFirst({
-      where: { currency: { not: null } },
-      orderBy: { created_at: 'desc' },
-      select: { currency: true },
-    });
-    return latest?.currency ?? null;
+    return customersService.resolveCurrencyFromOrdersForAgent();
   }
 
   return [
     // ─── Tool 1: find_customer ───────────────────────────────────────
     {
       name: 'find_customer',
+      version: '1',
       domain: 'customers',
       readOnly: true,
       description:
@@ -327,12 +286,10 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
           where = { ...scope, AND: conditions };
         }
 
-        let rows: any[] = await prisma.users.findMany({
+        let rows: any[] = await customersService.searchCustomerCardsForAgent(
           where,
-          select: CUSTOMER_CARD_SELECT,
-          orderBy: { created_at: 'desc' },
-          take: limit + 1,
-        });
+          limit + 1,
+        );
 
         let usedFuzzyPass = false;
         let scanCapReached = false;
@@ -341,12 +298,10 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
           // Accent-insensitive / phone-format-insensitive second pass. Bounded
           // scan, deliberately cheap: only the identifying columns.
           usedFuzzyPass = true;
-          const pool: any[] = await prisma.users.findMany({
-            where: scope,
-            select: CUSTOMER_CARD_SELECT,
-            orderBy: { created_at: 'desc' },
-            take: FUZZY_SCAN_CAP,
-          });
+          const pool: any[] = await customersService.searchCustomerCardsForAgent(
+            scope,
+            FUZZY_SCAN_CAP,
+          );
           scanCapReached = pool.length === FUZZY_SCAN_CAP;
 
           const normalizedTokens = normalize(rawQuery)
@@ -404,18 +359,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
         // which the scope filter would silently drop.
         const [stats, withAddresses, currency] = await Promise.all([
           loadPurchaseStats(ids),
-          prisma.users.findMany({
-            where: { id: { in: ids } },
-            select: {
-              id: true,
-              addresses: {
-                where: { type: 'shipping' },
-                orderBy: { is_primary: 'desc' },
-                take: 1,
-                select: { city: true },
-              },
-            },
-          }) as Promise<any[]>,
+          customersService.findCustomerCitiesForAgent(ids),
           resolveCurrencyFromOrders(),
         ]);
 
@@ -466,6 +410,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
     // ─── Tool 2: get_customer_history ────────────────────────────────
     {
       name: 'get_customer_history',
+      version: '1',
       domain: 'customers',
       readOnly: true,
       description:
@@ -524,51 +469,17 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
 
         const [recentOrders, finishedAggregate, openBalance, bookingsCount] =
           await Promise.all([
-            prisma.orders.findMany({
-              where: { customer_id: customerId },
-              orderBy: { created_at: 'desc' },
-              take: limit,
-              select: {
-                id: true,
-                order_number: true,
-                state: true,
-                channel: true,
-                grand_total: true,
-                total_paid: true,
-                remaining_balance: true,
-                currency: true,
-                created_at: true,
-                completed_at: true,
-              },
-            }) as Promise<any[]>,
-            prisma.orders.aggregate({
-              where: { customer_id: customerId, state: 'finished' },
-              _count: { _all: true },
-              _sum: { grand_total: true },
-              _max: { created_at: true },
-              _min: { created_at: true },
-            }) as Promise<any>,
-            prisma.orders.aggregate({
-              where: {
-                customer_id: customerId,
-                state: { notIn: ['cancelled', 'refunded', 'draft'] },
-                remaining_balance: { gt: 0 },
-              },
-              _count: { _all: true },
-              _sum: { remaining_balance: true },
-            }) as Promise<any>,
-            prisma.bookings.count({ where: { customer_id: customerId } }),
+            customersService.getRecentOrdersForAgent(customerId, limit),
+            customersService.getFinishedAggregateForAgent(customerId),
+            customersService.getOpenBalanceForAgent(customerId),
+            customersService.getBookingsCountForAgent(customerId),
           ]);
 
         let topProducts: any[] = [];
         if (includeTopProducts) {
-          const grouped = (await prisma.order_items.groupBy({
-            by: ['product_name'],
-            where: { orders: { customer_id: customerId, state: 'finished' } },
-            _sum: { quantity: true, total_price: true },
-            orderBy: { _sum: { quantity: 'desc' } },
-            take: 5,
-          })) as any[];
+          const grouped = (await customersService.getTopProductsForAgent(
+            customerId,
+          )) as any[];
 
           topProducts = grouped.map((row) => ({
             product: row.product_name,
@@ -640,6 +551,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
     // ─── Tool 3: get_customer_segments ───────────────────────────────
     {
       name: 'get_customer_segments',
+      version: '1',
       domain: 'customers',
       readOnly: true,
       description:
@@ -694,19 +606,9 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
         const now = new Date();
         const since = new Date(now.getTime() - periodDays * 86_400_000);
 
-        const grouped = (await prisma.orders.groupBy({
-          by: ['customer_id'],
-          where: {
-            state: 'finished',
-            customer_id: { not: null },
-            created_at: { gte: since },
-          },
-          _count: { _all: true },
-          _sum: { grand_total: true },
-          _max: { created_at: true },
-          orderBy: { _sum: { grand_total: 'desc' } },
-          take: 5000,
-        })) as any[];
+        const grouped = (await customersService.getSegmentPopulationForAgent(
+          since,
+        )) as any[];
 
         const population: CustomerAggregate[] = grouped
           .filter((row) => row.customer_id != null)
@@ -785,13 +687,10 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
 
         const nameById = new Map<number, string>();
         if (exampleIds.length) {
-          const users: any[] = await prisma.users.findMany({
-            where: {
-              id: { in: exampleIds },
-              ...customerScope(storeId, true),
-            },
-            select: { id: true, first_name: true, last_name: true },
-          });
+          const users: any[] = await customersService.findCustomerNamesForAgent(
+            storeId,
+            exampleIds,
+          );
           for (const user of users) nameById.set(user.id, fullName(user));
         }
 
@@ -851,6 +750,169 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
           population_capped: grouped.length === 5000 || undefined,
           segments,
           note: 'Solo se cuentan órdenes en estado finished dentro del período. Los clientes sin ninguna compra en la ventana no aparecen en ningún grupo.',
+        });
+      },
+    },
+
+    // ─── O-42 lookup_customer ──────────────────────────────────────────
+    {
+      name: 'lookup_customer',
+      version: '1',
+      domain: 'customers',
+      readOnly: true,
+      description:
+        'Verifica si un documento, teléfono o correo YA es cliente de la tienda, para soporte POS ("¿este número ya es cliente?") sin crear duplicados. Es solo resolución de identidad: no crea, no edita. Si hay varias coincidencias las devuelve todas para que el usuario confirme; si no hay ninguna, lo dice y sugiere crearlo desde el módulo de clientes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          documento: {
+            type: 'string',
+            description:
+              'Número de documento a buscar. Al menos uno de documento, telefono o email es obligatorio.',
+          },
+          telefono: {
+            type: 'string',
+            description: 'Teléfono a buscar.',
+          },
+          email: {
+            type: 'string',
+            description: 'Correo a buscar.',
+          },
+        },
+      },
+      requiredPermissions: ['store:customers:read'],
+      handler: async (args, context) => {
+        const storeId = context.store_id;
+        if (!storeId) {
+          return JSON.stringify({
+            error:
+              'Sin tienda en contexto: los clientes se resuelven siempre dentro de una tienda.',
+          });
+        }
+
+        const keys = [args.documento, args.telefono, args.email]
+          .map((key) => String(key ?? '').trim())
+          .filter((key) => key.length > 0)
+          .slice(0, 3);
+        if (!keys.length) {
+          return JSON.stringify({
+            error:
+              'Pasa al menos uno: documento, telefono o email del cliente a buscar.',
+            next_step:
+              'Pide al usuario el documento o el teléfono y vuelve a llamar.',
+          });
+        }
+
+        const seen = new Map<number, { matched_by: string; user: any }>();
+        try {
+          for (const key of keys) {
+            const result = await customersService.findAll(storeId, {
+              search: key,
+              limit: 5,
+            });
+            for (const user of result?.data ?? []) {
+              if (!seen.has(user.id)) seen.set(user.id, { matched_by: key, user });
+            }
+          }
+        } catch (error: any) {
+          return JSON.stringify({
+            error: `No se pudo buscar el cliente: ${error?.message ?? 'error desconocido'}`,
+          });
+        }
+
+        const customers = Array.from(seen.values()).map(({ matched_by, user }) => ({
+          customer_id: user.id,
+          name: fullName(user),
+          document: formatDocument(user),
+          phone: user.phone ?? null,
+          email: user.email ?? null,
+          city: user.addresses?.[0]?.city ?? null,
+          state: user.state,
+          matched_by,
+        }));
+
+        if (!customers.length) {
+          return JSON.stringify({
+            match_count: 0,
+            customers: [],
+            next_step:
+              'No existe un cliente con esos datos en esta tienda. Si el usuario quiere registrarlo, créalo desde el módulo de clientes (esta lectura nunca crea duplicados).',
+          });
+        }
+
+        return JSON.stringify({
+          match_count: customers.length,
+          ambiguous: customers.length > 1,
+          customers,
+          next_step:
+            customers.length > 1
+              ? 'Hay más de un posible cliente. Muéstraselos al usuario (nombre + documento + teléfono) y pídele que confirme cuál antes de seguir.'
+              : 'Usa customer_id con get_customer_history para ver su ficha completa.',
+        });
+      },
+    },
+
+    // ─── O-43 get_customer_stats ─────────────────────────────────────────
+    {
+      name: 'get_customer_stats',
+      version: '1',
+      domain: 'customers',
+      readOnly: true,
+      description:
+        'Radiografía de la base de clientes de la tienda: cuántos hay, cuántos compran, cuántos llegaron este mes, cuánto han facturado y el ranking de los que más órdenes finalizadas tienen. Úsala para "¿cuántos clientes tenemos?", "¿quiénes son los top?". Los ids del ranking encadenan con get_customer_history.',
+      parameters: {
+        type: 'object',
+        properties: {
+          top_limit: {
+            type: 'number',
+            description:
+              'Cuántos clientes traer en el ranking. Por defecto 5, tope 20.',
+          },
+        },
+      },
+      requiredPermissions: ['store:customers:read'],
+      handler: async (args, context) => {
+        const storeId = context.store_id;
+        if (!storeId) {
+          return JSON.stringify({
+            error:
+              'Sin tienda en contexto: las estadísticas de clientes son siempre por tienda.',
+          });
+        }
+
+        const topLimit = clampLimit(args.top_limit, 5, 20);
+
+        let stats: any;
+        let top: any[];
+        try {
+          [stats, top] = await Promise.all([
+            customersService.getStats(storeId),
+            customersService.getTopCustomers(storeId, topLimit),
+          ]);
+        } catch (error: any) {
+          return JSON.stringify({
+            error: `No se pudieron calcular las estadísticas: ${error?.message ?? 'error desconocido'}`,
+          });
+        }
+
+        return JSON.stringify({
+          resumen: {
+            total_clientes: stats.total_customers ?? 0,
+            clientes_activos: stats.active_customers ?? 0,
+            nuevos_este_mes: stats.new_customers_this_month ?? 0,
+            facturacion_clientes: round2(toAmount(stats.total_revenue)),
+          },
+          top_clientes: (top ?? []).map((user: any) => ({
+            customer_id: user.id,
+            name: fullName(user),
+            document: formatDocument(user),
+            phone: user.phone ?? null,
+            email: user.email ?? null,
+            ordenes_finalizadas: user.order_count ?? 0,
+          })),
+          nota: 'Activos = con al menos una orden en la tienda; la facturación suma solo órdenes finished; el ranking ordena por número de órdenes finalizadas.',
+          next_step:
+            'Usa customer_id con get_customer_history para ver la ficha de cualquiera del ranking.',
         });
       },
     },

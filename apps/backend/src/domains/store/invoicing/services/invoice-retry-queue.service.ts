@@ -264,18 +264,18 @@ export class InvoiceRetryQueueService {
 
   /**
    * Mark a retry as failed. If max attempts reached, mark as failed permanently.
-   * Otherwise, schedule next retry with exponential backoff.
+   * Otherwise, schedule next retry with the fixed backoff.
+   *
+   * Exhausting the retries NEVER declares contingency automatically: the
+   * 2026-09-29 incident showed that an automatic Type 04 declaration made later
+   * resends get signed as 04 and rejected by the DIAN (CTG01). Contingency is
+   * only declared manually (`declareContingency`). The third parameter is kept
+   * for call-site compatibility and is ignored.
    */
   async markFailed(
     retry_queue_id: number,
     error: string,
-    /**
-     * True when the failure is a DIAN availability problem (`contingency_eligible`
-     * from the SOAP client). Only then may exhausting the retries lead to
-     * contingency; a rejected or malformed document must terminate as `failed`,
-     * because contingency is not an escape hatch for an invalid document.
-     */
-    contingency_eligible = false,
+    _contingency_eligible = false,
   ): Promise<void> {
     const item = await this.prisma.invoice_retry_queue.findUnique({
       where: { id: retry_queue_id },
@@ -286,26 +286,18 @@ export class InvoiceRetryQueueService {
     const new_attempts = item.attempts + 1;
 
     if (new_attempts >= item.max_attempts) {
-      const terminal_status = contingency_eligible
-        ? RETRY_STATUS.CONTINGENCY
-        : RETRY_STATUS.FAILED;
-
       await this.prisma.invoice_retry_queue.update({
         where: { id: retry_queue_id },
         data: {
-          status: terminal_status,
+          status: RETRY_STATUS.FAILED,
           attempts: new_attempts,
           last_error: error,
           updated_at: new Date(),
         },
       });
 
-      if (contingency_eligible) {
-        await this.declareContingency(item.invoice_id, error);
-      }
-
       this.logger.warn(
-        `Invoice ${item.invoice_id} exhausted all ${item.max_attempts} retry attempts → ${terminal_status}`,
+        `Invoice ${item.invoice_id} exhausted all ${item.max_attempts} retry attempts → ${RETRY_STATUS.FAILED}`,
       );
       return;
     }
@@ -334,6 +326,21 @@ export class InvoiceRetryQueueService {
     this.logger.log(
       `Invoice ${item.invoice_id} retry ${new_attempts}/${item.max_attempts} failed. Next attempt at ${next_retry_at.toISOString()}`,
     );
+  }
+
+  /**
+   * Re-programs a row without consuming an attempt (e.g. the invoice is already
+   * being transmitted by another flow). Leaves `attempts` untouched.
+   */
+  async reschedule(retry_queue_id: number, delay_ms: number): Promise<void> {
+    await this.prisma.invoice_retry_queue.update({
+      where: { id: retry_queue_id },
+      data: {
+        status: RETRY_STATUS.PENDING,
+        next_retry_at: new Date(Date.now() + delay_ms),
+        updated_at: new Date(),
+      },
+    });
   }
 
   /**

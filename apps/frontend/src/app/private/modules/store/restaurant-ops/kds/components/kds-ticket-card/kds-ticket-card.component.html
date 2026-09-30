@@ -33,6 +33,19 @@
     </div>
   </header>
 
+  <!-- QUI-887 — nota global de la orden. Bloque propio bajo el header (no
+       dentro de un plato) con borde izquierdo distinto al amber de notas por
+       ítem, para que no se confundan. Solo renderiza con nota no vacía. -->
+  @if (orderNote()) {
+    <div class="kds-card__order-note" role="note" [attr.title]="'Nota de la orden: ' + orderNote()">
+      <app-icon name="sticky-note" [size]="14" />
+      <div>
+        <span class="kds-card__order-note-label">Nota de la orden</span>
+        <span>{{ orderNote() }}</span>
+      </div>
+    </div>
+  }
+
   <!-- Status + elapsed -->
   <div class="kds-card__row">
     <app-badge
@@ -75,9 +88,8 @@
           <span class="kds-card__name">
             {{ item.product?.name || ('Producto #' + item.product_id) }}
           </span>
-          <!-- El rótulo de empaque depende de la orden, no de is_takeaway;
-               su @if propio lo mantiene visible junto a cualquier estado. -->
-          @if (deliveryBadgeLabel(); as label) {
+          <!-- El rótulo de empaque respeta el plato individual en mesa y la orden en mostrador/envío. -->
+          @if (itemDeliveryBadge(item); as label) {
             <app-badge variant="info" size="xs" [title]="label === 'ENVÍO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
               <app-icon name="shopping-bag" [size]="10" /> {{ label }}
             </app-badge>

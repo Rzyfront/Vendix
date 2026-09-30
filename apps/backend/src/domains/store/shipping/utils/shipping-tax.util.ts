@@ -6,9 +6,12 @@ import { resolveInclusiveClearing } from '../../invoicing/utils/dian-money.util'
  * Decisiones del dueño (contrato `shipping-rate-tax`):
  * - Cada `shipping_rates` puede llevar una `tax_categories` (null = sin
  *   impuesto, el default).
- * - El impuesto va SIEMPRE INCLUIDO en el precio de la tarifa: se IGNORA el
- *   `is_inclusive` de la categoría. Lo que paga el cliente no cambia: $15.000
- *   con INC 8 % = base 13.888,89 + INC 1.111,11.
+ * - Cada tarifa declara su MODO (`shipping_rates.tax_is_inclusive`): INCLUIDO
+ *   (bruto = precio de tarifa; $15.000 con INC 8 % = base 13.888,89 + INC
+ *   1.111,11) o AGREGADO (bruto = base + trunc(base·r); $10.000 con IVA 19 %
+ *   = 10.000 + 1.900 = $11.900). Se IGNORA el `is_inclusive` de la categoría:
+ *   el modo vive en la tarifa. `resolveShippingCharge` es el punto único
+ *   "precio de tarifa → bruto"; si el impuesto no aplica, bruto = precio.
  * - La orden guarda una COPIA congelada (`orders.shipping_tax_*`); editar la
  *   tarifa o la categoría después no toca las órdenes existentes.
  *
@@ -225,7 +228,10 @@ const skip = (reason: ShippingTaxSkipReason): ShippingTaxResolution => ({
 });
 
 /**
- * Resuelve la copia del impuesto del envío. Siempre incluido.
+ * Resuelve la copia del impuesto del envío a partir del BRUTO. Siempre despeja
+ * en modo incluido — también para tarifas agregadas, cuyo bruto ya trae el
+ * impuesto sumado por `resolveShippingCharge` (f(B) = B + trunc(B·r) es
+ * estrictamente creciente, así que el despeje recupera exactamente B).
  *
  * REGLA (nunca copia vacía por redondeo):
  *   · impuesto = cuota del kernel (`resolveInclusiveClearing`, el mismo de la
@@ -295,6 +301,165 @@ export function resolveShippingTaxSnapshot(
   };
 }
 
+/**
+ * Precio configurado de una tarifa (`shipping_rates.price`), en unidades
+ * comerciales. En modo INCLUIDO es el bruto que paga el cliente; en modo
+ * AGREGADO es la base sobre la que se liquida el impuesto. Tipo separado de
+ * `ChargedShippingCost` para que ningún productor confunda el precio
+ * configurado con lo que paga el cliente.
+ */
+export type RatePrice = number;
+
+export type ShippingChargeSkipReason =
+  | 'no_category'
+  | 'no_price'
+  | ShippingTaxIneligibleReason
+  | 'vat_not_responsible'
+  | 'inc_not_responsible'
+  | 'clearing_unclosed';
+
+/** Modo de la tarifa que produjo el cobro cuando el impuesto aplica. */
+export type ShippingChargeMode = 'inclusive' | 'exclusive';
+
+export interface ResolveShippingChargeInput {
+  /** Precio de la tarifa (`RatePrice`); en agregado es la base, en incluido el bruto. */
+  rate_price: unknown;
+  /** Categoría de la tarifa con sus tasas; null/undefined ⇒ sin impuesto. */
+  category: ShippingTaxCategoryInput | null | undefined;
+  /** Modo de la tarifa (`shipping_rates.tax_is_inclusive`). */
+  tax_is_inclusive: boolean;
+  /**
+   * Responsabilidad de IVA del emisor AL VENDER. Solo se consulta si la
+   * categoría es IVA. Omitida ⇒ no se evalúa (el llamador ya la resolvió).
+   */
+  vat_responsible?: boolean;
+  /**
+   * Responsabilidad de INC del emisor AL VENDER. Solo se consulta si la
+   * categoría es INC. Omitida ⇒ no se evalúa (el llamador ya la resolvió).
+   */
+  inc_responsible?: boolean;
+}
+
+/**
+ * Costo de envío cobrado al cliente (= `orders.shipping_cost`, siempre el
+ * BRUTO). Cuando el impuesto no aplica, bruto = precio de tarifa: nunca hay
+ * recargo sin impuesto registrado.
+ */
+export type ChargedShippingCost =
+  | {
+      applies: true;
+      /** Lo que paga el cliente por el envío. */
+      gross: number;
+      /** Base neta = bruto − impuesto. */
+      base: number;
+      /** Impuesto a registrar en la copia. */
+      tax: number;
+      reason: ShippingChargeMode;
+    }
+  | {
+      applies: false;
+      gross: number;
+      base: number;
+      tax: 0;
+      reason: ShippingChargeSkipReason;
+    };
+
+const noCharge = (
+  reason: ShippingChargeSkipReason,
+  price: number,
+): ChargedShippingCost => ({
+  applies: false,
+  gross: price,
+  base: price,
+  tax: 0,
+  reason,
+});
+
+/**
+ * Cálculo único "precio de tarifa → bruto". Punto único donde el costo SALE
+ * de la tarifa; lo consumen cotización, checkout/WhatsApp, POS,
+ * `assignShipping`, `shipOrder` y el editor para cobrar todos lo mismo.
+ *
+ * REGLA:
+ *   · incluido ⇒ bruto = precio de tarifa (el impuesto se despeja del bruto
+ *     con `resolveShippingTaxSnapshot`, el mismo de la factura).
+ *   · agregado ⇒ bruto = base + trunc(base·r) con
+ *     `resolveInclusiveClearing(is_inclusive:false)`, el mismo kernel de las
+ *     líneas exclusivas de producto.
+ *   · si el impuesto no aplica (emisor sin O-48/O-33 según el tipo, categoría
+ *     no elegible, sin categoría o sin precio) ⇒ bruto = precio de tarifa.
+ */
+export function resolveShippingCharge(
+  input: ResolveShippingChargeInput,
+): ChargedShippingCost {
+  const raw = Number(input.rate_price ?? 0);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return { applies: false, gross: 0, base: 0, tax: 0, reason: 'no_price' };
+  }
+  const price_cents = Math.round(raw * 100);
+  if (price_cents <= 0) {
+    return { applies: false, gross: 0, base: 0, tax: 0, reason: 'no_price' };
+  }
+  const price = price_cents / 100;
+
+  if (!input.category) return noCharge('no_category', price);
+
+  const evaluation = evaluateShippingTaxCategory(input.category);
+  if (!evaluation.eligible) return noCharge(evaluation.reason_code, price);
+
+  if (evaluation.tax_type === 'iva' && input.vat_responsible === false) {
+    return noCharge('vat_not_responsible', price);
+  }
+  if (evaluation.tax_type === 'inc' && input.inc_responsible === false) {
+    return noCharge('inc_not_responsible', price);
+  }
+
+  if (input.tax_is_inclusive !== false) {
+    const resolution = resolveShippingTaxSnapshot({
+      shipping_cost: price,
+      category: input.category,
+      vat_responsible: input.vat_responsible,
+    });
+    if (resolution.applies) {
+      return {
+        applies: true,
+        gross: resolution.gross,
+        base: resolution.base,
+        tax: resolution.snapshot.shipping_tax_amount,
+        reason: 'inclusive',
+      };
+    }
+    // `no_shipping` es inalcanzable con precio > 0 ya validado, pero el tipo
+    // de la resolución lo permite: se mapea al motivo de este camino.
+    const reason =
+      resolution.reason === 'no_shipping' ? 'no_price' : resolution.reason;
+    return noCharge(reason, price);
+  }
+
+  const clearing = resolveInclusiveClearing(price, [
+    {
+      rate: evaluation.rate.fraction,
+      rate_basis: 'fraction',
+      is_inclusive: false,
+    },
+  ]);
+  const tax_cents = Math.round(
+    (clearing.rates[0]?.amount.toNumber() ?? 0) * 100,
+  );
+  // Defensivo: entrada que el kernel rechaza, o base tan chica que la cuota
+  // trunca a cero. Sin impuesto registrado no hay recargo.
+  if (clearing.invalid_inputs.length > 0 || tax_cents <= 0) {
+    return noCharge('clearing_unclosed', price);
+  }
+  return {
+    applies: true,
+    gross: (price_cents + tax_cents) / 100,
+    base: price,
+    tax: tax_cents / 100,
+    reason: 'exclusive',
+  };
+}
+
 /** Lo mínimo que se lee de una orden para derivar la fila de desglose. */
 export interface ShippingTaxOrderInput {
   shipping_cost?: unknown;
@@ -345,4 +510,57 @@ export function buildShippingTaxBreakdownRow(
 /** Base neta del envío a partir de la copia (= `shipping_cost - shipping_tax_amount`). */
 export function shippingNetBase(order: ShippingTaxOrderInput): number {
   return Math.max(0, toCents(order.shipping_cost) - toCents(order.shipping_tax_amount)) / 100;
+}
+
+/**
+ * Cuota proporcional del impuesto del envío para un bruto devuelto, en
+ * centavos enteros. ÚNICA definición: la usan el prorrateo de devoluciones
+ * (`refund-calculation.service.ts`) y la reconstrucción fiscal de la
+ * devolución manual (`manual-refund-accounting.util.ts`).
+ */
+export function proportionalShippingTaxCents(
+  shippingCostCents: number,
+  shippingTaxCents: number,
+  grossRefundCents: number,
+): number {
+  if (shippingCostCents <= 0) return 0;
+  return Math.round((shippingTaxCents * grossRefundCents) / shippingCostCents);
+}
+
+/**
+ * Impuesto del envío a devolver por la devolución actual, en centavos
+ * enteros. ÚNICA definición del prorrateo: proporcional al bruto devuelto,
+ * y la devolución que completa el envío cierra al centavo contra
+ * `shipping_tax_amount`.
+ *
+ * Lo ya devuelto del impuesto no está persistido: se reconstruye con la
+ * MISMA proporción sobre cada bruto previo (determinista). Sin ese cierre,
+ * cada parcial arrastraría ±1 ¢ de redondeo.
+ *
+ * Todo en centavos enteros; con bruto, impuesto o devolución actual ≤ 0
+ * devuelve 0.
+ */
+export function prorateShippingTaxRefundCents(
+  shippingCostCents: number,
+  shippingTaxCents: number,
+  priorRefundCents: readonly number[],
+  currentRefundCents: number,
+): number {
+  if (currentRefundCents <= 0 || shippingCostCents <= 0 || shippingTaxCents <= 0) {
+    return 0;
+  }
+  const priorShippingCents = priorRefundCents.reduce((sum, gross) => sum + gross, 0);
+  const priorTaxCents = priorRefundCents.reduce(
+    (sum, gross) =>
+      sum + proportionalShippingTaxCents(shippingCostCents, shippingTaxCents, gross),
+    0,
+  );
+  const remainingTaxCents = Math.max(0, shippingTaxCents - priorTaxCents);
+  if (priorShippingCents + currentRefundCents >= shippingCostCents) {
+    return remainingTaxCents;
+  }
+  return Math.min(
+    remainingTaxCents,
+    proportionalShippingTaxCents(shippingCostCents, shippingTaxCents, currentRefundCents),
+  );
 }

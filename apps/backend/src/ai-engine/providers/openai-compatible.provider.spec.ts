@@ -737,6 +737,62 @@ describe('OpenAICompatibleProvider', () => {
       );
     });
 
+    it('routes explicit images_api edits with references to /images, not /responses', async () => {
+      // Prod mirror (config 18): full …/v1/images base_url + explicit mode.
+      // Before the fix this fell into the /responses branch and OpenRouter
+      // answered the chat/completions 404 that collapsed to AI_REQUEST_001.
+      const provider = imageProvider('https://openrouter.ai/api/v1/images', {
+        image_generation_mode: 'images_api',
+      });
+      const responsesCreate = jest
+        .spyOn((provider as any).client.responses, 'create')
+        .mockRejectedValueOnce(new Error('responses transport must not run'));
+      const referenceUrl = `data:image/png;base64,${pngB64}`;
+
+      const response = await provider.generateImage('add more ice', {
+        action: 'edit',
+        referenceImages: [{ url: referenceUrl, detail: 'high' }],
+      });
+
+      expect(responsesCreate).not.toHaveBeenCalled();
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://openrouter.ai/api/v1/images');
+      expect(JSON.parse(init.body)).toEqual({
+        model: 'meta/muse-image',
+        prompt: 'add more ice',
+        input_references: [
+          {
+            type: 'image_url',
+            image_url: { url: referenceUrl, detail: 'high' },
+          },
+        ],
+      });
+      expect(response.success).toBe(true);
+    });
+
+    it('carries references as input_references on the auto-mode chat fallback', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1');
+      jest
+        .spyOn((provider as any).client.chat.completions, 'create')
+        .mockRejectedValueOnce(new Error(chatRedirect404));
+      const referenceUrl = `data:image/png;base64,${pngB64}`;
+
+      const response = await provider.generateImage('add more ice', {
+        action: 'edit',
+        referenceImages: [{ url: referenceUrl }],
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+        model: 'meta/muse-image',
+        prompt: 'add more ice',
+        input_references: [
+          { type: 'image_url', image_url: { url: referenceUrl } },
+        ],
+      });
+      expect(response.success).toBe(true);
+    });
+
     it('falls back from the chat 404 to /images in auto mode', async () => {
       const provider = imageProvider('https://openrouter.ai/api/v1');
       jest

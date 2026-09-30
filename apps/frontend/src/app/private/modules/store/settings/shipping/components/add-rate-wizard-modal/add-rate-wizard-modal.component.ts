@@ -3,11 +3,15 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { startWith } from 'rxjs';
 
 import {
+  FormArray,
   FormBuilder,
+  FormControl,
+  FormGroup,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
 import {
+  DistanceTier,
   ShippingZone,
   ShippingRate,
   ShippingRateType,
@@ -30,30 +34,85 @@ import {
 import { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { StepsLineItem } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { resolveInclusiveClearing } from '@money-kernel/dian-money';
+
+/** Modo del impuesto de la tarifa (paso 15a): incluido o agregado. */
+export type ShippingTaxMode = 'inclusive' | 'exclusive';
 
 /**
- * Vista previa informativa del impuesto incluido en el precio de la tarifa.
- * El precio configurado es lo que paga el cliente; la base se despeja como
- * `cost / (1 + r)` redondeada a 2 decimales. Solo orienta: el cálculo que se
- * factura lo hace el backend al vender.
+ * Vista previa informativa del impuesto de la tarifa («Cliente paga $X»).
+ * Replica la matemática de `resolveShippingCharge` del backend (el cálculo
+ * único "precio de tarifa → bruto" del cotizador) con el MISMO kernel
+ * (`resolveInclusiveClearing`, truncado DIAN — 10.000 al 19 % ⇒ 1.596,63
+ * incluido, 1.900 agregado). Solo orienta: el cálculo que se factura lo hace
+ * el backend al vender.
  */
 export interface ShippingTaxPreview {
+  /** Precio configurado (bruto en incluido, base en agregado). */
   cost: number;
+  /** Base neta. */
+  base: number;
+  /** Cuota del impuesto. */
   tax: number;
+  /** Lo que paga el cliente (bruto). */
+  gross: number;
+  /** «IVA 19%» — etiqueta con porcentaje. */
   label: string;
+  /** «IVA» — tipo sin porcentaje, para «10.000 + IVA 1.900». */
+  type_label: string;
+  mode: ShippingTaxMode;
 }
-
-const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export function computeShippingTaxPreview(
   cost: number,
   rate_percent: number | null | undefined,
   label: string | null,
+  type_label: string | null,
+  tax_is_inclusive = true,
 ): ShippingTaxPreview | null {
-  if (!label || rate_percent == null || !(Number(rate_percent) > 0)) return null;
+  if (!label || !type_label || rate_percent == null || !(Number(rate_percent) > 0)) return null;
   if (!Number.isFinite(cost) || cost <= 0) return null;
-  const base = round2(cost / (1 + Number(rate_percent) / 100));
-  return { cost, tax: round2(cost - base), label };
+  const price_cents = Math.round(cost * 100);
+  if (price_cents <= 0) return null;
+  const price = price_cents / 100;
+  // Misma llamada que `resolveShippingCharge`: fracción explícita; la cuota
+  // se TRUNCA (DIAN), no se redondea hacia arriba.
+  const inclusive = tax_is_inclusive !== false;
+  const clearing = resolveInclusiveClearing(price, [
+    {
+      rate: Number(rate_percent) / 100,
+      rate_basis: 'fraction',
+      is_inclusive: inclusive,
+    },
+  ]);
+  if (clearing.invalid_inputs.length > 0) return null;
+  const tax_cents = Math.round(
+    (clearing.rates[0]?.amount.toNumber() ?? 0) * 100,
+  );
+  if (!(tax_cents > 0)) return null;
+  const tax = tax_cents / 100;
+  if (inclusive) {
+    const base_cents = price_cents - tax_cents;
+    if (base_cents <= 0) return null;
+    return {
+      cost: price,
+      base: base_cents / 100,
+      tax,
+      gross: price,
+      label,
+      type_label,
+      mode: 'inclusive',
+    };
+  }
+  return {
+    cost: price,
+    base: price,
+    tax,
+    gross: (price_cents + tax_cents) / 100,
+    label,
+    type_label,
+    mode: 'exclusive',
+  };
 }
 
 /** El selector trabaja con `number`; `null` es «Sin impuesto». */
@@ -61,6 +120,99 @@ export function toTaxCategoryId(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** Fila cruda del editor de tiers (los inputs number pueden entregar texto). */
+export interface DistanceTierRowInput {
+  from_km: unknown;
+  to_km: unknown;
+  price: unknown;
+}
+
+/**
+ * Parsea un campo de tier: número finito, `null` cuando está vacío y se
+ * permite (`to_km` abierto), o `undefined` cuando es inválido/ausente.
+ */
+function toTierNumber(
+  value: unknown,
+  allowEmpty = false,
+): number | null | undefined {
+  if (value === null || value === undefined || value === '') {
+    return allowEmpty ? null : undefined;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Valida la escala de distancia: rangos crecientes, contiguos (sin huecos ni
+ * traslapes), primera escala desde 0 y `to_km` abierto solo al final.
+ * Pura para poder unit-testearla. Retorna el error en español o null.
+ */
+export function validateDistanceTiers(
+  rows: DistanceTierRowInput[],
+): string | null {
+  if (rows.length === 0) return null;
+  const tiers: DistanceTier[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const n = i + 1;
+    const from = toTierNumber(rows[i].from_km);
+    const to = toTierNumber(rows[i].to_km, true);
+    const price = toTierNumber(rows[i].price);
+    if (typeof from !== 'number' || from < 0) {
+      return `Escala ${n}: el "desde" debe ser un número mayor o igual a 0`;
+    }
+    if (to === undefined || (to !== null && typeof to !== 'number')) {
+      return `Escala ${n}: el "hasta" debe ser un número o quedar vacío (sin límite)`;
+    }
+    if (to !== null && to <= from) {
+      return `Escala ${n}: el "hasta" debe ser mayor que el "desde"`;
+    }
+    if (typeof price !== 'number' || price < 0) {
+      return `Escala ${n}: el precio debe ser un número mayor o igual a 0`;
+    }
+    tiers.push({ from_km: from, to_km: to, price });
+  }
+  const sorted = [...tiers].sort((a, b) => a.from_km - b.from_km);
+  if (sorted[0].from_km !== 0) {
+    return 'La primera escala debe empezar en 0 km';
+  }
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    if (prev.to_km === null) {
+      return 'Solo la última escala puede quedar sin límite';
+    }
+    if (curr.from_km < prev.to_km) {
+      return `Las escalas se traslapan en ${curr.from_km} km`;
+    }
+    if (curr.from_km > prev.to_km) {
+      return `Hay un hueco sin cubrir entre ${prev.to_km} y ${curr.from_km} km`;
+    }
+  }
+  return null;
+}
+
+/** Parsea filas ya validadas a `DistanceTier[]` ordenados por `from_km`. */
+export function parseDistanceTiers(
+  rows: DistanceTierRowInput[],
+): DistanceTier[] {
+  return rows
+    .map((r) => ({
+      from_km: Number(r.from_km),
+      to_km:
+        r.to_km === null || r.to_km === undefined || r.to_km === ''
+          ? null
+          : Number(r.to_km),
+      price: Number(r.price),
+    }))
+    .sort((a, b) => a.from_km - b.from_km);
+}
+
+interface DistanceTierFormControls {
+  from_km: FormControl<number | null>;
+  to_km: FormControl<number | null>;
+  price: FormControl<number | null>;
 }
 
 @Component({
@@ -93,6 +245,8 @@ export class AddRateWizardModalComponent implements OnInit {
   method_id = input.required<number>();
   existing_zones = input<ShippingZone[]>([]);
   edit_rate = input<ShippingRate | null>(null);
+  /** El editor de tiers solo se muestra si el método cobra por distancia. */
+  method_distance_enabled = input<boolean>(false);
 
   // ─── Outputs ───
 
@@ -146,7 +300,18 @@ export class AddRateWizardModalComponent implements OnInit {
     is_active: [true],
     name: [''],
     tax_category_id: [null as number | null],
+    // Paso 15a — modo del impuesto: true = incluido (default), false =
+    // agregado. En tarifas nuevas se preselecciona desde la categoría.
+    tax_is_inclusive: [true as boolean],
+    tiers: this.fb.array<FormGroup<DistanceTierFormControls>>([]),
   });
+
+  /** Filas del editor de escala por distancia. */
+  get tiersArray(): FormArray<FormGroup<DistanceTierFormControls>> {
+    return this.rate_form.get('tiers') as FormArray<
+      FormGroup<DistanceTierFormControls>
+    >;
+  }
 
   /** Puente zoneless del valor del formulario (los `computed` lo leen). */
   private readonly form_value = toSignal(
@@ -204,7 +369,12 @@ export class AddRateWizardModalComponent implements OnInit {
     return options;
   });
 
-  selected_tax = computed<{ rate_percent: number | null; label: string | null } | null>(() => {
+  selected_tax = computed<{
+    rate_percent: number | null;
+    label: string | null;
+    type_label: string;
+    is_inclusive: boolean | null;
+  } | null>(() => {
     const id = toTaxCategoryId(this.form_value().tax_category_id);
     if (id === null) return null;
     const option = this.tax_options()?.categories.find((c) => c.id === id);
@@ -212,6 +382,8 @@ export class AddRateWizardModalComponent implements OnInit {
       return {
         rate_percent: option.rate_percent,
         label: this.shippingService.getRateTaxLabel(option),
+        type_label: (option.tax_type ?? '').toUpperCase(),
+        is_inclusive: option.is_inclusive ?? null,
       };
     }
     const current = this.edit_rate()?.tax_category;
@@ -219,10 +391,23 @@ export class AddRateWizardModalComponent implements OnInit {
       return {
         rate_percent: current.rate_percent,
         label: this.shippingService.getRateTaxLabel(current),
+        type_label: (current.tax_type ?? '').toUpperCase(),
+        // La lectura de la tarifa no trae el modo de la categoría: sin pista.
+        is_inclusive: null,
       };
     }
     return null;
   });
+
+  /** Hay categoría elegida (aunque las opciones aún no carguen): se muestra el modo. */
+  has_tax_category = computed(
+    () => toTaxCategoryId(this.form_value().tax_category_id) !== null,
+  );
+
+  /** Modo leído del formulario (default incluido). */
+  is_inclusive_mode = computed(
+    () => this.form_value().tax_is_inclusive !== false,
+  );
 
   tax_preview = computed<ShippingTaxPreview | null>(() => {
     const tax = this.selected_tax();
@@ -231,11 +416,33 @@ export class AddRateWizardModalComponent implements OnInit {
       Number(this.form_value().base_cost),
       tax.rate_percent,
       tax.label,
+      tax.type_label,
+      this.form_value().tax_is_inclusive !== false,
     );
+  });
+
+  /**
+   * Aviso cuando la categoría es «Adicional» en impuestos pero la tarifa está
+   * en Incluido: el impuesto se descontará del precio en vez de sumarse.
+   */
+  tax_mode_mismatch = computed<string | null>(() => {
+    const tax = this.selected_tax();
+    if (!tax || this.is_free_type()) return null;
+    if (tax.is_inclusive !== false) return null;
+    if (!this.is_inclusive_mode()) return null;
+    return 'Esta categoría es «Adicional» en impuestos, pero la tarifa está en Incluido: el impuesto se descontará del precio en vez de sumarse.';
   });
 
   tax_suggestion = computed(() => this.tax_options()?.suggestion?.message ?? null);
   tax_warnings = computed(() => this.tax_options()?.warnings ?? []);
+
+  /** Error vivo de la escala (null = válida o vacía). Gratis no usa escala. */
+  tiers_error = computed<string | null>(() => {
+    if (!this.method_distance_enabled() || this.is_free_type()) return null;
+    const rows = (this.form_value().tiers ??
+      []) as unknown as DistanceTierRowInput[];
+    return validateDistanceTiers(rows);
+  });
 
   // ─── Dynamic labels (extracted from rates-modal) ───
 
@@ -300,6 +507,16 @@ export class AddRateWizardModalComponent implements OnInit {
           : `. Además, será <strong>gratis</strong> si la compra supera los <strong>$${free}</strong>`;
     }
 
+    if (
+      this.method_distance_enabled() &&
+      type !== 'free' &&
+      this.tiersArray.length > 0 &&
+      !this.tiers_error()
+    ) {
+      const n = this.tiersArray.length;
+      text += `. Con cobro por distancia rige la escala de <strong>${n} tramo${n === 1 ? '' : 's'}</strong>`;
+    }
+
     return text + '.';
   }
 
@@ -308,6 +525,22 @@ export class AddRateWizardModalComponent implements OnInit {
   ngOnInit(): void {
     this.zones_list.set(this.existing_zones());
     this.loadTaxOptions();
+
+    // Paso 15a — en tarifas NUEVAS el modo se preselecciona desde la
+    // categoría (`is_inclusive`); al editar manda lo guardado y nunca se
+    // toca. Sin pista (null/sin categoría) se deja lo que haya.
+    this.rate_form.controls.tax_category_id.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((id) => {
+        if (this.is_edit_mode()) return;
+        const category = this.tax_options()?.categories.find(
+          (c) => c.id === toTaxCategoryId(id),
+        );
+        const hint = category?.is_inclusive;
+        if (typeof hint === 'boolean') {
+          this.rate_form.controls.tax_is_inclusive.setValue(hint);
+        }
+      });
 
     const rate = this.edit_rate();
     if (rate) {
@@ -325,7 +558,12 @@ export class AddRateWizardModalComponent implements OnInit {
         is_active: rate.is_active,
         name: rate.name || '',
         tax_category_id: rate.tax_category?.id ?? rate.tax_category_id ?? null,
+        tax_is_inclusive: rate.tax_is_inclusive ?? true,
       });
+      this.tiersArray.clear();
+      for (const t of rate.distance_tiers ?? []) {
+        this.tiersArray.push(this.newTierGroup(t));
+      }
       this.current_step.set(1);
       // La lista del padre puede no traer la zona de la tarifa en edición.
       if (!this.zones_list().some((z) => z.id === rate.shipping_zone_id)) {
@@ -375,6 +613,70 @@ export class AddRateWizardModalComponent implements OnInit {
         free_shipping_threshold: null,
       });
     }
+  }
+
+  /** Paso 15a — el comerciante elige si el impuesto va incluido o agregado. */
+  selectTaxMode(inclusive: boolean): void {
+    this.rate_form.patchValue({ tax_is_inclusive: inclusive });
+  }
+
+  // ─── Escala por distancia ───
+
+  private newTierGroup(
+    tier?: {
+      from_km: number | null;
+      to_km: number | null;
+      price: number | null;
+    } | null,
+  ): FormGroup<DistanceTierFormControls> {
+    return this.fb.group<DistanceTierFormControls>({
+      from_km: new FormControl<number | null>(tier?.from_km ?? null),
+      to_km: new FormControl<number | null>(tier?.to_km ?? null),
+      price: new FormControl<number | null>(tier?.price ?? null),
+    });
+  }
+
+  /**
+   * Agrega una escala. El "desde" se prellena para mantener contigüidad: 0 si
+   * es la primera, o el "hasta" de la anterior.
+   */
+  addTier(): void {
+    let from: number | null = null;
+    if (this.tiersArray.length === 0) {
+      from = 0;
+    } else {
+      const prevTo = this.tiersArray.at(this.tiersArray.length - 1).get('to_km')
+        ?.value;
+      from =
+        prevTo !== null && prevTo !== undefined && (prevTo as unknown) !== ''
+          ? Number(prevTo)
+          : null;
+      if (from !== null && !Number.isFinite(from)) from = null;
+    }
+    this.tiersArray.push(
+      this.newTierGroup({ from_km: from, to_km: null, price: null }),
+    );
+  }
+
+  removeTier(index: number): void {
+    this.tiersArray.removeAt(index);
+  }
+
+  /**
+   * Tiers para el DTO: escala parseada si hay filas, `[]` para limpiar la
+   * escala previa en edición, u omitido (precio plano intacto).
+   */
+  private buildTiersDto(): { distance_tiers?: DistanceTier[] | null } {
+    const rows = this.tiersArray.getRawValue() as unknown as DistanceTierRowInput[];
+    const parsed = parseDistanceTiers(rows);
+    if (parsed.length > 0) return { distance_tiers: parsed };
+    if (
+      this.is_edit_mode() &&
+      (this.edit_rate()?.distance_tiers?.length ?? 0) > 0
+    ) {
+      return { distance_tiers: [] };
+    }
+    return {};
   }
 
   formatCountries(countries: string[] | undefined): string {
@@ -510,6 +812,23 @@ export class AddRateWizardModalComponent implements OnInit {
       return;
     }
 
+    // Escala por distancia: rangos crecientes, sin huecos ni traslapes.
+    // Gratis no cobra envío: no lleva escala (igual que el impuesto).
+    const useTiers =
+      this.method_distance_enabled() && values.type !== 'free';
+    // Validación directa del FormArray (no del computed) para no depender
+    // del timing del puente `form_value` en el momento del submit.
+    const tiersError = useTiers
+      ? validateDistanceTiers(
+          this.tiersArray.getRawValue() as unknown as DistanceTierRowInput[],
+        )
+      : null;
+    if (tiersError) {
+      this.toastService.show({ variant: 'error', description: tiersError });
+      this.is_saving.set(false);
+      return;
+    }
+
     const dto: CreateRateDto = {
       shipping_zone_id: this.selected_zone_id()!,
       shipping_method_id: this.method_id(),
@@ -524,6 +843,15 @@ export class AddRateWizardModalComponent implements OnInit {
       // Gratis no cobra envío: no hay impuesto que llevar.
       tax_category_id:
         values.type === 'free' ? null : toTaxCategoryId(values.tax_category_id),
+      // Paso 15a — el modo viaja siempre (sin impuesto es inerte).
+      tax_is_inclusive: values.tax_is_inclusive !== false,
+      // Release-853 paso 11 — pasar a `free` limpia la escala previa: se
+      // envía `[]` (el backend la persiste como NULL).
+      ...(useTiers
+        ? this.buildTiersDto()
+        : values.type === 'free'
+          ? { distance_tiers: [] }
+          : {}),
     };
 
     const obs = this.is_edit_mode()

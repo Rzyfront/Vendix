@@ -1,0 +1,16 @@
+F.2-SA2 — Spec pos-shipping-step (alias→snapshot sin POST)
+Fecha: 2026-09-24
+Comando: cd apps/frontend && npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox --progress=false --include='**/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts'
+
+== Resultado: TOTAL: 24 SUCCESS (24 of 24 SUCCESS, Chrome Headless) ==
+
+Aserciones alias→snapshot PRESENTES en pos-shipping-step.component.spec.ts:
+- :356 'sends alias delivery snapshot without creating an address or sending an id'
+- :385 'builds alias draft context with snapshot but no address id or POST'
+- :404 'retains zero map coordinates and omits absent municipality code in alias snapshot' (+:412-416 snapshot.latitude/longitude/municipality_code)
+- :419 'omits a registered customer address FK when switching an adopted draft to alias'
+- :432 'charges alias delivery without calling the address API'
+- createCustomerAddress/updateCustomerAddress NOT called: :112-113, :148-149, :352, :375, :401, :429, :449
+- Control registrado: :454 'keeps registered-customer address creation and primary flag' (POST solo con customer)
+
+Conclusión spec: PASS 24/24, aserción alias→snapshot confirmada.

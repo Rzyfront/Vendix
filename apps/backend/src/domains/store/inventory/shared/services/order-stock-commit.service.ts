@@ -54,6 +54,31 @@ export interface CommitOpts {
    * to resolve manual serial selection. Only meaningful with `consumeSerials`.
    */
   posSelection?: any;
+  /** Caller-owned reconciliation alert for an accepted non-blocking shortfall. */
+  onShortfall?: (item: {
+    product_id: number;
+    product_variant_id: number | null;
+    product_name: string;
+    requested: number;
+    available: number;
+  }) => void;
+  /**
+   * "Permitir sobreventa" (docs/plans/no-overselling-stock-guard-plan.md, step
+   * 9). Default `false` (undefined). ONLY the delivery/commit caller that
+   * already resolved `StockValidatorService.resolveInventoryPolicy(...).allowOversell
+   * === true` may set this `true`, and only paired with
+   * `blockOnInsufficient: false` — the two describe the SAME accepted-shortfall
+   * intent, they are not independent toggles.
+   *
+   * When `true`, the per-slice `updateStock` call in `processLine` is told
+   * `allow_negative: true`, so the existing non-blocking floor-0 absorb path
+   * (`absorbShortfall`, used today by dispatch delivery) writes the full
+   * deducted quantity and lets `quantity_on_hand` / `quantity_available` go
+   * NEGATIVE instead of clamping to 0. Dispatch delivery (and any other
+   * caller) that never sets this keeps writing the floor-0 clamp exactly as
+   * before — this flag changes nothing for them.
+   */
+  allowNegativeOnShortfall?: boolean;
 }
 
 export interface CommitResult {
@@ -78,10 +103,14 @@ interface CommitLine {
   quantity: number;
   track_inventory: boolean;
   product_type: string | null;
+  /** Display name for insufficient-stock messages (variant name ?? product name). */
+  product_name?: string | null;
   /** When set, the matching order_items row is flagged `inventory_committed`. */
   order_item_id?: number | null;
   inventory_committed?: boolean | null;
   inventory_consumed_at_fire?: boolean | null;
+  /** Soft-cancel marker (`order_items.cancelled_at`) — a cancelled line never deducts. */
+  cancelled_at?: Date | null;
   skip_kds?: boolean | null;
   /** Location to deduct from when no active reservation is found (dispatch line). */
   location_id_override?: number | null;
@@ -155,7 +184,101 @@ export class OrderStockCommitService {
       }
       return result;
     }
-    const db = tx;
+    return this.runOrderCommit(orderId, opts, tx, null);
+  }
+
+  /**
+   * No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md) —
+   * commits stock for a SUBSET of an order's lines instead of the whole
+   * order. Reuses every rule `commitOrderDelivery` enforces (skip/idempotency/
+   * restaurant-fire/allocation/serials) via the shared {@link runOrderCommit},
+   * filtered to `orderItemIds` at the DB query level so unrelated lines are
+   * never even loaded.
+   *
+   * Idempotent the same way as `commitOrderDelivery`: the atomic
+   * `inventory_committed` claim inside `processLine` makes a repeat call for
+   * the same item id a no-op.
+   *
+   * Deviation from the literal contract shape (documented, justified): the
+   * contract's `opts` only lists `blockOnInsufficient` / `tx` / `userId`, but
+   * `processLine` also needs a movement type, a reason and a serial-consumption
+   * flag (the same fields every other `CommitOpts` caller supplies). Rather
+   * than hardcode them invisibly, they are accepted as optional fields here
+   * and default to the same values `commitOrderDelivery` uses for a normal
+   * sale (`movementType: 'sale'`, `consumeSerials: true`), so a caller that
+   * only passes the three contractual fields observes identical behavior to a
+   * full-order commit of that same line.
+   */
+  async commitOrderLines(
+    orderId: number,
+    orderItemIds: number[],
+    opts: {
+      blockOnInsufficient: boolean;
+      tx?: Prisma.TransactionClient;
+      userId?: number;
+      movementType?: 'sale' | 'stock_out';
+      consumeSerials?: boolean;
+      reason?: string;
+      posSelection?: any;
+      afterCommit?: Array<() => void>;
+      allowNegativeOnShortfall?: boolean;
+      onShortfall?: CommitOpts['onShortfall'];
+    },
+  ): Promise<CommitResult> {
+    const fullOpts: CommitOpts = {
+      movementType: opts.movementType ?? 'sale',
+      blockOnInsufficient: opts.blockOnInsufficient,
+      consumeSerials: opts.consumeSerials ?? true,
+      reason: opts.reason ?? 'Entrega parcial de línea de orden',
+      userId: opts.userId,
+      posSelection: opts.posSelection,
+      afterCommit: opts.afterCommit,
+      allowNegativeOnShortfall: opts.allowNegativeOnShortfall,
+      onShortfall: opts.onShortfall,
+    };
+
+    if (!opts.tx) {
+      const afterCommit: Array<() => void> = [];
+      const result = await this.prisma.$transaction(
+        (client) =>
+          this.runOrderCommit(
+            orderId,
+            { ...fullOpts, afterCommit },
+            client,
+            new Set(orderItemIds),
+          ),
+        { timeout: 20000 },
+      );
+      for (const publish of afterCommit) {
+        try { publish(); } catch (error) {
+          this.logger.warn(`Stock committed; notification failed: ${(error as Error).message}`);
+        }
+      }
+      return result;
+    }
+
+    return this.runOrderCommit(
+      orderId,
+      fullOpts,
+      opts.tx,
+      new Set(orderItemIds),
+    );
+  }
+
+  /**
+   * Shared engine behind `commitOrderDelivery` (full order,
+   * `itemIdFilter === null`) and `commitOrderLines` (subset, non-null
+   * `Set<number>` of `order_items.id`). Extracted so both public methods stay
+   * in lockstep instead of duplicating the direct_delivery serial guard, the
+   * per-line loop and the end-of-commit reservation sweep.
+   */
+  private async runOrderCommit(
+    orderId: number,
+    opts: CommitOpts,
+    tx: Prisma.TransactionClient,
+    itemIdFilter: Set<number> | null,
+  ): Promise<CommitResult> {
+    const db: any = tx;
     const scopedOrder = await db.orders.findFirst({
       where: { id: orderId }, select: { id: true, store_id: true },
     });
@@ -170,11 +293,22 @@ export class OrderStockCommitService {
       include: {
         stores: { select: { organization_id: true, industries: true } },
         order_items: {
+          where: itemIdFilter
+            ? { id: { in: Array.from(itemIdFilter) } }
+            : undefined,
           include: {
             products: {
-              select: { id: true, track_inventory: true, product_type: true },
+              select: {
+                id: true,
+                track_inventory: true,
+                product_type: true,
+                requires_serial_numbers: true,
+                name: true,
+              },
             },
-            product_variants: { select: { id: true } },
+            product_variants: {
+              select: { id: true, track_inventory_override: true, name: true },
+            },
           },
         },
       },
@@ -186,6 +320,39 @@ export class OrderStockCommitService {
 
     const isRestaurant = storeIsRestaurant((order as any).stores?.industries);
     const posMatcher = this.buildPosMatcher(opts.posSelection);
+    const serialSelectionByLine = new Map<number, PosSelection>();
+
+    // E.1: flow/pay and other callers can reach this canonical commit without
+    // the POS DTO. For immediate direct delivery, never fall back to FIFO just
+    // because the frontend lost requires_serial_numbers during hydration.
+    // The persisted product flag is authoritative and the guard runs before
+    // ANY line claims stock; a throw rolls the caller's transaction back.
+    if (order.delivery_type === 'direct_delivery') {
+      const selectedIds = new Set<number>();
+      const selectedTexts = new Set<string>();
+      for (const item of order.order_items ?? []) {
+        if (!item.products?.requires_serial_numbers || item.inventory_committed ||
+            item.inventory_consumed_at_fire) continue;
+        const selection = posMatcher(item);
+        const ids = selection?.serial_ids ?? [];
+        const texts = (selection?.serial_numbers ?? []).map((value: string) => value.trim());
+        const count = Number(item.stock_units_consumed ?? item.quantity);
+        if (!opts.consumeSerials || !item.products.track_inventory ||
+            item.products.product_type !== 'physical' ||
+            !Number.isInteger(count) || count < 1 || ids.length + texts.length !== count ||
+            ids.some((id: number) => !Number.isInteger(id) || id < 1 || selectedIds.has(id)) ||
+            texts.some((text: string) => !text || selectedTexts.has(text)) ||
+            new Set(ids).size !== ids.length || new Set(texts).size !== texts.length) {
+          throw new VendixHttpException(
+            ErrorCodes.SERIAL_REQUIRED_001,
+            `Selecciona exactamente ${count} seriales distintos antes de entregar el producto ${item.product_name ?? item.product_id}.`,
+          );
+        }
+        ids.forEach((id: number) => selectedIds.add(id));
+        texts.forEach((value: string) => selectedTexts.add(value));
+        serialSelectionByLine.set(item.id, selection!);
+      }
+    }
 
     let totalCost = 0;
     let committedItemCount = 0;
@@ -193,19 +360,28 @@ export class OrderStockCommitService {
     for (const item of order.order_items || []) {
       if (!item.product_id) continue;
 
+      const effectiveTracking =
+        item.product_variants?.track_inventory_override ??
+        item.products?.track_inventory ??
+        false;
+
       const line: CommitLine = {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id ?? undefined,
         // D4 multi-tarifa: deduct the real stock units when a price tier
         // resolved a pack size > 1, else the logical line quantity.
         quantity: item.stock_units_consumed ?? item.quantity,
-        track_inventory: !!item.products?.track_inventory,
+        track_inventory: !!effectiveTracking,
         product_type: item.products?.product_type ?? null,
+        product_name: item.product_variants?.name ?? item.products?.name ?? null,
         order_item_id: item.id,
         inventory_committed: item.inventory_committed,
         inventory_consumed_at_fire: item.inventory_consumed_at_fire,
+        cancelled_at: (item as any).cancelled_at ?? null,
         skip_kds: item.skip_kds,
-        posSelection: opts.consumeSerials ? posMatcher(item) : undefined,
+        posSelection: opts.consumeSerials
+          ? (serialSelectionByLine.get(item.id) ?? posMatcher(item))
+          : undefined,
       };
 
       const res = await this.processLine(
@@ -223,13 +399,20 @@ export class OrderStockCommitService {
 
     // Defensive sweep: consume any residual active reservations for this order
     // WITHOUT touching on_hand (the per-line updateStock already deducted it).
-    await this.stockLevelManager.releaseReservationsByReference(
-      'order',
-      orderId,
-      'consumed',
-      tx,
-      { decrementOnHand: false },
-    );
+    // ONLY for a true full-order commit (itemIdFilter === null): running this
+    // during a filtered `commitOrderLines` would consume/clear the reservations
+    // of sibling lines that were deliberately excluded from this call (still
+    // pending delivery) — reintroducing the exact double-release bug this
+    // plan fixes.
+    if (itemIdFilter === null) {
+      await this.stockLevelManager.releaseReservationsByReference(
+        'order',
+        orderId,
+        'consumed',
+        tx,
+        { decrementOnHand: false },
+      );
+    }
 
     return { totalCost, committedItemCount };
   }
@@ -288,10 +471,32 @@ export class OrderStockCommitService {
     const products = productIds.length
       ? await db.products.findMany({
           where: { id: { in: productIds } },
-          select: { id: true, track_inventory: true, product_type: true },
+          select: {
+            id: true,
+            track_inventory: true,
+            product_type: true,
+            name: true,
+          },
         })
       : [];
     const productMap = new Map<number, any>(products.map((p) => [p.id, p]));
+
+    // Batch-load variant tracking override/name — a variant can flip
+    // effective tracking independently of its product (`vendix-product-variants`).
+    const variantIds = Array.from(
+      new Set(
+        (items || [])
+          .map((i) => i.product_variant_id)
+          .filter((id): id is number => id != null),
+      ),
+    );
+    const variants = variantIds.length
+      ? await db.product_variants.findMany({
+          where: { id: { in: variantIds } },
+          select: { id: true, track_inventory_override: true, name: true },
+        })
+      : [];
+    const variantMap = new Map<number, any>(variants.map((v) => [v.id, v]));
 
     // Only order-linked remisiones have order_items to flag as committed.
     // (sales_order-linked remisiones settle their own sales_order_items; there
@@ -310,6 +515,7 @@ export class OrderStockCommitService {
               stock_units_consumed: true,
               inventory_committed: true,
               inventory_consumed_at_fire: true,
+              cancelled_at: true,
               skip_kds: true,
             },
           },
@@ -325,7 +531,15 @@ export class OrderStockCommitService {
       if (!item.product_id) continue;
 
       const product = productMap.get(item.product_id);
+      const variantRow =
+        item.product_variant_id != null
+          ? variantMap.get(item.product_variant_id)
+          : undefined;
       const matched = orderItemMatcher ? orderItemMatcher(item) : undefined;
+      const effectiveTracking =
+        variantRow?.track_inventory_override ??
+        product?.track_inventory ??
+        false;
 
       const line: CommitLine = {
         product_id: item.product_id,
@@ -343,11 +557,13 @@ export class OrderStockCommitService {
           matched?.quantity,
           matched?.stock_units_consumed,
         ),
-        track_inventory: !!product?.track_inventory,
+        track_inventory: !!effectiveTracking,
         product_type: product?.product_type ?? null,
+        product_name: variantRow?.name ?? product?.name ?? null,
         order_item_id: matched?.id ?? null,
         inventory_committed: matched?.inventory_committed,
         inventory_consumed_at_fire: matched?.inventory_consumed_at_fire,
+        cancelled_at: matched?.cancelled_at ?? null,
         skip_kds: matched?.skip_kds,
         location_id_override:
           item.location_id ?? dispatchNote.dispatch_location_id ?? null,
@@ -394,6 +610,12 @@ export class OrderStockCommitService {
     const db: any = tx ?? this.prisma;
     const variant = line.product_variant_id ?? undefined;
 
+    // 0. Soft-cancelled line: money/tax/audit never counts it, so inventory
+    //    must not either — a cancelled line NEVER deducts, regardless of
+    //    tracking. `order_items.cancelled_at`.
+    if (line.cancelled_at != null) {
+      return { cost: 0, committed: false };
+    }
     // 1. Skip untracked / service lines.
     if (!line.track_inventory || line.product_type === 'service') {
       return { cost: 0, committed: false };
@@ -443,13 +665,25 @@ export class OrderStockCommitService {
       }
     }
 
-    // Find EVERY active reservation for this order/SO reference. Read WITHOUT
-    // store scope (mirrors order-flow) so a cross-store reservation is still
-    // found; tx (request context) already carries the right scope.
+    // Preview EVERY active reservation for this order/SO reference — same
+    // (product, variant, ref) identity, which two sibling order lines for the
+    // same product/variant SHARE (reservations are not keyed by order_item_id).
+    // Read WITHOUT store scope (mirrors order-flow) so a cross-store
+    // reservation is still found; tx (request context) already carries the
+    // right scope.
     //
     // QUI-559: a line may hold more than one reservation when its quantity was
     // reserved across several locations. Reading only the first one made the
     // commit believe the line lived in a single location and refuse the sale.
+    //
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md):
+    // this is a READ-ONLY preview of which locations THIS line's own
+    // `qty` would touch, oldest-reservation-first — mirroring exactly the
+    // ordering `StockLevelManager.releaseReservationQuantity` uses below — so
+    // the allocator step below still prefers the right warehouses. The actual
+    // release/consume of reservation rows is bounded to `qty` units (never
+    // "every reservation for this identity"), so a sibling line reserving the
+    // same product/variant keeps its own reservation active.
     const reservationReader: any = tx ?? this.prisma.withoutScope();
     const reservations = await reservationReader.stock_reservations.findMany({
       where: {
@@ -459,25 +693,41 @@ export class OrderStockCommitService {
         reserved_for_id: reservationRefId,
         status: 'active',
       },
-      select: { location_id: true },
+      select: { location_id: true, quantity: true },
+      orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
     });
 
-    const reservedLocationIds: number[] = Array.from(
-      new Set(reservations.map((r: any) => r.location_id as number)),
-    );
-
-    // Consume the reservations first (reserved-=q, available+=q, on_hand
-    // intact) so availability is restored before allocation / deduction.
-    for (const locId of reservedLocationIds) {
-      await this.stockLevelManager.releaseReservation(
-        line.product_id,
-        variant,
-        locId,
-        reservationRefType,
-        reservationRefId,
-        tx,
-      );
+    const reservedLocationIds: number[] = [];
+    {
+      const seen = new Set<number>();
+      let remainingPreview = qty;
+      for (const r of reservations) {
+        if (remainingPreview <= 0) break;
+        const take = Math.min(r.quantity, remainingPreview);
+        if (take <= 0) continue;
+        if (!seen.has(r.location_id)) {
+          seen.add(r.location_id);
+          reservedLocationIds.push(r.location_id);
+        }
+        remainingPreview -= take;
+      }
     }
+
+    // Release/consume ONLY this line's own quantity of the reservation
+    // (bounded, oldest-first) so a sibling line's reservation for the same
+    // product/variant is left untouched. `decrementOnHand:false` — the
+    // per-slice `updateStock` loop below is the single place that decrements
+    // `quantity_on_hand` (costing/movements/valuation source of truth).
+    await this.stockLevelManager.releaseReservationQuantity(
+      reservationRefType,
+      reservationRefId,
+      line.product_id,
+      variant ?? null,
+      qty,
+      'consumed',
+      tx,
+      { decrementOnHand: false },
+    );
 
     // Locations the caller is already committed to, honoured before any other:
     // the released reservations, then the line's own dispatch location.
@@ -504,12 +754,14 @@ export class OrderStockCommitService {
 
     if (allocation.shortfall > 0) {
       if (opts.blockOnInsufficient) {
+        const displayName = line.product_name ?? `producto ${line.product_id}`;
         throw new VendixHttpException(
           ErrorCodes.INV_STOCK_002,
-          `No se puede entregar: stock insuficiente para el producto (disponible ${allocation.available}, requerido ${qty})`,
+          `No se puede entregar: stock insuficiente para ${displayName} (disponible ${allocation.available}, requerido ${qty})`,
           {
             product_id: line.product_id,
             product_variant_id: variant ?? null,
+            product_name: line.product_name ?? null,
             requested: qty,
             available: allocation.available,
             location_id: slices[0]?.location_id ?? null,
@@ -533,6 +785,13 @@ export class OrderStockCommitService {
           `${variant ? ` variant ${variant}` : ''} disponible ${allocation.available} requerido ${qty} ` +
           `loc ${fallbackLocationId} ref ${reservationRefId}; se deduce con piso 0.`,
       );
+      opts.onShortfall?.({
+        product_id: line.product_id,
+        product_variant_id: variant ?? null,
+        product_name: line.product_name ?? `producto ${line.product_id}`,
+        requested: qty,
+        available: allocation.available,
+      });
       slices = this.allocator.absorbShortfall(allocation, fallbackLocationId);
     }
 
@@ -566,6 +825,7 @@ export class OrderStockCommitService {
           order_item_id: line.order_item_id ?? undefined,
           create_movement: true,
           afterCommit: opts.afterCommit,
+          allow_negative: opts.allowNegativeOnShortfall,
         },
         tx,
       );

@@ -1,0 +1,28 @@
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:136:  describe('projectOrderPaymentToTableSession (B.1)', () => {
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:146:        service.projectOrderPaymentToTableSession(orderId, paymentId),
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:172:      const projection = await service.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:197:        service.projectOrderPaymentToTableSession(orderId, paymentId),
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:214:      await service.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:215:      await service.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:232:      await service.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:246:      const projection = await service.projectOrderPaymentToTableSession(
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1761:  async projectOrderPaymentToTableSession(
+apps/backend/src/domains/store/tables/table-sessions.service.ts:2725:        await this.projectOrderPaymentToTableSession(
+apps/backend/src/domains/store/tables/split-account-payment.service.ts:546:          ReturnType<TableSessionsService['projectOrderPaymentToTableSession']>
+apps/backend/src/domains/store/tables/split-account-payment.service.ts:550:            await this.tableSessions.projectOrderPaymentToTableSession(
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:220:      projectOrderPaymentToTableSession: jest.fn(
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:282:        tableSessions.projectOrderPaymentToTableSession,
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:533:    expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledTimes(
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:536:    expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledWith(
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:567:    expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledWith(
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:577:    tableSessions.projectOrderPaymentToTableSession.mockRejectedValueOnce(
+apps/backend/src/domains/store/payments/webhook-handler.service.spec.ts:110:          useValue: { projectOrderPaymentToTableSession: projectTablePayment, closeSession: closeTableSession },
+apps/backend/src/domains/store/payments/payments.service.spec.ts:338:            projectOrderPaymentToTableSession: jest.fn(),
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1831:        (service as any).tableSessionsService.projectOrderPaymentToTableSession,
+apps/backend/src/domains/store/payments/payments.service.spec.ts:3892:        .projectOrderPaymentToTableSession as jest.Mock;
+apps/backend/src/domains/store/payments/payments.service.spec.ts:3932:        .projectOrderPaymentToTableSession as jest.Mock;
+apps/backend/src/domains/store/payments/payments.service.spec.ts:3952:        .projectOrderPaymentToTableSession as jest.Mock;
+apps/backend/src/domains/store/payments/payments.service.ts:1384:              await this.tableSessionsService.projectOrderPaymentToTableSession(
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:1624:      await tableSessionsService.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/orders/order-flow/order-flow-pos-invoice-emission.spec.ts:353:          projectOrderPaymentToTableSession: projectTablePayment,
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.spec.ts:524:      { get: jest.fn(() => ({ projectOrderPaymentToTableSession: projectTablePayment })) } as any,

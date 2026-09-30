@@ -1,4 +1,5 @@
 import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
+import { formatPercentFromFraction } from '../components/report-viewer/report-viewer.component';
 
 export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'overview', label: 'Resumen', description: 'Reporte general consolidado del negocio', icon: 'layout-dashboard', color: 'var(--color-primary)' },
@@ -11,6 +12,7 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'financial', label: 'Financiero', description: 'Reportes de gastos, perdidas y ganancias, caja y cuentas por pagar', icon: 'wallet', color: 'var(--color-destructive)' },
   { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables: balance de prueba, balance general, libro mayor e impuestos', icon: 'scale', color: 'var(--color-info)' },
   { id: 'payroll', label: 'Nómina', description: 'Reportes de nómina: resumen por período, detalle por empleado y provisiones laborales', icon: 'banknote', color: 'var(--color-primary)' },
+  { id: 'payments', label: 'Pagos', description: 'Reporte de pagos recibidos: método, estado, reembolsos, caja y comprobante', icon: 'credit-card', color: 'var(--color-primary)' },
   { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, planillas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)', panelUiKey: 'reports_dispatch' },
 ];
 
@@ -59,7 +61,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/overview/summary',
   },
 
-  // ─── COMPRAS (2) ─────────────────────────────────────────────────────────────────
+  // ─── COMPRAS (4) ─────────────────────────────────────────────────────────────────
 
   {
     id: 'purchase-summary',
@@ -124,36 +126,100 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
-    // QUI-547: Tendencias de compra. Serie temporal con date_trunc sobre
-    // order_date al granularity del query (hour|day|week|month|year,
-    // default day). Permite ver el comportamiento de compras en el tiempo.
+    // QUI-547: Tendencias de compra a proveedores. Serie temporal agregada por
+    // período (día, semana, mes) y proveedor, detallando número de órdenes de compra,
+    // monto total comprado, ticket promedio y unidades recibidas.
     id: 'purchase-trends',
     category: 'purchases',
     title: 'Tendencias de Compra',
-    description: 'Serie temporal de órdenes de compra por período',
+    description: 'Serie temporal de compras a proveedores por período',
     detailedDescription:
-      'Evolución temporal de las compras: cuántas órdenes se generaron, monto total y desglose entre pendientes y recibidas en cada período (hora, día, semana, mes o año).',
+      'Evolución temporal de compras a proveedores por día, semana o mes: órdenes de compra emitidas, monto total comprado, ticket promedio y unidades recibidas.',
     icon: 'trending-up',
     route: '/admin/reports/purchases/purchase-trends',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
-    trackKey: 'period',
+    trackKey: 'track_id',
     columns: [
       { key: 'period', header: 'Período', type: 'date' },
-      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
-      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
-      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
-      { key: 'completed_count', header: 'Recibidas', type: 'number', footer: 'sum' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'purchase_count', header: 'Nº OC', type: 'number', footer: 'sum' },
+      { key: 'total_amount', header: 'Total Comprado', type: 'currency', footer: 'sum' },
+      { key: 'avg_purchase', header: 'Ticket Promedio', type: 'currency', footer: 'average' },
+      { key: 'items_received', header: 'Unidades Recibidas', type: 'number', footer: 'sum' },
     ],
     exportFilename: 'tendencias_compra',
     stats: [
-      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'file-text' },
-      { key: 'pending_count', label: 'Pendientes', type: 'number', icon: 'clock' },
+      { key: 'total_amount', label: 'Total Comprado', type: 'currency', icon: 'dollar-sign' },
+      { key: 'purchase_count', label: 'Nº Órdenes', type: 'number', icon: 'file-text' },
+      { key: 'avg_purchase', label: 'Ticket Promedio', type: 'currency', icon: 'trending-up' },
+      { key: 'items_received', label: 'Unidades Recibidas', type: 'number', icon: 'package' },
     ],
     dataEndpoint: 'store/analytics/purchases/trends',
     exportEndpoint: 'store/analytics/purchases/trends/export',
+  },
+
+  {
+    // QUI-542: Cuentas por pagar a proveedores por edades (aging).
+    // Saldo pendiente por proveedor distribuido en buckets (corriente, 1-30, 31-60, 61-90, >90 días).
+    id: 'payable-aging',
+    category: 'purchases',
+    title: 'Cuentas por Pagar Proveedor',
+    description: 'Saldo pendiente a proveedores por edades de vencimiento',
+    detailedDescription:
+      'Reporte de cartera a proveedores distribuida por antigüedad (corriente, 1-30, 31-60, 61-90 y más de 90 días). Permite priorizar la gestión de pagos y controlar la deuda comercial.',
+    icon: 'clock',
+    route: '/admin/reports/purchases/payable-aging',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    serverPagination: true,
+    trackKey: 'supplier_id',
+    columns: [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'total_paid', header: 'Total Abonado', type: 'currency', footer: 'sum' },
+      { key: 'total_outstanding', header: 'Saldo Total', type: 'currency', footer: 'sum' },
+      {
+        key: 'due_in_days',
+        header: 'Vencimiento',
+        type: 'text',
+        badge: true,
+        badgeConfig: {
+          type: 'custom',
+          size: 'sm',
+          colorFn: (value: any) => {
+            if (value === null || value === undefined || value === '') return '#9ca3af';
+            const num = Number(value);
+            if (!Number.isFinite(num)) return '#9ca3af';
+            if (num < 0) return '#ef4444';
+            if (num === 0) return '#f97316';
+            if (num <= 7) return '#f59e0b';
+            return '#10b981';
+          },
+        },
+        transform: (value: any, row?: any) => {
+          const days = row?.due_in_days ?? value;
+          if (days === null || days === undefined) return 'Sin fecha';
+          const num = Number(days);
+          if (!Number.isFinite(num)) return 'Sin fecha';
+          if (num < 0) return `Vencida hace ${Math.abs(num)}d`;
+          if (num === 0) return 'Vence hoy';
+          return `Vence en ${num}d`;
+        },
+      },
+      { key: 'last_payment_date', header: 'Último Pago', type: 'date' },
+    ],
+    exportFilename: 'cuentas_por_pagar_aging',
+    stats: [
+      { key: 'total_outstanding', label: 'Saldo Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'current', label: 'Corriente', type: 'currency', icon: 'check-circle' },
+      { key: 'days_over_90', label: 'Vencido >90d', type: 'currency', icon: 'alert-triangle' },
+      { key: '_count', label: 'Proveedores', type: 'number', icon: 'building-2' },
+    ],
+    dataEndpoint: 'store/analytics/purchases/payable-aging',
+    exportEndpoint: 'store/analytics/purchases/payable-aging/export',
   },
 
   // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
@@ -463,6 +529,41 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/sales/by-user',
     exportEndpoint: 'store/analytics/sales/by-user/export',
+  },
+
+  {
+    // B10: Propinas por mesero. Lee únicamente `orders.tip_amount` /
+    // `tip_waiter_id` (atribución de mesero); las cuentas divididas
+    // (`order_financial_accounts.tip_amount`) no tienen mesero asociado y
+    // quedan fuera a propósito para no arrastrar doble conteo.
+    id: 'sales-tips-by-waiter',
+    category: 'sales',
+    title: 'Propinas por Mesero',
+    description: 'Propinas desglosadas por el mesero asignado en cada orden',
+    detailedDescription:
+      'Analiza las propinas recibidas por cada mesero: órdenes con propina, total acumulado, propina promedio y fecha de la última propina registrada.',
+    icon: 'hand-coins',
+    route: '/admin/reports/sales/sales-tips-by-waiter',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'waiter_name', header: 'Mesero', type: 'text' },
+      { key: 'waiter_email', header: 'Correo', type: 'text' },
+      { key: 'tipped_orders_count', header: 'Órdenes con propina', type: 'number', footer: 'sum' },
+      { key: 'total_tips', header: 'Total propinas', type: 'currency', footer: 'sum' },
+      { key: 'avg_tip', header: 'Propina promedio', type: 'currency', footer: 'average' },
+      { key: 'last_tip_date', header: 'Última propina', type: 'date' },
+    ],
+    exportFilename: 'propinas_por_mesero',
+    stats: [
+      { key: 'total_tips', label: 'Total Propinas', type: 'currency', icon: 'dollar-sign' },
+      { key: 'tipped_orders_count', label: 'Órdenes con Propina', type: 'number', icon: 'shopping-cart' },
+      { key: 'avg_tip', label: 'Propina Promedio', type: 'currency', icon: 'calculator' },
+    ],
+    dataEndpoint: 'store/analytics/sales/tips-by-waiter',
+    exportEndpoint: 'store/analytics/sales/tips-by-waiter/export',
   },
 
   {
@@ -1231,7 +1332,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'tax_name', header: 'Tipo de Impuesto', type: 'text' },
       { key: 'taxable_amount', header: 'Base Gravable', type: 'currency', footer: 'sum' },
       { key: 'total_tax', header: 'Impuesto', type: 'currency', footer: 'sum' },
-      { key: 'tax_rate', header: 'Tasa', type: 'percentage' },
+      { key: 'tax_rate', header: 'Tasa', type: 'percentage', transform: formatPercentFromFraction },
     ],
     exportFilename: 'tax_summary',
     stats: [
@@ -1588,6 +1689,51 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/dispatch/vehiculos',
     exportEndpoint: 'store/analytics/dispatch/vehiculos/export',
+  },
+  // ─── PAGOS (1) ───────────────────────────────────────────────────────────────────
+
+  {
+    // Página propia (`pages/payments/`): columnas ricas, filtros multi-select
+    // fijables y paginación de servidor. NO usa el viewer genérico; el registry
+    // aporta catálogo + endpoints.
+    id: 'payments-list',
+    category: 'payments',
+    title: 'Pagos',
+    description:
+      'Listado de pagos recibidos con orden, cliente, método, estado, reembolsos, caja y comprobante.',
+    detailedDescription:
+      'Filtra por período, estado y método de pago; busca por orden, cliente o referencia; fija tus filtros por tienda y exporta el detalle completo a XLSX.',
+    icon: 'credit-card',
+    route: '/admin/reports/payments/payments-list',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    serverPagination: true,
+    columns: [
+      { key: 'effective_date', header: 'Fecha de pago', type: 'date' },
+      { key: 'order_number', header: '# Orden', type: 'text' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_document', header: 'Documento', type: 'text' },
+      { key: 'payment_method', header: 'Método', type: 'text' },
+      { key: 'state', header: 'Estado', type: 'text' },
+      { key: 'amount', header: 'Monto', type: 'currency', footer: 'sum' },
+      { key: 'refunded_amount', header: 'Reembolsado', type: 'currency', footer: 'sum' },
+      { key: 'net_amount', header: 'Neto', type: 'currency', footer: 'sum' },
+      { key: 'reference', header: 'Referencia', type: 'text' },
+      { key: 'register_name', header: 'Caja', type: 'text' },
+      { key: 'bank_account', header: 'Cuenta bancaria', type: 'text' },
+      { key: 'has_receipt', header: 'Comprobante', type: 'text' },
+    ],
+    exportFilename: 'reporte_pagos',
+    stats: [
+      { key: 'total_collected', label: 'Recaudado', type: 'currency', icon: 'wallet' },
+      { key: 'payments_count', label: '# Pagos', type: 'number', icon: 'credit-card' },
+      { key: 'average_payment', label: 'Ticket promedio', type: 'currency', icon: 'receipt' },
+      { key: 'total_refunded', label: 'Reembolsado', type: 'currency', icon: 'undo-2' },
+    ],
+    dataEndpoint: 'store/analytics/payments',
+    exportEndpoint: 'store/analytics/payments/export',
   },
 ];
 

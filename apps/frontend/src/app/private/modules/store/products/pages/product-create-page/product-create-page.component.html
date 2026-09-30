@@ -18,6 +18,7 @@
   [icon]="isEditMode() ? 'package' : 'plus-circle'"
   [showBackButton]="true"
   backRoute="/admin/products"
+  [backQueryParams]="listBackQueryParams"
   [actions]="productHeaderActions()"
   (actionClicked)="onHeaderAction($event)"
   variant="default"
@@ -399,6 +400,12 @@
                   >
                   </app-input>
                 </div>
+                <div class="flex flex-col gap-0.5" aria-live="polite">
+                  <span class="text-sm font-bold text-rose-700">
+                    Oferta final: {{ salePriceWithTax | currency }}
+                  </span>
+                  <span class="text-xs text-rose-600">{{ saleTaxExplanation }}</span>
+                </div>
               </div>
             }
           </div>
@@ -766,6 +773,8 @@
 
         <!-- MOBILE: Images Section (visible only on mobile, after pricing) -->
         <section
+          id="product-images-mobile"
+          tabindex="-1"
           class="lg:hidden bg-surface rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
@@ -1221,6 +1230,21 @@
               "
             >
             </app-setting-toggle>
+
+            @if (productForm.get('track_inventory')?.value && !isService) {
+              <div class="pt-2">
+                <app-input
+                  formControlName="min_stock_level"
+                  label="Umbral de stock bajo"
+                  type="number"
+                  [min]="0"
+                  step="1"
+                  [placeholder]="defaultLowStockThresholdPlaceholder()"
+                  helperText="Cantidad mínima antes de alertar stock bajo. Si se deja vacío, usa el valor por defecto de la tienda."
+                >
+                </app-input>
+              </div>
+            }
 
             <app-setting-toggle
               formControlName="requires_serial_numbers"
@@ -1833,6 +1857,8 @@
       <div class="hidden lg:flex flex-col gap-4 md:gap-6">
         <!-- Images Section (Desktop) -->
         <section
+          id="product-images-desktop"
+          tabindex="-1"
           class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col"
         >
           <div class="flex items-center gap-2 mb-4">
@@ -2344,6 +2370,20 @@
                     >
                   </div>
                 </div>
+                @if (!isService) {
+                <div class="mt-2 p-2.5 bg-surface rounded-lg border border-border flex items-center justify-between text-xs">
+                  <div class="flex items-center gap-1.5 text-text-muted">
+                    <app-icon name="alert-triangle" size="14" class="text-amber-500"></app-icon>
+                    <span>Alerta de stock bajo:</span>
+                  </div>
+                  <span class="font-semibold text-text-primary">
+                    {{ effectiveProductLowStockThreshold() }} un.
+                    <span class="text-[10px] text-text-muted font-normal">
+                      ({{ isCustomLowStockThreshold() ? 'Producto' : 'Tienda' }})
+                    </span>
+                  </span>
+                </div>
+                }
               </div>
 
               <!-- Acciones Rápidas -->
@@ -3711,7 +3751,7 @@
 >
   <div class="space-y-4 md:space-y-6">
     <!-- Summary Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
       <div class="p-4 bg-bg rounded-xl border border-border">
         <p
           class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1"
@@ -3762,6 +3802,23 @@
           }
         </div>
       </div>
+@if (!isService) {
+      <div class="p-4 bg-bg rounded-xl border border-border">
+        <p
+          class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1"
+        >
+          Umbral Stock Bajo
+        </p>
+        <div class="flex items-baseline gap-2">
+          <p class="text-2xl font-bold text-text-primary">
+            {{ effectiveProductLowStockThreshold() }}
+          </p>
+          <span class="text-[10px] font-medium text-text-muted">
+            ({{ isCustomLowStockThreshold() ? 'Producto' : 'Tienda' }})
+          </span>
+        </div>
+      </div>
+}
     </div>
 
     <!-- Desglose del insumo (Modelo B) -->
@@ -4103,7 +4160,7 @@
 <!-- Product Image Source Modal -->
 <app-product-image-source-modal
   [isOpen]="isImageSourceModalOpen()"
-  (isOpenChange)="isImageSourceModalOpen.set($event)"
+  (isOpenChange)="onProductImageModalOpenChange($event)"
   [remainingSlots]="remainingImageSlots()"
   [mode]="imageModalMode()"
   [sourceImageUrl]="imageEditSourceUrl()"

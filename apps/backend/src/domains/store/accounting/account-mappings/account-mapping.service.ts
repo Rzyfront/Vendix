@@ -280,6 +280,20 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5295',
     description: 'Faltantes de Inventario',
   },
+  // Fired prepared dishes already credited inventory at kitchen fire.
+  // Cancellation waste only reclassifies that item's booked COGS.
+  'order_item.prepared_waste.shrinkage': {
+    code: '5295',
+    description: 'Merma de plato preparado',
+  },
+  'order_item.prepared_reuse.inventory': {
+    code: '1435',
+    description: 'Reuso de insumos de plato preparado',
+  },
+  'order_item.prepared_disposition.cogs': {
+    code: '6135',
+    description: 'Reclasificación costo de cocina',
+  },
   // Restaurant Suite Fase C — sub-recipe batch production.
   // Produccion is a value transfer between inventory buckets: DR 1435
   // (finished good received) / CR 1435 (ingredient stock consumed).
@@ -1090,6 +1104,9 @@ export const MAPPING_EVENT_LABELS: Record<string, string> = {
   'layaway.completed': 'Plan separe completado',
   'layaway.payment': 'Pago plan separe',
   'order.completed': 'Orden completada',
+  'order_item.prepared_waste': 'Merma de plato preparado',
+  'order_item.prepared_reuse': 'Reuso de insumos de plato preparado',
+  'order_item.prepared_disposition': 'Reclasificación de plato preparado',
   'payment.received': 'Pago recibido',
   'payroll.approved': 'Nómina aprobada',
   'payroll.paid': 'Nómina pagada',

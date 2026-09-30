@@ -1,17 +1,25 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   AnalyticsQueryDto,
   Granularity,
+  PayableAgingQueryDto,
+  PurchaseTrendsQueryDto,
   PurchasesBySupplierQueryDto,
-} from '../dto/analytics-query.dto';
+} from '../dto';
 import {
   getDateTruncInterval,
   getPreviousPeriod,
   parseDateRange,
 } from '../utils/date.util';
-import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import {
+  assertSafeTimezone,
+  localPeriodSql,
+  resolveLocalDateRange,
+  resolveStoreTimezone,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   PURCHASE_COMMITTED_STATES,
@@ -19,6 +27,10 @@ import {
   round2,
   sqlStateList,
 } from '../analytics-metrics.contract';
+import {
+  PayableAgingRow,
+  PayableAgingTotals,
+} from '../interfaces/payable-aging-row.interface';
 
 /**
  * Shape returned by {@link PurchasesAnalyticsService.aggregatePurchaseWindow}.
@@ -463,16 +475,14 @@ export class PurchasesAnalyticsService {
   }
 
   /**
-   * QUI-547: serie temporal de compras agregada por período
-   * (hour|day|week|month|year según query.granularity, default day).
+   * QUI-547: Consulta y agrega series temporales de órdenes de compra
+   * agrupadas por período y proveedor.
    *
-   * Trae todas las POs del rango y las bucketa en JS. Para un store
-   * típico con miles de POs por mes es perfectamente manejable y evita
-   * depender de $queryRaw que StorePrismaService no expone. Si el
-   * dataset crece a >100k POs por período conviene migrar a SQL
-   * nativo.
+   * Utiliza $queryRaw con agregación nativa en Postgres para evitar producto
+   * cartesiano con purchase_order_items (que inflaría total_amount) y
+   * garantizar que el cálculo sea idéntico entre la vista paginada y el export XLSX.
    */
-  async getPurchasesTrendsForExport(query: AnalyticsQueryDto) {
+  private async fetchPurchaseTrendsRows(query: PurchaseTrendsQueryDto) {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -481,84 +491,167 @@ export class PurchasesAnalyticsService {
     const organizationId = context.organization_id;
 
     const tz = await resolveStoreTimezone(this.prisma, storeId);
-    const { startDate, endDate } = parseDateRange(query, tz);
-    const granularity: Granularity = query.granularity ?? Granularity.DAY;
-    const interval = getDateTruncInterval(granularity);
+    const safeTz = assertSafeTimezone(tz);
+    const { startDate, endDate } = parseDateRange(query, safeTz);
 
-    const purchaseOrders = await this.prisma.purchase_orders.findMany({
-      where: {
-        organization_id: organizationId,
-        location: { store_id: storeId },
-        status: { in: PURCHASE_COMMITTED_STATES },
-        order_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date en TZ del store
-      },
-      select: {
-        status: true,
-        subtotal_amount: true,
-        total_amount: true,
-        order_date: true,
-      },
+    const granularity: Granularity = query.granularity ?? Granularity.DAY;
+    const periodSql = localPeriodSql(
+      'COALESCE(po.order_date, po.created_at)',
+      safeTz,
+      granularity,
+    );
+
+    const supplierCondition = query.supplier_id
+      ? Prisma.sql`AND po.supplier_id = ${query.supplier_id}`
+      : Prisma.empty;
+
+    const searchCondition = query.search?.trim()
+      ? Prisma.sql`AND s.name ILIKE ${'%' + query.search.trim() + '%'}`
+      : Prisma.empty;
+
+    const rawClient = this.prisma.withoutScope() as any;
+
+    const rows = await rawClient.$queryRaw<
+      Array<{
+        period: string;
+        supplier_id: number | null;
+        supplier_name: string | null;
+        purchase_count: number | bigint;
+        total_amount: number | string;
+        items_received: number | string;
+      }>
+    >`
+      SELECT
+        ${periodSql} AS period,
+        s.id AS supplier_id,
+        COALESCE(s.name, 'Sin Proveedor') AS supplier_name,
+        COUNT(po.id)::int AS purchase_count,
+        COALESCE(SUM(CASE WHEN po.total_amount > 0 THEN po.total_amount ELSE po.subtotal_amount END), 0)::float8 AS total_amount,
+        COALESCE(SUM(poi.items_received), 0)::float8 AS items_received
+      FROM purchase_orders po
+      JOIN inventory_locations l ON l.id = po.location_id
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      LEFT JOIN (
+        SELECT i.purchase_order_id,
+               COALESCE(SUM(i.quantity_received * COALESCE(p.purchase_to_stock_factor, 1)), 0)::float8 AS items_received
+        FROM purchase_order_items i
+        LEFT JOIN products p ON p.id = i.product_id
+        GROUP BY i.purchase_order_id
+      ) poi ON poi.purchase_order_id = po.id
+      WHERE po.organization_id = ${organizationId}
+        AND l.store_id = ${storeId}
+        AND po.status::text IN (${sqlStateList(PURCHASE_COMMITTED_STATES)})
+        AND COALESCE(po.order_date, po.created_at) >= ${startDate}
+        AND COALESCE(po.order_date, po.created_at) <= ${endDate}
+        ${supplierCondition}
+        ${searchCondition}
+      GROUP BY 1, s.id, s.name
+      ORDER BY 1 DESC, total_amount DESC
+    `;
+
+    const allRows = (rows || []).map((r) => {
+      const purchaseCount = Number(r.purchase_count) || 0;
+      const totalAmount = round2(Number(r.total_amount) || 0);
+      const itemsReceived = round2(Number(r.items_received) || 0);
+      const avgPurchase =
+        purchaseCount > 0 ? round2(totalAmount / purchaseCount) : 0;
+      const supplierId = r.supplier_id ? Number(r.supplier_id) : 0;
+      const period = r.period;
+      const trackId = `${period}_${supplierId}`;
+
+      return {
+        track_id: trackId,
+        id: trackId,
+        period,
+        supplier_id: supplierId,
+        supplier_name: r.supplier_name || 'Sin Proveedor',
+        purchase_count: purchaseCount,
+        total_amount: totalAmount,
+        avg_purchase: avgPurchase,
+        items_received: itemsReceived,
+      };
     });
 
-    // Bucketing en JS. Usamos UTC porque la conversión a TZ ya se hizo
-    // en parseDateRange, y date_trunc('day', timestamp) en Postgres
-    // opera en la TZ de la sesión. Para mantener consistencia con
-    // `getDateTruncInterval` (que es solo el nombre del intervalo),
-    // truncamos manualmente en UTC al inicio del bucket correspondiente.
-    const buckets = new Map<number, {
-      period: Date;
-      order_count: number;
-      total_spent: number;
-      pending_count: number;
-      completed_count: number;
-    }>();
+    let totalPurchases = 0;
+    let totalSpent = 0;
+    let totalReceived = 0;
 
-    for (const po of purchaseOrders) {
-      const period = truncateToGranularity(po.order_date, granularity);
-      const key = period.getTime();
-      const bucket = buckets.get(key) ?? {
-        period,
-        order_count: 0,
-        total_spent: 0,
-        pending_count: 0,
-        completed_count: 0,
-      };
-      bucket.order_count += 1;
-      bucket.total_spent += Number(po.subtotal_amount || po.total_amount || 0);
-      if (this.PENDING_STATES.includes(po.status as any)) {
-        bucket.pending_count += 1;
-      } else if (this.COMPLETED_STATES.includes(po.status as any)) {
-        bucket.completed_count += 1;
-      }
-      buckets.set(key, bucket);
+    for (const row of allRows) {
+      totalPurchases += row.purchase_count;
+      totalSpent += row.total_amount;
+      totalReceived += row.items_received;
     }
 
-    return Array.from(buckets.values())
-      .sort((a, b) => a.period.getTime() - b.period.getTime())
-      .map((b) => ({
-        period: b.period,
-        order_count: b.order_count,
-        total_spent: Math.round(b.total_spent * 100) / 100,
-        pending_count: b.pending_count,
-        completed_count: b.completed_count,
-        granularity: interval,
-      }));
+    const summary = {
+      purchase_count: totalPurchases,
+      total_amount: round2(totalSpent),
+      avg_purchase:
+        totalPurchases > 0 ? round2(totalSpent / totalPurchases) : 0,
+      items_received: round2(totalReceived),
+    };
+
+    return { allRows, summary, tz: safeTz };
   }
 
   /**
-   * QUI-542: cuentas por pagar a proveedores con bucketing de
-   * antigüedad. Toma purchase_orders con payment_status IN
-   * ('unpaid', 'partial') y payment_due_date no nulo, calcula días
-   * de mora desde payment_due_date vs now(), y bucket:
-   *   - '0-30' (corriente)
-   *   - '31-60'
-   *   - '61-90'
-   *   - '90+' (crítico, escalación)
-   *
-   * Una fila por orden con supplier, total, saldo pendiente, días de
-   * mora y bucket.
+   * QUI-547: Obtiene las tendencias de compra paginadas para visualización en pantalla.
    */
-  async getAccountsPayableForExport(query: AnalyticsQueryDto) {
+  async getPurchaseTrends(query: PurchaseTrendsQueryDto) {
+    const { allRows, summary } = await this.fetchPurchaseTrendsRows(query);
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
+    const total = allRows.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedRows = allRows.slice(startIndex, startIndex + limit);
+
+    return {
+      data: paginatedRows,
+      meta: {
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
+      },
+      summary,
+    };
+  }
+
+  /**
+   * QUI-547: Obtiene todas las filas de tendencias de compra para exportación XLSX (hasta 10.000).
+   */
+  async getPurchaseTrendsForExport(query: PurchaseTrendsQueryDto) {
+    const { allRows } = await this.fetchPurchaseTrendsRows(query);
+    const MAX_EXPORT_ROWS = 10000;
+    return allRows.slice(0, MAX_EXPORT_ROWS);
+  }
+
+  /** Alias para retrocompatibilidad con referencias anteriores. */
+  async getPurchasesTrendsForExport(query: PurchaseTrendsQueryDto) {
+    return this.getPurchaseTrendsForExport(query);
+  }
+
+  /**
+   * QUI-542: Cuentas por pagar a proveedores con bucketing de antigüedad (aging).
+   *
+   * Agrupa las deudas pendientes por proveedor y distribuye el saldo en:
+   *   - current: no vencido (días de mora <= 0)
+   *   - days_1_30: 1 a 30 días de mora
+   *   - days_31_60: 31 a 60 días de mora
+   *   - days_61_90: 61 a 90 días de mora
+   *   - days_over_90: más de 90 días de mora
+   *   - total_outstanding: saldo total pendiente del proveedor
+   *   - last_payment_date: fecha del último abono/pago registrado al proveedor
+   *
+   * El universo de tienda es `location.store_id = storeId`, alineado con
+   * el contrato del dominio (QUI-624/625/550).
+   */
+  async buildPayableAgingRows(query: PayableAgingQueryDto): Promise<{
+    rows: PayableAgingRow[];
+    totals: PayableAgingTotals;
+  }> {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -566,63 +659,221 @@ export class PurchasesAnalyticsService {
     const storeId = context.store_id;
     const organizationId = context.organization_id;
 
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    let asOfDate: Date;
+    if (query.as_of) {
+      asOfDate = resolveLocalDateRange({ date_to: query.as_of }, tz).endDate;
+    } else if (query.date_to) {
+      asOfDate = resolveLocalDateRange({ date_to: query.date_to }, tz).endDate;
+    } else {
+      asOfDate = new Date();
+    }
+
     const orders = await this.prisma.purchase_orders.findMany({
       where: {
         organization_id: organizationId,
-        suppliers: { store_id: storeId },
+        location: { store_id: storeId },
         payment_status: { in: ['unpaid', 'partial'] },
-        payment_due_date: undefined,
+        status: { in: PURCHASE_COMMITTED_STATES },
+        ...(query.supplier_id ? { supplier_id: query.supplier_id } : {}),
       },
       select: {
         id: true,
         order_number: true,
-        supplier_invoice_number: true,
         total_amount: true,
-        tax_amount: true,
         order_date: true,
         payment_due_date: true,
-        payment_status: true,
-        suppliers: { select: { id: true, name: true, code: true } },
+        created_at: true,
+        supplier_id: true,
+        suppliers: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            tax_id: true,
+            verification_digit: true,
+          },
+        },
+        payments: {
+          select: {
+            amount: true,
+            payment_date: true,
+          },
+        },
       },
       orderBy: { payment_due_date: 'asc' },
       take: 10000,
     });
 
-    const now = new Date();
+    const supplierBuckets = new Map<number, PayableAgingRow>();
 
-    return orders
-      .filter((o) => o.payment_due_date !== null)
-      .map((o) => {
-        const days = Math.max(
-          0,
-          Math.floor(
-            (now.getTime() - o.payment_due_date!.getTime()) / 86400000,
-          ),
-        );
-        const bucket =
-          days <= 30
-            ? '0-30'
-            : days <= 60
-              ? '31-60'
-              : days <= 90
-                ? '61-90'
-                : '90+';
-        return {
-          id: o.id,
-          order_number: o.order_number,
-          supplier_invoice_number: o.supplier_invoice_number ?? '',
-          supplier_id: o.suppliers.id,
-          supplier_name: o.suppliers.name,
-          supplier_code: o.suppliers.code ?? '',
-          order_date: o.order_date,
-          payment_due_date: o.payment_due_date,
-          days_overdue: days,
-          aging_bucket: bucket,
-          total_amount: Math.round(Number(o.total_amount) * 100) / 100,
-          tax_amount: Math.round(Number(o.tax_amount || 0) * 100) / 100,
-          payment_status: o.payment_status,
+    for (const order of orders) {
+      const sup = order.suppliers;
+      if (!sup) continue;
+
+      const totalAmount = Number(order.total_amount);
+      const paidAmount = (order.payments || []).reduce(
+        (sum, p) => sum + Number(p.amount),
+        0,
+      );
+      const balance = Math.max(0, round2(totalAmount - paidAmount));
+      if (balance <= 0) continue;
+
+      let bucket = supplierBuckets.get(order.supplier_id);
+      if (!bucket) {
+        const doc = sup.tax_id
+          ? sup.verification_digit
+            ? `${sup.tax_id}-${sup.verification_digit}`
+            : sup.tax_id
+          : sup.code ?? '';
+
+        bucket = {
+          supplier_id: sup.id,
+          supplier_name: sup.name,
+          supplier_document: doc,
+          total_paid: 0,
+          current: 0,
+          days_1_30: 0,
+          days_31_60: 0,
+          days_61_90: 0,
+          days_over_90: 0,
+          total_outstanding: 0,
+          due_date: null,
+          due_in_days: null,
+          last_payment_date: null,
         };
+        supplierBuckets.set(order.supplier_id, bucket);
+      }
+
+      bucket.total_paid = round2(bucket.total_paid + paidAmount);
+
+      if (order.payment_due_date) {
+        if (!bucket.due_date || order.payment_due_date < bucket.due_date) {
+          bucket.due_date = order.payment_due_date;
+        }
+      }
+
+      const effectiveDueDate =
+        order.payment_due_date ?? order.order_date ?? order.created_at ?? asOfDate;
+      const daysOverdue = Math.floor(
+        (asOfDate.getTime() - effectiveDueDate.getTime()) / 86400000,
+      );
+
+      if (daysOverdue <= 0) {
+        bucket.current = round2(bucket.current + balance);
+      } else if (daysOverdue <= 30) {
+        bucket.days_1_30 = round2(bucket.days_1_30 + balance);
+      } else if (daysOverdue <= 60) {
+        bucket.days_31_60 = round2(bucket.days_31_60 + balance);
+      } else if (daysOverdue <= 90) {
+        bucket.days_61_90 = round2(bucket.days_61_90 + balance);
+      } else {
+        bucket.days_over_90 = round2(bucket.days_over_90 + balance);
+      }
+
+      bucket.total_outstanding = round2(bucket.total_outstanding + balance);
+    }
+
+    if (supplierBuckets.size > 0) {
+      const supplierIds = Array.from(supplierBuckets.keys());
+      const lastPayments = await this.prisma.purchase_order_payments.findMany({
+        where: {
+          purchase_order: {
+            organization_id: organizationId,
+            location: { store_id: storeId },
+            supplier_id: { in: supplierIds },
+          },
+        },
+        select: {
+          payment_date: true,
+          purchase_order: {
+            select: { supplier_id: true },
+          },
+        },
+        orderBy: { payment_date: 'desc' },
       });
+
+      const lastPaymentMap = new Map<number, Date>();
+      for (const p of lastPayments) {
+        const sId = p.purchase_order.supplier_id;
+        if (!lastPaymentMap.has(sId)) {
+          lastPaymentMap.set(sId, p.payment_date);
+        }
+      }
+
+      for (const [sId, bucket] of supplierBuckets.entries()) {
+        bucket.last_payment_date = lastPaymentMap.get(sId) ?? null;
+      }
+    }
+
+    for (const bucket of supplierBuckets.values()) {
+      if (bucket.due_date) {
+        const diffDays =
+          (bucket.due_date.getTime() - asOfDate.getTime()) / 86_400_000;
+        const days = Math.ceil(diffDays);
+        bucket.due_in_days = days === 0 ? 0 : days;
+      } else {
+        bucket.due_in_days = null;
+      }
+    }
+
+    let rows = Array.from(supplierBuckets.values());
+    if (query.search) {
+      const term = query.search.trim().toLowerCase();
+      rows = rows.filter(
+        (r) =>
+          r.supplier_name.toLowerCase().includes(term) ||
+          r.supplier_document.toLowerCase().includes(term),
+      );
+    }
+
+    rows.sort((a, b) => b.total_outstanding - a.total_outstanding);
+
+    const totals: PayableAgingTotals = {
+      total_paid: round2(rows.reduce((sum, r) => sum + r.total_paid, 0)),
+      current: round2(rows.reduce((sum, r) => sum + r.current, 0)),
+      days_1_30: round2(rows.reduce((sum, r) => sum + r.days_1_30, 0)),
+      days_31_60: round2(rows.reduce((sum, r) => sum + r.days_31_60, 0)),
+      days_61_90: round2(rows.reduce((sum, r) => sum + r.days_61_90, 0)),
+      days_over_90: round2(rows.reduce((sum, r) => sum + r.days_over_90, 0)),
+      total_outstanding: round2(rows.reduce((sum, r) => sum + r.total_outstanding, 0)),
+    };
+
+    return { rows, totals };
+  }
+
+  async getPayableAging(query: PayableAgingQueryDto) {
+    const { rows, totals } = await this.buildPayableAgingRows(query);
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 50));
+    const total = rows.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const offset = (page - 1) * limit;
+    const paginatedRows = rows.slice(offset, offset + limit);
+
+    return {
+      data: paginatedRows,
+      meta: {
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
+        totals,
+      },
+    };
+  }
+
+  async getPayableAgingForExport(query: PayableAgingQueryDto) {
+    return this.buildPayableAgingRows(query);
+  }
+
+  async getAccountsPayableForExport(query: any) {
+    return this.getPayableAgingForExport(query);
   }
 }
 

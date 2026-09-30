@@ -97,6 +97,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAY_DUPLICATE_001: 'Ya se registro un pago para esta orden.',
   PAY_FIND_001: 'Pago no encontrado.',
   PAY_VALIDATE_001: 'La validacion de los datos de pago fallo.',
+  PAY_MULTI_TENDER_WALLET_INSUFFICIENT:
+    'El saldo Wallet no cubre los tramos asignados. No se cobró ningún método.',
   PAY_PERM_001: 'No tiene permisos para acceder a este recurso de pago.',
 
   // Authentication
@@ -126,6 +128,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ECOM_CHECKOUT_001: 'Error en el proceso de compra.',
   ECOM_CHECKOUT_002: 'Metodo de pago invalido.',
   ECOM_CHECKOUT_003: 'Metodo de envio invalido.',
+  ECOM_CHECKOUT_PENDING_SHIPPING_001:
+    'Esta tienda no recibe pedidos por WhatsApp. Marca tu ubicación en el mapa para calcular el envío.',
   // Ecommerce checkout — validación cliente de dirección de envío
   ECOM_CHECKOUT_ADDR_REQUIRED_001:
     'Completa la dirección de envío para continuar.',
@@ -272,6 +276,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta orden tiene un pago confirmado que requiere reversión o conciliación. Usa el flujo de reembolso cuando corresponda; anular la orden no devuelve el dinero de la pasarela.',
   ORD_CANCEL_OPEN_TABLE_001:
     'Esta cuenta pertenece a una mesa abierta. Cierra o cobra la cuenta desde Mesas antes de cancelar la orden.',
+  ORD_CANCEL_CREDIT_NOTE_REQUIRED_001:
+    'Esta orden tiene una factura electrónica aceptada por la DIAN. Emite primero la nota crédito correspondiente y luego cancela la orden.',
   ORD_ITEM_CANCEL_PAID_001:
     'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
   ORD_ITEM_CANCEL_STATE_001:
@@ -284,6 +290,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
   ORD_SHIP_RATE_MISMATCH_001:
     'La tarifa seleccionada no corresponde al método de envío.',
+  ORD_SHIP_CHARGED_COST_CHANGE_001:
+    'La orden ya tiene pagos aplicados: no se puede cambiar el costo de envío. Elige una tarifa con el mismo costo o revierte el pago primero.',
   // Respaldo estático: la impresión masiva ya muestra el mensaje dinámico del
   // backend ("Ninguna de las 20 órdenes … 12 canceladas, 8 no encontradas"),
   // que es más útil. Este texto solo aparece si ese detalle no llega.
@@ -297,6 +305,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No hay despacho a esta dirección, pero puedes retirar tu pedido en la tienda.',
   ORD_SHIP_CITY_UNRESOLVED_001:
     'No pudimos identificar tu ciudad. Vuelve a seleccionar departamento y ciudad e intenta de nuevo.',
+  // E.5 — el backend redacta el detalle con la orden; este texto es el respaldo corto.
+  ORD_SHIP_REQUIRED_FOR_FLOW_001:
+    'Selecciona un método de envío antes de guardar o cobrar esta venta.',
 
   // Quotations
   QUOTE_CONVERT_STATUS_001:
@@ -327,6 +338,15 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INV_PERM_001: 'No tiene permisos para acceder al inventario.',
   INV_CONTEXT_001: 'Debe seleccionar una organizacion.',
   INV_STOCK_001: 'Stock insuficiente.',
+  // No overselling — guardia de reserva/entrega (order-stock-commit.service.ts).
+  // Este canned copy es sólo el respaldo: el backend ya manda el mensaje
+  // humano en español con el producto y las cantidades (ver
+  // isPresentableApiMessage en parse-api-error.ts), así que normalmente lo que
+  // ve el operador es ESE texto, no éste.
+  INV_STOCK_002:
+    'No se puede entregar: no hay stock suficiente. Quita el producto de la orden o desactiva «Maneja inventario» en su ficha.',
+  INV_STOCK_INSUFFICIENT_LINES:
+    'No hay stock suficiente para uno o más productos o insumos. Quítalos de la orden o desactiva «Maneja inventario» en el producto.',
   INV_LOC_001: 'Ubicacion no encontrada.',
   INV_ADJ_001: 'Ajuste no encontrado.',
   INV_BULK_001: 'El archivo esta vacio o no contiene datos validos.',
@@ -356,6 +376,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   REF_FIND_001: 'Reembolso no encontrado.',
   REF_CREATE_001: 'Error al crear el reembolso.',
   REF_VALIDATE_001: 'La validacion del reembolso fallo.',
+  REF_PAYOUT_REQUIRED_001: 'Para completar se exigen referencia y canal del desembolso.',
+  REF_RESOLUTION_CONFLICT_001: 'El reembolso cambió de estado; recarga e inténtalo de nuevo.',
 
   // Superadmin
   SUP_ADMIN_USER_001: 'Usuario de superadministrador no encontrado.',
@@ -470,6 +492,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DSP_VALIDATE_004: 'La remisión solo puede modificarse en estado borrador',
   DSP_VALIDATE_005:
     'La cantidad a despachar excede la cantidad pendiente del pedido',
+  // E.5 — el backend nombra #orden/estado en el detalle; estos textos son respaldos cortos.
+  DSP_ORDER_DELIVERY_001: 'Las entregas en el acto no generan remisión.',
+  DSP_ORDER_STATE_001:
+    'Esta orden no admite remisión en su estado actual. Revísala antes de despacharla.',
 
   // ICA Municipal Tax
   ICA_RATE_NOT_FOUND: 'No se encontro tarifa ICA para el municipio.',
@@ -1090,6 +1116,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Aún no hay una cuenta abierta para esta mesa. Llama al mesero para que la abra.',
   TABLE_SESSION_ALREADY_OPEN:
     'Esta mesa ya tiene una cuenta abierta.',
+  ORD_TABLE_REASSIGN_ORDER_STATE_001:
+    'Esta orden está cancelada o reembolsada. No se puede devolver a una mesa.',
+  ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001:
+    'Esta orden ya fue cobrada, dividida o facturada. Revisa su historial antes de reasignarla.',
   // B.5 / ERR-39 — aviso de apertura exitosa, no error ni confirmación.
   TABLE_REOPENED_FROM_CLEANING_001:
     'Esta mesa estaba en limpieza. Verifica que esté lista para atender.',
@@ -1103,6 +1133,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La mesa no está en un estado válido para esta acción.',
   TABLE_SESSION_ADD_ITEMS_INVALID:
     'No se pudieron agregar los productos a la cuenta de la mesa. Verifica que estén disponibles e intenta de nuevo.',
+  // D.4 / ERR-15 — post-cobro: el plato ya pagado no se cancela, se reembolsa.
+  TABLE_SESSION_ITEM_NOT_REMOVABLE:
+    'La orden ya fue cobrada. Usa Reembolso para devolver el plato; la cancelación no devuelve el dinero.',
   MENU_ITEM_NOT_AVAILABLE_NOW:
     'Este producto no está disponible en este momento (fuera del horario del menú).',
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY:
@@ -1135,6 +1168,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Selecciona o crea un cliente antes de guardar la orden.',
   POS_DRAFT_REQUIRES_PAYMENT_001:
     'No puedes cobrar y guardar borrador al mismo tiempo. Guarda la orden primero y luego cobra.',
+  POS_DRAFT_DUPLICATE_ORDER_001:
+    'Esta orden ya tiene un cobro o no se puede volver a cobrar. Revisa su detalle antes de intentar otra venta.',
   POS_STOCK_INSUFFICIENT_001:
     'No hay stock suficiente para uno o más productos.',
   // Round 3 MAJOR #5 — added to keep the mobile POS payment modal and the
@@ -1155,6 +1190,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_EDIT_NOT_ALLOWED_001: 'Esta orden ya no se puede editar.',
   ORD_EDIT_CUSTOMER_STORE_MISMATCH_001:
     'El cliente no pertenece a esta tienda.',
+  // Release-853 regresión (paso 10 del plan de titular): la orden ya tiene
+  // `sales_invoice` vigente y el titular es inmutable por trazabilidad
+  // fiscal; la vía de corrección es anular o emitir nota crédito.
+  ORD_TITULAR_INVOICED_001:
+    'La orden ya tiene una factura emitida; anúlala o emite una nota crédito para cambiar el titular.',
   ORD_EDIT_INVALID_SHIPPING_001:
     'Revisa la dirección, el método y el costo de envío.',
   ORD_EDIT_INVALID_STATE_001:

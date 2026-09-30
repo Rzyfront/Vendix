@@ -1,0 +1,241 @@
+E.6-SA1 — DB-02 read-only checks (docker exec vendix_postgres psql -U username -d vendix_db)
+date-utc: 2026-09-24T01:23:40Z
+
+=== Q1: overpayment — effective paid (succeeded/captured/authorized) vs grand_total+0.01 (expect 0 rows) ===
+ order_id |    order_number     | order_state | grand_total |   paid   | over_by  
+----------+---------------------+-------------+-------------+----------+----------
+      394 | T-1781745183100-255 | finished    |    30000.00 | 60000.00 | 30000.00
+      817 | POS-2026-0167       | finished    |      100.00 |   800.00 |   700.00
+      818 | POS-2026-0168       | finished    |      100.00 |   900.00 |   800.00
+      819 | POS-2026-0169       | finished    |      100.00 |   800.00 |   700.00
+      821 | POS-2026-0171       | finished    |      100.00 |   800.00 |   700.00
+      852 | POS-2026-0201       | draft       |    11333.33 | 12000.00 |   666.67
+      902 | ORD2608210001       | finished    |    50000.00 | 70000.00 | 20000.00
+      903 | POS-2026-0008       | finished    |    50000.00 | 62000.00 | 12000.00
+      917 | POS-2026-0020       | finished    |    50000.00 | 65000.00 | 15000.00
+     1028 | T-1788593166228-529 | finished    |    28000.00 | 29000.00 |  1000.00
+(10 rows)
+
+
+=== Q1b: same, excluding credit/installment orders (interest may legitimately exceed grand_total) ===
+ order_id |    order_number     | order_state | grand_total |   paid   | over_by  
+----------+---------------------+-------------+-------------+----------+----------
+      394 | T-1781745183100-255 | finished    |    30000.00 | 60000.00 | 30000.00
+      817 | POS-2026-0167       | finished    |      100.00 |   800.00 |   700.00
+      818 | POS-2026-0168       | finished    |      100.00 |   900.00 |   800.00
+      819 | POS-2026-0169       | finished    |      100.00 |   800.00 |   700.00
+      821 | POS-2026-0171       | finished    |      100.00 |   800.00 |   700.00
+      852 | POS-2026-0201       | draft       |    11333.33 | 12000.00 |   666.67
+      902 | ORD2608210001       | finished    |    50000.00 | 70000.00 | 20000.00
+      903 | POS-2026-0008       | finished    |    50000.00 | 62000.00 | 12000.00
+      917 | POS-2026-0020       | finished    |    50000.00 | 65000.00 | 15000.00
+     1028 | T-1788593166228-529 | finished    |    28000.00 | 29000.00 |  1000.00
+(10 rows)
+
+
+=== Q1c: per-payment detail of the 10 flagged orders (read-only diagnostic) ===
+ order_id | pay_id |  amount  |         created_at         |    method     |       transaction_id        | grand_total | tip_amount 
+----------+--------+----------+----------------------------+---------------+-----------------------------+-------------+------------
+      394 |    453 | 30000.00 | 2026-07-06 23:24:44.622    | cash          | TXN-1783380284621-X0VHWNK73 |    30000.00 |           
+      394 |    454 | 30000.00 | 2026-07-06 23:24:44.629    | cash          | TXN-1783380284628-M81TJL9NO |    30000.00 |           
+      817 |    617 |   100.00 | 2026-08-20 13:15:17.479    | cash          | TXN-1787231717479-GSFJ3LYTT |      100.00 |           
+      817 |    618 |   100.00 | 2026-08-20 13:15:17.483    | cash          | TXN-1787231717482-EEYM7EKA9 |      100.00 |           
+      817 |    619 |   100.00 | 2026-08-20 13:15:17.485    | cash          | TXN-1787231717485-V8AYZNX4R |      100.00 |           
+      817 |    620 |   100.00 | 2026-08-20 13:15:17.491    | cash          | TXN-1787231717491-Q2UQJTSLZ |      100.00 |           
+      817 |    621 |   100.00 | 2026-08-20 13:15:17.493    | cash          | TXN-1787231717493-1NZWZGWFY |      100.00 |           
+      817 |    622 |   100.00 | 2026-08-20 13:15:17.506    | cash          | TXN-1787231717506-30IFJNSIH |      100.00 |           
+      817 |    623 |   100.00 | 2026-08-20 13:15:17.511    | cash          | TXN-1787231717511-Z91AYQ06M |      100.00 |           
+      817 |    624 |   100.00 | 2026-08-20 13:15:17.513    | cash          | TXN-1787231717513-B6NDAEFGC |      100.00 |           
+      818 |    625 |   100.00 | 2026-08-20 13:17:37.261    | cash          | TXN-1787231857260-CLAVCGFOV |      100.00 |           
+      818 |    626 |   100.00 | 2026-08-20 13:17:37.264    | cash          | TXN-1787231857264-C5T78YRCC |      100.00 |           
+      818 |    627 |   100.00 | 2026-08-20 13:17:37.265    | cash          | TXN-1787231857264-Q0WH1ES4B |      100.00 |           
+      818 |    628 |   100.00 | 2026-08-20 13:17:37.282    | cash          | TXN-1787231857282-X3RJN1KLO |      100.00 |           
+      818 |    629 |   100.00 | 2026-08-20 13:17:37.283    | cash          | TXN-1787231857283-JN5QG0QCF |      100.00 |           
+      818 |    630 |   100.00 | 2026-08-20 13:17:37.29     | cash          | TXN-1787231857290-RK8TPXOOK |      100.00 |           
+      818 |    631 |   100.00 | 2026-08-20 13:17:37.305    | cash          | TXN-1787231857305-8R42I2UYT |      100.00 |           
+      818 |    632 |   100.00 | 2026-08-20 13:17:37.305    | cash          | TXN-1787231857305-3JWTJTOKP |      100.00 |           
+      818 |    633 |   100.00 | 2026-08-20 13:17:37.306    | cash          | TXN-1787231857306-EWAKDKDGT |      100.00 |           
+      819 |    634 |   100.00 | 2026-08-20 13:25:56.605    | cash          | TXN-1787232356604-EZWVISOYA |      100.00 |           
+      819 |    635 |   100.00 | 2026-08-20 13:25:56.609    | cash          | TXN-1787232356609-3JIIH10OR |      100.00 |           
+      819 |    636 |   100.00 | 2026-08-20 13:25:56.619    | cash          | TXN-1787232356619-W46T5ILN7 |      100.00 |           
+      819 |    637 |   100.00 | 2026-08-20 13:25:56.627    | cash          | TXN-1787232356627-1WEB6025S |      100.00 |           
+      819 |    638 |   100.00 | 2026-08-20 13:25:56.638    | cash          | TXN-1787232356638-X0S3H5QR1 |      100.00 |           
+      819 |    639 |   100.00 | 2026-08-20 13:25:56.644    | cash          | TXN-1787232356644-13V0N4E7C |      100.00 |           
+      819 |    640 |   100.00 | 2026-08-20 13:25:56.673    | cash          | TXN-1787232356673-Z16NQ4C51 |      100.00 |           
+      819 |    641 |   100.00 | 2026-08-20 13:25:56.698    | cash          | TXN-1787232356698-JVEJEZPAV |      100.00 |           
+      821 |    642 |   100.00 | 2026-08-20 13:29:02.774    | cash          | TXN-1787232542773-GESD5HGPR |      100.00 |           
+      821 |    643 |   100.00 | 2026-08-20 13:29:02.781    | cash          | TXN-1787232542781-TM4IC6CNX |      100.00 |           
+      821 |    644 |   100.00 | 2026-08-20 13:29:02.782    | cash          | TXN-1787232542782-HZH809YGG |      100.00 |           
+      821 |    645 |   100.00 | 2026-08-20 13:29:02.784    | cash          | TXN-1787232542784-CZPE1O5YZ |      100.00 |           
+      821 |    646 |   100.00 | 2026-08-20 13:29:02.797    | cash          | TXN-1787232542797-F5NQ9FIHI |      100.00 |           
+      821 |    647 |   100.00 | 2026-08-20 13:29:02.8      | cash          | TXN-1787232542799-LRBMQO45K |      100.00 |           
+      821 |    648 |   100.00 | 2026-08-20 13:29:02.804    | cash          | TXN-1787232542804-K81OWM5BV |      100.00 |           
+      821 |    649 |   100.00 | 2026-08-20 13:29:02.834    | cash          | TXN-1787232542834-LUH04BIFQ |      100.00 |           
+      852 |    661 | 12000.00 | 2026-08-20 21:56:15.302    | cash          | txn_1787262975321_v23a7lo8w |    11333.33 |           
+      902 |    679 | 50000.00 | 2026-08-21 22:18:59.311    | cash          | TXN-1787350739310-0ZPV859AK |    50000.00 |           
+      902 |    756 | 20000.00 | 2026-09-13 00:41:00.049917 | bank_transfer | TEST-MIX-902-LATER          |    50000.00 |           
+      903 |    680 | 50000.00 | 2026-08-21 22:33:14.808    | cash          | TXN-1787351594807-V89T4KP2E |    50000.00 |           
+      903 |    758 | 12000.00 | 2026-09-13 00:41:00.049917 | cash          | TEST-DEDUP-903-LATER        |    50000.00 |           
+      917 |    681 | 50000.00 | 2026-08-21 23:47:27.49     | cash          | TXN-1787356047489-2ZVRHF3WG |    50000.00 |           
+      917 |    757 | 15000.00 | 2026-09-13 00:41:00.049917 | bank_transfer | TEST-MIX-917-EARLIER        |    50000.00 |           
+     1028 |    748 | 29000.00 | 2026-09-08 18:44:19.31     | bank_transfer | TXN-1788893059309-GRJA66LC8 |    28000.00 |           
+(43 rows)
+
+
+=== Q1-VERDICT ===
+Q1/Q1b return 10 rows, NOT 0. All predate E.6 (2026-07-06..2026-09-13) and NONE has tip_amount set:
+- 902/903/917: second payment is synthetic test residue (transaction_id TEST-MIX-902-LATER, TEST-DEDUP-903-LATER, TEST-MIX-917-EARLIER; identical created_at 2026-09-13).
+- 817/818/819/821: 8-9x duplicate 100.00 cash payments within milliseconds (2026-08-20 brute-force residue) on 100.00 orders.
+- 394: duplicate 30000.00 cash 7ms apart (2026-07-06 double-submit residue).
+- 852: single 12000 cash vs 11333.33 draft, adopted order, cash_received=12000 (2026-08-20).
+- 1028: single 29000 bank_transfer vs 28000.00, change=0, no tip, no refund (2026-09-08) — pre-existing unexplained overpay, NOT tip-related.
+E.6 relevance: NONE of the 10 rows involves tip_amount; no E.6 regression. DB-02 0-rows: NO (with explanation above).
+
+=== Q2: tip invariant — full population with tip>0 (5 orders): tip inside grand_total, outside subtotal/tax ===
+-[ RECORD 1 ]----------+--------------------
+id                     | 1200
+order_number           | ORD2609240005
+state                  | finished
+channel                | pos
+subtotal               | 20000.00
+discount               | 0.00
+tax                    | 0.00
+ship                   | 0.00
+ship_tax               | 0.00
+tip                    | 2000.00
+tip_type               | fixed
+tip_value              | 2000.00
+grand_total            | 22000.00
+recomputed_with_tip    | 22000.00
+diff_identity          | 0.00
+items_subtotal         | 20000.00
+diff_subtotal_vs_items | 0.00
+items_tax              | 0
+diff_tax_vs_items      | 0.00
+-[ RECORD 2 ]----------+--------------------
+id                     | 1199
+order_number           | POS-2026-0353
+state                  | finished
+channel                | pos
+subtotal               | 20000.00
+discount               | 0.00
+tax                    | 0.00
+ship                   | 0.00
+ship_tax               | 0.00
+tip                    | 2000.00
+tip_type               | fixed
+tip_value              | 2000.00
+grand_total            | 22000.00
+recomputed_with_tip    | 22000.00
+diff_identity          | 0.00
+items_subtotal         | 20000.00
+diff_subtotal_vs_items | 0.00
+items_tax              | 0
+diff_tax_vs_items      | 0.00
+-[ RECORD 3 ]----------+--------------------
+id                     | 996
+order_number           | ORD2608300003
+state                  | finished
+channel                | pos
+subtotal               | 5000.00
+discount               | 0.00
+tax                    | 0.00
+ship                   | 0.00
+ship_tax               | 0.00
+tip                    | 500.00
+tip_type               | fixed
+tip_value              | 500.00
+grand_total            | 5500.00
+recomputed_with_tip    | 5500.00
+diff_identity          | 0.00
+items_subtotal         | 5000.00
+diff_subtotal_vs_items | 0.00
+items_tax              | 0
+diff_tax_vs_items      | 0.00
+-[ RECORD 4 ]----------+--------------------
+id                     | 989
+order_number           | ORD2608300001
+state                  | finished
+channel                | pos
+subtotal               | 28000.00
+discount               | 0.00
+tax                    | 0.00
+ship                   | 0.00
+ship_tax               | 0.00
+tip                    | 3000.00
+tip_type               | percentage
+tip_value              | 50.00
+grand_total            | 31000.00
+recomputed_with_tip    | 31000.00
+diff_identity          | 0.00
+items_subtotal         | 28000.00
+diff_subtotal_vs_items | 0.00
+items_tax              | 0
+diff_tax_vs_items      | 0.00
+-[ RECORD 5 ]----------+--------------------
+id                     | 908
+order_number           | ORD2608210003
+state                  | finished
+channel                | pos
+subtotal               | 50000.00
+discount               | 0.00
+tax                    | 0.00
+ship                   | 0.00
+ship_tax               | 0.00
+tip                    | 3000.00
+tip_type               | fixed
+tip_value              | 3000.00
+grand_total            | 53000.00
+recomputed_with_tip    | 53000.00
+diff_identity          | 0.00
+items_subtotal         | 50000.00
+diff_subtotal_vs_items | 0.00
+items_tax              | 0
+diff_tax_vs_items      | 0.00
+-[ RECORD 6 ]----------+--------------------
+id                     | 907
+order_number           | ORD2608210002
+state                  | finished
+channel                | pos
+subtotal               | 50000.00
+discount               | 0.00
+tax                    | 0.00
+ship                   | 0.00
+ship_tax               | 0.00
+tip                    | 2500.00
+tip_type               | fixed
+tip_value              | 2500.00
+grand_total            | 52500.00
+recomputed_with_tip    | 52500.00
+diff_identity          | 0.00
+items_subtotal         | 50000.00
+diff_subtotal_vs_items | 0.00
+items_tax              | 0
+diff_tax_vs_items      | 0.00
+-[ RECORD 7 ]----------+--------------------
+id                     | 498
+order_number           | T-1783814416185-516
+state                  | finished
+channel                | ecommerce
+subtotal               | 30000.00
+discount               | 0.00
+tax                    | 0.00
+ship                   | 0.00
+ship_tax               | 0.00
+tip                    | 5000.00
+tip_type               | 
+tip_value              | 
+grand_total            | 35000.00
+recomputed_with_tip    | 35000.00
+diff_identity          | 0.00
+items_subtotal         | 30000.00
+diff_subtotal_vs_items | 0.00
+items_tax              | 0
+diff_tax_vs_items      | 0.00
+
+
+=== Q2-VERDICT ===
+Population with tip>0 was 5 when counted, 7 when Q2 ran (orders 1199/1200 created 2026-09-24 01:23:53/01:24:05Z by concurrent testing; shared dev DB is live). Q2 captured all 7.
+ALL 7: diff_identity=0.00 (grand_total = subtotal-discount+tax+ship+ship_tax+tip), diff_subtotal_vs_items=0.00, diff_tax_vs_items=0.00.
+=> tip INSIDE grand_total, OUTSIDE subtotal and tax, in 7/7 orders. Invariant HOLDS.
+Notes: ORD2608300001 keeps legacy tip_type=percentage/tip_value=50 (pre-E.6 anchoring, 2026-08-30) yet identity holds; T-1783814416185-516 has NULL tip_type (2026-07-12 legacy direct amount), identity holds.

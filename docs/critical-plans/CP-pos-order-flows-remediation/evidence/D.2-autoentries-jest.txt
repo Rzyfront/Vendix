@@ -1,0 +1,73 @@
+D.2 accounting — jest evidence (UN spec a la vez, --runInBand, secuencial)
+Rama: develop @ 4bebaacab | Fecha: 2026-09-24 UTC | Checkout: /Users/rzy/Documents/Organizations/Quickss/Vendix
+Cwd de cada corrida: apps/backend
+
+================================================================
+RUN 1 (requerido a): spec de auto-entry.service
+CMD: npx jest --runInBand src/domains/store/accounting/auto-entries/auto-entry.service.spec.ts
+EXIT: 0
+----------------------------------------------------------------
+PASS src/domains/store/accounting/auto-entries/auto-entry.service.spec.ts (6.085 s)
+  D.2 prepared dish disposition reclassification
+    ✓ waste posts DR order_item.prepared_waste.shrinkage / CR 6135 by item id
+    ✓ reuse posts DR order_item.prepared_reuse.inventory / CR 6135 by item id
+    ✓ does not create a zero-cost journal
+    ✓ active posting failure records item-scoped retry payload for repair
+  AutoEntryService credit note reversal
+    ✓ posts the mirror reversal (DR 4175 + DR taxes per type, CR 1305) for IVA+INC breakdown
+    ✓ falls back to a single IVA debit line when no typed breakdown is present
+  AutoEntryService VAT settlement lifecycle (F5 + 2a/2b)
+    ✓ re-approval with unchanged amounts posts a plain vat_declaration (no correction)
+    ✓ first approval posts the plain vat_declaration settlement L
+    ✓ void posts the mirror reversal that nets the settlement to 0
+    ✓ re-approval after recalc posts a correction netting to (new − old)
+  AutoEntryService purchase_order.received — flete asumido (C.6)
+    ✓ modo 'prorate' (sin flete propio): dos líneas y la CxP igual al inventario
+    ✓ modo 'expense': DR 1435 neto + DR 513550 flete + CR 2205 la suma, y cuadra
+    ✓ un flete en 0 no produce la tercera línea (no hay gasto que registrar)
+    ✓ sin la clave de mapeo del flete falla EN VOZ ALTA, nombrándola, en vez de emitir un asiento torcido
+  AutoEntryService postAutoEntry — omisiones instrumentadas (C.9)
+    ✓ área contable inactiva ⇒ fila SKIPPED_AREA_INACTIVE y retorno nulo
+    ✓ menos de dos líneas válidas ⇒ fila SKIPPED_MISSING_MAPPING y retorno nulo
+    ✓ IVA no positivo en purchase.vat_recognized ⇒ fila SKIPPED_ZERO_AMOUNT
+Test Suites: 1 passed, 1 total
+Tests:       17 passed, 17 total
+
+================================================================
+RUN 2 (requerido b): spec del listener accounting
+CMD: npx jest --runInBand src/domains/store/accounting/auto-entries/accounting-events.listener.spec.ts
+EXIT: 0
+NOTA: no contiene test D.2 (por diseño: D.2 llama directo a
+onPreparedDishDisposition post-commit desde order-flow, sin @OnEvent).
+----------------------------------------------------------------
+PASS src/domains/store/accounting/auto-entries/accounting-events.listener.spec.ts (5.493 s)
+  AccountingEventsListener invoice.accepted routing
+    ✓ routes credit_note to onCreditNoteAccepted (reversal), never the sale entry
+    ✓ routes debit_note to onInvoiceValidated (a debit note increases the receivable)
+    ✓ routes regular sales invoices to onInvoiceValidated (current behavior)
+    ✓ applies the invoicing flow gate to credit notes too
+  AccountingEventsListener — omisión de asiento instrumentada (C.9)
+    ✓ deja fila SKIPPED_FLOW_DISABLED cuando el subflujo de compras está apagado
+    ✓ pasa la organización del evento al gate: la bodega de organización (store_id ausente) ya no resuelve org_id=0
+    ✓ no afirma «Auto-entry created» cuando postAutoEntry devolvió null
+    ✓ sí afirma «Auto-entry created» cuando hubo asiento
+    ✓ propaga el flete asumido al servicio de asientos (C.6)
+  AccountingEventsListener refund.completed
+    ✓ reenvía subtotal y envío para separar la reversa del ingreso por fletes
+Test Suites: 1 passed, 1 total
+Tests:       10 passed, 10 total
+
+================================================================
+RUN 3 (soporte, misma disciplina): defaults de mapeo D.2
+CMD: npx jest --runInBand src/domains/store/accounting/account-mappings/account-mapping.d2.spec.ts
+EXIT: 0
+----------------------------------------------------------------
+PASS src/domains/store/accounting/account-mappings/account-mapping.d2.spec.ts (5.196 s)
+  D.2 prepared disposition mappings without seed rows
+    ✓ advertises the keys and defaults in the backend catalog
+    ✓ resolves each key at runtime when this store has no seeded mapping row
+Test Suites: 1 passed, 1 total
+Tests:       2 passed, 2 total
+
+================================================================
+TOTAL: 29/29 passed (17 + 10 + 2). Ningún spec editado, ningún fallo.

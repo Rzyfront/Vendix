@@ -418,6 +418,22 @@ describe('FinancialAnalyticsService', () => {
   });
 
   describe('getTaxSummary', () => {
+    it('tax_rate del breakdown es FRACCION con 5 decimales (0.08 y 0.00966 se conservan)', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { tax_type: 'inc', tax_name: 'INC 8%', tax_rate: 0.08, is_compound: false, total_tax: '80.000', taxable_amount: '1000.000' },
+        { tax_type: 'ica', tax_name: 'ICA 9.66x1000', tax_rate: '0.00966', is_compound: false, total_tax: '9.660', taxable_amount: '1000.000' },
+      ]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '1000.000', exempt_revenue: '0.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      const result = await service.getTaxSummary(QUERY as any);
+
+      expect(result.breakdown[0].tax_rate).toBe(0.08);
+      expect(result.breakdown[1].tax_rate).toBe(0.00966);
+    });
+
     it('QUI-630 defect 1+2: base is derived from each tax row (tax/rate), NOT the item total — a line with two taxes splits its base correctly', async () => {
       // SQL output for one item that carries IVA 19% (tax=190) and INC 8% (tax=80).
       // Item total = 1000, but each tax's base must be derived from the tax's own
@@ -428,7 +444,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -436,7 +452,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'inc',
           tax_name: 'INC 8%',
-          tax_rate: 8,
+          tax_rate: 0.08,
           is_compound: false,
           total_tax: '80.000',
           taxable_amount: '1000.0000000000',
@@ -468,7 +484,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -495,7 +511,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -523,7 +539,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'unclassified', // already COALESCEd in SQL
           tax_name: 'Unknown tax',
-          tax_rate: 5,
+          tax_rate: 0.05,
           is_compound: false,
           total_tax: '50.000',
           taxable_amount: '1000.0000000000',
@@ -546,7 +562,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '138.126',
           taxable_amount: '727.0000000000',
@@ -554,7 +570,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'inc',
           tax_name: 'INC 8%',
-          tax_rate: 8,
+          tax_rate: 0.08,
           is_compound: false,
           total_tax: '139.514',
           taxable_amount: '1743.9250000000',
@@ -584,7 +600,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -617,7 +633,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -625,7 +641,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'withholding',
           tax_name: 'ReteFuente 1%',
-          tax_rate: 1,
+          tax_rate: 0.01,
           is_compound: false,
           total_tax: '10.000',
           taxable_amount: '1000.0000000000',
@@ -633,7 +649,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'reteiva',
           tax_name: 'ReteIVA 15%',
-          tax_rate: 15,
+          tax_rate: 0.15,
           is_compound: false,
           total_tax: '15.000',
           taxable_amount: '1000.0000000000',
@@ -663,7 +679,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -694,7 +710,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -702,7 +718,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'inc',
           tax_name: 'INC 8%',
-          tax_rate: 8,
+          tax_rate: 0.08,
           is_compound: false,
           total_tax: '80.000',
           taxable_amount: '1000.0000000000',
@@ -710,7 +726,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'ica',
           tax_name: 'ICA Bogotá',
-          tax_rate: 5,
+          tax_rate: 0.05,
           is_compound: false,
           total_tax: '50.000',
           taxable_amount: '1000.0000000000',
@@ -718,7 +734,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'withholding',
           tax_name: 'ReteFuente 1%',
-          tax_rate: 1,
+          tax_rate: 0.01,
           is_compound: false,
           total_tax: '10.000',
           taxable_amount: '1000.0000000000',
@@ -761,7 +777,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '50.000',
           taxable_amount: '263.1578947368',
@@ -793,7 +809,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '100.000',
           taxable_amount: '526.3157894737',
@@ -801,7 +817,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'withholding',
           tax_name: 'ReteFuente 4%',
-          tax_rate: 4,
+          tax_rate: 0.04,
           is_compound: false,
           total_tax: '40.000',
           taxable_amount: '1000.0000000000',
@@ -854,7 +870,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -889,7 +905,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '190.000',
           taxable_amount: '1000.0000000000',
@@ -953,7 +969,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'iva',
           tax_name: 'IVA 19%',
-          tax_rate: 19,
+          tax_rate: 0.19,
           is_compound: false,
           total_tax: '138.126',
           taxable_amount: '727.0000000000',
@@ -961,7 +977,7 @@ describe('FinancialAnalyticsService', () => {
         {
           tax_type: 'inc',
           tax_name: 'INC 8%',
-          tax_rate: 8,
+          tax_rate: 0.08,
           is_compound: false,
           total_tax: '139.514',
           taxable_amount: '1743.9250000000',

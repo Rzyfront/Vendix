@@ -1,0 +1,16 @@
+E.6-SA1 — tip.util.spec run (single spec, --runInBand, --max-old-space-size=2048)
+date-utc: 2026-09-24T01:23:06Z
+head: dc536b36d
+cmd: cd apps/backend && node --max-old-space-size=2048 ../../node_modules/.bin/jest src/common/utils/tip.util.spec.ts --runInBand --ci --forceExit
+wrapper: npm run buildcheck:test -- src/common/utils/tip.util.spec.ts => PASS (10s), exit=0
+
+ PASS  src/common/utils/tip.util.spec.ts (10.514 s)
+    ✓ 10% of products including tax (4 ms)
+    ✓ direct amount overrides percentage (1 ms)
+    ✓ zero tip stays zero
+Test Suites: 1 passed, 1 total
+Tests:       3 passed, 3 total
+Time:        10.878 s
+
+Anchor E.6 (ADR-11): 119000 gross products @10% => 11900 — covered by case '10% of products including tax'.
+NOTE: one direct re-run with --max-old-space-size=1536 (below wrapper default 2048) OOM'd; not a spec defect — wrapper cap 2048 passes.

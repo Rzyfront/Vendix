@@ -4,3 +4,4 @@ export * from './inventory-analytics.interface';
 export * from './products-analytics.interface';
 export * from './overview-analytics.interface';
 export * from './dispatch-analytics.interface';
+export * from './purchases-analytics.interface';

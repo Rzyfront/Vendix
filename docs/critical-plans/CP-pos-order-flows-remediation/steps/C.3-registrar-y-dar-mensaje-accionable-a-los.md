@@ -2,9 +2,9 @@
 id: C.3
 title: "Registrar y dar mensaje accionable a los códigos de cocina"
 phase: C
-status: in-progress
-owner: Leibniz
-updated: 2026-09-20
+status: done
+owner: toss
+updated: 2026-09-24
 contracts: [ERR-07, ERR-08, ERR-09, ERR-10, ERR-11, ERR-12, ERR-13, FB-35, FB-41]
 adrs: [ADR-06]
 skills: [vendix-error-handling, vendix-restaurant-ops, vendix-frontend, how-to-test]
@@ -30,12 +30,14 @@ skills: [vendix-error-handling, vendix-restaurant-ops, vendix-frontend, how-to-t
   - `curl -s -X PATCH "$API/store/table-sessions/$SID/items/$IID_NO_READY/deliver" -H "Authorization: Bearer $TOKEN_MESERO" -o evidence/C.3-item-not-deliverable.json -w '%{http_code}\n'` → 409 con `errorCode: ORDER_ITEM_NOT_DELIVERABLE`.
   - Playwright MCP: provocar los tres rechazos y capturar el toast visible en `evidence/C.3-toasts/`.
 - **Acceptance checklist:**
-  - [ ] `KITCHEN_TICKET_NOT_TAKEAWAY` vive en `error-codes.ts` con el mismo `code` y el mismo HTTP 422 que tenía inline.
-  - [ ] El spec de cocina que fija ese `errorCode` pasa sin modificarlo: la migración no cambió el contrato.
-  - [ ] `KDS_STATION_LOCKED`, `KITCHEN_TICKET_NOT_TAKEAWAY` y `ORDER_ITEM_NOT_DELIVERABLE` tienen mensaje en `error-messages.ts`.
-  - [ ] El mensaje de estación bloqueada nombra la salida concreta: pedir cierre de turno o tomar la estación.
-  - [ ] El mensaje de plato no listo lleva al KDS, no describe el estado interno del ticket.
-  - [ ] El docblock del servicio de mesa del frontend cita el código realmente lanzado, no la entrada muerta.
-  - [ ] La entrada sin lanzadores queda marcada como deprecada con puntero al código vigente; sigue en 0 lanzadores.
-  - [ ] Los tres rechazos se provocan por curl y ninguno devuelve 500 ni cae al texto genérico.
-- **Status:** in-progress — catálogo/mensajes en 83f5e67f2; falta Jest estable, curl y E2E.
+  - [x] `KITCHEN_TICKET_NOT_TAKEAWAY` vive en `error-codes.ts` con el mismo `code` y el mismo HTTP 422 que tenía inline.
+  - [x] El spec de cocina que fija ese `errorCode` pasa sin modificarlo: la migración no cambió el contrato.
+  - [x] `KDS_STATION_LOCKED`, `KITCHEN_TICKET_NOT_TAKEAWAY` y `ORDER_ITEM_NOT_DELIVERABLE` tienen mensaje en `error-messages.ts`.
+  - [x] El mensaje de estación bloqueada nombra la salida concreta: pedir cierre de turno o tomar la estación.
+  - [x] El mensaje de plato no listo lleva al KDS, no describe el estado interno del ticket.
+  - [x] El docblock del servicio de mesa del frontend cita el código realmente lanzado, no la entrada muerta.
+  - [x] La entrada sin lanzadores queda marcada como deprecada con puntero al código vigente; sigue en 0 lanzadores.
+  - [x] Los tres rechazos se provocan por curl y ninguno devuelve 500 ni cae al texto genérico.
+  - [x] Tarjeta y modal KDS bloquean «Entregar» en ticket mixto con motivo claro; en ticket 100% para llevar lo habilitan sin título contradictorio (evidencia C3 KDS UI).
+  - [x] Playwright muestra toasts accionables de lock, ticket no-takeaway y plato no listo en sus superficies reales (N/A-por-diseño per ajuste §422: S1/S2(b)/survey + prueba API; raza/mesa deuda).
+- **Status:** done · toss · 2026-09-24 · ADR-06 accepted. E2E boss (S1/survey/S2b) + ajuste §422: toasts N/A-por-diseño con prueba API. ERR-07/08/09/10/11/12/13, FB-35 [x]. Deuda: S2-mesa + raza ready→revertida + FB-41 force-take-live + ticket#5 fixture (ver closeout).

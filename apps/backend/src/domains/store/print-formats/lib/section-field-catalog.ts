@@ -56,7 +56,7 @@ const DOCUMENT_INFO_FIELDS: SectionFieldCatalogEntry[] = [
   { id: 'f_channel', key: 'document.channel_label', label: 'Canal de Venta', format: 'text', position: 'left' },
   { id: 'f_cashier', key: 'document.cashier_name', label: 'Cajero / Vendedor', format: 'text', position: 'left' },
   { id: 'f_terminal', key: 'document.pos_terminal', label: 'Caja / Terminal', format: 'text', position: 'right' },
-  { id: 'f_customer_alias', key: 'document.customer_alias', label: 'Alias Cliente (venta rápida)', format: 'text', position: 'left' },
+  { id: 'f_customer_alias', key: 'document.customer_alias', label: 'Nombre de referencia (venta rápida)', format: 'text', position: 'left' },
   { id: 'f_table', key: 'document.table_number', label: 'Mesa', format: 'text', position: 'left' },
   { id: 'f_waiter', key: 'document.waiter_name', label: 'Mesero', format: 'text', position: 'left' },
   { id: 'f_guests', key: 'document.guests_count', label: 'Nº Comensales', format: 'number', position: 'left' },

@@ -72,6 +72,11 @@ import {
   DispatchFulfillmentEnvelope,
   DispatchCollectionsEnvelope,
 } from '../interfaces/dispatch-analytics.interface';
+import {
+  PayableAgingRow,
+  PayableAgingTotals,
+  PayableAgingQuery,
+} from '../interfaces/purchases-analytics.interface';
 
 // Purchases interfaces
 export interface PurchasesSummary {
@@ -121,6 +126,25 @@ export interface PurchasesBySupplier {
   growth: number | null;
 }
 
+export interface PurchaseTrendItem {
+  track_id: string;
+  id: string;
+  period: string;
+  supplier_id: number;
+  supplier_name: string;
+  purchase_count: number;
+  total_amount: number;
+  avg_purchase: number;
+  items_received: number;
+}
+
+export interface PurchaseTrendsSummary {
+  purchase_count: number;
+  total_amount: number;
+  avg_purchase: number;
+  items_received: number;
+}
+
 // Reviews interfaces
 export interface ReviewsSummary {
   total_reviews: number;
@@ -137,6 +161,23 @@ export interface ReviewsSummary {
     5: number;
   };
   total_helpful_votes: number;
+}
+
+// Reviews por producto (misma fila que el export backend: pantalla == archivo)
+export interface ReviewsByProductRow {
+  product_id: number;
+  product_name: string;
+  sku: string;
+  total_reviews: number;
+  average_rating: number;
+  stars_5: number;
+  stars_4: number;
+  stars_3: number;
+  stars_2: number;
+  stars_1: number;
+  verified_count: number;
+  pending_count: number;
+  last_review_date: string | null;
 }
 
 // Financial interfaces
@@ -1058,6 +1099,44 @@ export class AnalyticsService {
     );
   }
 
+  getPurchaseTrends(
+    query: any = {},
+  ): Observable<PaginatedResponse<PurchaseTrendItem> & { summary?: PurchaseTrendsSummary }> {
+    const cacheKey = `purchases-trends-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<PurchaseTrendItem> & { summary?: PurchaseTrendsSummary }>(
+        this.getApiUrl('purchases/trends'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  getPayableAging(
+    query: PayableAgingQuery = {},
+  ): Observable<PaginatedResponse<PayableAgingRow>> {
+    const cacheKey = `purchases-payable-aging-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<PayableAgingRow>>(
+        this.getApiUrl('purchases/payable-aging'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportPurchaseTrends(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('purchases/trends/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  exportPayableAging(query: PayableAgingQuery = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('purchases/payable-aging/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
   // ==================== REVIEWS ANALYTICS ====================
 
   getReviewsSummary(
@@ -1069,6 +1148,24 @@ export class AnalyticsService {
         params: this.buildParams(query),
       }),
     );
+  }
+
+  getReviewsByProduct(
+    query: any = {},
+  ): Observable<ApiResponse<ReviewsByProductRow[]>> {
+    const cacheKey = `reviews-by-product-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ReviewsByProductRow[]>>(this.getApiUrl('reviews/by-product'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  exportReviewsByProduct(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('reviews/by-product/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   // ==================== FINANCIAL ANALYTICS ====================
@@ -1134,7 +1231,7 @@ export class AnalyticsService {
   invalidateCache(prefix?: string): void {
     if (prefix) {
       for (const key of analyticsCache.keys()) {
-        if (key.startsWith(prefix)) {
+        if (key.includes(prefix) || key.startsWith(prefix)) {
           analyticsCache.delete(key);
         }
       }

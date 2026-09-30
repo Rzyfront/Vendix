@@ -172,8 +172,8 @@ export async function seedSystemPaymentMethods(
     },
     {
       name: 'payment_vouchers',
-      display_name: 'Vouchers de Pago',
-      description: 'Vouchers o cupones de pago prepagados',
+      display_name: 'Datáfono',
+      description: 'Pago con tarjeta débito o crédito mediante datáfono',
       type: 'voucher',
       provider: 'internal',
       is_active: true,
@@ -184,23 +184,23 @@ export async function seedSystemPaymentMethods(
         properties: {
           allow_validation: {
             type: 'boolean',
-            description: 'Permitir validación de vouchers',
+            description: 'Permitir validación de pagos por datáfono',
           },
           require_verification: {
             type: 'boolean',
-            description: 'Requerir verificación de vouchers',
+            description: 'Requerir verificación de pagos por datáfono',
           },
           voucher_prefix: {
             type: 'string',
-            description: 'Prefijo para códigos de voucher',
+            description: 'Prefijo para códigos de transacción del datáfono',
           },
           min_amount: {
             type: 'number',
-            description: 'Monto mínimo del voucher',
+            description: 'Monto mínimo del pago por datáfono',
           },
           max_amount: {
             type: 'number',
-            description: 'Monto máximo del voucher',
+            description: 'Monto máximo del pago por datáfono',
           },
         },
       },

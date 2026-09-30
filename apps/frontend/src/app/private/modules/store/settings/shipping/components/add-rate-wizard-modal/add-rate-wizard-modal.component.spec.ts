@@ -17,14 +17,15 @@ import {
 } from '../../interfaces/shipping-zones.interface';
 
 /**
- * Impuesto opcional por tarifa de envío (Paso 9) y edición de zona desde el
- * wizard (Paso 10). Se instancia la clase sin plantilla: lo que importa es el
- * payload que sale y las reglas de la vista previa.
+ * Impuesto opcional por tarifa de envío (Paso 9), edición de zona desde el
+ * wizard (Paso 10) y modo incluido/agregado (paso 15a). Se instancia la clase
+ * sin plantilla: lo que importa es el payload que sale y las reglas de la
+ * vista previa.
  */
 describe('AddRateWizardModalComponent — impuesto del envío', () => {
   const taxOptions: ShippingRateTaxOptions = {
     categories: [
-      { id: 11, name: 'INC domicilio', tax_type: 'inc', rate_percent: 8, eligible: true },
+      { id: 11, name: 'INC domicilio', tax_type: 'inc', rate_percent: 8, eligible: true, is_inclusive: true },
       {
         id: 12,
         name: 'IVA general',
@@ -32,6 +33,7 @@ describe('AddRateWizardModalComponent — impuesto del envío', () => {
         rate_percent: 19,
         eligible: false,
         reason: 'No eres responsable de IVA',
+        is_inclusive: false,
       },
     ],
     issuer: { vat_responsible: false, inc_responsible: true, is_restaurant: true },
@@ -131,10 +133,114 @@ describe('AddRateWizardModalComponent — impuesto del envío', () => {
     expect(options.find((o) => o.value === 11)!.disabled).toBeFalse();
   });
 
-  it('la vista previa despeja la base del precio que paga el cliente', () => {
+  it('la vista previa incluida despeja la base del precio que paga el cliente', () => {
     const c = build();
     c.rate_form.patchValue({ type: 'flat', base_cost: 15000, tax_category_id: 11 });
-    expect(c.tax_preview()).toEqual({ cost: 15000, tax: 1111.11, label: 'INC 8%' });
+    expect(c.is_inclusive_mode()).toBeTrue();
+    expect(c.tax_preview()).toEqual({
+      cost: 15000,
+      base: 13888.89,
+      tax: 1111.11,
+      gross: 15000,
+      label: 'INC 8%',
+      type_label: 'INC',
+      mode: 'inclusive',
+    });
+  });
+
+  it('la vista previa agregada suma el impuesto al precio (Cliente paga $11.900)', () => {
+    const c = build();
+    c.rate_form.patchValue({ type: 'flat', base_cost: 10000, tax_category_id: 12 });
+    // La categoría «Adicional» preselecciona Agregado en tarifas nuevas.
+    expect(c.is_inclusive_mode()).toBeFalse();
+    expect(c.tax_preview()).toEqual({
+      cost: 10000,
+      base: 10000,
+      tax: 1900,
+      gross: 11900,
+      label: 'IVA 19%',
+      type_label: 'IVA',
+      mode: 'exclusive',
+    });
+  });
+
+  it('una tarifa gratis no muestra vista previa aunque tenga categoría', () => {
+    const c = build();
+    c.rate_form.patchValue({ tax_category_id: 11 });
+    c.selectRateType('free');
+    expect(c.tax_preview()).toBeNull();
+    expect(c.tax_mode_mismatch()).toBeNull();
+  });
+
+  it('el modo se preselecciona desde la categoría en tarifas nuevas', () => {
+    const c = build();
+    expect(c.is_inclusive_mode()).toBeTrue();
+    c.rate_form.patchValue({ tax_category_id: 12 });
+    expect(c.is_inclusive_mode()).toBeFalse();
+    c.rate_form.patchValue({ tax_category_id: 11 });
+    expect(c.is_inclusive_mode()).toBeTrue();
+  });
+
+  it('el comerciante puede cambiar el modo a mano con selectTaxMode', () => {
+    const c = build();
+    c.rate_form.patchValue({ type: 'flat', base_cost: 10000, tax_category_id: 12 });
+    expect(c.tax_preview()?.gross).toBe(11900);
+    c.selectTaxMode(true);
+    expect(c.is_inclusive_mode()).toBeTrue();
+    expect(c.tax_preview()?.gross).toBe(10000);
+    expect(c.tax_preview()?.mode).toBe('inclusive');
+  });
+
+  it('avisa cuando la categoría es Adicional pero la tarifa está en Incluido', () => {
+    const c = build();
+    c.rate_form.patchValue({ type: 'flat', base_cost: 10000, tax_category_id: 12 });
+    // Preseleccionó Agregado: sin aviso.
+    expect(c.tax_mode_mismatch()).toBeNull();
+    c.selectTaxMode(true);
+    expect(c.tax_mode_mismatch()).toContain('Adicional');
+    c.selectTaxMode(false);
+    expect(c.tax_mode_mismatch()).toBeNull();
+  });
+
+  it('el DTO lleva el modo incluido por defecto', () => {
+    const c = build();
+    c.rate_form.patchValue({ type: 'flat', base_cost: 15000 });
+    c.onSubmit();
+    expect(lastCreateDto().tax_is_inclusive).toBeTrue();
+  });
+
+  it('el DTO lleva el modo agregado si se eligió', () => {
+    const c = build();
+    c.rate_form.patchValue({ type: 'flat', base_cost: 10000, tax_category_id: 12 });
+    c.onSubmit();
+    expect(lastCreateDto().tax_category_id).toBe(12);
+    expect(lastCreateDto().tax_is_inclusive).toBeFalse();
+  });
+
+  it('en edición el modo sale de lo guardado y cambiar de categoría no lo toca', () => {
+    const rate: ShippingRate = {
+      id: 91,
+      shipping_zone_id: zone.id,
+      shipping_method_id: 7,
+      type: 'flat',
+      base_cost: 10000,
+      is_active: true,
+      tax_category_id: 12,
+      tax_category: { id: 12, name: 'IVA general', tax_type: 'iva', rate_percent: 19 },
+      tax_is_inclusive: false,
+    };
+    const c = build(rate);
+    expect(c.rate_form.controls.tax_is_inclusive.value).toBeFalse();
+    expect(c.tax_preview()?.mode).toBe('exclusive');
+    // Categoría «Incluida» en edición: el modo guardado manda.
+    c.rate_form.patchValue({ tax_category_id: 11 });
+    expect(c.rate_form.controls.tax_is_inclusive.value).toBeFalse();
+
+    c.rate_form.patchValue({ tax_category_id: 12 });
+    c.onSubmit();
+    const [id, dto] = service.updateRate.calls.mostRecent().args;
+    expect(id).toBe(91);
+    expect(dto.tax_is_inclusive).toBeFalse();
   });
 
   it('en edición carga el impuesto de la tarifa y permite quitarlo (null)', () => {
@@ -156,6 +262,7 @@ describe('AddRateWizardModalComponent — impuesto del envío', () => {
     const [id, dto] = service.updateRate.calls.mostRecent().args;
     expect(id).toBe(90);
     expect(dto.tax_category_id).toBeNull();
+    expect(dto.tax_is_inclusive).toBeTrue();
   });
 
   it('editar zona avisa si es compartida o copia del sistema y recarga conservando la zona', () => {
@@ -186,12 +293,44 @@ describe('AddRateWizardModalComponent — impuesto del envío', () => {
     });
 
     it('computeShippingTaxPreview omite costo cero o sin tarifa', () => {
-      expect(computeShippingTaxPreview(0, 8, 'INC 8%')).toBeNull();
-      expect(computeShippingTaxPreview(15000, null, 'INC')).toBeNull();
-      expect(computeShippingTaxPreview(11900, 19, 'IVA 19%')).toEqual({
+      expect(computeShippingTaxPreview(0, 8, 'INC 8%', 'INC')).toBeNull();
+      expect(computeShippingTaxPreview(15000, null, 'INC', 'INC')).toBeNull();
+      expect(computeShippingTaxPreview(15000, 8, null, 'INC')).toBeNull();
+      expect(computeShippingTaxPreview(11900, 19, 'IVA 19%', 'IVA')).toEqual({
         cost: 11900,
+        base: 10000,
         tax: 1900,
+        gross: 11900,
         label: 'IVA 19%',
+        type_label: 'IVA',
+        mode: 'inclusive',
+      });
+    });
+
+    it('computeShippingTaxPreview trunca como el backend (10.000 al 19 % ⇒ 1.596,63)', () => {
+      // El mismo kernel que `resolveShippingCharge`: truncado DIAN, no
+      // redondeo hacia arriba (que daría 1.596,64).
+      expect(computeShippingTaxPreview(10000, 19, 'IVA 19%', 'IVA')).toEqual({
+        cost: 10000,
+        base: 8403.37,
+        tax: 1596.63,
+        gross: 10000,
+        label: 'IVA 19%',
+        type_label: 'IVA',
+        mode: 'inclusive',
+      });
+    });
+
+    it('computeShippingTaxPreview agregado suma trunc(base·r) (10.000 al 19 % ⇒ 11.900)', () => {
+      // Mismo camino que `resolveShippingCharge` con `tax_is_inclusive:false`.
+      expect(computeShippingTaxPreview(10000, 19, 'IVA 19%', 'IVA', false)).toEqual({
+        cost: 10000,
+        base: 10000,
+        tax: 1900,
+        gross: 11900,
+        label: 'IVA 19%',
+        type_label: 'IVA',
+        mode: 'exclusive',
       });
     });
   });

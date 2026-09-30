@@ -1331,11 +1331,13 @@ export class CatalogService {
     // Fase 2b — el ABANICO de presentaciones. `[]` con el flag apagado o sin
     // presentaciones publicadas, y en ese caso la card queda idéntica a la
     // histórica: `sale_unit_count: 0` y `price_from: null` son aditivos.
-    const saleUnitOptions = this.buildAvailableSaleUnits(
-      product,
-      availableStockUnits,
-      effectiveTracking,
-    );
+    const saleUnitOptions = variantCount > 0
+      ? []
+      : this.buildAvailableSaleUnits(
+          product,
+          availableStockUnits,
+          effectiveTracking,
+        );
 
     return {
       id: product.id,
@@ -1347,6 +1349,7 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      regular_final_price: this.calculateRegularFinalPrice(product),
       // Presentación en la que se publica y se vende. `null` = unidad principal.
       // NO cambia con el selector: sigue siendo la marcada por defecto, que es
       // la garantía de cero regresión para el cliente que no se actualice.
@@ -1475,11 +1478,13 @@ export class CatalogService {
     // Fase 2b — el abanico completo, que es lo que pinta el selector del
     // detalle. Se mide contra el MISMO stock que `available_stock`, así que un
     // chip "Agotado" y el badge del producto no pueden contradecirse.
-    const saleUnitOptions = this.buildAvailableSaleUnits(
-      product,
-      productAvailableStockUnits,
-      effectiveTracking,
-    );
+    const saleUnitOptions = hasVariants
+      ? []
+      : this.buildAvailableSaleUnits(
+          product,
+          productAvailableStockUnits,
+          effectiveTracking,
+        );
 
     return {
       id: product.id,
@@ -1491,6 +1496,7 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      regular_final_price: this.calculateRegularFinalPrice(product),
       // Presentación en la que se publica y se vende. `null` = unidad principal.
       // NO cambia con el selector: sigue siendo la marcada por defecto, que es
       // la garantía de cero regresión para el cliente que no se actualice.
@@ -1603,7 +1609,8 @@ export class CatalogService {
             ? Number(variant.price_override)
             : null,
           effective_base_price: priceResult.unitBasePrice,
-          final_price: Math.round(priceResult.unitPriceWithTax * 100) / 100,
+          final_price: this.calculateFinalPrice(product, variant),
+          regular_final_price: this.calculateRegularFinalPrice(product, variant),
           // Compatibilidad: stock_quantity refleja ahora la suma desde stock_levels.
           stock_quantity: availableStock,
           available_stock: effectiveTrackInventory ? availableStock : null,
@@ -1643,6 +1650,14 @@ export class CatalogService {
       taxRate: this.storefrontPrice.getTotalTaxRate(product),
       taxRates: this.storefrontPrice.getTypedTaxRates(product),
     }).gross_unit_price;
+  }
+
+  /** The compare-at amount must use exactly the same tax resolver as `final_price`. */
+  private calculateRegularFinalPrice(product: any, variant?: any): number {
+    return this.calculateFinalPrice(
+      { ...product, is_on_sale: false, sale_price: null },
+      variant ? { ...variant, is_on_sale: false, sale_price: null } : undefined,
+    );
   }
 
   /**
@@ -2328,6 +2343,9 @@ export class CatalogService {
                     base_price: true,
                     sale_price: true,
                     is_on_sale: true,
+                    product_tax_assignments: {
+                      include: { tax_categories: { include: { tax_rates: true } } },
+                    },
                     is_combo: true,
                     is_sellable: true,
                     // Buyability invariant: a carta item must be both active
@@ -2422,6 +2440,8 @@ export class CatalogService {
                         base_price: p.base_price,
                         sale_price: p.sale_price,
                         is_on_sale: p.is_on_sale,
+                        final_price: this.calculateFinalPrice(p),
+                        regular_final_price: this.calculateRegularFinalPrice(p),
                         is_combo: p.is_combo,
                         // Variant signal for direct add-to-cart from the carta.
                         has_variants: variantCount > 0,

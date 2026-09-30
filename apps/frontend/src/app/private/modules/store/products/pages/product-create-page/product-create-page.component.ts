@@ -526,6 +526,21 @@ export class ProductCreatePageComponent {
   private inventoryService = inject(InventoryService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  /**
+   * Release-853 paso 12 — el back del header conserva `?page=` de origen
+   * con la misma fuente que `navigateAfterSave` (`fromPage`, que el
+   * listado manda al abrir el alta/edición). Sin `fromPage` no se mandan
+   * queryParams y el back queda como antes. Estático: el snapshot no
+   * cambia mientras la página vive, así que no necesita signal.
+   */
+  readonly listBackQueryParams: Params | undefined = (() => {
+    // `route` ya está inicializado (los fields corren en orden de
+    // declaración): se reutiliza en vez de inyectar dos veces.
+    const fromPage = this.route.snapshot.queryParams['fromPage'];
+    return fromPage === undefined || fromPage === null || fromPage === ''
+      ? undefined
+      : { page: fromPage };
+  })();
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
   private promotionsService = inject(PromotionsService);
@@ -554,7 +569,54 @@ export class ProductCreatePageComponent {
    * faltaba, ocultando "Plato preparado" en tiendas restaurante.
    */
   private readonly storeSettings = toSignal(this.authFacade.storeSettings$, {
-    initialValue: null as { general?: { industries?: string[] } } | null,
+    initialValue: null as {
+      general?: { industries?: string[] };
+      inventory?: { low_stock_threshold?: number };
+    } | null,
+  });
+
+  readonly defaultLowStockThreshold = computed<number>(() => {
+    const threshold = this.storeSettings()?.inventory?.low_stock_threshold;
+    return typeof threshold === 'number' && threshold >= 0 ? threshold : 10;
+  });
+
+  readonly defaultLowStockThresholdPlaceholder = computed<string>(() => {
+    return `Por defecto de la tienda (${this.defaultLowStockThreshold()})`;
+  });
+
+  readonly effectiveProductLowStockThreshold = computed<number>(() => {
+    const formVal = this.minStockFormValue();
+    const num = Number(formVal);
+    if (
+      formVal !== null &&
+      formVal !== undefined &&
+      formVal !== '' &&
+      Number.isFinite(num) &&
+      num > 0
+    ) {
+      return num;
+    }
+    const prodVal = Number(this.productMinStockLevel());
+    if (Number.isFinite(prodVal) && prodVal > 0) {
+      return prodVal;
+    }
+    return this.defaultLowStockThreshold();
+  });
+
+  readonly isCustomLowStockThreshold = computed<boolean>(() => {
+    const formVal = this.minStockFormValue();
+    const num = Number(formVal);
+    if (
+      formVal !== null &&
+      formVal !== undefined &&
+      formVal !== '' &&
+      Number.isFinite(num) &&
+      num > 0
+    ) {
+      return true;
+    }
+    const prodVal = Number(this.productMinStockLevel());
+    return Number.isFinite(prodVal) && prodVal > 0;
   });
   private readonly loginIndustries = toSignal(this.authFacade.userIndustries$, {
     initialValue: [] as string[],
@@ -904,6 +966,17 @@ export class ProductCreatePageComponent {
   readonly requiresBookingSig = signal(false);
 
   productForm: FormGroup = this.createForm();
+
+  /** Valor del control `min_stock_level` como señal (los computed no ven FormControl). */
+  private readonly minStockFormValue = toSignal(
+    this.productForm.get('min_stock_level')!.valueChanges.pipe(
+      startWith(this.productForm.get('min_stock_level')!.value),
+    ),
+    { initialValue: this.productForm.get('min_stock_level')!.value },
+  );
+
+  /** `min_stock_level` del producto cargado/guardado, espejo en señal de `product`. */
+  private readonly productMinStockLevel = signal<number | null>(null);
 
   /**
    * Cuenta PUC del producto, leída como señal.
@@ -1291,6 +1364,7 @@ export class ProductCreatePageComponent {
   isBrandCreateOpen = false;
   isTaxCategoryCreateOpen = false;
   isImageSourceModalOpen = signal(false);
+  private pendingImagesScroll = false;
   readonly imageModalMode = signal<'add' | 'edit'>('add');
   readonly imageEditSourceUrl = signal<string | null>(null);
   readonly editingImageIndex = signal<number | null>(null);
@@ -1330,10 +1404,10 @@ export class ProductCreatePageComponent {
     this.formUpdateTrigger(); // Dependency
     return [
       {
-        id: 'cancel',
-        label: 'Cancelar',
-        icon: 'x',
-        variant: 'outline',
+        id: 'photos',
+        label: 'Fotos',
+        icon: 'image-plus',
+        variant: 'secondary',
       },
       {
         id: 'save',
@@ -1733,6 +1807,7 @@ export class ProductCreatePageComponent {
       base_price: draft.base_price || 0,
       stock_quantity: draft.stock_quantity || 0,
       track_inventory: draft.track_inventory ?? true,
+      min_stock_level: draft.min_stock_level ?? null,
       allow_pos_price_override: draft.allow_pos_price_override ?? false,
       sku: draft.sku || '',
       barcode: draft.barcode || '',
@@ -1806,6 +1881,7 @@ export class ProductCreatePageComponent {
         } as Product;
 
         this.product = updatedProduct;
+        this.productMinStockLevel.set(updatedProduct?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(updatedProduct);
         this.toastService.success('Link y QR de compra online generados');
         this.isGeneratingOnlinePurchaseLink.set(false);
@@ -1944,6 +2020,7 @@ export class ProductCreatePageComponent {
         barcode: ['', [Validators.maxLength(64)]],
         stock_quantity: [0, [Validators.min(0)]],
         track_inventory: [true],
+        min_stock_level: [null, [Validators.min(0)]],
         requires_serial_numbers: [false],
         category_ids: [[] as number[]],
         brand_ids: [[]],
@@ -2086,6 +2163,27 @@ export class ProductCreatePageComponent {
    */
   get priceWithTax(): number {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
+    return this.estimateConfiguredPrice(basePrice);
+  }
+
+  get salePriceWithTax(): number {
+    const salePrice = Number(this.productForm.get('sale_price')?.value || 0);
+    return this.estimateConfiguredPrice(salePrice);
+  }
+
+  get saleTaxExplanation(): string {
+    const taxes = this.selectedTaxEstimateInputs().filter((tax) => tax.rateFraction > 0);
+    if (taxes.length === 0) return 'Sin impuestos configurados';
+    if (taxes.every((tax) => tax.inclusive)) return 'Impuestos incluidos en la oferta';
+    if (taxes.every((tax) => !tax.inclusive)) return 'Impuestos agregados a la oferta';
+    return 'Incluye algunos impuestos; otros se agregan a la oferta';
+  }
+
+  private estimateConfiguredPrice(price: number): number {
+    return estimatePriceWithTax(price, this.selectedTaxEstimateInputs());
+  }
+
+  private selectedTaxEstimateInputs(): Array<{ rateFraction: number; inclusive: boolean }> {
     const selectedTaxIds =
       this.productForm.get('tax_category_ids')?.value || [];
     // F4 — si el comercio no es responsable de IVA, el IVA nunca compone el
@@ -2093,22 +2191,19 @@ export class ProductCreatePageComponent {
     const ivaIds = this.ivaTaxCategoryIdSet();
     const blocked = this.isVatBlocked();
 
-    return estimatePriceWithTax(
-      basePrice,
-      selectedTaxIds
-        .filter((id: number) => !(blocked && ivaIds.has(id)))
-        .map((id: number) => {
-          const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
-          return {
-            rateFraction: taxCat
-              ? parseTaxRateFraction(
-                  taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
-                )
-              : 0,
-            inclusive: this.isTaxInclusive(id),
-          };
-        }),
-    );
+    return selectedTaxIds
+      .filter((id: number) => !(blocked && ivaIds.has(id)))
+      .map((id: number) => {
+        const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+        return {
+          rateFraction: taxCat
+            ? parseTaxRateFraction(
+                taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
+              )
+            : 0,
+          inclusive: this.isTaxInclusive(id),
+        };
+      });
   }
 
   get taxBreakdown(): {
@@ -2179,6 +2274,7 @@ export class ProductCreatePageComponent {
     this.productsService.getProductById(id).subscribe({
       next: (product: Product) => {
         this.product = product;
+        this.productMinStockLevel.set(product?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
         // Form ya poblado → render con `is_ingredient` resuelto (sin flash).
@@ -2241,6 +2337,7 @@ export class ProductCreatePageComponent {
       barcode: product.barcode,
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
+      min_stock_level: product.min_stock_level ?? null,
       requires_serial_numbers: product.requires_serial_numbers ?? false,
       category_ids: categoryIds,
       brand_ids: product.brand?.id
@@ -3373,6 +3470,16 @@ export class ProductCreatePageComponent {
     this.isImageSourceModalOpen.set(true);
   }
 
+  onProductImageModalOpenChange(open: boolean): void {
+    this.isImageSourceModalOpen.set(open);
+    if (!open && this.pendingImagesScroll) {
+      this.pendingImagesScroll = false;
+      const el = document.querySelector('#product-images-mobile') as HTMLElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus?.({ preventScroll: true });
+    }
+  }
+
   openImageEditor(index = this.activeImageIndex): void {
     const sourceUrl = this.imageUrls[index];
     if (!sourceUrl) {
@@ -3718,16 +3825,13 @@ export class ProductCreatePageComponent {
     }
   }
 
-  onCancel(): void {
-    const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
-    this.router.navigate(['/admin/products'], {
-      queryParams: { page: returnPage },
-    });
-  }
-
   onHeaderAction(actionId: string): void {
-    if (actionId === 'cancel') this.onCancel();
-    else if (actionId === 'save') this.onSubmit();
+    if (actionId === 'photos') {
+      this.pendingImagesScroll =
+        this.imageUrls.length < 5 &&
+        window.matchMedia('(max-width: 1023.98px)').matches;
+      this.openImageSourceModal();
+    } else if (actionId === 'save') this.onSubmit();
   }
 
   preventNativeFormSubmit(event: SubmitEvent): void {
@@ -4193,13 +4297,18 @@ export class ProductCreatePageComponent {
       allow_pos_price_override: !!neutral(formValue.allow_pos_price_override, false),
       sku: formValue.sku || undefined,
       barcode: formValue.barcode || undefined,
-      track_inventory: isServiceType ? false : !!formValue.track_inventory,
+      track_inventory: !!formValue.track_inventory,
       requires_serial_numbers: !!formValue.requires_serial_numbers,
-      stock_quantity: isServiceType
+      stock_quantity: formValue.track_inventory
+        ? Number(formValue.stock_quantity)
+        : undefined,
+      min_stock_level: !formValue.track_inventory
         ? undefined
-        : formValue.track_inventory
-          ? Number(formValue.stock_quantity)
-          : undefined,
+        : formValue.min_stock_level !== null &&
+          formValue.min_stock_level !== undefined &&
+          formValue.min_stock_level !== ''
+          ? Number(formValue.min_stock_level)
+          : null,
       category_ids: formValue.category_ids || [],
       // F4 — filtro defensivo de ids IVA cuando el comercio no es responsable.
       tax_category_ids: effectiveTaxIds,
@@ -4443,6 +4552,7 @@ export class ProductCreatePageComponent {
               // El producto YA existe aunque veníamos de crear: sin promover a
               // modo edición, reintentar guardaría un duplicado del producto.
               this.product = savedProduct;
+              this.productMinStockLevel.set(savedProduct?.min_stock_level ?? null);
               this.productId = savedProduct.id;
               this.isEditMode.set(true);
               this.toastService.error(

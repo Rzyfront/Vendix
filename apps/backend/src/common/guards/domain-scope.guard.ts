@@ -132,12 +132,18 @@ export class DomainScopeGuard implements CanActivate {
     }
 
     // 6c. Customers (CUSTOMER / STORE_ECOMMERCE): bell notifications
-    //     only. The `/store/notifications` endpoint already filters by
-    //     `data->>'target_user_id'` so the customer can only see their
-    //     own — no need to expose the rest of /store/*. We carve out
-    //     this single namespace below; everything else still 403s.
+    //     only — el namespace /store/notifications ya filtra por store y por
+    //     `data->>'target_user_id'` (QUI-854), así que el customer solo ve sus
+    //     propias notificaciones. Sin embargo su token no autoriza las
+    //     superficies de gestión del bell (subscriptions, Web Push, vapid) ni
+    //     el resto de /store/*. Carve-out acotado a list/unread-count/stream +
+    //     mark-read/mark-all (que el servicio scopa por usuario).
     if (appType !== 'ORG_ADMIN' && appType !== 'STORE_ADMIN') {
-      if (path.includes('/store/notifications')) {
+      const isCustomerBellAllowed =
+        path.includes('/store/notifications') &&
+        !path.includes('/store/notifications/subscriptions') &&
+        !path.includes('/store/notifications/push');
+      if (isCustomerBellAllowed) {
         return true;
       }
       this.logger.warn(

@@ -4,6 +4,12 @@ import { createCustomerTools } from '../../../ai-engine/tools/domains/customers.
 import { createCustomerWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
 import { CustomersService } from './customers.service';
 import { CustomerLookupService } from './customer-lookup.service';
+import { SocrataClient } from './external-identity/socrata.client';
+import { RuesSource } from './external-identity/rues.source';
+import { SecopProveedoresSource } from './external-identity/secop-proveedores.source';
+import { SecopContratosSource } from './external-identity/secop-contratos.source';
+import { RntSource } from './external-identity/rnt.source';
+import { ExternalIdentityLookupService } from './external-identity/external-identity-lookup.service';
 import { CustomersController } from './customers.controller';
 import { CustomersBulkService } from './customers-bulk.service';
 import { CustomersBulkController } from './customers-bulk.controller';
@@ -25,6 +31,12 @@ import { EmailModule } from '../../../email/email.module';
   providers: [
     CustomersService,
     CustomerLookupService,
+    SocrataClient,
+    RuesSource,
+    SecopProveedoresSource,
+    SecopContratosSource,
+    RntSource,
+    ExternalIdentityLookupService,
     CustomersBulkService,
     CustomerHistoryService,
     CustomerEmailListener,
@@ -36,7 +48,6 @@ export class CustomersModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
     private readonly customersService: CustomersService,
-    private readonly prisma: StorePrismaService,
   ) {}
 
   /**
@@ -50,7 +61,6 @@ export class CustomersModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createCustomerTools({
         customersService: this.customersService,
-        prisma: this.prisma,
       }),
     );
 
@@ -60,7 +70,6 @@ export class CustomersModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createCustomerWriteTools({
         customersService: this.customersService,
-        prisma: this.prisma,
       }),
     );
   }

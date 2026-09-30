@@ -32,7 +32,18 @@ export interface VexiProposal {
   confirmationToken: string;
   preview?: VexiProposalPreview;
   applying: boolean;
+  /**
+   * The write belongs to a plan Vexi is carrying internally. Decides whether
+   * approving/rejecting reopens a continuation turn.
+   */
+  planActive?: boolean;
 }
+
+/**
+ * Why a turn has no user message. The server composes the instruction; the
+ * browser only says which of the three situations it is.
+ */
+export type VexiContinuation = 'approved' | 'rejected' | 'resume';
 
 // Load conversations
 export const loadConversations = createAction('[Vexi] Load Conversations');
@@ -117,6 +128,14 @@ export const sendMessage = createAction(
      * row, which is something only the server can say.
      */
     skipUserMessage?: boolean;
+    /**
+     * Turns this send into a continuation of the agent's own plan: no user bubble
+     * is added, no user row is persisted, and `content` is ignored by the server.
+     *
+     * Independent of `isRetry`: a dropped continuation is replayed with the same
+     * `continuation`, so recovery keeps working.
+     */
+    continuation?: VexiContinuation;
   }>(),
 );
 
@@ -196,8 +215,18 @@ export const proposalReceived = createAction(
     arguments: Record<string, unknown>;
     confirmationToken: string;
     preview?: VexiProposalPreview;
+    planActive?: boolean;
   }>(),
 );
+
+/**
+ * The stream announced it ran out of budget with work pending (`plan_continue`).
+ * The turn is chained when it completes.
+ */
+export const planContinueReceived = createAction('[Vexi] Plan Continue Received');
+
+/** The automatic chain hit its cap: say so instead of looping. */
+export const planContinueCapped = createAction('[Vexi] Plan Continue Capped');
 
 /**
  * `speak` is declared by the surface that knows the mode.
@@ -226,6 +255,10 @@ export const confirmProposalSuccess = createAction(
     /** Set in voice mode, so the acknowledgement is heard and not only read. */
     audioBase64?: string;
     contentType?: string;
+    /** The applied proposal belonged to an active plan: reopen a turn. */
+    planActive?: boolean;
+    /** Mode of the approval, reused for the continuation turn. */
+    speak?: boolean;
   }>(),
 );
 

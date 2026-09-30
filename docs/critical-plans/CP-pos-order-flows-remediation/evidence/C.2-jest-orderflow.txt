@@ -1,0 +1,66 @@
+# C.2 — jest order-flow.service.spec.ts (corrida verificadora del step)
+# spec:    src/domains/store/orders/order-flow/order-flow.service.spec.ts
+# comando: npx jest --runInBand src/domains/store/orders/order-flow/order-flow.service.spec.ts
+# cwd:     apps/backend (jest configurado en apps/backend/package.json: rootDir src, maxWorkers 2)
+# fecha:   2026-09-24T01:05:47Z (inicio)
+# rama:    develop
+# exit:    1
+#
+# RESUMEN: Tests: 2 failed, 146 passed, 148 total.
+# Los 2 rojos son EXACTAMENTE los preexistentes conocidos de la base
+# (bloque "cancelDeliveredOrderItem — reversa (1060 paso 2)", área D.2):
+#   1. restock: devuelve stock, cancela suave y audita con destino (spec:2404)
+#      esperado cancellation_type "before_fire", recibido "after_fire_reused"
+#      (+ cancelled_at/updated_at 2026-09-24T01:05:53.884Z)
+#   2. waste: NO toca stock, deja merma auditada (spec:2444)
+#      esperado cancellation_type "before_fire", recibido "after_fire_waste"
+#      (+ cancellation_reason/cancelled_at/updated_at 2026-09-24T01:05:53.886Z)
+# Todo lo demás VERDE, incluidos los bloques objetivo C.2:
+#   - "deliverOrderItem — sync orden→cocina (paso 2)": 8/8 (a,b,c,d, dispatch x2, e, plato pendiente)
+#   - "revertKitchenOrderDelivery — kitchen bridge reverse": 5/5 (happy + 3 idempotencia + error)
+#   - "markKitchenOrderDelivery — restaurant bridge": 5/5
+#   - "D.2 — cancelación de una línea prepared ya consumida": 12/12
+# Veredicto: ESPERADO (2 rojos preexistentes aprobados para asumir en D.2, sin cambios).
+#
+# ---- tail -40 de la salida (códigos ANSI removidos; el detalle del rojo #1
+#        queda fuera del corte y se documenta en el header de arriba) ----
+
+  ● OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2) › waste: NO toca stock, deja merma auditada
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    - Expected
+    + Received
+
+      Object {
+    -   "data": ObjectContaining {
+    -     "cancellation_type": "before_fire",
+    +   "data": Object {
+    +     "cancellation_reason": "se cayó el plato al llevarlo",
+    +     "cancellation_type": "after_fire_waste",
+    +     "cancelled_at": 2026-09-24T01:05:53.886Z,
+    +     "updated_at": 2026-09-24T01:05:53.886Z,
+        },
+        "where": Object {
+          "id": 801,
+        },
+      },
+
+    Number of calls: 1
+
+      2442 |       stockLevelManager.getDefaultLocationForProduct,
+      2443 |     ).not.toHaveBeenCalled();
+    > 2444 |     expect(txMock.order_items.update).toHaveBeenCalledWith({
+           |                                       ^
+      2445 |       where: { id: ITEM_ID },
+      2446 |       data: expect.objectContaining({ cancellation_type: 'before_fire' }),
+      2447 |     });
+
+      at Object.<anonymous> (domains/store/orders/order-flow/order-flow.service.spec.ts:2444:39)
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 146 passed, 148 total
+Snapshots:   0 total
+Time:        6.315 s, estimated 7 s
+Ran all test suites matching /src\/domains\/store\/orders\/order-flow\/order-flow.service.spec.ts/i.
+EXIT_CODE=1

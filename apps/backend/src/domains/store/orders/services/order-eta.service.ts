@@ -8,10 +8,15 @@ export interface EtaResult {
   transitMinutes: number;
 }
 
+export interface EtaItemInput {
+  preparation_time_minutes: number | null;
+  variant_preparation_time_minutes?: number | null;
+}
+
 @Injectable()
 export class OrderEtaService {
   computeEta(
-    items: { preparation_time_minutes: number | null }[],
+    items: EtaItemInput[],
     transitTimeMinutes: number,
     storeSettings: OperationsSettings | undefined,
     paidAt: Date,
@@ -20,7 +25,12 @@ export class OrderEtaService {
 
     const prepMinutes = items.length
       ? Math.max(
-          ...items.map((item) => item.preparation_time_minutes ?? defaultPrep),
+          ...items.map(
+            (item) =>
+              item.variant_preparation_time_minutes ??
+              item.preparation_time_minutes ??
+              defaultPrep,
+          ),
         )
       : defaultPrep;
 

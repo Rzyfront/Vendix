@@ -164,6 +164,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         date_formatted: note.created_at ? new Date(note.created_at).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
         state: note.state,
         state_label: note.state,
+        // The alias was snapshotted as customer_name on creation; never read
+        // the mutable order when reprinting a dispatch note.
+        customer_alias: note.customer_id == null ? note.customer_name || undefined : undefined,
         shipping_carrier: note.carrier_name || undefined,
         shipping_tracking_number: note.tracking_number || undefined,
         notes: note.notes || undefined,

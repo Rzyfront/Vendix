@@ -19,6 +19,9 @@ import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
 import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import { OrderHistoryService } from '../../orders/order-history/order-history.service';
+import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
+import { ProcessReservedPosPaymentDto } from '../dto/create-payment.dto';
 
 @Injectable()
 export class PaymentGatewayService {
@@ -29,6 +32,11 @@ export class PaymentGatewayService {
     private validatorService: PaymentValidatorService,
     private s3Service: S3Service,
     @Optional() private readonly paymentEncryption?: PaymentEncryptionService,
+    // Plan order-truth-and-invoice-tz (Step 6). `@Optional()` matches this
+    // file's existing convention for tail deps so specs that construct this
+    // service positionally without it keep compiling; guarded at each call
+    // site below.
+    @Optional() private readonly orderHistory?: OrderHistoryService,
   ) {}
 
   /**
@@ -136,6 +144,136 @@ export class PaymentGatewayService {
       }
       throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, error.message);
     }
+  }
+
+  /** Execute the one pending row created by flow/pay ONLINE. Never create a second row. */
+  async processReservedPosPayment(
+    paymentId: number,
+    storeId: number,
+    input: ProcessReservedPosPaymentDto,
+  ): Promise<{ result: PaymentResult; methodType: 'wallet' | 'wompi' }> {
+    const snapshot = await this.prisma.payments.findFirst({
+      where: { id: paymentId, orders: { store_id: storeId } },
+      select: { order_id: true },
+    });
+    if (!snapshot) throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'Reserved payment not found');
+
+    const reserved = await this.prisma.$transaction(async (tx) => {
+      const locked = await lockOrderLifecycle(tx, snapshot.order_id, storeId);
+      const payment = await tx.payments.findFirst({
+        where: { id: paymentId, order_id: locked.id },
+        include: {
+          orders: { include: {
+            users: { select: { email: true } },
+            payments: { select: { id: true, state: true, amount: true } },
+          } },
+          store_payment_method: { include: { system_payment_method: true } },
+        },
+      });
+      const methodType = payment?.store_payment_method?.system_payment_method?.type;
+      const marker = payment?.gateway_response as Record<string, unknown> | null;
+      const isPending = payment?.state === 'pending';
+      const otherCommitted = (payment?.orders.payments ?? [])
+        .filter((row) => row.id !== paymentId &&
+          ['succeeded', 'captured', 'pending', 'authorized'].includes(row.state))
+        .reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0));
+      if (!payment || payment.orders.store_id !== storeId ||
+          payment.orders.channel !== 'pos' || payment.orders.active_financial_split_id ||
+          (methodType !== 'wallet' && methodType !== 'wompi') ||
+          (isPending && (locked.state !== 'pending_payment' || marker?.payment_type !== 'online' ||
+            payment.store_payment_method?.state !== 'enabled' ||
+            payment.store_payment_method?.system_payment_method?.is_active !== true)) ||
+          Number(payment.amount) <= 0 || payment.currency !== payment.orders.currency ||
+          (isPending && !new Prisma.Decimal(payment.orders.grand_total)
+            .minus(otherCommitted).equals(payment.amount))) {
+        throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'This POS payment is not a payable digital reservation');
+      }
+      const ref = methodType === 'wompi'
+        ? `vendix_${storeId}_${payment.order_id}_${payment.id}`
+        : `pos_wallet_${storeId}_${payment.order_id}_${payment.id}`;
+      if (payment.gateway_reference && payment.gateway_reference !== ref) {
+        throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'Payment reference does not belong to this reservation');
+      }
+      if (!isPending && !payment.gateway_reference) {
+        throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'This payment was not processed as a POS digital reservation');
+      }
+      if (isPending && methodType === 'wallet' &&
+          (!input.wallet_id || input.wompi_payment_method ||
+            (marker?.wallet_id != null && marker.wallet_id !== input.wallet_id))) {
+        throw new PaymentError(PaymentErrorCodes.VALIDATION_FAILED, 'Select the original wallet for this payment');
+      }
+      if (isPending && methodType === 'wompi' && (!input.wompi_payment_method || input.wallet_id)) {
+        throw new PaymentError(PaymentErrorCodes.VALIDATION_FAILED, 'Select a Wompi payment method');
+      }
+      if (payment.state === 'pending' && !payment.gateway_reference) {
+        await tx.payments.updateMany({
+          where: { id: payment.id, state: 'pending', gateway_reference: null },
+          data: { gateway_reference: ref,
+            gateway_response: { ...(marker || {}), pos_reserved_payment: true,
+              ...(methodType === 'wallet' ? { wallet_id: input.wallet_id } : {}) },
+            updated_at: new Date() },
+        });
+      }
+      return { payment, methodType, ref };
+    });
+
+    const { payment, methodType, ref } = reserved;
+    if (payment.state !== 'pending') {
+      return { methodType, result: {
+        success: ['succeeded', 'captured'].includes(payment.state),
+        status: payment.state, transactionId: payment.transaction_id ?? undefined,
+        gatewayReference: ref, gatewayResponse: payment.gateway_response,
+      } };
+    }
+    const data: PaymentData = {
+      orderId: payment.order_id,
+      customerId: payment.orders.customer_id ?? undefined,
+      amount: Number(payment.amount),
+      currency: payment.currency!,
+      storePaymentMethodId: payment.store_payment_method_id!,
+      storeId,
+      idempotencyKey: `pos-reserved-${payment.id}`,
+      metadata: {
+        paymentId: payment.id,
+        reference: ref,
+        ...(methodType === 'wallet' ? { walletId: input.wallet_id } : {
+          paymentMethod: input.wompi_payment_method,
+          customerEmail: payment.orders.users?.email ?? undefined,
+          wompiConfig: this.paymentEncryption?.decryptConfig(
+            (payment.store_payment_method!.custom_config || {}) as Record<string, any>,
+            'wompi',
+          ),
+        }),
+      },
+      returnUrl: input.returnUrl,
+    };
+    if (methodType === 'wompi' && !this.paymentEncryption) {
+      throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, 'Wompi configuration unavailable');
+    }
+    await this.validatePaymentData(data, payment.id);
+    const processor = this.getProcessor(methodType);
+    if (!processor.isEnabled()) {
+      throw new PaymentError(PaymentErrorCodes.PAYMENT_METHOD_DISABLED, 'Payment method is disabled');
+    }
+    const result = await processor.processPayment(data);
+    // A Wompi callback can win while the HTTP provider call is in flight.
+    // Final settlement belongs to WebhookHandlerService, never this update.
+    if (methodType === 'wompi') {
+      await this.prisma.payments.updateMany({
+        where: { id: payment.id, state: 'pending', gateway_reference: ref },
+        data: {
+          ...(result.transactionId ? { transaction_id: result.transactionId } : {}),
+          gateway_response: {
+            payment_type: 'online',
+            pos_reserved_payment: true,
+            provider_response: result.gatewayResponse ?? null,
+            nextAction: result.nextAction ?? null,
+          },
+          updated_at: new Date(),
+        },
+      });
+    }
+    return { result: { ...result, gatewayReference: ref }, methodType };
   }
 
   /** Server-only: executes an already budgeted account payment; never creates another row.
@@ -267,8 +405,8 @@ export class PaymentGatewayService {
         });
 
         if (payment) {
-          await this.createRefundRecord(payment, result, reason);
-          await this.updateOrderAfterRefund(payment.order_id);
+          const refund = await this.createRefundRecord(payment, result, reason);
+          await this.updateOrderAfterRefund(payment.order_id, refund);
         }
       }
 
@@ -630,7 +768,10 @@ export class PaymentGatewayService {
   private async updateOrderStatus(orderId: number) {
     const order = await this.prisma.orders.findUnique({
       where: { id: orderId },
-      include: { payments: true },
+      include: {
+        payments: true,
+        stores: { select: { organization_id: true } },
+      },
     });
 
     if (!order) return;
@@ -639,6 +780,7 @@ export class PaymentGatewayService {
       .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
       .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
+    const previousState = order.state;
     let newState = order.state;
 
     if (totalPaid >= Number(order.grand_total)) {
@@ -658,6 +800,17 @@ export class PaymentGatewayService {
           state: newState,
           updated_at: new Date(),
         },
+      });
+      // Plan order-truth-and-invoice-tz (Step 6) — pasarela de pago
+      // (webhook/HTTP confirmado por el gateway, nunca directamente por el
+      // usuario), de ahí source:'webhook' explícito.
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: newState,
       });
     }
   }
@@ -748,34 +901,110 @@ export class PaymentGatewayService {
     });
   }
 
-  private async updateOrderAfterRefund(orderId: number) {
+  private async updateOrderAfterRefund(
+    orderId: number,
+    refund?: {
+      id: number;
+      payment_id: number | null;
+      amount: Prisma.Decimal | number | string;
+      state: refunds_state_enum;
+      refund_transaction_id: string | null;
+      reason?: string | null;
+    },
+  ) {
     const order = await this.prisma.orders.findUnique({
       where: { id: orderId },
       include: {
         payments: true,
         refunds: true,
+        stores: { select: { organization_id: true } },
       },
     });
 
     if (!order) return;
 
+    // `refund_created` SIEMPRE que el carril de pasarela crea la fila de
+    // `refunds`, en cualquier estado inicial (incluido `processing` cuando la
+    // pasarela responde `pending`). Shape espejo de
+    // `RefundFlowService.recordCancellationPendingRefunds`: el reembolso vuelve
+    // por el riel original del pago (`refund_method: 'original_payment'`).
+    if (refund) {
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'refund_created',
+        paymentId: refund.payment_id ?? null,
+        amount: refund.amount?.toString() ?? null,
+        payload: {
+          reason: refund.reason ?? null,
+          refund_id: refund.id,
+          refund_method: 'original_payment',
+          initial_state: refund.state,
+          payout_channel: 'gateway',
+        },
+      });
+    }
+
+    // Plan order-truth-and-invoice-tz — refund_resolved (shape espejo de
+    // `RefundFlowService.resolveRefund`). Solo cuando la pasarela dejó el
+    // reembolso en estado TERMINAL (`completed`/`failed`); un `processing`
+    // (pasarela respondió `pending`) aún no está resuelto y no se registra.
+    // Carril HTTP (`PaymentsService.refundPayment` ← controller): sin
+    // `source` explícito, `record` resuelve 'http'/'system' por contexto.
+    if (
+      refund &&
+      (refund.state === refunds_state_enum.completed ||
+        refund.state === refunds_state_enum.failed)
+    ) {
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'refund_resolved',
+        paymentId: refund.payment_id ?? null,
+        amount: refund.amount.toString(),
+        payload: {
+          refund_id: refund.id,
+          target_state: refund.state,
+          payout_reference: refund.refund_transaction_id ?? null,
+          payout_channel: 'gateway',
+        },
+      });
+    }
+
     const totalPaid = order.payments
       .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
       .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
+    // `refunds` no tiene columna `status`: el estado vive en `state`
+    // (`refunds_state_enum`) y el éxito terminal es `completed`. Filtrar por
+    // `r.status === 'succeeded'` dejaba `totalRefunded` siempre en 0 y la orden
+    // nunca pasaba a `refunded` por el carril de pasarela.
     const totalRefunded = order.refunds
-      .filter((r: any) => r.status === 'succeeded')
-      .reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+      .filter((r) => r.state === refunds_state_enum.completed)
+      .reduce((sum: number, r) => sum + Number(r.amount), 0);
 
     const netAmount = totalPaid - totalRefunded;
 
-    if (netAmount <= 0 && totalRefunded > 0) {
+    if (netAmount <= 0 && totalRefunded > 0 && order.state !== 'refunded') {
+      const previousState = order.state;
       await this.prisma.orders.update({
         where: { id: orderId },
         data: {
           state: 'refunded',
           updated_at: new Date(),
         },
+      });
+      // Plan order-truth-and-invoice-tz (Step 6) — mismo criterio de
+      // origen que `updateOrderStatus`: confirmación de pasarela.
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: 'refunded',
       });
     }
   }

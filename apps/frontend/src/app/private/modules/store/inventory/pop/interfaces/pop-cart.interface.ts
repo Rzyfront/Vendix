@@ -120,6 +120,7 @@ export interface PreBulkData {
   description?: string;
   product_type?: string;
   track_inventory?: boolean;
+  min_stock_level?: number | null;
   pricing_type?: string;
   tax_category_ids?: number[];
   state?: string;

@@ -286,7 +286,7 @@ export class PrintFormatsService {
     if (normalizedOverrides) {
       const current = await this.gateway.resolveEffectiveConfig(storeId, formatType);
       const merged = { ...current.definition, ...normalizedOverrides };
-      this.fiscalValidator.assertFiscalCompliance(formatType, merged as any);
+      this.fiscalValidator.assertSaveCompliance(formatType, merged as any);
     }
 
     const existing = await this.storePrisma.store_print_format_configs.findFirst({
@@ -446,7 +446,7 @@ export class PrintFormatsService {
     // no es estructuralmente idéntico a la unión de literales que genera
     // Prisma, así que sigue haciendo falta un cast en la frontera — un solo
     // cast, sin pasar por `unknown`.
-    this.fiscalValidator.assertFiscalCompliance(
+    this.fiscalValidator.assertSaveCompliance(
       dto.format_type as print_format_type_enum,
       normalizedDefinition as any,
     );

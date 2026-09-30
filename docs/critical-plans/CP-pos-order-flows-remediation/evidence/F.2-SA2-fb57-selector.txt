@@ -1,0 +1,35 @@
+F.2-SA2 — FB-57 selector direcciones checkout sin huérfanas (solo lectura)
+Fecha: 2026-09-24
+
+== Cadena del selector (verificada por lectura) ==
+1. Selector frontend: pos-shipping-step.component.html:104-110
+   `@for (saved of cartState()!.customer!.addresses!; track saved.id)` — SIN filtro explícito,
+   pero consume EXCLUSIVAMENTE el arreglo embebido customer.addresses.
+   Otras lecturas del mismo arreglo: pos-shipping-step.component.ts:444-445 (primary/first),
+   :471 (find by id), :875 (is_primary), :954 (find saved).
+2. Mapeo frontend: pos-customer.service.ts:434
+   `(apiCustomer.addresses || []).map(...)` — sin filtro; entrada ya viene acotada por relación.
+   Modelo PosCustomerAddress (pos/models/customer.model.ts:1-12) no expone user_id.
+3. Backend puebla vía include RELACIONAL users→addresses (join addresses.user_id = users.id):
+   - customers.service.ts:1198 (findAll/search POS)
+   - customers.service.ts:1278 (getTopCustomers pre-mostrar buscador POS)
+   - customers.service.ts:1316 (findOne)
+   - customers.service.ts:1569 (lookup/resolve)
+   Todos con `where: { type: 'shipping' }` sobre el include relacional.
+4. Relación: schema.prisma addresses.user_id Int? (:1159) + users relation "user_addresses" (:1160-1161).
+   El JOIN relacional excluye estructuralmente user_id NULL: una huérfana (alias-flow)
+   NUNCA puede aparecer en customer.addresses.
+
+== Listados standalone (fuera del selector checkout) ==
+- addresses.service.ts:152 findAll (GET /store/addresses) NO filtra user_id NULL (incluiría huérfanas),
+  pero NINGÚN consumo checkout/POS lo usa: frontend solo usa POST/PATCH /store/addresses
+  (customers.service.ts:174,185 create/updateCustomerAddress) + lookup DIAN municipalities.
+- invoice-create-page.component.ts:8138 lee customer.addresses?.[0] (módulo invoicing, mismo include relacional).
+
+== Filtro explícito `user_id NOT NULL` ==
+NO existe filtro explícito en código (ni frontend html:106 ni backend includes).
+La exclusión es ESTRUCTURAL por join relacional, verificada en la cadena completa.
+
+Conclusión FB-57: OK — selector sin huérfanas por construcción relacional (funcionalmente imposible
+que una user_id NULL llegue al @for). Observación: si el criterio F.2 exige filtro explícito
+defensivo, el punto sería pos-shipping-step.component.html:106 — NO implementado (sin orden).

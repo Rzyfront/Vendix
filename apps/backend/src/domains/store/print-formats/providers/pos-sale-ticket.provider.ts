@@ -8,13 +8,22 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
-import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+  formatStoreTime,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
+import {
+  resolveFiscalIssuerForPrint,
+  resolveFiscalQualitiesLine,
+} from '../services/fiscal-issuer-identity';
+
+/** Descargo no fiscal del tiquete POS: texto único real + muestra (ADR-2). */
+const NON_FISCAL_DISCLAIMER = 'Este documento no es factura electrónica de venta.';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
-import {
-  ORDER_PAYMENT_MEANS_INCLUDE,
-  resolveOrderPaymentLabel,
-} from '../../payments/order-payment-means.contract';
+import { ORDER_PAYMENT_MEANS_INCLUDE } from '../../payments/order-payment-means.contract';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — el tiquete declara
 // `money_basis: 'gross'` (G-01) y propaga el gate fiscal que C.1 resolvió,
 // usando las filas `org`/`store` que el `include` de C.1 ya trae en memoria.
@@ -25,6 +34,9 @@ import {
   resolveOrderLinePrintedGross,
   resolveOrderLineTaxTotal,
 } from '../../taxes/utils/final-price.util';
+// B6 — el impuesto del envío vive en la copia de la orden, no en
+// `order_item_taxes`: el recibo pre-fiscal lo pinta desde esta definición.
+import { buildShippingTaxBreakdownRow } from '../../shipping/utils/shipping-tax.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -80,6 +92,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             organizations: {
               include: {
                 organization_settings: { select: { settings: true } },
+                // Paridad FE: `resolveFiscalIssuerForPrint` lee `org.addresses[0]`
+                // (mismo select que `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+                addresses: {
+                  take: 1,
+                  select: {
+                    address_line1: true,
+                    city: true,
+                    state_province: true,
+                    municipality_code: true,
+                    postal_code: true,
+                    phone_number: true,
+                  },
+                },
               },
             },
           },
@@ -127,10 +152,18 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     // usan otros callers de este provider — no podíamos meterle un `await`
     // sin volverlo async y arrastrar ese cambio a todos sus usos.
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, order.stores?.logo_url, this.logger);
-    const model = this.mapOrderToStandardModel(order, signedLogoUrl);
+    // B17 — el ticket mostraba la fecha/hora en la zona del contenedor
+    // (UTC), no en la de la tienda. Se resuelve UNA vez por documento y se
+    // pasa al mapeador, igual que el logo firmado.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const model = this.mapOrderToStandardModel(order, signedLogoUrl, tz);
     // A.3 (F-047): si la orden ya tiene factura, el desglose y los totales
     // salen del snapshot fiscal. Nunca lanza: ver el método.
     await this.overrideWithInvoiceSnapshot(storeId, orderId, model);
+    // CP-REFUND-FLOW-REDESIGN paso 9: sección Reembolsos/NC referenciada,
+    // ADITIVA en `custom_variables` — los totales originales quedan intactos.
+    // Nunca lanza: ver el método.
+    await this.attachRefundsSection(storeId, orderId, model);
     return model;
   }
 
@@ -237,6 +270,207 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
   }
 
   /**
+   * CP-REFUND-FLOW-REDESIGN paso 9 — sección Reembolsos/NC de la reimpresión.
+   *
+   * Los documentos ORIGINALES son inmutables: esta sección es ADITIVA y vive
+   * en `model.custom_variables.refunds` — jamás toca `model.totals`,
+   * `model.items` ni `model.taxes`. Sin refunds con dinero comprometido, el
+   * modelo sale byte-idéntico al de antes (cero regresión en el papel).
+   *
+   * Semántica compartida con `RefundCoverageService` (paso 7), re-derivada
+   * acá porque el provider no puede inyectar servicios de `order-flow` (el
+   * módulo es ajeno a este paso): por línea, `refunded_*` agrega
+   * `refund_items` de refunds con dinero comprometido
+   * (`completed`/`pending_approval`/`processing` — el mismo conjunto que el
+   * techo del paso 1 y las NC sugeribles del paso 7; `requested`/`approved`
+   * quedan fuera hasta que un plan los asigne, `failed`/`cancelled` no
+   * devolvieron nada); `nc_covered_*` suma el puente estructural
+   * `credit_note_refund_items` solo de NC `accepted`, y `notes` lista TODAS
+   * las NC del puente para trazabilidad. Ningún UPDATE toca documentos
+   * emitidos: lectura pura.
+   *
+   * Nunca lanza: si la lectura falla por lo que sea, la tirilla sale sin la
+   * sección como siempre. Un recibo sin sección vale más que ningún recibo.
+   */
+  private async attachRefundsSection(
+    storeId: number,
+    orderId: number,
+    model: StandardPrintDataModel,
+  ): Promise<void> {
+    try {
+      // `refunds` está registrado en `StorePrismaService` con scope
+      // relacional (`orders.store_id`), así que el `findMany` ya viene
+      // anclado al tenant; el `orderId` además salió de una orden verificada
+      // con `store_id` más arriba.
+      const refunds = await this.prisma.refunds.findMany({
+        where: {
+          order_id: orderId,
+          state: { in: ['completed', 'pending_approval', 'processing'] },
+        },
+        select: {
+          id: true,
+          state: true,
+          amount: true,
+          refund_method: true,
+          reason: true,
+          requested_at: true,
+          processed_at: true,
+          refund_items: {
+            select: {
+              id: true,
+              order_item_id: true,
+              quantity: true,
+              refund_amount: true,
+              order_items: { select: { product_name: true } },
+            },
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
+      if (refunds.length === 0) return;
+
+      const refundItemIds = refunds.flatMap((r) =>
+        r.refund_items.map((ri) => ri.id),
+      );
+      // `withoutScope()` + ids ya verificados: el puente no está registrado
+      // en `StorePrismaService` y no necesita estarlo — los ids salen de
+      // lecturas scopeadas, así que la consulta va anclada al tenant por
+      // construcción (mismo criterio que `RefundCoverageService`).
+      const bridgeRows =
+        refundItemIds.length > 0
+          ? await this.prisma
+              .withoutScope()
+              .credit_note_refund_items.findMany({
+                where: { refund_item_id: { in: refundItemIds } },
+                include: {
+                  credit_note: {
+                    select: { id: true, invoice_number: true, status: true },
+                  },
+                },
+              })
+          : [];
+
+      const orderItemOf = new Map<number, number>();
+      for (const r of refunds) {
+        for (const ri of r.refund_items) {
+          orderItemOf.set(ri.id, ri.order_item_id);
+        }
+      }
+      const notesByLine = new Map<
+        number,
+        Array<{
+          credit_note_id: number;
+          invoice_number: string | null;
+          status: string;
+          covered_qty: number;
+          covered_amount: number;
+        }>
+      >();
+      const coveredByLine = new Map<number, { qty: number; amount: number }>();
+      for (const row of bridgeRows) {
+        const orderItemId = orderItemOf.get(row.refund_item_id);
+        if (orderItemId == null) continue;
+        const list = notesByLine.get(orderItemId) ?? [];
+        list.push({
+          credit_note_id: row.credit_note.id,
+          invoice_number: row.credit_note.invoice_number,
+          status: row.credit_note.status,
+          covered_qty: row.covered_qty,
+          covered_amount: Number(row.covered_amount ?? 0),
+        });
+        notesByLine.set(orderItemId, list);
+        // Solo la NC aceptada cubre: el resto se LISTA (trazabilidad) pero
+        // no suma (no acreditó nada todavía).
+        if (row.credit_note.status === 'accepted') {
+          const acc = coveredByLine.get(orderItemId) ?? { qty: 0, amount: 0 };
+          acc.qty += row.covered_qty;
+          acc.amount += Number(row.covered_amount ?? 0);
+          coveredByLine.set(orderItemId, acc);
+        }
+      }
+
+      const lines = new Map<
+        number,
+        {
+          order_item_id: number;
+          product_name: string | null;
+          refunded_qty: number;
+          refunded_amount: number;
+        }
+      >();
+      for (const r of refunds) {
+        for (const ri of r.refund_items) {
+          const line = lines.get(ri.order_item_id) ?? {
+            order_item_id: ri.order_item_id,
+            product_name: ri.order_items?.product_name ?? null,
+            refunded_qty: 0,
+            refunded_amount: 0,
+          };
+          line.refunded_qty += ri.quantity;
+          line.refunded_amount += Number(ri.refund_amount ?? 0);
+          lines.set(ri.order_item_id, line);
+        }
+      }
+      // Refunds sin ítems (patas de cancelación, filas legacy) aportan solo
+      // a nivel orden: sin líneas no hay sección que agregar.
+      if (lines.size === 0) return;
+
+      const sectionLines = Array.from(lines.values()).map((line) => {
+        const nc = coveredByLine.get(line.order_item_id) ?? {
+          qty: 0,
+          amount: 0,
+        };
+        return {
+          ...line,
+          refunded_amount_formatted: this.formatOrderMoney(
+            line.refunded_amount,
+          ),
+          nc_covered_qty: nc.qty,
+          nc_covered_amount: nc.amount,
+          notes: notesByLine.get(line.order_item_id) ?? [],
+        };
+      });
+      const refundedAmount = sectionLines.reduce(
+        (sum, line) => sum + line.refunded_amount,
+        0,
+      );
+      const ncCoveredAmount = sectionLines.reduce(
+        (sum, line) => sum + line.nc_covered_amount,
+        0,
+      );
+      model.custom_variables = {
+        ...(model.custom_variables ?? {}),
+        refunds: {
+          lines: sectionLines,
+          totals: {
+            refunded_amount: refundedAmount,
+            refunded_amount_formatted: this.formatOrderMoney(refundedAmount),
+            nc_covered_amount: ncCoveredAmount,
+            nc_covered_amount_formatted:
+              this.formatOrderMoney(ncCoveredAmount),
+          },
+          refunds: refunds.map((r) => ({
+            id: r.id,
+            state: r.state,
+            amount: Number(r.amount ?? 0),
+            amount_formatted: this.formatOrderMoney(Number(r.amount ?? 0)),
+            refund_method: r.refund_method,
+            reason: r.reason,
+            requested_at: r.requested_at
+              ? new Date(r.requested_at).toISOString()
+              : null,
+            processed_at: r.processed_at
+              ? new Date(r.processed_at).toISOString()
+              : null,
+          })),
+        },
+      };
+    } catch {
+      // Ver docblock: la tirilla sin sección es el fallback.
+    }
+  }
+
+  /**
    * Agrega `invoice_taxes` por `(tax_name, tax_rate)` sumando importes YA
    * truncados — igual que `aggregateHeaderTaxes` del calculador.
    *
@@ -251,12 +485,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     rate: number;
     base_amount: number;
     tax_amount: number;
+    tax_type?: string;
     base_formatted: string;
     tax_formatted: string;
   }> {
     const grouped = new Map<
       string,
-      { name: string; rate: number; tax_amount: number; base_amount: number }
+      {
+        name: string;
+        rate: number;
+        tax_amount: number;
+        base_amount: number;
+        tax_type?: string;
+      }
     >();
 
     for (const t of invoiceTaxes || []) {
@@ -276,6 +517,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           rate,
           tax_amount: taxAmount,
           base_amount: baseAmount,
+          // QUI-890 — mismo arrastre que `aggregateTaxes`.
+          tax_type: t.tax_type || undefined,
         });
       }
     }
@@ -285,6 +528,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       rate: g.rate,
       base_amount: g.base_amount,
       tax_amount: g.tax_amount,
+      tax_type: g.tax_type,
       base_formatted: formatFiscalMoney(g.base_amount),
       tax_formatted: formatFiscalMoney(g.tax_amount),
     }));
@@ -335,6 +579,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         amount_received_formatted: '$100.000',
         change_due: 12500,
         change_due_formatted: '$12.500',
+        // Paridad muestra/real (ADR-2): el mismo descargo, sin literales sueltos.
+        non_fiscal_disclaimer: NON_FISCAL_DISCLAIMER,
       },
       // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
       money_basis: 'gross',
@@ -403,6 +649,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del cliente', example: 'Carrera 15 # 88-64, Bogotá D.C.' },
       { token: '{{order.grand_total}}', path: 'totals.grand_total_formatted', description: 'Total a pagar con formato', example: '$87.500' },
       { token: '{{order.change_due}}', path: 'document.change_due_formatted', description: 'Cambio o vuelto entregado', example: '$12.500' },
+      { token: '{{document.non_fiscal_disclaimer}}', path: 'document.non_fiscal_disclaimer', description: 'Leyenda fija: no es factura electrónica', example: 'Este documento no es factura electrónica de venta.' },
     ];
   }
 
@@ -459,21 +706,26 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
   }
 
   /**
-   * Efectivo entregado y vuelto, leídos del pago en efectivo de la orden.
+   * Efectivo entregado y vuelto, leídos del tramo en efectivo de la orden.
    *
-   * El POS los escribe dentro de `payments.gateway_response`
+   * El POS y `flow/pay` los escriben dentro de `payments.gateway_response`
    * (`metadata.amount_received` y `change`), que es `Json?` en Prisma: puede
    * llegar `null`, una cadena, un arreglo o un objeto sin esas claves. Por eso
    * se comprueba la FORMA antes de leer: asumirla reventaría el tiquete entero
    * por un pago viejo con otro contenido.
    *
-   * Ambos valores salen del MISMO pago —el primer cobro que traiga alguno— y no
-   * de una búsqueda independiente por campo: son las dos mitades de un único
-   * acto de entrega de efectivo, y cruzar el recibido de un pago con el vuelto
-   * de otro imprimiría una cuenta que nunca ocurrió.
+   * Se filtra PRIMERO por `system_payment_method.type === 'cash'`: en un cobro
+   * multimétodo los tramos no-efectivo también traen claves de tender (el POS
+   * escribe `metadata.amount_received` en todos los tramos y ambos carriles
+   * escriben `change: 0` en los que no dan vuelto), así que «el primer cobro
+   * que traiga alguno» devolvería el recibido de una tarjeta. Sin tramo en
+   * efectivo ambos quedan `undefined`: el compositor no emite las filas (no hay
+   * vuelto que inventar).
    *
-   * Una venta con tarjeta no tiene ninguno de los dos y ambos quedan
-   * `undefined`: el compositor no emite las filas (no hay vuelto que inventar).
+   * Ambos valores salen del MISMO pago y no de una búsqueda independiente por
+   * campo: son las dos mitades de un único acto de entrega de efectivo, y
+   * cruzar el recibido de un pago con el vuelto de otro imprimiría una cuenta
+   * que nunca ocurrió.
    */
   private resolveCashTender(payments: any[]): {
     amount_received?: number;
@@ -489,6 +741,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
 
     for (const payment of payments || []) {
       if (!payment || payment.state !== 'succeeded') continue;
+      // Multimétodo: sólo el tramo en efectivo entrega y devuelve billetes.
+      if (payment.store_payment_method?.system_payment_method?.type !== 'cash') {
+        continue;
+      }
 
       const gateway = payment.gateway_response;
       if (!isPlainObject(gateway)) continue;
@@ -503,10 +759,67 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     return {};
   }
 
-  private mapOrderToStandardModel(order: any, signedLogoUrl?: string): StandardPrintDataModel {
+  /**
+   * Desglose del cobro por pago, listo para `document.payment_method`.
+   *
+   * Un cobro multimétodo une una entrada por pago («Efectivo $20.000 ·
+   * Transferencia $80.000»), SIN deduplicar y en el orden en que llegan —que
+   * es `paid_at` ascendente porque la consulta usa
+   * `ORDER_PAYMENT_MEANS_INCLUDE`—. El monto sale con `formatOrderMoney`, igual
+   * que el TOTAL que tiene al lado.
+   *
+   * Con un solo pago con nombre se devuelve la etiqueta sola, sin monto:
+   * idéntico a lo que el contrato compartido devolvía hoy. `undefined` cuando
+   * ningún cobro trae nombre: la fila no se emite. El desglose se arma acá y no
+   * en el compositor para no tocar su región de totales.
+   */
+  private resolvePaymentBreakdown(payments: any[]): string | undefined {
+    const entries: Array<{ label: string; amount: number }> = [];
+    for (const payment of payments || []) {
+      if (!payment || payment.state !== 'succeeded') continue;
+      const label = this.resolvePaymentLegLabel(payment);
+      if (!label) continue;
+      entries.push({ label, amount: Number(payment.amount || 0) });
+    }
+    if (entries.length === 0) return undefined;
+    if (entries.length === 1) return entries[0].label;
+    return entries
+      .map((entry) => `${entry.label} ${this.formatOrderMoney(entry.amount)}`)
+      .join(' · ');
+  }
+
+  /**
+   * Etiqueta de UN pago: la misma cascada de tres niveles del contrato
+   * compartido (`order-payment-means.contract.ts`: alias de la tienda, nombre
+   * canónico del sistema, clave técnica). Vive acá duplicada a propósito: el
+   * contrato no exporta la etiqueta individual y el desglose no deduplica.
+   */
+  private resolvePaymentLegLabel(payment: any): string | undefined {
+    const storeMethod = payment?.store_payment_method;
+    const systemMethod = storeMethod?.system_payment_method;
+    const candidates = [
+      storeMethod?.display_name,
+      systemMethod?.display_name,
+      systemMethod?.name,
+    ];
+    for (const candidate of candidates) {
+      const label = (candidate ?? '').trim();
+      if (label) return label;
+    }
+    return undefined;
+  }
+
+  private mapOrderToStandardModel(
+    order: any,
+    signedLogoUrl?: string,
+    tz: string = DEFAULT_STORE_TIMEZONE,
+  ): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
     const addr = store.addresses?.[0] || {};
+    // Paridad FE: sin fila en `addresses`, la dirección cae a la identidad
+    // fiscal (modo permisivo: un ticket nunca falla 422 por datos fiscales).
+    const issuer = resolveFiscalIssuerForPrint(org, store, false);
     const user = order.users || {};
 
     // ADR-04 — mesa + mesero derivados de la última sesión, abierta o cerrada.
@@ -567,6 +880,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         it.tax_rate !== null && it.tax_rate !== undefined
           ? Math.round(Number(it.tax_rate) * 10000) / 100
           : undefined,
+      // QUI-890 — tributo real de la línea (primera fila, misma convención
+      // que la base en `aggregateTaxes`) para pintar "INC: 8%" en vez de
+      // inventar "IVA". Solo este provider lo declara.
+      tax_name: it.order_item_taxes?.[0]?.tax_name || undefined,
+      tax_type: it.order_item_taxes?.[0]?.tax_type || undefined,
       tax_amount: lineTax > 0 ? lineTax : undefined,
       total_price: gross_total_price,
       total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
@@ -575,13 +893,35 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
 
     const taxes = this.aggregateTaxes(order.order_items);
 
-    // Etiqueta del método de pago — la resuelve el contrato compartido, no
-    // este archivo: soporta pago mixto («Efectivo + Tarjeta»), respeta el
-    // alias que la tienda le puso al método y devuelve `undefined` cuando no
-    // hay ningún cobro con nombre. Ese `undefined` se propaga tal cual: la
-    // fila no se emite. Un tiquete que dice «Efectivo» por defecto afirma una
-    // entrada de caja que nadie hizo.
-    const paymentMethod = resolveOrderPaymentLabel(order.payments);
+    // B6 — fila del impuesto del envío en el bloque `taxes` del recibo
+    // pre-fiscal: `aggregateTaxes` solo lee `order_item_taxes`, así que sin
+    // esto el tributo del domicilio no salía aunque el total sí lo cobró.
+    // Fila PROPIA («INC 8% (incl. envío)»), no fusionada con el grupo de
+    // productos, para que el comerciante vea de dónde sale. Sin copia ⇒
+    // null ⇒ el modelo sale byte-idéntico al de antes. El carril fiscal
+    // (`overrideWithInvoiceSnapshot`) no se toca: `invoice_taxes` ya trae
+    // el envío y `aggregateInvoiceTaxes` ya lo suma.
+    const shippingTaxRow = buildShippingTaxBreakdownRow(order);
+    if (shippingTaxRow) {
+      taxes.push({
+        name: `${shippingTaxRow.tax_type.toUpperCase()} (incl. envío)`,
+        tax_type: shippingTaxRow.tax_type,
+        // La copia guarda fracción (`Decimal(6,5)` ⇒ 0.08); la fila se pinta
+        // como `(${rate}%)`, igual que en `aggregateTaxes`.
+        rate: Math.round(shippingTaxRow.tax_rate * 10000) / 100,
+        base_amount: shippingTaxRow.taxable_amount,
+        tax_amount: shippingTaxRow.tax_amount,
+        base_formatted: this.formatOrderMoney(shippingTaxRow.taxable_amount),
+        tax_formatted: this.formatOrderMoney(shippingTaxRow.tax_amount),
+      });
+    }
+
+    // Desglose del cobro por pago («Efectivo $20.000 · Transferencia
+    // $80.000», en orden de cobro): lo arma este provider, no el compositor,
+    // y con un solo método devuelve la etiqueta sola, igual que hoy. Ese
+    // `undefined` se propaga tal cual: la fila no se emite. Un tiquete que dice
+    // «Efectivo» por defecto afirma una entrada de caja que nadie hizo.
+    const paymentMethod = this.resolvePaymentBreakdown(order.payments);
     const { amount_received, change_due } = this.resolveCashTender(
       order.payments,
     );
@@ -599,7 +939,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         tax_id: org.tax_id,
         phone: store.phone,
         email: store.email,
-        address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : undefined,
+        address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : issuer.address_line || issuer.fiscal_address || undefined,
         city: addr.city,
         logo_url: signedLogoUrl,
       },
@@ -618,8 +958,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         id: order.id,
         number: String(order.order_number),
         date: order.created_at ? new Date(order.created_at).toISOString() : new Date().toISOString(),
-        date_formatted: order.created_at ? new Date(order.created_at).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
-        time: order.created_at ? new Date(order.created_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : undefined,
+        // B17 — antes formateaba en la zona del contenedor (`toLocaleDateString`/
+        // `toLocaleTimeString` sin `timeZone`); ahora usa la zona de la tienda.
+        date_formatted: order.created_at ? formatStoreDate(new Date(order.created_at), tz) : formatStoreDate(new Date(), tz),
+        time: order.created_at ? formatStoreTime(new Date(order.created_at), tz) : undefined,
         state: order.state,
         state_label: order.state,
         channel: order.channel,
@@ -646,6 +988,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
               change_due_formatted: this.formatOrderMoney(change_due),
             }
           : {}),
+        // Leyenda no fiscal fija (el validador la exige en `pos_sale_ticket`).
+        non_fiscal_disclaimer: NON_FISCAL_DISCLAIMER,
         // QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Va en la CABECERA
         // junto al número de orden, NO bajo el bloque "Datos del Cliente"
         // (`customer`): el alias no es un cliente formal y no debe leerse como
@@ -701,12 +1045,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     rate: number;
     base_amount: number;
     tax_amount: number;
+    tax_type?: string;
     base_formatted: string;
     tax_formatted: string;
   }> {
     const grouped = new Map<
       string,
-      { name: string; rate: number; tax_amount: number; base_amount: number }
+      {
+        name: string;
+        rate: number;
+        tax_amount: number;
+        base_amount: number;
+        tax_type?: string;
+      }
     >();
 
     for (const item of orderItems || []) {
@@ -737,6 +1088,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             rate,
             tax_amount: taxAmount,
             base_amount: rowBase,
+            // QUI-890 — se arrastra el tipo de la primera fila del grupo
+            // (sin tipo = IVA por contrato fiscal, lo resuelve el lector).
+            tax_type: t.tax_type || undefined,
           });
         }
       });
@@ -747,6 +1101,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       rate: g.rate,
       base_amount: g.base_amount,
       tax_amount: g.tax_amount,
+      tax_type: g.tax_type,
       base_formatted: `$${g.base_amount.toLocaleString('es-CO')}`,
       tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
     }));

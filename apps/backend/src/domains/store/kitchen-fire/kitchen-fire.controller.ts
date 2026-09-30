@@ -26,6 +26,7 @@ import {
   ResendOrderItemsDto,
   KitchenTicketQueryDto,
   KdsSnapshotQueryDto,
+  CancelKitchenTicketDto,
 } from './dto';
 
 /**
@@ -172,12 +173,8 @@ export class KitchenFireController {
         limit,
         'Tickets de cocina obtenidos',
       );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener tickets de cocina',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -204,12 +201,8 @@ export class KitchenFireController {
         },
         'Snapshot de tickets activos',
       );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener snapshot de tickets',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -335,22 +328,10 @@ export class KitchenFireController {
     try {
       const ticket = await this.kitchenFireService.startPreparation(id);
       return this.responseService.success(ticket, 'Ticket en preparación');
-    } catch (error: any) {
-      // VendixHttpException exposes `errorCode` (camelCase) and `getResponse()`
-      // returns the JSON body. The legacy `error.error_code` is on the
-      // response body, NOT on the exception instance — fall back to it for
-      // non-Vendix exceptions (NestJS HttpException etc.).
-      const errorCode =
-        error?.errorCode ??
-        error?.error?.error_code ??
-        error?.response?.error_code ??
-        null;
-      return this.responseService.error(
-        error.message || 'Error al iniciar el ticket',
-        error.response?.message || error.message,
-        error.status || 400,
-        errorCode ?? undefined,
-      );
+    } catch (error) {
+      // Returning responseService.error here would turn a typed rejection
+      // into HTTP 201. The global filter owns the status and error_code.
+      throw error;
     }
   }
 
@@ -360,18 +341,8 @@ export class KitchenFireController {
     try {
       const ticket = await this.kitchenFireService.markReady(id);
       return this.responseService.success(ticket, 'Ticket listo');
-    } catch (error: any) {
-      const errorCode =
-        error?.errorCode ??
-        error?.error?.error_code ??
-        error?.response?.error_code ??
-        null;
-      return this.responseService.error(
-        error.message || 'Error al marcar el ticket como listo',
-        error.response?.message || error.message,
-        error.status || 400,
-        errorCode ?? undefined,
-      );
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -381,39 +352,22 @@ export class KitchenFireController {
     try {
       const ticket = await this.kitchenFireService.markDelivered(id);
       return this.responseService.success(ticket, 'Ticket entregado');
-    } catch (error: any) {
-      const errorCode =
-        error?.errorCode ??
-        error?.error?.error_code ??
-        error?.response?.error_code ??
-        null;
-      return this.responseService.error(
-        error.message || 'Error al entregar el ticket',
-        error.response?.message || error.message,
-        error.status || 400,
-        errorCode ?? undefined,
-      );
+    } catch (error) {
+      throw error;
     }
   }
 
   @Post('tickets/:id/cancel')
   @Permissions('store:kitchen_fire:cancel')
-  async cancelTicket(@Param('id', ParseIntPipe) id: number) {
+  async cancelTicket(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: CancelKitchenTicketDto,
+  ) {
     try {
-      const ticket = await this.kitchenFireService.cancelTicket(id);
+      const ticket = await this.kitchenFireService.cancelTicket(id, body?.disposition);
       return this.responseService.success(ticket, 'Ticket cancelado');
-    } catch (error: any) {
-      const errorCode =
-        error?.errorCode ??
-        error?.error?.error_code ??
-        error?.response?.error_code ??
-        null;
-      return this.responseService.error(
-        error.message || 'Error al cancelar el ticket',
-        error.response?.message || error.message,
-        error.status || 400,
-        errorCode ?? undefined,
-      );
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -426,18 +380,8 @@ export class KitchenFireController {
         ticket,
         'Ticket revertido al paso anterior',
       );
-    } catch (error: any) {
-      const errorCode =
-        error?.errorCode ??
-        error?.error?.error_code ??
-        error?.response?.error_code ??
-        null;
-      return this.responseService.error(
-        error.message || 'Error al revertir el ticket',
-        error.response?.message || error.message,
-        error.status || 400,
-        errorCode ?? undefined,
-      );
+    } catch (error) {
+      throw error;
     }
   }
 }

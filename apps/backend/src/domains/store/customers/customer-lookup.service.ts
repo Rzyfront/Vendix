@@ -22,6 +22,10 @@ export interface ExternalLookupResult {
   email?: string;
   phone?: string;
   address?: string;
+  legal_name?: string;
+  verification_digit?: string;
+  person_type?: 'NATURAL' | 'JURIDICA';
+  registration_status?: string;
 }
 
 @Injectable()

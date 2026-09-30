@@ -26,6 +26,7 @@ import { ConfigFacade } from '../../../core/store/config';
 import { TourModalComponent } from '../../../shared/components/tour/tour-modal/tour-modal.component';
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
+import { TOUR_CONFIG_MAP } from '../../../shared/components/tour/configs/tour-registry';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
@@ -214,7 +215,6 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
           [class.md:px-4]="!isPosRoute()"
           [class.overflow-hidden]="isPosRoute()"
           [class.p-0]="isPosRoute()"
-          [style.padding-top]="isPosRoute() ? '0' : 'var(--admin-header-gap)'"
           style="background-color: var(--background);"
         >
           <div
@@ -242,7 +242,7 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
     }
 
     <!-- Tour Modal -->
-    <app-tour-modal [(isOpen)]="showTourModal" [tourConfig]="posTourConfig">
+    <app-tour-modal [(isOpen)]="showTourModal" [tourConfig]="activeTourConfig()">
     </app-tour-modal>
 
     <!-- Subscription paywall (driven by interceptor + access service) -->
@@ -794,6 +794,12 @@ export class StoreAdminLayoutComponent {
           alwaysVisible: true,
         },
         {
+          label: 'Pagos',
+          icon: 'circle',
+          route: '/admin/analytics/payments',
+          alwaysVisible: true,
+        },
+        {
           label: 'Despachos',
           icon: 'circle',
           route: '/admin/analytics/dispatch',
@@ -857,6 +863,12 @@ export class StoreAdminLayoutComponent {
           label: 'Financiero',
           icon: 'circle',
           route: '/admin/reports/financial',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Pagos',
+          icon: 'circle',
+          route: '/admin/reports/payments',
           alwaysVisible: true,
         },
         {
@@ -1088,7 +1100,20 @@ export class StoreAdminLayoutComponent {
     { initialValue: [] as MenuItem[] },
   );
 
-  readonly posTourConfig = POS_TOUR_CONFIG;
+  /**
+   * The tour the modal shows (U-3).
+   *
+   * Resolved from the injectable registry by the id `TourService` activated:
+   * the first-visit flow activates `pos-first-sale` and behaves exactly as
+   * before, while `ui_start_tour` activates any registered tour and the same
+   * modal renders it. The layout stays the owner of `isOpen`.
+   */
+  readonly activeTourConfig = computed(() => {
+    const currentId = this.tourService.state().currentTourId;
+    return (
+      (currentId ? TOUR_CONFIG_MAP[currentId] : undefined) ?? POS_TOUR_CONFIG
+    );
+  });
 
   breadcrumb = {
     parent: 'Tienda',
@@ -1212,6 +1237,20 @@ export class StoreAdminLayoutComponent {
       });
 
     this.checkAndStartPosTour();
+
+    // Opens the modal when `TourService` activates a tour behind our back
+    // (U-3 `ui_start_tour`). The first-visit flow above opens it directly and
+    // never activates the service, so this only fires for agent starts — and
+    // completing/skipping deactivates the service, which this ignores.
+    effect(
+      () => {
+        const state = this.tourService.state();
+        if (state.isActive && state.currentTourId && !this.showTourModal()) {
+          this.showTourModal.set(true);
+        }
+      },
+      { allowSignalWrites: true },
+    );
 
     // S1.2 — Notify the subscription feature about store-context changes
     // (including initial). This wipes any stale data from the previous

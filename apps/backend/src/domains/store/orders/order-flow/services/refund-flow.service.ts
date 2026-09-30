@@ -4,6 +4,8 @@ import {
   forwardRef,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
+  Optional,
   Logger,
 } from '@nestjs/common';
 import { Prisma, refunds_state_enum } from '@prisma/client';
@@ -18,26 +20,107 @@ import {
 import {
   RefundCalculationService,
   RefundCalculationResult,
+  REFUND_LEDGER_STATES,
 } from './refund-calculation.service';
+import { RefundCoverageService } from './refund-coverage.service';
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
 import { resolveRefundStockUnits } from '../../../products/services/packaging.util';
 import { CreateRefundDto } from '../dto/create-refund.dto';
+import { RefundPayoutChannel } from '../dto/resolve-refund.dto';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { SettingsService } from '../../../settings/settings.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
-import { MovementsService } from '../../../cash-registers/movements/movements.service';
+import {
+  MovementsService,
+  type RefundCashMovementOutcome,
+} from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { KitchenFireService } from '../../../kitchen-fire/kitchen-fire.service';
+import { AutoEntryService } from '../../../accounting/auto-entries/auto-entry.service';
+import { AuditResource } from '@common/audit/audit.service';
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
+import {
+  ManualRefundDeliveryService,
+  MANUAL_REFUND_DELIVERY_KEY,
+  MANUAL_REFUND_DELIVERY_SOURCE,
+  type ManualRefundDeliveryPayload,
+} from '../../../accounting/auto-entries/manual-refund-delivery.service';
 import {
   resolveEffectiveRefundChannel,
   awaitsExternalReversal,
   API_REVERSIBLE_REFUND_PROCESSORS,
   type EffectiveRefundChannel,
 } from './refund-channel.util';
+import { REFUNDABLE_ORDER_STATES } from '../order-action-policy.util';
+import { OrderHistoryService } from '../../order-history/order-history.service';
 
-const REFUNDABLE_STATES = ['delivered', 'finished'];
+// order-truth-and-invoice-tz plan (B1b) — was a hand-synced local copy of
+// `['delivered', 'finished']`; now reuses the single source of truth in
+// `order-action-policy.util.ts` (`canRefund`/`getAvailableActions` read the
+// same array) so this guard can never drift from the read-side action list.
+const REFUNDABLE_STATES: ReadonlyArray<string> = REFUNDABLE_ORDER_STATES;
+
+/** ADR-12 — prefix of the deterministic `refund_transaction_id` placeholders
+ * that `recordCancellationPendingRefunds` stamps on cancellation refunds.
+ * A placeholder is NOT a gateway id: `manuallyResolveRefund` lets the real
+ * payout reference replace it, while a genuine gateway id stays protected.
+ */
+export const CANCELLATION_REFUND_TX_PREFIX = 'adr12:cancel:';
+
+export function buildCancellationRefundTxId(orderId: number, leg: string): string {
+  return `${CANCELLATION_REFUND_TX_PREFIX}o${orderId}:${leg}`;
+}
+
+export function isCancellationRefundPlaceholder(
+  txId: string | null | undefined,
+): boolean {
+  return !!txId && txId.startsWith(CANCELLATION_REFUND_TX_PREFIX);
+}
+
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 4 — aviso explícito del movimiento de caja
+ * que viaja en la respuesta del refund (`cash_movement`). `skipped` solo
+ * cuando el módulo de caja está apagado (no hay nada que entregar);
+ * cualquier otro camino entrega durable (`recorded`) o deja fila en el
+ * outbox (`pending` + `failure_id` consultable).
+ */
+export type RefundCashMovementNotice =
+  | RefundCashMovementOutcome
+  | { status: 'skipped'; reason: string };
+
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 6 — post-commit work collected in-tx by the
+ * dish branch (`processDishRefundLine`). SSE pushes and the COGS reclass run
+ * only after the refund commits (same rule as every other post-commit effect:
+ * accounting/KDS failures must never roll back money already returned).
+ */
+export interface DishRefundPostCommit {
+  /** Tickets fully cancelled in-tx → `emitTicketCancelledEvent` each. */
+  cancelledTicketIds: number[];
+  /** Tickets partially cancelled in-tx → `emitTicketUpdatedEvent` each. */
+  updatedTicketIds: number[];
+  /** One reclass per fully-covered dish line with known cost > 0. */
+  reclassJobs: Array<{
+    order_item_id: number;
+    organization_id: number;
+    disposition: 'reuse' | 'waste';
+    total_cost: number;
+  }>;
+}
+
+/** One settled leg to return: either a `payments` row (`payment_id`) or a
+ * real CxC abono (`ar_payment_id`) — never both, never neither.
+ */
+export interface CancellationPendingLeg {
+  payment_id?: number;
+  ar_payment_id?: number;
+  amount: Prisma.Decimal;
+  /** Concrete rail for the audit notes (e.g. 'card', 'wompi', 'abono CxC #5 (transferencia)'). */
+  method_label: string;
+}
 
 @Injectable()
 export class RefundFlowService {
@@ -65,6 +148,29 @@ export class RefundFlowService {
     // cycle (see order-flow.module.ts:39).
     @Inject(forwardRef(() => PaymentGatewayService))
     private readonly paymentGatewayService: PaymentGatewayService,
+    private readonly manualRefundDelivery: ManualRefundDeliveryService,
+    // CP-REFUND-FLOW-REDESIGN paso 6 — dish branch (KDS cancel + COGS
+    // reclass). `@Optional()` so the historic spec constructions keep
+    // working (same pattern as OrderFlowService:kitchenFireService); in
+    // prod both providers always resolve via KitchenFireModule /
+    // AccountingModule (see order-flow.module.ts). A dish line with no
+    // KitchenFireService fails LOUD in-tx (never skips the KDS silently);
+    // a missing AutoEntryService degrades to a logged error post-commit
+    // (the refund is already committed by then).
+    @Optional() private readonly kitchenFireService?: KitchenFireService,
+    @Optional() private readonly autoEntryService?: AutoEntryService,
+    // Release-853 (paso 7) — re-agregación del caché de cobertura por línea
+    // (`recomputeLineCache`). `@Optional()` por la misma razón que los dos
+    // de arriba: los specs históricos construyen sin él; en prod siempre
+    // resuelve (mismo módulo, sin ciclo). Donde falta, el caché no se
+    // re-agrega — todos los llamados van con `?.` por eso.
+    @Optional() private readonly coverageService?: RefundCoverageService,
+    // Plan order-truth-and-invoice-tz — Paso 6. Único escritor de
+    // `order_events`. `@Optional()` por el mismo motivo que los tres de
+    // arriba: no romper los specs históricos que construyen el servicio a
+    // mano. En prod siempre resuelve vía `OrderHistoryModule` (importado en
+    // `order-flow.module.ts`, mismo módulo que provee este servicio).
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
   ) {}
 
   /** Cash cancellation uses the same refund document and ceiling as returns,
@@ -75,11 +181,14 @@ export class RefundFlowService {
     tx: Prisma.TransactionClient,
     order: {
       id: number;
+      store_id: number;
+      stores?: { organization_id: number | null } | null;
       grand_total: Prisma.Decimal;
       tax_amount: Prisma.Decimal;
       shipping_cost: Prisma.Decimal;
       shipping_tax_amount: Prisma.Decimal;
       shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
       currency: string | null;
       payments: { id: number; state: string }[];
     },
@@ -108,7 +217,137 @@ export class RefundFlowService {
         processed_at: null,
       },
     });
+    // Plan order-truth-and-invoice-tz — Paso 6. Reembolso documental de la
+    // cancelación (no cambia `orders.state`: cancelOrder ya registra su
+    // propio `state_changed` a 'cancelled' en el mismo tx).
+    await this.orderHistoryService?.record(tx, {
+      orderId: order.id,
+      storeId: order.store_id,
+      organizationId: order.stores?.organization_id ?? null,
+      type: 'refund_created',
+      paymentId: paymentIds.length === 1 ? paymentIds[0] : null,
+      amount: breakdown.amount.toString(),
+      payload: { reason, refund_id: refund.id, refund_method: 'cash' },
+    });
     return { refund, breakdown };
+  }
+
+  /** ADR-12 — one `requested` refund per settled non-cash leg, created inside
+   * the caller's cancel transaction BEFORE the atomic claim, so a lost race
+   * rolls every leg back with the claim. The original payments stay
+   * `succeeded`: this method documents the debt to return, it never reverses.
+   *
+   * `alreadyPlanned` is the cash amount the caller already recorded in this
+   * same transaction: the cumulative ceiling (cash + every leg) is checked
+   * ONCE against `grand_total` here, because per-leg checks alone would let
+   * cash 60 + card 60 pass a ceiling of 100.
+   *
+   * `refund_method` is the domain vocabulary for "return via the original
+   * rail" (`original_payment` → 1110 fallback in accounting); the concrete
+   * rail travels on the linked payment row and in `notes`. Manual closure
+   * overwrites it with the real payout channel anyway.
+   */
+  async recordCancellationPendingRefunds(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: number;
+      store_id: number;
+      stores?: { organization_id: number | null } | null;
+      grand_total: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
+      currency: string | null;
+      payments: { id: number; state: string }[];
+    },
+    legs: CancellationPendingLeg[],
+    reason: string,
+    alreadyPlanned: Prisma.Decimal = new Prisma.Decimal(0),
+  ) {
+    if (legs.length === 0) {
+      return [];
+    }
+    const ceiling = await this.calculationService.calculate(
+      { order_id: order.id, items: [], include_shipping: false }, tx,
+    );
+    const plannedTotal = legs.reduce(
+      (acc, leg) => acc.plus(new Prisma.Decimal(leg.amount as any)),
+      new Prisma.Decimal(alreadyPlanned as any),
+    );
+    if (plannedTotal.greaterThan(new Prisma.Decimal(ceiling.max_refundable).plus(0.01))) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_VALIDATE_001,
+        `Cancellation refunds ${plannedTotal.toString()} exceed the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
+      );
+    }
+    const created: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>>[] = [];
+    for (const leg of legs) {
+      const hasPayment = leg.payment_id != null;
+      const hasArPayment = leg.ar_payment_id != null;
+      if (hasPayment === hasArPayment) {
+        throw new VendixHttpException(
+          ErrorCodes.REF_VALIDATE_001,
+          'Cancellation refund leg must reference exactly one of payment_id or ar_payment_id',
+        );
+      }
+      const amount = new Prisma.Decimal(leg.amount as any);
+      if (amount.lessThanOrEqualTo(0)) {
+        this.logger.warn(
+          `recordCancellationPendingRefunds: skipping zero-value leg of order #${order.id} ` +
+            `(payment_id=${leg.payment_id ?? 'n/a'} ar_payment_id=${leg.ar_payment_id ?? 'n/a'}): nothing to return`,
+        );
+        continue;
+      }
+      const legKey = hasPayment ? `p${leg.payment_id}` : `ar${leg.ar_payment_id}`;
+      const refundTransactionId = buildCancellationRefundTxId(order.id, legKey);
+      const existing = await tx.refunds.findFirst({
+        where: { refund_transaction_id: refundTransactionId },
+        select: { id: true },
+      });
+      if (existing) {
+        this.logger.warn(
+          `recordCancellationPendingRefunds: refund for leg ${legKey} of order #${order.id} ` +
+            `already exists (#${existing.id}) — skipping duplicate`,
+        );
+        continue;
+      }
+      const breakdown = await this.calculationService.calculateCancellationRefund(
+        order.id, amount, tx, order,
+      );
+      const refund = await tx.refunds.create({
+        data: {
+          order_id: order.id,
+          payment_id: leg.payment_id ?? null,
+          ar_payment_id: leg.ar_payment_id ?? null,
+          amount: breakdown.amount,
+          subtotal_refund: breakdown.subtotal,
+          tax_refund: breakdown.tax,
+          shipping_refund: breakdown.shipping,
+          currency: order.currency,
+          reason,
+          notes: `Cancelación ADR-12; pierna ${leg.method_label}`,
+          refund_method: 'original_payment',
+          refund_transaction_id: refundTransactionId,
+          state: 'requested',
+          processed_by_user_id: RequestContextService.getUserId(),
+          requested_at: new Date(),
+          processed_at: null,
+        },
+      });
+      await this.orderHistoryService?.record(tx, {
+        orderId: order.id,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id ?? null,
+        type: 'refund_created',
+        paymentId: leg.payment_id ?? null,
+        amount: breakdown.amount.toString(),
+        payload: { reason, refund_id: refund.id, refund_method: 'original_payment', ar_payment_id: leg.ar_payment_id ?? null },
+      });
+      created.push({ refund, breakdown });
+    }
+    return created;
   }
 
   async completeCancellationCashRefund(refundId: number) {
@@ -184,10 +423,14 @@ export class RefundFlowService {
       );
     }
 
+    // Release-853 (paso 7): el preview usa el MISMO techo que la creación
+    // (`include_pending_states: true`) — un `max_refundable` calculado con
+    // otro techo que el que valida la creación es una promesa rota.
     return this.calculationService.calculate({
       order_id: orderId,
       items: dto.items,
       include_shipping: dto.include_shipping,
+      include_pending_states: true,
     });
   }
 
@@ -204,7 +447,11 @@ export class RefundFlowService {
         order_items: {
           where: { cancelled_at: null },
           include: {
-            products: { select: { id: true, track_inventory: true } },
+            // Paso 6 — `product_type` routes dish lines to the KDS-aware
+            // branch (`inventory_consumed_at_fire`/`skip_kds` already travel
+            // on the row); the authoritative flag read happens in-tx under
+            // the order lock (see the inventory loop below).
+            products: { select: { id: true, track_inventory: true, product_type: true } },
             product_variants: { select: { id: true } },
           },
         },
@@ -230,11 +477,13 @@ export class RefundFlowService {
       );
     }
 
-    // Calculate the refund breakdown
+    // Calculate the refund breakdown. Step 1: pending-aware ceiling, so an
+    // in-flight partial already reserves its share before this one is sized.
     const calculation = await this.calculationService.calculate({
       order_id: orderId,
       items: dto.items,
       include_shipping: dto.include_shipping,
+      include_pending_states: true,
     });
 
     // REFUND OVERHAUL — resolve missing location_id for `restock` and `write_off`
@@ -283,13 +532,73 @@ export class RefundFlowService {
     // aprobación, así que aparcarlos los atasca para siempre.
     const awaitsReversal = awaitsExternalReversal(dto.refund_method, paymentType);
 
+    // Paso 6 — dish post-commit collector (KDS SSE + COGS reclass). Filled
+    // in-tx by `processDishRefundLine`, drained in the `.then()` below.
+    // Empty for non-dish refunds: the drain is a guarded no-op.
+    const dishPostCommit: DishRefundPostCommit = {
+      cancelledTicketIds: [],
+      updatedTicketIds: [],
+      reclassJobs: [],
+    };
+
     // Execute everything in a transaction
     return this.prisma
       .$transaction(async (tx) => {
+        // Step 1 (CP-REFUND-FLOW-REDESIGN) — atomic lifecycle claim. The
+        // pre-tx reads above raced: two concurrent partials could both pass
+        // the ceiling and jointly over-refund. Serializing on the order row
+        // (same `FOR UPDATE` shape as `manuallyResolveRefund`) plus a fresh
+        // state check and a ceiling re-validation under the lock closes both
+        // the double-partial race and the refund-vs-cancel TOCTOU. There is
+        // no flippable row to `updateMany`-claim on a creation path, so the
+        // re-reads under the lock are the claim; P2002 still maps to a
+        // creation conflict in the rejection handler below.
+        await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
+        const fresh = await tx.orders.findFirst({
+          where: { id: orderId },
+          select: { state: true },
+        });
+        if (!fresh || !REFUNDABLE_STATES.includes(fresh.state)) {
+          throw new BadRequestException(
+            `Cannot refund order in state '${fresh?.state}'. Refunds are only allowed from: [${REFUNDABLE_STATES.join(', ')}]`,
+          );
+        }
+        // Re-validate the same request against the pending-aware ceiling.
+        // Throws on breach; the persisted amounts stay the deterministic
+        // outer breakdown (order lines are immutable once sold).
+        await this.calculationService.calculate(
+          {
+            order_id: orderId,
+            items: dto.items,
+            include_shipping: dto.include_shipping,
+            include_pending_states: true,
+          },
+          tx,
+        );
+
+        // Step 2 (CP-REFUND-FLOW-REDESIGN) — settled legs under the claim.
+        // `partially_refunded` belongs to the search: after a first partial
+        // the leg stays in play, and a second partial that covers the
+        // accumulated total must still find it to promote it to `refunded`
+        // (evidence 7384: payment stuck at `partially_refunded` with the
+        // order already `refunded`). The refund links to the first settled
+        // leg by id — deterministic for single-payment orders; scalar
+        // `payment_id` cannot split-link a multi-payment distribution.
+        const settledPayments = (order.payments ?? [])
+          .filter((p) =>
+            p.state === 'succeeded' ||
+            p.state === 'pending' ||
+            p.state === 'partially_refunded',
+          )
+          .sort((a, b) => a.id - b.id);
+        const linkedPaymentId =
+          settledPayments.length > 0 ? settledPayments[0].id : null;
+
         // 1. Create refund record
         const refund = await tx.refunds.create({
           data: {
             order_id: orderId,
+            payment_id: linkedPaymentId,
             amount: calculation.total_refund,
             subtotal_refund: calculation.subtotal_refund,
             tax_refund: calculation.tax_refund,
@@ -300,6 +609,25 @@ export class RefundFlowService {
             state: 'processing',
             processed_by_user_id: userId,
             requested_at: new Date(),
+          },
+        });
+
+        // Plan order-truth-and-invoice-tz — Paso 6. `refund_created` primero;
+        // el `state_changed` a 'refunded' (si aplica) se registra más abajo,
+        // junto a la escritura de `orders.state`.
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id ?? null,
+          type: 'refund_created',
+          paymentId: linkedPaymentId,
+          amount: calculation.total_refund.toString(),
+          actorUserId: userId,
+          payload: {
+            reason: dto.reason,
+            refund_id: refund.id,
+            refund_method: dto.refund_method,
+            is_full_refund: calculation.is_full_refund,
           },
         });
 
@@ -361,7 +689,50 @@ export class RefundFlowService {
           refundItemIdByOrderItem.set(item.order_item_id, refundItem.id);
         }
 
+        // 2b. Step 3 (CP-REFUND-FLOW-REDESIGN) — per-line coverage cache,
+        // same tx that inserts the `refund_items` above. Release-853 (paso
+        // 7): el SQL inline se extrajo a `recomputeLineCache` (una sola
+        // agregación para creación, caídas a `failed` y resolve manual) y
+        // además resetea a 0 las líneas sin ledger — el SQL viejo sólo
+        // tocaba las líneas cubiertas y congelaba el resto. Incondicional
+        // (también item-less): re-escribir valores idénticos es barato y
+        // mantiene el caché auto-reparable en cada creación.
+        await this.coverageService?.recomputeLineCache(tx, orderId);
+
         // 3. Process inventory per item
+        //
+        // Paso 6 — dish lines (`product_type='prepared'`, stock-mode
+        // `skip_kds` excluded) take the KDS-aware branch below; every other
+        // line keeps the retail path byte-identical. The fire flag is
+        // re-read fresh here, under the order lock, so the audit trail
+        // (`fired` in the disposition metadata) reflects the line's real
+        // state even when a fire races this refund. Any of the three
+        // actions is valid for fired and non-fired dishes alike.
+        const dishItemIds = calculation.items
+          .filter((item) => {
+            if (item.inventory_action === 'no_return') return false;
+            const oi = order.order_items.find(
+              (o) => o.id === item.order_item_id,
+            );
+            return (
+              oi?.products?.product_type === 'prepared' &&
+              oi.skip_kds !== true
+            );
+          })
+          .map((item) => item.order_item_id);
+        const firedByOrderItem = new Map<number, boolean>();
+        if (dishItemIds.length > 0) {
+          const freshDishFlags = await tx.order_items.findMany({
+            where: { id: { in: dishItemIds }, order_id: orderId },
+            select: { id: true, inventory_consumed_at_fire: true },
+          });
+          for (const row of freshDishFlags) {
+            firedByOrderItem.set(
+              row.id,
+              row.inventory_consumed_at_fire === true,
+            );
+          }
+        }
         for (const item of calculation.items) {
           if (item.inventory_action === 'no_return') continue;
 
@@ -369,6 +740,34 @@ export class RefundFlowService {
             (oi) => oi.id === item.order_item_id,
           );
           if (!orderItem?.products) continue;
+
+          // Paso 6 — dish branch: restock / write_off / no_return for fired
+          // and non-fired dishes alike (no_return is skipped above);
+          // leaf-level reversal at historical cost (never the sold dish),
+          // KDS item cancel in-tx, audit + COGS reclass post-commit.
+          // Retail lines (incl. stock-mode `skip_kds` dishes, whose own
+          // stock the payment consumed as a regular sale) fall through
+          // untouched.
+          if (
+            orderItem.products.product_type === 'prepared' &&
+            orderItem.skip_kds !== true
+          ) {
+            await this.processDishRefundLine(tx, {
+              orderId,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+              refundId: refund.id,
+              orderReason: dto.reason,
+              item,
+              soldQuantity: Number(orderItem.quantity ?? 0),
+              fired:
+                firedByOrderItem.get(item.order_item_id) ??
+                orderItem.inventory_consumed_at_fire === true,
+              userId,
+              postCommit: dishPostCommit,
+            });
+            continue;
+          }
 
           const stockUnits =
             stockUnitsByOrderItem.get(item.order_item_id) ?? item.quantity;
@@ -435,19 +834,22 @@ export class RefundFlowService {
           }
         }
 
-        // 4. Update payment state
-        const activePayment = order.payments.find(
-          (p) => p.state === 'succeeded' || p.state === 'pending',
-        );
-        if (activePayment) {
+        // 4. Update payment state across every settled leg. A full-coverage
+        // refund promotes ALL settled legs to `refunded` (the accumulated
+        // refunds covered the order); a partial marks the linked leg
+        // `partially_refunded` and leaves sibling legs untouched. Re-marking
+        // an already `partially_refunded` leg is idempotent.
+        if (calculation.is_full_refund) {
+          for (const leg of settledPayments) {
+            await tx.payments.update({
+              where: { id: leg.id },
+              data: { state: 'refunded', updated_at: new Date() },
+            });
+          }
+        } else if (linkedPaymentId != null) {
           await tx.payments.update({
-            where: { id: activePayment.id },
-            data: {
-              state: calculation.is_full_refund
-                ? 'refunded'
-                : 'partially_refunded',
-              updated_at: new Date(),
-            },
+            where: { id: linkedPaymentId },
+            data: { state: 'partially_refunded', updated_at: new Date() },
           });
         }
 
@@ -459,6 +861,14 @@ export class RefundFlowService {
               state: 'refunded',
               updated_at: new Date(),
             },
+          });
+          await this.orderHistoryService?.record(tx, {
+            orderId,
+            storeId: order.store_id,
+            organizationId: order.stores?.organization_id ?? null,
+            type: 'state_changed',
+            fromState: fresh.state,
+            toState: 'refunded',
           });
         }
 
@@ -641,6 +1051,64 @@ export class RefundFlowService {
           );
         }
 
+        // Paso 6 — dish post-commit drain: KDS SSE + COGS reclass collected
+        // in-tx by `processDishRefundLine`. Best-effort per job (the refund
+        // already committed): each failure is logged with the refund id for
+        // operator reconciliation, never thrown. Guarded no-op for refunds
+        // without dish lines.
+        if (
+          dishPostCommit.cancelledTicketIds.length > 0 ||
+          dishPostCommit.updatedTicketIds.length > 0 ||
+          dishPostCommit.reclassJobs.length > 0
+        ) {
+          const kds = this.kitchenFireService;
+          for (const ticketId of dishPostCommit.cancelledTicketIds) {
+            try {
+              await kds?.emitTicketCancelledEvent(ticketId);
+            } catch (error) {
+              this.logger.error(
+                `Refund #${completedRefund.id}: post-commit ticket.cancelled SSE for ticket #${ticketId} failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          for (const ticketId of dishPostCommit.updatedTicketIds) {
+            try {
+              await kds?.emitTicketUpdatedEvent(ticketId);
+            } catch (error) {
+              this.logger.error(
+                `Refund #${completedRefund.id}: post-commit ticket.updated SSE for ticket #${ticketId} failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          for (const job of dishPostCommit.reclassJobs) {
+            if (!this.autoEntryService) {
+              this.logger.error(
+                `AutoEntryService no disponible: reclass ${job.disposition} de ` +
+                  `ítem #${job.order_item_id} (refund #${completedRefund.id}, costo ${job.total_cost}) ` +
+                  `requiere conciliación desde audit_logs`,
+              );
+              continue;
+            }
+            try {
+              await this.autoEntryService.onPreparedDishDisposition({
+                order_id: orderId,
+                order_item_id: job.order_item_id,
+                organization_id: job.organization_id,
+                store_id: order.store_id,
+                disposition: job.disposition,
+                total_cost: job.total_cost,
+                user_id: userId ?? undefined,
+              });
+            } catch (error) {
+              this.logger.error(
+                `Refund #${completedRefund.id}: COGS reclass (${job.disposition}) ` +
+                  `for item #${job.order_item_id} failed, reconcile from audit_logs ` +
+                  `order_item.refund_dish_disposition: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+        }
+
         this.logger.log(
           `Refund #${completedRefund.id} processed for order #${orderId}: ` +
             `${calculation.total_refund.toFixed(2)} (${calculation.is_full_refund ? 'full' : 'partial'})`,
@@ -650,18 +1118,17 @@ export class RefundFlowService {
         // wallet so the refund value is actually available to them. Non-blocking
         // because the refund row is already committed — a credit failure only
         // means an operator alert via log; the sale refund is intact.
+        // Paso 4: vía `creditForRefund` (fila durable con reference refund;
+        // sin emisión `wallet.credited`: ver nota contable en WalletService).
         if (dto.refund_method === 'store_credit' && order.customer_id) {
           try {
-            const customerWallet =
-              await this.walletService.getOrCreateWallet(order.customer_id);
-            await this.walletBalance.credit(
-              customerWallet.id,
+            await this.walletService.creditForRefund(
+              order.customer_id,
               Number(calculation.total_refund),
               {
-                reference_type: 'refund',
-                reference_id: completedRefund.id,
-                description: `Refund #${completedRefund.id} for order #${orderId}`,
-                created_by: userId,
+                refund_id: completedRefund.id,
+                order_id: orderId,
+                user_id: userId,
               },
             );
             this.logger.log(
@@ -691,17 +1158,288 @@ export class RefundFlowService {
         // `bank_transfer` → el operador transfiere desde su app bancaria
         // manualmente; no hay integración API.
         const movesCash = effectiveChannel === 'cash';
+        // Paso 4: entrega durable y awaited — la respuesta lleva el aviso
+        // explícito (`recorded` / `pending` + fila del outbox) en vez de un
+        // éxito silencioso. El refund ya está committed: un `pending` no lo
+        // revierte, solo le dice al operador que la caja quedó por entregar.
+        let cash_movement: RefundCashMovementNotice | undefined;
         if (userId && movesCash) {
-          this.recordRefundCashRegisterMovement(
-            order.store_id,
-            userId,
-            calculation.total_refund,
-            orderId,
-          ).catch(() => {});
+          cash_movement = await this.recordRefundCashRegisterMovement({
+            organization_id: order.stores?.organization_id,
+            store_id: order.store_id,
+            user_id: userId,
+            refund_id: completedRefund.id,
+            order_id: orderId,
+            payment_id: completedRefund.payment_id ?? null,
+            amount: calculation.total_refund,
+            channel: effectiveChannel,
+          });
         }
 
-        return completedRefund;
+        return cash_movement === undefined
+          ? completedRefund
+          : { ...completedRefund, cash_movement };
+      },
+      // Step 1: the `.then(onFulfilled, onRejected)` two-arg form only
+      // handles the TRANSACTION rejection — `$transaction` itself takes a
+      // single callback (its 2nd param is options, NOT a handler), so the
+      // mapping MUST live here. Post-commit behavior (resilience guards
+      // above) is untouched. A unique violation inside the claim window
+      // surfaces as a creation conflict instead of a generic 500.
+      (error: unknown) => {
+        if ((error as { code?: string })?.code === 'P2002') {
+          throw new VendixHttpException(
+            ErrorCodes.REF_CREATE_001,
+            `Concurrent refund creation conflict on order #${orderId}`,
+          );
+        }
+        throw error;
+      },
+    );
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 6 — dish branch of `createRefund`, in-tx.
+   *
+   * Disposition for one `prepared` line (stock-mode `skip_kds` lines never
+   * reach here — the retail path owns them). Owner rule (2026-09-28): a
+   * dish admits ANY of the three inventory actions whether or not it was
+   * already fired to the kitchen (`inventory_consumed_at_fire`) — e.g. two
+   * identical orders entered by mistake, one refunded, its ingredients go
+   * back to stock:
+   *   - `restock` ⇒ reverses EXACTLY the recorded consumption transactions
+   *     for this line (sign +, historical unit cost, cost layer recreated,
+   *     COGS reclass reuse DR 1435 / CR 6135). For a fired dish those
+   *     transactions are the fire's BOM leaves; for a non-fired one, the
+   *     payment/delivery consumption. The recorded transaction is the
+   *     source of truth (same canon as
+   *     `OrderFlowService.disposeConsumedPreparedLeaves`: never restock the
+   *     sold dish). Re-exploding the CURRENT recipe here would restock
+   *     QUI-655 exclusions and post-fire recipe edits as phantom stock, and
+   *     would fabricate leaves for recipe-less fires, so the reversal is
+   *     sourcing-ledger, not re-derivation.
+   *   - `write_off` (motivo required) ⇒ no stock movement at all (a leaf
+   *     `damage` move would subtract twice — the consumption already
+   *     happened); the booked COGS is reclassed to loss post-commit
+   *     (DR 5295 / CR 6135) with full traceability in `audit_logs`.
+   *   - `no_return` ⇒ skipped by the caller, never reaches here.
+   *   `fired` is kept in the audit metadata for traceability only.
+   *   - partial quantities converge exactly across cumulative partials: this
+   *     refund reverses `round(consumed × cumAfter/sold) − round(consumed ×
+   *     cumBefore/sold)` per leaf, where the cumulative counts come from the
+   *     `refund_items` ledger (which already includes this refund's rows).
+   *   - KDS: this line's ticket items cancel in-tx (item-level — sibling
+   *     lines on the same ticket keep cooking); SSE (`ticket.cancelled` /
+   *     `ticket.updated`) and the COGS reclass (`onPreparedDishDisposition`,
+   *     existing lane, no new mapping keys) run post-commit via `postCommit`.
+   *     The reclass posts only when the line is FULLY covered, because the
+   *     lane's idempotency key is the order_item (a second post would be
+   *     skipped as duplicate): stock converges in-tx per partial, the single
+   *     reclass lands when the line closes.
+   *
+   * Never touches the anti-double-discount invariant: no flag is flipped
+   * here, so a later payment still skips fired lines (`flag=true`) and
+   * committed lines exactly as before.
+   */
+  private async processDishRefundLine(
+    tx: Prisma.TransactionClient,
+    input: {
+      orderId: number;
+      storeId: number;
+      organizationId: number | null | undefined;
+      refundId: number;
+      orderReason: string;
+      item: RefundCalculationResult['items'][number];
+      soldQuantity: number;
+      fired: boolean;
+      userId: number | null | undefined;
+      postCommit: DishRefundPostCommit;
+    },
+  ): Promise<void> {
+    const {
+      orderId, storeId, organizationId, refundId, item, soldQuantity, fired,
+      userId, postCommit,
+    } = input;
+    const orderItemId = item.order_item_id;
+    const refundQty = Number(item.quantity ?? 0);
+    const disposition: 'reuse' | 'waste' =
+      item.inventory_action === 'restock' ? 'reuse' : 'waste';
+
+    // 1. Validation. Fired dishes admit restock too (owner rule 2026-09-28):
+    // the reuse branch reverses the fire's recorded BOM leaves. Plain
+    // BadRequest messages — no new error codes.
+    const motivo = (item.reason?.trim() || input.orderReason?.trim() || '');
+    if (disposition === 'waste' && !motivo) {
+      throw new BadRequestException(
+        `Order item #${orderItemId} is a dish write-off: a reason (motivo) is required.`,
+      );
+    }
+    if (organizationId == null) {
+      throw new InternalServerErrorException(
+        `Refund #${refundId}: organization unknown, dish disposition for ` +
+          `item #${orderItemId} cannot be audited`,
+      );
+    }
+    const kds = this.kitchenFireService;
+    if (!kds) {
+      throw new InternalServerErrorException(
+        'KitchenFireService no disponible en RefundFlowService (revisar imports de OrderFlowModule)',
+      );
+    }
+
+    // 2. Recorded consumption for this line (fire leaves, or the own-stock
+    // sale for non-restaurant/legacy paths). Empty for recipe-less fires
+    // and never-consumed lines: both correctly reverse to nothing.
+    const consumed = await tx.inventory_transactions.findMany({
+      where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+      select: {
+        product_id: true,
+        product_variant_id: true,
+        quantity_change: true,
+        unit_cost: true,
+        total_cost: true,
+      },
+    });
+    const fullConsumedCost = consumed.reduce(
+      (sum, ct) => sum + Math.abs(Number(ct.total_cost ?? 0)),
+      0,
+    );
+
+    // 3. Cumulative line coverage from the ledger (this refund's rows were
+    // inserted in step 2 of this same tx, so they are already included).
+    // Release-853 (paso 7): filtrado por `REFUND_LEDGER_STATES` — sin el
+    // filtro, un refund `failed` previo inflaba `cumAfter` y el prorrateo
+    // reponía insumos de más (o encolaba un reclass indebido).
+    let cumAfter = refundQty;
+    if (soldQuantity > 0 && refundQty > 0) {
+      const ledger = await tx.refund_items.findMany({
+        where: {
+          order_item_id: orderItemId,
+          refunds: { state: { in: [...REFUND_LEDGER_STATES] } },
+        },
+        select: { quantity: true },
       });
+      cumAfter = ledger.reduce(
+        (sum, row) => sum + Number(row.quantity ?? 0),
+        0,
+      );
+    }
+    const cumBefore = Math.max(0, cumAfter - refundQty);
+    const fullCovered = soldQuantity > 0 && cumAfter >= soldQuantity;
+
+    // 4. Reuse: reverse the recorded consumption at historical cost,
+    // pro-rated to this refund's incremental share. No order_item_id on the
+    // reversal (same Restrict reason as cancelOrderItem); cumulative
+    // partials converge through the ledger math above, not through tags.
+    const reversedLeaves: Array<{
+      product_id: number;
+      quantity: number;
+      unit_cost: number;
+    }> = [];
+    if (disposition === 'reuse' && soldQuantity > 0 && refundQty > 0) {
+      for (const ct of consumed) {
+        const consumedQty = Math.abs(ct.quantity_change);
+        const targetNow = Math.round((consumedQty * cumAfter) / soldQuantity);
+        const targetBefore = Math.round((consumedQty * cumBefore) / soldQuantity);
+        const reverseQty = Math.max(0, targetNow - targetBefore);
+        if (reverseQty <= 0) continue;
+        const historicalTotal = Math.abs(Number(ct.total_cost ?? 0));
+        const unitCost = Number(
+          ct.unit_cost ?? (consumedQty > 0 ? historicalTotal / consumedQty : 0),
+        );
+        const locationId =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            ct.product_id,
+            ct.product_variant_id ?? undefined,
+          );
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: ct.product_id,
+            variant_id: ct.product_variant_id ?? undefined,
+            location_id: locationId,
+            quantity_change: reverseQty,
+            movement_type: 'return',
+            movement_unit_cost: unitCost > 0 ? unitCost : undefined,
+            reason:
+              `Refund #${refundId} restock plato (orden #${orderId} ítem #${orderItemId})` +
+              (motivo ? `: ${motivo}` : ''),
+            source_module: 'dish_refund',
+            create_movement: true,
+            validate_availability: false,
+          },
+          tx,
+        );
+        // updateStock(return) restores quantity/value snapshots but no cost
+        // layer — recreate it at the historical cost (cancelOrderItem canon).
+        await tx.inventory_cost_layers.create({
+          data: {
+            organization_id: organizationId,
+            product_id: ct.product_id,
+            product_variant_id: ct.product_variant_id,
+            location_id: locationId,
+            quantity_remaining: reverseQty,
+            unit_cost: new Prisma.Decimal(unitCost),
+            received_at: new Date(),
+          },
+        });
+        reversedLeaves.push({
+          product_id: ct.product_id,
+          quantity: reverseQty,
+          unit_cost: unitCost,
+        });
+      }
+    }
+
+    // 5. KDS cancel in-tx (item-level; SSE post-commit via `postCommit`).
+    const { cancelledTicketIds, updatedTicketIds } =
+      await kds.cancelTicketItemsForRefund(tx, orderId, [orderItemId]);
+    for (const id of cancelledTicketIds) {
+      if (!postCommit.cancelledTicketIds.includes(id)) {
+        postCommit.cancelledTicketIds.push(id);
+      }
+    }
+    for (const id of updatedTicketIds) {
+      if (!postCommit.updatedTicketIds.includes(id)) {
+        postCommit.updatedTicketIds.push(id);
+      }
+    }
+
+    // 6. Audit (same family as cancelOrderItem's prepared_disposition).
+    const requestId = RequestContextService.getRequestId();
+    await tx.audit_logs.create({
+      data: {
+        user_id: userId ?? null,
+        organization_id: organizationId,
+        store_id: storeId,
+        action: 'order_item.refund_dish_disposition',
+        resource: AuditResource.ORDERS,
+        resource_id: orderId,
+        request_id: requestId && requestId.length <= 100 ? requestId : null,
+        metadata: {
+          order_id: orderId,
+          order_item_id: orderItemId,
+          refund_id: refundId,
+          reason: motivo || null,
+          destination: disposition,
+          fired,
+          refunded_qty: refundQty,
+          cumulative_refunded_qty: cumAfter,
+          consumed_cost: fullConsumedCost,
+          reversed_leaves: reversedLeaves,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // 7. COGS reclass on full line coverage (reuse: DR 1435 / CR 6135
+    // symmetric reversal; waste: DR 5295 / CR 6135, COGS a pérdida).
+    if (fullCovered && fullConsumedCost > 0) {
+      postCommit.reclassJobs.push({
+        order_item_id: orderItemId,
+        organization_id: organizationId,
+        disposition,
+        total_cost: Math.round(fullConsumedCost * 100) / 100,
+      });
+    }
   }
 
   /**
@@ -829,8 +1567,14 @@ export class RefundFlowService {
     completedRefund: any,
     amount: number,
   ): Promise<{ status: 'completed' | 'failed' | 'processing'; message?: string }> {
+    // Step 2 follow-up: `partially_refunded` stays in play so a second
+    // `original_payment` gateway refund still auto-dispatches instead of
+    // parking as manual `processing`.
     const activePayment = order.payments?.find(
-      (p: any) => p.state === 'succeeded' || p.state === 'pending',
+      (p: any) =>
+        p.state === 'succeeded' ||
+        p.state === 'pending' ||
+        p.state === 'partially_refunded',
     );
 
     if (!activePayment) {
@@ -895,6 +1639,10 @@ export class RefundFlowService {
           updated_at: new Date(),
         },
       });
+      // Release-853 (paso 7): al caer a `failed` el refund sale del ledger
+      // — el caché por línea se re-agrega sin él (best-effort post-commit:
+      // el dinero ya se movió y el caché nunca revienta la respuesta).
+      await this.refreshLineCacheBestEffort(order.id, completedRefund.id);
       return { status: 'failed', message };
     }
 
@@ -928,6 +1676,9 @@ export class RefundFlowService {
         updated_at: new Date(),
       },
     });
+    if (newState === refunds_state_enum.failed) {
+      await this.refreshLineCacheBestEffort(order.id, completedRefund.id);
+    }
 
     this.logger.log(
       `Refund #${completedRefund.id}: processor returned status=${result.status}, persisted state=${newState}`,
@@ -947,33 +1698,88 @@ export class RefundFlowService {
   }
 
   /**
-   * Record a refund movement in the cash register if the feature is enabled
-   * and the user has an active session. Non-blocking.
+   * Release-853 (paso 7) — re-agregación best-effort del caché de cobertura
+   * tras una caída a `failed` fuera de tx (dispatch de pasarela). El refund
+   * ya cambió de estado y el dinero ya se movió: si el re-agregado falla
+   * se loguea para reconciliación del operador y la próxima creación o
+   * resolve lo repara (el helper es idempotente). Nunca lanza.
    */
-  private async recordRefundCashRegisterMovement(
-    storeId: number,
-    userId: number,
-    amount: number,
+  private async refreshLineCacheBestEffort(
     orderId: number,
+    refundId: number,
   ): Promise<void> {
+    try {
+      await this.coverageService?.recomputeLineCache(this.prisma, orderId);
+    } catch (error) {
+      this.logger.error(
+        `Refund #${refundId} (order #${orderId}): line-cache recompute after failed transition failed, reconcile from refund_items ledger: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 4 — entrega durable del movimiento de caja
+   * del refund. Reemplaza al best-effort silencioso: cada camino devuelve
+   * un aviso explícito que viaja en la respuesta (`recorded` / `pending` /
+   * `skipped`), y `pending` siempre deja fila en el outbox. Non-blocking
+   * para el refund (ya committed): hasta el fallo del propio outbox se
+   * degrada a `pending` con log, nunca lanza.
+   */
+  private async recordRefundCashRegisterMovement(input: {
+    organization_id: number | null | undefined;
+    store_id: number;
+    user_id: number;
+    refund_id: number;
+    order_id: number;
+    payment_id: number | null;
+    amount: number | Prisma.Decimal;
+    channel: string;
+  }): Promise<RefundCashMovementNotice> {
     try {
       const settings = await this.settingsService.getSettings();
       const cr_settings = (settings as any)?.pos?.cash_register;
-      if (!cr_settings?.enabled) return;
+      if (!cr_settings?.enabled) {
+        this.logger.warn(
+          `Refund #${input.refund_id} (order #${input.order_id}): cash register ` +
+            `module disabled — no cash movement to deliver (skipped).`,
+        );
+        return { status: 'skipped', reason: 'cash_register_disabled' };
+      }
+      if (input.organization_id == null) {
+        this.logger.error(
+          `Refund #${input.refund_id} (order #${input.order_id}): cannot ` +
+            `deliver cash movement — organization unknown, outbox row unwritable.`,
+        );
+        return { status: 'pending', failure_id: null, reason: 'unknown_organization' };
+      }
 
-      const session = await this.sessionsService.getActiveSession(userId);
-      if (!session) return;
+      // Sesión activa tal cual (`getActiveSession`); `null` = el durable
+      // escribe al outbox en vez de retornar en silencio.
+      const session = await this.sessionsService.getActiveSession(input.user_id);
 
-      await this.movementsService.recordRefundMovement(session.id, {
-        store_id: storeId,
-        user_id: userId,
-        amount,
-        payment_method: 'cash',
-        order_id: orderId,
-        reference: `Refund for order #${orderId}`,
+      return await this.movementsService.recordRefundCashMovementDurable({
+        organization_id: input.organization_id,
+        store_id: input.store_id,
+        user_id: input.user_id,
+        refund_id: input.refund_id,
+        order_id: input.order_id,
+        payment_id: input.payment_id,
+        amount: Number(input.amount),
+        channel: input.channel,
+        session_id: session?.id ?? null,
       });
-    } catch {
-      // Non-critical: don't fail the refund if movement recording fails
+    } catch (error) {
+      // Non-critical: don't fail the refund if movement recording fails —
+      // but say so explicitly instead of swallowing it.
+      this.logger.error(
+        `Refund #${input.refund_id} (order #${input.order_id}): cash movement ` +
+          `delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return {
+        status: 'pending',
+        failure_id: null,
+        reason: 'delivery_error',
+      };
     }
   }
 
@@ -1045,6 +1851,23 @@ export class RefundFlowService {
    *   `refund.completed` — cambiar el shape los rompería en silencio.
    *   Por eso este método REPLICA el bloque de emit existente, sólo
    *   intercambiando el `result` por el update manual.
+   *
+   * CP-REFUND-FLOW-REDESIGN paso 5 — normalización al contrato ordinario:
+   *   un `completed` manual aplica los mismos side-effects que un
+   *   `completed` ordinario (pagos con semántica multi-pago del paso 2,
+   *   orden a `refunded` al cubrir el acumulado, wallet vía
+   *   `creditForRefund`, caja vía `recordRefundCashRegisterMovement`
+   *   durable del paso 4) y emite `refund.completed` con los campos
+   *   canónicos (montos, `tax_breakdown`, `refund_method`,
+   *   `effective_channel`). Dos lados quedan explícitamente manuales
+   *   (escape hatch de la Business decision): (1) el asiento contable
+   *   sigue en el carril durable `manual_refund_delivery_v1` — el
+   *   listener ordinario lo salta por el marcador `manual_durable`, así
+   *   que el carril único anti-doble-reversa refund-vs-NC queda intacto
+   *   y ningún consumidor recibe un doble post; (2) inventario y caché
+   *   de cobertura NO se re-aplican porque ya se escribieron en la
+   *   creación del refund (re-mover stock duplicaría unidades) y los
+   *   refunds sin ítems (cancelación) no tienen nada que aplicar.
    */
   async manuallyResolveRefund(
     orderId: number,
@@ -1052,11 +1875,9 @@ export class RefundFlowService {
     targetState: 'completed' | 'failed',
     resolutionNotes: string,
     userId: number,
+    payoutReference?: string,
+    payoutChannel?: RefundPayoutChannel,
   ) {
-    // (3) Re-verificación defensiva de la nota — el DTO ya exige
-    // `@IsNotEmpty()`, pero esta función puede llamarse desde otros
-    // call-sites en el futuro. Trim explícito para no aceptar
-    // `"   "` como nota válida.
     const trimmedNotes =
       typeof resolutionNotes === 'string' ? resolutionNotes.trim() : '';
     if (!trimmedNotes) {
@@ -1064,152 +1885,482 @@ export class RefundFlowService {
         'resolution_notes is required for manual refund resolution',
       );
     }
+    const reference = typeof payoutReference === 'string' ? payoutReference.trim() : '';
+    if (
+      targetState === 'completed' &&
+      (!reference || reference.length > 255 ||
+        !Object.values(RefundPayoutChannel).includes(payoutChannel as RefundPayoutChannel))
+    ) {
+      throw new VendixHttpException(ErrorCodes.REF_PAYOUT_REQUIRED_001);
+    }
 
-    // (1) Scoped lookup (el Store scope del `StorePrismaService` filtra
-    // cross-tenant). Traemos `order_id` junto con `state` y
-    // `processed_at` para validar pertenencia y construir el update
-    // en la misma lectura.
-    const refund = await this.prisma.refunds.findFirst({
-      where: { id: refundId },
+    // refunds has no `stores` relation. The scoped order read establishes the
+    // real store and organization; the refund lookup remains bound to orderId.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
       select: {
         id: true,
-        order_id: true,
+        store_id: true,
+        // Paso 5: estado + cliente + piernas de pago para los side-effects
+        // ordinarios (promoción de orden/pagos, wallet). `order_number`
+        // alimenta `order.status_changed` como en `createRefund`.
         state: true,
-        processed_at: true,
-        amount: true,
-        subtotal_refund: true,
-        tax_refund: true,
-        shipping_refund: true,
-        refund_method: true,
+        customer_id: true,
+        order_number: true,
+        payments: { select: { id: true, state: true } },
+        grand_total: true,
+        shipping_cost: true,
+        shipping_tax_amount: true,
+        shipping_tax_type: true,
         stores: { select: { organization_id: true } },
+        order_items: {
+          select: {
+            order_item_taxes: { select: { tax_type: true, tax_amount: true } },
+          },
+        },
+        refunds: {
+          where: { state: 'completed' },
+          select: { id: true, amount: true, shipping_refund: true },
+        },
       },
     });
-    if (!refund || refund.order_id !== orderId) {
-      // ERR-02: 404 con código explícito. No distinguimos "no existe"
-      // de "no pertenece a esta orden / tienda" para no leakear la
-      // existencia de refunds de otras tiendas vía respuesta
-      // diferenciada.
-      throw new NotFoundException(`Refund #${refundId} not found`);
+    if (!order?.stores?.organization_id) {
+      throw new NotFoundException(`Order #${orderId} not found`);
     }
-
-    // (2) Guarda de estado no-terminal. `completed | failed | cancelled`
-    // son terminales: reescribir uno corrompería el histórico contable.
-    // El plan declara este caso ERR-01 (409) — aquí usamos
-    // BadRequestException porque ya es el patrón del archivo (línea
-    // 870 y siguientes); el filtro global del módulo contable acepta
-    // códigos 4xx indistintamente para mapeo cliente.
-    const terminalStates: refunds_state_enum[] = [
-      refunds_state_enum.completed,
-      refunds_state_enum.failed,
-      refunds_state_enum.cancelled,
-    ];
-    if (terminalStates.includes(refund.state)) {
-      throw new BadRequestException(
-        `Refund #${refundId} is already in terminal state '${refund.state}' and cannot be resolved again`,
-      );
-    }
-
-    const newState =
-      targetState === 'completed'
-        ? refunds_state_enum.completed
-        : refunds_state_enum.failed;
-
-    // `processed_at` se setea cuando el refund termina EXITOSAMENTE.
-    // Si va a `failed` y ya tenía valor (poco probable, pero por si
-    // el processor lo había marcado y luego queremos forzar `failed`
-    // vía manual), preservamos ese valor histórico. Si era null,
-    // sigue null — un `failed` no es una "ejecución completada".
-    const processedAt =
-      newState === refunds_state_enum.completed
-        ? new Date()
-        : refund.processed_at ?? null;
-
-    const updatedRefund = await this.prisma.refunds.update({
-      where: { id: refundId },
-      data: {
-        state: newState,
-        resolved_by_user_id: userId,
-        resolution_notes: trimmedNotes,
-        processed_at: processedAt,
-        updated_at: new Date(),
-      },
-    });
-
-    // (4) Emit canónico — exactamente el mismo shape que usa
-    // `createRefund` en líneas 485-509. Los listeners de contabilidad
-    // y de invalidación de caché consumen este evento.
-    if (newState === refunds_state_enum.completed) {
-      // Lookup del canal efectivo para que la contabilidad enrute a la
-      // PUC correcta (1105/1110/2335). Se calcula contra el método de
-      // pago ORIGINAL — el operador que cerró el refund no lo cambió,
-      // sólo cerró la fila. Re-llamamos al resolver con el input
-      // `paymentType` que la orden llevaba cuando se creó el refund.
-      //
-      // Esta consulta extra es aceptable: el resolve endpoint es
-      // operator-driven (1-2 clicks), no high-throughput. Si el
-      // resolver requiere `payments` que la fila no carga, devolvemos
-      // `null` y el listener cae al fallback `cash` — mismo
-      // comportamiento que el emit original cuando no hay pagos. El
-      // log warning deja rastro para diagnóstico.
-      const refundWithPayment = await this.prisma.refunds.findFirst({
-        where: { id: refundId },
-        include: {
-          payments: {
-            select: {
-              store_payment_method: {
-                select: { system_payment_method: { select: { type: true } } },
+    const refund = await this.prisma.refunds.findFirst({
+      where: { id: refundId, order_id: orderId },
+      include: {
+        refund_items: {
+          select: {
+            tax_amount: true,
+            order_items: {
+              select: {
+                order_item_taxes: { select: { tax_type: true, tax_amount: true } },
               },
             },
           },
         },
-      });
-      let paymentType: string | null = null;
-      if (
-        refundWithPayment?.payments?.store_payment_method?.system_payment_method
-          ?.type
-      ) {
-        paymentType =
-          refundWithPayment.payments.store_payment_method
-            .system_payment_method.type;
-      }
-      const effectiveChannel = resolveEffectiveRefundChannel(
-        refund.refund_method ?? 'original_payment',
-        paymentType,
-      );
-
-      this.eventEmitter.emit('refund.completed', {
-        refund_id: updatedRefund.id,
-        order_id: orderId,
-        organization_id: refund.stores?.organization_id,
-        store_id: undefined, // El refund row no carga store_id directamente;
-        //   el listener de cache lo usa opcionalmente. Lo dejamos
-        //   undefined para no inventar el id — si el listener lo
-        //   necesita, la organización ya está en el payload.
-        amount: Number(updatedRefund.amount),
-        subtotal: refund.subtotal_refund ? Number(refund.subtotal_refund) : undefined,
-        tax: refund.tax_refund ? Number(refund.tax_refund) : undefined,
-        tax_amount: refund.tax_refund ? Number(refund.tax_refund) : undefined,
-        shipping: refund.shipping_refund
-          ? Number(refund.shipping_refund)
-          : undefined,
-        is_full_refund: false, // El manual resolve NO es por flujo completo —
-        //   la UX permite ambos. Sin este dato en la URL no podemos
-        //   inferir; lo marcamos false para que contabilidad no
-        //   aplique lógica de refund total.
-        user_id: userId,
-        refund_method: refund.refund_method ?? undefined,
-        effective_channel: effectiveChannel,
-        resolution_notes: trimmedNotes,
-      });
+      },
+    });
+    if (!refund || refund.order_id !== orderId) {
+      throw new NotFoundException(`Refund #${refundId} not found`);
     }
 
-    // Log diagnóstico — el caller sólo necesita la fila actualizada, pero
-    // el equipo de soporte revisa el log para auditar quién cerró qué.
+    const nonterminalStates: refunds_state_enum[] = [
+      refunds_state_enum.requested,
+      refunds_state_enum.pending_approval,
+      refunds_state_enum.approved,
+      refunds_state_enum.processing,
+    ];
+    if (!nonterminalStates.includes(refund.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_RESOLUTION_CONFLICT_001,
+        `Refund #${refundId} is already in terminal state '${refund.state}' and cannot be resolved again`,
+      );
+    }
+    if (
+      targetState === 'completed' &&
+      refund.refund_transaction_id &&
+      refund.refund_transaction_id !== reference &&
+      !isCancellationRefundPlaceholder(refund.refund_transaction_id)
+    ) {
+      // A gateway refund ID may already occupy this unique column. Never
+      // overwrite it with a different manual payout reference. ADR-12
+      // placeholders are the deliberate exception: they are deterministic
+      // no-dup keys, not gateway ids, so the real payout reference replaces
+      // them — otherwise no cancellation refund could ever close manually.
+      throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+    }
+
+    // Paso 5 — cobertura acumulada en decimales exactos: lo ya completado
+    // (cargado en el select de arriba) más este refund cubre el total de la
+    // orden con tolerancia de 1¢, igual que el techo del paso 1.
+    const orderGrandTotal = new Prisma.Decimal(order.grand_total as any);
+    const priorCompletedTotal = (order.refunds ?? []).reduce(
+      (acc, row) => acc.plus(new Prisma.Decimal(row.amount as any)),
+      new Prisma.Decimal(0),
+    );
+    // Valor pre-tx (lectura sin lock): se RECALCULA bajo el lock dentro de
+    // la tx de abajo (release-853, paso 7) — un resolve concurrente puede
+    // completar otro parcial entre ambas lecturas y dejarlo viejo.
+    let isFullRefund = priorCompletedTotal
+      .plus(new Prisma.Decimal(refund.amount as any))
+      .greaterThanOrEqualTo(orderGrandTotal.minus(0.01));
+    // La orden sólo se promueve desde estados reembolsables: una orden
+    // `cancelled` (cancelación ADR-12/efectivo) conserva su estado — el
+    // `refunded` ordinario nunca pisa una cancelación.
+    let willPromoteOrder =
+      targetState === 'completed' &&
+      isFullRefund &&
+      REFUNDABLE_STATES.includes(order.state);
+    // Piernas liquidadas con el mismo predicado del paso 2: una pierna
+    // `partially_refunded` sigue en juego para promoverse a `refunded`.
+    const settledLegs = (order.payments ?? [])
+      .filter(
+        (leg) =>
+          leg.state === 'succeeded' ||
+          leg.state === 'pending' ||
+          leg.state === 'partially_refunded',
+      )
+      .sort((a, b) => a.id - b.id);
+
+    const newState = targetState === 'completed'
+      ? refunds_state_enum.completed
+      : refunds_state_enum.failed;
+    const processedAt = newState === refunds_state_enum.completed
+      ? new Date()
+      : refund.processed_at ?? null;
+    const updateData = {
+      state: newState,
+      resolved_by_user_id: userId,
+      resolution_notes: trimmedNotes,
+      processed_at: processedAt,
+      updated_at: new Date(),
+      ...(targetState === 'completed' ? {
+        refund_transaction_id: reference,
+        refund_method: payoutChannel!,
+      } : {}),
+    };
+    let deliveryId: number | null = null;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Serialize two manual completions for the same order, so the prior
+        // shipping/tip allocation snapshot has a deterministic predecessor.
+        await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
+        const prior = await tx.refunds.findMany({
+          where: { order_id: orderId, state: 'completed' },
+          select: { id: true, amount: true },
+        });
+        // Release-853 (paso 7) — `is_full_refund` bajo el lock: la lectura
+        // pre-tx pudo quedar vieja si otro resolve concurrente completó un
+        // parcial en el medio. Sólo `completed` cubre (un `failed`/`pending`
+        // no movió dinero y no promueve pagos ni orden a `refunded`).
+        isFullRefund = prior
+          .reduce(
+            (acc, row) => acc.plus(new Prisma.Decimal((row.amount as any) ?? 0)),
+            new Prisma.Decimal(0),
+          )
+          .plus(new Prisma.Decimal(refund.amount as any))
+          .greaterThanOrEqualTo(orderGrandTotal.minus(0.01));
+        willPromoteOrder =
+          targetState === 'completed' &&
+          isFullRefund &&
+          REFUNDABLE_STATES.includes(order.state);
+        const claim = await tx.refunds.updateMany({
+          where: {
+            id: refundId, order_id: orderId,
+            state: { in: nonterminalStates },
+          },
+          data: updateData,
+        });
+        if (claim.count !== 1) throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+        // Plan order-truth-and-invoice-tz — Paso 6. Resolución manual del
+        // refund (completed o failed); el `state_changed` de la orden (si
+        // esta rama promueve) se registra junto a esa escritura, más abajo.
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores.organization_id,
+          type: 'refund_resolved',
+          paymentId: refund.payment_id ?? null,
+          amount: refund.amount.toString(),
+          actorUserId: userId,
+          payload: {
+            refund_id: refundId,
+            target_state: targetState,
+            resolution_notes: trimmedNotes,
+            payout_reference: targetState === 'completed' ? reference : null,
+            payout_channel: targetState === 'completed' ? payoutChannel : null,
+          },
+        });
+        if (targetState === 'completed') {
+          const payload: ManualRefundDeliveryPayload = {
+            version: 1, refund_id: refundId, order_id: orderId,
+            organization_id: order.stores.organization_id,
+            store_id: order.store_id, user_id: userId,
+            payout_channel: payoutChannel!,
+            prior_refund_ids: prior.map((row) => row.id),
+          };
+          const delivery = await tx.accounting_entry_failures.create({ data: {
+            organization_id: payload.organization_id,
+            store_id: payload.store_id,
+            handler_key: MANUAL_REFUND_DELIVERY_KEY,
+            source_type: MANUAL_REFUND_DELIVERY_SOURCE,
+            source_id: refundId,
+            event_payload: payload as unknown as Prisma.InputJsonValue,
+            error_message: 'PENDING_DELIVERY: manual refund accounting not yet posted',
+          } });
+          deliveryId = delivery.id;
+
+          // Paso 5 — side-effects ordinarios de pago/orden, atómicos con el
+          // claim. Idempotentes para refunds atascados (la creación ya los
+          // aplicó con los mismos valores) y correctivos para piernas de
+          // cancelación (ADR-12), que nacen sin tocar pagos. Un parcial sin
+          // `payment_id` vinculado no atribuye pierna: se salta antes que
+          // marcar un pago ajeno.
+          if (isFullRefund) {
+            for (const leg of settledLegs) {
+              await tx.payments.update({
+                where: { id: leg.id },
+                data: { state: 'refunded', updated_at: new Date() },
+              });
+            }
+          } else {
+            const linkedPaymentId = refund.payment_id;
+            if (
+              linkedPaymentId != null &&
+              settledLegs.some((leg) => leg.id === linkedPaymentId)
+            ) {
+              await tx.payments.update({
+                where: { id: linkedPaymentId },
+                data: { state: 'partially_refunded', updated_at: new Date() },
+              });
+            }
+          }
+          if (willPromoteOrder) {
+            await tx.orders.update({
+              where: { id: orderId },
+              data: { state: 'refunded', updated_at: new Date() },
+            });
+            await this.orderHistoryService?.record(tx, {
+              orderId,
+              storeId: order.store_id,
+              organizationId: order.stores.organization_id,
+              type: 'state_changed',
+              fromState: order.state,
+              toState: 'refunded',
+            });
+          }
+        } else {
+          // Release-853 (paso 7) — rama `failed`: el refund sale del ledger
+          // en este mismo claim, así que el caché por línea se re-agrega
+          // sin él (las líneas que quedan sin ledger vuelven a 0). En-tx
+          // bajo el lock de la orden: si el re-agregado falla, el resolve
+          // entero revierte en vez de dejar caché y ledger descuadrados.
+          await this.coverageService?.recomputeLineCache(tx, orderId);
+        }
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === 'P2002') {
+        throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+      }
+      throw error;
+    }
+    const updatedRefund = { ...refund, ...updateData };
+    // Paso 5 — `payoutChannel` es un canal directo (cash/bank_transfer/
+    // store_credit/gateway): el resolver lo mapea uno-a-uno sin necesitar
+    // el tipo del pago original.
+    const effectiveChannel =
+      deliveryId !== null
+        ? resolveEffectiveRefundChannel(payoutChannel!, null)
+        : null;
+    let cash_movement: RefundCashMovementNotice | undefined;
+    if (deliveryId !== null) {
+      // The row survives a process crash here; the retry worker also sweeps
+      // stranded rows. A journal failure cannot undo a real-world payout.
+      try { await this.manualRefundDelivery.deliver(deliveryId); }
+      catch (error) {
+        this.logger.error(`Refund #${refundId} accounting delivery #${deliveryId} remains unresolved: ${error}`);
+        try { await this.manualRefundDelivery.enqueue(deliveryId); }
+        catch (queueError) { this.logger.error(`Refund #${refundId} delivery retry could not be queued: ${queueError}`); }
+      }
+      // Paso 5 — emit canónico: los mismos campos que `createRefund`
+      // (montos, desglose, método, canal efectivo) reconstruidos de la fila
+      // persistida. El marcador `manual_durable` se conserva para que el
+      // listener ordinario NO postee un segundo asiento: el carril único
+      // sigue siendo la delivery durable de arriba.
+      const fiscal = this.buildManualResolveFiscalPayload(order, refund);
+      try {
+        this.eventEmitter.emit('refund.completed', {
+          refund_id: refundId, order_id: orderId,
+          organization_id: order.stores.organization_id, store_id: order.store_id,
+          amount: fiscal.amount,
+          subtotal: fiscal.subtotal,
+          tax: fiscal.tax,
+          tax_amount: fiscal.tax_amount,
+          tax_breakdown: fiscal.tax_breakdown,
+          shipping: fiscal.shipping,
+          is_full_refund: isFullRefund,
+          user_id: userId,
+          refund_method: payoutChannel!,
+          effective_channel: effectiveChannel!,
+          accounting_delivery: 'manual_durable',
+        });
+      } catch (error) {
+        this.logger.error(`Refund #${refundId} cache invalidation event failed: ${error}`);
+      }
+
+      if (willPromoteOrder) {
+        try {
+          this.eventEmitter.emit('order.status_changed', {
+            store_id: order.store_id,
+            organization_id: order.stores.organization_id,
+            order_id: orderId,
+            order_number: order.order_number,
+            old_state: order.state,
+            new_state: 'refunded',
+          });
+        } catch (error) {
+          this.logger.error(`Refund #${refundId} order status event failed: ${error}`);
+        }
+      }
+
+      // Paso 5 — wallet vía el mismo `creditForRefund` durable del paso 4.
+      // Non-blocking como en el ordinario: el refund ya está committed.
+      if (payoutChannel === RefundPayoutChannel.STORE_CREDIT && order.customer_id) {
+        try {
+          await this.walletService.creditForRefund(
+            order.customer_id,
+            fiscal.amount,
+            { refund_id: refundId, order_id: orderId, user_id: userId },
+          );
+          this.logger.log(
+            `Wallet credited: customer=${order.customer_id} amount=${fiscal.amount} refund=#${refundId} (manual resolve)`,
+          );
+        } catch (e) {
+          this.logger.error(
+            `Failed to credit wallet for manually resolved refund #${refundId} (customer=${order.customer_id}): ${e?.message ?? e}`,
+          );
+        }
+      }
+
+      // Paso 5 — caja vía el helper durable compartido del paso 4. Sólo
+      // cuando el canal efectivo es `cash` (misma compuerta del ordinario);
+      // la respuesta lleva el aviso explícito igual que `createRefund`.
+      if (userId && effectiveChannel === 'cash') {
+        cash_movement = await this.recordRefundCashRegisterMovement({
+          organization_id: order.stores.organization_id,
+          store_id: order.store_id,
+          user_id: userId,
+          refund_id: refundId,
+          order_id: orderId,
+          payment_id: refund.payment_id ?? null,
+          amount: fiscal.amount,
+          channel: effectiveChannel,
+        });
+      }
+    }
     this.logger.log(
       `Refund #${refundId} (order #${orderId}) manually resolved to '${newState}' by user #${userId}: "${trimmedNotes.slice(0, 80)}${trimmedNotes.length > 80 ? '…' : ''}"`,
     );
+    return cash_movement === undefined
+      ? updatedRefund
+      : { ...updatedRefund, cash_movement };
+  }
 
-    return updatedRefund;
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 5 — reconstruye los montos canónicos del
+   * emit `refund.completed` desde la fila persistida del refund (misma
+   * derivación que el bloque de emit de `createRefund`, sin re-consultar:
+   * todo viene de los selects ya cargados). Las filas tipadas se toman de
+   * los ítems del refund cuando existen y de la orden en caso contrario
+   * (refunds de cancelación sin ítems). El impuesto del envío usa la misma
+   * fórmula determinista de `RefundCalculationService.calculate` sobre la
+   * copia congelada de la orden (`shipping_refund` es BRUTO).
+   */
+  private buildManualResolveFiscalPayload(
+    order: {
+      shipping_cost: Prisma.Decimal | number;
+      shipping_tax_amount: Prisma.Decimal | number;
+      shipping_tax_type: string | null;
+      order_items?: {
+        order_item_taxes?: {
+          tax_type?: string | null;
+          tax_amount?: Prisma.Decimal | number | null;
+        }[] | null;
+      }[] | null;
+      refunds?: {
+        shipping_refund?: Prisma.Decimal | number | null;
+      }[] | null;
+    },
+    refund: {
+      amount: Prisma.Decimal | number;
+      subtotal_refund?: Prisma.Decimal | number | null;
+      tax_refund?: Prisma.Decimal | number | null;
+      shipping_refund?: Prisma.Decimal | number | null;
+      refund_items?: {
+        order_items?: {
+          order_item_taxes?: {
+            tax_type?: string | null;
+            tax_amount?: Prisma.Decimal | number | null;
+          }[] | null;
+        } | null;
+      }[] | null;
+    },
+  ): {
+    amount: number;
+    subtotal: number;
+    tax: number;
+    tax_amount: number;
+    tax_breakdown: TaxBreakdownItem[];
+    shipping: number;
+  } {
+    const productTax = Number(refund.tax_refund ?? 0);
+    const itemTaxRows = (refund.refund_items ?? []).flatMap(
+      (item) => item.order_items?.order_item_taxes ?? [],
+    );
+    const orderTaxRows = (order.order_items ?? []).flatMap(
+      (item) => item.order_item_taxes ?? [],
+    );
+    // B1 gate step 10: buildTaxBreakdown exige tax_amount presente; la
+    // normalización vive en el borde (filas ?? 0 se ignoran igual adentro).
+    const taxRows = (itemTaxRows.length > 0 ? itemTaxRows : orderTaxRows).map(
+      (row) => ({ ...row, tax_amount: row.tax_amount ?? 0 }),
+    );
+    const tax_breakdown = scaleBreakdownToTotal(
+      buildTaxBreakdown(taxRows),
+      productTax,
+    );
+    const shippingRefundCents = Math.round(
+      Number(refund.shipping_refund ?? 0) * 100,
+    );
+    const shippingCostCents = Math.round(Number(order.shipping_cost ?? 0) * 100);
+    const shippingTaxCents = Math.round(
+      Number(order.shipping_tax_amount ?? 0) * 100,
+    );
+    let shippingTaxRefund = 0;
+    if (
+      shippingRefundCents > 0 &&
+      shippingCostCents > 0 &&
+      shippingTaxCents > 0
+    ) {
+      const proportional = (cents: number) =>
+        Math.round((shippingTaxCents * cents) / shippingCostCents);
+      let priorCents = 0;
+      let priorTaxCents = 0;
+      for (const row of order.refunds ?? []) {
+        const cents = Math.round(Number(row.shipping_refund ?? 0) * 100);
+        if (cents <= 0) continue;
+        priorCents += cents;
+        priorTaxCents += proportional(cents);
+      }
+      const remaining = Math.max(0, shippingTaxCents - priorTaxCents);
+      shippingTaxRefund =
+        (priorCents + shippingRefundCents >= shippingCostCents
+          ? remaining
+          : Math.min(remaining, proportional(shippingRefundCents))) / 100;
+    }
+    const shippingTaxType =
+      shippingTaxRefund > 0 ? (order.shipping_tax_type ?? null) : null;
+    if (shippingTaxRefund > 0 && shippingTaxType) {
+      if (tax_breakdown.length === 0 && productTax > 0) {
+        tax_breakdown.push({ tax_type: 'iva', tax_amount: productTax });
+      }
+      tax_breakdown.push({
+        tax_type: shippingTaxType as TaxBreakdownItem['tax_type'],
+        tax_amount: shippingTaxRefund,
+      });
+    }
+    const tax =
+      Math.round(productTax * 100 + shippingTaxRefund * 100) / 100;
+    return {
+      amount: Number(refund.amount ?? 0),
+      subtotal: Number(refund.subtotal_refund ?? 0),
+      tax,
+      tax_amount: tax,
+      tax_breakdown,
+      shipping: Number(refund.shipping_refund ?? 0),
+    };
   }
 
   /**

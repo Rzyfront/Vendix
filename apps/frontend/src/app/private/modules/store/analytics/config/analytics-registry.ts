@@ -26,7 +26,8 @@ export type AnalyticsCategoryId =
   | 'customers'
   | 'reviews'
   | 'financial'
-  | 'dispatch';
+  | 'dispatch'
+  | 'payments';
 
 export interface AnalyticsCategory {
   id: AnalyticsCategoryId;
@@ -34,7 +35,8 @@ export interface AnalyticsCategory {
   description: string;
   icon: string;
   color: string;
-  panelUiKey: string;
+  /** Opcional: la categoría Pagos no tiene clave de panel_ui propia (no se filtra por módulo). */
+  panelUiKey?: string;
 }
 
 export interface AnalyticsView {
@@ -49,7 +51,7 @@ export interface AnalyticsView {
 }
 
 // ─────────────────────────────────────────────
-// Categories (9 total)
+// Categories (10 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
@@ -125,10 +127,17 @@ export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
     color: 'var(--color-warning)',
     panelUiKey: 'analytics_dispatch',
   },
+  {
+    id: 'payments',
+    label: 'Pagos',
+    description: 'Recaudo, estados y participación por método de pago',
+    icon: 'credit-card',
+    color: 'var(--color-success)',
+  },
 ];
 
 // ─────────────────────────────────────────────
-// Views (28 total)
+// Views (35 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_VIEWS: AnalyticsView[] = [
@@ -304,7 +313,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'coins',
   },
 
-  // Purchases (2)
+  // Purchases (4)
   {
     key: 'purchases_summary',
     title: 'Resumen de Compras',
@@ -322,6 +331,26 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/purchases/by-supplier',
     category: 'purchases',
     icon: 'truck',
+  },
+  {
+    key: 'purchases_trends',
+    title: 'Tendencias de Compra',
+    description: 'Evolución temporal del gasto en proveedores y órdenes',
+    detailedDescription: 'Analiza la evolución temporal de compras, volumen de órdenes, ticket promedio y unidades recibidas por período.',
+    route: '/admin/analytics/purchases/trends',
+    category: 'purchases',
+    icon: 'trending-up',
+  },
+  {
+    // QUI-542: Cuentas por pagar a proveedores por edades de mora
+    key: 'purchases_payable_aging',
+    title: 'Cuentas por Pagar Proveedor',
+    description: 'Cartera a proveedores y saldos por edades de vencimiento',
+    detailedDescription:
+      'Gestiona las cuentas por pagar a proveedores con distribución de mora por edades (corriente, 1-30, 31-60, 61-90 y >90 días) y detalle por proveedor.',
+    route: '/admin/analytics/purchases/payable-aging',
+    category: 'purchases',
+    icon: 'clock',
   },
 
   // Customers (4)
@@ -363,7 +392,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'hand-coins',
   },
 
-  // Reviews (1)
+  // Reviews (2)
   {
     key: 'reviews_summary',
     title: 'Resumen de Reseñas',
@@ -372,6 +401,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/reviews/summary',
     category: 'reviews',
     icon: 'message-square',
+  },
+  {
+    key: 'reviews_by_product',
+    title: 'Reseñas por Producto',
+    description: 'Promedio y distribución de estrellas por producto',
+    detailedDescription: 'Calificación promedio, distribución 1-5 estrellas, verificadas y pendientes por producto.',
+    route: '/admin/analytics/reviews/by-product',
+    category: 'reviews',
+    icon: 'star',
   },
 
   // Financial (3)
@@ -431,6 +469,26 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     category: 'dispatch',
     icon: 'wallet',
   },
+
+  // Payments (2)
+  {
+    key: 'payments_overview',
+    title: 'Resumen de Pagos',
+    description: 'Recaudo, cantidad de pagos, tendencia y estados del periodo',
+    detailedDescription: 'Visualiza cuánto se recaudó, el ticket promedio, lo reembolsado, la tendencia por periodo y el desglose por estado de pago.',
+    route: '/admin/analytics/payments/overview',
+    category: 'payments',
+    icon: 'credit-card',
+  },
+  {
+    key: 'payments_by_method',
+    title: 'Por Método de Pago',
+    description: 'Participación del recaudo por método de pago',
+    detailedDescription: 'Compara cuánto recauda cada método de pago y qué porcentaje aporta al total recaudado del periodo.',
+    route: '/admin/analytics/payments/by-method',
+    category: 'payments',
+    icon: 'pie-chart',
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -457,7 +515,7 @@ export function getSidebarEntries(): {
   label: string;
   route: string;
   icon: string;
-  panelUiKey: string;
+  panelUiKey: string | undefined;
   viewCount: number;
 }[] {
   return ANALYTICS_CATEGORIES.map((cat) => ({

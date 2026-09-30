@@ -11,6 +11,8 @@ import { RepartosService } from '../../../store-delivery/services/repartos.servi
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { DispatchTicketPrintService } from '../../dispatch-ticket/services/dispatch-ticket-print.service';
+import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
+import { StoreOrdersService } from '../../orders/services/store-orders.service';
 import { PosFiscalStatus } from '../services/pos-fiscal.service';
 
 @Component({ selector: 'app-modal', standalone: true, template: `<ng-content></ng-content><ng-content select="[slot=footer]"></ng-content>` })
@@ -52,6 +54,43 @@ class PosFiscalStatusStub {
   readonly orderId = input<number | null>(null);
   readonly autoLoad = input(true);
   readonly statusChanged = output<PosFiscalStatus>();
+}
+
+@Component({ selector: 'app-dispatch-method-selector-modal', standalone: true, template: `` })
+class DispatchMethodSelectorStub {
+  readonly isOpen = input(false);
+  readonly enabledMethods = input<unknown[]>([]);
+  readonly selected = output<unknown>();
+  readonly closed = output<void>();
+}
+
+@Component({ selector: 'app-courier-name-modal', standalone: true, template: `` })
+class CourierNameStub {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly confirmed = output<string>();
+  readonly closed = output<void>();
+}
+
+@Component({ selector: 'app-generate-dispatch-wizard', standalone: true, template: `` })
+class DispatchWizardStub {
+  readonly isOpen = input(false);
+  readonly order = input<unknown>(null);
+  readonly generated = output<number>();
+  readonly requestAddress = output<void>();
+  readonly closed = output<void>();
+}
+
+@Component({ selector: 'app-shipping-address-modal', standalone: true, template: `` })
+class ShippingAddressStub {
+  readonly customerId = input<unknown>(null);
+  readonly customerName = input<unknown>(null);
+  readonly saving = input(false);
+  readonly addressId = input<unknown>(null);
+  readonly initialAddress = input<unknown>(null);
+  readonly close = output<void>();
+  readonly submitForm = output<unknown>();
+  readonly submitEdit = output<unknown>();
 }
 
 describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-autoprint-sync)', () => {
@@ -108,6 +147,7 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
       settings: storeSettingsSignal,
       receipts: signal({ print_dispatch_ticket_enabled: false }),
       pos: signal({ auto_print_receipt: true }),
+      dispatch: signal(null),
     };
 
     mockStore = {
@@ -127,6 +167,9 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
         IconStub,
         InvoicingNotConfiguredStub,
         PosFiscalStatusStub,
+        DispatchMethodSelectorStub,
+        CourierNameStub,
+        DispatchWizardStub,
       ],
       providers: [
         { provide: AuthFacade, useValue: mockAuthFacade },
@@ -137,11 +180,39 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
         { provide: StoreSettingsFacade, useValue: mockStoreSettingsFacade },
         { provide: Store, useValue: mockStore },
         { provide: DispatchTicketPrintService, useValue: mockDispatchTicketPrint },
+        {
+          provide: DispatchNotesService,
+          useValue: {
+            createFromOrder: jasmine.createSpy('createFromOrder').and.returnValue(of({ id: 9 })),
+            deliver: jasmine.createSpy('deliver').and.returnValue(of({})),
+          },
+        },
+        {
+          provide: StoreOrdersService,
+          useValue: {
+            getOrderById: jasmine.createSpy('getOrderById').and.callFake((id: string) =>
+              of({
+                id: Number(id),
+                customer_id: 55,
+                order_items: [
+                  { id: 11, product_name: 'Prueba', quantity: 1, unit_price: 1000, final_unit_price: 1000 },
+                ],
+                addresses_orders_shipping_address_idToaddresses: {
+                  address_line1: 'Calle 1 # 2-3',
+                  city: 'Bogotá',
+                },
+              }),
+            ),
+            createCustomerAddress: jasmine.createSpy('createCustomerAddress').and.returnValue(of({ id: 77 })),
+            updateOrderShippingAddress: jasmine.createSpy('updateOrderShippingAddress').and.returnValue(of({ id: 1001 })),
+            updateAddress: jasmine.createSpy('updateAddress').and.returnValue(of({})),
+          },
+        },
       ],
     })
       .overrideComponent(PosOrderConfirmationComponent, {
         set: {
-          imports: [ModalStub, ButtonStub, IconStub, InvoicingNotConfiguredStub, PosFiscalStatusStub],
+          imports: [ModalStub, ButtonStub, IconStub, InvoicingNotConfiguredStub, PosFiscalStatusStub, DispatchMethodSelectorStub, CourierNameStub, DispatchWizardStub, ShippingAddressStub],
         },
       })
       .compileComponents();
@@ -397,5 +468,85 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
 
     expect(component.derivedOrderItems()[0].tax).toBe(0);
     expect(component.derivedOrderTax()).toBe(0);
+  });
+
+  it('QUI-844 — Despachar con todo habilitado abre el selector', () => {
+    component.orderId = '1001';
+    fixture.detectChanges();
+    expect(component.enabledDispatchMethods()).toEqual(['with-note', 'direct', 'to-dispatch']);
+    component.dispatchOrder();
+    expect(component.showDispatchSelector()).toBeTrue();
+    expect(mockRepartosService.publishToPool).not.toHaveBeenCalled();
+  });
+
+  it('QUI-844 — Despachar con una sola vía activa la ejecuta sin modal', () => {
+    mockStoreSettingsFacade.dispatch = signal({
+      enable_dispatch_with_remision: false,
+      enable_dispatch_direct_delivery: false,
+      enable_dispatch_to_pool: true,
+    });
+    component.orderId = '1001';
+    fixture.detectChanges();
+    component.dispatchOrder();
+    expect(component.showDispatchSelector()).toBeFalse();
+    expect(mockRepartosService.publishToPool).toHaveBeenCalledWith(1001);
+  });
+
+  it('QUI-844 — Elegir remisión abre el wizard y Entrega pide domiciliario', () => {
+    component.orderId = '1001';
+    fixture.detectChanges();
+    component.onDispatchMethodSelected('with-note');
+    expect(component.showDispatchModal()).toBeTrue();
+    component.onDispatchMethodSelected('direct');
+    expect(component.showCourierNameModal()).toBeTrue();
+  });
+
+  it('QUI-844 — al despachar se oculta el ticket y al cancelar vuelve', () => {
+    component.orderId = '1001';
+    fixture.detectChanges();
+    expect(component.isDispatchFlowOpen()).toBeFalse();
+    component.dispatchOrder();
+    expect(component.isDispatchFlowOpen()).toBeTrue();
+    const closedSpy = jasmine.createSpy('closed');
+    const sub = component.closed.subscribe(closedSpy);
+    component.onModalClosed();
+    expect(closedSpy).not.toHaveBeenCalled();
+    component.showDispatchSelector.set(false);
+    component.onModalClosed();
+    expect(closedSpy).toHaveBeenCalledTimes(1);
+    sub.unsubscribe();
+  });
+
+  it('QUI-844 — mientras se ejecuta la vía directa el ticket sigue oculto', () => {
+    component.orderId = '1001';
+    fixture.detectChanges();
+    expect(component.isDispatchFlowOpen()).toBeFalse();
+    component.dispatching.set(true);
+    expect(component.isDispatchFlowOpen()).toBeTrue();
+    component.dispatching.set(false);
+    expect(component.isDispatchFlowOpen()).toBeFalse();
+  });
+
+  it('QUI-844 — remisión carga la orden completa con relaciones para el wizard', () => {
+    component.orderId = '1001';
+    fixture.detectChanges();
+    component.onDispatchMethodSelected('with-note');
+    expect(component.fullDispatchOrder()?.id).toBe(1001);
+    expect(component.fullDispatchOrder()?.order_items?.length).toBe(1);
+    expect(
+      component.fullDispatchOrder()?.addresses_orders_shipping_address_idToaddresses?.address_line1,
+    ).toBe('Calle 1 # 2-3');
+    expect(component.showDispatchModal()).toBeTrue();
+  });
+
+  it('QUI-844 — agregar dirección la asigna y refresca el wizard', () => {
+    component.orderId = '1001';
+    fixture.detectChanges();
+    component.onDispatchMethodSelected('with-note');
+    component.onDispatchNeedsAddress();
+    expect(component.showShippingAddressModal()).toBeTrue();
+    component.onDispatchAddressSubmit({ address_line1: 'Calle 9' } as any);
+    expect(component.showShippingAddressModal()).toBeFalse();
+    expect(component.fullDispatchOrder()?.id).toBe(1001);
   });
 });

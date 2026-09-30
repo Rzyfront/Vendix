@@ -1,0 +1,60 @@
+# F.1-SA1 DB-26 — solo lectura (2026-09-24T01:30Z, HEAD d1061f0)
+
+Método: SELECT vía `docker exec vendix_postgres psql -U username -d vendix_db`.
+Cero escrituras. `addresses` NO tiene created_at/updated_at (verificado con \d):
+no hay corte temporal directo; el corte es delta vs baseline 2026-09-23
+(F1-primary-isolation.md: 8 tienda + 45 org = 53) + corte indirecto vía
+orders.created_at por FK (nota rollback ADR-05) + ids QA conocidos.
+
+## a) Huérfanas primary de tienda (user_id NULL, is_primary, store_id NOT NULL)
+
+SELECT count(*) FROM addresses WHERE is_primary AND user_id IS NULL AND store_id IS NOT NULL;
+=> 8  (esperado 8 legacy: OK)
+
+SELECT count(*) FROM addresses WHERE is_primary AND user_id IS NULL AND store_id IS NULL;
+=> 45 (organización, excluidas del alcance F.1: OK)
+
+SELECT count(*) FROM addresses WHERE is_primary AND user_id IS NULL;
+=> 53 (8+45, igual que baseline 2026-09-23: OK)
+
+Detalle 8 legacy (id, store_id, city, address_line1):
+  5,   4, Medellín,     Centro Comercial Oviedo
+  6,   6, Bogotá,       Centro Comercial Andino
+  10, 10, Riohacha,     Carrera 26 con Calle 14H Bis
+  12, 11, 694,          Calle 12
+  478, 38, 694,         Calle 12
+  488, 39, 167,         Calle 100 # 15-20
+  492, 41, 694,         Calle 12
+  515,  3, Bogotá, D.c., Calle 100 # 15-20 Of 501
+
+## b) Defaults por tienda (estables)
+
+SELECT store_id, count(*) FROM addresses
+ WHERE is_primary AND store_id IS NOT NULL GROUP BY 1 ORDER BY 1;
+  3:2  4:1  6:1  10:11  11:1  38:1  39:1  41:1
+Tienda #10 = 11 (igual que 11→11 de ambas evidencias F1: OK)
+
+Duplicadas por (user_id, store_id) con store_id NOT NULL:
+SELECT user_id, store_id, count(*) FROM addresses
+ WHERE is_primary AND user_id IS NOT NULL AND store_id IS NOT NULL
+ GROUP BY 1,2 HAVING count(*)>1;
+=> 0 rows (OK; las 5 aparentes sin filtro store_id son seed de org con store_id NULL, fuera de alcance)
+
+## c) Huérfanas primary NUEVAS atribuibles al fix: 0
+
+- Delta vs baseline 2026-09-23: 8 hoy − 8 baseline = 0.
+- Corte indirecto por FK: las 8 tienen 0 órdenes que las referencien
+  (ordenes_ref=0, max_order_created NULL) → ninguna nació de un flujo de venta reciente.
+- IDs QA del fix (#535 POST, #536/#537 concurrencia): SELECT id ... IN (535,536,537) => 0 rows
+  (creadas y eliminadas 204 durante la prueba atómica, sin residuo).
+- Max id entre las 8 = 515 < 535 (rango QA), consistente con legado.
+- Nota de método: sin created_at en addresses no se puede fechar la fila;
+  la atribución "nueva" se infiere por delta de conteo + ausencia de refs en orders
+  + limpieza de ids QA. Si F.2 (gates alias) creara huérfanas a futuro, este conteo
+  subiría sobre 8 y el delta lo delataría.
+
+## Censo daño histórico tienda #10 (soporte checklist item 13)
+
+SELECT user_id, count(*) FROM addresses WHERE user_id IS NOT NULL AND store_id=10
+ GROUP BY 1 HAVING count(*)>1 AND bool_and(NOT is_primary);
+=> 151:2  197:2  (igual que F1-primary-isolation.md: OK, sin backfill por plan)

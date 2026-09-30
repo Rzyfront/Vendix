@@ -1,0 +1,5 @@
+# B.1 baseline — 2026-09-24T01:00:36Z (HEAD 2431a1152)
+query: SELECT count(*) FROM table_sessions WHERE closed_at IS NULL AND paid_at IS NOT NULL;
+result: 15
+method: docker exec vendix_postgres psql -U username -d vendix_db (no host psql binary); read-only
+note: comparar en B.2 — debe crecer, nunca decrecer

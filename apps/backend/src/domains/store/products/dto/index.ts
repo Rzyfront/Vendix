@@ -806,6 +806,34 @@ export class UpdateProductDto {
 
   @ApiPropertyOptional({
     description:
+      'Umbral de stock bajo por producto. null o 0 activa el fallback a la configuración de la tienda.',
+  })
+  @IsOptional()
+  @IsInt({ message: 'El stock mínimo debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El stock mínimo no puede ser negativo' })
+  min_stock_level?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'El stock máximo debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El stock máximo no puede ser negativo' })
+  max_stock_level?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'El punto de reorden debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El punto de reorden no puede ser negativo' })
+  reorder_point?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'La cantidad de reorden debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'La cantidad de reorden no puede ser negativa' })
+  reorder_quantity?: number | null;
+
+  @ApiPropertyOptional({
+    description:
       'Alias histórico de base_price. Si mandas los dos, manda el mismo valor; para editar el precio usa base_price.',
   })
   @IsOptional()
@@ -2058,6 +2086,11 @@ export class BulkProductItemDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 
   @IsOptional()
@@ -2251,6 +2284,33 @@ export class BulkProductUploadDto {
   products: BulkProductItemDto[];
 }
 
+/** Tope de filas por página al confirmar una sesión de carga masiva. */
+export const MAX_BULK_UPLOAD_PAGE = 100;
+
+/**
+ * Body de `POST store/products/bulk/upload-session`. Sin `offset`/`limit` se
+ * confirma el archivo completo (comportamiento legacy); con ellos se procesa
+ * solo la página `[offset, offset + limit)`.
+ */
+export class BulkUploadSessionDto {
+  @IsString()
+  @IsNotEmpty()
+  session_id: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_BULK_UPLOAD_PAGE)
+  limit?: number;
+}
+
 export class BulkUploadItemResultDto {
   row_number?: number;
   product_name?: string;
@@ -2270,6 +2330,14 @@ export class BulkUploadResultDto {
   failed: number;
   skipped: number;
   results: BulkUploadItemResultDto[];
+}
+
+/** Resultado de confirmar una página de la sesión (campos legacy + paginación). */
+export class BulkUploadSessionResultDto extends BulkUploadResultDto {
+  total: number;
+  offset: number;
+  limit: number;
+  done: boolean;
 }
 
 export class BulkValidationResultDto {

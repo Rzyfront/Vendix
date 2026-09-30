@@ -11,6 +11,7 @@ import {
   STORE_MODULE_BY_KEY,
   STORE_MODULE_CATALOG,
 } from '../../shared/constants/store-module-catalog.constant';
+import { canUserAccessDashboard } from '../utils/dashboard-access.util';
 import type {
   OrganizationOperatingScope,
   OrganizationFiscalScope,
@@ -113,7 +114,7 @@ export class MenuFilterService {
   private readonly authorizationGates$ = toObservable(
     computed(
       () =>
-        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.canConfigureVexi()}`,
+        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.canConfigureVexi()}|${this.canAccessDashboard()}`,
     ),
   );
 
@@ -852,9 +853,16 @@ export class MenuFilterService {
     }
 
     // ─── 9. Authorization prefilters ─────────────────────────────────
-    // These two entries carry no panel_ui key of their own, so the layout used
-    // to strip them from the tree before filtering. Folding them in here keeps
-    // the reason available instead of the item just vanishing.
+    // These entries carry authorization gates beyond basic panel_ui settings.
+    // Folding them in here keeps the reason available instead of vanishing.
+    if (menuItem.route === '/admin/dashboard' && !this.canAccessDashboard()) {
+      return {
+        visible: false,
+        blockedBy: 'permission',
+        detail: 'No tienes permisos para acceder al Panel Principal.',
+        fixPath: null,
+      };
+    }
     if (menuItem.route === '/admin/settings/users' && !this.canManageUsers()) {
       return {
         visible: false,
@@ -920,6 +928,9 @@ export class MenuFilterService {
    * observable pass (`filterMenuItems`) and the synchronous one (`diagnose`).
    */
   private passesAuthorizationGates(item: MenuItem): boolean {
+    if (item.route === '/admin/dashboard' && !this.canAccessDashboard()) {
+      return false;
+    }
     if (item.route === '/admin/settings/users' && !this.canManageUsers()) {
       return false;
     }
@@ -1126,5 +1137,14 @@ export class MenuFilterService {
    */
   private canConfigureVexi(): boolean {
     return this.authFacade.isOwner() || this.authFacade.isAdmin();
+  }
+
+  /**
+   * Authorization over the store dashboard. Mirrors `storeDashboardGuard`:
+   * requires trusted roles (owner/admin/super_admin/STORE_OWNER/ORG_OWNER/manager)
+   * or explicit permissions ('store:dashboard:view', 'store:analytics:read').
+   */
+  private canAccessDashboard(): boolean {
+    return canUserAccessDashboard(this.authFacade);
   }
 }

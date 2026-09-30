@@ -7,6 +7,7 @@ import {
   StoreSettings,
   PosSettings,
   CheckoutSettings,
+  DispatchSettings,
   NotificationsSettings,
   ReceiptsSettings,
   VexiSettings,
@@ -58,6 +59,23 @@ export class StoreSettingsFacade {
     () => this.settings()?.checkout ?? null,
   );
 
+  /**
+   * IANA timezone of the active store, e.g. `America/Bogota`.
+   *
+   * Source: `settings.general.timezone` (the JSON mirror this facade already
+   * exposes via `selectStoreSettings`). Falls back to `America/Bogota` — the
+   * same default the backend's `DEFAULT_STORE_TIMEZONE`
+   * (`store-timezone.util.ts`) uses — so a store whose settings haven't
+   * loaded yet, or that never persisted one, still dates fiscal documents
+   * consistently instead of falling through to the browser's local zone.
+   *
+   * Order-truth-and-invoice-tz-plan, Step 9: single source every invoicing
+   * screen reads for `formatStoreDate`/`formatStoreDateTime`/`storeToday`.
+   */
+  readonly timezone = computed<string>(
+    () => this.settings()?.general?.timezone || 'America/Bogota',
+  );
+
   readonly branding = computed<Record<string, any> | null>(
     () => this.settings()?.branding ?? null,
   );
@@ -77,6 +95,11 @@ export class StoreSettingsFacade {
   /** Print/delivery preferences for receipts, POS tickets and invoices. */
   readonly receipts = computed<ReceiptsSettings | null>(
     () => this.settings()?.receipts ?? null,
+  );
+
+  /** Dispatch behavior: state-update mode plus QUI-844 method toggles. */
+  readonly dispatch = computed<DispatchSettings | null>(
+    () => this.settings()?.dispatch ?? null,
   );
 
   readonly modules = computed<Record<string, any> | null>(

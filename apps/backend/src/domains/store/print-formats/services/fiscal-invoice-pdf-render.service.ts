@@ -12,12 +12,18 @@ import {
   PrintFormat,
 } from '../../settings/interfaces/store-settings.interface';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
+import { resolveAcquirerIdentity } from '../../invoicing/utils/acquirer-identity.resolver';
 import {
   resolveFiscalIssuerForPrint,
   FiscalIssuerPrintIdentity,
 } from './fiscal-issuer-identity';
 import { PaperDefinition } from '../print-templates/paper-definitions';
 import { resolvePaperDefinition } from '../print-templates/paper-defaults';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * Ensamblador del PDF fiscal — ESPEJO DEL CONTRATO `INVOICE_PDF_INCLUDE`
@@ -69,18 +75,29 @@ const FISCAL_INVOICE_PDF_RENDER_INCLUDE = {
       id: true,
       first_name: true,
       last_name: true,
+      legal_name: true,
       email: true,
+      document_type: true,
+      verification_digit: true,
     },
   },
 };
 
-/** Formats a Date as DD/MM/YYYY — mismo formato que `InvoicePdfService`. */
-function formatDate(date: Date): string {
-  const d = new Date(date);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+/**
+ * Formats a Date as DD/MM/YYYY — mismo formato que `InvoicePdfService`.
+ *
+ * B17 — antes usaba `Date#getDate/getMonth/getFullYear` (hora del
+ * CONTENEDOR, siempre UTC en producción). Delegado a `formatStoreDate`, que
+ * bifurca igual que `invoice-flow.service.ts#formatIssueDate`: columnas con
+ * hora real (`issue_date`, etc.) se leen en la zona de la tienda; columnas
+ * civiles escritas como medianoche UTC (`resolution_date`, `valid_from/to`)
+ * se leen tal cual, sin desplazarlas un día. `tz` por defecto
+ * (`DEFAULT_STORE_TIMEZONE`) preserva el comportamiento de
+ * `buildFiscalInvoicePdfData` para el caller puro que no resuelve tienda
+ * (`fiscal-invoice-pdf-render.service.spec.ts:132`).
+ */
+function formatDate(date: Date, tz: string = DEFAULT_STORE_TIMEZONE): string {
+  return formatStoreDate(new Date(date), tz);
 }
 
 /** Extrae una dirección mostrable del JSON `customer_address`. */
@@ -129,6 +146,7 @@ export function buildFiscalInvoicePdfData(
   invoice: any,
   issuer: FiscalIssuerPrintIdentity,
   io: { logo_buffer?: Buffer; qr_buffer?: Buffer },
+  tz: string = DEFAULT_STORE_TIMEZONE,
 ): InvoicePdfData {
   const store = invoice.store || {};
   const org = invoice.organization || {};
@@ -140,6 +158,13 @@ export function buildFiscalInvoicePdfData(
     (customer
       ? `${customer.first_name} ${customer.last_name}`
       : 'Consumidor Final');
+
+  // Misma identidad efectiva (ficha → snapshot) que `InvoicePdfService` y que
+  // `invoice-flow.service.ts`; ver el JSDoc de `acquirer-identity.resolver.ts`.
+  const acquirer_identity = resolveAcquirerIdentity({
+    snapshot: invoice,
+    customer: customer ?? undefined,
+  });
 
   return {
     // Emisor
@@ -156,34 +181,40 @@ export function buildFiscalInvoicePdfData(
     // Paper format configured for this store.
     format: resolveFiscalInvoicePaperFormat(store),
 
+    // B17 — sello de fecha/hora del pie (`InvoicePdfBuilder.drawFooter`) en
+    // la zona de la tienda.
+    tz,
+
     // Resolucion
     resolution_number: resolution?.resolution_number,
     resolution_date: resolution?.resolution_date
-      ? formatDate(resolution.resolution_date)
+      ? formatDate(resolution.resolution_date, tz)
       : undefined,
     resolution_range_from: resolution?.range_from,
     resolution_range_to: resolution?.range_to,
     resolution_prefix: resolution?.prefix,
     resolution_valid_from: resolution?.valid_from
-      ? formatDate(resolution.valid_from)
+      ? formatDate(resolution.valid_from, tz)
       : undefined,
     resolution_valid_to: resolution?.valid_to
-      ? formatDate(resolution.valid_to)
+      ? formatDate(resolution.valid_to, tz)
       : undefined,
 
     // Cliente
     customer_name,
     customer_tax_id: invoice.customer_tax_id || undefined,
+    customer_document_type: acquirer_identity.document_type_literal ?? undefined,
+    customer_verification_digit: acquirer_identity.verification_digit ?? undefined,
     customer_address: formatCustomerAddress(invoice.customer_address),
-    customer_email: customer?.email || undefined,
+    customer_email: acquirer_identity.email ?? undefined,
 
     // Factura
     invoice_number: invoice.invoice_number,
     invoice_type: invoice.invoice_type,
-    issue_date: formatDate(invoice.issue_date),
-    due_date: invoice.due_date ? formatDate(invoice.due_date) : undefined,
+    issue_date: formatDate(invoice.issue_date, tz),
+    due_date: invoice.due_date ? formatDate(invoice.due_date, tz) : undefined,
     payment_date: invoice.payment_date
-      ? formatDate(invoice.payment_date)
+      ? formatDate(invoice.payment_date, tz)
       : undefined,
     currency: invoice.currency || 'COP',
     notes: invoice.notes || undefined,
@@ -340,10 +371,15 @@ export class FiscalInvoicePdfRenderService {
       }
     }
 
-    const data = buildFiscalInvoicePdfData(invoice, issuer, {
-      logo_buffer,
-      qr_buffer,
-    });
+    // B17 — fecha/hora del documento en la zona de la tienda, no la del
+    // contenedor (mismo patrón que `InvoicePdfService.generatePdf`).
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const data = buildFiscalInvoicePdfData(
+      invoice,
+      issuer,
+      { logo_buffer, qr_buffer },
+      tz,
+    );
 
     // E.11 slice 3 — el consumer del render consulta `paper-defaults` para
     // resolver la `PaperDefinition` del papel configurado por la tienda, ANTES

@@ -57,6 +57,11 @@ import {
 } from '../dispatch-routes/utils/route-stop-calc';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
+  kitchenHandoffBlocker,
+  describeKitchenHandoffBlocker,
+} from '../orders/order-flow/order-action-policy.util';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
+import {
   resolveOrderLineTaxTotal,
   roundMoney2,
 } from '../taxes/utils/final-price.util';
@@ -930,6 +935,13 @@ export class DispatchNotesService {
       dispatched_quantity: number;
     }>,
   ): Promise<void> {
+    // A POS order may have reserved a negative available balance when the
+    // store explicitly permits overselling. Dispatch must honor that same
+    // server-side policy; otherwise the order can be paid but never shipped.
+    // Structural errors (missing location / wrong variant) remain blocking.
+    const { allowOversell } = await this.stockValidator.resolveInventoryPolicy(
+      store_id,
+    );
     type BlockedItem = {
       product_id: number;
       product_variant_id: number | null;
@@ -1056,6 +1068,14 @@ export class DispatchNotesService {
         onHand - reservedForOrder >= qty
       ) {
         reason = 'reserved_by_others';
+      }
+
+      if (allowOversell && reason !== 'variant_required') {
+        this.logger.warn(
+          `Sobreventa permitida al despachar orden ${order_id}: producto ${item.product_id}, ` +
+            `variante ${item.product_variant_id ?? 'base'}, requerido ${qty}, disponible ${effectiveAvailable}`,
+        );
+        continue;
       }
 
       insufficient.push({
@@ -1947,6 +1967,30 @@ export class DispatchNotesService {
   }
 
   /**
+   * Contexto de `create_dispatch_note`: orden + renglones para replicar en el
+   * preview las precondiciones de `createFromOrder` (estado, entrega
+   * inmediata, dirección). Devuelve `null` en vez de lanzar para que la tool
+   * conteste `{error, next_step}`. Misma proyección que la tool leía directa
+   * (paso 15). Lectura pura, scopeada por tienda.
+   */
+  async findOrderForDispatchPlanForAgent(orderId: number): Promise<any> {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        delivery_type: true,
+        shipping_address_snapshot: true,
+        shipping_address_id: true,
+        order_items: {
+          select: { id: true, product_name: true, quantity: true },
+        },
+      },
+    });
+  }
+
+  /**
    * Create a dispatch note (remisión) straight from an order, optionally
    * confirming it and/or attaching it to a route — all in ONE atomic
    * transaction. This is the "atajo de despacho COD" shortcut: a single call
@@ -1988,7 +2032,18 @@ export class DispatchNotesService {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
-        order_items: true,
+        // H3 fix: the kitchen hand-off guard below needs to know whether
+        // THIS store is currently a restaurant before requiring a
+        // never-fired prepared line to reach the kitchen.
+        stores: { select: { industries: true } },
+        order_items: {
+          include: {
+            products: { select: { product_type: true } },
+            kitchen_ticket_items: {
+              select: { status: true }, orderBy: { id: 'desc' }, take: 1,
+            },
+          },
+        },
         users: {
           select: {
             id: true,
@@ -2019,6 +2074,32 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_FIND_001);
     }
 
+    // Explicit partial dispatch may contain only ordinary direct-delivery
+    // lines while a dish is still in KDS. The quick-accept/full-order path
+    // must wait for every prepared line's kitchen hand-off. Never let a
+    // retail line in a mixed order turn the implicit ALL into a KDS bypass.
+    const requestedItemIds = Array.isArray(dto.items) && dto.items.length > 0
+      ? new Set(dto.items.map((item) => item.order_item_id))
+      : null;
+    const kitchenCandidates = requestedItemIds
+      ? order.order_items.filter((item) => requestedItemIds.has(item.id))
+      : order.order_items;
+    // H3 fix: only require the kitchen hand-off when the store is CURRENTLY
+    // a restaurant — a store that dropped the industry but kept legacy
+    // prepared/skip_kds:false catalog rows must still be able to remisionar
+    // those orders. A line with a real (fired) ticket keeps blocking
+    // regardless of the flag; a `cancelled` ticket blocks with its own
+    // explanatory message instead of the generic one.
+    const kitchenBlocker = kitchenHandoffBlocker(kitchenCandidates, {
+      isRestaurant: storeIsRestaurant((order as any).stores?.industries),
+    });
+    if (kitchenBlocker) {
+      throw new VendixHttpException(
+        ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+        describeKitchenHandoffBlocker(kitchenBlocker),
+      );
+    }
+
     // A dispatch note (remisión) only makes sense for orders that are being
     // fulfilled. `processing` is the canonical state (stock reserved, goods
     // ready to leave). `pending_payment` is admitted for the COD shortcut: the
@@ -2037,6 +2118,12 @@ export class DispatchNotesService {
         ErrorCodes.DSP_ORDER_DELIVERY_001,
         `La orden #${order_id} tiene tipo de entrega "${order.delivery_type}", que se entrega en el acto y no requiere remisión. Si necesita envío, corrija el tipo de entrega antes de despacharla.`,
       );
+    }
+
+    // Envío por asignar (checkout por WhatsApp sin ubicación): sin método no
+    // hay con qué despachar ni qué cobrar de envío. Primero se asigna.
+    if (order.delivery_type === 'other' && order.shipping_method_id == null) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
     // Delivery address gate: a remisión needs a place to deliver. The address
@@ -2064,8 +2151,9 @@ export class DispatchNotesService {
       );
     }
 
-    const customer_name =
-      `${order.users?.first_name || ''} ${order.users?.last_name || ''}`.trim();
+    const customer_name = order.users
+      ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+      : order.customer_alias?.trim() || '';
 
     // Resolve the default dispatch location: the active reservation's location
     // for this order, falling back to the store default. Used when an item
@@ -2192,10 +2280,20 @@ export class DispatchNotesService {
       });
     }
 
-    // Stock gate: the remisión dispatches what is already reserved for this
-    // order, so reserved-for-this-order units count as available. Only a real
-    // shortfall raises DISPATCH_NOTE_INSUFFICIENT_STOCK.
-    await this.validateDispatchItemsStock(store_id, order_id, dispatch_items);
+    // Stock gate only for lines whose inventory is still pending. An item
+    // delivered individually already consumed its reservation and marked
+    // `inventory_committed`; a prepared dish consumed its ingredients when it
+    // was fired. Revalidating either against TODAY's availability falsely
+    // blocks the remisión after a legitimate handoff (especially when the
+    // store explicitly allowed overselling), even though the delivery commit
+    // below is claim-once and will not consume those lines again.
+    const stockPendingItems = dispatch_items.filter((item) => {
+      const source = order.order_items.find(
+        (line) => line.id === item.sales_order_item_id,
+      );
+      return !source?.inventory_committed && !source?.inventory_consumed_at_fire;
+    });
+    await this.validateDispatchItemsStock(store_id, order_id, stockPendingItems);
 
     const subtotal = dispatch_items.reduce(
       (sum, item) =>
@@ -3258,6 +3356,7 @@ export class DispatchNotesService {
         id: true,
         state: true,
         delivery_type: true,
+        shipping_method_id: true,
         dispatch_fulfillment: true,
         dispatch_pool_at: true,
       },
@@ -3303,6 +3402,10 @@ export class DispatchNotesService {
         ErrorCodes.DSP_ORDER_DELIVERY_001,
         `La orden #${order_id} tiene tipo de entrega "${order.delivery_type}", que se entrega en el acto y no va al pool de despacho. Si necesita envío, corrija el tipo de entrega antes de publicarla.`,
       );
+    }
+
+    if (order.delivery_type === 'other' && order.shipping_method_id == null) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
     // Ya remitida al 100% → sólo se rechaza si NO queda nada que un repartidor

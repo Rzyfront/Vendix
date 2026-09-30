@@ -140,6 +140,8 @@ export interface EcommerceProduct {
   available_stock: number | null;
   is_available: boolean;
   final_price: number;
+  /** Tax-inclusive regular price from the same server resolver as final_price. */
+  regular_final_price?: number;
   image_url: string | null;
   weight?: number | null;
   pricing_type?: 'unit' | 'weight';
@@ -223,6 +225,7 @@ export interface ProductVariantDetail {
   price_override: number | null;
   effective_base_price: number;
   final_price: number;
+  regular_final_price?: number;
   stock_quantity: number;
   available_stock: number | null;
   is_available: boolean;
@@ -356,6 +359,7 @@ export interface MenuItemProduct {
    * publique; los consumidores usan `??` fallback a sale/base.
    */
   final_price?: number | null;
+  regular_final_price?: number | null;
   sale_price: number | null;
   is_on_sale: boolean;
   is_combo: boolean;

@@ -1,0 +1,15 @@
+ store_id | item_id | order_id | ticket_item_id | kitchen_ticket_id | latest_status |      delivered_at      
+----------+---------+----------+----------------+-------------------+---------------+------------------------
+       10 |    1692 |     1008 |             87 |                83 | ready         | 2026-09-01 14:45:45.37
+(1 row)
+
+ postcut_mismatch 
+------------------
+                0
+(1 row)
+
+ db08_postcut 
+--------------
+            0
+(1 row)
+

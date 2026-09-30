@@ -1340,6 +1340,8 @@ export class CartService {
     state_province?: string;
     city?: string;
     postal_code?: string;
+    latitude?: number;
+    longitude?: number;
   }): Observable<any[]> {
     const cart = this.cart();
     if (!cart || cart.items.length === 0) {

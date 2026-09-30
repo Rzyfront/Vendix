@@ -60,7 +60,7 @@
     <div class="checkout-grid">
       <!-- Columna principal: paso activo -->
       <div class="checkout-main">
-        <!-- Paso · Entrega (Consumir / Para llevar / Enviar). Siempre primero
+        <!-- Paso · Pedido (mesa / para llevar / domicilio). Siempre primero
              (paso 0). Se mantiene MONTADO mientras 'entrega' esté en stepKeys
              para que el shell lea checkoutTableId()/needsTable(). -->
         @if (stepKeys().includes('entrega')) {
@@ -85,6 +85,7 @@
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
               [tableId]="checkoutTableId()"
               [fulfillment]="entregaChoice() === 'mesa' ? 'consumo' : 'entrega'"
+              [deliveryType]="deliveryTypeForPayment()"
               [takeawayOrder]="isTakeawayOrder()"
               [sessionId]="checkoutSessionId()"
               [isAnonymous]="isAnonymousSale()"
@@ -154,39 +155,10 @@
                         <p class="sale-type-hint">
                           <app-icon name="info" [size]="14"></app-icon>
                           <span
-                            >No disponible para ventas con envío: se requiere un
-                            cliente con dirección.</span
+                            >No disponible para ventas con envío: indica un
+                            cliente o nombre de referencia con dirección.</span
                           >
                         </p>
-                      } @else if (isAnonymousSale()) {
-                        <!-- Paso 9 — «Facturar a nombre de»: on-demand, sin
-                             abandonar "Venta Anónima". Captura los 5 campos
-                             mínimos para una factura nominativa (documento,
-                             nombres, apellidos, email) reutilizando el mismo
-                             selector/resolver que "Con Cliente", en modo
-                             reducido (`minimalInvoiceMode`). -->
-                        <button
-                          type="button"
-                          class="invoice-capture-toggle"
-                          [attr.aria-expanded]="showAnonymousInvoiceCapture()"
-                          aria-label="Mostrar u ocultar los datos de facturación"
-                          (click)="toggleAnonymousInvoiceCapture()"
-                        >
-                          <app-icon name="file-text" [size]="14"></app-icon>
-                          {{
-                            showAnonymousInvoiceCapture()
-                              ? 'Ocultar datos de facturación'
-                              : 'Facturar a nombre de'
-                          }}
-                        </button>
-                        @if (showAnonymousInvoiceCapture()) {
-                          <app-pos-customer-selector
-                            [selectedCustomer]="null"
-                            [allowAnonymous]="false"
-                            [minimalInvoiceMode]="true"
-                            (customerSelected)="selectCustomer($event)"
-                          ></app-pos-customer-selector>
-                        }
                       }
                     }
 
@@ -198,8 +170,6 @@
                         [attr.tabindex]="saleMode() === 'alias' ? 0 : -1"
                         class="sale-type-btn"
                         [class.selected]="saleMode() === 'alias'"
-                        [class.is-disabled]="aliasBlockedByDelivery()"
-                        [disabled]="aliasBlockedByDelivery()"
                         (click)="onSelectSaleMode('alias')"
                         (keydown)="onSaleTypeKeydown($event)"
                       >
@@ -219,15 +189,6 @@
                           >
                         </div>
                       </button>
-                      @if (aliasBlockedByDelivery()) {
-                        <p class="sale-type-hint">
-                          <app-icon name="info" [size]="14"></app-icon>
-                          <span
-                            >No disponible para ventas con envío: se requiere un
-                            cliente con dirección.</span
-                          >
-                        </p>
-                      }
                     }
 
                     <button
@@ -334,6 +295,7 @@
                       <app-pos-customer-selector
                         [selectedCustomer]="cartState()?.customer ?? null"
                         [allowAnonymous]="canBeAnonymous()"
+                        [requiresElectronicInvoicing]="requiresElectronicInvoicing()"
                         [showTopSuggestions]="true"
                         [searchLimit]="3"
                         (customerSelected)="onSelectCustomerAndAdvance($event)"
@@ -350,6 +312,12 @@
                       }
                     </section>
                   }
+                }
+              }
+              @if (requiresAddress() && clienteSubStep() === 1 &&
+                (saleMode() === 'alias' || cartState()?.customer)) {
+                @if (shippingStep()?.clientDeliveryDetails(); as deliveryDetails) {
+                  <ng-container [ngTemplateOutlet]="deliveryDetails"></ng-container>
                 }
               }
             </div>
@@ -383,7 +351,9 @@
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
             <app-pos-shipping-step
               [cartState]="cartState()"
+              [customerAlias]="saleMode() === 'alias' ? customerAlias().trim() : ''"
               [editingOrderId]="editingOrderId()"
+              [detailsInCliente]="true"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>
           </div>
@@ -505,6 +475,12 @@
               <div class="summary-row">
                 <span>Envío</span>
                 <span class="summary-value">{{ shippingCost() | currency }}</span>
+              </div>
+            }
+            @if ((paymentStep()?.tipAmount() ?? 0) > 0) {
+              <div class="summary-row">
+                <span>Propina</span>
+                <span class="summary-value">{{ paymentStep()!.tipAmount() | currency }}</span>
               </div>
             }
           </div>

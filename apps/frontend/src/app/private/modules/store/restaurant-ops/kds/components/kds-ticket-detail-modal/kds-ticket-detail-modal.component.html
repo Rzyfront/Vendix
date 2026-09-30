@@ -41,14 +41,31 @@
         </div>
       </div>
 
+      <!-- QUI-887 — nota global de la orden en los metadatos. Solo con nota
+           no vacía: sin bloque residual. -->
+      @if (t.order?.notes?.trim()) {
+        <div class="flex items-start gap-2 px-3 py-2 rounded-lg border-l-[3px] border-l-[var(--color-info,#0284c7)] bg-[rgba(2,132,199,0.08)]" role="note">
+          <app-icon name="sticky-note" [size]="14" class="mt-0.5 shrink-0 text-[var(--color-info,#0284c7)]" />
+          <div class="min-w-0">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-info,#0284c7)] font-semibold">Nota de la orden</p>
+            <p class="text-[13px] font-medium text-[var(--color-text-primary)] whitespace-pre-wrap">{{ t.order!.notes!.trim() }}</p>
+          </div>
+        </div>
+      }
+
       <!-- Items + recipes -->
       <div class="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
         @for (item of t.items; track item.id) {
           <div class="rounded-lg border border-[var(--color-border)] p-3">
             <div class="flex items-start gap-2">
               <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-[var(--color-text-primary)]">
-                  ×{{ item.quantity }} {{ item.product?.name || ('Producto #' + item.product_id) }}
+                <p class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5 flex-wrap">
+                  <span>×{{ item.quantity }} {{ item.product?.name || ('Producto #' + item.product_id) }}</span>
+                  @if (itemDeliveryBadge(item); as label) {
+                    <app-badge variant="info" size="xs" [title]="label === 'ENVÍO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
+                      <app-icon name="shopping-bag" [size]="10" /> {{ label }}
+                    </app-badge>
+                  }
                 </p>
                 <!-- CP-POLLO-ARABE-727 C.4 (QUI-736) — sub-línea de variante, NO
                      concatenada al nombre. sr-only para que el lector de pantalla

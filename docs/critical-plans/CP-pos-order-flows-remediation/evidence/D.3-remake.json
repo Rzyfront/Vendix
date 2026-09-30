@@ -1,0 +1,45 @@
+{
+ "probe": "boss privileged resend remake #1188 [1912,1913]",
+ "date": "2026-09-24",
+ "calls": [
+  {
+   "call": 1,
+   "http": 201,
+   "body": {
+    "success": true,
+    "message": "Reenvio ejecutado: ticket #126, con nuevo consumo en #1912,#1913.",
+    "data": {
+     "ticketId": 126,
+     "ticketIds": [
+      126
+     ],
+     "firedItemIds": [
+      1912,
+      1913
+     ],
+     "cancelledTicketIds": [],
+     "wasteRefiredItemIds": [
+      1912,
+      1913
+     ]
+    }
+   }
+  },
+  {
+   "call": 2,
+   "http": 422,
+   "body": {
+    "statusCode": 422,
+    "error_code": "KITCHEN_FIRE_NOT_RESENDABLE",
+    "message": "Los items #1912, 1913 ya tienen un remake posterior a la cancelación. Cree un nuevo pedido si el cliente quiere repetir el plato.",
+    "request_id": "d49786a6-12cf-4653-a8b9-cc1f69151016",
+    "timestamp": "2026-09-24T01:57:53.670Z",
+    "path": "/api/store/kitchen-fire/resend",
+    "devDetails": {
+     "name": "VendixHttpException",
+     "stack": "VendixHttpException: Los items #1912, 1913 ya tienen un remake posterior a la cancelación. Cree un nuevo pedido si el cliente quiere repetir el plato.\n    at <anonymous> (/app/src/domains/store/kitchen-fire/kitchen-fire.service.ts:1457:19)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Proxy._transactionWithCallback (/app/node_modules/@prisma/client/src/runtime/getPrismaClient.ts:697:18)\n    at async KitchenFireService.resendOrderItems (/app/src/domains/store/kitchen-fire/kitchen-fire.service.ts:1435:27)\n    at async KitchenFireController.resend (/app/src/domains/store/kitchen-fire/kitchen-fire.controller.ts:141:22)"
+    }
+   }
+  }
+ ]
+}

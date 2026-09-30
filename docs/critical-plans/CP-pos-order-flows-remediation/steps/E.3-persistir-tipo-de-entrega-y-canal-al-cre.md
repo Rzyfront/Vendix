@@ -2,9 +2,9 @@
 id: E.3
 title: "Persistir tipo de entrega y canal al crear la orden"
 phase: E
-status: in-progress
-owner: Rawls
-updated: 2026-09-20
+status: done
+owner: Fabio
+updated: 2026-09-23
 contracts: [FB-16, DB-04, DB-05]
 adrs: [ADR-01]
 skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-handling, how-to-test]
@@ -28,13 +28,13 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-han
   - Valor fuera del enum: `curl … -d '{"delivery_type":"takeaway", …}'` → rechazo tipado, nunca 500 → `evidence/E.3-delivery-type-invalido.json`.
   - SQL de DB-05 tras el despliegue: `SELECT count(*) FROM orders WHERE channel='pos' AND delivery_type='pickup' AND created_at > :deploy;` → 0 → `evidence/E.3-db05-sin-pickup.txt`.
 - **Acceptance checklist:**
-  - [ ] Existe un test que falla antes del arreglo: crear con `dine_in` devolvía `direct_delivery`.
-  - [ ] `orders.create` persiste `delivery_type` del DTO y cae al default del esquema solo cuando no viene.
-  - [ ] `channel` está declarado en el DTO con su enum y se persiste.
-  - [ ] Un canal fuera del enum se rechaza con código tipado y `details.validationErrors`, nunca con 500.
-  - [ ] El docblock de `delivery_type` del DTO deja de afirmar un default que el esquema no tiene.
-  - [ ] `resolveInitialOrderState` sigue produciendo el mismo estado inicial para los mismos datos.
-  - [ ] Una orden creada con `home_delivery` llega al detalle con su etiqueta correcta.
-  - [ ] Ninguna orden POS nueva nace con tipo de entrega de recogida diferida.
-  - [ ] Ninguna fila histórica de `orders` se reescribe durante el paso.
-- **Status:** in-progress — persistencia y 75 tests en 91575a2c7; falta curl/DB.
+  - [x] Existe un test que falla antes del arreglo: crear con `dine_in` devolvía `direct_delivery`.
+  - [x] `orders.create` persiste `delivery_type` del DTO y cae al default del esquema solo cuando no viene.
+  - [x] `channel` está declarado en el DTO con su enum y se persiste.
+  - [x] Un canal fuera del enum se rechaza con código tipado y `details.validationErrors`, nunca con 500.
+  - [x] El docblock de `delivery_type` del DTO deja de afirmar un default que el esquema no tiene.
+  - [x] `resolveInitialOrderState` sigue produciendo el mismo estado inicial para los mismos datos.
+  - [x] Una orden creada con `home_delivery` llega al detalle con su etiqueta correcta.
+  - [x] Ningún default de este endpoint inventa `pickup`; el `pickup` explícito sigue permitido y «Para llevar» UI pertenece a E.1.
+  - [x] Ninguna fila histórica de `orders` se reescribe durante el paso.
+- **Status:** done · Fabio · 2026-09-23 · `91575a2c7`, OrdersService 105/105. `evidence/E3-contract-matrix.md`: POST/SQL órdenes #1147 `dine_in/pos`, #1148 `home_delivery/whatsapp`, #1149 omitido `direct_delivery/pos`; tres negativos 400 `SYS_VALIDATION_001` con detalles y Playwright #1148 «Envío a domicilio». QA cancelada auditadamente. DB-05 se acota a «Para llevar» UI y queda pendiente con E.1 por excepción serializada.

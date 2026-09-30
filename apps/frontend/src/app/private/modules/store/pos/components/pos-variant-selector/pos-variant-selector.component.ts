@@ -2,6 +2,7 @@ import { Component, input, output, inject } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { Product, PosProductVariant } from '../../services/pos-product.service';
+import { PosCartService } from '../../services/pos-cart.service';
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
 import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing-variants-banner/pos-product-missing-variants-banner.component';
 
@@ -40,6 +41,8 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
           </div>
           <button
             (click)="onClose()"
+            type="button"
+            aria-label="Cerrar selección de variante"
             class="w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
           >
             <app-icon
@@ -125,19 +128,21 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
                             : 'text-text-primary'
                         "
                       >
-                        {{ resolution.unitPrice | currency }}
+                        {{ getVariantFinalPrice(variant) | currency }}
                       </span>
                     </div>
-                    @if (resolution.isOnSale && resolution.compareAtPrice) {
+                    @if (getVariantCompareAtPrice(variant); as compareAt) {
                       <span
                         class="text-[10px] text-text-muted line-through mt-0.5"
                       >
-                        {{ resolution.compareAtPrice | currency }}
+                        {{ compareAt | currency }}
                       </span>
                     }
                   }
                   @if (doesVariantTrackInventory(variant)) {
-                    @if (isVariantAvailable(variant)) {
+                    @if (isVariantOversellCandidate(variant)) {
+                      <span class="text-xs text-warning font-medium mt-0.5">Sobreventa · {{ variant.stock }} disp.</span>
+                    } @else if (isVariantAvailable(variant)) {
                       <span
                         class="text-xs mt-0.5"
                         [class]="
@@ -174,6 +179,7 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
 })
 export class PosVariantSelectorComponent {
   private priceResolver = inject(PriceResolverService);
+  private cartService = inject(PosCartService);
 
   readonly product = input.required<Product>();
   readonly variants = input.required<PosProductVariant[]>();
@@ -206,10 +212,16 @@ export class PosVariantSelectorComponent {
   /** Check if a variant is available considering track_inventory */
   isVariantAvailable(variant: PosProductVariant): boolean {
     if (!this.doesVariantTrackInventory(variant)) return true;
+    if (this.cartService.allowNegativeStock()) return true;
     if (typeof variant.is_available === 'boolean') {
       return variant.is_available;
     }
     return variant.stock > 0;
+  }
+
+  isVariantOversellCandidate(variant: PosProductVariant): boolean {
+    return this.cartService.allowNegativeStock() &&
+      this.doesVariantTrackInventory(variant) && Number(variant.stock ?? 0) <= 0;
   }
 
   doesVariantTrackInventory(variant: PosProductVariant): boolean {
@@ -245,6 +257,23 @@ export class PosVariantSelectorComponent {
     const productLike = this.toProductLike(this.product());
     const variantLike = this.toVariantLike(variant);
     return this.priceResolver.resolve(productLike, variantLike);
+  }
+
+  getVariantFinalPrice(variant: PosProductVariant): number {
+    return Number(variant.final_price ?? this.getVariantPriceResolution(variant).unitPrice);
+  }
+
+  getVariantCompareAtPrice(variant: PosProductVariant): number | null {
+    const resolution = this.getVariantPriceResolution(variant);
+    if (!resolution.isOnSale) return null;
+    // A server final price includes tax; never strike a locally resolved net
+    // price beside it. Older responses without final_price stay net-to-net.
+    const before = variant.final_price != null
+      ? Number(variant.regular_final_price)
+      : Number(resolution.compareAtPrice);
+    return Number.isFinite(before) && before > this.getVariantFinalPrice(variant)
+      ? before
+      : null;
   }
 
   getVariantLabel(variant: PosProductVariant): string {

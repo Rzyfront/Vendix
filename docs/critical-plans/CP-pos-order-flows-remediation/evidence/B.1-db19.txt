@@ -1,0 +1,4 @@
+# B.1 DB-19 — 2026-09-24 (HEAD 2431a1152)
+query: SELECT table_id FROM table_sessions WHERE closed_at IS NULL GROUP BY 1 HAVING count(*)>1;
+result: 0 rows (invariante "como máximo una sesión abierta por mesa" se cumple)
+method: docker exec vendix_postgres psql -U username -d vendix_db; read-only

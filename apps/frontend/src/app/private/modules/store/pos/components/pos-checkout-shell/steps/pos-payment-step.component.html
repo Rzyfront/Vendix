@@ -11,6 +11,7 @@
       context="pos"
       [layout]="'stepped'"
       [amount]="effectiveAmount()"
+      [tipBase]="tipBase()"
       [paymentMethods]="paymentMethods()"
       [autoLoad]="false"
       [isProcessing]="isProcessing()"
@@ -20,6 +21,7 @@
       [requireCustomer]="!isAnonymous() && !isAlias()"
       [walletInfo]="collectorWalletInfo()"
       [allowTip]="authFacade.isRestaurant()"
+      [allowMultiTender]="true"
       [paymentResetKey]="paymentResetKey()"
       (submit)="onCollectorSubmit($event)"
       (requestCustomer)="requestCustomer.emit()"
@@ -68,3 +70,12 @@
     </div>
   }
 </div>
+<app-pos-serial-selection-modal
+  [isOpen]="serialModalOpen()"
+  [productName]="serialModalProductName()"
+  [quantity]="serialModalQuantity()"
+  [options]="serialModalOptions()"
+  [loading]="serialModalLoading()"
+  (confirmed)="onSerialConfirmed($event)"
+  (cancelled)="onSerialCancelled()"
+></app-pos-serial-selection-modal>

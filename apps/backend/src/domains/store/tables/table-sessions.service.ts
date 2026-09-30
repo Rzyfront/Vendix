@@ -12,6 +12,12 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+  type InsufficientStockItem,
+} from '../inventory/shared/services/stock-validator.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import type { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
   groupRatesByProductId,
@@ -22,6 +28,9 @@ import {
 } from '../taxes/utils/final-price.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
+import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
+import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 // QUI-INC — el enum fiscal canónico. Se importa (en vez de tipar `string`)
 // para que la fila de `order_item_taxes` de la cuenta abierta no pueda
 // persistir un valor que el `tax_type_enum` de Postgres no reconozca, ni
@@ -29,6 +38,9 @@ import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale
 import { TaxFiscalType } from '../taxes/dto';
 import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
+import type { CancellationType } from './dto';
+import { ReassignTableSessionDto } from './dto/table-session.dto';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * QUI-INC — fila de impuesto COMPLETA de una línea de cuenta abierta: lo que
@@ -64,6 +76,12 @@ export interface TableSessionView {
   guest_count: number | null;
   /** Only present in the response that creates a session, never persisted. */
   previous_table_status?: table_status_enum;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — additive, only
+   * present when the store's "Permitir sobreventa" switch accepted a real
+   * shortfall while reserving the appended items. Never an empty array.
+   */
+  stock_warnings?: InsufficientStockItem[];
   order?: {
     id: number;
     state: string;
@@ -138,7 +156,7 @@ export interface TableSessionView {
       // texto/datetime, no afectan el reporte que cocina lee.
       cancelled_at: Date | null;
       cancellation_reason: string | null;
-      cancellation_type: 'before_fire' | 'after_fire_waste' | null;
+      cancellation_type: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' | 'delivered_restock' | 'delivered_waste' | null;
       // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
       // orders.service.findOne). Ordered desc by id so the most recent
       // ticket-item wins; empty for items never fired to the kitchen.
@@ -286,6 +304,11 @@ export class TableSessionsService {
       OrderFlowService,
       'cancelOrderItem' | 'deliverOrderItem'
     >,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    private readonly orderHistory: OrderHistoryService,
+    private readonly stockValidator: StockValidatorService,
+    private readonly sellableStockAllocator: SellableStockAllocator,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -331,7 +354,7 @@ export class TableSessionsService {
    *   - `openedBy`     null for anonymous QR sessions, userId for POS.
    *   - `customerId`   null for anonymous, userId fallback for POS.
    *   - `channel`      'pos' for POS, 'ecommerce' for QR.
-   *   - `deliveryType` 'direct_delivery' for POS, 'dine_in' for QR.
+   *   - `deliveryType` 'dine_in' for both POS and QR table sessions.
    *
    * QUI-535: the DB work now lives in `createOpenSessionInTx` so a
    * caller that already owns a transaction (the POS payment, which opens
@@ -548,7 +571,7 @@ export class TableSessionsService {
       openedBy: userId,
       customerId,
       channel: 'pos',
-      deliveryType: 'direct_delivery',
+      deliveryType: 'dine_in',
       guestCount: dto.guest_count ?? null,
       // QUI-737 (B.4 / FB-21) — el DTO ya lo declara y el controller ya lo
       // liga; sin este paso el alias moria aca y la orden nacia sin el.
@@ -687,8 +710,9 @@ export class TableSessionsService {
    * Validates the order is still in 'draft' state (cannot mutate a
    * paid/closed order) and re-derives `subtotal_amount` and
    * `grand_total` after appending the new lines. Inventory reservation
-   * is intentionally NOT performed for `prepared` items — the consume
-   * happens at fire-to-kitchen (Fase D).
+   * is intentionally NOT performed for `prepared` items — this DTO has no
+   * `skip_kds`, so prepared lines always go to kitchen and consume ingredients
+   * at fire-to-kitchen (Fase D).
    */
   async addItems(
     sessionId: number,
@@ -734,6 +758,7 @@ export class TableSessionsService {
         is_on_sale: true,
         sale_price: true,
         is_sellable: true,
+        state: true,
         product_type: true,
         track_inventory: true,
         // QUI-648 / ADR-08 commit 5 (F-038/F-080) — escala de precio del
@@ -774,6 +799,12 @@ export class TableSessionsService {
           `Producto "${p.name}" no es vendible (is_sellable=false)`,
         );
       }
+      if (p.state !== 'active') {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+          `Producto "${p.name}" no está activo`,
+        );
+      }
       // ERR-07 — un producto CON variantes exige que la línea declare cuál
       // (preparado o no: la cuenta y la cocina trabajan por variante, nunca
       // por la base). Sin esto la comanda llega como el producto base y el
@@ -793,7 +824,33 @@ export class TableSessionsService {
     // F-094 punto 2 — timeout/maxWait explícitos (default 5 s): mismo valor
     // que `payments.service.ts:1769` para el mismo tipo de transacción con
     // trabajo variable por línea (N ítems, exclusiones, KDS).
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to the
+    // response, only when the store's "Permitir sobreventa" switch accepted
+    // a real shortfall. Declared outside the tx so it survives into the
+    // final return below.
+    const stockWarnings: InsufficientStockItem[] = [];
     await this.prisma.$transaction(async (tx) => {
+      // SplitOrderService locks this same source row before freezing account
+      // allocations. Take that lock BEFORE inserting any line, then re-check
+      // the split under it: a stale pre-read of the table may still say draft
+      // after the source became financially immutable.
+      const lockedOrders: Array<{
+        id: number;
+        state: string;
+        active_financial_split_id: number | null;
+      }> = await tx.$queryRaw`
+        SELECT id, state, active_financial_split_id FROM orders
+        WHERE id = ${session.order_id} AND store_id = ${storeId}
+        FOR UPDATE
+      `;
+      if (!lockedOrders.length) {
+        throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+      }
+      assertNoActiveFinancialSplit(lockedOrders[0]);
+      if (lockedOrders[0].state !== 'draft') {
+        throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ORDER_NOT_DRAFT);
+      }
+
       // CP-POLLO-ARABE-727 C.4 — validación ERR-15 ANTES del bucle, en UN solo
       // `findMany` (no un findFirst por ítem — presión de pool, ver A.7). Una
       // variante ajena al `product_id` de la línea descuadra inventario/coste.
@@ -804,6 +861,7 @@ export class TableSessionsService {
         id: number;
         product_id: number;
         price_override: Prisma.Decimal | number | null;
+        track_inventory_override: boolean | null;
         is_on_sale: boolean;
         sale_price: Prisma.Decimal | number | null;
       };
@@ -816,6 +874,7 @@ export class TableSessionsService {
               id: true,
               product_id: true,
               price_override: true,
+              track_inventory_override: true,
               is_on_sale: true,
               sale_price: true,
             },
@@ -833,6 +892,28 @@ export class TableSessionsService {
           }
         }
       }
+
+      const stockDemands: StockDemandLine[] = dto.items.flatMap((item) => {
+        const product = productMap.get(item.product_id)!;
+        return product.product_type === 'prepared'
+          ? []
+          : [{
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id,
+              quantity: item.quantity,
+              product_name: product.name,
+            }];
+      });
+      const inventoryPolicy = await this.stockValidator.resolveInventoryPolicy(
+        storeId,
+        tx,
+      );
+      const allowOversell = inventoryPolicy.allowOversell === true;
+      const shortages = await this.stockValidator.assertLinesAvailable(
+        stockDemands,
+        { tx, allowOversell },
+      );
+      if (shortages.length > 0) stockWarnings.push(...shortages);
 
       for (const item of dto.items) {
         const product = productMap.get(item.product_id)!;
@@ -971,6 +1052,74 @@ export class TableSessionsService {
           },
         });
 
+        if (product.product_type !== 'prepared' && product.product_type !== 'service' &&
+          this.stockValidator.resolveEffectiveTracking(product, variant)) {
+          const allocation = await this.sellableStockAllocator.allocateForLine(
+            storeId,
+            item.product_id,
+            item.product_variant_id ?? undefined,
+            item.quantity,
+            [],
+            tx,
+          );
+          let reserveSlices = allocation.slices;
+          if (allocation.shortfall > 0) {
+            if (!allowOversell) {
+              throw new VendixHttpException(
+                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                `No hay existencias suficientes de ${product.name}.`,
+                { items: [{
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id ?? null,
+                  product_name: product.name,
+                  kind: 'product',
+                  requested: item.quantity,
+                  available: allocation.available,
+                }] },
+              );
+            }
+            this.logger.warn(
+              `Sobreventa permitida — ${product.name}: requiere ${item.quantity}, disponible ${allocation.available}.`,
+            );
+            stockWarnings.push({
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              product_name: product.name,
+              kind: 'product',
+              requested: item.quantity,
+              available: allocation.available,
+            });
+            const fallbackLocationId =
+              allocation.slices[0]?.location_id ??
+              (await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id ?? undefined,
+                tx,
+              ));
+            reserveSlices = this.sellableStockAllocator.absorbShortfall(
+              allocation,
+              fallbackLocationId,
+            );
+          }
+          for (const slice of reserveSlices) {
+            await this.stockLevelManager.reserveStock(
+              item.product_id,
+              item.product_variant_id ?? undefined,
+              slice.location_id,
+              slice.quantity,
+              'order',
+              session.order_id,
+              RequestContextService.getContext()?.user_id ?? undefined,
+              !allowOversell,
+              tx,
+              undefined,
+              false,
+              undefined,
+              allowOversell,
+            );
+          }
+        }
+
         // QUI-655 — LA INTENCION, no el consumo. Se registra lo que el cliente
         // pidio sin, para que el KDS lo muestre tachado y el cocinero no tenga que
         // deducirlo de una nota. El consumo real se decide al confirmar en cocina y
@@ -1057,7 +1206,10 @@ export class TableSessionsService {
     this.logger.log(
       `Items appended: session=${sessionId} order=${session.order_id} lines=${dto.items.length}`,
     );
-    return this.findOne(sessionId);
+    const view = await this.findOne(sessionId);
+    return stockWarnings.length > 0
+      ? { ...view, stock_warnings: stockWarnings }
+      : view;
   }
 
   // -------------------------------------------------------------- remove
@@ -1092,7 +1244,7 @@ export class TableSessionsService {
     sessionId: number,
     orderItemId: number,
     reason: string,
-    cancellationType?: 'before_fire' | 'after_fire_waste',
+    cancellationType?: CancellationType,
   ): Promise<TableSessionView> {
     // Mirror addItems: only store context is required (the POS controller path
     // is already gated by @Permissions('store:table_sessions:update')).
@@ -1238,6 +1390,142 @@ export class TableSessionsService {
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id} (order state unchanged — see docblock)`,
     );
     return this.findOne(sessionId);
+  }
+
+  /**
+   * ADR-07: append a new open session to an existing, previously closed
+   * table order. Never reopen or mutate its closed-session history, order,
+   * items, or inventory. The order lifecycle lock serializes this with pay.
+   */
+  async reassignSessionToTable(dto: ReassignTableSessionDto): Promise<TableSessionView> {
+    const { storeId, userId } = this.requireContext();
+
+    // The raw lifecycle lock needs an id/store pair from a scoped read, not
+    // directly from the request body. The authoritative eligibility read is
+    // repeated inside the transaction after the lock.
+    const scopedOrder = await this.prisma.orders.findFirst({
+      where: { id: dto.order_id, store_id: storeId },
+      select: { id: true, store_id: true },
+    });
+    if (!scopedOrder) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+
+    let newSession: Pick<
+      TableSessionView,
+      'id' | 'order_id' | 'table_id' | 'opened_at' | 'opened_by'
+    >;
+    let targetTable: { id: number; name: string; zone: string | null };
+    try {
+      ({ newSession, targetTable } = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await lockOrderLifecycle(tx, scopedOrder.id, scopedOrder.store_id);
+
+        const order = await tx.orders.findFirst({
+          where: { id: scopedOrder.id, store_id: storeId },
+          select: { id: true, state: true, active_financial_split_id: true },
+        });
+        if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+
+        const sessions = await tx.table_sessions.findMany({
+          where: { order_id: order.id, store_id: storeId },
+          orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+          select: { id: true, table_id: true, closed_at: true, guest_count: true },
+        });
+        const payments = await tx.payments.findMany({
+          where: { order_id: order.id },
+          select: { state: true },
+        });
+        const invoices = await tx.invoices.findMany({
+          where: { order_id: order.id, store_id: storeId },
+          select: { status: true },
+        });
+        const eligibility = canReassignOrderToTable({
+          state: order.state,
+          active_financial_split_id: order.active_financial_split_id,
+          table_sessions: sessions,
+          payments,
+          invoices,
+        });
+        if (!eligibility.eligible) {
+          throw new VendixHttpException(
+            ErrorCodes[eligibility.errorCode],
+            undefined,
+            'details' in eligibility ? eligibility.details : undefined,
+          );
+        }
+
+        const target = await tx.tables.findFirst({
+          where: { id: dto.target_table_id, store_id: storeId },
+          select: { id: true, name: true, zone: true, status: true },
+        });
+        if (!target) throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+        if (target.status === 'occupied') {
+          throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ALREADY_OPEN);
+        }
+        if (target.status !== 'available') {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_INVALID_STATUS,
+            target.status === 'reserved'
+              ? 'La mesa de destino está reservada; elige otra mesa'
+              : 'La mesa de destino está en limpieza; elige otra mesa',
+          );
+        }
+
+        // Check-then-act remains protected by the partial unique index; the
+        // transaction catch maps its residual P2002 race to a typed 409.
+        const occupied = await tx.table_sessions.findFirst({
+          where: { table_id: target.id, store_id: storeId, closed_at: null },
+          select: { id: true },
+        });
+        if (occupied) throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ALREADY_OPEN);
+
+        // Claim the available table row before creating the session. The
+        // conditional write closes the status race with reserve/cleaning;
+        // a failed claim rolls back with a typed retryable conflict.
+        const tableClaim = await tx.tables.updateMany({
+          where: { id: target.id, store_id: storeId, status: 'available' },
+          data: { status: 'occupied', updated_at: new Date() },
+        });
+        if (tableClaim.count !== 1) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'La mesa cambió de estado; actualiza y reintenta la operación',
+          );
+        }
+
+        const created = await tx.table_sessions.create({
+          data: {
+            store_id: storeId,
+            table_id: target.id,
+            order_id: order.id,
+            opened_by: userId,
+            guest_count: sessions[0].guest_count,
+            updated_at: new Date(),
+          },
+        });
+        await tx.kitchen_tickets.updateMany({
+          where: { order_id: order.id, store_id: storeId },
+          data: { table_id: target.id },
+        });
+        return { newSession: created, targetTable: target };
+      }));
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ALREADY_OPEN);
+        }
+        if (error.code === 'P2034') {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'Conflicto de escritura al reasignar la mesa; reintenta la operación',
+          );
+        }
+      }
+      throw error;
+    }
+
+    // Post-commit only. Failed or rolled-back writes must not reach floor-map.
+    this.emitSessionOpened(storeId, newSession);
+    this.emitTransferTableStatus(storeId, targetTable, 'occupied');
+    return this.findOne(newSession.id);
   }
 
   // ------------------------------------------------------- transfer / swap
@@ -1622,12 +1910,12 @@ export class TableSessionsService {
         return null;
       }
 
-      await this.markSessionPaid(openSession.id, paymentId, client);
+      const marked = await this.markSessionPaid(openSession.id, paymentId, client);
       let emitted = false;
       return {
         sessionId: openSession.id,
         emitAfterCommit: () => {
-          if (!openSession.paid_at && !emitted) {
+          if (marked.newlyPaid && !emitted) {
             emitted = true;
             this.emitSessionPaid(storeId, openSession.id, orderId, paymentId);
           }
@@ -1649,10 +1937,9 @@ export class TableSessionsService {
    * `payments`.
    *
    * Comportamiento:
-   *  - Idempotente sobre `paid_at`: si ya está pagado, no vuelve a escribir
-   *    y retorna el row actual (un segundo cobro POS contra la misma mesa
-   *    se bloquea aguas arriba por el guard `POS_TABLE_SESSION_ALREADY_CHARGED`
-   *    en `applyPosPaymentToTableSession`, pero igual defendemos aquí).
+   *  - Idempotente y seguro ante dos proyectores concurrentes: el claim
+   *    condicional `paid_at IS NULL` deja un solo ganador. Sólo él emite SSE;
+   *    el segundo conserva el timestamp original sin nuevo evento.
    *  - Acepta `tx` opcional para ejecutarse dentro de la transacción del
    *    pago POS; sin tx abre una propia.
    *
@@ -1664,29 +1951,26 @@ export class TableSessionsService {
     sessionId: number,
     paymentId: number | null,
     tx?: any,
-  ): Promise<{ id: number; paid_at: Date | null; order_id: number }> {
+  ): Promise<{ id: number; paid_at: Date | null; order_id: number; newlyPaid: boolean }> {
     const run = async (client: any) => {
-      const existing = await client.table_sessions.findUnique({
-        where: { id: sessionId },
+      const { storeId } = this.requireStoreContext();
+      const claimed = await client.table_sessions.updateMany({
+        where: { id: sessionId, store_id: storeId, paid_at: null },
+        data: { paid_at: new Date(), updated_at: new Date() },
+      });
+      const current = await client.table_sessions.findUnique({
+        where: { id: sessionId, store_id: storeId },
         select: { id: true, paid_at: true, order_id: true },
       });
-      if (!existing) {
+      if (!current) {
         throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
       }
-      if (existing.paid_at) {
-        // Ya pagada — no reescribir el timestamp (auditoría de cuándo fue
-        // el primer pago, no el último).
-        return existing;
+      if (claimed.count === 1) {
+        this.logger.log(
+          `Table session marked paid: session=${sessionId} order=${current.order_id} payment=${paymentId ?? 'n/a'}`,
+        );
       }
-      const updated = await client.table_sessions.update({
-        where: { id: sessionId },
-        data: { paid_at: new Date(), updated_at: new Date() },
-        select: { id: true, paid_at: true, order_id: true },
-      });
-      this.logger.log(
-        `Table session marked paid: session=${sessionId} order=${updated.order_id} payment=${paymentId ?? 'n/a'}`,
-      );
-      return updated;
+      return { ...current, newlyPaid: claimed.count === 1 };
     };
     return tx ? run(tx) : this.prisma.$transaction(run);
   }
@@ -2151,6 +2435,7 @@ export class TableSessionsService {
               ...(finalsByItemId.get(it.id) ?? {}),
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
               item_type: it.item_type,
+              notes: it.notes ?? null,
               is_takeaway: it.is_takeaway,
               delivered_at: it.delivered_at,
               delivered_by_user_id: it.delivered_by_user_id,
@@ -2161,7 +2446,10 @@ export class TableSessionsService {
               cancellation_reason: it.cancellation_reason,
               cancellation_type: it.cancellation_type as
                 | 'before_fire'
+                | 'after_fire_reused'
                 | 'after_fire_waste'
+                | 'delivered_restock'
+                | 'delivered_waste'
                 | null,
               kitchen_ticket_items: it.kitchen_ticket_items.map((kti) => ({
                 id: kti.id,
@@ -2247,6 +2535,70 @@ export class TableSessionsService {
     return this.findOne(sessionId);
   }
 
+  /**
+   * Update notes on a single item of an open table check.
+   *
+   * Validates:
+   *   1. Session is open.
+   *   2. Item belongs to this session's order and is not cancelled.
+   * Updates:
+   *   - order_items.notes (trimmed, or null if empty string)
+   *   - kitchen_ticket_items.notes if a pending kitchen ticket item exists.
+   * Returns:
+   *   - Fresh TableSessionView.
+   */
+  async updateItemNotes(
+    sessionId: number,
+    orderItemId: number,
+    notes?: string,
+  ): Promise<TableSessionView> {
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+    const item = session.order?.order_items.find((it) => it.id === orderItemId);
+    if (!item) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        `El ítem #${orderItemId} no pertenece a esta cuenta`,
+      );
+    }
+    if (item.cancelled_at) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'No se pueden editar las notas de un ítem cancelado',
+      );
+    }
+
+    const cleanNotes = notes?.trim() || null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order_items.updateMany({
+        where: { id: orderItemId, order_id: session.order_id },
+        data: {
+          notes: cleanNotes,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.kitchen_ticket_items.updateMany({
+        where: {
+          order_item_id: orderItemId,
+          status: 'pending',
+        },
+        data: {
+          notes: cleanNotes,
+        },
+      });
+    });
+
+    this.logger.log(
+      `Table item notes updated: session=${sessionId} orderItemId=${orderItemId} notes="${cleanNotes ?? ''}"`,
+    );
+
+    return this.findOne(sessionId);
+  }
+
   // ------------------------------------------------------------ customer
   /**
    * Assign (or detach) the customer of the draft order backing an open
@@ -2299,6 +2651,19 @@ export class TableSessionsService {
       // respondería 500 si ambos se poblaran en la misma fila.
       data: { customer_id: customerId, customer_alias: null, updated_at: new Date() },
     });
+
+    // Plan order-truth-and-invoice-tz (Step 6) — sólo se registra si el
+    // cliente vinculado realmente cambió (asignar el mismo cliente dos veces
+    // o desasignar una mesa ya anónima no es un cambio).
+    const priorCustomerId = session.order?.customer?.id ?? null;
+    if (priorCustomerId !== customerId) {
+      await this.orderHistory.record(this.prisma, {
+        orderId: session.order_id,
+        storeId,
+        type: 'customer_changed',
+        payload: { from_customer_id: priorCustomerId, to_customer_id: customerId },
+      });
+    }
 
     this.logger.log(
       `Table session customer ${
@@ -2392,7 +2757,9 @@ export class TableSessionsService {
    *   - Updates `orders.total_paid` / `remaining_balance` so the order
    *     reflects the new paid amount.
    *   - Once the paid sum covers `grand_total`, projects `table_sessions.paid_at`
-   *     after commit; partial payments leave the session unpaid.
+   *     after commit; partial payments leave the session unpaid. A projection
+   *     failure is captured: SSE/cash side effects still run and ERR-33 is
+   *     thrown typed at the end, with the payment kept succeeded.
    *   - Emits `payment.received` with the canonical shape so the auto-entry
    *     listener + notification listener both fire identically to the POS
    *     fresh-sale path.
@@ -2411,6 +2778,10 @@ export class TableSessionsService {
     paymentId: number,
   ): Promise<{ state: 'succeeded'; payment_id: number }> {
     const { storeId, userId } = this.requireContext();
+
+    // Gate único de caja: con caja activa, quien cobra necesita SU sesión
+    // abierta ANTES de confirmar el pago (cualquier método).
+    await this.cashRegisterSessionsService.assertSessionForSales(userId);
 
     // 1. Tenant + open-session guards.
     const session = await this.findOne(sessionId);
@@ -2506,6 +2877,16 @@ export class TableSessionsService {
         Number(payment.amount),
       );
 
+      // Plan order-truth-and-invoice-tz (Step 6).
+      await this.orderHistory.record(tx, {
+        orderId: order.id,
+        storeId,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'payment_registered',
+        paymentId: payment.id,
+        amount: Number(payment.amount),
+      });
+
       // 6. Emit canonical `payment.received`. Shape mirrors the POS fresh-sale
       //    emit (payments.service.ts L1179) so the auto-entry listener + the
       //    notification listener both process it identically.
@@ -2554,12 +2935,23 @@ export class TableSessionsService {
 
     // The payment and order balance are committed before B.1 opens its own
     // transaction. A succeeded retry repairs a missed projection; B.1 keeps
-    // both paid_at and session_paid idempotent.
+    // both paid_at and session_paid idempotent. A projection failure must
+    // never lose the SSE/cash side effects below nor surface a raw 500: it
+    // is captured here and rethrown typed (ERR-33) at the end.
+    let projectionError: unknown = null;
     if (result.shouldProject) {
-      await this.projectOrderPaymentToTableSession(
-        result.orderId,
-        result.payment_id,
-      );
+      try {
+        await this.projectOrderPaymentToTableSession(
+          result.orderId,
+          result.payment_id,
+        );
+      } catch (error) {
+        projectionError = error;
+        this.logger.error(
+          `[confirmPayment] table projection failed for order ${result.orderId} payment ${result.payment_id}: ${(error as Error)?.message ?? String(error)}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
     }
 
     // 7. Post-commit side effects — fire-and-await because the SSE push
@@ -2621,6 +3013,14 @@ export class TableSessionsService {
       );
     }
 
+    // The payment stays succeeded no matter what: a captured projection
+    // failure surfaces here, typed, after every side effect already ran.
+    if (projectionError) {
+      throw new VendixHttpException(
+        ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001,
+      );
+    }
+
     return { state: 'succeeded', payment_id: result.payment_id };
   }
 
@@ -2632,11 +3032,10 @@ export class TableSessionsService {
    * cash-in (DR 1105 via the `payment.received` event), breaking the
    * cash-register ↔ ledger reconciliation.
    *
-   * Business rule (mirror of the POS `processPosPayment` path): record ONLY if
-   *   1. `pos.cash_register.enabled` is on, AND
-   *   2. the confirming staff user has an OPEN cash session, AND
-   *   3. for non-cash methods, `track_non_cash_payments` is on.
-   * Any miss is a SILENT skip. This helper never throws and never blocks the
+   * Business rule: with `pos.cash_register.enabled`, EVERY method is recorded
+   * (the arqueo still counts only cash). `confirmPayment` already ran
+   * `assertSessionForSales`, so a missing session here is an anomaly and is
+   * logged as error. This helper never throws and never blocks the
    * already-committed payment confirmation (called after the COMMIT and only
    * on a real transition, i.e. `!result.noop`).
    */
@@ -2661,10 +3060,10 @@ export class TableSessionsService {
       const session = await this.cashRegisterSessionsService.getActiveSession(
         userId,
       );
-      if (!session) return;
-
-      // 3. Non-cash gate — skip unless the store tracks non-cash movements.
-      if (paymentMethod !== 'cash' && !crSettings.track_non_cash_payments) {
+      if (!session) {
+        this.logger.error(
+          `[confirmPayment] no open cash session for user ${userId} despite gate; movement NOT recorded (order ${orderId}, payment ${paymentId})`,
+        );
         return;
       }
 

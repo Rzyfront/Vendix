@@ -365,10 +365,7 @@ import {
                             Personalizado
                           </span>
                         }
-                        @if (
-                          item.product.product_type === 'service' ||
-                          item.product.product_type === 'prepared'
-                        ) {
+                        @if (item.product.product_type === 'service') {
                           <button
                             type="button"
                             class="shrink-0 w-5 h-5 rounded flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors cursor-pointer"
@@ -640,6 +637,9 @@ import {
                           <span class="text-[10px] font-medium text-blue-700 leading-none">
                             {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
                           </span>
+                        }
+                        @if (getOversellWarning(item); as warning) {
+                          <span class="text-[10px] font-medium text-amber-700" role="status">{{ warning }}</span>
                         }
                       </div>
                     }
@@ -1312,7 +1312,7 @@ import {
 
     <!--
       CP-POS-SVC-PERF-001 / C.2 + C.3 — service scheduler modal. Mounted
-      at the cart root so the calendar icon on a service/prepared item
+      at the cart root so the calendar icon on a service item
       can toggle the schedulerOpen signal with the target cartItem and
       optional existing booking for re-agendamiento.
     -->
@@ -2071,7 +2071,13 @@ private cartService = inject(PosCartService);
       .updateCartItem({ itemId, quantity })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {},
+        next: (state) => {
+          const item = state.items.find((candidate) => candidate.id === itemId);
+          if (item) {
+            const warning = this.getOversellWarning(item);
+            if (warning) this.toastService.warning(warning);
+          }
+        },
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',
@@ -2114,13 +2120,18 @@ private cartService = inject(PosCartService);
     return item.quantity * Number(item.units_per_package ?? 1);
   }
 
-  getQuantityMax(item: CartItem): number {
+  getQuantityMax(item: CartItem): number | null {
+    if (this.cartService.allowNegativeStock()) return null;
     if (item.itemType === 'custom' || item.product.track_inventory === false) {
       return 999;
     }
     const availableStock = this.getAvailableStockForItem(item);
     const requiredPerUnit = this.getRequiredStockPerUnit(item);
     return Math.max(0, Math.floor(availableStock / requiredPerUnit));
+  }
+
+  getOversellWarning(item: CartItem): string | null {
+    return this.cartService.getOversellWarningForItem(item);
   }
 
   private getAvailableStockForItem(item: CartItem): number {
@@ -2657,7 +2668,7 @@ private cartService = inject(PosCartService);
     name?: string;
     first_name?: string;
     last_name?: string;
-    legal_name?: string;
+    legal_name?: string | null;
     business_name?: string;
     email?: string;
   } | null | undefined): string {
@@ -2681,7 +2692,7 @@ private cartService = inject(PosCartService);
     name?: string;
     first_name?: string;
     last_name?: string;
-    legal_name?: string;
+    legal_name?: string | null;
     business_name?: string;
     email?: string;
   } | null): string {

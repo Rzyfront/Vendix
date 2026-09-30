@@ -4,6 +4,8 @@ import {
   DIAN_FINAL_CONSUMER_NAME,
   DIAN_FINAL_CONSUMER_TYPE_CODE,
 } from './customer-fiscal-identity.validator';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { ErrorCodes } from '@common/errors/error-codes';
 
 describe('resolveAcquirerRail', () => {
   it('entrada completamente vacía resuelve a consumidor final', () => {
@@ -71,14 +73,38 @@ describe('resolveAcquirerRail', () => {
     expect(result.rail).toBe('final_consumer');
   });
 
-  it('nombre y número completos, sin tipo declarado, derivan document_type a CC', () => {
+  it('nombre y número completos, sin tipo declarado, BLOQUEA en vez de inventar CC (incidente Óptica Panorama)', () => {
+    // Antes: `document_type: (input.document_type ?? '').trim() || 'CC'` — así
+    // se transmitió una Cédula de Ciudadanía para un NIT real. Ahora debe
+    // bloquear ANTES de tomar el consecutivo, con el código de error fijado
+    // (no basta con `instanceof VendixHttpException`).
+    let caught: unknown;
+    try {
+      resolveAcquirerRail({
+        document_number: '800214345',
+        legal_name: 'Óptica Panorama SAS',
+      });
+      fail('esperaba que resolveAcquirerRail lanzara');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED.code,
+    );
+  });
+
+  it('nombre y número completos CON tipo declarado (NIT) no bloquea y preserva el tipo tal cual', () => {
     const result = resolveAcquirerRail({
-      document_number: '1118860776',
-      legal_name: 'Juan Pérez',
+      document_type: 'NIT',
+      document_number: '800214345',
+      legal_name: 'Óptica Panorama SAS',
     });
 
     expect(result.rail).toBe('nominative_minimal');
-    expect(result.identity.document_type).toBe('CC');
+    expect(result.identity.document_type).toBe('NIT');
+    expect(result.identity.document_number).toBe('800214345');
   });
 
   it('nombre literal "Consumidor Final" con número real resuelve a nominativo — el número manda', () => {
@@ -91,5 +117,59 @@ describe('resolveAcquirerRail', () => {
     expect(result.rail).toBe('nominative_minimal');
     expect(result.identity.document_number).toBe('1118860776');
     expect(result.identity.name).toBe('Consumidor Final');
+  });
+
+  // P1-B — corrección del sobre-alcance: 67 fichas prod con número+nombre y
+  // document_type NULL, sólo 21 con forma de NIT. Sin señal de riesgo, se
+  // infiere 'CC' en vez de bloquear.
+  it('persona natural, número SIN forma de NIT, sin legal_name ni tipo declarado ⇒ infiere CC, no bloquea', () => {
+    const result = resolveAcquirerRail({
+      document_number: '1118860776',
+      first_name: 'Juan',
+      last_name: 'Pérez',
+    });
+
+    expect(result.rail).toBe('nominative_minimal');
+    expect(result.identity.document_type).toBe('CC');
+    expect(result.identity.document_number).toBe('1118860776');
+  });
+
+  it('número CON forma de NIT (8/9 + 8 dígitos), sin legal_name ni tipo declarado ⇒ BLOQUEA igual (señal de riesgo por forma)', () => {
+    let caught: unknown;
+    try {
+      resolveAcquirerRail({
+        document_number: '900123456',
+        first_name: 'Juan',
+        last_name: 'Pérez',
+      });
+      fail('esperaba que resolveAcquirerRail lanzara');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED.code,
+    );
+  });
+
+  it('person_type explícito JURIDICA con número SIN forma de NIT y sin legal_name ⇒ BLOQUEA igual (señal de riesgo por person_type)', () => {
+    let caught: unknown;
+    try {
+      resolveAcquirerRail({
+        document_number: '1118860776',
+        first_name: 'Empresa',
+        last_name: 'X',
+        person_type: 'JURIDICA',
+      });
+      fail('esperaba que resolveAcquirerRail lanzara');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED.code,
+    );
   });
 });

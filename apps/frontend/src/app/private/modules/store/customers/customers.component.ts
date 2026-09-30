@@ -1,8 +1,9 @@
-import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { Component, inject, signal, DestroyRef, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize } from 'rxjs';
 import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
+import { CUSTOMER_MODAL_FILLABLE_FIELDS } from './components/customer-modal/customer-modal.component';
 import { translateCustomerError } from './utils/customer-error.translator';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CustomersService } from './services/customers.service';
@@ -18,6 +19,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
+  vexiWhenReady,
 } from '../../../../core/services/vexi-ui-host.registry';
 
 @Component({
@@ -146,6 +148,10 @@ export class CustomersComponent {
   // Bulk Upload Modal
   isBulkUploadModalOpen = signal(false);
 
+  // The customer form lives in the child modal, so fillForm reaches it
+  // through the child's own fill method — never by writing the service.
+  private readonly customerForm = viewChild(CustomerModalComponent);
+
   // ── Host de Vexi ────────────────────────────────────────────────────────
   //
   // Adaptador y no `implements VexiUiHost`: esta clase ya define
@@ -162,6 +168,14 @@ export class CustomersComponent {
         ? `${this.selectedCustomer()!.first_name} ${this.selectedCustomer()!.last_name}`.trim()
         : null,
       filters: { search: this.searchQuery() || undefined },
+      form_fields: this.isModalOpen()
+        ? [...CUSTOMER_MODAL_FILLABLE_FIELDS]
+        : undefined,
+      open_modal: this.vexiOpenModal(),
+      page: this.page(),
+      limit: this.limit(),
+      total: this.totalItems(),
+      total_pages: Math.max(1, Math.ceil(this.totalItems() / this.limit())),
       notes: this.loading()
         ? 'La lista todavía está cargando.'
         : this.isModalOpen()
@@ -197,31 +211,137 @@ export class CustomersComponent {
       }
     },
     setFilter: async (values) => {
-      if (typeof values['search'] !== 'string') {
+      const applied: string[] = [];
+      const ignored: string[] = [];
+      let note: string | undefined;
+
+      if (typeof values['search'] === 'string') {
+        // `onSearch` resetea la página; escribir el signal a mano dejaría a la
+        // persona en la página 4 de un resultado que tiene una sola.
+        this.onSearch(values['search']);
+        applied.push(`búsqueda "${values['search']}"`);
+      }
+
+      if (values['limit'] !== undefined) {
+        const limit = Number(values['limit']);
+        if (Number.isInteger(limit) && limit > 0 && limit <= 100) {
+          this.changeLimit(limit);
+          applied.push(`${limit} por página`);
+        } else {
+          ignored.push('limit');
+        }
+      }
+
+      if (values['page'] !== undefined) {
+        const totalPages = Math.max(
+          1,
+          Math.ceil(this.totalItems() / this.limit()),
+        );
+        let page = Math.floor(Number(values['page']));
+        if (!Number.isFinite(page)) {
+          ignored.push('page');
+        } else {
+          // La página explícita se aplica DESPUÉS del filtro: `onSearch`
+          // reseteó a 1 y el pedido es aterrizar en la pedida.
+          if (page < 1) page = 1;
+          if (page > totalPages) {
+            note = `Pediste la página ${page} pero solo hay ${totalPages}; te dejé en la última.`;
+            page = totalPages;
+          }
+          this.onPageChange(page);
+          applied.push(`página ${page}`);
+        }
+      }
+
+      if (values['sort'] !== undefined) {
+        ignored.push('sort');
+      }
+
+      for (const key of Object.keys(values)) {
+        if (!['search', 'limit', 'page', 'sort'].includes(key)) {
+          ignored.push(key);
+        }
+      }
+
+      if (!applied.length) {
         return {
           status: 'not_found' as const,
           message:
-            'La lista de Clientes solo filtra por búsqueda. Pasame el texto a buscar.',
+            'La lista de Clientes solo filtra por búsqueda y pagina con page/limit. No ordena (el backend no expone sort).',
         };
       }
 
-      // `onSearch` resetea la página; escribir el signal a mano dejaría a la
-      // persona en la página 4 de un resultado que tiene una sola.
-      this.onSearch(values['search']);
-      // Sin conteo: `onSearch` recarga de forma asíncrona, así que `customers()`
-      // acá sigue siendo la página anterior. Prometer un número que no se ha
-      // leído es exactamente lo que el lazo cerrado viene a evitar.
+      // Sin conteo: los handlers recargan de forma asíncrona, así que
+      // `customers()` acá sigue siendo la página anterior. Prometer un número
+      // que no se ha leído es exactamente lo que el lazo cerrado viene a evitar.
       return {
         status: 'ok' as const,
-        message: `Busqué "${values['search']}" en clientes. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.`,
+        message:
+          `Apliqué ${applied.join(', ')} en clientes. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.` +
+          (ignored.length
+            ? ` No apliqué ${ignored.join(', ')} porque esta lista no lo soporta.`
+            : ''),
+        detail: note ? { note } : undefined,
+      };
+    },
+    fillForm: async (values) => {
+      const form = this.customerForm();
+      if (!form) {
+        return {
+          status: 'error' as const,
+          message: 'El formulario de cliente no está montado en esta pantalla.',
+        };
+      }
+
+      if (!this.isModalOpen()) {
+        this.openCreateModal();
+      }
+
+      const result = form.vexiFillForm(values);
+      const unknownNote = result.unknown.length
+        ? ` No reconocí ${result.unknown.join(', ')}.`
+        : '';
+
+      if (!result.valid) {
+        return {
+          status: 'needs_user_input' as const,
+          message:
+            `Dejé la ficha de cliente llena con ${result.applied.join(', ') || 'nada nuevo'}, pero todavía falta: ` +
+            result.validation_errors.map((e) => e.message).join('; ') +
+            `.${unknownNote} Nada se guardó.`,
+          detail: { validation_errors: result.validation_errors },
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        message:
+          `Dejé la ficha de cliente llena (${result.applied.join(', ')}) y válida, lista para revisar.` +
+          `${unknownNote} Nada se guardó.`,
       };
     },
     openModal: (id) => this.vexiHostAdapter.runAction!(id),
+    closeModal: async () => {
+      const open = this.vexiOpenModal();
+      if (!open) {
+        return {
+          status: 'not_found' as const,
+          message: 'No hay ningún modal abierto en Clientes.',
+        };
+      }
+      this.closeModal();
+      this.isBulkUploadModalOpen.set(false);
+      return {
+        status: 'ok' as const,
+        message: `Cerré ${open.title}.`,
+      };
+    },
     refresh: () => {
       this.loadCustomers();
       this.loadStats();
       return { status: 'ok' as const, message: 'Recargué la lista de clientes.' };
     },
+    whenReady: () => vexiWhenReady(() => this.loading()),
   };
 
   constructor() {
@@ -296,6 +416,13 @@ export class CustomersComponent {
     this.loadCustomers();
   }
 
+  /** Cambiar filas por página vuelve a la 1, igual que un cambio de filtro. */
+  changeLimit(limit: number) {
+    this.limit.set(limit);
+    this.page.set(1);
+    this.loadCustomers();
+  }
+
   openCreateModal() {
     this.openModal();
   }
@@ -312,6 +439,15 @@ export class CustomersComponent {
   closeModal() {
     this.isModalOpen.set(false);
     this.selectedCustomer.set(null);
+  }
+
+  /** El modal abierto en forma accionable (U-5): `ui_close_modal` cierra este. */
+  private vexiOpenModal(): { id: string; title: string } | undefined {
+    if (this.isModalOpen())
+      return { id: 'ficha_cliente', title: 'la ficha de cliente' };
+    if (this.isBulkUploadModalOpen())
+      return { id: 'carga_masiva', title: 'la carga masiva' };
+    return undefined;
   }
 
   onSave(data: CreateCustomerRequest) {

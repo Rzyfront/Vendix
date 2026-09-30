@@ -2,9 +2,9 @@
 id: F.3
 title: "Alias y dirección visibles en remisión, ruta y documento impreso"
 phase: F
-status: pending
-owner: none
-updated: 2026-09-20
+status: done
+owner: loks
+updated: 2026-09-24
 contracts: [FB-60, FB-61, FB-62, FB-63, DB-35, DB-36, ERR-21]
 adrs: [ADR-05]
 skills: [vendix-dispatch-routes, vendix-address-geocoding, vendix-backend, how-to-test]
@@ -27,19 +27,19 @@ skills: [vendix-dispatch-routes, vendix-address-geocoding, vendix-backend, how-t
   - `curl -s "$API/store/dispatch-notes/by-order/$ORDER_ALIAS_ID" -H "Authorization: Bearer $TOKEN" | tee evidence/F.3-by-order.json`
   - `curl -s -X PATCH "$API/store/dispatch-notes/$NOTE_ID/address" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"address_line1":"Cra 7 # 1-3","city":"Bogotá"}' | tee evidence/F.3-patch-address.json` → dirección recopiada, nombre intacto.
   - SQL de DB-35: `SELECT count(*) FROM dispatch_notes d JOIN orders o ON o.id=d.order_id WHERE o.customer_alias IS NOT NULL AND d.customer_address IS NULL;` → 0 → `evidence/F.3-db35.txt`.
-  - SQL de DB-36: `SELECT s.id FROM dispatch_route_stops s JOIN dispatch_notes d ON d.id=s.dispatch_note_id WHERE d.customer_address IS NULL;` → 0 filas → `evidence/F.3-db36.txt`.
+  - SQL de DB-36: consultar paradas creadas por el nuevo recorrido de alias y exigir dirección/coordenadas; **no cero global** (57 paradas legacy sin copia, `evidence/F3-historical-baseline-20260923.md`).
   - Daño histórico: `SELECT count(*) FROM dispatch_notes WHERE customer_id IS NULL AND coalesce(customer_name,'')='';` → `evidence/F.3-remisiones-sin-nombre.txt`.
   - Playwright MCP contra `https://vendix.com`: venta con alias → generar remisión → armar ruta → ver la parada en el mapa → descargar el PDF de ruta. Capturas y PDF en `evidence/F.3-alias-ruta-e2e/`.
 - **Acceptance checklist:**
-  - [ ] Existe un test que falla antes del arreglo: la remisión de una venta con alias nacía sin nombre.
-  - [ ] La remisión copia el nombre de referencia al crearse y no lo resuelve en cada lectura.
-  - [ ] La remisión de una venta con alias deja el cliente nulo, sin inventar ninguna ficha.
-  - [ ] El rechazo por falta de dirección no se dispara en una venta con alias.
-  - [ ] La lista de paradas de la ruta muestra el nombre de referencia.
-  - [ ] La parada resuelve coordenadas por la copia o por la clave foránea, sin depender del cliente.
-  - [ ] El PDF de ruta imprime el nombre de referencia en vez del guión.
-  - [ ] El documento impreso de la remisión declara el campo de nombre de referencia en el catálogo.
-  - [ ] Una venta con alias entra al pool de despacho con nombre y dirección legibles.
-  - [ ] Ninguna remisión existente se reescribe durante el paso.
-  - [ ] El conteo de remisiones históricas sin nombre queda registrado como evidencia.
-- **Status:** pending
+  - [x] Existe un test que falla antes del arreglo: la remisión de una venta con alias nacía sin nombre.
+  - [x] La remisión copia el nombre de referencia al crearse y no lo resuelve en cada lectura.
+  - [x] La remisión de una venta con alias deja el cliente nulo, sin inventar ninguna ficha.
+  - [x] El rechazo por falta de dirección no se dispara en una venta con alias.
+  - [x] La lista de paradas de la ruta muestra el nombre de referencia (spec).
+  - [x] La parada resuelve coordenadas por la copia o por la clave foránea, sin depender del cliente (spec).
+  - [x] El PDF de ruta imprime el nombre de referencia en vez del guión (spec).
+  - [x] El documento impreso de la remisión declara el campo de nombre de referencia en el catálogo (spec).
+  - [x] Una venta con alias entra al pool de despacho con nombre y dirección legibles.
+  - [x] Ninguna remisión existente se reescribe durante el paso.
+  - [x] El conteo de remisiones históricas sin nombre queda registrado en `evidence/F3-historical-baseline-20260923.md`.
+- **Status:** done — loks 2026-09-24, 11/11. #231 alias 201 nombre+dir; by-order OK; patch nombre intacto; pool OK; DB-35 0; stop#129 coords; no-rewrite delta 0.

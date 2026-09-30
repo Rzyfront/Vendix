@@ -14,10 +14,14 @@ import {
   resolveLineTotals,
   type InclusiveRateBasis,
 } from '../../store/taxes/utils/tax-inclusive-math.util';
-import { CheckoutDto } from './dto/checkout.dto';
+import { CheckoutDto, CouponPreviewDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { Prisma, payment_processing_mode_enum } from '@prisma/client';
+import {
+  Prisma,
+  payment_processing_mode_enum,
+  shipping_rate_type_enum,
+} from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -59,6 +63,7 @@ import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
+import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -207,6 +212,10 @@ export class CheckoutService {
     // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
     // en specs) el envío sale sin impuesto.
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
+    // Cobro por distancia: mismo resolver del cotizador, recalculado en
+    // servidor al confirmar. `@Optional()` por el mismo motivo; sin él el
+    // envío sale a precio de zona.
+    @Optional() private readonly shippingDistance?: ShippingDistanceService,
   ) {}
 
   /**
@@ -225,6 +234,276 @@ export class CheckoutService {
     return this.shippingTaxService.snapshotForRate(null, rate_id, shipping_cost, {
       store_id,
     });
+  }
+
+  /**
+   * Paso 14 — precio de tarifa por tipo, misma selección del cotizador
+   * (`shipping-calculator.service.ts`): `free` ⇒ 0; `weight_based` ⇒ base +
+   * `per_unit_cost` × peso del carrito; resto ⇒ base. Sin puerta de rangos
+   * (`min_val`/`max_val`): el cotizador ya filtra lo ofrecido y rechazarla
+   * aquí agregaría un 400 nuevo; se cobra la selección tal cual.
+   */
+  private static selectRatePriceByType(
+    rate: {
+      type?: shipping_rate_type_enum | string | null;
+      base_cost?: unknown;
+      per_unit_cost?: unknown;
+    },
+    cart_weight_kg: number,
+  ): number {
+    if (rate.type === shipping_rate_type_enum.free) return 0;
+    const base = Number(rate.base_cost ?? 0);
+    if (rate.type === shipping_rate_type_enum.weight_based) {
+      const per_unit = Number(rate.per_unit_cost ?? 0);
+      const weight = Number.isFinite(cart_weight_kg) ? cart_weight_kg : 0;
+      return base + (Number.isFinite(per_unit) ? per_unit : 0) * weight;
+    }
+    return base;
+  }
+
+  /**
+   * Paso 14 — umbral de envío gratis, misma regla del cotizador: umbral
+   * alcanzado por el bruto de productos ⇒ 0. `null` = sin umbral; negativo
+   * legacy = sin gratis. El bruto aquí es el tarifado en servidor
+   * (subtotal + impuesto), no el estimado del storefront.
+   */
+  private static applyFreeShippingThreshold(
+    rate: { free_shipping_threshold?: unknown },
+    price: number,
+    products_gross: number,
+  ): number {
+    const threshold = rate.free_shipping_threshold;
+    if (threshold == null) return price;
+    const limit = Number(threshold);
+    if (!Number.isFinite(limit) || limit < 0) return price;
+    return products_gross >= limit ? 0 : price;
+  }
+
+  /** Peso del carrito en kg (Σ peso unitario × cantidad, sin peso ⇒ 0). */
+  private static cartWeightKg(
+    cart_items: ReadonlyArray<{
+      quantity?: unknown;
+      product?: { weight?: unknown } | null;
+    }>,
+  ): number {
+    return cart_items.reduce((sum, item) => {
+      const unit = Number(item?.product?.weight ?? 0);
+      const qty = Number(item?.quantity ?? 0);
+      return (
+        sum +
+        (Number.isFinite(unit) && Number.isFinite(qty) && unit > 0 && qty > 0
+          ? unit * qty
+          : 0)
+      );
+    }, 0);
+  }
+
+  /**
+   * Paso 14 — bruto de la tarifa con el cálculo único (`chargeForRate`):
+   * incluido ⇒ precio; agregado ⇒ base + impuesto. Sin servicio (solo
+   * specs) o sin `chargeForRate` (dobles viejos) ⇒ el precio es el bruto y
+   * el modo queda null. Precio 0 ⇒ 0 sin impuesto, sin leer la tarifa.
+   * Nunca lanza por el impuesto.
+   */
+  private async chargeCheckoutRate(
+    rate_id: number | null,
+    rate_price: number,
+    store_id: number | null | undefined,
+  ): Promise<{ gross: number; is_inclusive: boolean | null }> {
+    const passthrough = {
+      gross: rate_price,
+      is_inclusive: null as boolean | null,
+    };
+    if (!rate_id || !store_id || !this.shippingTaxService) return passthrough;
+    if (typeof this.shippingTaxService.chargeForRate !== 'function') {
+      return passthrough;
+    }
+    if (!(rate_price > 0)) return { gross: 0, is_inclusive: null };
+    const charge = await this.shippingTaxService.chargeForRate(
+      null,
+      rate_id,
+      rate_price,
+      { store_id },
+    );
+    return {
+      gross: charge.gross,
+      is_inclusive: charge.applies ? charge.reason === 'inclusive' : null,
+    };
+  }
+
+  /**
+   * Recalcula el costo de envío por distancia al confirmar, con el mismo
+   * resolver del cotizador (`ShippingDistanceService`) y las coords de la
+   * dirección final. Sin método-distancia/escala, sin ORIGEN del método, o
+   * con el motor de ruteo caído/lanzando, rige el precio de zona (con un
+   * warn estructurado — ver abajo): eso es infraestructura, no la dirección
+   * del comprador. Si la distancia cae fuera de todos los rangos
+   * (`matchTier`, SIN tolerancia de borde) la selección ya no es válida (el
+   * cotizador nunca la habría ofrecido) y el checkout se rechaza con 400
+   * `ECOM_CHECKOUT_003` — rechazo estricto, deliberado: no hay margen de
+   * tolerancia por diseño de negocio, así que un comprador justo en el
+   * borde de un tramo (o fuera de él) debe volver a cotizar en vez de
+   * recibir una tarifa que el cotizador nunca ofreció.
+   *
+   * Cambio de negocio (2026-09-27): sin coords del comprador Y sin poder
+   * geocodificar su dirección (`resolveBuyerCoords` devuelve `null` — sin
+   * `address_line1`, país no-CO, o el geocoder no resuelve), el checkout
+   * TAMBIÉN se rechaza con el mismo 400 `ECOM_CHECKOUT_003` (antes
+   * degradaba a zona) — sin saber dónde está el comprador no hay forma
+   * honesta de cobrar por distancia, y el cotizador ya excluyó esa tarifa
+   * de las opciones (`ShippingCalculatorService.applyDistancePrice`), así
+   * que el frontend nunca debió ofrecerla.
+   *
+   * `toCoords` (origen y destino) es el MISMO helper que usa el cotizador
+   * (`ShippingCalculatorService.resolveQuoteDistances`): redondea a 6
+   * decimales antes de armar el string de ruteo, así que un comprador que
+   * confirma la MISMA dirección que cotizó cae en la misma llave de caché de
+   * `RoutingService` y mide la misma distancia — eso reduce el ruido de
+   * redondeo Decimal(10,8) del snapshot vs. el float de la cotización, o de
+   * un proveedor de ruteo distinto entre ambas llamadas, pero no reemplaza
+   * el rechazo estricto: fuera de rango es fuera de rango.
+   *
+   * Sin coords en el snapshot, se intenta `ShippingDistanceService.
+   * resolveBuyerCoords` con los MISMOS campos y el MISMO bias (origen del
+   * método) que usa el cotizador (`resolveQuoteDistances`) — el `forward`
+   * cachea por dirección normalizada, así que esta llamada es un HIT del
+   * mismo resultado que ya vio la cotización. Cuando el geocode resuelve, el
+   * punto se escribe de vuelta en `address_snapshot.latitude/longitude`
+   * (mismo objeto que luego persiste `orders.shipping_address_snapshot`),
+   * así la orden queda con coords aunque el comprador nunca las haya
+   * mandado.
+   */
+  private async resolveConfirmShippingCost(
+    rate: {
+      type?: shipping_rate_type_enum | string | null;
+      distance_tiers?: unknown;
+      shipping_method_id?: number;
+      shipping_method?: {
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    },
+    address_snapshot: {
+      address_line1?: unknown;
+      city?: unknown;
+      state_province?: unknown;
+      country_code?: unknown;
+      latitude?: unknown;
+      longitude?: unknown;
+    } | null,
+    zone_cost: number,
+  ): Promise<number> {
+    // Release-853 paso 11 — tarifa `free` cobra 0 al confirmar, con o sin
+    // escala (misma regla del cotizador: `shipping-calculator.service.ts`).
+    if (rate.type === shipping_rate_type_enum.free) return 0;
+    const distance = this.shippingDistance;
+    const method = rate.shipping_method;
+    if (!distance || !method?.distance_pricing_enabled) return zone_cost;
+    const tiers = ShippingDistanceService.parseTiers(rate.distance_tiers);
+    if (!tiers) return zone_cost;
+
+    const logCtx = {
+      store_id: RequestContextService.getStoreId() ?? null,
+      shipping_method_id: rate.shipping_method_id ?? null,
+    };
+    const origin = ShippingDistanceService.toCoords(
+      method.origin_latitude,
+      method.origin_longitude,
+      'confirm:origin',
+    );
+    if (!origin) {
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: 'origin_coords_missing',
+      });
+      return zone_cost;
+    }
+
+    let buyer = ShippingDistanceService.toCoords(
+      address_snapshot?.latitude,
+      address_snapshot?.longitude,
+      'confirm:buyer',
+    );
+    if (!buyer) {
+      const resolved = await distance.resolveBuyerCoords(
+        {
+          address_line1: address_snapshot?.address_line1 as
+            | string
+            | undefined,
+          city: address_snapshot?.city as string | undefined,
+          state_province: address_snapshot?.state_province as
+            | string
+            | undefined,
+          country_code: address_snapshot?.country_code as string | undefined,
+          latitude: address_snapshot?.latitude,
+          longitude: address_snapshot?.longitude,
+        },
+        { lat: origin.latitude, lng: origin.longitude },
+      );
+      if (resolved) {
+        buyer = { latitude: resolved.latitude, longitude: resolved.longitude };
+        // Persistencia trivial: `address_snapshot` es el MISMO objeto que
+        // luego se escribe tal cual como `orders.shipping_address_snapshot`
+        // (ver los `prisma.orders.create` de checkout/whatsapp checkout más
+        // abajo). Solo se escribe cuando el punto vino del geocode — un pin
+        // de cliente ya está en el snapshot y no hace falta tocarlo.
+        if (address_snapshot && resolved.source === 'geocoded') {
+          (
+            address_snapshot as { latitude?: unknown; longitude?: unknown }
+          ).latitude = resolved.latitude;
+          (
+            address_snapshot as { latitude?: unknown; longitude?: unknown }
+          ).longitude = resolved.longitude;
+        }
+      }
+    }
+    if (!buyer) {
+      // Cambio de negocio 2026-09-27: ya NO degrada a zona — sin coords del
+      // comprador y sin poder geocodificar su dirección, no hay forma
+      // honesta de medir el envío por distancia, así que se rechaza igual
+      // que "fuera de todos los tramos" (mismo ECOM_CHECKOUT_003, reason
+      // distinto en el warn para que siga siendo diagnosticable). El origen
+      // faltante y el motor de ruteo caído SÍ siguen degradando a zona más
+      // abajo — eso es infraestructura, no la dirección del comprador.
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: 'buyer_geocode_failed',
+      });
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_003,
+        'No pudimos ubicar la dirección de entrega. Marca la ubicación en el mapa para calcular el envío.',
+      );
+    }
+    let distanceKm: number | null;
+    try {
+      distanceKm = await distance.resolveDistanceKm(origin, buyer);
+    } catch {
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: 'routing_exception',
+      });
+      return zone_cost;
+    }
+    if (distanceKm == null) {
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: 'routing_failed',
+      });
+      return zone_cost;
+    }
+    const tier = ShippingDistanceService.matchTier(tiers, distanceKm);
+    if (!tier) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_003,
+        'La tarifa de envío seleccionada ya no cubre la distancia a tu dirección; vuelve a cotizar el envío',
+      );
+    }
+    return tier.price;
   }
 
   /**
@@ -621,6 +900,8 @@ export class CheckoutService {
   private async getCheckoutSettings(): Promise<{
     require_registration: boolean;
     require_payment_receipt: boolean;
+    whatsapp_checkout: boolean;
+    whatsapp_number: string;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -638,6 +919,13 @@ export class CheckoutService {
       require_registration: !!checkout.require_registration,
       // Opt-in por tienda (default `false` ⇒ comprobante opcional).
       require_payment_receipt: !!checkout.require_payment_receipt,
+      // pending_shipping_assignment: la tienda debe tener el checkout por
+      // WhatsApp activo Y un número configurado para recibirlo.
+      whatsapp_checkout: checkout.whatsapp_checkout === true,
+      whatsapp_number:
+        typeof checkout.whatsapp_number === 'string'
+          ? checkout.whatsapp_number.trim()
+          : '',
     };
   }
 
@@ -648,6 +936,37 @@ export class CheckoutService {
     if (checkoutSettings.require_registration) {
       throw new BadRequestException(
         'Debes iniciar sesión o registrarte para completar esta compra',
+      );
+    }
+  }
+
+  /**
+   * Paso 1 (checkout-whatsapp-location-fallback): valida el flag
+   * `pending_shipping_assignment`. El backend nunca confía en el frontend —
+   * revalida todo el contrato aunque el frontend ya lo haya gateado en UI.
+   */
+  private async assertPendingShippingAssignmentAllowed(
+    dto: CheckoutDto,
+  ): Promise<void> {
+    if (!dto.pending_shipping_assignment) return;
+
+    if (
+      dto.channel !== 'whatsapp' ||
+      dto.shipping_method_id != null ||
+      dto.shipping_rate_id != null
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_PENDING_SHIPPING_001,
+      );
+    }
+
+    const checkoutSettings = await this.getCheckoutSettings();
+    if (
+      !checkoutSettings.whatsapp_checkout ||
+      checkoutSettings.whatsapp_number.length === 0
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_PENDING_SHIPPING_001,
       );
     }
   }
@@ -672,6 +991,32 @@ export class CheckoutService {
     };
 
     return Object.values(normalized).some(Boolean) ? normalized : null;
+  }
+
+  /**
+   * Alias de cliente para la venta guest sin identidad resuelta.
+   *
+   * Cuando `resolved_customer_id` es null (invitado solo-nombre: sin email ni
+   * teléfono que permitan resolver/crear el `users` vía
+   * `resolveGuestCustomerForCheckout`) y hay nombre, la orden se persiste con
+   * `customer_id = null` + `customer_alias = trim(nombre)` truncado a 100
+   * caracteres (límite del `VARCHAR(100)` de `orders.customer_alias`). Con
+   * cliente resuelto el alias queda en null (XOR `orders_customer_xor_alias`).
+   */
+  private static resolveGuestCustomerAlias(
+    guest: {
+      first_name?: string | null;
+      last_name?: string | null;
+    } | null,
+    resolved_customer_id: number | null,
+  ): string | null {
+    if (resolved_customer_id != null || !guest) return null;
+    const alias = [guest.first_name, guest.last_name]
+      .filter((part) => typeof part === 'string' && part.trim().length > 0)
+      .join(' ')
+      .trim()
+      .slice(0, 100);
+    return alias.length > 0 ? alias : null;
   }
 
   private async createInvoiceIfConfigured(
@@ -951,6 +1296,109 @@ export class CheckoutService {
   }
 
   /**
+   * Vista previa del descuento de un cupón para el storefront (QUI-883).
+   * El checkout mostraba `-$0.00` hasta confirmar y el comprador creía que
+   * el cupón no funcionaba. Este preview corre EXACTAMENTE la misma
+   * validación (`resolveCheckoutDiscounts`) que el confirm, con precios
+   * resueltos en servidor (nunca los del cliente) y Prisma scoped al tenant.
+   * Solo lectura: no crea `coupon_uses`, no toca contadores. El confirm
+   * recalcula de todos modos, así que la cifra final siempre manda.
+   * Un cupón inválido devuelve `valid: false` con el motivo en vez de 500.
+   */
+  async previewCouponDiscount(dto: CouponPreviewDto): Promise<{
+    valid: boolean;
+    coupon_id: number | null;
+    code: string;
+    discount_amount: number;
+    subtotal: number;
+    reason?: string;
+  }> {
+    const code = dto.coupon_code?.trim().toUpperCase();
+    if (!code || !dto.items?.length) {
+      return { valid: false, coupon_id: null, code: code ?? '', discount_amount: 0, subtotal: 0 };
+    }
+    const customerId = RequestContextService.getUserId() ?? null;
+
+    const lines: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      net_price: number;
+    }> = [];
+    for (const item of dto.items) {
+      const product = await this.prisma.products.findFirst({
+        where: {
+          id: item.product_id,
+          state: 'active',
+          available_for_ecommerce: true,
+        },
+      });
+      if (!product || product.is_sellable !== true) {
+        throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_002);
+      }
+      let variant: any = null;
+      if (item.product_variant_id) {
+        variant = await this.prisma.product_variants.findUnique({
+          where: { id: item.product_variant_id },
+        });
+        if (!variant || variant.product_id !== item.product_id) {
+          throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
+        }
+      }
+      // `sale_price = 0` significa "sin oferta" (columna NOT NULL con
+      // default 0): `??` no salta el 0 y el preview cotizaba la línea en 0,
+      // lo que hacía fallar la validación con CPN_APPLY_001 ("no aplica a
+      // los productos") aunque el cupón sí aplicaba. Se cae al siguiente
+      // candidato cuando el valor es 0.
+      const priceCandidates = [
+        variant?.price_override,
+        variant?.sale_price,
+        product.sale_price,
+        product.base_price,
+      ];
+      const net =
+        priceCandidates.map((c) => Number(c ?? 0)).find((n) => n > 0) ?? 0;
+      lines.push({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        quantity: item.quantity,
+        net_price: net,
+      });
+    }
+
+    try {
+      const res = await this.resolveCheckoutDiscounts({
+        items: lines,
+        customerId,
+        couponCode: code,
+      });
+      return {
+        valid: true,
+        coupon_id: res.coupon?.coupon_id ?? null,
+        code,
+        discount_amount: res.coupon_discount,
+        subtotal: res.quote.promotional_subtotal,
+      };
+    } catch (err) {
+      // Cupón inválido (vencido, mínimo, usos, no aplica): respuesta honesta
+      // con motivo, sin romper el checkout.
+      if (err instanceof VendixHttpException) {
+        const body = err.getResponse() as any;
+        return {
+          valid: false,
+          coupon_id: null,
+          code,
+          discount_amount: 0,
+          subtotal: 0,
+          reason:
+            body?.error_code ?? body?.message ?? 'Cupón no válido',
+        };
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Persist `order_promotions` + `coupon_uses` after the ecommerce order
    * has been created. Each promotion is wrapped in its own try/catch so a
    * race on usage limits doesn't break the checkout (the order is already
@@ -1138,6 +1586,7 @@ export class CheckoutService {
 
   private async runCheckout(dto: CheckoutDto, file?: Express.Multer.File) {
     await this.assertGuestCheckoutAllowed();
+    await this.assertPendingShippingAssignmentAllowed(dto);
 
     const user_id = RequestContextService.getUserId();
     const is_guest = !user_id;
@@ -1240,43 +1689,52 @@ export class CheckoutService {
       cart?.currency || (await this.settingsService.getStoreCurrency());
 
     // store_id se aplica automáticamente
-    const payment_method = await this.prisma.store_payment_methods.findFirst({
-      where: {
-        id: dto.payment_method_id,
-        state: 'enabled',
-      },
-      include: { system_payment_method: true },
-    });
+    // pending_shipping_assignment: sin payment_method_id (el pago se acuerda
+    // por fuera del sistema), así que se omite toda la resolución/validación
+    // de método de pago. OJO: `dto.payment_method_id` puede venir undefined
+    // aquí — Prisma ignoraría el filtro `id: undefined` y devolvería un
+    // método arbitrario, por eso el guard salta todo el bloque en vez de
+    // dejar que la query corra igual.
+    let payment_method: any = null;
+    if (!dto.pending_shipping_assignment) {
+      payment_method = await this.prisma.store_payment_methods.findFirst({
+        where: {
+          id: dto.payment_method_id,
+          state: 'enabled',
+        },
+        include: { system_payment_method: true },
+      });
 
-    if (!payment_method) {
-      throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
-    }
+      if (!payment_method) {
+        throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
+      }
 
-    // FIX QUI-467: block wallet payment for anonymous users. Even if a guest
-    // crafts a request manually, the server must refuse wallet — the wallet
-    // is per-customer (prepaid balance) and needs an authenticated identity.
-    if (
-      payment_method.system_payment_method.type === 'wallet' &&
-      !RequestContextService.getUserId()
-    ) {
-      throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_005);
-    }
+      // FIX QUI-467: block wallet payment for anonymous users. Even if a guest
+      // crafts a request manually, the server must refuse wallet — the wallet
+      // is per-customer (prepaid balance) and needs an authenticated identity.
+      if (
+        payment_method.system_payment_method.type === 'wallet' &&
+        !RequestContextService.getUserId()
+      ) {
+        throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_005);
+      }
 
-    // Soporte obligatorio por tienda: con
-    // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer /
-    // voucher sin `file` se rechaza aquí (fail-fast, antes de crear orden y
-    // pago). Con el flag apagado el flujo queda idéntico al actual.
-    if (
-      (payment_method.system_payment_method.type === 'bank_transfer' ||
-        payment_method.system_payment_method.type === 'voucher') &&
-      !file
-    ) {
-      const checkoutSettings = await this.getCheckoutSettings();
-      if (checkoutSettings.require_payment_receipt) {
-        throw new VendixHttpException(
-          ErrorCodes.ECOM_CHECKOUT_001,
-          'El comprobante de pago es obligatorio para este método de pago',
-        );
+      // Soporte obligatorio por tienda: con
+      // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer /
+      // voucher sin `file` se rechaza aquí (fail-fast, antes de crear orden y
+      // pago). Con el flag apagado el flujo queda idéntico al actual.
+      if (
+        (payment_method.system_payment_method.type === 'bank_transfer' ||
+          payment_method.system_payment_method.type === 'voucher') &&
+        !file
+      ) {
+        const checkoutSettings = await this.getCheckoutSettings();
+        if (checkoutSettings.require_payment_receipt) {
+          throw new VendixHttpException(
+            ErrorCodes.ECOM_CHECKOUT_001,
+            'El comprobante de pago es obligatorio para este método de pago',
+          );
+        }
       }
     }
 
@@ -1338,7 +1796,12 @@ export class CheckoutService {
       return true;
     });
 
-    if (hasPhysicalItems && !dto.shipping_method_id && !dto.shipping_rate_id) {
+    if (
+      hasPhysicalItems &&
+      !dto.pending_shipping_assignment &&
+      !dto.shipping_method_id &&
+      !dto.shipping_rate_id
+    ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
@@ -1399,6 +1862,24 @@ export class CheckoutService {
     let shipping_cost = 0;
     let shipping_method_id: number | null = null;
     let shipping_rate_id: number | null = null;
+    // Paso 14 — la tarifa elegida; el COSTO se calcula tarde (junto al
+    // snapshot) porque el umbral de envío gratis se evalúa contra el bruto
+    // de productos (subtotal + impuesto), que solo existe tras tarifar.
+    let selected_rate: {
+      id: number;
+      type?: shipping_rate_type_enum | string | null;
+      base_cost?: unknown;
+      per_unit_cost?: unknown;
+      free_shipping_threshold?: unknown;
+      distance_tiers?: unknown;
+      shipping_method_id: number;
+      shipping_method?: {
+        type?: unknown;
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    } | null = null;
     let delivery_type:
       | 'pickup'
       | 'home_delivery'
@@ -1430,9 +1911,9 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
-      shipping_cost = Number(rate.base_cost);
       shipping_method_id = rate.shipping_method_id;
       shipping_rate_id = rate.id;
+      selected_rate = rate;
 
       // Derive delivery_type from shipping method type
       const methodType = rate.shipping_method.type;
@@ -1462,6 +1943,16 @@ export class CheckoutService {
       delivery_type = deriveDeliveryType(method.type);
     }
 
+    if (dto.pending_shipping_assignment) {
+      // pending_shipping_assignment: ninguna rama de arriba corrió
+      // (shipping_method_id/shipping_rate_id están prohibidos por el guard
+      // de assertPendingShippingAssignmentAllowed), así que se fuerza aquí.
+      // shipping_cost/shipping_method_id/shipping_rate_id quedan en sus
+      // defaults (0/null/null) y selected_rate en null — resolveConfirmShippingCost
+      // nunca se invoca porque su llamada está condicionada a `selected_rate`.
+      delivery_type = 'other';
+    }
+
     if (
       hasPhysicalItems &&
       delivery_type !== 'pickup' &&
@@ -1476,6 +1967,7 @@ export class CheckoutService {
 
     // QUI-850: El pago en efectivo solo está disponible para entrega 'pickup' (recoger en tienda).
     if (
+      payment_method &&
       payment_method.system_payment_method.type === 'cash' &&
       delivery_type !== 'pickup'
     ) {
@@ -1647,6 +2139,36 @@ export class CheckoutService {
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
 
+    // Paso 14 — el costo cobrado SALE de la tarifa con la misma selección
+    // del cotizador (`/shipping/calculate`: tipo → distancia → umbral de
+    // envío gratis) y el cálculo único (`chargeForRate`: incluido ⇒ precio,
+    // agregado ⇒ base + impuesto). El cliente nunca envía costos. Va ANTES
+    // del snapshot para que el impuesto se calcule sobre el costo final.
+    let shipping_tax_is_inclusive: boolean | null = null;
+    if (selected_rate) {
+      const type_price = CheckoutService.selectRatePriceByType(
+        selected_rate,
+        CheckoutService.cartWeightKg(cart_items),
+      );
+      const distanced_price = await this.resolveConfirmShippingCost(
+        selected_rate,
+        shipping_address_snapshot,
+        type_price,
+      );
+      const rate_price = CheckoutService.applyFreeShippingThreshold(
+        selected_rate,
+        distanced_price,
+        this.roundMoney(subtotal + total_tax),
+      );
+      const charge = await this.chargeCheckoutRate(
+        shipping_rate_id,
+        rate_price,
+        store_id,
+      );
+      shipping_cost = charge.gross;
+      shipping_tax_is_inclusive = charge.is_inclusive;
+    }
+
     // Copia del impuesto del envío (tarifa elegida). Va incluido en
     // `shipping_cost`: no cambia `grand_total`.
     const shipping_tax = await this.resolveCheckoutShippingTax(
@@ -1718,11 +2240,17 @@ export class CheckoutService {
       dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
       delivery_type,
     );
+    // Guest solo-nombre: sin cliente resuelto el nombre viaja como alias.
+    const guest_customer_alias = CheckoutService.resolveGuestCustomerAlias(
+      guest_customer,
+      resolved_customer_id,
+    );
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
       data: {
         order_number,
         customer_id: resolved_customer_id,
+        customer_alias: guest_customer_alias,
         // Canal unificado CP-tienda-checkout-whatsapp: "Finalizar por
         // WhatsApp" recorre este mismo núcleo con channel='whatsapp'; el
         // endpoint legacy POST /whatsapp sigue creando channel='whatsapp'
@@ -1737,12 +2265,35 @@ export class CheckoutService {
         shipping_rate_id: shipping_rate_id,
         // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
         ...shipping_tax,
+        // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+        // impuesto o histórico).
+        shipping_tax_is_inclusive,
         delivery_type: delivery_type,
         grand_total: grand_total,
+        // B8 (release-855): `remaining_balance`/`total_paid` default to 0 in
+        // the schema, which reads as "nothing owed". For a contra-entrega
+        // order that made the dispatch treat it as prepaid (no COD
+        // collection) and the order auto-finished unpaid. Scoped to
+        // ON_DELIVERY only: online/transfer methods keep their historical
+        // shape (their confirmation settles the order).
+        ...(payment_method?.system_payment_method?.processing_mode ===
+        payment_processing_mode_enum.ON_DELIVERY
+          ? { total_paid: 0, remaining_balance: grand_total }
+          : {}),
         shipping_address_id,
         shipping_address_snapshot,
         state: 'pending_payment',
-        internal_notes: dto.notes,
+        // QUI-887 (rev 867, re-review) — la observación del comprador va a
+        // `notes` (columna visible: el POS ya la escribe ahí y el KDS la lee
+        // de ahí). El aviso operativo de envío pendiente vive SOLO en
+        // `internal_notes`: con envío pendiente es SOLO el aviso — si llevara
+        // también la observación, el detalle mostraría el mismo texto en Nota
+        // y en Staff. Sin envío pendiente conserva la observación y el detalle
+        // oculta Staff cuando iguala a Nota.
+        notes: dto.notes?.trim() || undefined,
+        internal_notes: dto.pending_shipping_assignment
+          ? 'Pedido por WhatsApp con envío pendiente de asignar. Contactar al comprador para acordar el método y costo de envío.'
+          : dto.notes?.trim() || undefined,
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
@@ -1829,8 +2380,9 @@ export class CheckoutService {
     let receipt_s3_key: string | null = null;
     let receipt_uploaded_at: Date | null = null;
     const receiptEligibleMethodType =
-      payment_method.system_payment_method.type === 'bank_transfer' ||
-      payment_method.system_payment_method.type === 'voucher';
+      payment_method != null &&
+      (payment_method.system_payment_method.type === 'bank_transfer' ||
+        payment_method.system_payment_method.type === 'voucher');
 
     if (file && receiptEligibleMethodType) {
       receipt_s3_key = await this.uploadCheckoutReceipt(file);
@@ -1862,22 +2414,26 @@ export class CheckoutService {
     // QUI-728 — capturamos el `id` del pago recién creado para devolverlo al
     // comprador en la respuesta y permitirle releer su comprobante más tarde
     // (solo si subió archivo — sin `receipt_s3_key` no hay qué re-leer).
-    const created_payment = await this.prisma.payments.create({
-      data: {
-        order_id: order.id,
-        amount: grand_total,
-        currency: cart_currency,
-        state: 'pending',
-        store_payment_method_id: dto.payment_method_id,
-        receipt_s3_key,
-        receipt_uploaded_at,
-        bank_account_id: resolved_bank_account_id,
-      },
-      select: { id: true },
-    });
-    const payment_id_with_receipt: number | null = receipt_s3_key
-      ? created_payment.id
-      : null;
+    // pending_shipping_assignment: sin payment_method_id no hay pago que
+    // registrar — la tienda cobra por fuera del sistema tras acordar envío.
+    let created_payment: { id: number } | null = null;
+    if (!dto.pending_shipping_assignment) {
+      created_payment = await this.prisma.payments.create({
+        data: {
+          order_id: order.id,
+          amount: grand_total,
+          currency: cart_currency,
+          state: 'pending',
+          store_payment_method_id: dto.payment_method_id,
+          receipt_s3_key,
+          receipt_uploaded_at,
+          bank_account_id: resolved_bank_account_id,
+        },
+        select: { id: true },
+      });
+    }
+    const payment_id_with_receipt: number | null =
+      receipt_s3_key && created_payment ? created_payment.id : null;
 
     // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones
     // distintas son dos reservas independientes, y la suma de ambas es lo que
@@ -1954,9 +2510,13 @@ export class CheckoutService {
       }
     }
 
-    const invoice_id = is_guest
-      ? null
-      : await this.createInvoiceIfConfigured(order.id);
+    // pending_shipping_assignment: nunca facturar DIAN automáticamente — el
+    // envío ($0 en este punto) todavía no está acordado con el comprador, y
+    // una factura con costo de envío en cero sería incorrecta.
+    const invoice_id =
+      dto.pending_shipping_assignment || is_guest
+        ? null
+        : await this.createInvoiceIfConfigured(order.id);
     const guestArtifacts = is_guest
       ? await this.createGuestOrderArtifacts(order.id, guest_customer)
       : null;
@@ -1979,6 +2539,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
+      customer_id: (order as any).customer_id ?? resolved_customer_id ?? null,
+      customer_alias:
+        (order as any).customer_alias ?? guest_customer_alias ?? null,
       // Contrato numérico: Prisma devuelve Decimal (serializa como string);
       // el storefront tipa `total: number` (auditoría D.3).
       total: this.roundMoney(Number(order.grand_total)),
@@ -2471,6 +3034,7 @@ export class CheckoutService {
     let wa_shipping_method_id: number | null = null;
     let wa_shipping_rate_id: number | null = null;
     let wa_shipping_cost = 0;
+    let wa_shipping_tax_is_inclusive: boolean | null = null;
     let wa_delivery_type:
       | 'pickup'
       | 'home_delivery'
@@ -2493,8 +3057,31 @@ export class CheckoutService {
       }
       wa_shipping_method_id = rate.shipping_method_id;
       wa_shipping_rate_id = rate.id;
-      wa_shipping_cost = Number(rate.base_cost);
       wa_delivery_type = deriveDeliveryType(rate.shipping_method.type);
+      // Paso 14 — misma selección del cotizador + cálculo único que el
+      // checkout normal (tipo → distancia → umbral → bruto). El subtotal
+      // tarifado ya existe aquí, así que el costo se resuelve en el sitio.
+      const wa_type_price = CheckoutService.selectRatePriceByType(
+        rate,
+        CheckoutService.cartWeightKg(cart_items),
+      );
+      const wa_distanced = await this.resolveConfirmShippingCost(
+        rate,
+        shipping_address_snapshot,
+        wa_type_price,
+      );
+      const wa_rate_price = CheckoutService.applyFreeShippingThreshold(
+        rate,
+        wa_distanced,
+        this.roundMoney(subtotal + total_tax),
+      );
+      const wa_charge = await this.chargeCheckoutRate(
+        wa_shipping_rate_id,
+        wa_rate_price,
+        wa_store_id,
+      );
+      wa_shipping_cost = wa_charge.gross;
+      wa_shipping_tax_is_inclusive = wa_charge.is_inclusive;
     } else if (dto.shipping_method_id) {
       const method = await this.store_prisma.shipping_methods.findFirst({
         where: {
@@ -2542,10 +3129,16 @@ export class CheckoutService {
       'whatsapp',
       wa_delivery_type,
     );
+    // Mismo alias guest que el núcleo web (endpoint legacy, mismo contrato).
+    const wa_guest_customer_alias = CheckoutService.resolveGuestCustomerAlias(
+      guest_customer,
+      resolved_customer_id,
+    );
     const order = await this.prisma.orders.create({
       data: {
         order_number,
         customer_id: resolved_customer_id,
+        customer_alias: wa_guest_customer_alias,
         channel: 'whatsapp',
         currency: cart_currency,
         subtotal_amount: subtotal,
@@ -2556,12 +3149,24 @@ export class CheckoutService {
         shipping_rate_id: wa_shipping_rate_id,
         // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
         ...wa_shipping_tax,
+        // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+        // impuesto o histórico).
+        shipping_tax_is_inclusive: wa_shipping_tax_is_inclusive,
         delivery_type: wa_delivery_type,
         grand_total: grand_total,
+        // B8 (release-855): same reasoning as the normal checkout path —
+        // no `payments` row is created for WhatsApp checkout at all, so the
+        // schema default (`remaining_balance=0`) is even more wrong here:
+        // nothing has ever been collected for this order.
+        total_paid: 0,
+        remaining_balance: grand_total,
         shipping_address_id,
         shipping_address_snapshot,
         state: 'created',
         internal_notes: dto.notes,
+        // QUI-887 — igual que el checkout normal: la observación del
+        // comprador va a la columna visible `notes` para que el KDS la lea.
+        notes: dto.notes?.trim() || undefined,
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
@@ -2692,6 +3297,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
+      customer_id: (order as any).customer_id ?? resolved_customer_id ?? null,
+      customer_alias:
+        (order as any).customer_alias ?? wa_guest_customer_alias ?? null,
       total: order.grand_total,
       public_order_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,

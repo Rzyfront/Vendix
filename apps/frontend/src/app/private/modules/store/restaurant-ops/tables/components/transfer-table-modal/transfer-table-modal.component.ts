@@ -18,7 +18,7 @@ import {
   SpinnerComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
-import { Table, TableStatus, TransferResult } from '../../interfaces';
+import { Table, TableSession, TableStatus, TransferResult } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 
 /**
@@ -27,14 +27,15 @@ import { TablesService } from '../../services/tables.service';
  * Patrón de `quick-status-modal` / `seat-booking-modal`: visibilidad por
  * `isOpen` / `isOpenChange`, mesa origen en `table`, lista completa en
  * `tables`. El footer Confirmar (habilitado solo con destino válido)
- * llama `TablesService.transferSession`; al éxito emite `confirmed` con
- * el `TransferResult` y se cierra. El padre toastea y recarga en
- * `onTransferConfirmed`.
+ * llama `TablesService.transferSession` para una cuenta abierta, o
+ * `reassignOrderToTable` para devolver a mesa una orden cerrada elegible.
+ * Emite `confirmed` o `reassigned` según el modo y se cierra al éxito.
  *
  * Reglas de selección:
  *  - el origen se lista marcado con "Origen" y no es elegible;
- *  - `reserved` se lista deshabilitada con tooltip (el backend la
- *    rechaza con 409 `TABLE_INVALID_STATUS`);
+ *  - en transfer, `reserved` se deshabilita y `occupied` anticipa swap;
+ *  - en reassign, solo `available` se habilita, `occupied` se excluye,
+ *    y `reserved`/`cleaning` se marcan sin poder seleccionarse;
  *  - el mensaje previo anticipa swap (destino ocupado) o traslado.
  */
 @Component({
@@ -58,9 +59,12 @@ export class TransferTableModalComponent {
   readonly isOpen = input(false);
   readonly table = input<Table | null>(null);
   readonly tables = input<Table[]>([]);
+  readonly mode = input<'transfer' | 'reassign'>('transfer');
+  readonly orderId = input<number | null>(null);
 
   readonly isOpenChange = output<boolean>();
   readonly confirmed = output<TransferResult>();
+  readonly reassigned = output<TableSession>();
 
   readonly selectedId = signal<number | null>(null);
   readonly isConfirming = signal(false);
@@ -85,6 +89,13 @@ export class TransferTableModalComponent {
     this.tables().length > 0 ? this.tables() : this.fetchedTables(),
   );
 
+  /** Reassignment never swaps accounts: occupied destinations are omitted. */
+  readonly visibleTables = computed<Table[]>(() =>
+    this.mode() === 'reassign'
+      ? this.allTables().filter((t) => !t.active_session && this.statusOf(t) !== 'occupied')
+      : this.allTables(),
+  );
+
   readonly source = computed(() => this.table());
 
   readonly target = computed<Table | null>(() => {
@@ -103,8 +114,8 @@ export class TransferTableModalComponent {
     const s = this.source();
     const t = this.target();
     if (!s || !t) return false;
-    if (t.id === s.id) return false;
-    return this.statusOf(t) !== 'reserved';
+    if (this.mode() === 'reassign' && this.orderId() == null) return false;
+    return this.isSelectable(t);
   });
 
   readonly canConfirm = computed(
@@ -116,6 +127,9 @@ export class TransferTableModalComponent {
     const s = this.source();
     const t = this.target();
     if (!s || !t || !this.isTargetValid()) return '';
+    if (this.mode() === 'reassign') {
+      return `La orden volverá a ${t.name} con una sesión nueva; el cierre anterior se conserva.`;
+    }
     return this.targetOccupied()
       ? `${s.name} ↔ ${t.name} intercambian cuentas`
       : `${s.name} → ${t.name}; ${s.name} queda Disponible`;
@@ -123,8 +137,15 @@ export class TransferTableModalComponent {
 
   readonly title = computed(() => {
     const s = this.source();
+    if (this.mode() === 'reassign') {
+      return s ? `Devolver orden a una mesa — ${s.name}` : 'Devolver orden a una mesa';
+    }
     return s ? `Cambiar de mesa — ${s.name}` : 'Cambiar de mesa';
   });
+
+  readonly subtitle = computed(() => this.mode() === 'reassign'
+    ? 'Elige una mesa disponible. Las reservadas y las que están en limpieza no se pueden usar.'
+    : 'Elige la mesa destino. Si está ocupada, ambas cuentas se intercambian.');
 
   constructor() {
     /*
@@ -142,6 +163,8 @@ export class TransferTableModalComponent {
     effect(() => {
       const open = this.isOpen();
       this.table();
+      this.mode();
+      this.orderId();
       untracked(() => {
         // Reset de selección en cada apertura o cambio de origen (mismo
         // patrón que quick-status-modal con `selectedStatus`).
@@ -221,8 +244,19 @@ export class TransferTableModalComponent {
     return this.statusOf(t) === 'reserved';
   }
 
-  /** Fila elegible: ni origen ni reservada. */
+  destinationHint(t: Table): string {
+    if (this.mode() === 'reassign') {
+      if (this.statusOf(t) === 'reserved') return 'Reservada — elige una mesa disponible';
+      if (this.statusOf(t) === 'cleaning') return 'En limpieza — márcala disponible primero';
+    }
+    return this.isReserved(t) ? 'Reservada — elige otra mesa' : '';
+  }
+
+  /** Transfer may swap with occupied; reassignment requires availability. */
   isSelectable(t: Table): boolean {
+    if (this.mode() === 'reassign') {
+      return this.statusOf(t) === 'available' && !t.active_session;
+    }
     return !this.isOrigin(t) && !this.isReserved(t);
   }
 
@@ -265,6 +299,30 @@ export class TransferTableModalComponent {
     const t = this.target();
     if (!s || !t || !this.isTargetValid() || this.isConfirming()) return;
     this.isConfirming.set(true);
+    if (this.mode() === 'reassign') {
+      const orderId = this.orderId();
+      if (orderId == null) {
+        this.isConfirming.set(false);
+        return;
+      }
+      this.tablesService
+        .reassignOrderToTable(orderId, t.id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (session) => {
+            this.isConfirming.set(false);
+            this.reassigned.emit(session);
+            this.close();
+          },
+          error: (err: unknown) => {
+            this.isConfirming.set(false);
+            this.toastService.error(
+              typeof err === 'string' ? err : 'No se pudo reasignar la orden a la mesa',
+            );
+          },
+        });
+      return;
+    }
     this.tablesService
       .transferSession(s.id, t.id)
       .pipe(takeUntilDestroyed(this.destroyRef))

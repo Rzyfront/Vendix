@@ -24,6 +24,7 @@ import {
 } from '../interfaces/bulk-image-analysis.interface';
 import {
   BulkProductAnalysisResult,
+  BulkProductUploadPage,
   BulkProductUploadResult,
 } from '../interfaces/bulk-product-analysis.interface';
 import { PRODUCT_SAVE_ERROR_MAP } from '../utils/product-save-requirements';
@@ -687,6 +688,22 @@ export class ProductsService {
       .post<
         ApiResponse<BulkProductUploadResult>
       >(`${this.apiUrl}/store/products/bulk/upload-session`, { session_id: sessionId })
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** Commit paginado de la sesión (máx. 100 filas por página). */
+  uploadProductsFromSessionPage(
+    sessionId: string,
+    offset: number,
+    limit: number,
+  ): Observable<BulkProductUploadPage> {
+    return this.http
+      .post<
+        ApiResponse<BulkProductUploadPage>
+      >(`${this.apiUrl}/store/products/bulk/upload-session`, { session_id: sessionId, offset, limit })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),

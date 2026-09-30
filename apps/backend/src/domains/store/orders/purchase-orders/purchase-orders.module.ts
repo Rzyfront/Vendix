@@ -1,7 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
+import { createPurchasingTools } from '../../../../ai-engine/tools/domains/purchasing.tools';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { SuppliersService } from '../../inventory/suppliers/suppliers.service';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { PaymentReceiptScanProcessor } from './payment-receipt-scan.processor';
 import { ResponseModule } from '@common/responses/response.module';
@@ -35,4 +38,26 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
   ],
   exports: [PurchaseOrdersService],
 })
-export class PurchaseOrdersModule {}
+export class PurchaseOrdersModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly purchaseOrdersService: PurchaseOrdersService,
+    // Viene de `SuppliersModule`, re-exportado por `InventoryModule` (ya
+    // importado arriba): se inyecta sin agregar ninguna arista al grafo.
+    private readonly suppliersService: SuppliersService,
+  ) {}
+
+  /**
+   * O-33..O-36: compras vía `PurchaseOrdersService` (dueño de la máquina de
+   * estados de la OC y de la guarda PO_VARIANT_001). Registro
+   * descentralizado en el módulo dueño, no en `AIEngineModule` (ciclo DI).
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createPurchasingTools({
+        purchaseOrdersService: this.purchaseOrdersService,
+        suppliersService: this.suppliersService,
+      }),
+    );
+  }
+}

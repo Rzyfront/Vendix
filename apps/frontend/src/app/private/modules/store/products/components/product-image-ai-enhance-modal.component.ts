@@ -32,175 +32,171 @@ import { ProductsService } from '../services/products.service';
       (cancel)="close()"
     >
       <div class="space-y-4">
-        @if (mode() === 'enhance') {
+        <div class="space-y-2 max-w-sm mx-auto">
           <div
-            class="grid gap-4"
-            [class.grid-cols-1]="!isGenerating() && !generatedImageUrl() && !errorMessage()"
-            [class.md:grid-cols-2]="isGenerating() || generatedImageUrl() || errorMessage()"
+            class="flex items-center gap-2 text-sm font-semibold text-gray-700"
           >
-            <div
-              class="space-y-2"
-              [class.max-w-xs]="!isGenerating() && !generatedImageUrl() && !errorMessage()"
-              [class.mx-auto]="!isGenerating() && !generatedImageUrl() && !errorMessage()"
-            >
-              <div
-                class="flex items-center gap-2 text-sm font-semibold text-gray-700"
-              >
-                <app-icon name="image" size="16"></app-icon>
-                Imagen actual
-              </div>
-              <div
-                class="aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
-              >
+            <app-icon
+              [name]="generatedImageUrl() ? 'sparkles' : 'image'"
+              size="16"
+            ></app-icon>
+            {{
+              generatedImageUrl()
+                ? mode() === 'generate'
+                  ? 'Resultado IA'
+                  : 'Compara el resultado'
+                : mode() === 'generate'
+                  ? 'Resultado IA'
+                  : 'Imagen actual'
+            }}
+          </div>
+          <div
+            class="ai-result-stage aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
+            [class.is-generating]="isGenerating()"
+            [class.is-error]="!!errorMessage()"
+          >
+            @if (generatedImageUrl(); as generatedUrl) {
+              @if (mode() === 'enhance') {
+                @if (sourceImageUrl(); as sourceUrl) {
+                  <div class="ai-compare relative z-[2] h-full w-full">
+                    <img
+                      [src]="generatedUrl"
+                      alt="Imagen mejorada con IA"
+                      class="absolute inset-0 h-full w-full object-contain bg-surface p-3"
+                      draggable="false"
+                    />
+                    <div
+                      class="absolute inset-0"
+                      [style.clip-path]="compareClip()"
+                    >
+                      <img
+                        [src]="sourceUrl"
+                        alt="Imagen original"
+                        class="h-full w-full object-contain bg-surface p-3"
+                        draggable="false"
+                      />
+                    </div>
+                    <div
+                      class="ai-compare__divider"
+                      [style.left.%]="comparePosition()"
+                    >
+                      <span class="ai-compare__grip"></span>
+                    </div>
+                    <span class="ai-compare__tag ai-compare__tag--left">
+                      Original
+                    </span>
+                    <span class="ai-compare__tag ai-compare__tag--right">
+                      IA
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      [value]="comparePosition()"
+                      (input)="onCompareInput($event)"
+                      class="ai-compare__range"
+                      aria-label="Comparar imagen original con imagen mejorada"
+                    />
+                  </div>
+                } @else {
+                  <img
+                    [src]="generatedUrl"
+                    alt="Imagen mejorada con IA"
+                    class="relative z-[2] h-full w-full object-contain bg-surface p-3"
+                  />
+                }
+              } @else {
+                <img
+                  [src]="generatedUrl"
+                  alt="Imagen generada con IA"
+                  class="relative z-[2] h-full w-full object-contain bg-surface p-3"
+                />
+              }
+            } @else if (isGenerating()) {
+              @if (mode() === 'enhance') {
                 @if (sourceImageUrl(); as sourceUrl) {
                   <img
                     [src]="sourceUrl"
-                    alt="Imagen actual"
-                    class="h-full w-full object-contain bg-surface p-3"
+                    alt="Imagen original"
+                    class="absolute inset-0 z-[1] h-full w-full object-contain bg-surface p-3 blur-[6px] scale-105 saturate-150"
                   />
-                } @else {
-                  <div class="text-sm text-gray-400">Sin imagen</div>
                 }
+              }
+              <div class="ai-result-stage__placeholder">
+                <div class="ai-holo-grid"></div>
+                <div class="ai-holo-aurora"></div>
+                <div class="ai-sparkle ai-sparkle--a"></div>
+                <div class="ai-sparkle ai-sparkle--b"></div>
+                <div class="ai-sparkle ai-sparkle--c"></div>
+                <div class="ai-sparkle ai-sparkle--d"></div>
+                <div class="ai-sparkle ai-sparkle--e"></div>
+                <div class="ai-result-stage__halo"></div>
+                <div class="ai-result-stage__icon">
+                  <app-icon name="sparkles" size="38"></app-icon>
+                </div>
+                <p class="ai-result-stage__caption">
+                  {{ generationMessage() }}
+                </p>
               </div>
-            </div>
-
-            @if (isGenerating() || generatedImageUrl() || errorMessage()) {
-              <div class="space-y-2">
-                <div
-                  class="flex items-center gap-2 text-sm font-semibold text-gray-700"
-                >
-                  <app-icon name="sparkles" size="16"></app-icon>
-                  Resultado IA
+              <div class="ai-result-stage__shimmer"></div>
+              <div class="ai-result-stage__scan"></div>
+              <div class="ai-result-stage__prism"></div>
+            } @else if (errorMessage(); as error) {
+              <div class="ai-result-stage__error-state">
+                <div class="ai-result-stage__error-icon">
+                  <app-icon name="alert-triangle" size="30"></app-icon>
                 </div>
-                <div
-                  class="ai-result-stage aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
-                  [class.is-generating]="isGenerating()"
-                  [class.is-error]="!!errorMessage()"
+                <p class="ai-result-stage__error-title">
+                  {{
+                    mode() === 'generate'
+                      ? 'No se pudo generar la imagen'
+                      : 'No se pudo mejorar la imagen'
+                  }}
+                </p>
+                <p class="ai-result-stage__error-text">{{ error }}</p>
+                <app-button
+                  variant="outline-danger"
+                  size="sm"
+                  (clicked)="retryGeneration()"
+                  [disabled]="!canRetry()"
+                  customClasses="!rounded-lg"
                 >
-                  @if (generatedImageUrl(); as generatedUrl) {
-                    <img
-                      [src]="generatedUrl"
-                      alt="Imagen generada con IA"
-                      class="relative z-[2] h-full w-full object-contain bg-surface p-3"
-                    />
-                  } @else if (isGenerating()) {
-                    <div class="ai-result-stage__placeholder">
-                      <div class="ai-holo-grid"></div>
-                      <div class="ai-holo-aurora"></div>
-                      <div class="ai-sparkle ai-sparkle--a"></div>
-                      <div class="ai-sparkle ai-sparkle--b"></div>
-                      <div class="ai-sparkle ai-sparkle--c"></div>
-                      <div class="ai-sparkle ai-sparkle--d"></div>
-                      <div class="ai-sparkle ai-sparkle--e"></div>
-                      <div class="ai-result-stage__halo"></div>
-                      <div class="ai-result-stage__icon">
-                        <app-icon name="sparkles" size="38"></app-icon>
-                      </div>
-                      <p class="ai-result-stage__caption">
-                        {{ generationMessage() }}
-                      </p>
-                    </div>
-                    <div class="ai-result-stage__shimmer"></div>
-                    <div class="ai-result-stage__scan"></div>
-                    <div class="ai-result-stage__prism"></div>
-                  } @else if (errorMessage(); as error) {
-                    <div class="ai-result-stage__error-state">
-                      <div class="ai-result-stage__error-icon">
-                        <app-icon name="alert-triangle" size="30"></app-icon>
-                      </div>
-                      <p class="ai-result-stage__error-title">
-                        No se pudo mejorar la imagen
-                      </p>
-                      <p class="ai-result-stage__error-text">{{ error }}</p>
-                      <app-button
-                        variant="outline-danger"
-                        size="sm"
-                        (clicked)="retryGeneration()"
-                        [disabled]="!canRetry()"
-                        customClasses="!rounded-lg"
-                      >
-                        <app-icon
-                          slot="icon"
-                          name="refresh-cw"
-                          size="14"
-                        ></app-icon>
-                        Reintentar
-                      </app-button>
-                    </div>
-                  }
+                  <app-icon
+                    slot="icon"
+                    name="refresh-cw"
+                    size="14"
+                  ></app-icon>
+                  Reintentar
+                </app-button>
+              </div>
+            } @else if (mode() === 'enhance') {
+              @if (sourceImageUrl(); as sourceUrl) {
+                <img
+                  [src]="sourceUrl"
+                  alt="Imagen actual"
+                  class="relative z-[2] h-full w-full object-contain bg-surface p-3"
+                />
+              } @else {
+                <div class="ai-result-stage__idle">
+                  <div class="ai-result-stage__icon">
+                    <app-icon name="image" size="30"></app-icon>
+                  </div>
+                  <p class="ai-result-stage__caption">Sin imagen</p>
                 </div>
+              }
+            } @else {
+              <div class="ai-result-stage__idle">
+                <div class="ai-result-stage__icon">
+                  <app-icon name="sparkles" size="30"></app-icon>
+                </div>
+                <p class="ai-result-stage__caption">
+                  Describe la imagen y pulsa Generar
+                </p>
               </div>
             }
           </div>
-        } @else {
-          @if (isGenerating() || generatedImageUrl() || errorMessage()) {
-            <div class="space-y-2 max-w-sm mx-auto">
-              <div
-                class="flex items-center gap-2 text-sm font-semibold text-gray-700"
-              >
-                <app-icon name="sparkles" size="16"></app-icon>
-                Resultado IA
-              </div>
-              <div
-                class="ai-result-stage aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
-                [class.is-generating]="isGenerating()"
-                [class.is-error]="!!errorMessage()"
-              >
-                @if (generatedImageUrl(); as generatedUrl) {
-                  <img
-                    [src]="generatedUrl"
-                    alt="Imagen generada con IA"
-                    class="relative z-[2] h-full w-full object-contain bg-surface p-3"
-                  />
-                } @else if (isGenerating()) {
-                  <div class="ai-result-stage__placeholder">
-                    <div class="ai-holo-grid"></div>
-                    <div class="ai-holo-aurora"></div>
-                    <div class="ai-sparkle ai-sparkle--a"></div>
-                    <div class="ai-sparkle ai-sparkle--b"></div>
-                    <div class="ai-sparkle ai-sparkle--c"></div>
-                    <div class="ai-sparkle ai-sparkle--d"></div>
-                    <div class="ai-sparkle ai-sparkle--e"></div>
-                    <div class="ai-result-stage__halo"></div>
-                    <div class="ai-result-stage__icon">
-                      <app-icon name="sparkles" size="38"></app-icon>
-                    </div>
-                    <p class="ai-result-stage__caption">
-                      {{ generationMessage() }}
-                    </p>
-                  </div>
-                  <div class="ai-result-stage__shimmer"></div>
-                  <div class="ai-result-stage__scan"></div>
-                  <div class="ai-result-stage__prism"></div>
-                } @else if (errorMessage(); as error) {
-                  <div class="ai-result-stage__error-state">
-                    <div class="ai-result-stage__error-icon">
-                      <app-icon name="alert-triangle" size="30"></app-icon>
-                    </div>
-                    <p class="ai-result-stage__error-title">
-                      No se pudo generar la imagen
-                    </p>
-                    <p class="ai-result-stage__error-text">{{ error }}</p>
-                    <app-button
-                      variant="outline-danger"
-                      size="sm"
-                      (clicked)="retryGeneration()"
-                      [disabled]="!canRetry()"
-                      customClasses="!rounded-lg"
-                    >
-                      <app-icon
-                        slot="icon"
-                        name="refresh-cw"
-                        size="14"
-                      ></app-icon>
-                      Reintentar
-                    </app-button>
-                  </div>
-                }
-              </div>
-            </div>
-          }
-        }
+        </div>
 
         <div class="space-y-2">
           <label class="text-sm font-semibold text-gray-700">
@@ -368,7 +364,8 @@ import { ProductsService } from '../services/products.service';
       }
 
       .ai-result-stage__placeholder,
-      .ai-result-stage__error-state {
+      .ai-result-stage__error-state,
+      .ai-result-stage__idle {
         position: absolute;
         inset: 0;
         z-index: 1;
@@ -511,6 +508,99 @@ import { ProductsService } from '../services/products.service';
         background-size: 200% 100%;
         background-position: 200% 0;
         animation: ai-shimmer-sweep 3.4s ease-in-out infinite;
+      }
+
+      .ai-compare {
+        touch-action: pan-y;
+      }
+
+      .ai-compare__divider {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        z-index: 3;
+        width: 2px;
+        transform: translateX(-50%);
+        background: white;
+        box-shadow: 0 0 12px rgba(0, 0, 0, 0.35);
+        pointer-events: none;
+      }
+
+      .ai-compare:focus-within .ai-compare__divider {
+        background: var(--color-primary);
+        box-shadow: 0 0 16px
+          color-mix(in oklab, var(--color-primary) 70%, transparent);
+      }
+
+      .ai-compare__grip {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 40px;
+        height: 40px;
+        transform: translate(-50%, -50%);
+        border-radius: 9999px;
+        background: white;
+        box-shadow:
+          0 2px 10px rgba(0, 0, 0, 0.3),
+          0 0 0 1px color-mix(in oklab, var(--color-primary) 35%, transparent);
+      }
+
+      .ai-compare__grip::before,
+      .ai-compare__grip::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        width: 8px;
+        height: 8px;
+        border-top: 2px solid var(--color-primary);
+        border-right: 2px solid var(--color-primary);
+      }
+
+      .ai-compare__grip::before {
+        left: 9px;
+        transform: translateY(-50%) rotate(-135deg);
+      }
+
+      .ai-compare__grip::after {
+        right: 9px;
+        transform: translateY(-50%) rotate(45deg);
+      }
+
+      .ai-compare__tag {
+        position: absolute;
+        z-index: 4;
+        top: 0.75rem;
+        padding: 0.2rem 0.6rem;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border-radius: 9999px;
+        color: white;
+        background: rgba(15, 23, 42, 0.65);
+        backdrop-filter: blur(4px);
+        pointer-events: none;
+      }
+
+      .ai-compare__tag--left {
+        left: 0.75rem;
+      }
+
+      .ai-compare__tag--right {
+        right: 0.75rem;
+        background: color-mix(in oklab, var(--color-primary) 85%, black);
+      }
+
+      .ai-compare__range {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        opacity: 0;
+        cursor: ew-resize;
       }
 
       .ai-holo-grid {
@@ -766,6 +856,7 @@ export class ProductImageAiEnhanceModalComponent {
   readonly isGenerating = signal(false);
   readonly generationMessage = signal(this.enhanceSteps[0]);
   readonly generationStepIndex = signal(0);
+  readonly comparePosition = signal(50);
 
   readonly canGenerate = computed(() => {
     const hasPrompt = this.prompt().trim().length >= 3;
@@ -778,6 +869,9 @@ export class ProductImageAiEnhanceModalComponent {
   readonly canRetry = computed(() => {
     return !!this.errorMessage() && this.canGenerate();
   });
+  readonly compareClip = computed(
+    () => `inset(0 ${100 - this.comparePosition()}% 0 0)`,
+  );
 
   constructor() {
     effect(() => {
@@ -887,6 +981,12 @@ export class ProductImageAiEnhanceModalComponent {
     this.generate();
   }
 
+  onCompareInput(event: Event): void {
+    const value = (event.target as HTMLInputElement | null)?.valueAsNumber;
+    if (value === undefined || Number.isNaN(value)) return;
+    this.comparePosition.set(Math.min(100, Math.max(0, value)));
+  }
+
   replaceOriginal(): void {
     const generated = this.generatedImageUrl();
     if (!generated) return;
@@ -925,6 +1025,7 @@ export class ProductImageAiEnhanceModalComponent {
     this.errorMessage.set(null);
     this.isGenerating.set(false);
     this.generationStepIndex.set(0);
+    this.comparePosition.set(50);
     this.generationMessage.set(this.getCurrentSteps()[0]);
   }
 

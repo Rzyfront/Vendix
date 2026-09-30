@@ -1,0 +1,10 @@
+{
+  "statusCode": 403,
+  "error_code": "SUBSCRIPTION_003",
+  "message": "Subscription is cancelled/expired",
+  "details": {
+    "subscription_state": "expired",
+    "plan_id": null,
+    "has_record": true
+  }
+}

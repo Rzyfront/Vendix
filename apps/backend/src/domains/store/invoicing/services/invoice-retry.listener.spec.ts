@@ -36,6 +36,7 @@ describe('InvoiceRetryListener', () => {
     const retry_queue = {
       markSuccess: jest.fn().mockResolvedValue(undefined),
       markFailed: jest.fn().mockResolvedValue(undefined),
+      reschedule: jest.fn().mockResolvedValue(undefined),
       ...overrides.retry_queue,
     };
 
@@ -168,5 +169,44 @@ describe('InvoiceRetryListener', () => {
     });
 
     await expect(listener.handleInvoiceRetry(event)).resolves.toBeUndefined();
+  });
+
+  it('marks failed (not success) when send() returns a rejected invoice', async () => {
+    const { listener, retry_queue } = createListener({
+      invoice_flow: {
+        send: jest.fn().mockResolvedValue({
+          id: 55,
+          status: 'rejected',
+          provider_response: { message: 'CTG01 rechazo' },
+        }),
+      },
+    });
+    const warn = jest.spyOn((listener as any).logger, 'warn');
+    const log = jest.spyOn((listener as any).logger, 'log');
+
+    await listener.handleInvoiceRetry(event);
+
+    expect(retry_queue.markFailed).toHaveBeenCalledWith(10, 'CTG01 rechazo');
+    expect(retry_queue.markSuccess).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Retry did not succeed'),
+    );
+    expect(log).not.toHaveBeenCalledWith(
+      expect.stringContaining('Retry succeeded'),
+    );
+  });
+
+  it('reschedules without markFailed when send() throws FISCAL_SEND_IN_PROGRESS', async () => {
+    const err: any = new Error('in progress');
+    err.errorCode = 'FISCAL_SEND_IN_PROGRESS';
+    const { listener, retry_queue } = createListener({
+      invoice_flow: { send: jest.fn().mockRejectedValue(err) },
+    });
+
+    await listener.handleInvoiceRetry(event);
+
+    expect(retry_queue.reschedule).toHaveBeenCalledWith(10, 120000);
+    expect(retry_queue.markFailed).not.toHaveBeenCalled();
+    expect(retry_queue.markSuccess).not.toHaveBeenCalled();
   });
 });

@@ -193,7 +193,7 @@ export class PaymentMethodsComponent implements OnInit {
     { value: 'card', label: 'Tarjeta' },
     { value: 'paypal', label: 'PayPal' },
     { value: 'bank_transfer', label: 'Transferencia' },
-    { value: 'voucher', label: 'Voucher' },
+    { value: 'voucher', label: 'Datáfono' },
   ];
 
   activeStates = [

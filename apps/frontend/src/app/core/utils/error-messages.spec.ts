@@ -2,6 +2,11 @@ import { HttpErrorResponse } from '@angular/common/http';
 
 import { DEFAULT_ERROR_MESSAGE, ERROR_MESSAGES } from './error-messages';
 import { parseApiError } from './parse-api-error';
+import {
+  formatStockShortageLine,
+  formatStockShortageSummary,
+  STOCK_SHORTAGE_HINT,
+} from './stock-shortage.util';
 
 /**
  * Words that would accuse the merchant of a debt.
@@ -13,6 +18,50 @@ import { parseApiError } from './parse-api-error';
  * quietly reintroducing dunning language.
  */
 const DEBT_WORDS = ['pago', 'deuda', 'mora', 'pendiente'];
+
+describe('ERROR_MESSAGES — rechazos de cocina C.3', () => {
+  for (const [code, status, action] of [
+    ['KDS_STATION_LOCKED', 403, 'tome la estación'],
+    ['KITCHEN_TICKET_NOT_TAKEAWAY', 422, 'desde la mesa'],
+    ['ORDER_ITEM_NOT_DELIVERABLE', 409, 'KDS'],
+  ] as const) {
+    it(`${code} tiene una acción concreta y no usa el genérico`, () => {
+      const copy = ERROR_MESSAGES[code];
+      expect(copy).toContain(action);
+      expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
+      expect(
+        parseApiError({ error: { statusCode: status, error_code: code } }).userMessage,
+      ).toBe(copy);
+    });
+  }
+
+  it('el detalle español de cocina coincide con la acción visible para el ticket de mesa', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 422,
+        error_code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+        message: 'Este ticket incluye platos de mesa. Entrégalos desde la mesa, no desde cocina.',
+      },
+    });
+    expect(parsed.userMessage).toBe(
+      ERROR_MESSAGES['KITCHEN_TICKET_NOT_TAKEAWAY'],
+    );
+  });
+});
+
+describe('ERROR_MESSAGES — POS draft payment guards', () => {
+  for (const errorCode of ['POS_DRAFT_DUPLICATE_ORDER_001', 'POS_DRAFT_REQUIRES_PAYMENT_001'] as const) {
+    it(`maps ${errorCode} to an actionable Spanish message`, () => {
+      const parsed = parseApiError({
+        error: { statusCode: 409, error_code: errorCode, message: 'POS draft rejected' },
+      });
+      expect(parsed.errorCode).toBe(errorCode);
+      expect(parsed.userMessage).toBe(ERROR_MESSAGES[errorCode]);
+      expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+      expect(parsed.userMessage).not.toContain('POS draft rejected');
+    });
+  }
+});
 
 describe('ERROR_MESSAGES — SUBSCRIPTION_011 (plan retired from catalog)', () => {
   it('resolves to its own copy, not the generic DEFAULT_ERROR_MESSAGE', () => {
@@ -95,7 +144,11 @@ describe('ERROR_MESSAGES — CASH_REGISTER_DISABLE_001 (caja con sesiones abiert
     });
 
     expect(parsed.errorCode).toBe('CASH_REGISTER_DISABLE_001');
-    expect(parsed.userMessage).toBe(ERROR_MESSAGES['CASH_REGISTER_DISABLE_001']);
+    // A presentable, specific Spanish backend message takes precedence over
+    // the generic catalog copy (e.g. it names the register to close).
+    expect(parsed.userMessage).toBe(
+      'No se puede deshabilitar la caja registradora: la tienda tiene 1 sesión abierta en "Caja Principal".',
+    );
     expect(parsed.details).toEqual({
       open_sessions: 1,
       registers: [{ id: 19, name: 'Caja Principal' }],
@@ -202,5 +255,309 @@ describe('ERROR_MESSAGES — INV_SCAN_* (escáner de facturas POP)', () => {
 
     expect(copy).toContain('proveedor');
     expect(copy).toContain('productos');
+  });
+});
+
+/**
+ * E.5 — respaldos cortos de venta/despacho. El backend redacta el detalle con
+ * #orden/estado y `parseApiError` lo prefiere cuando es presentable; estas
+ * copies solo aparecen si ese detalle no llega, así que los casos fijan la
+ * resolución contra un devMessage inglés no presentable.
+ */
+describe('ERROR_MESSAGES — E.5 shipping/dispatch guards', () => {
+  it('ORD_SHIP_REQUIRED_FOR_FLOW_001 resuelve a su copy y no al genérico', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 422,
+        error_code: 'ORD_SHIP_REQUIRED_FOR_FLOW_001',
+        message: 'Shipping method required for this order flow',
+      },
+    });
+
+    expect(parsed.errorCode).toBe('ORD_SHIP_REQUIRED_FOR_FLOW_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['ORD_SHIP_REQUIRED_FOR_FLOW_001']);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+    expect(parsed.userMessage).not.toContain('Shipping method required');
+  });
+
+  it('DSP_ORDER_DELIVERY_001 resuelve a su copy y no al genérico', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 422,
+        error_code: 'DSP_ORDER_DELIVERY_001',
+        message: 'On-the-spot deliveries do not generate a dispatch note',
+      },
+    });
+
+    expect(parsed.errorCode).toBe('DSP_ORDER_DELIVERY_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['DSP_ORDER_DELIVERY_001']);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+    expect(parsed.userMessage).not.toContain('dispatch note');
+  });
+
+  it('DSP_ORDER_STATE_001 resuelve a su copy y no al genérico', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'DSP_ORDER_STATE_001',
+        message: 'Order state does not admit a dispatch note',
+      },
+    });
+
+    expect(parsed.errorCode).toBe('DSP_ORDER_STATE_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['DSP_ORDER_STATE_001']);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+    expect(parsed.userMessage).not.toContain('dispatch note');
+  });
+});
+
+/**
+ * Sin sobreventa — `INV_STOCK_INSUFFICIENT_LINES` (mesa/KDS/POS, varias
+ * líneas de producto o insumo) e `INV_STOCK_002` (entrega, un solo faltante
+ * plano en `details`, sin `items[]`). La lista estructurada prevalece sobre
+ * el texto del backend para mostrar TODOS los faltantes incluso en servicios
+ * que reducen el error a string. Sin detalles legibles, se usa el mensaje
+ * presentable o el respaldo en `ERROR_MESSAGES`.
+ */
+describe('ERROR_MESSAGES / stockShortages — INV_STOCK_INSUFFICIENT_LINES (no overselling)', () => {
+  it('tiene copy propia, no el genérico', () => {
+    const copy = ERROR_MESSAGES['INV_STOCK_INSUFFICIENT_LINES'];
+    expect(copy).toBeDefined();
+    expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
+  });
+
+  it('la lista estructurada gana sobre el mensaje abreviado del backend', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'INV_STOCK_INSUFFICIENT_LINES',
+        message: 'Sin stock suficiente para MODELO y Limón.',
+        details: {
+          items: [
+            {
+              product_id: 501,
+              product_variant_id: null,
+              product_name: 'MODELO',
+              kind: 'product',
+              requested: 1,
+              available: 0,
+            },
+            {
+              product_id: 88,
+              product_variant_id: null,
+              product_name: 'Limón',
+              kind: 'ingredient',
+              requested: 3,
+              available: 1,
+              used_by: ['Mojito'],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.errorCode).toBe('INV_STOCK_INSUFFICIENT_LINES');
+    expect(parsed.userMessage).toContain('MODELO — pedido 1, disponible 0');
+    expect(parsed.userMessage).toContain('Limón (insumo, usado en Mojito) — requerido 3, disponible 1');
+    expect(parsed.userMessage).toContain(STOCK_SHORTAGE_HINT);
+    expect(parsed.userMessage).not.toBe(ERROR_MESSAGES['INV_STOCK_INSUFFICIENT_LINES']);
+  });
+
+  it('cae al copy enlatado cuando el backend no manda mensaje presentable', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'INV_STOCK_INSUFFICIENT_LINES',
+        message: 'Insufficient stock for lines',
+        details: {
+          items: [
+            {
+              product_id: 501,
+              product_variant_id: null,
+              product_name: 'MODELO',
+              kind: 'product',
+              requested: 1,
+              available: 0,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.userMessage).toContain('MODELO — pedido 1, disponible 0');
+    expect(parsed.userMessage).not.toContain('Insufficient stock');
+  });
+
+  it('parsed.stockShortages normaliza producto e insumo desde details.items[]', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'INV_STOCK_INSUFFICIENT_LINES',
+        message: 'Sin stock suficiente para MODELO y Limón.',
+        details: {
+          items: [
+            {
+              product_id: 501,
+              product_variant_id: null,
+              product_name: 'MODELO',
+              kind: 'product',
+              requested: 1,
+              available: 0,
+            },
+            {
+              product_id: 88,
+              product_variant_id: null,
+              product_name: 'Limón',
+              kind: 'ingredient',
+              requested: 3,
+              available: 1,
+              used_by: ['Mojito'],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.stockShortages).toEqual([
+      {
+        product_id: 501,
+        product_variant_id: null,
+        product_name: 'MODELO',
+        kind: 'product',
+        requested: 1,
+        available: 0,
+      },
+      {
+        product_id: 88,
+        product_variant_id: null,
+        product_name: 'Limón',
+        kind: 'ingredient',
+        requested: 3,
+        available: 1,
+        used_by: ['Mojito'],
+      },
+    ]);
+  });
+
+  it('muestra el faltante al cobrar aunque el código de superficie sea de pago', () => {
+    const parsed = parseApiError({
+      error: {
+        error_code: 'ORD_FLOW_PAYMENT_FAILED_001',
+        message: 'Payment failed',
+        details: {
+          cause_code: 'INV_STOCK_INSUFFICIENT_LINES',
+          items: [{
+            product_id: 501,
+            product_variant_id: null,
+            product_name: 'MODELO',
+            kind: 'product',
+            requested: 1,
+            available: 0,
+          }],
+        },
+      },
+    });
+
+    expect(parsed.userMessage).toContain('MODELO — pedido 1, disponible 0');
+    expect(parsed.userMessage).toContain(STOCK_SHORTAGE_HINT);
+  });
+
+  it('formatStockShortageLine produce el texto exacto para producto e insumo', () => {
+    expect(
+      formatStockShortageLine({
+        product_id: 501,
+        product_variant_id: null,
+        product_name: 'MODELO',
+        kind: 'product',
+        requested: 1,
+        available: 0,
+      }),
+    ).toBe('MODELO — pedido 1, disponible 0');
+
+    expect(
+      formatStockShortageLine({
+        product_id: 88,
+        product_variant_id: null,
+        product_name: 'Limón',
+        kind: 'ingredient',
+        requested: 3,
+        available: 1,
+        used_by: ['Mojito'],
+      }),
+    ).toBe('Limón (insumo, usado en Mojito) — requerido 3, disponible 1');
+  });
+
+  it('formatStockShortageSummary une las líneas y agrega la sugerencia', () => {
+    const summary = formatStockShortageSummary([
+      {
+        product_id: 501,
+        product_variant_id: null,
+        product_name: 'MODELO',
+        kind: 'product',
+        requested: 1,
+        available: 0,
+      },
+    ]);
+
+    expect(summary).toContain('MODELO — pedido 1, disponible 0');
+    expect(summary).toContain(STOCK_SHORTAGE_HINT);
+  });
+});
+
+/**
+ * `INV_STOCK_002` — entrega sin reserva (`order-stock-commit.service.ts`), un
+ * solo faltante plano en `details` (sin `items[]`, y hoy sin `product_name`
+ * en el backend actual). `readInsufficientStockItems` debe tolerar la fila
+ * completa (con `product_name`) para cuando el backend la mande, y NO debe
+ * reventar cuando falta —simplemente no reporta ese shortage.
+ */
+describe('ERROR_MESSAGES / stockShortages — INV_STOCK_002 (entrega sin stock)', () => {
+  it('tiene copy propia, no el genérico', () => {
+    const copy = ERROR_MESSAGES['INV_STOCK_002'];
+    expect(copy).toBeDefined();
+    expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
+  });
+
+  it('parsed.stockShortages normaliza la forma plana (details = la fila)', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'INV_STOCK_002',
+        message: 'No se puede entregar: stock insuficiente para el producto (disponible 0, requerido 2)',
+        details: {
+          product_id: 77,
+          product_variant_id: null,
+          product_name: 'Gaseosa 1.5L',
+          requested: 2,
+          available: 0,
+        },
+      },
+    });
+
+    expect(parsed.stockShortages).toEqual([
+      {
+        product_id: 77,
+        product_variant_id: null,
+        product_name: 'Gaseosa 1.5L',
+        kind: 'product',
+        requested: 2,
+        available: 0,
+      },
+    ]);
+    expect(parsed.userMessage).toContain('Gaseosa 1.5L — pedido 2, disponible 0');
+    expect(parsed.userMessage).toContain(STOCK_SHORTAGE_HINT);
+  });
+
+  it('sin product_name no reporta shortage (fila ilegible se descarta, no revienta)', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'INV_STOCK_002',
+        message: 'No se puede entregar: stock insuficiente para el producto',
+        details: { product_id: 77, requested: 2, available: 0 },
+      },
+    });
+
+    expect(parsed.stockShortages).toBeUndefined();
   });
 });

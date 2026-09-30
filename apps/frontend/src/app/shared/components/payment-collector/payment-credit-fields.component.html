@@ -33,14 +33,18 @@
 
   <!-- Initial (down) payment -->
   <div class="credit-field">
-    <label>Pago inicial (opcional)</label>
-    <input
-      appCurrencyInput
-      [currencyDecimals]="currencyDecimals()"
-      [formControl]="initialPaymentControl"
-      placeholder="0"
-      class="credit-input"
-    />
+    <label for="credit-initial-payment">Pago inicial (opcional)</label>
+    <div class="credit-money-field">
+      <span aria-hidden="true">{{ currencySymbol() }}</span>
+      <input
+        id="credit-initial-payment"
+        appCurrencyInput
+        [currencyDecimals]="currencyDecimals()"
+        [formControl]="initialPaymentControl"
+        placeholder="0"
+        class="credit-money-input"
+      />
+    </div>
     @if (paymentMethods().length > 0 && (initialPayment() || 0) > 0) {
       <div class="credit-methods">
         @for (m of paymentMethods(); track m.id) {

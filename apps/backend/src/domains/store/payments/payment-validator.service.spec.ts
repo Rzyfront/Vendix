@@ -1,8 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentValidatorService } from './services/payment-validator.service';
+import {
+  PaymentValidatorService,
+  getSettledOrderAmount,
+  isOrderFullyPaid,
+} from './services/payment-validator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrderValidationResult } from './interfaces';
 import { ErrorCodes } from '../../../common/errors/error-codes';
+
+describe('shared order settlement predicate', () => {
+  it('sums only settled payments with Decimal precision', () => {
+    const order = {
+      grand_total: '0.30',
+      payments: [
+        { state: 'succeeded', amount: '0.10' },
+        { state: 'captured', amount: '0.20' },
+        { state: 'pending', amount: '100.00' },
+      ],
+    };
+
+    expect(getSettledOrderAmount(order).equals('0.30')).toBe(true);
+    expect(isOrderFullyPaid(order)).toBe(true);
+    expect(isOrderFullyPaid({ ...order, grand_total: '0.31' })).toBe(false);
+  });
+});
 
 describe('PaymentValidatorService', () => {
   let service: PaymentValidatorService;

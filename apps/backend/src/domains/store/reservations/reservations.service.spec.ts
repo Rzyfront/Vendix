@@ -50,6 +50,8 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
     const priceResolverService = {} as any;
     const tablesService = {} as any;
     const tableSessionsService = {} as any;
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    const orderHistory = { record: jest.fn().mockResolvedValue(null) } as any;
 
     const service = new ReservationsService(
       prisma,
@@ -60,9 +62,10 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
       priceResolverService,
       tablesService,
       tableSessionsService,
+      orderHistory,
     );
 
-    return { service, prisma, bookings, eventEmitter, emits };
+    return { service, prisma, bookings, eventEmitter, emits, orderHistory };
   }
 
   it('markArriving only allows confirmed → arriving', async () => {
@@ -292,6 +295,8 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
 
     const tablesService = {} as any;
     const tableSessionsService = {} as any;
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    const orderHistory = { record: jest.fn().mockResolvedValue(null) } as any;
 
     const service = new ReservationsService(
       prisma,
@@ -302,6 +307,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       priceResolverService,
       tablesService,
       tableSessionsService,
+      orderHistory,
     );
 
     return {
@@ -314,6 +320,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       ordersService,
       eventEmitter,
       emits,
+      orderHistory,
       setOrderCreateImpl: (impl: any) => {
         orderCreateImpl = impl;
       },

@@ -141,6 +141,23 @@ describe('SplitAccountsPanelComponent financial contract', () => {
     expect(component.canConfirm()).toBeFalse();
   });
 
+  it('opens four account slots when the number input CVA emits a string', async () => {
+    component.form.controls.count.setValue('4' as unknown as number);
+    expect(component.payers()).toHaveSize(4);
+    expect(component.form.controls.aliases.length).toBe(4);
+    expect(component.form.controls.amounts.length).toBe(4);
+    await component.calculatePreview();
+    expect(api.previewFinancialSplit.calls.mostRecent().args[1].n_splits).toBe(4);
+  });
+
+  it('hides an obsolete preview after changing the account count', async () => {
+    await component.calculatePreview();
+    expect(component.accountRows()).toHaveSize(2);
+    component.form.controls.count.setValue('4' as unknown as number);
+    expect(component.accountRows()).toHaveSize(0);
+    expect(component.canConfirm()).toBeFalse();
+  });
+
   it('confirms with source version and an idempotency key, not fabricated child orders', async () => {
     await component.calculatePreview();
     await component.confirmSplit();

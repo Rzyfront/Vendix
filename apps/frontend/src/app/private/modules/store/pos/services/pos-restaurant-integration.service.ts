@@ -4,6 +4,7 @@ import type {
   FireItemExclusion,
 } from '../../restaurant-ops/kds/interfaces';
 import { industriesSupportIngredients } from '../../../../../shared/constants/industry-modules.constant';
+import type { InsufficientStockItem } from '../../../../../core/utils/parse-api-error';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
@@ -38,6 +39,13 @@ interface FireOrderItemsResponse {
   skipped_item_ids: number[];
   cogs_total: string | number;
   consumed_line_count: number;
+  /**
+   * Presente cuando `allow_negative_stock` / `allow_ingredient_overuse`
+   * dejaron pasar la operación con faltantes: no bloqueó, pero el
+   * inventario quedó en negativo. Plan no-overselling-stock-guard-plan.md
+   * paso 9 — el POS lo muestra como toast de advertencia.
+   */
+  stock_warnings?: InsufficientStockItem[];
 }
 
 /**

@@ -2,7 +2,6 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { S3Module } from '../../../common/services/s3.module';
 import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
@@ -10,6 +9,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 // Vexi (AI agent) — familia de herramientas contables de sólo lectura.
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createAccountingTools } from '../../../ai-engine/tools/domains/accounting.tools';
+import { createFinanceOpsTools } from '../../../ai-engine/tools/domains/finance-ops.tools';
 
 // Chart of Accounts
 import { ChartOfAccountsController } from './chart-of-accounts/chart-of-accounts.controller';
@@ -46,6 +46,7 @@ import {
   ACCOUNTING_ENTRY_RETRY_QUEUE,
 } from './auto-entries/accounting-entry-failure.service';
 import { AccountingEntryRetryProcessor } from './auto-entries/processors/accounting-entry-retry.processor';
+import { ManualRefundDeliveryService } from './auto-entries/manual-refund-delivery.service';
 import { EntryFailuresController } from './auto-entries/entry-failures.controller';
 import { PlatformOrgService } from '../../../common/services/platform-org.service';
 
@@ -122,6 +123,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     AutoEntryService,
     AccountingEventsListener,
     AccountingEntryFailureService,
+    ManualRefundDeliveryService,
     DispatchSettlementListener,
     AccountingEntryRetryProcessor,
     PlatformOrgService,
@@ -153,6 +155,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     AccountingReportsService,
     AccountMappingService,
     AutoEntryService,
+    ManualRefundDeliveryService,
     BankAccountsService,
     BankTransactionsService,
     ReconciliationService,
@@ -175,9 +178,16 @@ export class AccountingModule implements OnModuleInit {
     private readonly reportsService: AccountingReportsService,
     private readonly fiscalPeriodsService: FiscalPeriodsService,
     private readonly journalEntriesService: JournalEntriesService,
+    private readonly entryFlowService: JournalEntryFlowService,
     private readonly chartOfAccountsService: ChartOfAccountsService,
     private readonly fiscalScopeService: FiscalScopeService,
-    private readonly prisma: StorePrismaService,
+    private readonly accountMappingService: AccountMappingService,
+    private readonly entryFailureService: AccountingEntryFailureService,
+    private readonly fixedAssetsService: FixedAssetsService,
+    private readonly budgetVarianceService: BudgetVarianceService,
+    private readonly reconciliationService: ReconciliationService,
+    private readonly reconciliationMatchingService: ReconciliationMatchingService,
+    private readonly consolidationService: ConsolidationService,
   ) {}
 
   /**
@@ -187,10 +197,9 @@ export class AccountingModule implements OnModuleInit {
    * dentro de un módulo global sería un generador de ciclos.
    *
    * Se inyectan los servicios del dominio (no Prisma crudo) porque son ellos
-   * los que resuelven la entidad contable / `fiscal_scope` correcta. La única
-   * excepción es `StorePrismaService`, usado exclusivamente para leer la fila
-   * de `accounting_entities` con la que se etiqueta cada respuesta — y aun así
-   * pasa por el scoping multi-tenant.
+   * los que resuelven la entidad contable / `fiscal_scope` correcta. Desde el
+   * paso 15 ni siquiera la etiqueta de `accounting_entities` se lee directa:
+   * la resuelve `FiscalScopeService.findAccountingEntityDescription`.
    */
   onModuleInit(): void {
     this.toolRegistry.registerMany(
@@ -198,9 +207,22 @@ export class AccountingModule implements OnModuleInit {
         reportsService: this.reportsService,
         fiscalPeriodsService: this.fiscalPeriodsService,
         journalEntriesService: this.journalEntriesService,
+        entryFlowService: this.entryFlowService,
         chartOfAccountsService: this.chartOfAccountsService,
         fiscalScopeService: this.fiscalScopeService,
-        prisma: this.prisma,
+        accountMappingService: this.accountMappingService,
+        entryFailureService: this.entryFailureService,
+      }),
+    );
+    // Paso 12 track B: familia finance-ops (F-95..F-100). Mismo módulo dueño,
+    // sin imports nuevos: los 5 services ya se proveen aquí.
+    this.toolRegistry.registerMany(
+      createFinanceOpsTools({
+        fixedAssetsService: this.fixedAssetsService,
+        budgetVarianceService: this.budgetVarianceService,
+        reconciliationService: this.reconciliationService,
+        reconciliationMatchingService: this.reconciliationMatchingService,
+        consolidationService: this.consolidationService,
       }),
     );
   }

@@ -647,6 +647,13 @@ export class EcommerceComponent {
         ], // frontend-only, never sent to backend
         whatsapp_pitch: ['', [Validators.maxLength(500)]],
         require_registration: [false],
+        require_payment_receipt: [false],
+      }),
+
+      // Pedidos (vista pública /pedido/:token) — opt-out: apagar = visible.
+      orders: this.fb.group({
+        hide_tracking_progress: [false],
+        hide_prep_eta: [false],
       }),
     });
   }
@@ -750,6 +757,20 @@ export class EcommerceComponent {
   }
   get requireRegistrationControl() {
     return this.checkoutGroup.get('require_registration') as any;
+  }
+  get requirePaymentReceiptControl() {
+    return this.checkoutGroup.get('require_payment_receipt') as any;
+  }
+  get ordersGroup(): FormGroup {
+    return this.settingsForm.get('orders') as FormGroup;
+  }
+
+  // Pedidos (vista pública /pedido/:token)
+  get hideTrackingProgressControl() {
+    return this.ordersGroup.get('hide_tracking_progress') as any;
+  }
+  get hidePrepEtaControl() {
+    return this.ordersGroup.get('hide_prep_eta') as any;
   }
 
   /**

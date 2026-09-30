@@ -32,6 +32,7 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveFiscalResponsibilityFlags } from 'src/common/helpers/vat-responsibility.helper';
 import { DIAN_FINAL_CONSUMER_NAME } from '../../../validators/customer-fiscal-identity.validator';
+import { normalizeAcquirerDocumentType } from '../../../utils/acquirer-identity.resolver';
 import { createHash } from 'crypto';
 import {
   DianNumericInput,
@@ -861,10 +862,17 @@ export class UblCommonBuilder {
       'AccountingCustomerParty',
     );
 
-    // Structural branch selector — see method JSDoc for the rule.
+    // Structural branch selector — see method JSDoc for the rule. Deriva del
+    // CÓDIGO DIAN del documento (31 ⇒ jurídica), no sólo del literal 'NIT':
+    // `customer.document_type` puede llegar como código sin normalizar, y
+    // compararlo contra el literal lo hacía caer siempre a 'NATURAL' — la
+    // mitad del incidente Óptica Panorama SAS / Pollo Árabe (NIT de persona
+    // jurídica transmitido como persona natural).
     const resolved_person_type: 'NATURAL' | 'JURIDICA' =
       customer.person_type ??
-      (customer.document_type === 'NIT' ? 'JURIDICA' : 'NATURAL');
+      (normalizeAcquirerDocumentType(customer.document_type).code === '31'
+        ? 'JURIDICA'
+        : 'NATURAL');
 
     const dian_scheme_id =
       DIAN_ID_TYPES[customer.document_type] || customer.document_type;
@@ -1002,7 +1010,18 @@ export class UblCommonBuilder {
 
     // `cac:TaxScheme` del adquirente: 01 (IVA) si es responsable, ZZ (No aplica)
     // para consumidor final o adquirente no responsable.
-    const is_customer_responsible = customer.tax_regime === '48';
+    //
+    // Antes comparaba `customer.tax_regime === '48'` — pero `tax_regime` en
+    // este objeto lo produce `DianDirectProvider.normalizePartyAccountType`,
+    // que SÓLO devuelve '1' o '2' (persona jurídica/natural), nunca '48'. La
+    // comparación era estructuralmente imposible: TODO adquiriente resolvía
+    // `ZZ`, sin importar su responsabilidad real de IVA. Se deriva ahora de
+    // `customer.tax_responsibilities` (RUT casilla 53 real del cliente, ya
+    // disponible en este mismo método para `cbc:TaxLevelCode` unas líneas
+    // arriba) con la misma jerarquía de evidencia que usa el emisor.
+    const is_customer_responsible = resolveFiscalResponsibilityFlags({
+      tax_responsibilities: responsibilities,
+    }).vat_responsible;
     const customer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
     customer_scheme
       .ele(UBL_NAMESPACES.CBC, 'ID')
@@ -1280,12 +1299,16 @@ export class UblCommonBuilder {
     if (municipality) {
       addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(municipality.code);
       addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(municipality.name);
-      // El postal declarado gana al del catálogo: el del catálogo es el urbano
-      // de referencia del municipio, útil como respaldo pero menos preciso que
-      // el que el usuario informó. FAJ73 es notificación, no rechazo.
-      addr
-        .ele(UBL_NAMESPACES.CBC, 'PostalZone')
-        .txt(declared_postal_code || municipality.postal_code);
+      // Task B (2026-09-28): `cbc:PostalZone` es `0..1` (`UBL_CONTENT_MODEL`,
+      // `AddressType`) — OMITIRLO es válido. Antes se rellenaba con el postal
+      // «urbano de referencia» del catálogo (`municipality.postal_code`) cuando
+      // el usuario no declaró uno; para Bogotá ese valor es 110111, y eso es un
+      // dato INVENTADO viajando en un documento firmado, no un respaldo
+      // legítimo — nadie verificó que esa fuera la zona postal real. Sólo se
+      // emite cuando el propio address lo trae.
+      if (declared_postal_code) {
+        addr.ele(UBL_NAMESPACES.CBC, 'PostalZone').txt(declared_postal_code);
+      }
       addr
         .ele(UBL_NAMESPACES.CBC, 'CountrySubentity')
         .txt(municipality.department_name);

@@ -178,6 +178,25 @@ export class KdsSseService {
     this.hasSnapshot.set(true);
   }
 
+  /** A successful mutation response is a full server-confirmed ticket too. */
+  reconcileConfirmedTicket(ticket: KitchenTicket): void {
+    if (!ticket || !Number.isInteger(ticket.id)) return;
+    this.tickets.update((list) => {
+      const index = list.findIndex((current) => current.id === ticket.id);
+      if (index === -1) return [...list, ticket];
+      const current = list[index];
+      const currentTime = current.updated_at == null
+        ? NaN : new Date(current.updated_at).getTime();
+      const incomingTime = ticket.updated_at == null
+        ? NaN : new Date(ticket.updated_at).getTime();
+      if (Number.isFinite(currentTime) && Number.isFinite(incomingTime) &&
+          incomingTime < currentTime) return list;
+      const next = [...list];
+      next[index] = ticket;
+      return next;
+    });
+  }
+
   /**
    * Fetch manual contra /snapshot. Devuelve la lista nueva y la aplica.
    * Usado por el botón "Refrescar" del board. Usamos `firstValueFrom`
@@ -292,8 +311,8 @@ export class KdsSseService {
       this.applySnapshot(event.tickets);
       return;
     }
-    // Todos los `ticket.*` (created/started/ready/delivered/cancelled/
-    // reverted) traen el ticket completo en `event.ticket` con el mismo
+    // Todos los `ticket.*` (created/started/ready/updated/delivered/
+    // cancelled/reverted) traen el ticket completo en `event.ticket` con el mismo
     // shape, por lo que `ticket.reverted` se reconcilia con el MISMO
     // upsert por id que `ticket.delivered` — sin lógica especial.
     if (!('ticket' in event) || !event.ticket) return;
@@ -301,15 +320,7 @@ export class KdsSseService {
     const id = incoming?.id;
     if (typeof id !== 'number') return;
 
-    this.tickets.update((list) => {
-      const idx = list.findIndex((t) => t.id === id);
-      if (idx === -1) {
-        return [...list, incoming];
-      }
-      const next = [...list];
-      next[idx] = incoming;
-      return next;
-    });
+    this.reconcileConfirmedTicket(incoming);
   }
 
   private scheduleReconnect(reason: string, windowMinutes: number): void {

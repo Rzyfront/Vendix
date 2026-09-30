@@ -49,6 +49,14 @@ export interface StandardPrintItem {
   discount_formatted?: string;
   tax_rate?: number;
   tax_amount?: number;
+  /**
+   * QUI-890 — nombre y tipo fiscal del tributo de la línea (ej. tax_name
+   * "Impoconsumo 8%", tax_type "inc") para que el compositor pinte el nombre
+   * real en vez de inventar "IVA". OPCIONALES: los formatos que no los
+   * declaran siguen con el default histórico.
+   */
+  tax_name?: string;
+  tax_type?: string;
   total_price: number;
   total_price_formatted?: string;
   notes?: string;
@@ -69,6 +77,8 @@ export interface StandardPrintTaxRow {
   tax_amount: number;
   base_formatted?: string;
   tax_formatted?: string;
+  /** QUI-890 — tipo fiscal (`iva`/`inc`/…) para el título de la fila de totales. */
+  tax_type?: string;
 }
 
 export interface StandardPrintDataModel {
@@ -91,6 +101,12 @@ export interface StandardPrintDataModel {
     internal_notes?: string;
     cashier_name?: string;
     pos_terminal?: string;
+    /**
+     * Descargo no fiscal del tiquete POS (`pos_sale_ticket`): publicado solo
+     * por ese provider; el compositor lo pinta fijo en el footer cuando viene
+     * presente y el validador lo exige en ese formato.
+     */
+    non_fiscal_disclaimer?: string;
     payment_method?: string;
     amount_received?: number;
     amount_received_formatted?: string;

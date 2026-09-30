@@ -23,6 +23,16 @@ describe('AddressesService primary address isolation', () => {
     addresses = rows.map((row) => ({ ...row }));
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 10 } as any);
     prisma = {
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      $transaction: jest.fn(async (callback) => {
+        const before = addresses.map((row) => ({ ...row }));
+        try {
+          return await callback(prisma);
+        } catch (error) {
+          addresses = before;
+          throw error;
+        }
+      }),
       users: { findFirst: jest.fn().mockImplementation(({ where }) =>
         where.id === 101 ? { id: 101 } : null),
       },
@@ -69,6 +79,10 @@ describe('AddressesService primary address isolation', () => {
 
   it('clears only the same customer on create', async () => {
     await service.create(dto({ customer_id: 101, is_primary: true }), {});
+    expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      'address_primary:10:101',
+    );
     expect(prisma.addresses.updateMany).toHaveBeenCalledWith({
       where: { is_primary: true, store_id: 10, user_id: 101 },
       data: { is_primary: false },
@@ -76,14 +90,40 @@ describe('AddressesService primary address isolation', () => {
     expect(addresses[1].is_primary).toBe(true);
   });
 
+  it('keeps the existing primary if creating its replacement fails', async () => {
+    prisma.addresses.create.mockRejectedValue(new Error('create failed'));
+
+    await expect(service.create(dto({ customer_id: 101, is_primary: true }), {}))
+      .rejects.toThrow('create failed');
+
+    expect(addresses[0].is_primary).toBe(true);
+    expect(addresses[1].is_primary).toBe(true);
+    expect(primaryCount()).toBe(2);
+  });
+
   it('clears only the address owner on update', async () => {
     await service.update(3, { is_primary: true }, {});
+    expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      'address_primary:10:101',
+    );
     expect(prisma.addresses.updateMany).toHaveBeenCalledWith({
       where: { is_primary: true, store_id: 10, user_id: 101, id: { not: 3 } },
       data: { is_primary: false },
     });
     expect(primaryCount()).toBe(2);
     expect(addresses[1].is_primary).toBe(true);
+  });
+
+  it('keeps the existing primary if updating its replacement fails', async () => {
+    prisma.addresses.update.mockRejectedValue(new Error('update failed'));
+
+    await expect(service.update(3, { is_primary: true }, {}))
+      .rejects.toThrow('update failed');
+
+    expect(addresses[0].is_primary).toBe(true);
+    expect(addresses[1].is_primary).toBe(true);
+    expect(primaryCount()).toBe(2);
   });
 
   it('rejects primary update of an address without owner', async () => {

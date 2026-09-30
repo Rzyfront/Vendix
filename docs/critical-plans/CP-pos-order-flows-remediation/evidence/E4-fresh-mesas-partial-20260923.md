@@ -1,0 +1,9 @@
+# E.4 — mesa fresca desde UI, cobro API y cierre explícito (parcial)
+
+Playwright Node sobre `https://vendix.com` (MCP no disponible), tienda QA #10: se creó mesa `QA E4 fresh 202609231136` (#26) porque las 19 previas estaban ocupadas (POST 201), se abrió sesión **#118** (POST 201), se agregó Coca-Cola 400ml x1 por **$38.000** (POST 201) y se navegó al detalle de orden **#1170** (GET 200). Las capturas `E4-fresh-session-item.png` y `E4-fresh-order-draft.png` muestran la sesión con producto y el detalle BORRADOR con Registrar Pago. El modal de pago quedó abierto, pero la prueba de clic se detuvo para permitir reiniciar backend por otro fix; **no se afirma cobro UI E2E**.
+
+Hallazgo semántico: `openSession` de staff creó esta orden con `delivery_type=direct_delivery`, `channel=pos`, `shipping_method_id=NULL`, mientras la variante QR usa `dine_in`. No se cambió esa regla implícita en este lote; requiere análisis de consumidores antes de homogeneizarla.
+
+Luego, con el mismo token local, `POST /store/orders/1170/flow/pay` usando efectivo #5 respondió **200**: orden `finished`, un pago `succeeded` **#844** por $38.000, `total_paid=38000`, saldo cero. La sesión #118 recibió `paid_at` y quedó abierta; la mesa siguió `occupied` hasta `POST /store/table-sessions/118/close` **201**, tras el cual `closed_at` quedó poblado y mesa `cleaning`. Repetir `flow/pay` devolvió **409 `ORD_FLOW_PAYMENT_FAILED_001`** y `add-items` sobre la sesión ya pagada devolvió **409 `TABLE_SESSION_ORDER_NOT_DRAFT`**; la orden conservó un solo pago. El cobro vía API auto-finalizó por `direct_delivery`, así que en este caso no hubo segundo botón Finalizar.
+
+Este caso valida la proyección financiera de mesa en el carril detalle, pero **no** el clic final de pago en el navegador ni decide si `direct_delivery` es correcto para consumo en mesa. E.4 permanece in-progress y el bundle no está listo para desplegar.

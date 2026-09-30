@@ -49,15 +49,26 @@ export interface ShippingRateMethod {
 }
 
 /**
- * Categoría de impuesto asignada a una tarifa (lectura). El impuesto va
- * SIEMPRE incluido en el precio de la tarifa: lo que paga el cliente no
- * cambia al asignarlo.
+ * Categoría de impuesto asignada a una tarifa (lectura). Cómo entra el
+ * impuesto al precio lo decide `ShippingRate.tax_is_inclusive`, no la
+ * categoría.
  */
 export interface ShippingRateTaxCategory {
   id: number;
   name: string;
   tax_type: 'iva' | 'inc';
   rate_percent: number;
+}
+
+/**
+ * Escala de cobro por distancia de una tarifa (shipping-distance-pricing plan).
+ * `to_km` null = escala abierta (solo válida como última). Sin escala rige el
+ * precio plano (`base_cost`) de la tarifa.
+ */
+export interface DistanceTier {
+  from_km: number;
+  to_km: number | null;
+  price: number;
 }
 
 export interface ShippingRate {
@@ -67,6 +78,8 @@ export interface ShippingRate {
   name?: string;
   type: ShippingRateType;
   base_cost: number;
+  /** Escala de km; null/vacía = precio plano. Nombre exacto del backend. */
+  distance_tiers?: DistanceTier[] | null;
   per_unit_cost?: number;
   min_val?: number;
   max_val?: number;
@@ -76,6 +89,11 @@ export interface ShippingRate {
   /** Impuesto opcional de la tarifa; null = sin impuesto. */
   tax_category_id?: number | null;
   tax_category?: ShippingRateTaxCategory | null;
+  /**
+   * Modo del impuesto: true = INCLUIDO en el precio (default del backend),
+   * false = AGREGADO (se suma al cobrar). Sin impuesto es inerte.
+   */
+  tax_is_inclusive?: boolean;
 
   // Copy tracking fields
   copied_from_system_rate_id?: number;
@@ -135,6 +153,11 @@ export interface ShippingRateTaxOptionCategory {
   eligible: boolean;
   /** Motivo en español cuando `eligible` es false. */
   reason?: string;
+  /**
+   * Pista de preselección para tarifas NUEVAS: el `is_inclusive` crudo de la
+   * categoría. Nunca entra al cálculo — el modo vive en la tarifa.
+   */
+  is_inclusive?: boolean | null;
 }
 
 export interface ShippingRateTaxOptions {
@@ -173,6 +196,7 @@ export interface CreateRateDto {
   name?: string | null;
   type: ShippingRateType;
   base_cost: number;
+  distance_tiers?: DistanceTier[] | null;
   per_unit_cost?: number | null;
   min_val?: number | null;
   max_val?: number | null;
@@ -180,6 +204,8 @@ export interface CreateRateDto {
   is_active?: boolean;
   /** null = sin impuesto (o quitarlo en edición). */
   tax_category_id?: number | null;
+  /** Modo del impuesto: true = incluido (default), false = agregado. */
+  tax_is_inclusive?: boolean;
 }
 
 export interface UpdateRateDto extends Partial<

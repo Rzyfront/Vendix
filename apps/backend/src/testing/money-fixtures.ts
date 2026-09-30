@@ -22,7 +22,7 @@ export function buildOrderItem(overrides: BuildOrderItemOverrides = {}) {
     quantity: 1,
     unit_price: money(50),
     total_price: money(50),
-    discount_amount: money(0),
+    discount_amount: null,
     tax_rate: money(19),
     tax_amount_item: money(9.5),
     price_unit_quantity: 1,

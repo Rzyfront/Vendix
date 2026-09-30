@@ -1,4 +1,4 @@
-<section class="split-panel" aria-label="Cuentas independientes">
+<section class="split-panel" aria-label="Cuentas independientes" [hidden]="!allowCreate() && !group()">
   <div class="split-row">
     <div>
       <h3>Cuentas independientes</h3>
@@ -58,23 +58,32 @@
           >Por ítems</app-button
         >
       </div>
+      <p class="split-note" id="split-steps">
+        1. Elige cuántas personas pagarán y cómo repartir el saldo. 2. Puedes
+        asignar un titular o dejar una cuenta a consumidor final. 3. Revisa la
+        vista previa y confirma para crear las cuentas; después cobra cada una.
+      </p>
       <app-input
-        label="Número de cuentas"
+        label="Número de comensales / cuentas"
         type="number"
         [min]="2"
         [max]="20"
         [formControl]="form.controls.count"
       />
+      <p class="split-note" role="status">
+        {{ payers().length }} cuentas para gestionar. Cada tarjeta de abajo
+        corresponde a una persona.
+      </p>
       <div class="split-accounts">
         @for (payer of payers(); track $index; let index = $index) {
           <div class="split-card">
-            <h4>Cuenta {{ index + 1 }}</h4>
+            <h4>Comensal {{ index + 1 }} · Cuenta {{ index + 1 }}</h4>
             <p>{{ payerName(payer) }}</p>
             <app-button
               variant="ghost"
               [disabled]="busy()"
               (clicked)="editPayer(index)"
-              >Elegir titular</app-button
+              >Asignar titular</app-button
             >
             @if (!payer.customer_id) {
               <app-input
@@ -122,18 +131,19 @@
           [loading]="busy()"
           [disabled]="busy()"
           (clicked)="calculatePreview()"
-          >Calcular reparto</app-button
+          >Ver vista previa del reparto</app-button
         >
         <app-button
           variant="primary"
           [disabled]="!canConfirm()"
           (clicked)="confirmSplit()"
-          >Confirmar división</app-button
+          >Crear {{ payers().length }} cuentas</app-button
         >
       </div>
-      @if (preview() && !canConfirm() && !busy()) {
+      @if (preview() && !currentPreview() && !busy()) {
         <p class="split-note" role="status">
-          El reparto cambió. Calcula nuevamente antes de confirmar.
+          Cambiaste el reparto. Genera otra vista previa para habilitar la
+          creación de cuentas.
         </p>
       }
     } @else {
@@ -141,6 +151,7 @@
     }
   }
   @if (accountRows().length) {
+    <h4>{{ group() ? "Cuentas creadas" : "Vista previa — aún no se han creado las cuentas" }}</h4>
     <p class="split-note">
       {{
         group()
@@ -190,7 +201,7 @@
                   variant="ghost"
                   [disabled]="busy()"
                   (clicked)="editPayer(null, account)"
-                  >Titular</app-button
+                  >Cambiar titular</app-button
                 >
               }
               @if (canPay() && money(account.available_to_pay) > 0) {
@@ -283,9 +294,6 @@
     <app-button variant="ghost" [disabled]="busy()" (clicked)="cancelSplit()"
       >Anular división sin pagos nuevos ni facturas</app-button
     >
-  }
-  @if (!group() && !allowCreate() && !loading() && !error()) {
-    <p class="split-note">La cuenta aún no está dividida.</p>
   }
 </section>
 <app-modal

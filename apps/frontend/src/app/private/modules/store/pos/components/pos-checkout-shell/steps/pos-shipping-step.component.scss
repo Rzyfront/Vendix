@@ -12,6 +12,81 @@
   min-width: 0;
 }
 
+/* Delivery inputs live alongside Cliente; keep them compact on narrow POS screens. */
+.client-delivery-details {
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+}
+
+.client-delivery-details .method-section,
+.client-delivery-details .address-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.client-delivery-details .method-card {
+  min-height: 52px;
+  padding: 10px 12px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+}
+
+.client-delivery-details .method-card-label {
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.client-delivery-details .saved-addresses {
+  grid-template-columns: 1fr;
+}
+
+.address-help,
+.address-preview {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-neutral-600);
+}
+
+.address-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* H6 — aviso de dirección guardada incompleta (state_province/phone_number
+   nulos) que precede el formulario precargado en #clientDeliveryDetails.
+   Mismos tokens de warning que .flash-banner. */
+.address-help--warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #92400e;
+  font-weight: 500;
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+}
+
+@media (max-width: 480px) {
+  .client-delivery-details .method-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Stitch paso 5 — screen-reader-only para la live region que anuncia el
    sub-paso actual (el step indicator compartido no expone aria-current). */
 .sr-only {
@@ -271,6 +346,29 @@
   height: 1px;
   background: var(--color-border);
   margin: 14px 0;
+}
+
+/* Paso 15b — filas del desglose fiscal (base + impuesto). Jerarquía menor
+   que la fila del costo: sangría + cuerpo reducido. */
+.cost-row--detail {
+  margin-top: 8px;
+  padding-left: 12px;
+}
+
+.cost-row--detail .cost-row-label {
+  font-size: 14px;
+}
+
+.cost-row--detail .cost-row-amount {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Paso 15b — aviso de que el costo manual pierde el impuesto de la tarifa. */
+.manual-tax-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--color-neutral-600);
 }
 
 .cost-calculating {

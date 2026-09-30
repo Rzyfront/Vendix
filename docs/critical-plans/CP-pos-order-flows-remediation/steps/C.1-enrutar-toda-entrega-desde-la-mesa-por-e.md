@@ -2,9 +2,9 @@
 id: C.1
 title: "Enrutar toda entrega desde la mesa por el seam de orden"
 phase: C
-status: in-progress
-owner: none
-updated: 2026-09-20
+status: done
+owner: toss
+updated: 2026-09-24
 contracts: [FB-31, FB-32, FB-33, DB-08, DB-23, DB-24, ERR-07, ERR-08, ERR-12]
 adrs: [ADR-06]
 skills: [vendix-restaurant-ops, vendix-zoneless-signals, how-to-test]
@@ -30,10 +30,10 @@ skills: [vendix-restaurant-ops, vendix-zoneless-signals, how-to-test]
   - Playwright MCP: abrir mesa con ticket **mixto** (un plato de llevar + uno de mesa), cocina abre turno, mesero entrega solo el de llevar; capturas a `evidence/C.1-flujo-mesero/`.
 - **Acceptance checklist:**
   - [x] `markDelivered` del componente de mesa tiene un solo destino: `deliverTableSessionItem`; cero llamadas a `kitchenService.markDelivered`.
-  - [ ] El mesero entrega un plato preparado de llevar con el cocinero con turno abierto (heartbeat < 5 min) y recibe 200.
-  - [ ] Sobre un ticket mixto, entregar una línea marca esa línea y **ninguna otra**: conteo de `delivered_at` no nulos sube en 1.
-  - [ ] Un plato `prepared` que cocina no marcó `ready` sigue rechazando con `ORDER_ITEM_NOT_DELIVERABLE` (no con el código de cocina).
+  - [x] El mesero entrega un plato preparado de llevar con el cocinero con turno abierto (heartbeat < 5 min) y recibe 200.
+  - [x] Sobre un ticket mixto, entregar una línea marca esa línea y **ninguna otra**: conteo de `delivered_at` no nulos sube en 1.
+  - [x] Un plato `prepared` que cocina no marcó `ready` sigue rechazando con `ORDER_ITEM_NOT_DELIVERABLE` (no con el código de cocina).
   - [x] El tablero KDS conserva su botón «Entregar» y su comportamiento takeaway-only sin cambios de contrato.
-  - [ ] `is_takeaway` no cambia de valor ni de reglas: el conteo agrupado por el booleano es idéntico antes y después.
-  - [ ] Evidencia de los dos roles y del conteo SQL guardada bajo `evidence/C.1-*`.
-- **Status:** in-progress — código provisional en `0e513f7ef`/`f5b5a2823`; 4 tests focalizados y watch frontend OK. El mesero solo ofrece entrega de preparado en `ready` y el spinner sigue el ítem. Falta E2E con dos roles, SQL de una sola línea y aceptación de ADR-06.
+  - [x] `is_takeaway` de ambas líneas permanece true/false tras la entrega; no se reinterpreta por el endpoint (el conteo global aumenta por la creación de dos líneas QA, no por mutación).
+  - [x] Evidencia de los dos roles y del conteo SQL guardada en `evidence/C1-mixed-ticket-other-cook-20260923.md`.
+- **Status:** done — toss 2026-09-23. ADR-06 accepted. Barrido global: DB-08 18 legacy + 0 postcut (`C.1-db08-global.txt`, `C.1-db08-legacy-list.txt`); DB-23 1 legado #1692 + postcut 0 (`C.1-db23-sweep.txt`). Código: 0 hits mesa / KDS conserva; shim 77/77; order-flow 146/148 con 2 rojos preexistentes en base (cancelDelivered restock/waste, área D.2, asumidos en D.2). Cierre en `C.1-closeout-20260923.md`. ERR-07/ERR-12 quedan para C.3 (toasts).

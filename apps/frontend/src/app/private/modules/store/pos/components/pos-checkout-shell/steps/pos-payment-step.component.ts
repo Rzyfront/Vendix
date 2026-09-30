@@ -26,12 +26,14 @@ import type {
   CreditTerms,
   PaymentMode,
 } from '../../../../../../../shared/components';
+import type { PaymentLeg } from '../../../../../../../shared/components/payment-collector/payment-collector.model';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   PosPaymentService,
   PaymentMethod,
   PosSalePaymentResponse,
 } from '../../../services/pos-payment.service';
+import type { PosPaymentLeg } from '../../../services/pos-payment.service';
 import { PaymentMethodType } from '../../../../../../../shared/models/payment-method.model';
 import { FulfillmentType } from '../../pos-fulfillment-selector.component';
 import type { CheckoutIntent } from '../pos-checkout-shell.component';
@@ -48,6 +50,47 @@ import { StoreSettingsFacade } from '../../../../../../../core/store/store-setti
 import type { BusinessHours } from '../../../../../../../core/models/store-settings.interface';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { ERROR_MESSAGES } from '../../../../../../../core/utils/error-messages';
+import { PosSerialSelectionModalComponent } from '../../pos-serial-selection-modal/pos-serial-selection-modal.component';
+import { SerialNumbersService } from '../../../../serial-numbers/services/serial-numbers.service';
+import { PosCashRegisterService } from '../../../services/pos-cash-register.service';
+import { CartItem } from '../../../models/cart.model';
+import { MultiSelectorOption } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
+
+/**
+ * Cobro multimétodo de contado: traduce los tramos del collector al DTO del
+ * backend (`PaymentLegDto`). Claves snake_case EXACTAS; `leg.method` es eco
+ * de UI y NUNCA viaja.
+ */
+function toPosPaymentLegs(legs: PaymentLeg[]): PosPaymentLeg[] {
+  return legs.map((leg) => ({
+    store_payment_method_id: leg.storePaymentMethodId,
+    amount: leg.amount,
+    ...(leg.amountReceived != null
+      ? { amount_received: leg.amountReceived }
+      : {}),
+    ...(leg.reference ? { payment_reference: leg.reference } : {}),
+    ...(leg.bankAccountId != null
+      ? { bank_account_id: leg.bankAccountId }
+      : {}),
+  }));
+}
+
+/**
+ * Copy en español para los rechazos multimétodo. `parseApiError` no tiene
+ * estos códigos en `ERROR_MESSAGES` (catálogo fuera del alcance de este
+ * paso), así que el consumidor los traduce aquí leyendo el `errorCode` que
+ * el servicio deja en superficie.
+ */
+const MULTI_TENDER_ERROR_COPY: Record<string, string> = {
+  PAY_MULTI_TENDER_SUM_MISMATCH:
+    'La suma de los métodos no coincide con el total a cobrar. Revisa los montos e inténtalo de nuevo.',
+  PAY_MULTI_TENDER_METHOD_NOT_ALLOWED:
+    'Uno de los métodos no permite cobro combinado. Wallet requiere cliente y saldo; Wompi no se combina.',
+  PAY_MULTI_TENDER_MULTIPLE_CASH:
+    'Solo se permite un pago en efectivo dentro del cobro combinado.',
+  PAY_MULTI_TENDER_CASH_INSUFFICIENT:
+    'El efectivo recibido es menor que el monto en efectivo. Revisa el recibido.',
+};
 
 /**
  * Fase 5·B1 — `app-pos-payment-step`.
@@ -74,6 +117,7 @@ import { ERROR_MESSAGES } from '../../../../../../../core/utils/error-messages';
     SpinnerComponent,
     ButtonComponent,
     PaymentCollectorComponent,
+    PosSerialSelectionModalComponent,
   ],
   templateUrl: './pos-payment-step.component.html',
   styleUrl: './pos-payment-step.component.scss',
@@ -110,6 +154,10 @@ export class PosPaymentStepComponent implements OnInit {
    * `is_takeaway` por línea. Default false = comportamiento actual.
    */
   readonly takeawayOrder = input<boolean>(false);
+  /**
+   * Tipo de entrega resuelto por el shell ('dine_in', 'direct_delivery', 'home_delivery').
+   */
+  readonly deliveryType = input<string | null>(null);
   /**
    * CP-POS-MODAL-SCOPE-001 / Phase F.11 — when the shell is paying an
    * EXISTING draft order (edit → Actualizar → Cobrar path), the charge
@@ -182,6 +230,127 @@ export class PosPaymentStepComponent implements OnInit {
   protected readonly collector = viewChild(PaymentCollectorComponent);
 
   private readonly paymentService = inject(PosPaymentService);
+  private readonly serialNumbersService = inject(SerialNumbersService);
+  private readonly cashRegisterService = inject(PosCashRegisterService);
+  readonly serialModalOpen = signal(false);
+  readonly serialModalProductName = signal('');
+  readonly serialModalQuantity = signal(1);
+  readonly serialModalOptions = signal<MultiSelectorOption[]>([]);
+  readonly serialModalLoading = signal(false);
+  private serialQueue: CartItem[] = [];
+  private pendingSerialSubmit: PaymentSubmit | null = null;
+  private walletMultiAttemptKey: string | null = null;
+  private walletMultiAttemptSignature: string | null = null;
+  private readonly serialChoices = new Map<string, { productId: string; variantId: number | null; quantity: number; serialIds: number[]; serialNumbers: string[] }>();
+
+  private serialQuantity(item: CartItem): number {
+    // Mirrors PosPaymentService.mapCartItemForPos.stock_units_consumed and the
+    // backend OrderStockCommitService quantity, including pack/stock-unit tiers.
+    const factor = Number(item.units_per_package) > 1
+      ? Number(item.units_per_package)
+      : Number(item.stock_units_per_sale_unit) > 1
+        ? Number(item.stock_units_per_sale_unit)
+        : 1;
+    return item.quantity * factor;
+  }
+
+  private needsImmediateSerialCapture(submit: PaymentSubmit): boolean {
+    return this.autoExecute() && this.checkoutIntent() === 'pickup' &&
+      this.fulfillment() === 'entrega' && this.tableId() == null &&
+      this.sessionId() == null && submit.mode === 'contado';
+  }
+
+  private collectSerialsBeforeCharge(submit: PaymentSubmit): boolean {
+    if (!this.needsImmediateSerialCapture(submit)) return false;
+    if (this.pendingSerialSubmit) return true;
+    const items = (this.cartState()?.items ?? []).filter(
+      (item) => item.product.requires_serial_numbers === true,
+    );
+    const missing = items.filter((item) => {
+      const choice = this.serialChoices.get(item.id);
+      return !choice || choice.productId !== String(item.product.id) ||
+        choice.variantId !== (item.variant_id ?? null) ||
+        choice.quantity !== this.serialQuantity(item) ||
+        choice.serialIds.length + choice.serialNumbers.length !== this.serialQuantity(item);
+    });
+    if (!missing.length) return false;
+    this.pendingSerialSubmit = submit;
+    this.serialQueue = missing;
+    this.openNextSerialModal();
+    return true;
+  }
+
+  private openNextSerialModal(): void {
+    const item = this.serialQueue[0];
+    if (!item) {
+      const submit = this.pendingSerialSubmit;
+      this.pendingSerialSubmit = null;
+      this.serialModalOpen.set(false);
+      if (submit) this.onCollectorSubmit(submit);
+      return;
+    }
+    this.serialModalProductName.set(item.product.name);
+    this.serialModalQuantity.set(this.serialQuantity(item));
+    this.serialModalOptions.set([]);
+    this.serialModalOpen.set(true);
+    const session = this.cashRegisterService.getActiveSessionSnapshot();
+    const locationId = session?.register?.location_id ?? session?.register?.location?.id;
+    if (locationId == null) return; // Free-text capture remains available.
+    this.serialModalLoading.set(true);
+    this.serialNumbersService.listAvailable({
+      product_id: Number(item.product.id),
+      product_variant_id: item.variant_id,
+      location_id: locationId,
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (rows) => {
+        this.serialModalOptions.set(rows.map((row) => ({ value: row.id, label: row.serial_number })));
+        this.serialModalLoading.set(false);
+      },
+      error: () => this.serialModalLoading.set(false),
+    });
+  }
+
+  onSerialConfirmed(selection: { serialIds: number[]; freeTextSerials: string[] }): void {
+    const item = this.serialQueue[0];
+    if (!item) return;
+    const serialIds = selection.serialIds;
+    const serialNumbers = selection.freeTextSerials.map((serial) => serial.trim()).filter(Boolean);
+    const quantity = this.serialQuantity(item);
+    if (serialIds.length + serialNumbers.length !== quantity ||
+        new Set(serialIds).size !== serialIds.length ||
+        new Set(serialNumbers).size !== serialNumbers.length) {
+      this.toastService.error(`Selecciona exactamente ${quantity} serial(es) distintos para ${item.product.name}.`);
+      return;
+    }
+    this.serialChoices.set(item.id, {
+      productId: String(item.product.id), variantId: item.variant_id ?? null,
+      quantity, serialIds, serialNumbers,
+    });
+    this.serialQueue.shift();
+    this.openNextSerialModal();
+  }
+
+  onSerialCancelled(): void {
+    this.pendingSerialSubmit = null;
+    this.serialQueue = [];
+    this.serialModalOpen.set(false);
+  }
+
+  private cartWithConfirmedSerials(): CartState {
+    const cart = this.cartState()!;
+    return {
+      ...cart,
+      items: cart.items.map((item) => {
+        const choice = this.serialChoices.get(item.id);
+        return choice && item.product.requires_serial_numbers &&
+          choice.productId === String(item.product.id) &&
+          choice.variantId === (item.variant_id ?? null) &&
+          choice.quantity === this.serialQuantity(item)
+          ? { ...item, serial_ids: choice.serialIds, serial_numbers: choice.serialNumbers }
+          : item;
+      }),
+    };
+  }
   // CP-POS-MODAL-SCOPE-001 / Phase F.11 — ordersService owns the flow/pay
   // endpoint that charges an EXISTING draft order. The payment-step is
   // shared between create-payment (processSaleWithPayment) and edit-then-
@@ -286,8 +455,19 @@ export class PosPaymentStepComponent implements OnInit {
   readonly effectiveAmount = computed<number>(
     () => this.amountOverride() ?? (this.cartState()?.summary?.total || 0),
   );
+  /** Backend `resolveTip` uses gross products, never discounted total or shipping. */
+  readonly tipBase = computed<number>(() => {
+    const summary = this.cartState()?.summary;
+    return (summary?.subtotal ?? 0) + (summary?.taxAmount ?? 0);
+  });
 
   // ── Footer-facing collector projections (read by the shell) ──────────────
+  readonly tipAmount = computed<number>(() => {
+    const collector = this.collector();
+    return collector?.mode() === 'contado' && collector.config().allowTip
+      ? collector.tipAmount()
+      : 0;
+  });
   readonly mode = computed<PaymentMode | undefined>(() => this.collector()?.mode());
   readonly isWompiSelected = computed<boolean>(
     () => this.collector()?.isWompiSelected() ?? false,
@@ -398,7 +578,7 @@ export class PosPaymentStepComponent implements OnInit {
     if (cur < last) {
       if (cur < c.modoOffset()) {
         c.goToSubStep(c.modoOffset()); // Forma de pago → Método / Plan
-      } else if (!c.selectedMethod()) {
+      } else if (c.multiEnabled() ? !c.isMultiValid() : !c.selectedMethod()) {
         c.flashValidation(); // Método sin elegir → decir qué falta, no ignorar el clic
         return true;
       } else {
@@ -581,7 +761,20 @@ export class PosPaymentStepComponent implements OnInit {
   // ── The single collector submit handler (all POS gates preserved) ────────
   //
   onCollectorSubmit(submit: PaymentSubmit): void {
+    if (this.processing()) return;
     if (!this.cartState()) return;
+    if (this.autoExecute() && this.checkoutIntent() === 'pickup' &&
+        this.fulfillment() === 'entrega' && this.tableId() == null && this.sessionId() == null &&
+        this.cartState()!.items.some((item) => item.product.requires_serial_numbers) &&
+        (submit.mode === 'credito' || submit.method?.type === 'wompi' ||
+          submit.method?.type === 'wallet' ||
+          (submit.method?.original as any)?.system_payment_method?.processing_mode === 'ON_DELIVERY')) {
+      this.toastService.error(
+        'Los productos con serial para llevar requieren pago inmediato en caja. Elige efectivo, tarjeta o transferencia; para cobrar después usa un envío con remisión.',
+      );
+      return;
+    }
+    if (this.collectSerialsBeforeCharge(submit)) return;
 
     // T10.B1 — defensa de profundidad (NO confiar sólo en `[allowTip]="..."`):
     // la propina vive DENTRO de `grand_total` y FUERA de `subtotal`/`tax_amount`,
@@ -688,7 +881,39 @@ export class PosPaymentStepComponent implements OnInit {
       // viaja con el pago para que el POS persista payments.bank_account_id en
       // processPosPaymentTransaction (CreatePosPaymentDto).
       bank_account_id: submit.bankAccountId,
+      ...(submit.tip != null && submit.tip > 0
+        ? {
+            tip_amount: submit.tip,
+            tip_type: submit.tipType,
+            tip_value: submit.tipValue,
+            tip_waiter_id: submit.tipWaiterId ?? undefined,
+          }
+        : {}),
     };
+
+    // Cobro multimétodo de contado: con 2+ tramos el payload lleva
+    // `payments[]` y el servicio omite las claves escalares de método (el
+    // backend prefiere `payments[]`). Con 1 tramo, el payload escalar es
+    // idéntico al actual.
+    const multiLegs =
+      submit.legs && submit.legs.length >= 2 ? submit.legs : null;
+    if (multiLegs) {
+      payment_request.payments = toPosPaymentLegs(multiLegs);
+      if (multiLegs.some((leg) => leg.methodType === PaymentMethodType.WALLET)) {
+        const signature = JSON.stringify({
+          customerId: this.cartState()?.customer?.id ?? null,
+          linkedOrderId: this.editingOrderId() ?? this.cartState()?.linkedOrderId ?? null,
+          items: this.cartState()?.items.map((item) => [item.product.id, item.quantity, item.totalPrice]),
+          legs: payment_request.payments,
+          tip: submit.tip ?? 0,
+        });
+        if (signature !== this.walletMultiAttemptSignature) {
+          this.walletMultiAttemptSignature = signature;
+          this.walletMultiAttemptKey = crypto.randomUUID();
+        }
+        payment_request.idempotencyKey = this.walletMultiAttemptKey;
+      }
+    }
 
     if (method.type === 'wallet' && this.walletInfo()) {
       payment_request.metadata = { walletId: this.walletInfo()?.wallet_id };
@@ -706,21 +931,48 @@ export class PosPaymentStepComponent implements OnInit {
     // atomically promotes the draft and charges it), NOT processSaleWithPayment
     // (which would create a SECOND order).
     const editingId = this.editingOrderId();
-    const obs: Observable<PosSalePaymentResponse> = editingId
+    const selectedCart = this.cartWithConfirmedSerials();
+    const immediateSerials = this.needsImmediateSerialCapture(submit) &&
+      selectedCart.items.some((item) => item.product.requires_serial_numbers);
+    const walletMultiInExistingOrder = editingId != null &&
+      !!multiLegs?.some((leg) => leg.methodType === PaymentMethodType.WALLET);
+    const editingDigitalTip = editingId != null && !immediateSerials &&
+      (submit.tip ?? 0) > 0 &&
+      (method.type === PaymentMethodType.WOMPI ||
+        method.type === PaymentMethodType.WALLET);
+    const obs: Observable<PosSalePaymentResponse> = editingDigitalTip
+      ? this.paymentService.processExistingDigitalTip(selectedCart, payment_request, editingId)
+      : editingId && !immediateSerials && !walletMultiInExistingOrder
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
-          amount: this.cartState()!.summary.total,
+          amount: this.cartState()!.summary.total + (submit.tip ?? 0),
           amount_received: submit.amountReceived,
+          ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
+          ...(submit.tip != null && submit.tip > 0
+            ? {
+                tip_amount: submit.tip,
+                tip_type: submit.tipType,
+                tip_value: submit.tipValue,
+                tip_waiter_id: submit.tipWaiterId ?? undefined,
+              }
+            : { tip_amount: 0, tip_type: 'fixed', tip_value: 0 }),
+          // Multimétodo: `PayOrderDto` exige el escalar pero el backend
+          // prefiere `payments[]` cuando llega. Se adjunta, no se sustituye.
+          ...(multiLegs ? { payments: toPosPaymentLegs(multiLegs) } : {}),
         } as any)
       : this.paymentService.processSaleWithPayment(
-          this.cartState()!,
+          editingId && (immediateSerials || walletMultiInExistingOrder)
+            ? { ...selectedCart, linkedOrderId: editingId }
+            : selectedCart,
           payment_request,
           'current_user',
           this.sessionId() ?? null,
           this.tableId() ?? null,
           // QUI-653 — 'Para llevar' de la orden hacia `order_items.is_takeaway`.
           this.takeawayOrder(),
+          immediateSerials || walletMultiInExistingOrder,
+          this.deliveryType(),
         );
 
     obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -729,7 +981,7 @@ export class PosPaymentStepComponent implements OnInit {
           // shape (PayOrderResponse) does NOT carry a top-level `success`
           // flag; treat any non-thrown response as success. processSaleWithPayment
           // returns `{success: true/false, ...}` so we honor its flag.
-          const isSuccess = editingId ? !!response?.order : response.success;
+          const isSuccess = response.success ?? (editingId ? !!response?.order : false);
           if (isSuccess) {
             if (
               isWompi &&
@@ -741,6 +993,8 @@ export class PosPaymentStepComponent implements OnInit {
             }
 
             this.processing.set(false);
+            this.walletMultiAttemptKey = null;
+            this.walletMultiAttemptSignature = null;
             if (
               !editingId &&
               response.order?.payment_status === 'succeeded' &&
@@ -752,9 +1006,15 @@ export class PosPaymentStepComponent implements OnInit {
                 5000,
               );
             }
+            // Multimétodo: `pos.component` arma la confirmación esparciendo
+            // `paymentData.order`, así que el desglose viaja colgado de la
+            // orden (único canal en alcance hacia el tiquete).
+            const ticketPayments = this.resolveTicketPayments(response, submit);
             this.paymentCompleted.emit({
               success: true,
-              order: response.order,
+              order: ticketPayments
+                ? { ...response.order, payments: ticketPayments }
+                : response.order,
               payment: response.payment,
               change: response.change,
               message: response.message,
@@ -775,6 +1035,14 @@ export class PosPaymentStepComponent implements OnInit {
         error: (error: any) => {
           this.processing.set(false);
           console.error('Payment error:', error);
+          // Multimétodo: ambas vías (`processSaleWithPayment` y `flowPayOrder`)
+          // dejan el `errorCode` en superficie; se traduce al copy en español.
+          const surfaceCode: string | undefined =
+            (error as { errorCode?: string })?.errorCode ??
+            extractApiError(error).code;
+          const multiTenderCopy = surfaceCode
+            ? MULTI_TENDER_ERROR_COPY[surfaceCode]
+            : undefined;
           this.toastService.show({
             variant: 'error',
             title: 'Error',
@@ -782,12 +1050,49 @@ export class PosPaymentStepComponent implements OnInit {
             // A legitimate stock block used to read "Http failure response …
             // 409 Conflict", which tells the cashier nothing actionable.
             description:
+              multiTenderCopy ??
               extractApiError(error).message ??
               'Error de conexión al procesar el pago',
           });
         },
       });
   }
+  /**
+   * Desglose por método para el tiquete local. Prefiere `response.payments`
+   * (contrato del backend: misma forma que `payment`, solo presente si se
+   * usó `payments[]`); si no viene (p. ej. `flow/pay`, que no lo devuelve),
+   * lo reconstruye desde los tramos del submit con las etiquetas del
+   * catálogo. `undefined` en cobro escalar: el tiquete imprime lo de hoy.
+   */
+  private resolveTicketPayments(
+    response: PosSalePaymentResponse,
+    submit: PaymentSubmit,
+  ): Array<{ amount: number; payment_method: string }> | undefined {
+    const echoed = (
+      response as {
+        payments?: Array<{ amount?: unknown; payment_method?: unknown }>;
+      }
+    ).payments;
+    if (Array.isArray(echoed) && echoed.length > 0) {
+      return echoed.map((p) => ({
+        amount: Number(p.amount) || 0,
+        payment_method: String(p.payment_method ?? 'Pago'),
+      }));
+    }
+    const legs = submit.legs;
+    if (!legs || legs.length < 2) return undefined;
+    const catalog = this.paymentMethods();
+    return legs.map((leg) => ({
+      amount: Number(leg.amount) || 0,
+      payment_method:
+        leg.method?.label ??
+        catalog.find((m) => Number(m.id) === leg.storePaymentMethodId)
+          ?.displayName ??
+        catalog.find((m) => Number(m.id) === leg.storePaymentMethodId)?.name ??
+        leg.methodType,
+    }));
+  }
+
   private runCreditSale(terms: CreditTerms | null): void {
     if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');

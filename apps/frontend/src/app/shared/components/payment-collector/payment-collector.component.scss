@@ -870,3 +870,187 @@
   }
 }
 
+// 5b — modo «Varios métodos» (multi-tender). Mobile-first: el toggle y las
+// filas caben a 375px sin overflow; mismo lenguaje que .pc-tip-mode /
+// .pc-tip-row (chips + filas con min-width:0). Solo layout: superficies,
+// inputs, warnings y cambio reusan .pc-card / .pc-input / .pc-warn /
+// .change-display y tokens var(--color-*).
+.pc-multi-toggle {
+  display: flex;
+  gap: 0.375rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pc-multi-toggle-btn {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    background: var(--color-background);
+    color: var(--color-text-primary);
+  }
+
+  // Mismo patron que .pc-tip-mode-btn: tinte + borde + texto en marca,
+  // sin pintar el fondo entero (compite con el CTA del footer).
+  &.is-active {
+    background: color-mix(
+      in srgb,
+      var(--color-primary) 12%,
+      var(--color-surface)
+    );
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+}
+
+.pc-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 12px;
+
+  // Dentro del stack con gap, los márgenes propios de .pc-warn /
+  // .change-display duplicarían el espaciado.
+  .pc-warn {
+    margin-bottom: 0;
+  }
+
+  .change-display {
+    margin-top: 0;
+  }
+}
+
+.pc-multi-leg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-background);
+
+  > .error-text {
+    margin-top: 0;
+  }
+}
+
+.pc-multi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pc-multi-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+}
+
+.pc-multi-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+
+  &:hover {
+    border-color: var(--color-error);
+    color: var(--color-error);
+    background: rgba(var(--color-error-rgb), 0.06);
+  }
+}
+
+.pc-multi-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pc-multi-method {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.pc-multi-amount {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.pc-multi-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.pc-multi-label {
+  color: color-mix(
+    in srgb,
+    var(--color-text-primary) 78%,
+    transparent
+  );
+}
+
+.pc-multi-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 2px dashed var(--color-border);
+  border-radius: 10px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: border-color 0.2s;
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@media (min-width: 768px) {
+  .pc-multi-row {
+    flex-wrap: nowrap;
+  }
+}
+

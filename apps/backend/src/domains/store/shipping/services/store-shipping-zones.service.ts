@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma, shipping_rate_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
@@ -43,6 +44,24 @@ function withTaxCategoryView<T extends { tax_category?: unknown }>(
       >[0],
     ),
   };
+}
+
+/**
+ * Normaliza la escala del DTO a JSON plano para Prisma. `null` (quitar la
+ * escala) se persiste como NULL de columna (`Prisma.DbNull`): el `null`
+ * plano en un campo Json lo rechaza Prisma con error de validación (500).
+ */
+function toDistanceTiersJson(
+  tiers: Array<{ from_km: number; to_km?: number | null; price: number }> | null,
+):
+  | Array<{ from_km: number; to_km: number | null; price: number }>
+  | typeof Prisma.DbNull {
+  if (tiers == null) return Prisma.DbNull;
+  return tiers.map((tier) => ({
+    from_km: tier.from_km,
+    to_km: tier.to_km ?? null,
+    price: tier.price,
+  }));
 }
 
 @Injectable()
@@ -267,6 +286,9 @@ export class StoreShippingZonesService {
     const created = await this.prisma.shipping_rates.create({
       data: {
         tax_category_id: dto.tax_category_id ?? null,
+        // El modo vive en la tarifa (default incluido); el update lo lleva el
+        // spread de `update_data` (el DTO lo declara opcional).
+        tax_is_inclusive: dto.tax_is_inclusive ?? true,
         shipping_zone_id: dto.shipping_zone_id,
         shipping_method_id: dto.shipping_method_id,
         name: dto.name,
@@ -277,6 +299,18 @@ export class StoreShippingZonesService {
         max_val: dto.max_val,
         free_shipping_threshold: dto.free_shipping_threshold,
         is_active: dto.is_active ?? true,
+        // Escala de km: ausente ⇒ precio plano; se persiste como JSON plano.
+        // Release-853 paso 11 — `free` no lleva escala: se limpia aunque el
+        // DTO traiga una (el wizard manda `[]` al pasar a `free`).
+        ...(dto.distance_tiers !== undefined ||
+        dto.type === shipping_rate_type_enum.free
+          ? {
+              distance_tiers:
+                dto.type === shipping_rate_type_enum.free
+                  ? Prisma.DbNull
+                  : toDistanceTiersJson(dto.distance_tiers ?? null),
+            }
+          : {}),
       },
       include: RATE_INCLUDE,
     });
@@ -308,7 +342,8 @@ export class StoreShippingZonesService {
       throw new VendixHttpException(ErrorCodes.SHIP_PERM_001);
     }
 
-    const { shipping_zone_id, tax_category_id, ...update_data } = dto;
+    const { shipping_zone_id, tax_category_id, distance_tiers, ...update_data } =
+      dto;
     if (
       shipping_zone_id !== undefined &&
       shipping_zone_id !== null &&
@@ -338,11 +373,26 @@ export class StoreShippingZonesService {
       await this.shippingTax.assertCategoryAssignable(tax_category_id);
     }
 
+    // Release-853 paso 11 — tipo efectivo: `free` limpia la escala aunque
+    // el DTO no la toque (pasar a gratis no debe dejar tramos huérfanos).
+    const effective_type = dto.type ?? rate.type;
+
     const updated = await this.prisma.shipping_rates.update({
       where: { id },
       data: {
         ...update_data,
         ...(tax_category_changes ? { tax_category_id } : {}),
+        // `undefined` ⇒ no se toca; `null` ⇒ se quita la escala (DbNull, no
+        // `null` plano: Prisma rechaza el `null` plano en Json con 500).
+        ...(distance_tiers !== undefined ||
+        effective_type === shipping_rate_type_enum.free
+          ? {
+              distance_tiers:
+                effective_type === shipping_rate_type_enum.free
+                  ? Prisma.DbNull
+                  : toDistanceTiersJson(distance_tiers ?? null),
+            }
+          : {}),
       },
       include: RATE_INCLUDE,
     });
@@ -442,6 +492,9 @@ export class StoreShippingZonesService {
             min_val: rate.min_val,
             max_val: rate.max_val,
             free_shipping_threshold: rate.free_shipping_threshold,
+            // El clonado copia el modo (sin impuesto: la categoría es de la
+            // tienda y la tarifa del sistema no la lleva).
+            tax_is_inclusive: rate.tax_is_inclusive,
             is_active: true,
             source_type: 'custom',
             copied_from_system_rate_id: rate.id,
@@ -491,7 +544,7 @@ export class StoreShippingZonesService {
     }
 
     // Create the rate copy (sin impuesto: la categoría es de la tienda y la
-    // tarifa del sistema no la lleva).
+    // tarifa del sistema no la lleva; el modo sí se copia).
     const copy = await this.prisma.shipping_rates.create({
       data: {
         shipping_zone_id: target_zone_id,
@@ -503,6 +556,7 @@ export class StoreShippingZonesService {
         min_val: system_rate.min_val,
         max_val: system_rate.max_val,
         free_shipping_threshold: system_rate.free_shipping_threshold,
+        tax_is_inclusive: system_rate.tax_is_inclusive,
         is_active: true,
         source_type: 'custom',
         copied_from_system_rate_id: system_rate.id,
@@ -626,6 +680,7 @@ export class StoreShippingZonesService {
               min_val: system_rate.min_val,
               max_val: system_rate.max_val,
               free_shipping_threshold: system_rate.free_shipping_threshold,
+              tax_is_inclusive: system_rate.tax_is_inclusive,
               updated_at: new Date(),
             },
           });
@@ -643,6 +698,7 @@ export class StoreShippingZonesService {
               min_val: system_rate.min_val,
               max_val: system_rate.max_val,
               free_shipping_threshold: system_rate.free_shipping_threshold,
+              tax_is_inclusive: system_rate.tax_is_inclusive,
               is_active: true,
               source_type: 'system_copy',
               copied_from_system_rate_id: system_rate.id,

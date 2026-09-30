@@ -224,6 +224,50 @@ describe('LegalDataFormComponent — DIAN strict resolver contract', () => {
     });
   });
 
+  it('selectores de referencia reflejan y escriben en los controles department/city (par A)', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    // El par A es la fuente de verdad: al setear department, el mirror de
+    // referencia debe reflejarlo y la cascada carga las ciudades.
+    component.form.controls.department.setValue('Bogotá D.C.');
+    fixture.detectChanges();
+    expect(component.referenceDepartment()).toBe('Bogotá D.C.');
+
+    await fixture.whenStable();
+    component.form.controls.city.setValue('Bogotá');
+    fixture.detectChanges();
+    expect(component.referenceCity()).toBe('Bogotá');
+
+    // Dirección inversa: lo que el usuario elige en el selector de referencia
+    // escribe en el mismo control del formulario (y resetea la ciudad).
+    component.onReferenceDepartmentChange('Antioquia');
+    expect(component.form.controls.department.value).toBe('Antioquia');
+    expect(component.referenceCity()).toBe('');
+
+    component.onReferenceCityChange('Medellín');
+    expect(component.form.controls.city.value).toBe('Medellín');
+
+    // Seleccionar el mismo valor no dispara un set redundante (ciclo corto).
+    component.onReferenceDepartmentChange('Antioquia');
+    expect(component.form.controls.department.value).toBe('Antioquia');
+  });
+
+  it('cambio de país limpia los mirrors de referencia y el control de ciudad', () => {
+    fixture.detectChanges();
+    component.form.controls.department.setValue('Bogotá D.C.');
+    component.form.controls.city.setValue('Bogotá');
+    fixture.detectChanges();
+
+    component.form.controls.country.setValue('MX');
+    fixture.detectChanges();
+
+    expect(component.form.controls.department.value).toBe('');
+    expect(component.form.controls.city.value).toBe('');
+    expect(component.referenceDepartment()).toBe('');
+    expect(component.referenceCity()).toBe('');
+  });
+
   describe('C.1 — Dos niveles de responsabilidades (ADR-02)', () => {
     it('frequentResponsibilityEntries contiene exactamente las 8 responsabilidades frecuentes', () => {
       fixture.detectChanges();

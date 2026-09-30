@@ -172,7 +172,7 @@ export class ShippingMethodsModalComponent {
   private getTypeLabel(type: string): string {
     const type_map: Record<string, string> = {
       custom: 'Personalizado',
-      pickup: 'Recogida',
+      pickup: 'Recogida en tienda',
       own_fleet: 'Flota propia',
       carrier: 'Transportadora',
       third_party_provider: 'Externo',

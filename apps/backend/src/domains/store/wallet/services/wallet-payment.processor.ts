@@ -6,6 +6,7 @@ import {
   PaymentStatus,
 } from '../../payments/interfaces';
 import { WalletBalanceService } from './wallet-balance.service';
+import { BadRequestException } from '@nestjs/common';
 
 export class WalletPaymentProcessor extends BasePaymentProcessor {
   private balanceService: WalletBalanceService;
@@ -25,30 +26,33 @@ export class WalletPaymentProcessor extends BasePaymentProcessor {
       this.logTransaction('PROCESS_WALLET_PAYMENT', paymentData);
 
       const walletId = paymentData.metadata?.walletId as number;
-      if (!walletId) {
+      const paymentId = Number(paymentData.metadata?.paymentId);
+      if (!walletId || !Number.isInteger(paymentId) || paymentId <= 0 ||
+          !paymentData.customerId) {
         return {
           success: false,
           status: 'failed',
-          message: 'Wallet ID is required in metadata.walletId',
+          message: 'Wallet, reserved payment and customer are required',
+          errorCode: 'WALLET_PRE_DEBIT_REJECTED',
         };
       }
-
-      const transactionId = this.generateTransactionId();
 
       const result = await this.balanceService.debit(
         walletId,
         paymentData.amount,
         {
-          reference_type: 'order_payment',
-          reference_id: paymentData.orderId,
+          reference_type: 'payment',
+          reference_id: paymentId,
           description: `Payment for order #${paymentData.orderId}`,
           created_by: paymentData.customerId,
+          expected_store_id: paymentData.storeId,
+          expected_customer_id: paymentData.customerId,
         },
       );
 
       return {
         success: true,
-        transactionId,
+        transactionId: `wallet_${result.transaction.id}`,
         status: 'succeeded',
         message: 'Wallet payment processed successfully',
         gatewayResponse: {
@@ -58,6 +62,10 @@ export class WalletPaymentProcessor extends BasePaymentProcessor {
         nextAction: { type: 'none' },
       };
     } catch (error) {
+      if (error instanceof BadRequestException) {
+        return { success: false, status: 'failed', message: error.message,
+          errorCode: 'WALLET_PRE_DEBIT_REJECTED' };
+      }
       return this.handleError(error, 'processPayment');
     }
   }

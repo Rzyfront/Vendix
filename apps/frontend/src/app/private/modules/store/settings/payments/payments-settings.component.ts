@@ -31,6 +31,7 @@ import {
   ItemListCardConfig,
   CardComponent,
   InputComponent,
+  ToggleComponent,
   SelectorComponent,
   AlertBannerComponent,
   ImageSourceModalComponent} from '../../../../../../app/shared/components/index';
@@ -51,6 +52,7 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
     ResponsiveDataViewComponent,
     CardComponent,
     InputComponent,
+    ToggleComponent,
     SelectorComponent,
     AlertBannerComponent,
     ImageSourceModalComponent
@@ -379,10 +381,17 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
                     [formControlName]="field.key" [required]="field.required" size="sm">
                   </app-selector>
                 </div>
+              } @else if (field.type === 'boolean') {
+                <div class="cfg-cell flex flex-col gap-1">
+                  <app-toggle [label]="field.title" [formControlName]="field.key"></app-toggle>
+                  @if (field.description) {
+                    <span class="text-xs text-text-secondary">{{ field.description }}</span>
+                  }
+                </div>
               } @else {
                 <div class="cfg-cell">
                   <app-input [label]="field.title"
-                    [type]="field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
+                    [type]="field.type === 'number' ? 'number' : field.type === 'password' || field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
                     [placeholder]="field.title" [formControlName]="field.key"
                     [required]="field.required" size="sm">
                   </app-input>
@@ -1374,7 +1383,7 @@ onSearchChange(term: string): void {
 
     for (const [key, prop] of Object.entries(properties) as [string, any][]) {
       const is_required = required_fields.includes(key);
-      const default_value = this.config_method?.default_config?.[key] ?? prop.default ?? '';
+      const default_value = this.config_method?.default_config?.[key] ?? prop.default ?? (prop.type === 'boolean' ? false : '');
       controls[key] = [default_value];
       this.config_fields.push({
         key,
@@ -1387,6 +1396,19 @@ onSearchChange(term: string): void {
     }
 
     this.config_form = this.fb.group(controls);
+  }
+
+  private getConfigValues(): Record<string, any> {
+    const config = { ...this.config_form.value } as Record<string, any>;
+    for (const field of this.config_fields) {
+      if (field.type !== 'number') continue;
+      if (config[field.key] === '' || config[field.key] === null) {
+        delete config[field.key];
+      } else {
+        config[field.key] = Number(config[field.key]);
+      }
+    }
+    return config;
   }
 
   saveConfigAndEnable(): void {
@@ -1419,7 +1441,8 @@ onSearchChange(term: string): void {
     if (!this.isBankTransferConfig()) {
       const required = this.config_method.config_schema?.['required'] || [];
       for (const key of required) {
-        if (!this.config_form.value[key]) {
+        const value = this.config_form.value[key];
+        if (value === null || value === undefined || value === '') {
           this.toast_service.error(`El campo "${key}" es requerido`);
           return;
         }
@@ -1437,7 +1460,7 @@ onSearchChange(term: string): void {
         const accounts = await this.persistBankConfigAccounts();
         return { accounts };
       }
-      return this.config_form.value as Record<string, any>;
+      return this.getConfigValues();
     })().then(
       (custom_config) => {
         this.payment_methods_service
@@ -1665,7 +1688,8 @@ onSearchChange(term: string): void {
     if (has_config && !this.isBankTransferConfig()) {
       const required = this.config_method!.config_schema?.['required'] || [];
       for (const key of required) {
-        if (!this.config_form.value[key]) {
+        const value = this.config_form.value[key];
+        if (value === null || value === undefined || value === '') {
           this.toast_service.error(`El campo "${key}" es requerido`);
           return;
         }
@@ -1680,7 +1704,7 @@ onSearchChange(term: string): void {
         const accounts = await this.persistBankConfigAccounts();
         return { accounts };
       }
-      return this.config_form.value as Record<string, any>;
+      return this.getConfigValues();
     })().then(
       (custom_config) => {
         const update_data = has_config

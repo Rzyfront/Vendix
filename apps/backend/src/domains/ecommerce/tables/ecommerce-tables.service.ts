@@ -68,6 +68,9 @@ export interface ResolveByTokenResult {
    * resolved SERVER-SIDE from `orders.customer_id`. `null` when the session
    * is anonymous or no session is open. The full `store_settings` object is
    * never exposed — only these derived flags.
+   *
+   * F1: `name` is the full name ONLY for the authenticated holder
+   * (`req.user.id === customer.id`); any other viewer gets the first name.
    */
   customer: { id: number; name: string } | null;
   /**
@@ -149,6 +152,10 @@ export interface BillItemView {
    * are passed through untouched to avoid double-signing.
    */
   image_url: string | null;
+  /**
+   * Nota libre de preparación del mesero o comensal (ej: "sin cebolla").
+   */
+  notes?: string | null;
 }
 
 export interface BillView {
@@ -410,6 +417,20 @@ export class EcommerceTablesService {
       customer = await this.resolveOrderCustomer(activeSession.order_id);
     }
 
+    // F1 (roku-shop-checkout-tarifa-detalle-orden) — `resolve` es
+    // `@OptionalAuth`: un anónimo que escanea el QR veía el nombre completo
+    // del titular de la cuenta. El `customer` completo es solo para el
+    // titular autenticado (`req.user.id === customer.id`); cualquier otro
+    // visor (anónimo o tercero autenticado) recibe solo el primer nombre.
+    // El `id` se conserva para no romper el skip del welcome-wizard, que
+    // llavea por presencia de `customer`.
+    if (customer) {
+      const viewerId = RequestContextService.getUserId();
+      if (viewerId !== customer.id) {
+        customer = { id: customer.id, name: this.firstNameOf(customer.name) };
+      }
+    }
+
     // HIGH-6 — defensa en frío contra el cambio de mesa. El comensal puede
     // llegar sin SSE (recarga dura, pestaña reabierta) trayendo en su
     // `localStorage` una sesión que ya no vive aquí. Sólo se marca
@@ -553,6 +574,14 @@ export class EcommerceTablesService {
   }
 
   // --------------------------------------------------- customer resolution
+  /**
+   * F1 — primer nombre para visores no titulares. Vacío ⇒ vacío (sin crash
+   * ni `undefined` en el payload).
+   */
+  private firstNameOf(name: string): string {
+    return (name ?? '').trim().split(/\s+/)[0] ?? '';
+  }
+
   /**
    * Resolve a diner's display name from `users` (scope-safe: the `users`
    * getter is unscoped, so a findFirst by id carries no AND-wrap caveat).
@@ -958,6 +987,7 @@ export class EcommerceTablesService {
         tax_amount_item: true,
         price_unit_quantity: true,
         variant_image_url: true,
+        notes: true,
         products: {
           select: {
             product_images: {
@@ -1012,6 +1042,7 @@ export class EcommerceTablesService {
           // redondeo (tasa 0% ⇒ grossUnit === netUnit ⇒ 0).
           tax_amount: Math.max(Math.round((lineTotalGross - netTotal) * 100) / 100, 0),
           image_url: signedImageUrl,
+          notes: it.notes ?? null,
         };
       }),
     );

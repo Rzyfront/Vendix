@@ -232,15 +232,10 @@ export class SplitAccountPaymentService {
               ),
           };
         }
-        if (
-          registerSettings?.enabled &&
-          registerSettings?.require_session_for_sales &&
-          !cashSession
-        ) {
-          this.reject(
-            'Se requiere una caja registradora abierta para procesar ventas.',
-          );
-        }
+        // Gate único de caja (`assertSessionForSales`): conserva la posición
+        // original — después del replay por idempotencia, que no crea dinero
+        // y por tanto no exige sesión.
+        await this.sessions.assertSessionForSales(user_id);
         if (cashSession) {
           const open =
             await tx.$queryRaw`SELECT id FROM cash_register_sessions WHERE id = ${cashSession.id} AND store_id = ${store_id} AND status = 'open' FOR UPDATE`;
@@ -336,11 +331,7 @@ export class SplitAccountPaymentService {
                 created_by_user_id: user_id,
                 authorized_store_id: store_id,
                 request_hash: requestHash,
-                cash_session_id:
-                  cashSession &&
-                  (type === 'cash' || registerSettings?.track_non_cash_payments)
-                    ? cashSession.id
-                    : null,
+                cash_session_id: cashSession ? cashSession.id : null,
                 payment_reference: dto.payment_reference ?? null,
                 amount_received: dto.amount_received ?? null,
                 wompi_payment_method: dto.wompi_payment_method ?? null,

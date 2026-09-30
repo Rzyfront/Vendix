@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { OrderShippingTaxRepairService } from './services/order-shipping-tax-repair.service';
 import { ResponseService } from '@common/responses/response.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { order_state_enum } from '@prisma/client';
@@ -20,6 +21,7 @@ describe('OrdersController', () => {
 
   const mockOrdersService = {
     findAll: jest.fn(),
+    listPaymentMethods: jest.fn(),
     create: jest.fn(),
     findOne: jest.fn(),
     update: jest.fn(),
@@ -66,6 +68,10 @@ describe('OrdersController', () => {
         // correr un solo test. Stub vacío: ningún test de este archivo
         // ejercita el stream SSE.
         { provide: NotificationsSseService, useValue: {} },
+        // El controller inyecta OrderShippingTaxRepairService desde el paso
+        // de reparación del impuesto del envío; ningún test de este archivo
+        // lo ejercita.
+        { provide: OrderShippingTaxRepairService, useValue: {} },
       ],
     }).compile();
 
@@ -142,6 +148,18 @@ describe('OrdersController', () => {
         400,
       );
     });
+  });
+
+  it('R10 expone catálogo mínimo en ruta estática bajo lectura de órdenes', async () => {
+    const methods = [{ id: 17, display_name: 'Transferencia' }];
+    mockOrdersService.listPaymentMethods.mockResolvedValueOnce(methods);
+    mockResponseService.success.mockReturnValueOnce({ data: methods });
+
+    expect(await controller.listPaymentMethods()).toEqual({ data: methods });
+    expect(mockResponseService.success).toHaveBeenCalledWith(
+      methods, 'Métodos de pago obtenidos exitosamente',
+    );
+    expect(Reflect.getMetadata('path', controller.listPaymentMethods)).toBe('payment-methods');
   });
 
   describe('create', () => {
@@ -296,42 +314,20 @@ describe('OrdersController', () => {
       );
     });
 
-    it('should handle errors when fetching order by id', async () => {
+    it('propagates a typed not-found error so the HTTP filter returns 404', async () => {
       const orderId = 999;
-      // F-164 — este test quedó invisible desde `3aa1960ed` (DI rota, todo
-      // el archivo fallaba en `compile()`). Al arreglar la DI queda expuesto
-      // un segundo desface, previo e independiente: el catch de `findOne`
-      // (CP-POS-SVC-PERF-001 / Bugfix) distingue a propósito `VendixHttpException`
-      // (mensaje curado, pasa tal cual) de cualquier otro `Error` (nunca
-      // filtra el mensaje crudo — responde 500 genérico + código estable
-      // `INTERNAL_ORDER_LOAD_001`) para no filtrar stack traces / mensajes
-      // internos de Prisma al cliente. Un `new Error('Order not found')`
-      // plano cae por la segunda rama, no por la primera — la expectativa
-      // vieja (400 con el mensaje del error) asumía que el mensaje pasaba
-      // directo, contrato que el bugfix de seguridad ya reemplazó.
-      const error = new Error('Order not found');
-
-      const errorResponse = {
-        success: false as const,
-        message: 'No se pudo cargar la orden. Intenta de nuevo.',
-        error: 'INTERNAL_ORDER_LOAD_001',
-        statusCode: 500,
-        timestamp: '2024-01-01T00:00:00.000Z',
-      };
-
+      const error = new VendixHttpException(ErrorCodes.ORD_FIND_001);
       mockOrdersService.findOne.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(errorResponse);
-
-      const result = await controller.findOne(orderId);
-
-      expect(result).toEqual(errorResponse);
+      await expect(controller.findOne(orderId)).rejects.toBe(error);
       expect(mockOrdersService.findOne).toHaveBeenCalledWith(orderId);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'No se pudo cargar la orden. Intenta de nuevo.',
-        'INTERNAL_ORDER_LOAD_001',
-        500,
-        'INTERNAL_ORDER_LOAD_001',
-      );
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
+
+    it('propagates unexpected failures for generic 500 handling by the HTTP filter', async () => {
+      const error = new Error('Internal Prisma details');
+      mockOrdersService.findOne.mockRejectedValue(error);
+      await expect(controller.findOne(999)).rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
