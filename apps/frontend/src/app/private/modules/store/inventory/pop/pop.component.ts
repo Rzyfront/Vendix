@@ -1892,6 +1892,9 @@ export class PopComponent implements OnInit, OnDestroy {
       );
       return;
     }
+    // QUI-855: el borrador también se bloquea con impuesto sin confirmar; al
+    // reabrirlo `loadOrder` no restaura la marca y se enviaría con IVA 0.
+    if (this.blockSubmitIfTaxUnconfirmed()) return;
     this.pendingAction.set(null);
     const draftState = { ...state, status: 'draft' as const };
     const userId = this.authFacade.getUserId() || 0;

@@ -518,7 +518,7 @@ export class PopCartService {
 
   /**
    * CP-ORC-POP-MODAL-DISCOUNT-001 — normalize a discount percentage to a safe
-   * integer in 0..100. Rejects `null`/`undefined`/`NaN`/`±Infinity` by
+   * percentage in 0..100 (up to `decimals` decimals, 2 in the POP). Rejects `null`/`undefined`/`NaN`/`±Infinity` by
    * returning 0; otherwise rounds and clamps the value.
    *
    * Used both at the cart-write seam (`setItemDiscount`) and at the entry
@@ -784,11 +784,11 @@ export class PopCartService {
         unit_cost: request.unit_cost,
         // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
         // descuento; el alta manual sigue en 0. La normalización
-        // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
+        // (porcentaje 0..100 con hasta 2 decimales, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
         discount: this.normalizeDiscount(request.discount, 2),
         // Paridad escáner: el MONTO viaja crudo. No pasa por
         // `normalizeDiscount` porque ese helper es el contrato del PORCENTAJE
-        // entero 0-100; aplicarlo a pesos truncaría la cifra de la factura.
+        // 0..100 con hasta 2 decimales; aplicarlo a pesos truncaría la cifra de la factura.
         discount_amount: request.discount_amount,
         // IVA cycle (F1/F3): defaults sembrados salvo override del request
         // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
@@ -907,7 +907,7 @@ export class PopCartService {
         unit_cost: request.unit_cost,
         // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
         // descuento; el alta manual sigue en 0. La normalización
-        // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
+        // (porcentaje 0..100 con hasta 2 decimales, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
         discount: this.normalizeDiscount(request.discount, 2),
         // Paridad escáner: el MONTO en pesos viaja crudo (ver rama prebulk).
         discount_amount: request.discount_amount,
@@ -1429,7 +1429,7 @@ export class PopCartService {
         quantity: item.quantity_ordered || item.quantity,
         unit_cost: item.unit_cost || item.unit_price,
         // Toda lectura de `discount_percentage` desde DB pasa por
-        // `normalizeDiscount` para garantizar el contrato entero 0-100
+        // `normalizeDiscount` para garantizar el contrato porcentaje 0..100 (hasta 2 decimales)
         // (regression: loadOrder bypass — antes leía `item.discount_percentage
         // || 0` directo, propagando la fracción al backend que la interpretaba
         // como 0.X% en vez del 20% que el operador creía haber tipeado).

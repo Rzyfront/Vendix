@@ -101,6 +101,34 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
       expect(toast.warning).toHaveBeenCalledTimes(2);
     });
 
+    it('onSaveAsDraft con línea sin confirmar no crea la OC y avisa', () => {
+      component.onSaveAsDraft();
+      expect(poService.createPurchaseOrder).not.toHaveBeenCalled();
+      expect(toast.warning).toHaveBeenCalledWith('Confirma el impuesto de 1 línea');
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    it('onSaveAsDraft con has_vat apagado sí crea el borrador', () => {
+      cart.currentState = makeState({
+        has_vat: false,
+        orderDate: new Date('2026-09-20'),
+        summary: { subtotal: 10, taxAmount: 0, tax_amount: 0, total: 10, grandTotal: 10 },
+        items: [
+          {
+            id: 'a',
+            product: { id: 1 },
+            quantity: 1,
+            unit_cost: 10,
+            tax_rate: null,
+            tax_needs_review: true,
+          },
+        ],
+      });
+      cart.clearCart = jasmine.createSpy('clearCart').and.returnValue(of(null));
+      component.onSaveAsDraft();
+      expect(poService.createPurchaseOrder).toHaveBeenCalledTimes(1);
+    });
+
     it('con has_vat apagado NO bloquea: el wizard abre y el envío procede', () => {
       cart.currentState = makeState({ has_vat: false });
       component.onSubmitOrder();

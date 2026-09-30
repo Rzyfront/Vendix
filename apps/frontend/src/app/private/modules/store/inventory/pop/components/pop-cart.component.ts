@@ -218,7 +218,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   size="sm"
                   [fullWidth]="true"
                   (clicked)="onSaveDraft()"
-                  [disabled]="actionState.loading || actionState.isEmpty"
+                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock()"
                   customClasses="!h-10 !font-semibold !border-border !text-text-primary !bg-surface hover:!bg-muted/30 hover:!text-text-primary"
                 >
                   Borrador
@@ -711,7 +711,7 @@ export class PopCartComponent {
   /**
    * «Confirma el impuesto de N línea(s)» mientras alguna línea siga sin
    * impuesto confirmado (o el kernel no la pudo calcular) con IVA encendido.
-   * Deshabilita «Crear orden» / «Crear + Recibir».
+   * Deshabilita «Borrador» / «Crear orden» / «Crear + Recibir».
    */
   readonly submitBlock = computed(() => {
     const st = this.cartState();
