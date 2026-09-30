@@ -2307,6 +2307,12 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/invoicing/received-documents/connections',
       method: 'GET',
     },
+    {
+      name: 'invoicing:received:connections:sync',
+      description: 'Solicitar o reintentar sincronizaciones de recepción de documentos para la tienda',
+      path: '/api/store/invoicing/received-documents/connections/:id/sync',
+      method: 'POST',
+    },
 
     // Perfiles de facturación (CP-INVOICE-PROFILES-AIU-DIAN)
     //
@@ -3948,6 +3954,12 @@ export async function seedPermissionsAndRoles(
       description: 'Configurar conexiones de recepción de documentos de la organización',
       path: '/api/organization/invoicing/received-documents/connections',
       method: 'GET',
+    },
+    {
+      name: 'organization:invoicing:received:connections:sync',
+      description: 'Solicitar o reintentar sincronizaciones de recepción de documentos de la organización',
+      path: '/api/organization/invoicing/received-documents/connections/:id/sync',
+      method: 'POST',
     },
     {
       name: 'organization:fiscal:migrate',

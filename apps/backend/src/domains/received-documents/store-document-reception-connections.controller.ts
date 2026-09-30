@@ -24,7 +24,9 @@ import {
   DocumentReceptionConnectionQueryDto,
   UpdateDocumentReceptionConnectionDto,
 } from './dto/document-reception-connection.dto';
+import { ManualDocumentReceptionSyncDto } from './dto/document-reception-sync.dto';
 import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
+import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 
 /** Bounded collection query that combines paging with the optional store override. */
@@ -37,12 +39,14 @@ export class DocumentReceptionConnectionsQueryDto extends DocumentReceptionConne
 }
 
 const CONFIGURE_PERMISSION = 'invoicing:received:connections:configure';
+const SYNC_PERMISSION = 'invoicing:received:connections:sync';
 
 @Controller('store/invoicing/received-documents/connections')
 @UseGuards(PermissionsGuard)
 export class StoreDocumentReceptionConnectionsController {
   constructor(
     private readonly connections: DocumentReceptionConnectionsService,
+    private readonly manualSync: DocumentReceptionManualSyncService,
     private readonly contexts: ReceivedDocumentsContextService,
     private readonly responses: ResponseService,
   ) {}
@@ -127,6 +131,38 @@ export class StoreDocumentReceptionConnectionsController {
     return this.responses.updated(
       await this.connections.update(context, id, dto),
       'Conexión de recepción actualizada',
+    );
+  }
+
+  @Post(':id/sync')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions(SYNC_PERMISSION)
+  async sync(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ManualDocumentReceptionSyncDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    this.rejectStoreOverride(scope.store_id);
+    const context = await this.contexts.resolveStore();
+    return this.responses.success(
+      await this.manualSync.request(context, id, dto),
+      'Sincronización de recepción solicitada',
+    );
+  }
+
+  @Post(':id/runs/:runId/retry')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions(SYNC_PERMISSION)
+  async retry(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('runId', ParseIntPipe) runId: number,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    this.rejectStoreOverride(scope.store_id);
+    const context = await this.contexts.resolveStore();
+    return this.responses.success(
+      await this.manualSync.retry(context, id, runId),
+      'Reintento de recepción solicitado',
     );
   }
 

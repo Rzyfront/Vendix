@@ -161,3 +161,7 @@ La base de datos es la fuente durable de ejecuciones; Redis sólo transporta `ru
 ### D41 — Acuse HTTP tras persistencia, independiente de Redis
 
 El webhook público POST `/api/public/received-documents/webhook/:publicToken` recibe los bytes originales y cabeceras `x-vendix-timestamp`, `x-vendix-event-id` y `x-vendix-signature`; sólo HMAC y validaciones previas autorizan persistir. Tras el commit durable del run se responde 202 incluso si encolar en Redis falla, indicando `queued:false`; el scheduler recupera el outbox pendiente. Un disparo manual recién creado sigue la misma semántica. En cambio, el reintento explícito de un run agotado fallido/parcial devuelve error seguro si Redis falla, porque el scheduler D40 no lo reencola automáticamente. Ninguna respuesta devuelve secreto, token público, firma ni contenido.
+
+### D42 — Configuración bloqueada ante ejecución sin resolver
+
+Antes de editar una conexión, la transacción bloquea su fila y comprueba si conserva un run `pending`, `queued`, `running`, `failed` o `partial`. En ese caso devuelve conflicto incluso si el lease ya es nulo: rotar secretos, endpoint, cursor o versión dejaría el outbox anterior sin ruta de recuperación. La operación debe completarse/reintentarse sobre el mismo run o resolverse mediante una cancelación explícita y auditada futura. Nunca se cancela silenciosamente un documento recibido al deshabilitar el conector.

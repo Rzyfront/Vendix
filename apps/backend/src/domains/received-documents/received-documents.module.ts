@@ -15,15 +15,27 @@ import { ReceivedDocumentScanQueueService } from './services/received-document-s
 import { ReceivedDocumentScanProcessor } from './services/received-document-scan.processor';
 import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
 import { DocumentReceptionHttpService } from './services/document-reception-http.service';
+import { DocumentReceptionEnvelopeService } from './services/document-reception-envelope.service';
+import { DocumentReceptionIngestService } from './services/document-reception-ingest.service';
+import { DocumentReceptionSyncLeaseService } from './services/document-reception-sync-lease.service';
+import { DocumentReceptionWebhookService } from './services/document-reception-webhook.service';
+import { DocumentReceptionSyncService } from './services/document-reception-sync.service';
+import { DocumentReceptionSyncQueueService } from './services/document-reception-sync-queue.service';
+import { DocumentReceptionSyncProcessor } from './services/document-reception-sync.processor';
+import { DocumentReceptionSyncSchedulerService } from './services/document-reception-sync-scheduler.service';
+import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
+import { PublicDocumentReceptionWebhookController } from './public-document-reception-webhook.controller';
 
-/** Provider-only shared module; route controllers live in each invoicing module. */
+/** Shared reception pipeline; tenant-facing controllers live in each invoicing module. */
 @Module({
   imports: [
     PrismaModule,
     ResponseModule,
     S3Module,
     BullModule.registerQueue({ name: 'received-document-scan' }),
+    BullModule.registerQueue({ name: 'document-reception-sync' }),
   ],
+  controllers: [PublicDocumentReceptionWebhookController],
   providers: [
     FiscalContextResolverService,
     ReceivedDocumentsContextService,
@@ -36,12 +48,22 @@ import { DocumentReceptionHttpService } from './services/document-reception-http
     ReceivedDocumentScanProcessor,
     DocumentReceptionHttpService,
     DocumentReceptionConnectionsService,
+    DocumentReceptionEnvelopeService,
+    DocumentReceptionIngestService,
+    DocumentReceptionSyncLeaseService,
+    DocumentReceptionWebhookService,
+    DocumentReceptionSyncService,
+    DocumentReceptionSyncQueueService,
+    DocumentReceptionSyncProcessor,
+    DocumentReceptionSyncSchedulerService,
+    DocumentReceptionManualSyncService,
   ],
   exports: [
     ReceivedDocumentsContextService,
     ReceivedDocumentsService,
     ReceivedDocumentScanQueueService,
     DocumentReceptionConnectionsService,
+    DocumentReceptionManualSyncService,
   ],
 })
 export class ReceivedDocumentsModule {}
