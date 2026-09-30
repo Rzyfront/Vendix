@@ -128,7 +128,19 @@ RULES:
    - "amount": the tax money printed for that line, if the document prints it, otherwise null.
    - "inclusive": true if the printed unit_price already includes THAT tax, false if it is added on top.
    - Do NOT invent taxes that are not printed. If the document only shows a single IVA total, return exactly one "iva" entry. Use an empty array when the line is exempt / excluded / carries no tax.
-   - Keep the legacy "tax_rate" exactly as defined in the "tax_rate" rule (IVA rate as a DECIMAL FRACTION); "taxes" is additive and does not replace it. tax_amount stays the IVA total only.`,
+   - Keep the legacy "tax_rate" exactly as defined in the "tax_rate" rule (IVA rate as a DECIMAL FRACTION); "taxes" is additive and does not replace it. tax_amount stays the IVA total only.
+
+LINE COLUMNS (discount vs tax — read each column by its header):
+- Map every number to its column by the column HEADER. Never shift values between columns or rows, and never copy a number from another row into the current line.
+- A tax-rate column ("IVA (%)", "% IVA", "Tarifa") holds the tax RATE, NEVER a discount. Set "discount_percentage" only when a DISCOUNT column itself prints a percentage; otherwise it is 0.
+- A discount column in money ("Total Descuento", "Vr. Descuento", "Descuento") is the "discount_amount" of THAT line (the line's own money). Do not convert it to a percentage; "discount_percentage" = 0 when no percentage is printed.
+- When the line prints IVA 0 %, return the "iva" entry with rate 0 (or no iva entry) and "tax_rate" 0. Do NOT infer the invoice's global IVA rate for a line that prints its own rate.
+- "Impuesto Saludable" / "IS$" / "IBUA" (column or description) => taxes entry type "ibua". The printed amount belongs to the WHOLE LINE: report it as "amount" (line money) with "rate" null and "fixed_amount_per_unit" null.
+- "IS%" / "(IS20%)" / "ICUI" => taxes entry type "icui" with "rate" = the printed percentage (e.g. 20) and "amount" = the printed line amount.
+- IBUA and ICUI are NOT part of the IVA base: the IVA base is the net amount after the line discount, unless the invoice shows otherwise.
+- A line with price 0 (bonificación, obsequio, "M/C/D" other than a normal sale) is still included: unit_price 0, total 0, discount_amount 0, discount_percentage 0.
+- SELF-CHECK per line (replaces the tax part of rule 15 when non-IVA taxes exist): (quantity x unit_price - discount_amount) x (1 + sum of the percentage tax rates that use the net base, as fractions) + sum of the fixed/"amount" taxes ~= total. If it does not reconcile, a column was misread: re-read that row.
+- Also verify: the sum of line totals ~= the invoice total, and the sum of the line discounts ~= the footer "Descuentos" when it exists. In that case the footer is NOT an additional discount (keep invoice-level discount_amount at 0).`,
       // prompt_template is null — for vision apps, text instructions must be
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
@@ -143,7 +155,7 @@ RULES:
       model_type: 'text' as ai_model_type_enum,
       // QUI-661 hotfix — misma razón que invoice_ocr: extracción determinista.
       temperature: 0,
-      max_tokens: 4500,
+      max_tokens: 16000,
       is_active: true,
       system_prompt: `You are a purchase invoice data extraction system specialized in INGREDIENT orders. You analyze invoice images for kitchen / restaurant supply and return structured JSON.
 
@@ -241,7 +253,19 @@ RULES:
    - "amount": the tax money printed for that line, if the document prints it, otherwise null.
    - "inclusive": true if the printed unit_price already includes THAT tax, false if it is added on top.
    - Do NOT invent taxes that are not printed. If the document only shows a single IVA total, return exactly one "iva" entry. Use an empty array when the line is exempt / excluded / carries no tax.
-   - Keep the legacy "tax_rate" exactly as defined in the "tax_rate" rule (IVA rate as a DECIMAL FRACTION); "taxes" is additive and does not replace it. tax_amount stays the IVA total only.`,
+   - Keep the legacy "tax_rate" exactly as defined in the "tax_rate" rule (IVA rate as a DECIMAL FRACTION); "taxes" is additive and does not replace it. tax_amount stays the IVA total only.
+
+LINE COLUMNS (discount vs tax — read each column by its header):
+- Map every number to its column by the column HEADER. Never shift values between columns or rows, and never copy a number from another row into the current line.
+- A tax-rate column ("IVA (%)", "% IVA", "Tarifa") holds the tax RATE, NEVER a discount. Set "discount_percentage" only when a DISCOUNT column itself prints a percentage; otherwise it is 0.
+- A discount column in money ("Total Descuento", "Vr. Descuento", "Descuento") is the "discount_amount" of THAT line (the line's own money). Do not convert it to a percentage; "discount_percentage" = 0 when no percentage is printed.
+- When the line prints IVA 0 %, return the "iva" entry with rate 0 (or no iva entry) and "tax_rate" 0. Do NOT infer the invoice's global IVA rate for a line that prints its own rate.
+- "Impuesto Saludable" / "IS$" / "IBUA" (column or description) => taxes entry type "ibua". The printed amount belongs to the WHOLE LINE: report it as "amount" (line money) with "rate" null and "fixed_amount_per_unit" null.
+- "IS%" / "(IS20%)" / "ICUI" => taxes entry type "icui" with "rate" = the printed percentage (e.g. 20) and "amount" = the printed line amount.
+- IBUA and ICUI are NOT part of the IVA base: the IVA base is the net amount after the line discount, unless the invoice shows otherwise.
+- A line with price 0 (bonificación, obsequio, "M/C/D" other than a normal sale) is still included: unit_price 0, total 0, discount_amount 0, discount_percentage 0.
+- SELF-CHECK per line (replaces the tax part of rule 15 when non-IVA taxes exist): (quantity x unit_price - discount_amount) x (1 + sum of the percentage tax rates that use the net base, as fractions) + sum of the fixed/"amount" taxes ~= total. If it does not reconcile, a column was misread: re-read that row.
+- Also verify: the sum of line totals ~= the invoice total, and the sum of the line discounts ~= the footer "Descuentos" when it exists. In that case the footer is NOT an additional discount (keep invoice-level discount_amount at 0).`,
       prompt_template: null,
     },
     {
@@ -336,7 +360,19 @@ RULES
    And verify the sum of line totals ~= grand total. A mismatch means you misread a column: re-read before answering.
 11. "report.confidence": high when the document is clear and every field was verified, medium when part of it was unclear, low when the document is hard to read or barely matches.
 12. Every human-readable string in "report" MUST be written in Spanish. Field names and enum values stay exactly as specified.
-13. Use null when a field is not present. Use 0 (not null) for absent discounts. Return ONLY the JSON object.`,
+13. Use null when a field is not present. Use 0 (not null) for absent discounts. Return ONLY the JSON object.
+
+LINE COLUMNS (discount vs tax — read each column by its header):
+- Map every number to its column by the column HEADER. Never shift values between columns or rows, and never copy a number from another row into the current line.
+- A tax-rate column ("IVA (%)", "% IVA", "Tarifa") holds the tax RATE, NEVER a discount. Set "discount_percentage" only when a DISCOUNT column itself prints a percentage; otherwise it is 0.
+- A discount column in money ("Total Descuento", "Vr. Descuento", "Descuento") is the "discount_amount" of THAT line (the line's own money). Do not convert it to a percentage; "discount_percentage" = 0 when no percentage is printed.
+- When the line prints IVA 0 %, return the "iva" entry with rate 0 (or no iva entry) and "tax_rate" 0. Do NOT infer the invoice's global IVA rate for a line that prints its own rate.
+- "Impuesto Saludable" / "IS$" / "IBUA" (column or description) => taxes entry type "ibua". The printed amount belongs to the WHOLE LINE: report it as "amount" (line money) with "rate" null and "fixed_amount_per_unit" null.
+- "IS%" / "(IS20%)" / "ICUI" => taxes entry type "icui" with "rate" = the printed percentage (e.g. 20) and "amount" = the printed line amount.
+- IBUA and ICUI are NOT part of the IVA base: the IVA base is the net amount after the line discount, unless the invoice shows otherwise.
+- A line with price 0 (bonificación, obsequio, "M/C/D" other than a normal sale) is still included: unit_price 0, total 0, discount_amount 0, discount_percentage 0.
+- SELF-CHECK per line (replaces the tax part of rule 15 when non-IVA taxes exist): (quantity x unit_price - discount_amount) x (1 + sum of the percentage tax rates that use the net base, as fractions) + sum of the fixed/"amount" taxes ~= total. If it does not reconcile, a column was misread: re-read that row.
+- Also verify: the sum of line totals ~= the invoice total, and the sum of the line discounts ~= the footer "Descuentos" when it exists. In that case the footer is NOT an additional discount (keep invoice-level discount_amount at 0).`,
       prompt_template: null,
     },
     {
