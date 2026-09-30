@@ -62,3 +62,14 @@ export interface UpdateDocumentReceptionConnectionInput {
   secret?: string;
   poll_interval_minutes: number;
 }
+
+export interface RequestDocumentReceptionSyncInput {
+  expected_version: number;
+  idempotency_key: string;
+}
+
+export interface DocumentReceptionSyncActionResult {
+  run_id: number;
+  duplicate?: boolean;
+  queued: boolean;
+}

@@ -7,8 +7,10 @@ import type {
   CreateDocumentReceptionConnectionInput,
   DocumentReceptionConnection,
   DocumentReceptionRun,
+  DocumentReceptionSyncActionResult,
   ReceptionConnectionEnvelope,
   ReceptionConnectionPage,
+  RequestDocumentReceptionSyncInput,
   UpdateDocumentReceptionConnectionInput,
 } from './document-reception-connections.interface';
 
@@ -46,6 +48,32 @@ export class DocumentReceptionConnectionsService {
     return this.http.patch<ReceptionConnectionEnvelope<DocumentReceptionConnection>>(`${this.base(scope)}/${id}`, input, {
       params: this.params(scope, storeId),
     });
+  }
+
+  requestSync(
+    scope: ReceivedDocumentsScope,
+    connectionId: number,
+    input: RequestDocumentReceptionSyncInput,
+    storeId?: number,
+  ): Observable<ReceptionConnectionEnvelope<DocumentReceptionSyncActionResult>> {
+    return this.http.post<ReceptionConnectionEnvelope<DocumentReceptionSyncActionResult>>(
+      `${this.base(scope)}/${connectionId}/sync`,
+      input,
+      { params: this.params(scope, storeId) },
+    );
+  }
+
+  retryRun(
+    scope: ReceivedDocumentsScope,
+    connectionId: number,
+    runId: number,
+    storeId?: number,
+  ): Observable<ReceptionConnectionEnvelope<DocumentReceptionSyncActionResult>> {
+    return this.http.post<ReceptionConnectionEnvelope<DocumentReceptionSyncActionResult>>(
+      `${this.base(scope)}/${connectionId}/runs/${runId}/retry`,
+      {},
+      { params: this.params(scope, storeId) },
+    );
   }
 
   private base(scope: ReceivedDocumentsScope): string {
