@@ -1,7 +1,7 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, model, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, model, output, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Subscription, finalize } from 'rxjs';
+import { Subscription, finalize, switchMap, take, takeUntil, timer } from 'rxjs';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
@@ -9,8 +9,9 @@ import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
 import { OrganizationStoresService } from '../../../organization/stores/services/organization-stores.service';
 import type { StoreListItem } from '../../../organization/stores/interfaces/store.interface';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
+import { environment } from '../../../../../../environments/environment';
 import type { ReceivedDocumentsScope } from './received-documents.interface';
-import type { CreateDocumentReceptionConnectionInput, DocumentReceptionConnection, DocumentReceptionConnectionType, DocumentReceptionRun, UpdateDocumentReceptionConnectionInput } from './document-reception-connections.interface';
+import type { CancelDocumentReceptionRunInput, CreateDocumentReceptionConnectionInput, DocumentReceptionConnection, DocumentReceptionConnectionType, DocumentReceptionRun, RequestDocumentReceptionSyncInput, UpdateDocumentReceptionConnectionInput } from './document-reception-connections.interface';
 import { DocumentReceptionConnectionsService } from './document-reception-connections.service';
 
 const STORE_PAGE_SIZE = 200;
@@ -31,7 +32,7 @@ type ConnectionForm = FormGroup<{
   selector: 'app-document-reception-connections', standalone: true,
   imports: [ModalComponent, ReactiveFormsModule], changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './document-reception-connections.component.html',
-  styles: [`.field{display:flex;flex-direction:column;gap:.375rem;color:var(--color-text-primary);font-size:.875rem;font-weight:500}.field input,.field select{min-height:2.75rem;width:100%;border:1px solid var(--color-border);border-radius:.5rem;background:var(--color-background);padding:.5rem .75rem;color:var(--color-text-primary);font-size:.875rem;font-weight:400}.field input:focus,.field select:focus{outline:2px solid var(--color-primary);outline-offset:1px}`],
+  styles: [`.field{display:flex;flex-direction:column;gap:.375rem;color:var(--color-text-primary);font-size:.875rem;font-weight:500}.field input,.field select,.field textarea{min-height:2.75rem;width:100%;border:1px solid var(--color-border);border-radius:.5rem;background:var(--color-background);padding:.5rem .75rem;color:var(--color-text-primary);font-size:.875rem;font-weight:400}.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--color-primary);outline-offset:1px}`],
 })
 export class DocumentReceptionConnectionsComponent {
   private readonly fb = inject(FormBuilder);
@@ -45,6 +46,8 @@ export class DocumentReceptionConnectionsComponent {
   readonly isOpen = model(false);
   readonly connectionTypes = CONNECTION_TYPES;
   readonly permission = computed(() => this.auth.hasPermission(`${this.scope() === 'store' ? 'invoicing' : 'organization:invoicing'}:received:connections:configure`));
+  readonly canSync = computed(() => this.auth.hasPermission(`${this.scope() === 'store' ? 'invoicing' : 'organization:invoicing'}:received:connections:sync`));
+  readonly syncCompleted = output<void>();
   readonly form: ConnectionForm = this.buildForm();
   readonly stores = signal<StoreListItem[]>([]);
   readonly storePage = signal(1);
@@ -70,6 +73,14 @@ export class DocumentReceptionConnectionsComponent {
   readonly conflict = signal(false);
   readonly submitAttempted = signal(false);
   readonly formMode = signal<'create' | 'edit' | null>(null);
+  readonly actionBusy = signal(false);
+  readonly actionMessage = signal<string | null>(null);
+  readonly actionWarning = signal<string | null>(null);
+  readonly actionError = signal<string | null>(null);
+  readonly pollingRunId = signal<number | null>(null);
+  readonly cancelingRunId = signal<number | null>(null);
+  readonly cancelReason = signal('');
+  readonly cancelBusy = signal(false);
   readonly scopeReady = computed(() => this.scope() === 'store' || this.hasOperationalStore());
   readonly canClose = (): boolean => !this.saving();
   readonly listPages = computed(() => Math.max(1, Math.ceil(this.total() / CONNECTION_PAGE_SIZE)));
@@ -82,6 +93,9 @@ export class DocumentReceptionConnectionsComponent {
   private detailRequest?: Subscription;
   private runsRequest?: Subscription;
   private saveRequest?: Subscription;
+  private actionRequest?: Subscription;
+  private cancelRequest?: Subscription;
+  private pollRequest?: Subscription;
 
   constructor() {
     effect(() => {
@@ -108,6 +122,10 @@ export class DocumentReceptionConnectionsComponent {
 
   get canEdit(): boolean { return this.formMode() !== null && this.scopeReady() && !this.loadingDetail() && !this.saving() && !this.conflict(); }
   get editing(): boolean { return this.formMode() === 'edit'; }
+  get syncHasUnsavedChanges(): boolean { return this.formMode() === 'create' || (this.formMode() === 'edit' && this.form.dirty); }
+  get syncActionDisabled(): boolean {
+    return !this.canSync() || !this.scopeReady() || this.actionBusy() || this.cancelBusy() || this.pollingRunId() !== null || this.saving() || this.loadingDetail() || this.syncHasUnsavedChanges;
+  }
 
   openCreate(): void {
     if (!this.permission() || !this.scopeReady()) return;
@@ -196,6 +214,62 @@ export class DocumentReceptionConnectionsComponent {
     if (page < 1 || page > this.runPages() || this.loadingRuns() || !this.selectedId()) return;
     this.loadRuns(this.selectedId()!, page);
   }
+
+  private pollRun(scope: ReceivedDocumentsScope, connectionId: number, runId: number, storeId: number | undefined, epoch: number, page: number): void {
+    this.stopActionPolling();
+    this.pollingRunId.set(runId);
+    this.pollRequest = timer(3000, 3000).pipe(
+      take(20),
+      switchMap(() => this.api.listRuns(scope, connectionId, page, storeId)),
+      takeUntil(timer(60_000)),
+    ).subscribe({
+      next: (response) => {
+        if (epoch !== this.epoch || this.selectedId() !== connectionId || this.pollingRunId() !== runId) return;
+        if (!response?.success || !Array.isArray(response.data)) {
+          this.stopActionPolling();
+          this.actionError.set('No se pudo consultar el resultado; actualiza el historial para verificarlo.');
+          return;
+        }
+        this.runs.set(response.data);
+        this.runsTotal.set(response.meta?.total ?? response.data.length);
+        this.runPage.set(response.meta?.page ?? page);
+        const selectedRun = response.data.find((run) => run.id === runId);
+        if (!selectedRun || !this.isTerminal(selectedRun.status)) return;
+
+        this.stopActionPolling();
+        this.actionMessage.set(null);
+        this.actionWarning.set(null);
+        this.actionError.set(null);
+        if (selectedRun.status === 'completed') {
+          this.actionMessage.set(`La ejecución ${runId} terminó correctamente.`);
+          this.syncCompleted.emit();
+        } else if (selectedRun.status === 'failed' || selectedRun.status === 'partial') {
+          this.actionError.set(`La ejecución ${runId} terminó con estado ${this.safeStatus(selectedRun.status)}. Revisa sus códigos y cantidades en el historial.`);
+        } else {
+          this.actionWarning.set(`La ejecución ${runId} terminó con estado ${this.safeStatus(selectedRun.status)}.`);
+        }
+      },
+      error: (error: unknown) => {
+        if (epoch !== this.epoch || this.pollingRunId() !== runId) return;
+        this.stopActionPolling();
+        this.actionError.set(this.describeFailure(error, 'No se pudo consultar el resultado; actualiza el historial para verificarlo.'));
+      },
+      complete: () => {
+        if (epoch === this.epoch && this.selectedId() === connectionId && this.pollingRunId() === runId) {
+          this.stopActionPolling();
+          this.actionWarning.set(`La ejecución ${runId} sigue en curso. Puedes consultar el historial más tarde.`);
+        }
+      },
+    });
+  }
+
+  private stopActionPolling(): void {
+    this.pollRequest?.unsubscribe();
+    this.pollRequest = undefined;
+    this.pollingRunId.set(null);
+  }
+
+  private isTerminal(status: string): boolean { return ['completed', 'failed', 'partial', 'cancelled'].includes(status); }
 
   loadConnections(page: number): void {
     if (!this.scopeReady() || !this.permission()) return;
@@ -292,13 +366,118 @@ export class DocumentReceptionConnectionsComponent {
 
   newConnection(): void { this.openCreate(); }
   closeEditor(): void {
-    this.detailRequest?.unsubscribe(); this.runsRequest?.unsubscribe();
+    this.detailRequest?.unsubscribe(); this.runsRequest?.unsubscribe(); this.stopActionPolling();
+    this.actionRequest?.unsubscribe(); this.actionRequest = undefined;
+    this.cancelRequest?.unsubscribe(); this.cancelRequest = undefined;
+    this.actionBusy.set(false); this.actionMessage.set(null); this.actionWarning.set(null); this.actionError.set(null);
+    this.cancelingRunId.set(null); this.cancelReason.set(''); this.cancelBusy.set(false);
     this.detail.set(null); this.runs.set([]); this.runsTotal.set(0); this.selectedId.set(null); this.formMode.set(null);
     this.form.enable({ emitEvent: false }); this.form.reset({ name: '', connection_type: 'api_poll', enabled: false, endpoint: '', secret: '', poll_interval_minutes: 15 });
     this.saveError.set(null); this.savedMessage.set(null); this.conflict.set(false); this.submitAttempted.set(false);
   }
 
   onClosed(): void { this.isOpen.set(false); }
+
+  requestSyncNow(): void {
+    const connection = this.detail();
+    if (!connection || connection.connection_type !== 'api_poll' || !connection.enabled || this.syncActionDisabled) return;
+    const input: RequestDocumentReceptionSyncInput = {
+      expected_version: connection.version,
+      idempotency_key: crypto.randomUUID(),
+    };
+    this.actionBusy.set(true); this.actionMessage.set(null); this.actionWarning.set(null); this.actionError.set(null);
+    const epoch = this.epoch;
+    this.actionRequest?.unsubscribe();
+    this.actionRequest = this.api.requestSync(this.scope(), connection.id, input, this.apiStoreId())
+      .pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { if (epoch === this.epoch) this.actionBusy.set(false); }))
+      .subscribe({
+        next: (response) => {
+          if (epoch !== this.epoch || this.selectedId() !== connection.id) return;
+          if (!response?.success || !response.data || !Number.isSafeInteger(response.data.run_id)) {
+            this.actionError.set('La solicitud no confirmó una ejecución. Actualiza el historial antes de reintentar.');
+            return;
+          }
+          const result = response.data;
+          this.actionWarning.set(result.queued
+            ? `Ejecución ${result.run_id} aceptada para encolamiento; todavía no está confirmada.`
+            : `Ejecución ${result.run_id} quedó guardada y el planificador intentará encolarla.`);
+          this.loadRuns(connection.id, 1);
+          this.pollRun(this.scope(), connection.id, result.run_id, this.apiStoreId(), epoch, 1);
+        },
+        error: (error: unknown) => {
+          if (epoch === this.epoch) this.actionError.set(this.describeFailure(error, 'No se pudo solicitar la sincronización.'));
+        },
+      });
+  }
+
+  retryRunNow(run: DocumentReceptionRun): void {
+    const connection = this.detail();
+    if (!connection?.enabled || !this.canSync() || !this.scopeReady() || this.actionBusy() || this.cancelBusy() || this.pollingRunId() !== null || this.syncHasUnsavedChanges || !['failed', 'partial'].includes(run.status)) return;
+    this.actionBusy.set(true); this.actionMessage.set(null); this.actionWarning.set(null); this.actionError.set(null);
+    const epoch = this.epoch;
+    this.actionRequest?.unsubscribe();
+    this.actionRequest = this.api.retryRun(this.scope(), connection.id, run.id, this.apiStoreId())
+      .pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { if (epoch === this.epoch) this.actionBusy.set(false); }))
+      .subscribe({
+        next: (response) => {
+          if (epoch !== this.epoch || this.selectedId() !== connection.id) return;
+          if (!response?.success || !response.data || response.data.run_id !== run.id) {
+            this.actionError.set('El servidor no confirmó el reintento. Actualiza el historial antes de continuar.');
+            return;
+          }
+          const result = response.data;
+          this.actionWarning.set(result.queued
+            ? `Reintento de ejecución ${run.id} aceptado para encolamiento; todavía no está confirmado.`
+            : `Reintento ${run.id} quedó guardado; el planificador intentará encolarlo.`);
+          this.loadRuns(connection.id, this.runPage());
+          this.pollRun(this.scope(), connection.id, run.id, this.apiStoreId(), epoch, this.runPage());
+        },
+        error: (error: unknown) => {
+          if (epoch === this.epoch) this.actionError.set(this.describeFailure(error, 'No se pudo solicitar el reintento.'));
+        },
+      });
+  }
+
+  beginCancel(run: DocumentReceptionRun): void {
+    if (!this.canSync() || !this.scopeReady() || this.loadingDetail() || this.actionBusy() || this.cancelBusy() || !this.isUnresolved(run.status)) return;
+    this.stopActionPolling();
+    this.actionError.set(null); this.actionMessage.set(null); this.actionWarning.set(null); this.cancelReason.set(''); this.cancelingRunId.set(run.id);
+  }
+
+  cancelCancelConfirmation(): void { this.cancelingRunId.set(null); this.cancelReason.set(''); }
+  onCancelReasonChange(event: Event): void { this.cancelReason.set((event.target as HTMLTextAreaElement).value); }
+  cancelReasonValid(): boolean { const length = this.cancelReason().trim().length; return length >= 10 && length <= 500; }
+
+  confirmCancelRun(run: DocumentReceptionRun): void {
+    const connection = this.detail();
+    if (!connection || this.cancelingRunId() !== run.id || !this.cancelReasonValid() || !this.canSync() || !this.scopeReady() || this.loadingDetail() || this.cancelBusy() || this.actionBusy() || !this.isUnresolved(run.status)) return;
+    const input: CancelDocumentReceptionRunInput = { reason: this.cancelReason().trim() };
+    this.cancelBusy.set(true); this.actionError.set(null); this.actionMessage.set(null); this.actionWarning.set(null);
+    this.stopActionPolling();
+    const epoch = this.epoch;
+    this.cancelRequest?.unsubscribe();
+    this.cancelRequest = this.api.cancelRun(this.scope(), connection.id, run.id, input, this.apiStoreId())
+      .pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { if (epoch === this.epoch) this.cancelBusy.set(false); }))
+      .subscribe({
+        next: (response) => {
+          if (epoch !== this.epoch || this.selectedId() !== connection.id) return;
+          const result = response?.data;
+          if (!response?.success || result?.run_id !== run.id || result.status !== 'cancelled') {
+            this.actionError.set('El servidor no confirmó la cancelación. Actualiza el historial para verificar el estado.');
+            return;
+          }
+          this.runs.update((rows) => rows.map((item) => item.id === run.id ? { ...item, status: result.status } : item));
+          this.actionWarning.set(result.duplicate ? `La ejecución ${run.id} ya estaba cancelada.` : `Ejecución ${run.id} cancelada y registrada en auditoría.`);
+          this.cancelingRunId.set(null); this.cancelReason.set('');
+          this.loadRuns(connection.id, this.runPage());
+        },
+        error: (error: unknown) => {
+          if (epoch === this.epoch) this.actionError.set(this.describeFailure(error, 'No se pudo cancelar la ejecución. Actualiza el historial y verifica el estado.'));
+        },
+      });
+  }
+
+  isUnresolved(status: string): boolean { return ['pending', 'queued', 'running', 'failed', 'partial'].includes(status); }
 
   runDate(value: string | null): string {
     if (!value) return 'Sin iniciar';
@@ -311,6 +490,11 @@ export class DocumentReceptionConnectionsComponent {
   safeErrorCodes(run: DocumentReceptionRun): string[] { return (run.summary?.error_codes ?? []).filter((code) => /^[A-Z0-9_]{1,80}$/.test(code)).slice(0, 10); }
   safeStatus(value: string): string { return value.replace(/[^a-zA-Z0-9_-]/g, '').replaceAll('_', ' ').slice(0, 40) || 'desconocido'; }
   connectionTypeLabel(type: DocumentReceptionConnectionType): string { return type === 'api_poll' ? 'API de proveedor' : 'Webhook firmado'; }
+  webhookUrl(relativePath: string): string {
+    const base = environment.apiUrl.replace(/\/+$/, '');
+    const path = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
+    return `${base}${path}`;
+  }
   getConnectionType(event: Event): void { const value = (event.target as HTMLSelectElement).value; if (CONNECTION_TYPES.includes(value as DocumentReceptionConnectionType)) this.form.controls.connection_type.setValue(value as DocumentReceptionConnectionType); }
   get currentStoreName(): string { const id = this.selectedOperationalStoreId(); return this.stores().find((store) => store.id === id)?.name ?? ''; }
 
@@ -342,6 +526,7 @@ export class DocumentReceptionConnectionsComponent {
     this.form.controls.connection_type.disable({ emitEvent: false });
     this.form.controls.secret.setValidators([Validators.maxLength(4096)]); this.form.controls.secret.updateValueAndValidity({ emitEvent: false });
     this.applyTypeValidators(connection.connection_type);
+    this.form.markAsPristine();
   }
 
   private createPayload(raw: ReturnType<ConnectionForm['getRawValue']>): CreateDocumentReceptionConnectionInput {
@@ -356,6 +541,8 @@ export class DocumentReceptionConnectionsComponent {
   private cancelListRequest(): void { this.listRequest?.unsubscribe(); this.listRequest = undefined; }
   private cancelContextRequests(): void {
     this.cancelListRequest(); this.detailRequest?.unsubscribe(); this.detailRequest = undefined; this.runsRequest?.unsubscribe(); this.runsRequest = undefined; this.saveRequest?.unsubscribe(); this.saveRequest = undefined;
+    this.actionRequest?.unsubscribe(); this.actionRequest = undefined; this.cancelRequest?.unsubscribe(); this.cancelRequest = undefined; this.stopActionPolling();
+    this.actionBusy.set(false); this.cancelBusy.set(false); this.cancelingRunId.set(null); this.cancelReason.set(''); this.actionMessage.set(null); this.actionWarning.set(null); this.actionError.set(null);
   }
   private resetSession(): void {
     this.epoch++;
@@ -379,8 +566,9 @@ export class DocumentReceptionConnectionsComponent {
   private describeFailure(error: unknown, fallback: string): string {
     const status = this.statusCode(error);
     if (status === 400) return describeApiFailure(error).message || 'Revisa los datos ingresados.';
-    if (status === 403) return 'Tu usuario no tiene permiso para configurar conexiones de recepción.';
+    if (status === 403) return 'Tu usuario no tiene permiso para esta acción de conexiones de recepción.';
     if (status === 404) return 'La conexión ya no existe o no está disponible en esta tienda.';
+    if (status === 409) return 'La ejecución cambió en el servidor. Actualiza el historial antes de volver a intentarlo.';
     return describeApiFailure(error).message || fallback;
   }
 }

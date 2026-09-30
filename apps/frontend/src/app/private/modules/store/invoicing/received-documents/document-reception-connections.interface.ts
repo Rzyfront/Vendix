@@ -73,3 +73,13 @@ export interface DocumentReceptionSyncActionResult {
   duplicate?: boolean;
   queued: boolean;
 }
+
+export interface CancelDocumentReceptionRunInput {
+  reason: string;
+}
+
+export interface DocumentReceptionRunCancellationResult {
+  run_id: number;
+  status: 'cancelled';
+  duplicate: boolean;
+}

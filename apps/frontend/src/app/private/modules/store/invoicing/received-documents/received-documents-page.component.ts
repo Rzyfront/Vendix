@@ -118,6 +118,7 @@ const STATUS_FILTERS = [
           [(isOpen)]="connectionsOpen"
           [scope]="scope"
           [selectedStoreId]="storeId() ?? null"
+          (syncCompleted)="load()"
         />
       }
     </div>

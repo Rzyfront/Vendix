@@ -5,7 +5,9 @@ import { environment } from '../../../../../../environments/environment';
 import type { ReceivedDocumentsScope } from './received-documents.interface';
 import type {
   CreateDocumentReceptionConnectionInput,
+  CancelDocumentReceptionRunInput,
   DocumentReceptionConnection,
+  DocumentReceptionRunCancellationResult,
   DocumentReceptionRun,
   DocumentReceptionSyncActionResult,
   ReceptionConnectionEnvelope,
@@ -72,6 +74,20 @@ export class DocumentReceptionConnectionsService {
     return this.http.post<ReceptionConnectionEnvelope<DocumentReceptionSyncActionResult>>(
       `${this.base(scope)}/${connectionId}/runs/${runId}/retry`,
       {},
+      { params: this.params(scope, storeId) },
+    );
+  }
+
+  cancelRun(
+    scope: ReceivedDocumentsScope,
+    connectionId: number,
+    runId: number,
+    input: CancelDocumentReceptionRunInput,
+    storeId?: number,
+  ): Observable<ReceptionConnectionEnvelope<DocumentReceptionRunCancellationResult>> {
+    return this.http.post<ReceptionConnectionEnvelope<DocumentReceptionRunCancellationResult>>(
+      `${this.base(scope)}/${connectionId}/runs/${runId}/cancel`,
+      input,
       { params: this.params(scope, storeId) },
     );
   }
