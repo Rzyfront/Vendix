@@ -104,11 +104,11 @@ describe('ReceivedDocumentScanService', () => {
 
   it('maps provider failures and unsuccessful/missing responses to safe scan errors', async () => {
     const providerFailure = harness(undefined, { runError: new Error('private provider detail') });
-    await expect(providerFailure.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_AI_FAIL });
+    await expect(providerFailure.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_AI_FAIL.code });
     const unsuccessful = harness('ignored', { success: false });
-    await expect(unsuccessful.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_AI_FAIL });
+    await expect(unsuccessful.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_AI_FAIL.code });
     const missing = harness(undefined);
-    await expect(missing.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_AI_FAIL });
+    await expect(missing.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_AI_FAIL.code });
   });
 
   it('preserves safe AI gate/configuration errors instead of hiding actionable codes', async () => {
@@ -129,7 +129,7 @@ describe('ReceivedDocumentScanService', () => {
     cases.push(JSON.stringify(deep));
     for (const content of cases) {
       const h = harness(content);
-      await expect(h.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_PARSE_FAIL });
+      await expect(h.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_PARSE_FAIL.code });
     }
   });
 
@@ -212,8 +212,24 @@ describe('ReceivedDocumentScanService', () => {
     expect(result.normalized.validation.errors).toContainEqual(expect.objectContaining({ code: 'UNREVIEWED_NOMINAL_TAX_BASIS' }));
   });
 
+  it('does not mistake null nominal-basis metadata on a monetary tax for a unit tax', async () => {
+    const facts = {
+      ...validFacts(),
+      tax_amount: '19',
+      total_amount: '119',
+      taxes: [{
+        tax_type: 'iva', tax_name: 'IVA', tax_basis_type: 'monetary',
+        base_quantity: null, base_unit_code: null, per_unit_amount: null,
+        rate: '19', base_amount: '100', amount: '19',
+      }],
+    };
+    const h = harness(JSON.stringify({ facts, evidence: [] }));
+    const result = await h.service.extract(file);
+    expect(result.normalized.validation.errors).not.toContainEqual(expect.objectContaining({ code: 'UNREVIEWED_NOMINAL_TAX_BASIS' }));
+  });
+
   it('rejects oversized provider JSON before parsing', async () => {
     const h = harness(' '.repeat(1024 * 1024 + 1));
-    await expect(h.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_PARSE_FAIL });
+    await expect(h.service.extract(file)).rejects.toMatchObject({ errorCode: ErrorCodes.INV_SCAN_PARSE_FAIL.code });
   });
 });

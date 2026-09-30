@@ -151,7 +151,7 @@ export class ReceivedDocumentScanService {
   private containsNominalTaxBasis(facts: Record<string, unknown>): boolean {
     const isUnitTax = (value: unknown): boolean => {
       const tax = this.asRecord(value);
-      return !!tax && (tax['tax_basis_type'] === 'unit' || 'per_unit_amount' in tax || 'base_quantity' in tax || 'base_unit_code' in tax);
+      return !!tax && (tax['tax_basis_type'] === 'unit' || ['per_unit_amount', 'base_quantity', 'base_unit_code'].some((field) => tax[field] != null && tax[field] !== ''));
     };
     if (Array.isArray(facts['taxes']) && facts['taxes'].some(isUnitTax)) return true;
     return Array.isArray(facts['items']) && facts['items'].slice(0, MAX_LINES_FOR_NORMALIZER).some((value) => {
