@@ -360,6 +360,195 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
     });
   });
 
+  it('counts POS equivalents only when the invoice is accepted and DIAN accepted', async () => {
+    const { service, prisma } = createService();
+    const posInvoice = (id: number, status: string, dian_status: string) => ({
+      id,
+      invoice_type: 'pos_equivalent_document',
+      invoice_number: `POS-${id}`,
+      status,
+      dian_status,
+      supplier_id: null,
+      customer_id: 80 + id,
+      customer_name: 'Cliente POS',
+      customer_tax_id: null,
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{
+        id: id * 10,
+        tax_type: 'iva',
+        taxable_amount: '100.00',
+        tax_amount: '19.00',
+      }],
+      supplier: null,
+    });
+    prisma.invoices.findMany.mockResolvedValueOnce([
+      posInvoice(31, 'accepted', 'accepted'),
+      posInvoice(32, 'draft', 'accepted'),
+      posInvoice(33, 'accepted', 'not_applicable'),
+      posInvoice(34, 'cancelled', 'accepted'),
+      posInvoice(35, 'voided', 'accepted'),
+    ] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.totals).toMatchObject({
+      generated_tax_amount: 19,
+      deductible_tax_amount: 0,
+      balance_due: 19,
+    });
+    expect(preview.source_snapshot).toMatchObject({
+      counted_invoice_ids: [31],
+      skipped_invoice_ids: [32, 33, 34, 35],
+    });
+    expect(preview.validation_summary).toMatchObject({
+      warnings: [
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 32 }),
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 33 }),
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 34 }),
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 35 }),
+      ],
+      errors: [],
+    });
+    expect(prisma.invoices.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          { invoice_type: 'pos_equivalent_document' },
+        ]),
+      }),
+    }));
+  });
+
+  it('blocks accepted equivalent adjustments until a reliable 93/94 direction exists', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 41,
+      invoice_type: 'equivalent_adjustment_note',
+      invoice_number: 'AE-93-94-UNKNOWN',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: null,
+      customer_id: 14,
+      customer_name: 'Cliente POS',
+      customer_tax_id: null,
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 411, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+      supplier: null,
+    }] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.lines).toHaveLength(0);
+    expect(preview.totals).toMatchObject({ generated_tax_amount: 0, deductible_tax_amount: 0 });
+    expect(preview.source_snapshot.skipped_invoice_ids).toEqual([41]);
+    expect(preview.validation_summary).toMatchObject({
+      errors: [expect.objectContaining({
+        code: 'UNSUPPORTED_EQUIVALENT_ADJUSTMENT_DIRECTION',
+        invoice_id: 41,
+      })],
+    });
+  });
+
+  it.each(['draft', 'validated'])(
+    'does not block an unaccepted equivalent adjustment in %s status',
+    async (status) => {
+      const { service, prisma } = createService();
+      prisma.invoices.findMany.mockResolvedValueOnce([{
+        id: 44,
+        invoice_type: 'equivalent_adjustment_note',
+        invoice_number: 'AE-PENDING-44',
+        status,
+        dian_status: 'not_applicable',
+        supplier_id: null,
+        customer_id: 14,
+        customer_name: 'Cliente POS',
+        customer_tax_id: null,
+        issue_date: new Date('2026-03-15T10:00:00.000Z'),
+        invoice_taxes: [{ id: 441, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+        supplier: null,
+      }] as any);
+
+      const preview = await service.preview(context, {
+        declaration_type: 'vat', period_year: 2026, period_month: 3,
+      });
+
+      expect(preview.lines).toHaveLength(0);
+      expect(preview.source_snapshot.skipped_invoice_ids).toEqual([44]);
+      expect(preview.validation_summary).toMatchObject({
+        warnings: [expect.objectContaining({
+          code: 'DIAN_NOT_ACCEPTED',
+          invoice_id: 44,
+          invoice_type: 'equivalent_adjustment_note',
+        })],
+        errors: [],
+      });
+    },
+  );
+
+  it('blocks unknown invoice types instead of defaulting them to deductible IVA', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 42,
+      invoice_type: 'future_unknown_invoice_type',
+      invoice_number: 'UNKNOWN-42',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: null,
+      customer_id: null,
+      customer_name: null,
+      customer_tax_id: null,
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 421, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+      supplier: null,
+    }] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.lines).toHaveLength(0);
+    expect(preview.source_snapshot.skipped_invoice_ids).toEqual([42]);
+    expect(preview.validation_summary).toMatchObject({
+      errors: [expect.objectContaining({ code: 'UNSUPPORTED_VAT_DOCUMENT_TYPE', invoice_id: 42 })],
+    });
+  });
+
+  it('keeps the PO-materialized support_document deductible with not_applicable DIAN status', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 43,
+      invoice_type: 'support_document',
+      invoice_number: 'PO-SUPPORT-43',
+      status: 'validated',
+      dian_status: 'not_applicable',
+      supplier_id: 50,
+      customer_id: null,
+      customer_name: 'Proveedor',
+      customer_tax_id: '900123456',
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 431, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+      supplier: { name: 'Proveedor', tax_id: '900123456' },
+    }] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.totals).toMatchObject({
+      generated_tax_amount: 0,
+      deductible_tax_amount: 19,
+      balance_favor: 19,
+    });
+    expect(preview.source_snapshot).toMatchObject({
+      counted_invoice_ids: [43],
+      skipped_invoice_ids: [],
+    });
+    expect(preview.validation_summary.errors).toEqual([]);
+  });
+
   it('previews VAT through the same calculation without persistence or events', async () => {
     const {
       service,

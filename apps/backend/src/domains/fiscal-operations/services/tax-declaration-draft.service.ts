@@ -753,7 +753,13 @@ export class TaxDeclarationDraftService {
           period.period_start,
           period.period_end,
         ),
-        status: { notIn: ['cancelled', 'voided'] },
+        OR: [
+          { status: { notIn: ['cancelled', 'voided'] } },
+          // POS equivalents are fetched even after cancellation/voiding only
+          // so the strict accepted+DIAN-accepted gate can report them as
+          // excluded; no other document family changes its legacy query set.
+          { invoice_type: 'pos_equivalent_document' },
+        ],
       },
       include: { invoice_taxes: true, supplier: true },
       orderBy: { issue_date: 'asc' },
@@ -765,6 +771,7 @@ export class TaxDeclarationDraftService {
     const lines: Prisma.tax_declaration_linesCreateManyInput[] = [];
     const validationErrors: Prisma.InputJsonObject[] = [];
     const skippedTaxIds = new Set<number>();
+    const skippedInvoiceIds = new Set<number>();
     const requiresDianAcceptance = (invoiceType: string) =>
       [
         'sales_invoice',
@@ -774,29 +781,76 @@ export class TaxDeclarationDraftService {
         'purchase_invoice',
         'support_document',
         'support_adjustment_note',
+        'pos_equivalent_document',
+        'equivalent_adjustment_note',
       ].includes(invoiceType);
-    const isAcceptedForTax = (invoice: (typeof invoices)[number]) =>
-      !requiresDianAcceptance(invoice.invoice_type) ||
-      invoice.dian_status === 'accepted' ||
-      invoice.dian_status === 'not_applicable';
+    const isAcceptedForTax = (invoice: (typeof invoices)[number]) => {
+      if (
+        invoice.invoice_type === 'pos_equivalent_document' ||
+        invoice.invoice_type === 'equivalent_adjustment_note'
+      ) {
+        return (
+          invoice.status === 'accepted' && invoice.dian_status === 'accepted'
+        );
+      }
+      return (
+        !requiresDianAcceptance(invoice.invoice_type) ||
+        invoice.dian_status === 'accepted' ||
+        invoice.dian_status === 'not_applicable'
+      );
+    };
     const nonAccepted = invoices.filter(
       (invoice) => !isAcceptedForTax(invoice),
     );
 
     for (const invoice of invoices) {
+      const direction = (() => {
+        switch (invoice.invoice_type as string) {
+          case 'sales_invoice':
+          case 'debit_note':
+          case 'export_invoice':
+          case 'pos_equivalent_document':
+            return { line_type: 'vat_generated' as const, sign: 1 };
+          case 'credit_note':
+            return { line_type: 'vat_generated' as const, sign: -1 };
+          case 'purchase_invoice':
+          case 'support_document':
+            return { line_type: 'vat_deductible' as const, sign: 1 };
+          case 'support_adjustment_note':
+            return { line_type: 'vat_deductible' as const, sign: -1 };
+          default:
+            return null;
+        }
+      })();
+
+      if (invoice.invoice_type === 'equivalent_adjustment_note') {
+        if (isAcceptedForTax(invoice)) {
+          validationErrors.push({
+            code: 'UNSUPPORTED_EQUIVALENT_ADJUSTMENT_DIRECTION',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            invoice_type: invoice.invoice_type,
+            message:
+              'Accepted equivalent adjustment cannot be classified without a reliable 93/94 direction.',
+          });
+          skippedInvoiceIds.add(invoice.id);
+        }
+        continue;
+      }
+
+      if (!direction) {
+        validationErrors.push({
+          code: 'UNSUPPORTED_VAT_DOCUMENT_TYPE',
+          invoice_id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          invoice_type: String(invoice.invoice_type),
+        });
+        skippedInvoiceIds.add(invoice.id);
+        continue;
+      }
+
       if (!isAcceptedForTax(invoice)) continue;
 
-      const sign =
-        invoice.invoice_type === 'credit_note' ||
-        invoice.invoice_type === 'support_adjustment_note'
-          ? -1
-          : 1;
-      const isSale = [
-        'sales_invoice',
-        'debit_note',
-        'export_invoice',
-        'credit_note',
-      ].includes(invoice.invoice_type);
       let invoiceTax = new Prisma.Decimal(0);
       let invoiceBase = new Prisma.Decimal(0);
       let hasUsableVatRow = false;
@@ -837,14 +891,17 @@ export class TaxDeclarationDraftService {
       }
 
       if (!hasUsableVatRow) continue;
-      const signedTax = invoiceTax.mul(sign);
-      const signedBase = invoiceBase.mul(sign);
+      const signedTax = invoiceTax.mul(direction.sign);
+      const signedBase = invoiceBase.mul(direction.sign);
       taxableBase = taxableBase.plus(signedBase);
-      if (isSale) generated = generated.plus(signedTax);
-      else deductible = deductible.plus(signedTax);
+      if (direction.line_type === 'vat_generated') {
+        generated = generated.plus(signedTax);
+      } else {
+        deductible = deductible.plus(signedTax);
+      }
       lines.push({
         declaration_id: 0,
-        line_type: isSale ? 'vat_generated' : 'vat_deductible',
+        line_type: direction.line_type,
         source_type: 'invoice',
         source_id: invoice.id,
         third_party_id: invoice.supplier_id ?? invoice.customer_id ?? undefined,
@@ -887,7 +944,12 @@ export class TaxDeclarationDraftService {
         counted_invoice_ids: lines
           .map((line) => line.source_id)
           .filter((id): id is number => typeof id === 'number'),
-        skipped_invoice_ids: nonAccepted.map((invoice) => invoice.id),
+        skipped_invoice_ids: [
+          ...new Set([
+            ...nonAccepted.map((invoice) => invoice.id),
+            ...skippedInvoiceIds,
+          ]),
+        ],
         skipped_tax_ids: [...skippedTaxIds],
       },
       validation_summary: {
