@@ -721,7 +721,18 @@ interface FreightAndTaxHeader {
   shipping_cost?: number;
   shipping_cost_allocation?: string;
   prices_include_tax?: boolean;
-  items?: Array<{ tax_rate?: number } | null | undefined>;
+  items?: Array<
+    | {
+        tax_rate?: number;
+        taxes?: Array<{
+          tax_rate?: number | null;
+          fixed_amount_per_unit?: number | null;
+          amount_override?: number | null;
+        } | null> | null;
+      }
+    | null
+    | undefined
+  >;
 }
 
 /**
@@ -766,7 +777,17 @@ export function validateFreightAndTaxHeader(
   }
   if (header.prices_include_tax === true) {
     const items = Array.isArray(header.items) ? header.items : [];
-    const anyTaxed = items.some((i) => Number(i?.tax_rate ?? 0) > 0);
+    const anyTaxed = items.some(
+      (i) =>
+        Number(i?.tax_rate ?? 0) > 0 ||
+        (Array.isArray(i?.taxes) &&
+          (i.taxes as any[]).some(
+            (t) =>
+              Number(t?.tax_rate ?? 0) > 0 ||
+              Number(t?.fixed_amount_per_unit ?? 0) > 0 ||
+              Number(t?.amount_override ?? 0) > 0,
+          )),
+    );
     if (!anyTaxed) {
       return 'La factura declara precios con impuesto incluido pero ninguna línea trae tasa de impuesto: falta el «tax_rate» de las líneas gravadas.';
     }

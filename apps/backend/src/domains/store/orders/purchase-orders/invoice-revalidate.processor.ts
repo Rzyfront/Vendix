@@ -19,7 +19,27 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   jpeg: 'image/jpeg',
 };
 
-function mimeFromKey(key: string): string {
+/** MIME por bytes mágicos; null si ninguno casa. */
+export function mimeFromBytes(buf: Buffer): string | null {
+  if (!buf || buf.length < 4) return null;
+  if (buf.subarray(0, 4).toString('latin1') === '%PDF') return 'application/pdf';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return 'image/png';
+  }
+  if (
+    buf.length >= 12 &&
+    buf.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    buf.subarray(8, 12).toString('latin1') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  return null;
+}
+
+function mimeFromKey(key: string, buffer?: Buffer): string {
+  const sniffed = buffer ? mimeFromBytes(buffer) : null;
+  if (sniffed) return sniffed;
   const ext = key.split('.').pop()?.toLowerCase() ?? '';
   return MIME_BY_EXTENSION[ext] ?? 'image/jpeg';
 }
@@ -82,7 +102,7 @@ export class InvoiceRevalidateProcessor extends WorkerHost {
           }
           return this.invoiceScanner.revalidateInvoice({
             fileBuffer: buffer,
-            mimeType: mimeFromKey(data.scan_attachment_key),
+            mimeType: mimeFromKey(data.scan_attachment_key, buffer),
             consolidated: data.consolidated,
             note: data.note,
             orderType: data.order_type,

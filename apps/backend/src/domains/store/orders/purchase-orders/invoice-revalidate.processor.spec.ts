@@ -1,5 +1,8 @@
 import { UnrecoverableError } from 'bullmq';
-import { InvoiceRevalidateProcessor } from './invoice-revalidate.processor';
+import {
+  InvoiceRevalidateProcessor,
+  mimeFromBytes,
+} from './invoice-revalidate.processor';
 import { InvoiceScannerService } from './invoice-scanner.service';
 
 function build(aiContent: string | { success: false; error: string }) {
@@ -187,5 +190,30 @@ describe('InvoiceRevalidateProcessor', () => {
     const p = processor.process(job());
     await expect(p).rejects.toThrow(/revalidar/);
     await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
+  });
+});
+
+describe('mimeFromBytes', () => {
+  it('detecta PDF, PNG, WEBP y JPEG por bytes mágicos', () => {
+    expect(mimeFromBytes(Buffer.from('%PDF-1.7 x'))).toBe('application/pdf');
+    expect(
+      mimeFromBytes(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])),
+    ).toBe('image/png');
+    expect(
+      mimeFromBytes(Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP')])),
+    ).toBe('image/webp');
+    expect(mimeFromBytes(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    expect(mimeFromBytes(Buffer.from('doc'))).toBeNull();
+  });
+
+  it('el processor prioriza los bytes sobre la extensión y cae a la extensión', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const { processor, s3, aiEngine } = build(
+      JSON.stringify({ consolidated: {}, report: {} }),
+    );
+    s3.downloadFile.mockResolvedValue(png);
+    await processor.process(job()).catch(() => undefined);
+    const call = aiEngine.run.mock.calls[0];
+    expect(JSON.stringify(call)).toContain('image/png');
   });
 });

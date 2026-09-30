@@ -370,7 +370,7 @@ export class PurchaseOrdersController {
           note: dto.note,
         },
         {
-          attempts: 3,
+          attempts: 2,
           backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: { count: 100 },
           removeOnFail: { count: 50 },

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { validateFreightAndTaxHeader } from './dto/create-purchase-order.dto';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { CostingService } from '../../inventory/shared/services/costing.service';
@@ -411,6 +412,83 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
       expect(sealedArgs.data.deductible_tax_amount).toBe(0);
       expect(sealedArgs.data.capitalized_tax_amount).toBe(400);
     });
+
+    // QUI-855 — recepción parcial: DR 1435 del lote == capa FIFO del lote.
+    async function receivePartial(opts: {
+      qty: number;
+      prevReceived: number;
+      prevCap: number;
+      cumulativeCap: number;
+      allReceived: boolean;
+      priorPosted?: number;
+    }) {
+      const sealed = { itemUpdates: [] as any[] };
+      const tx = mockReceiveTx(sealed);
+      const po = {
+        ...purchaseOrder,
+        purchase_order_items: [
+          {
+            ...orderItem,
+            quantity_received: opts.allReceived ? 5 : opts.prevReceived + opts.qty,
+            capitalized_tax_amount: opts.prevCap,
+            deductible_tax_amount: 0,
+          },
+        ],
+      };
+      tx.purchase_orders.findUnique = jest.fn().mockResolvedValue(po);
+      tx.purchase_orders.update = jest.fn().mockResolvedValue({
+        ...po,
+        suppliers: null,
+        purchase_order_items: [
+          {
+            ...po.purchase_order_items[0],
+            capitalized_tax_amount: opts.cumulativeCap,
+            deductible_tax_amount: 0,
+            products: null,
+            product_variants: null,
+          },
+        ],
+      });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      if (opts.priorPosted) {
+        prismaService.purchase_order_receptions.findMany.mockResolvedValue([
+          { id: 1 },
+        ]);
+        prismaService.accounting_entries.findMany.mockResolvedValue([
+          { total_debit: opts.priorPosted },
+        ]);
+      }
+      await service.receive(PO_ID, {
+        items: [{ id: PO_ITEM_ID, quantity_received: opts.qty }],
+      } as any);
+      const ev = eventEmitter.emit.mock.calls.filter(
+        (c) => c[0] === 'purchase_order.received',
+      );
+      return ev[ev.length - 1][1];
+    }
+
+    it('parcial 2/5 ⇒ lote 2160 (= 2 × 1080 FIFO) y luego 3/5 ⇒ 3240; suma 5400', async () => {
+      const first = await receivePartial({
+        qty: 2,
+        prevReceived: 0,
+        prevCap: 0,
+        cumulativeCap: 160,
+        allReceived: false,
+      });
+      expect(first.total_amount).toBe(2160);
+
+      eventEmitter.emit.mockClear();
+      const second = await receivePartial({
+        qty: 3,
+        prevReceived: 2,
+        prevCap: 160,
+        cumulativeCap: 400,
+        allReceived: true,
+        priorPosted: first.total_amount,
+      });
+      expect(second.total_amount).toBe(3240);
+      expect(first.total_amount + second.total_amount).toBe(5400);
+    });
   });
 
   // ------------------------------------------------- buildPurchaseTaxGroups
@@ -493,5 +571,137 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
     prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
     await service.remove(PO_ID);
     expect(order).toEqual(['taxes', 'order']);
+  });
+
+  // -------------------------------------------------- QUI-855 auditoría
+  it('remove(): el where de las filas de impuestos usa la relación purchase_order_items', async () => {
+    const tx = {
+      purchase_orders: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: PO_ID,
+          status: 'draft',
+          order_number: 'PO-X',
+        }),
+        delete: jest.fn().mockResolvedValue({ id: PO_ID }),
+      },
+      purchase_order_item_taxes: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+    };
+    prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+    await service.remove(PO_ID);
+    expect(tx.purchase_order_item_taxes.deleteMany).toHaveBeenCalledWith({
+      where: { purchase_order_items: { purchase_order_id: PO_ID } },
+    });
+  });
+
+  it('update() con items: el where de las filas de impuestos usa la relación purchase_order_items', async () => {
+    const tx = {
+      purchase_orders: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: PO_ID,
+          status: 'draft',
+          order_number: 'PO-X',
+          shipping_cost: 0,
+          shipping_cost_allocation: null,
+          subtotal_amount: 0,
+          tax_amount: 0,
+        }),
+        update: jest.fn().mockResolvedValue({ id: PO_ID }),
+      },
+      purchase_order_item_taxes: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      purchase_order_items: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
+    jest
+      .spyOn(service as any, 'assertNoBaseLineOnVariantProduct')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'linkScanAttachment').mockResolvedValue(undefined);
+    prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+    await service.update(PO_ID, {
+      items: [{ product_id: PRODUCT_ID, quantity: 2, unit_price: 1000, tax_rate: 19 }],
+    } as any);
+    expect(tx.purchase_order_item_taxes.deleteMany).toHaveBeenCalledWith({
+      where: { purchase_order_items: { purchase_order_id: PO_ID } },
+    });
+  });
+
+  describe('resolveLineTaxes — descuento y legacy', () => {
+    const resolve = (item: any) =>
+      (service as any).resolveLineTaxes(item, { prices_include_tax: false });
+
+    it('999 × 0,315 con descuento 400 ⇒ no lanza, neto 0 e impuestos 0', () => {
+      const r = resolve({
+        unit_price: 0.315,
+        quantity: 999,
+        discount_amount: 400,
+        tax_rate: 19,
+      });
+      expect(r.net_total).toBe(0);
+      expect(r.tax_amount).toBe(0);
+    });
+
+    it('descuento 100 % con cantidad 0,315 ⇒ no lanza', () => {
+      const r = resolve({
+        unit_price: 999,
+        quantity: 0.315,
+        discount_percentage: 100,
+        tax_rate: 19,
+      });
+      expect(r.net_total).toBe(0);
+      expect(r.tax_amount).toBe(0);
+    });
+
+    it('legacy con tax_type fuera de lista (ica) ⇒ se trata como IVA', () => {
+      const r = resolve({
+        unit_price: 1000,
+        quantity: 2,
+        tax_rate: 10,
+        tax_type: 'ica',
+      });
+      expect(r.tax_amount).toBe(200);
+      expect(r.taxes).toHaveLength(1);
+      expect(r.taxes[0].tax_type).toBe('iva');
+    });
+
+    it('taxes[] explícito con tipo no soportado sigue lanzando 400', () => {
+      expect(() =>
+        resolve({
+          unit_price: 1000,
+          quantity: 2,
+          taxes: [{ tax_type: 'ica', tax_rate: 10 }],
+        }),
+      ).toThrow(/no soportado/i);
+    });
+  });
+
+  describe('validateFreightAndTaxHeader — impuesto sólo en taxes[]', () => {
+    it('prices_include_tax con línea INC sólo en taxes[] es válida', () => {
+      expect(
+        validateFreightAndTaxHeader({
+          prices_include_tax: true,
+          items: [{ taxes: [{ tax_rate: 8 }] }],
+        }),
+      ).toBeNull();
+      expect(
+        validateFreightAndTaxHeader({
+          prices_include_tax: true,
+          items: [{ taxes: [{ tax_rate: null, fixed_amount_per_unit: 35 }] }],
+        }),
+      ).toBeNull();
+    });
+
+    it('sin tasa en ninguna línea ni fila sigue siendo 400', () => {
+      expect(
+        validateFreightAndTaxHeader({
+          prices_include_tax: true,
+          items: [{ tax_rate: 0, taxes: [{ tax_rate: 0 }] }],
+        }),
+      ).toEqual(expect.stringContaining('impuesto incluido'));
+    });
   });
 });

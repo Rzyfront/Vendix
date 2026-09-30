@@ -180,7 +180,12 @@ export class PurchaseOrdersService {
    *
    * Si `item.taxes` viene vacío/ausente se normaliza el par legacy
    * `tax_rate`/`tax_type` a UNA entrada (tasa 0/null ⇒ línea sin impuestos), de
-   * modo que una línea legacy deriva las mismas cifras que antes.
+   * modo que una línea legacy deriva cifras equivalentes a las históricas, no
+   * idénticas: con cantidades enteras el neto y el impuesto de línea coinciden;
+   * el `unit_cost` puede diferir en menos de 0,001 (el kernel redondea a
+   * centavo el bruto de la línea; p. ej. 1000 × 3 al 19 % incluido:
+   * 840,3361 → 840,3367); con cantidades fraccionarias, neto e impuesto
+   * pueden variar ±0,01.
    *
    * `unit_price_net` (= net_unit, → `unit_cost`), `tax_amount` (= tax_total),
    * `taxes` (filas resueltas por el kernel, en orden de cálculo).
@@ -243,9 +248,21 @@ export class PurchaseOrdersService {
       ownDiscount + Number(proratedHeaderDiscount || 0),
     );
     const discountPerUnit = Math.min(requestedDiscount / calcQty, gross);
+    // El tope se aplica sobre el descuento TOTAL (no por unidad antes de
+    // redondear): con 999 × 0,315 (bruto 314,685) redondear el descuento a
+    // 314,69 dejaría el neto en −0,01 (ROUND_HALF_UP del kernel) y lanzaría.
+    // Si el descuento pedido cubre la línea, al kernel se le pasa el bruto
+    // EXACTO de la línea (neto 0); `discount_total` se persiste a centavo.
+    const lineGrossExact = Math.round(gross * quantity * 1e6) / 1e6;
+    const discountCoversLine = requestedDiscount >= lineGrossExact;
     const discount_total = zeroQty
       ? 0
-      : Math.round(discountPerUnit * quantity * 100) / 100;
+      : Math.round(Math.min(requestedDiscount, lineGrossExact) * 100) / 100;
+    const kernelDiscount = zeroQty
+      ? Math.round(discountPerUnit * 100) / 100
+      : discountCoversLine
+        ? lineGrossExact
+        : discount_total;
 
     // Entradas de impuesto: `taxes[]` gana; si no, el par legacy.
     const kernelTaxes: PurchaseLineTaxInput[] = [];
@@ -301,12 +318,13 @@ export class PurchaseOrdersService {
         });
       }
     } else if (Number(item.tax_rate ?? 0) > 0) {
-      const legacyType = (item.tax_type ?? 'iva') as string;
-      if (!PURCHASE_TAX_TYPES.includes(legacyType)) {
-        throw new BadRequestException(
-          `Tipo de impuesto no soportado en compras: ${legacyType}.`,
-        );
-      }
+      // Rama legacy: un tipo fuera de iva/inc/icui/ibua (p. ej. ica,
+      // withholding) se trata como IVA, como antes. En `taxes[]` explícito
+      // sigue siendo 400.
+      const rawLegacyType = (item.tax_type ?? 'iva') as string;
+      const legacyType = PURCHASE_TAX_TYPES.includes(rawLegacyType)
+        ? rawLegacyType
+        : 'iva';
       kernelTaxes.push({
         tax_type: legacyType as PurchaseTaxType,
         calc_mode: 'percent',
@@ -319,9 +337,7 @@ export class PurchaseOrdersService {
       resolved = resolvePurchaseLineTaxes({
         unit_price: gross,
         quantity: calcQty,
-        discount_amount: zeroQty
-          ? Math.round(discountPerUnit * 100) / 100
-          : discount_total,
+        discount_amount: kernelDiscount,
         prices_include_tax: effective_include,
         taxes: kernelTaxes,
       });
@@ -2770,7 +2786,7 @@ export class PurchaseOrdersService {
         // QUI-855 — las filas hijas de impuestos referencian la línea con
         // ON DELETE RESTRICT: se borran ANTES que las líneas.
         await tx.purchase_order_item_taxes.deleteMany({
-          where: { purchase_order_item: { purchase_order_id: id } },
+          where: { purchase_order_items: { purchase_order_id: id } },
         });
         await tx.purchase_order_items.deleteMany({
           where: { purchase_order_id: id },
@@ -3663,6 +3679,9 @@ export class PurchaseOrdersService {
       // — see the `subtotal = sum(quantity * unit_price)` calc above in
       // create()). Used below to prorate the accounting entry amount.
       let receivedBatchSubtotal = 0;
+      // QUI-855 — impuesto capitalizado sellado por ESTE lote (delta de
+      // capitalized_tax_amount), sin reescalar por received/ordered.
+      let receivedBatchCapitalized = 0;
 
       // Create inventory movements, update stock, and calculate cost for received items
       for (const item of dto.items) {
@@ -3772,6 +3791,7 @@ export class PurchaseOrdersService {
               (prevCap + sealedCapNow + (vatResponsible ? 0 : sealedDedNow)) *
                 100,
             ) / 100;
+          receivedBatchCapitalized += newCap - prevCap;
           await tx.purchase_order_items.update({
             where: { id: item.id },
             data: {
@@ -4145,6 +4165,7 @@ export class PurchaseOrdersService {
         all_items_received,
         reception_id: reception.id,
         received_batch_subtotal: receivedBatchSubtotal,
+        received_batch_capitalized: receivedBatchCapitalized,
         order_subtotal: orderSubtotal,
         // F1/F2 IVA lifecycle: fiscal responsibility resolved once inside the
         // tx (O-48 → net cost + deductible VAT; O-49 → capitalized in cost).
@@ -4378,13 +4399,17 @@ export class PurchaseOrdersService {
         }
         batch_amount = Math.round((emit_total - alreadyPosted) * 100) / 100;
       } else if (result.order_subtotal > 0) {
-        // Proportional share of this batch vs. the order's full NET subtotal
-        // scaled onto the emit total (gross for O-49). The final reception's
-        // remainder branch trues up any per-batch rounding drift.
+        // QUI-855 — lote = subtotal NETO recibido + impuesto capitalizado de ESE
+        // lote (sin reescalar: el acumulado ya contiene lotes previos y
+        // escalarlo por received/ordered descuadraba DR 1435 vs la capa FIFO) +
+        // la porción proporcional del flete capitalizado. La recepción final
+        // sigue cuadrando por el remanente contra `emit_total`.
         batch_amount =
           Math.round(
-            (result.received_batch_subtotal / result.order_subtotal) *
-              emit_total *
+            (result.received_batch_subtotal +
+              Number(result.received_batch_capitalized ?? 0) +
+              (result.received_batch_subtotal / result.order_subtotal) *
+                capitalized_freight) *
               100,
           ) / 100;
       } else {
@@ -6200,7 +6225,7 @@ export class PurchaseOrdersService {
       // QUI-855 — la FK de las filas de impuestos a la línea es RESTRICT y la
       // línea cae en cascada con la orden: sin borrarlas antes, el delete falla.
       await tx.purchase_order_item_taxes.deleteMany({
-        where: { purchase_order_item: { purchase_order_id: id } },
+        where: { purchase_order_items: { purchase_order_id: id } },
       });
       return tx.purchase_orders.delete({
         where: { id },
