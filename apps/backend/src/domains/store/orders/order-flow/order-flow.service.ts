@@ -30,6 +30,7 @@ import {
   hasKitchenLinesAwaitingHandoff,
   describeKitchenHandoffBlocker,
   kitchenHandoffBlocker,
+  getUnpaidBalanceForFinish,
   OrderActionSnapshot,
 } from './order-action-policy.util';
 import { OrderSseService } from '../services/order-sse.service';
@@ -904,6 +905,10 @@ export class OrderFlowService {
         state: true,
         store_id: true,
         order_number: true,
+        grand_total: true,
+        remaining_balance: true,
+        payment_form: true,
+        payments: { select: { state: true, amount: true } },
         stores: { select: { organization_id: true } },
       },
     });
@@ -922,6 +927,28 @@ export class OrderFlowService {
           ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
           `La orden tiene platos sin entregar en cocina ("${blockedLine}"). Entrégalos o cancélalos antes de finalizar.`,
         );
+      }
+
+      // Guard único de saldo: nunca `finished` con saldo por cobrar (salvo
+      // ventas a crédito). Se evalúa el saldo RESULTANTE: si esta misma
+      // escritura persiste `remaining_balance` (payOrder →
+      // `settledBalanceMetadata`), manda ese valor y no el previo. Ver
+      // `getUnpaidBalanceForFinish` para la expresión exacta.
+      if (previous_order) {
+        const unpaid = getUnpaidBalanceForFinish(
+          previous_order,
+          metadata.remaining_balance,
+        );
+        if (unpaid > 0.01) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_FINISH_UNPAID_BALANCE_001,
+            undefined,
+            {
+              order_id: orderId,
+              remaining_balance: Math.round(unpaid * 100) / 100,
+            },
+          );
+        }
       }
     }
 
@@ -7296,6 +7323,33 @@ export class OrderFlowService {
       ...restaurantOrders.map((o) => o.id),
     ]);
 
+    // Saldo pendiente no-crédito: `updateOrderState` las rechazaría con
+    // ORD_FINISH_UNPAID_BALANCE_001, así que ni se intentan (sin error).
+    let skippedUnpaid = 0;
+    if (idsToFinish.size > 0) {
+      const candidates = await this.prisma.orders.findMany({
+        where: { id: { in: [...idsToFinish] } },
+        select: {
+          id: true,
+          grand_total: true,
+          remaining_balance: true,
+          payment_form: true,
+          payments: { select: { state: true, amount: true } },
+        },
+      });
+      for (const candidate of candidates ?? []) {
+        if (getUnpaidBalanceForFinish(candidate) > 0.01) {
+          idsToFinish.delete(candidate.id);
+          skippedUnpaid++;
+        }
+      }
+    }
+    if (skippedUnpaid > 0) {
+      this.logger.debug(
+        `Auto-finish omitted ${skippedUnpaid} order(s) with unpaid balance`,
+      );
+    }
+
     let finishedCount = 0;
     for (const orderId of idsToFinish) {
       try {
@@ -8447,15 +8501,24 @@ export class OrderFlowService {
       const cr_settings = (settings as any)?.pos?.cash_register;
       if (!cr_settings?.enabled) return;
 
-      // Only track non-cash if setting enabled
-      if (paymentMethodType !== 'cash' && !cr_settings.track_non_cash_payments)
-        return;
-
+      // Todo método se registra (efectivo, tarjeta, transferencia...): ya no
+      // depende de `track_non_cash_payments`. El arqueo esperado sigue
+      // contando sólo efectivo.
       const userId = RequestContextService.getUserId();
-      if (!userId) return;
+      if (!userId) {
+        this.logger.error(
+          `[payOrder cash movement] sin usuario en contexto: order=${orderId} payment=${paymentId ?? 'n/a'} amount=${amount}`,
+        );
+        return;
+      }
 
       const session = await this.sessionsService.getActiveSession(userId);
-      if (!session) return;
+      if (!session) {
+        this.logger.error(
+          `[payOrder cash movement] sin sesión de caja activa: order=${orderId} payment=${paymentId ?? 'n/a'} user=${userId} amount=${amount}`,
+        );
+        return;
+      }
 
       await this.movementsService.recordSaleMovement(session.id, {
         store_id: storeId,
@@ -8465,8 +8528,12 @@ export class OrderFlowService {
         order_id: orderId,
         payment_id: paymentId,
       });
-    } catch {
-      // Non-critical: don't fail the payment if movement recording fails
+    } catch (error) {
+      // Non-critical: don't fail the payment if movement recording fails,
+      // but never swallow it silently.
+      this.logger.error(
+        `[payOrder cash movement] fallo al registrar: order=${orderId} payment=${paymentId ?? 'n/a'}: ${(error as Error)?.message}`,
+      );
     }
   }
 

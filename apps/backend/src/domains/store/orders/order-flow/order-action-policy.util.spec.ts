@@ -267,8 +267,21 @@ describe('order-action-policy — canAssignShipping', () => {
 });
 
 describe('order-action-policy — canConfirmDelivery', () => {
-  it.each(['delivered', 'processing'])('enables on %s with no pending kitchen items', (state) =>
-    expect(canConfirmDelivery(order({ state }))).toEqual({ enabled: true }),
+  it.each(['delivered', 'processing'])('enables on %s with no pending kitchen items (paid)', (state) =>
+    expect(
+      canConfirmDelivery(order({ state, remaining_balance: 0, payments: [directPayment(100)] })),
+    ).toEqual({ enabled: true }),
+  );
+
+  it.each(['delivered', 'processing'])('disables on %s with an unpaid non-credit balance', (state) =>
+    expect(canConfirmDelivery(order({ state }))).toEqual({
+      enabled: false,
+      reason: 'ORD_FINISH_UNPAID_BALANCE_001',
+    }),
+  );
+
+  it('enables an unpaid credit sale (payment_form 2)', () =>
+    expect(canConfirmDelivery(order({ state: 'delivered', payment_form: '2' }))).toEqual({ enabled: true }),
   );
 
   it.each(['delivered', 'processing'])('disables on %s while kitchen items are still pending', (state) =>
