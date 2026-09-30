@@ -8,8 +8,9 @@ import {
 /**
  * Invariante de PARIDAD entre el frontend y el backend.
  *
- * `purchase-line-tax.util.ts` es espejo byte-a-byte de
- * `PurchaseOrdersService.deriveLineTax` / `prorateHeaderDiscount`. Es el único
+ * `purchase-line-tax.util.ts` delega el cálculo en el kernel
+ * `resolvePurchaseLineTaxes` (el mismo del backend) y conserva
+ * `prorateHeaderDiscount` como espejo de `PurchaseOrdersService`. Es el único
  * lugar del frontend que tiene derecho a decir cuánto vale una línea de compra:
  * el modal del escáner, el carrito y el resumen lo consumen para mostrar la
  * MISMA cifra que la base de datos va a persistir.
@@ -288,8 +289,10 @@ describe('purchase-line-tax.util — paridad con el backend', () => {
       expect(d.capitalized_per_unit).toBe(80);
       expect(d.deductible_per_unit).toBe(190);
       expect(d.taxes).toHaveSize(2);
-      expect(d.taxes[1].add_to_cost).toBe(true);
-      expect(d.taxes[1].taxable_amount).toBe(5000);
+      // El kernel ordena por secuencia (INC 20 antes que IVA 30): se busca por tipo.
+      const inc = d.taxes.find((t) => t.tax_type === 'inc');
+      expect(inc?.add_to_cost).toBe(true);
+      expect(inc?.taxable_amount).toBe(5000);
     });
 
     it('sin taxes deriva idéntico al legacy de una sola tasa', () => {
@@ -343,6 +346,137 @@ describe('purchase-line-tax.util — paridad con el backend', () => {
       expect(t.subtotal).toBe(5000);
       expect(t.tax_amount).toBe(1350);
       expect(t.total).toBe(6350);
+    });
+  });
+
+  describe('QUI-855: delegación en el kernel (multi-impuesto, incluidos, IBUA)', () => {
+    it('IVA 19% + INC 8% INCLUIDOS, 1270 × 1 ⇒ neto 1000, IVA 190, INC 80', () => {
+      // 1270 = neto × (1 + 0,19 + 0,08) ⇒ neto = 1000 en UN paso (no se extrae
+      // uno a uno). Ambos incluidos, así que el total no suma nada encima.
+      const d = deriveLineTaxes(
+        {
+          unit_cost: 1270,
+          quantity: 1,
+          taxes: [
+            { tax_type: 'iva', tax_rate: 19, is_inclusive: true },
+            { tax_type: 'inc', tax_rate: 8, is_inclusive: true },
+          ],
+        },
+        ADDED,
+      );
+
+      expect(d.net_line).toBe(1000);
+      expect(d.unit_price_net).toBe(1000);
+      expect(d.taxes.find((t) => t.tax_type === 'iva')?.tax_amount).toBe(190);
+      expect(d.taxes.find((t) => t.tax_type === 'inc')?.tax_amount).toBe(80);
+      expect(d.tax_amount).toBe(270);
+      expect(d.total_line).toBe(1270);
+      expect(d.capitalized_tax_total).toBe(80);
+      expect(d.cost_total).toBe(1080);
+    });
+
+    it('línea legacy sin taxes, tax_rate 19 exclusivo ⇒ IVA 190 sobre 1000', () => {
+      const d = deriveLineTaxes(
+        { unit_cost: 1000, quantity: 1, tax_rate: 19 },
+        ADDED,
+      );
+
+      expect(d.taxes).toHaveSize(1);
+      expect(d.taxes[0].tax_type).toBe('iva');
+      expect(d.taxes[0].taxable_amount).toBe(1000);
+      expect(d.taxes[0].tax_amount).toBe(190);
+      expect(d.net_line).toBe(1000);
+      expect(d.total_line).toBe(1190);
+    });
+
+    it('IBUA 68 por unidad × 5 unidades ⇒ 340, siempre al costo', () => {
+      const d = deriveLineTaxes(
+        {
+          unit_cost: 1000,
+          quantity: 5,
+          taxes: [
+            {
+              tax_type: 'ibua',
+              calc_mode: 'fixed_per_unit',
+              fixed_amount_per_unit: 68,
+              add_to_cost: false, // el kernel lo fuerza a true
+            },
+          ],
+        },
+        ADDED,
+      );
+
+      expect(d.taxes[0].tax_amount).toBe(340);
+      expect(d.taxes[0].add_to_cost).toBe(true);
+      expect(d.net_line).toBe(5000);
+      expect(d.total_line).toBe(5340);
+      expect(d.capitalized_tax_total).toBe(340);
+    });
+
+    it('base neto + impuestos anteriores: IVA 19% sobre neto + INC 8%', () => {
+      // INC (secuencia 20) va antes que IVA (30): 1000 × 8% = 80;
+      // IVA sobre 1000 + 80 = 1080 × 19% = 205,20.
+      const d = deriveLineTaxes(
+        {
+          unit_cost: 1000,
+          quantity: 1,
+          taxes: [
+            { tax_type: 'inc', tax_rate: 8 },
+            { tax_type: 'iva', tax_rate: 19, base_mode: 'net_plus_prior' },
+          ],
+        },
+        ADDED,
+      );
+
+      expect(d.taxes.find((t) => t.tax_type === 'inc')?.tax_amount).toBe(80);
+      expect(d.taxes.find((t) => t.tax_type === 'iva')?.tax_amount).toBe(205.2);
+      expect(d.total_line).toBe(1285.2);
+    });
+
+    it('descuento en % baja la base ANTES de los impuestos; el monto gana sobre el %', () => {
+      const pct = deriveLineTaxes(
+        { unit_cost: 1000, quantity: 1, tax_rate: 19, discount_percentage: 10 },
+        ADDED,
+      );
+      expect(pct.discount_total).toBe(100);
+      expect(pct.net_line).toBe(900);
+      expect(pct.tax_amount).toBe(171);
+
+      const amount = deriveLineTaxes(
+        {
+          unit_cost: 1000,
+          quantity: 1,
+          tax_rate: 19,
+          discount_percentage: 10,
+          discount_amount: 250,
+        },
+        ADDED,
+      );
+      expect(amount.discount_total).toBe(250);
+      expect(amount.net_line).toBe(750);
+    });
+
+    it('una combinación que el kernel rechaza no revienta el preview', () => {
+      // IBUA incluido de 500 sobre un bruto de 100: el kernel lanza; el util
+      // devuelve la línea sin impuestos.
+      const d = deriveLineTaxes(
+        {
+          unit_cost: 100,
+          quantity: 1,
+          taxes: [
+            {
+              tax_type: 'ibua',
+              calc_mode: 'fixed_per_unit',
+              fixed_amount_per_unit: 500,
+              is_inclusive: true,
+            },
+          ],
+        },
+        ADDED,
+      );
+
+      expect(d.tax_amount).toBe(0);
+      expect(d.net_line).toBe(100);
     });
   });
 });

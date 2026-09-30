@@ -3,20 +3,64 @@
  * Models for creating and submitting purchase orders
  */
 
-import { PopCartState, PopCartItem, PopLineTax, LotInfo, PreBulkData } from './pop-cart.interface';
+import {
+  PopCartState,
+  PopCartItem,
+  PopLineTax,
+  LotInfo,
+  PreBulkData,
+  PurchaseTaxBaseMode,
+  PurchaseTaxCalcMode,
+  PurchaseTaxType,
+} from './pop-cart.interface';
 
 /**
  * QUI-855 — un impuesto de una línea multi-impuesto para el payload.
- * Espejo del `PurchaseOrderItemTaxDto` del backend.
+ * Espejo del `PurchaseOrderItemTaxDto` del backend (contrato fijo): máx. 4,
+ * uno por `tax_type`. `tax_rate` es PORCENTAJE; en IBUA (`fixed_per_unit`)
+ * viaja `fixed_amount_per_unit` y no `tax_rate`.
  */
 export interface PopLineTaxRequest {
+  tax_type: PurchaseTaxType;
   tax_rate_id?: number;
   tax_name?: string;
-  tax_rate: number;
-  tax_type?: string;
+  tax_rate?: number;
+  calc_mode?: PurchaseTaxCalcMode;
+  fixed_amount_per_unit?: number;
+  base_mode?: PurchaseTaxBaseMode;
+  sequence?: number;
   is_inclusive?: boolean;
   add_to_cost?: boolean;
+  amount_override?: number;
 }
+
+/**
+ * Mapea las filas del carrito al request. Único punto de mapeo: la creación de
+ * la orden y la vista previa de costos lo comparten para no divergir.
+ */
+export function mapPopLineTaxesToRequest(
+  taxes: readonly PopLineTax[],
+): PopLineTaxRequest[] {
+  return taxes.slice(0, 4).map((t) => {
+    const isFixed = t.calc_mode === 'fixed_per_unit';
+    const req: PopLineTaxRequest = { tax_type: t.tax_type };
+    if (t.tax_rate_id != null) req.tax_rate_id = t.tax_rate_id;
+    if (t.tax_name) req.tax_name = t.tax_name;
+    if (t.calc_mode) req.calc_mode = t.calc_mode;
+    if (isFixed) {
+      req.fixed_amount_per_unit = Number(t.fixed_amount_per_unit) || 0;
+    } else {
+      req.tax_rate = Number(t.tax_rate) || 0;
+    }
+    if (t.base_mode) req.base_mode = t.base_mode;
+    if (t.sequence != null) req.sequence = t.sequence;
+    if (t.is_inclusive !== undefined) req.is_inclusive = t.is_inclusive;
+    req.add_to_cost = !!t.add_to_cost;
+    if (t.amount_override != null) req.amount_override = Number(t.amount_override);
+    return req;
+  });
+}
+
 import { ApiResponse } from '../../interfaces';
 
 
@@ -179,21 +223,14 @@ export function cartToPurchaseOrderRequest(
         // seeded default rate (19) would leak to the backend and contaminate
         // cost/deductible-IVA. `prices_include_tax` per-line override is only
         // meaningful when VAT is on (mixed invoices).
-        tax_rate: cartState.has_vat ? item.tax_rate : 0,
-        tax_type: item.tax_type ?? 'iva',
+        tax_rate: cartState.has_vat ? Number(item.tax_rate) || 0 : 0,
+        tax_type: item.taxes?.length ? 'iva' : (item.tax_type ?? 'iva'),
         // QUI-855: multi-impuesto gateado por el maestro igual que la tasa.
-        // No vacío ⇒ el backend lo usa y el par legacy queda como espejo.
+        // No vacío ⇒ el backend lo usa; el par legacy tax_rate/tax_type queda
+        // como la fila IVA (o 0 si la línea no tiene IVA) — el servicio del
+        // carrito ya lo mantiene así en `setItemTaxes`.
         ...(cartState.has_vat && item.taxes && item.taxes.length > 0
-          ? {
-              taxes: item.taxes.map((t) => ({
-                tax_rate_id: t.tax_rate_id,
-                tax_name: t.tax_name,
-                tax_rate: Number(t.tax_rate) || 0,
-                tax_type: t.tax_type ?? 'iva',
-                is_inclusive: t.is_inclusive,
-                add_to_cost: !!t.add_to_cost,
-              })),
-            }
+          ? { taxes: mapPopLineTaxesToRequest(item.taxes) }
           : {}),
         // QUI-661: descuento comercial de la línea. No se manda un precio ya
         // rebajado: el descuento tiene que ser visible como tal para que llegue

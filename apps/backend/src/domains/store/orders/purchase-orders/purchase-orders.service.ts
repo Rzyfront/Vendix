@@ -2554,6 +2554,7 @@ export class PurchaseOrdersService {
           include: {
             products: true,
             product_variants: true,
+            purchase_order_item_taxes: { orderBy: { sequence: 'asc' } },
           },
         },
         // QUI-647 — el detalle de la OC expone el calendario de pagos completo

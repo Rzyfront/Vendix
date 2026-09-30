@@ -4,6 +4,19 @@
  */
 
 import { WithholdingLine } from '../../../withholding-tax/interfaces/withholding.interface';
+import type {
+  PurchaseLineTaxInput as KernelPurchaseLineTaxInput,
+  PurchaseTaxBaseMode,
+  PurchaseTaxCalcMode,
+  PurchaseTaxType,
+} from '@money-kernel/purchase-line-taxes';
+
+export type {
+  KernelPurchaseLineTaxInput,
+  PurchaseTaxBaseMode,
+  PurchaseTaxCalcMode,
+  PurchaseTaxType,
+};
 
 // ============================================================================
 // Base Entity Interfaces (defined first to avoid forward reference issues)
@@ -172,18 +185,30 @@ export interface PreBulkData {
  */
 /**
  * QUI-855 — un impuesto dentro de una línea multi-impuesto del carrito.
- * Espejo del `PurchaseOrderItemTaxDto` del backend. `is_inclusive: undefined`
- * hereda el modo efectivo de la línea; `add_to_cost: true` capitaliza ese
- * impuesto al costo del inventario (estilo IBUA/ICUI).
+ * Espejo del `PurchaseOrderItemTaxDto` del backend (contrato del request). Los
+ * tipos de tipo/modo salen del kernel `purchase-line-taxes`; la única
+ * diferencia con `KernelPurchaseLineTaxInput` es el nombre de la tasa
+ * (`tax_rate` en el wire, `rate` en el kernel).
+ *
+ * `is_inclusive: undefined` hereda el modo efectivo de la línea. INC/ICUI/IBUA
+ * siempre capitalizan al costo (el kernel lo fuerza); `add_to_cost` sólo es
+ * editable para IVA.
  */
 export interface PopLineTax {
+  tax_type: PurchaseTaxType;
   tax_rate_id?: number;
   tax_name?: string;
-  /** PORCENTAJE (19 = 19%), nunca fracción. */
-  tax_rate: number;
-  tax_type?: string;
+  /** PORCENTAJE (19 = 19%), nunca fracción. Sin valor en IBUA (monto fijo). */
+  tax_rate?: number | null;
+  calc_mode?: PurchaseTaxCalcMode;
+  /** Pesos por unidad (calc_mode = fixed_per_unit, IBUA). */
+  fixed_amount_per_unit?: number | null;
+  base_mode?: PurchaseTaxBaseMode;
+  sequence?: number;
   is_inclusive?: boolean;
   add_to_cost?: boolean;
+  /** Monto de línea impreso por el proveedor; reemplaza el calculado. */
+  amount_override?: number | null;
 }
 
 export interface PopCartItem {
@@ -218,8 +243,15 @@ export interface PopCartItem {
   /**
    * IVA cycle (F1): tax rate captured MANUALLY for this line, as a
    * percentage (e.g. 19 for standard Colombian IVA, 0 for exempt).
+   * `null` ⇒ la tasa nunca se capturó (ya no se siembra un 19 silencioso):
+   * el carrito marca `tax_needs_review` y el impuesto vale 0 hasta confirmarla.
    */
-  tax_rate: number;
+  tax_rate: number | null;
+  /**
+   * La tasa vino vacía (sin catálogo ni escáner) y el operador aún no la
+   * confirmó. El componente muestra «Confirma el impuesto».
+   */
+  tax_needs_review?: boolean;
   /**
    * IVA cycle (F1): tax classification for this line. Defaults to 'iva'.
    * Passed through to the backend as-is (backend is the source of truth).
@@ -313,10 +345,13 @@ export interface PopCartSummary {
  * QUI-855 — un grupo del desglose de impuestos del resumen del carrito.
  */
 export interface PopTaxGroup {
-  tax_type: string;
+  tax_type: PurchaseTaxType;
   tax_rate: number;
   taxable_amount: number;
   tax_amount: number;
+  /** IBUA: monto fijo por unidad en vez de porcentaje. */
+  calc_mode?: PurchaseTaxCalcMode;
+  fixed_amount_per_unit?: number | null;
   /** Ese impuesto capitaliza al costo (IBUA/ICUI) en vez de ser descontable. */
   add_to_cost: boolean;
 }

@@ -1,153 +1,272 @@
 /**
- * Derivación fiscal de una línea de compra — espejo EXACTO del backend.
+ * Derivación fiscal de una línea de compra — QUI-855.
  *
- * El backend (`purchase-orders.service.ts` → `deriveLineTax` /
- * `prorateHeaderDiscount`) es la única autoridad sobre lo que se persiste:
- * ignora `subtotal_amount` / `tax_amount` / `total_amount` del DTO y recalcula
- * todo desde `unit_price`, `discount_*` y `tax_rate`.
+ * TODO el cálculo de impuestos vive en el kernel puro `resolvePurchaseLineTaxes`
+ * (`apps/backend/src/common/money-kernel/purchase-line-taxes.ts`, el mismo que
+ * usa el backend). Este archivo NO tiene matemática de impuestos propia: sólo
+ * traduce la línea del carrito (descuento %, `tax_rate` legacy, `taxes[]`) a la
+ * entrada del kernel y devuelve su resultado con la forma que ya consumían el
+ * carrito, el resumen y el modal del escáner.
  *
- * Este archivo existe porque el frontend necesita mostrar ESA misma cifra antes
- * de enviarla. Cualquier fórmula paralela —un factor proporcional, un subtotal
- * sin descuento— produce un número que el operador aprueba y que la base de
- * datos luego contradice.
+ * El backend sigue siendo la única autoridad sobre lo que se persiste; esto es
+ * el preview que muestra ESA misma cifra antes de enviarla.
  *
- * Regla de negocio que la fórmula codifica (QUI-661): el descuento comercial se
- * resta del BRUTO **antes** del split de IVA. En Colombia un descuento comercial
- * incondicional reduce la base gravable; derivar el IVA del precio sin descontar
- * infla el IVA descontable que llega a la declaración y capitaliza el inventario
- * a un costo que nunca se pagó.
- *
- * Al tocar este archivo hay que tocar el backend en el mismo commit, o dejan de
- * ser espejo.
+ * Regla de negocio (QUI-661): el descuento comercial se resta del BRUTO antes
+ * del split de impuestos (reduce la base gravable).
  */
+import { resolvePurchaseLineTaxes } from '@money-kernel/purchase-line-taxes';
+import type {
+  PurchaseLineTaxInput as KernelTaxInput,
+  PurchaseTaxBaseMode,
+  PurchaseTaxCalcMode,
+  PurchaseTaxType,
+  ResolvedPurchaseLine,
+} from '@money-kernel/purchase-line-taxes';
+import type { PopLineTax } from '../interfaces/pop-cart.interface';
+
+const TAX_TYPES: ReadonlySet<string> = new Set(['iva', 'inc', 'icui', 'ibua']);
 
 /** Línea mínima que la derivación necesita. Compatible con `PopCartItem`, `MatchedLineItem` y el DTO. */
 export interface PurchaseLineTaxInput {
-  /** Precio unitario BRUTO (antes de descuento y antes del split de IVA). */
+  /** Precio unitario BRUTO (antes de descuento y antes del split de impuestos). */
   unit_price?: number | null;
   /** Alias de `unit_price` — el carrito lo llama `unit_cost`. */
   unit_cost?: number | null;
   quantity?: number | null;
-  /** PORCENTAJE (19 = 19%), nunca fracción. El escáner emite fracción y la convierte antes. */
+  /** PORCENTAJE (19 = 19%), nunca fracción. Par legacy: se vuelve una fila IVA si no hay `taxes`. */
   tax_rate?: number | null;
+  /** Clasificación del par legacy (default 'iva'). Un valor fuera del kernel cae a 'iva'. */
+  tax_type?: string | null;
   /** Override por línea del modo de cabecera (facturas mixtas). */
   prices_include_tax?: boolean | null;
   /** Descuento propio de la línea en PORCENTAJE. */
   discount_percentage?: number | null;
   /** Descuento propio de la línea en DINERO. Gana sobre el porcentaje. */
   discount_amount?: number | null;
-  /**
-   * QUI-855 — N impuestos de la línea. Cuando tiene elementos REEMPLAZA al
-   * par legacy `tax_rate` en `deriveLineTaxes` (espejo del backend).
-   */
-  taxes?: Array<{
-    tax_rate?: number | null;
-    tax_type?: string | null;
-    is_inclusive?: boolean | null;
-    add_to_cost?: boolean | null;
-    tax_rate_id?: number | null;
-    tax_name?: string | null;
-  }> | null;
+  /** N impuestos de la línea. Cuando tiene elementos REEMPLAZA al par legacy. */
+  taxes?: PopLineTax[] | null;
 }
 
-/** QUI-855 — un impuesto derivado por línea (espejo del backend). */
+/** Un impuesto derivado por línea (montos del kernel). */
 export interface PurchaseDerivedTax {
   tax_rate: number;
-  tax_type: string;
-  is_inclusive: boolean;
-  add_to_cost: boolean;
+  tax_type: PurchaseTaxType;
   tax_rate_id: number | null;
   tax_name: string | null;
+  calc_mode: PurchaseTaxCalcMode;
+  fixed_amount_per_unit: number | null;
+  base_mode: PurchaseTaxBaseMode;
+  sequence: number;
+  is_inclusive: boolean;
+  add_to_cost: boolean;
   taxable_amount: number;
+  /** Monto que dio la fórmula. */
+  computed_amount: number;
+  /** Monto final de la línea (override del proveedor si lo hay). */
   tax_amount: number;
+  override_delta: number;
 }
 
 export interface PurchaseLineTaxResult {
-  /** Precio unitario NETO tras descuento y sin IVA — lo que se persiste como `unit_cost`. */
+  /** Precio unitario NETO tras descuento y sin impuestos incluidos. */
   unit_price_net: number;
   tax_amount_per_unit: number;
-  /** IVA total de la línea. */
+  /** Impuestos totales de la línea. */
   tax_amount: number;
   effective_include: boolean;
   /** Descuento total aplicado a la línea (propio + prorrateo de cabecera), en dinero. */
   discount_total: number;
   /** Bruto de la línea antes de descuento: `unit_price × quantity`. */
   gross_line: number;
-  /** Base gravable de la línea: `unit_price_net × quantity`. */
+  /** Base gravable de la línea. */
   net_line: number;
-  /** Total de la línea: base gravable + IVA. */
+  /** Total de la línea: base gravable + impuestos. */
   total_line: number;
+}
+
+export interface PurchaseLineTaxesResult extends PurchaseLineTaxResult {
+  taxes: PurchaseDerivedTax[];
+  capitalized_per_unit: number;
+  deductible_per_unit: number;
+  /** Σ impuestos que capitalizan al costo. */
+  capitalized_tax_total: number;
+  /** Costo capitalizable de la línea: neto + impuestos al costo. */
+  cost_total: number;
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
+const num = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 /**
- * Espejo de `PurchaseOrdersService.deriveLineTax`.
- *
- * `proratedHeaderDiscount` viaja como argumento explícito —igual que en el
- * backend— para que ningún llamador pueda contarlo dos veces dejándolo también
- * dentro de `discount_amount`.
+ * Entrada de impuestos del kernel a partir de la línea: las filas `taxes[]` si
+ * las hay; si no, UNA fila IVA armada con el `tax_rate` legacy. Tasas negativas
+ * o no finitas se sanean a 0 (el kernel las rechazaría con throw).
+ */
+export function toKernelTaxes(item: PurchaseLineTaxInput): KernelTaxInput[] {
+  if (item.taxes && item.taxes.length > 0) {
+    return item.taxes.map((t) => {
+      const fixed = t.fixed_amount_per_unit;
+      return {
+        tax_type: t.tax_type,
+        tax_rate_id: t.tax_rate_id ?? null,
+        tax_name: t.tax_name ?? null,
+        calc_mode: t.calc_mode,
+        rate: Math.max(0, num(t.tax_rate)),
+        fixed_amount_per_unit:
+          fixed === null || fixed === undefined ? null : Math.max(0, num(fixed)),
+        base_mode: t.base_mode,
+        sequence: t.sequence,
+        is_inclusive: t.is_inclusive,
+        add_to_cost: t.add_to_cost,
+        amount_override:
+          t.amount_override === null || t.amount_override === undefined
+            ? null
+            : Math.max(0, num(t.amount_override)),
+      };
+    });
+  }
+  const legacyType: PurchaseTaxType = TAX_TYPES.has(item.tax_type ?? '')
+    ? (item.tax_type as PurchaseTaxType)
+    : 'iva';
+  return [{ tax_type: legacyType, rate: Math.max(0, num(item.tax_rate)) }];
+}
+
+const EMPTY_KERNEL_LINE = (
+  gross: number,
+  quantity: number,
+): ResolvedPurchaseLine => ({
+  gross_line: gross,
+  net_total: gross,
+  net_unit: quantity > 0 ? gross / quantity : 0,
+  taxes: [],
+  tax_total: 0,
+  capitalized_tax_total: 0,
+  non_capitalized_tax_total: 0,
+  inclusive_tax_total: 0,
+  exclusive_tax_total: 0,
+  line_total: gross,
+  cost_total: gross,
+  iva: null,
+});
+
+/**
+ * Resuelve la línea con el kernel. Cantidad <= 0 o una combinación que el
+ * kernel rechaza (p. ej. IBUA incluido mayor que el bruto) devuelve la línea
+ * SIN impuestos en vez de romper el render del carrito: es un preview y el
+ * backend valida de nuevo al persistir.
+ */
+function resolveWithKernel(
+  item: PurchaseLineTaxInput,
+  effectiveInclude: boolean,
+  unitPrice: number,
+  quantity: number,
+  discountTotal: number,
+): ResolvedPurchaseLine {
+  const rawGross = round2(unitPrice * quantity);
+  if (!(quantity > 0)) return EMPTY_KERNEL_LINE(0, 0);
+  try {
+    return resolvePurchaseLineTaxes({
+      unit_price: unitPrice,
+      quantity,
+      discount_amount: discountTotal,
+      prices_include_tax: effectiveInclude,
+      taxes: toKernelTaxes(item),
+    });
+  } catch {
+    return EMPTY_KERNEL_LINE(
+      Math.max(0, round2(rawGross - discountTotal)),
+      quantity,
+    );
+  }
+}
+
+/**
+ * Deriva una línea (descuento → kernel). `proratedHeaderDiscount` viaja como
+ * argumento explícito para que ningún llamador lo cuente dos veces dejándolo
+ * también dentro de `discount_amount`.
+ */
+export function deriveLineTaxes(
+  item: PurchaseLineTaxInput,
+  header: { prices_include_tax?: boolean | null },
+  proratedHeaderDiscount = 0,
+): PurchaseLineTaxesResult {
+  const unitPrice = num(item.unit_price ?? item.unit_cost);
+  const quantity = num(item.quantity);
+  const effective_include =
+    item.prices_include_tax ?? header.prices_include_tax ?? false;
+  const rawGross = round2(unitPrice * quantity);
+
+  // `discount_amount` gana sobre `discount_percentage`: la cifra en dinero es la
+  // que se persiste y la que lee la contabilidad.
+  const ownDiscount =
+    item.discount_amount != null && num(item.discount_amount) > 0
+      ? num(item.discount_amount)
+      : round2(rawGross * (num(item.discount_percentage) / 100));
+
+  // Un descuento nunca puede volver la línea negativa (costo negativo
+  // envenena la capa FIFO): se topa al bruto.
+  const discount_total = quantity > 0
+    ? Math.min(rawGross, Math.max(0, ownDiscount + num(proratedHeaderDiscount)))
+    : 0;
+
+  const r = resolveWithKernel(
+    item,
+    effective_include,
+    unitPrice,
+    quantity,
+    discount_total,
+  );
+
+  const taxes: PurchaseDerivedTax[] = r.taxes.map((t) => ({
+    tax_rate: t.rate ?? 0,
+    tax_type: t.tax_type,
+    tax_rate_id: t.tax_rate_id,
+    tax_name: t.tax_name,
+    calc_mode: t.calc_mode,
+    fixed_amount_per_unit: t.fixed_amount_per_unit,
+    base_mode: t.base_mode,
+    sequence: t.sequence,
+    is_inclusive: t.is_inclusive,
+    add_to_cost: t.add_to_cost,
+    taxable_amount: t.taxable_amount,
+    computed_amount: t.computed_amount,
+    tax_amount: t.tax_amount,
+    override_delta: t.override_delta,
+  }));
+
+  const perUnit = (n: number): number => (quantity > 0 ? n / quantity : 0);
+  return {
+    unit_price_net: quantity > 0 ? r.net_unit : unitPrice,
+    tax_amount_per_unit: perUnit(r.tax_total),
+    tax_amount: r.tax_total,
+    effective_include,
+    discount_total: quantity > 0 ? round2(discount_total) : 0,
+    gross_line: rawGross,
+    net_line: r.net_total,
+    total_line: r.line_total,
+    taxes,
+    capitalized_per_unit: perUnit(r.capitalized_tax_total),
+    deductible_per_unit: perUnit(r.non_capitalized_tax_total),
+    capitalized_tax_total: r.capitalized_tax_total,
+    cost_total: r.cost_total,
+  };
+}
+
+/**
+ * Deriva una línea con el par legacy o con `taxes[]` (misma ruta: el kernel).
+ * Se conserva con este nombre para los consumidores que sólo necesitan el
+ * resultado base (escáner de facturas, carrito).
  */
 export function deriveLineTax(
   item: PurchaseLineTaxInput,
   header: { prices_include_tax?: boolean | null },
   proratedHeaderDiscount = 0,
 ): PurchaseLineTaxResult {
-  const gross = Number(item.unit_price ?? item.unit_cost ?? 0) || 0;
-  const quantity = Number(item.quantity ?? 0) || 0;
-  const r = (Number(item.tax_rate ?? 0) || 0) / 100;
-  const effective_include =
-    item.prices_include_tax ?? header.prices_include_tax ?? false;
-
-  // `discount_amount` gana sobre `discount_percentage`: el usuario puede teclear
-  // cualquiera de los dos, pero la cifra en dinero es la que se persiste y la que
-  // lee la contabilidad. Re-derivarla del porcentaje daría otro número el día que
-  // cambie el precio.
-  const ownDiscount =
-    item.discount_amount != null && Number(item.discount_amount) > 0
-      ? Number(item.discount_amount)
-      : gross * quantity * ((Number(item.discount_percentage ?? 0) || 0) / 100);
-
-  const discount_total = Math.max(
-    0,
-    ownDiscount + (Number(proratedHeaderDiscount) || 0),
-  );
-
-  // Un descuento nunca puede volver la línea negativa: un descuento mayor que la
-  // línea es un error de datos, y un costo negativo envenena la capa FIFO.
-  const discountPerUnit =
-    quantity > 0 ? Math.min(discount_total / quantity, gross) : 0;
-  const grossAfterDiscount = gross - discountPerUnit;
-
-  let unit_price_net: number;
-  let tax_amount_per_unit: number;
-  if (!(r > 0)) {
-    // Sin tasa (o tasa inválida) → línea sin impuesto, el costo queda como se tecleó.
-    unit_price_net = grossAfterDiscount;
-    tax_amount_per_unit = 0;
-  } else if (effective_include) {
-    // El precio ya trae el IVA dentro: se extrae para obtener el costo neto.
-    unit_price_net = grossAfterDiscount / (1 + r);
-    tax_amount_per_unit = grossAfterDiscount - unit_price_net;
-  } else {
-    // El IVA se suma encima: el precio tecleado ya es neto.
-    unit_price_net = grossAfterDiscount;
-    tax_amount_per_unit = grossAfterDiscount * r;
-  }
-
-  const net_line = unit_price_net * quantity;
-  const tax_amount = tax_amount_per_unit * quantity;
-
-  return {
-    unit_price_net,
-    tax_amount_per_unit,
-    tax_amount,
-    effective_include,
-    discount_total: discountPerUnit * quantity,
-    gross_line: gross * quantity,
-    net_line,
-    total_line: net_line + tax_amount,
-  };
+  return deriveLineTaxes(item, header, proratedHeaderDiscount);
 }
 
 /**
@@ -196,100 +315,6 @@ export function prorateHeaderDiscount(
   return shares;
 }
 
-/**
- * QUI-855 — espejo de `PurchaseOrdersService.deriveLineTaxes`.
- *
- * Mismo contrato de descuento/base que `deriveLineTax`, pero itera sobre
- * `item.taxes` cuando tiene elementos; si no, normaliza el par legacy
- * `tax_rate` a una sola entrada (números BYTE-IDÉNTICOS al legacy).
- *
- * `add_to_cost` capitaliza al costo (IBUA/ICUI) sin importar el modo include.
- */
-export function deriveLineTaxes(
-  item: PurchaseLineTaxInput,
-  header: { prices_include_tax?: boolean | null },
-  proratedHeaderDiscount = 0,
-): PurchaseLineTaxResult & {
-  taxes: PurchaseDerivedTax[];
-  capitalized_per_unit: number;
-  deductible_per_unit: number;
-} {
-  const gross = Number(item.unit_price ?? item.unit_cost ?? 0) || 0;
-  const quantity = Number(item.quantity ?? 0) || 0;
-  const effective_include =
-    item.prices_include_tax ?? header.prices_include_tax ?? false;
-
-  const ownDiscount =
-    item.discount_amount != null && Number(item.discount_amount) > 0
-      ? Number(item.discount_amount)
-      : gross * quantity * ((Number(item.discount_percentage ?? 0) || 0) / 100);
-  const discount_total = Math.max(
-    0,
-    ownDiscount + (Number(proratedHeaderDiscount) || 0),
-  );
-  const discountPerUnit =
-    quantity > 0 ? Math.min(discount_total / quantity, gross) : 0;
-  const grossAfterDiscount = gross - discountPerUnit;
-
-  const entries =
-    item.taxes && item.taxes.length > 0
-      ? item.taxes
-      : [
-          {
-            tax_rate: (item as PurchaseLineTaxInput).tax_rate ?? 0,
-            tax_type: undefined,
-            is_inclusive: undefined,
-            add_to_cost: false,
-          },
-        ];
-
-  let inclusivePortions = 0;
-  let taxTotal = 0;
-  let capitalizedPerUnit = 0;
-  let deductiblePerUnit = 0;
-  const taxes: PurchaseDerivedTax[] = entries.map((t) => {
-    const r = (Number(t.tax_rate ?? 0) || 0) / 100;
-    const include = t.is_inclusive ?? effective_include;
-    const portion =
-      r > 0
-        ? include
-          ? grossAfterDiscount - grossAfterDiscount / (1 + r)
-          : grossAfterDiscount * r
-        : 0;
-    if (include) inclusivePortions += portion;
-    const amount = portion * quantity;
-    taxTotal += amount;
-    if (t.add_to_cost) capitalizedPerUnit += portion;
-    else deductiblePerUnit += portion;
-    return {
-      tax_rate: Number(t.tax_rate ?? 0) || 0,
-      tax_type: t.tax_type ?? 'iva',
-      is_inclusive: include,
-      add_to_cost: !!t.add_to_cost,
-      tax_rate_id: t.tax_rate_id ?? null,
-      tax_name: t.tax_name ?? null,
-      taxable_amount: grossAfterDiscount * quantity,
-      tax_amount: amount,
-    };
-  });
-
-  const unit_price_net = grossAfterDiscount - inclusivePortions;
-  const net_line = unit_price_net * quantity;
-  return {
-    unit_price_net,
-    tax_amount_per_unit: quantity > 0 ? taxTotal / quantity : 0,
-    tax_amount: taxTotal,
-    effective_include,
-    discount_total: discountPerUnit * quantity,
-    gross_line: gross * quantity,
-    net_line,
-    total_line: net_line + taxTotal,
-    taxes,
-    capitalized_per_unit: capitalizedPerUnit,
-    deductible_per_unit: deductiblePerUnit,
-  };
-}
-
 export interface PurchaseTotals {
   /** Σ bruto antes de cualquier descuento. */
   gross_subtotal: number;
@@ -328,12 +353,7 @@ export function derivePurchaseTotals(
   let discount_amount = 0;
 
   items.forEach((item, i) => {
-    // QUI-855: con `taxes` no vacío deriva multi-impuesto; si no, el legacy
-    // (números idénticos a `deriveLineTax`).
-    const d =
-      item.taxes && item.taxes.length > 0
-        ? deriveLineTaxes(item, header, shares[i])
-        : deriveLineTax(item, header, shares[i]);
+    const d = deriveLineTaxes(item, header, shares[i]);
     gross_subtotal += d.gross_line;
     subtotal += d.net_line;
     tax_amount += d.tax_amount;
