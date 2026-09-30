@@ -1,6 +1,7 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { ErrorCodes } from '../../../common/errors/error-codes';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { DocumentReceptionHttpService } from './document-reception-http.service';
@@ -54,9 +55,11 @@ function harness() {
     findMany: jest.fn().mockResolvedValue([]),
     count: jest.fn().mockResolvedValue(0),
   };
+  const auditDelegate = { create: jest.fn().mockResolvedValue({ id: 7 }) };
   const prisma: any = {
     document_reception_connections: delegate,
     document_reception_runs: runDelegate,
+    audit_logs: auditDelegate,
     $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(prisma)),
   };
   const receivedDocuments = { assertContext: jest.fn().mockResolvedValue(undefined) };
@@ -68,7 +71,7 @@ function harness() {
     encryption as unknown as EncryptionService,
     http as unknown as DocumentReceptionHttpService,
   );
-  return { service, prisma, delegate, runDelegate, receivedDocuments, encryption, http };
+  return { service, prisma, delegate, runDelegate, auditDelegate, receivedDocuments, encryption, http };
 }
 
 describe('DocumentReceptionConnectionsService', () => {
@@ -98,6 +101,41 @@ describe('DocumentReceptionConnectionsService', () => {
     expect(result).toMatchObject({ id: 41, name: 'Supplier', store_id: 21, accounting_entity_id: 8, has_secret: true, endpoint: 'https://supplier.example.com/api/inbox' });
     expect(result).not.toHaveProperty('public_token');
     expect(h.encryption.decrypt).not.toHaveBeenCalled();
+    expect(h.prisma.$transaction).toHaveBeenCalledTimes(1);
+    const audit = h.auditDelegate.create.mock.calls[0][0].data;
+    expect(audit).toMatchObject({
+      user_id: 55, store_id: 21, organization_id: 3, action: 'CREATE',
+      resource: 'document_reception_connections', resource_id: 41,
+      new_values: {
+        version: 1, connection_type: 'api_poll', enabled: true, poll_interval_minutes: 30,
+        has_secret: true, store_id: 21, accounting_entity_id: 8, name: 'Supplier',
+      },
+    });
+    expect(audit.old_values).toBeUndefined();
+    const serializedAudit = JSON.stringify(audit);
+    for (const privateValue of ['clear-bearer-secret', 'sealed:clear-bearer-secret', 'supplier.example.com', 'opaque-cursor-secret', 'never-return-this']) {
+      expect(serializedAudit).not.toContain(privateValue);
+    }
+  });
+
+  it('writes audit identity from explicit context and bounds request_id from ALS storage', async () => {
+    const h = harness();
+    await RequestContextService.runIsolated({
+      is_super_admin: false, is_owner: false, user_id: 999, organization_id: 999, store_id: 999,
+      request_id: 'request-from-als',
+    }, () => h.service.create(orgStoreContext, {
+      name: 'Inbox', connection_type: 'webhook', secret: 'hmac-secret',
+    } as any));
+    expect(h.auditDelegate.create.mock.calls[0][0].data).toMatchObject({
+      user_id: 55, organization_id: 3, store_id: 21, request_id: 'request-from-als',
+    });
+
+    for (const requestId of [undefined, 'x'.repeat(101)]) {
+      const h2 = harness();
+      await RequestContextService.runIsolated({ is_super_admin: false, is_owner: false, request_id: requestId }, () =>
+        h2.service.create(orgStoreContext, { name: 'Inbox', connection_type: 'webhook', secret: 'hmac-secret' } as any));
+      expect(h2.auditDelegate.create.mock.calls[0][0].data.request_id).toBeNull();
+    }
   });
 
   it('requires a selected operational store for creation, even under organization fiscal scope', async () => {
@@ -190,11 +228,13 @@ describe('DocumentReceptionConnectionsService', () => {
     stale.delegate.findFirst.mockResolvedValueOnce(connectionRecord({ version: 4 }));
     await expect(stale.service.update(orgStoreContext, 41, { expected_version: 3, name: 'new' } as any)).rejects.toBeInstanceOf(ConflictException);
     expect(stale.delegate.updateMany).not.toHaveBeenCalled();
+    expect(stale.auditDelegate.create).not.toHaveBeenCalled();
 
     const leased = harness();
     leased.delegate.findFirst.mockResolvedValueOnce(connectionRecord({ lease_token: 'held', lease_expires_at: new Date(Date.now() + 60_000) }));
     await expect(leased.service.update(orgStoreContext, 41, { expected_version: 1, name: 'new' } as any)).rejects.toBeInstanceOf(ConflictException);
     expect(leased.delegate.updateMany).not.toHaveBeenCalled();
+    expect(leased.auditDelegate.create).not.toHaveBeenCalled();
 
     const noActor = harness();
     await expect(noActor.service.update({ ...orgStoreContext, actor_id: undefined }, 41, { expected_version: 1, name: 'new' } as any))
@@ -218,6 +258,16 @@ describe('DocumentReceptionConnectionsService', () => {
     expect(JSON.stringify(result)).not.toContain('rotated-secret');
     expect(JSON.stringify(result)).not.toContain('sealed:rotated-secret');
     expect(JSON.stringify(result)).not.toContain('opaque-cursor-secret');
+    const audit = h.auditDelegate.create.mock.calls[0][0].data;
+    expect(audit).toMatchObject({
+      action: 'UPDATE', resource: 'document_reception_connections',
+      old_values: { version: 1, connection_type: 'api_poll', has_secret: true, name: 'Supplier inbox' },
+      new_values: { version: 2, connection_type: 'api_poll', has_secret: true, name: 'Supplier inbox' },
+      metadata: { credential_rotated: true, endpoint_changed: false },
+    });
+    expect(JSON.stringify(audit)).not.toContain('rotated-secret');
+    expect(JSON.stringify(audit)).not.toContain('ciphertext-not-returned');
+    expect(JSON.stringify(audit)).not.toContain('opaque-cursor-secret');
   });
 
   it('preserves cursor and next sync on name/interval changes; null secret does not clear credentials', async () => {
@@ -236,6 +286,26 @@ describe('DocumentReceptionConnectionsService', () => {
     nullSecret.delegate.findFirst.mockResolvedValueOnce(connectionRecord());
     await expect(nullSecret.service.update(orgStoreContext, 41, { expected_version: 1, secret: null } as any)).rejects.toBeInstanceOf(BadRequestException);
     expect(nullSecret.delegate.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('fails config mutations with a generic 503 when durable audit insertion fails', async () => {
+    const create = harness();
+    create.auditDelegate.create.mockRejectedValueOnce(new Error('secret endpoint and credential in database error'));
+    const createFailure = await create.service.create(orgStoreContext, {
+      name: 'Inbox', connection_type: 'webhook', secret: 'private-hmac-secret',
+    } as any).catch((error) => error);
+    expect(createFailure).toBeInstanceOf(ServiceUnavailableException);
+    expect(createFailure.message).toBe('No fue posible registrar de forma segura el cambio de configuración.');
+    expect(createFailure.message).not.toContain('credential');
+
+    const update = harness();
+    update.delegate.findFirst
+      .mockResolvedValueOnce(connectionRecord())
+      .mockResolvedValueOnce(connectionRecord({ version: 2, name: 'Renamed' }));
+    update.auditDelegate.create.mockRejectedValueOnce(new Error('private provider details'));
+    const updateFailure = await update.service.update(orgStoreContext, 41, { expected_version: 1, name: 'Renamed' } as any).catch((error) => error);
+    expect(updateFailure).toBeInstanceOf(ServiceUnavailableException);
+    expect(updateFailure.message).not.toContain('private provider details');
   });
 
   it('returns only sanitized run summaries and scopes run lookup through the parent connection', async () => {

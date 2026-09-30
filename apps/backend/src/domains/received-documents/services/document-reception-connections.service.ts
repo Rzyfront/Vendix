@@ -1,5 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { ErrorCodes } from '../../../common/errors/error-codes';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
@@ -103,22 +104,29 @@ export class DocumentReceptionConnectionsService {
 
     const now = new Date();
     const encryptedSecret = secret ? this.encryption.encrypt(secret) : null;
-    const created = await this.prisma.document_reception_connections.create({
-      data: {
-        organization_id: ctx.organization_id,
-        store_id: ctx.store_id!,
-        accounting_entity_id: ctx.accounting_entity_id,
-        created_by: ctx.actor_id ?? null,
-        public_token: this.newPublicToken(),
-        name,
-        connection_type: type,
-        enabled,
-        endpoint,
-        encrypted_secret: encryptedSecret,
-        poll_interval_minutes: pollInterval,
-        cursor: null,
-        next_sync_at: type === 'api_poll' && enabled ? now : null,
-      },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const connection = await tx.document_reception_connections.create({
+        data: {
+          organization_id: ctx.organization_id,
+          store_id: ctx.store_id!,
+          accounting_entity_id: ctx.accounting_entity_id,
+          created_by: ctx.actor_id!,
+          public_token: this.newPublicToken(),
+          name,
+          connection_type: type,
+          enabled,
+          endpoint,
+          encrypted_secret: encryptedSecret,
+          poll_interval_minutes: pollInterval,
+          cursor: null,
+          next_sync_at: type === 'api_poll' && enabled ? now : null,
+        },
+      });
+      await this.writeAudit(tx, ctx, 'CREATE', connection, null, {
+        credential_rotated: false,
+        endpoint_changed: false,
+      });
+      return connection;
     });
     return this.toView(created);
   }
@@ -194,6 +202,10 @@ export class DocumentReceptionConnectionsService {
       }
       const fresh = await tx.document_reception_connections.findFirst({ where: { id, ...this.connectionWhere(ctx) } });
       if (!fresh) throw new NotFoundException('Conexión de recepción no encontrada.');
+      await this.writeAudit(tx, ctx, 'UPDATE', fresh, existing, {
+        credential_rotated: rotateSecret,
+        endpoint_changed: endpointChanged,
+      });
       return this.toView(fresh);
     });
   }
@@ -202,6 +214,48 @@ export class DocumentReceptionConnectionsService {
     await this.receivedDocuments.assertContext(ctx);
     this.assertPositiveId(ctx.store_id, 'store_id');
     this.assertPositiveId(ctx.actor_id, 'actor_id');
+  }
+
+  private async writeAudit(
+    tx: Pick<GlobalPrismaService, 'audit_logs'>,
+    ctx: ReceivedDocumentsContext,
+    action: 'CREATE' | 'UPDATE',
+    current: ConnectionRecord,
+    previous: ConnectionRecord | null,
+    metadata: { credential_rotated: boolean; endpoint_changed: boolean },
+  ): Promise<void> {
+    const requestId = RequestContextService.asyncLocalStorage.getStore()?.request_id;
+    try {
+      await tx.audit_logs.create({
+        data: {
+          user_id: ctx.actor_id!,
+          store_id: ctx.store_id!,
+          organization_id: ctx.organization_id,
+          action,
+          resource: 'document_reception_connections',
+          resource_id: current.id,
+          old_values: previous ? this.auditSnapshot(previous) : undefined,
+          new_values: this.auditSnapshot(current),
+          metadata,
+          request_id: typeof requestId === 'string' && requestId.length >= 1 && requestId.length <= 100 ? requestId : null,
+        },
+      });
+    } catch {
+      throw new ServiceUnavailableException('No fue posible registrar de forma segura el cambio de configuración.');
+    }
+  }
+
+  private auditSnapshot(record: ConnectionRecord) {
+    return {
+      version: record.version,
+      connection_type: record.connection_type,
+      enabled: record.enabled,
+      poll_interval_minutes: record.poll_interval_minutes,
+      has_secret: !!record.encrypted_secret,
+      store_id: record.store_id,
+      accounting_entity_id: record.accounting_entity_id,
+      name: record.name,
+    };
   }
 
   private connectionWhere(ctx: ReceivedDocumentsContext) {
