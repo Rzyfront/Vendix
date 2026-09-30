@@ -157,3 +157,7 @@ En un sondeo API, `next_cursor: null` significa fin de páginas, **no** escribir
 ### D40 — Reintentos acotados y recuperación del outbox
 
 La base de datos es la fuente durable de ejecuciones; Redis sólo transporta `run_id`. BullMQ hace máximo tres intentos con backoff exponencial sobre el **mismo run**. El scheduler recupera pendientes/en cola y procesos cuyo lease expiró, además de sondeos API vencidos. No vuelve a crear indefinidamente trabajos fallidos/parciales agotados: quedan visibles para reintento autorizado del mismo run o resolución administrativa. Esto evita tráfico sin límite y posibles cobros OCR reiterados; jamás se abre un nuevo sondeo API mientras uno anterior siga sin resolver.
+
+### D41 — Acuse HTTP tras persistencia, independiente de Redis
+
+El webhook público POST `/api/public/received-documents/webhook/:publicToken` recibe los bytes originales y cabeceras `x-vendix-timestamp`, `x-vendix-event-id` y `x-vendix-signature`; sólo HMAC y validaciones previas autorizan persistir. Tras el commit durable del run se responde 202 incluso si encolar en Redis falla, indicando `queued:false`; el scheduler recupera el outbox pendiente. Un disparo manual recién creado sigue la misma semántica. En cambio, el reintento explícito de un run agotado fallido/parcial devuelve error seguro si Redis falla, porque el scheduler D40 no lo reencola automáticamente. Ninguna respuesta devuelve secreto, token público, firma ni contenido.
