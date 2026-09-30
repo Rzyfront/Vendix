@@ -213,6 +213,7 @@ export class ReportsShellComponent {
     // Purchases
     'purchase-summary': '/admin/analytics/purchases/summary',
     'purchase-by-supplier': '/admin/analytics/purchases/by-supplier',
+    'purchase-trends': '/admin/analytics/purchases/trends',
     'payable-aging': '/admin/analytics/purchases/payable-aging',
     // Reviews
     'reviews-summary': '/admin/analytics/reviews/summary',

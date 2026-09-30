@@ -236,6 +236,16 @@ export class KdsTicketCardComponent {
     return `${first} ${last}`.trim();
   });
 
+  /**
+   * QUI-887 — nota global de la orden (`orders.notes`): alergias generales,
+   * entrega, preparación. Trimmeada; `''` = sin nota y el @if del template
+   * no renderiza nada (sin bloque residual ni espacio en blanco).
+   * Complementa a las notas por plato (`items[].notes`), no las reemplaza.
+   */
+  readonly orderNote = computed<string>(
+    () => this.ticket()?.order?.notes?.trim() ?? '',
+  );
+
   readonly statusBadgeVariant = computed<'success' | 'neutral' | 'warning' | 'error' | 'info' | 'primary'>(() => {
     switch (this.ticket().status) {
       case 'pending':

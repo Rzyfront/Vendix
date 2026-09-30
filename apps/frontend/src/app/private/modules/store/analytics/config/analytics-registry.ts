@@ -137,7 +137,7 @@ export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
 ];
 
 // ─────────────────────────────────────────────
-// Views (34 total)
+// Views (35 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_VIEWS: AnalyticsView[] = [
@@ -313,7 +313,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'coins',
   },
 
-  // Purchases (2)
+  // Purchases (4)
   {
     key: 'purchases_summary',
     title: 'Resumen de Compras',
@@ -331,6 +331,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/purchases/by-supplier',
     category: 'purchases',
     icon: 'truck',
+  },
+  {
+    key: 'purchases_trends',
+    title: 'Tendencias de Compra',
+    description: 'Evolución temporal del gasto en proveedores y órdenes',
+    detailedDescription: 'Analiza la evolución temporal de compras, volumen de órdenes, ticket promedio y unidades recibidas por período.',
+    route: '/admin/analytics/purchases/trends',
+    category: 'purchases',
+    icon: 'trending-up',
   },
   {
     // QUI-542: Cuentas por pagar a proveedores por edades de mora
@@ -383,7 +392,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'hand-coins',
   },
 
-  // Reviews (1)
+  // Reviews (2)
   {
     key: 'reviews_summary',
     title: 'Resumen de Reseñas',
@@ -392,6 +401,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/reviews/summary',
     category: 'reviews',
     icon: 'message-square',
+  },
+  {
+    key: 'reviews_by_product',
+    title: 'Reseñas por Producto',
+    description: 'Promedio y distribución de estrellas por producto',
+    detailedDescription: 'Calificación promedio, distribución 1-5 estrellas, verificadas y pendientes por producto.',
+    route: '/admin/analytics/reviews/by-product',
+    category: 'reviews',
+    icon: 'star',
   },
 
   // Financial (3)

@@ -6,6 +6,8 @@ import { ReportViewerComponent } from '../../components/report-viewer/report-vie
 import { ReportsActions } from '../../state/reports.actions';
 import { ReportsDataService } from '../../services/reports-data.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
+import { getDefaultDateRange } from '../../state/reports.state';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
@@ -39,6 +41,7 @@ import {
       [totalPages]="totalPages()"
       [totalItems]="totalItems()"
       [itemsPerPage]="itemsPerPage()"
+      [dateRange]="dateRange()"
       (dateRangeChange)="onDateRangeChange($event)"
       (pageChange)="onPageChange($event)"
       (exportClick)="onExport()"
@@ -52,6 +55,7 @@ export class GenericReportPageComponent {
   private route = inject(ActivatedRoute);
   private reportsDataService = inject(ReportsDataService);
   private toast = inject(ToastService);
+  private dateRangeSync = inject(DateRangeSyncService);
 
   readonly report = toSignal(this.store.select(selectSelectedReport));
   readonly data = toSignal(this.store.select(selectReportData));
@@ -62,7 +66,7 @@ export class GenericReportPageComponent {
   readonly totalPages = toSignal(this.store.select(selectTotalPages), { initialValue: 0 });
   readonly totalItems = toSignal(this.store.select(selectTotalItems), { initialValue: 0 });
   readonly itemsPerPage = toSignal(this.store.select(selectItemsPerPage), { initialValue: 10 });
-  private readonly dateRange = toSignal(this.store.select(selectDateRange));
+  readonly dateRange = toSignal(this.store.select(selectDateRange), { initialValue: getDefaultDateRange() });
 
   private readonly vexiHosts = inject(VexiUiHostRegistry);
   private readonly destroyRef = inject(DestroyRef);
@@ -193,6 +197,7 @@ export class GenericReportPageComponent {
   };
 
   onDateRangeChange(dateRange: any): void {
+    this.dateRangeSync.setDateRange(dateRange);
     this.store.dispatch(ReportsActions.setDateRange({ dateRange }));
     this.store.dispatch(ReportsActions.loadReportData());
   }

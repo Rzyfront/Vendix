@@ -3,23 +3,111 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 
 /**
- * Mock shape for StorePrismaService. Only the delegates touched by
- * ReviewsAnalyticsService are declared; everything else is `any` so the
- * service constructor accepts it. `reviews` is mocked with the raw delegation
- * methods; `$queryRaw` is shared between the scoped client and `withoutScope()`.
+ * Mock shape for StorePrismaService. `reviews` carries both the raw delegation
+ * methods (groupBy/aggregate/count) used by getReviewsSummary and findMany used
+ * by getReviewsByProduct; `$queryRaw` is shared between the scoped client and
+ * `withoutScope()` so the trend can be stubbed on the same function.
  */
 type MockStorePrismaService = {
-  store_settings: { findFirst: jest.Mock };
   reviews: {
+    findMany: jest.Mock;
     groupBy: jest.Mock;
     aggregate: jest.Mock;
     count: jest.Mock;
   };
+  store_settings: { findFirst: jest.Mock };
   $queryRaw: jest.Mock;
   withoutScope: jest.Mock;
 } & Partial<StorePrismaService>;
 
-describe('ReviewsAnalyticsService (QUI-629)', () => {
+function makeReview(overrides: {
+  id: number;
+  product_id: number;
+  name: string;
+  sku: string;
+  rating: number;
+  verified_purchase?: boolean;
+  state?: string;
+  created_at?: Date;
+}) {
+  return {
+    id: overrides.id,
+    product_id: overrides.product_id,
+    rating: overrides.rating,
+    verified_purchase: overrides.verified_purchase ?? false,
+    state: overrides.state ?? 'approved',
+    created_at: overrides.created_at ?? new Date('2026-09-01T15:00:00.000Z'),
+    products: { name: overrides.name, sku: overrides.sku },
+  };
+}
+
+describe('ReviewsAnalyticsService.getReviewsByProduct', () => {
+  let prisma: MockStorePrismaService;
+  let service: ReviewsAnalyticsService;
+
+  beforeEach(() => {
+    prisma = {
+      reviews: {
+        findMany: jest.fn(),
+        groupBy: jest.fn(),
+        aggregate: jest.fn(),
+        count: jest.fn(),
+      },
+      store_settings: { findFirst: jest.fn() },
+      $queryRaw: jest.fn(),
+      withoutScope: jest.fn(),
+    } as MockStorePrismaService;
+
+    // Sin timezone en tienda -> DEFAULT_STORE_TIMEZONE ('America/Bogota').
+    prisma.store_settings.findFirst.mockResolvedValue(null);
+    const queryRawMock = prisma.$queryRaw;
+    prisma.withoutScope.mockReturnValue({ $queryRaw: queryRawMock });
+
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 3, is_super_admin: false, is_owner: false });
+
+    service = new ReviewsAnalyticsService(prisma as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('agrupa por producto con promedio a 1 decimal y distribución de estrellas', async () => {
+    prisma.reviews.findMany.mockResolvedValue([
+      makeReview({ id: 1, product_id: 10, name: 'Café', sku: 'CAF-1', rating: 5, verified_purchase: true }),
+      makeReview({ id: 2, product_id: 10, name: 'Café', sku: 'CAF-1', rating: 4 }),
+      makeReview({ id: 3, product_id: 20, name: 'Té', sku: 'TE-1', rating: 3, state: 'pending' }),
+    ]);
+
+    const rows = await service.getReviewsByProduct({} as any);
+
+    expect(rows).toHaveLength(2);
+    const cafe = rows.find((r) => r.product_id === 10)!;
+    expect(cafe.total_reviews).toBe(2);
+    expect(cafe.average_rating).toBe(4.5);
+    expect(cafe.stars_5).toBe(1);
+    expect(cafe.stars_4).toBe(1);
+    expect(cafe.verified_count).toBe(1);
+    expect(cafe.pending_count).toBe(0);
+    const te = rows.find((r) => r.product_id === 20)!;
+    expect(te.pending_count).toBe(1);
+    expect(te.last_review_date).toBeInstanceOf(Date);
+  });
+
+  it('devuelve arreglo vacío sin reseñas en el rango', async () => {
+    prisma.reviews.findMany.mockResolvedValue([]);
+    await expect(service.getReviewsByProduct({} as any)).resolves.toEqual([]);
+  });
+
+  it('exige contexto de tienda', async () => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(undefined as any);
+    await expect(service.getReviewsByProduct({} as any)).rejects.toThrow();
+  });
+});
+
+describe('ReviewsAnalyticsService summary + trend (QUI-629)', () => {
   let service: ReviewsAnalyticsService;
   let prisma: MockStorePrismaService;
 
@@ -29,18 +117,22 @@ describe('ReviewsAnalyticsService (QUI-629)', () => {
     jest.clearAllMocks();
 
     prisma = {
-      store_settings: { findFirst: jest.fn() },
       reviews: {
+        findMany: jest.fn(),
         groupBy: jest.fn(),
         aggregate: jest.fn(),
         count: jest.fn(),
       },
+      store_settings: { findFirst: jest.fn() },
       $queryRaw: jest.fn(),
       withoutScope: jest.fn(),
     } as MockStorePrismaService;
 
     prisma.store_settings.findFirst.mockResolvedValue(null);
 
+    // Share the same $queryRaw mock across `prisma.$queryRaw` and the
+    // `withoutScope()` client. Tests set per-call responses via
+    // mockResolvedValueOnce on the shared function.
     const queryRawMock = prisma.$queryRaw;
     prisma.withoutScope.mockReturnValue({ $queryRaw: queryRawMock });
 

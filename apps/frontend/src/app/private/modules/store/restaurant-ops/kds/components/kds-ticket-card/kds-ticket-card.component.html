@@ -33,6 +33,19 @@
     </div>
   </header>
 
+  <!-- QUI-887 — nota global de la orden. Bloque propio bajo el header (no
+       dentro de un plato) con borde izquierdo distinto al amber de notas por
+       ítem, para que no se confundan. Solo renderiza con nota no vacía. -->
+  @if (orderNote()) {
+    <div class="kds-card__order-note" role="note" [attr.title]="'Nota de la orden: ' + orderNote()">
+      <app-icon name="sticky-note" [size]="14" />
+      <div>
+        <span class="kds-card__order-note-label">Nota de la orden</span>
+        <span>{{ orderNote() }}</span>
+      </div>
+    </div>
+  }
+
   <!-- Status + elapsed -->
   <div class="kds-card__row">
     <app-badge

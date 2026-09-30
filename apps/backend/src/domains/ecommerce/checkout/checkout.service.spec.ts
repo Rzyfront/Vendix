@@ -1138,14 +1138,48 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(capturedOrderData.shipping_method_id).toBeNull();
       expect(capturedOrderData.shipping_rate_id).toBeNull();
       expect(capturedOrderData.state).toBe('pending_payment');
-      // Nota staff-only sin migración (columna `notes`, existente).
-      expect(capturedOrderData.notes).toEqual(
+      // Aviso operativo staff-only en `internal_notes`; `notes` queda libre
+      // para la observación del comprador (el KDS la lee de ahí).
+      expect(capturedOrderData.internal_notes).toEqual(
         expect.stringContaining('envío pendiente de asignar'),
       );
+      expect(capturedOrderData.notes).toBeUndefined();
       expect(prisma.payments.create).not.toHaveBeenCalled();
       expect(createInvoiceSpy).not.toHaveBeenCalled();
       expect(result.channel).toBe('whatsapp');
       expect(result.payment_id).toBeNull();
+    });
+
+    it('con envío pendiente y observación: notes lleva solo la observación e internal_notes solo el aviso (sin duplicado)', async () => {
+      mockWhatsappCheckoutEnabled();
+      let capturedOrderData: any;
+      prisma.orders.create.mockImplementation(({ data }: any) => {
+        capturedOrderData = data;
+        return Promise.resolve({
+          id: 2,
+          store_id: STORE_ID,
+          order_number: data.order_number,
+          grand_total: 10000,
+          currency: data.currency,
+          state: data.state,
+          order_items: [],
+        });
+      });
+
+      await service.checkout(
+        baseDto({ notes: 'Timbre dos veces, por favor' }) as any,
+      );
+
+      // La observación va a la columna visible (KDS la muestra como Nota).
+      expect(capturedOrderData.notes).toBe('Timbre dos veces, por favor');
+      // El aviso operativo no arrastra la observación: el detalle no muestra
+      // el mismo texto en Nota y en Staff (re-review 867, red flag 1).
+      expect(capturedOrderData.internal_notes).toEqual(
+        expect.stringContaining('envío pendiente de asignar'),
+      );
+      expect(capturedOrderData.internal_notes).not.toEqual(
+        expect.stringContaining('Timbre dos veces'),
+      );
     });
 
     it("rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si channel no es 'whatsapp'", async () => {
