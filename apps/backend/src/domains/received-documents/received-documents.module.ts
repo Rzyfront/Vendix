@@ -24,6 +24,7 @@ import { DocumentReceptionSyncQueueService } from './services/document-reception
 import { DocumentReceptionSyncProcessor } from './services/document-reception-sync.processor';
 import { DocumentReceptionSyncSchedulerService } from './services/document-reception-sync-scheduler.service';
 import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
+import { DocumentReceptionRunResolutionService } from './services/document-reception-run-resolution.service';
 import { PublicDocumentReceptionWebhookController } from './public-document-reception-webhook.controller';
 
 /** Shared reception pipeline; tenant-facing controllers live in each invoicing module. */
@@ -57,6 +58,7 @@ import { PublicDocumentReceptionWebhookController } from './public-document-rece
     DocumentReceptionSyncProcessor,
     DocumentReceptionSyncSchedulerService,
     DocumentReceptionManualSyncService,
+    DocumentReceptionRunResolutionService,
   ],
   exports: [
     ReceivedDocumentsContextService,
@@ -64,6 +66,7 @@ import { PublicDocumentReceptionWebhookController } from './public-document-rece
     ReceivedDocumentScanQueueService,
     DocumentReceptionConnectionsService,
     DocumentReceptionManualSyncService,
+    DocumentReceptionRunResolutionService,
   ],
 })
 export class ReceivedDocumentsModule {}

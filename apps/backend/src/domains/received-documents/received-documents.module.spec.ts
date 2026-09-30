@@ -10,6 +10,7 @@ import { DocumentReceptionSyncQueueService } from './services/document-reception
 import { DocumentReceptionSyncProcessor } from './services/document-reception-sync.processor';
 import { DocumentReceptionSyncSchedulerService } from './services/document-reception-sync-scheduler.service';
 import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
+import { DocumentReceptionRunResolutionService } from './services/document-reception-run-resolution.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
@@ -45,6 +46,7 @@ describe('ReceivedDocumentsModule pipeline wiring', () => {
       DocumentReceptionSyncProcessor,
       DocumentReceptionSyncSchedulerService,
       DocumentReceptionManualSyncService,
+      DocumentReceptionRunResolutionService,
     ];
     const tokens = providers.map((provider) => typeof provider === 'function' ? provider : provider?.provide);
 
@@ -54,14 +56,16 @@ describe('ReceivedDocumentsModule pipeline wiring', () => {
     expect(new Set(tokens).size).toBe(tokens.length);
   });
 
-  it('exports manual sync to the store and organization connection controllers only through the shared module', () => {
+  it('exports connection command services to the store and organization controllers through the shared module', () => {
     expect(exports).toEqual(expect.arrayContaining([
       ReceivedDocumentsContextService,
       ReceivedDocumentsService,
       ReceivedDocumentScanQueueService,
       DocumentReceptionConnectionsService,
       DocumentReceptionManualSyncService,
+      DocumentReceptionRunResolutionService,
     ]));
+    expect(exports.filter((token) => token === DocumentReceptionRunResolutionService)).toHaveLength(1);
     expect(exports).not.toContain(DocumentReceptionSyncLeaseService);
     expect(exports).not.toContain(DocumentReceptionSyncQueueService);
   });

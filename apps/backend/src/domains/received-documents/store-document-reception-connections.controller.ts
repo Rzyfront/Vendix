@@ -25,8 +25,10 @@ import {
   UpdateDocumentReceptionConnectionDto,
 } from './dto/document-reception-connection.dto';
 import { ManualDocumentReceptionSyncDto } from './dto/document-reception-sync.dto';
+import { CancelDocumentReceptionRunDto } from './dto/document-reception-run-resolution.dto';
 import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
 import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
+import { DocumentReceptionRunResolutionService } from './services/document-reception-run-resolution.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 
 /** Bounded collection query that combines paging with the optional store override. */
@@ -47,6 +49,7 @@ export class StoreDocumentReceptionConnectionsController {
   constructor(
     private readonly connections: DocumentReceptionConnectionsService,
     private readonly manualSync: DocumentReceptionManualSyncService,
+    private readonly runResolution: DocumentReceptionRunResolutionService,
     private readonly contexts: ReceivedDocumentsContextService,
     private readonly responses: ResponseService,
   ) {}
@@ -163,6 +166,23 @@ export class StoreDocumentReceptionConnectionsController {
     return this.responses.success(
       await this.manualSync.retry(context, id, runId),
       'Reintento de recepción solicitado',
+    );
+  }
+
+  @Post(':id/runs/:runId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Permissions(SYNC_PERMISSION)
+  async cancelRun(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('runId', ParseIntPipe) runId: number,
+    @Body() dto: CancelDocumentReceptionRunDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    this.rejectStoreOverride(scope.store_id);
+    const context = await this.contexts.resolveStore();
+    return this.responses.updated(
+      await this.runResolution.cancel(context, id, runId, dto),
+      'Ejecución de recepción cancelada',
     );
   }
 

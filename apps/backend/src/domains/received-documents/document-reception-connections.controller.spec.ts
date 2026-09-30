@@ -22,6 +22,7 @@ import { ReceivedDocumentsContext } from './received-documents.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
 import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
+import { DocumentReceptionRunResolutionService } from './services/document-reception-run-resolution.service';
 import { OrganizationReceivedDocumentsController } from './organization-received-documents.controller';
 import { StoreReceivedDocumentsController } from './store-received-documents.controller';
 import {
@@ -57,6 +58,9 @@ function dependencies() {
     request: jest.fn().mockResolvedValue({ run_id: 71, duplicate: false, queued: true }),
     retry: jest.fn().mockResolvedValue({ run_id: 72, queued: true }),
   };
+  const runResolution = {
+    cancel: jest.fn().mockResolvedValue({ run_id: 90, status: 'cancelled', duplicate: false }),
+  };
   const contexts = {
     resolveStore: jest.fn().mockResolvedValue(STORE_CONTEXT),
     resolveOrganization: jest.fn().mockResolvedValue(ORG_CONTEXT),
@@ -67,13 +71,14 @@ function dependencies() {
     updated: jest.fn((data) => ({ data })),
     success: jest.fn((data) => ({ data })),
   };
-  return { connections, manualSync, contexts, responses };
+  return { connections, manualSync, runResolution, contexts, responses };
 }
 
 function storeController(deps: ReturnType<typeof dependencies>) {
   return new StoreDocumentReceptionConnectionsController(
     deps.connections as unknown as DocumentReceptionConnectionsService,
     deps.manualSync as unknown as DocumentReceptionManualSyncService,
+    deps.runResolution as unknown as DocumentReceptionRunResolutionService,
     deps.contexts as unknown as ReceivedDocumentsContextService,
     deps.responses as unknown as ResponseService,
   );
@@ -83,6 +88,7 @@ function organizationController(deps: ReturnType<typeof dependencies>) {
   return new OrganizationDocumentReceptionConnectionsController(
     deps.connections as unknown as DocumentReceptionConnectionsService,
     deps.manualSync as unknown as DocumentReceptionManualSyncService,
+    deps.runResolution as unknown as DocumentReceptionRunResolutionService,
     deps.contexts as unknown as ReceivedDocumentsContextService,
     deps.responses as unknown as ResponseService,
   );
@@ -97,6 +103,7 @@ describe('document reception connection controllers', () => {
     } as any;
     const updateDto = { expected_version: 1, name: 'Supplier API v2' } as any;
     const syncDto = { expected_version: 3, idempotency_key: 'e1f36e8d-141b-498c-9ac8-fb1d69af4382' } as any;
+    const cancelDto = { reason: 'Duplicate provider delivery confirmed' } as any;
 
     await expect(controller.list({ page: 2, limit: 10 })).resolves.toEqual({
       data: [{ id: 31 }], total: 1, page: 2, limit: 10,
@@ -109,8 +116,11 @@ describe('document reception connection controllers', () => {
     await expect(controller.update(31, updateDto, {})).resolves.toEqual({ data: { id: 31 } });
     await expect(controller.sync(31, syncDto, {})).resolves.toEqual({ data: { run_id: 71, duplicate: false, queued: true } });
     await expect(controller.retry(31, 41, {})).resolves.toEqual({ data: { run_id: 72, queued: true } });
+    await expect(controller.cancelRun(31, 41, cancelDto, {})).resolves.toEqual({
+      data: { run_id: 90, status: 'cancelled', duplicate: false },
+    });
 
-    expect(deps.contexts.resolveStore).toHaveBeenCalledTimes(7);
+    expect(deps.contexts.resolveStore).toHaveBeenCalledTimes(8);
     expect(deps.connections.list).toHaveBeenCalledWith(STORE_CONTEXT, { page: 2, limit: 10 });
     expect(deps.connections.create).toHaveBeenCalledWith(STORE_CONTEXT, createDto);
     expect(deps.connections.findOne).toHaveBeenCalledWith(STORE_CONTEXT, 31);
@@ -118,8 +128,13 @@ describe('document reception connection controllers', () => {
     expect(deps.connections.update).toHaveBeenCalledWith(STORE_CONTEXT, 31, updateDto);
     expect(deps.manualSync.request).toHaveBeenCalledWith(STORE_CONTEXT, 31, syncDto);
     expect(deps.manualSync.retry).toHaveBeenCalledWith(STORE_CONTEXT, 31, 41);
+    expect(deps.runResolution.cancel).toHaveBeenCalledWith(STORE_CONTEXT, 31, 41, cancelDto);
     expect(deps.responses.created).toHaveBeenCalledWith({ id: 31 }, 'Conexión de recepción creada');
     expect(deps.responses.updated).toHaveBeenCalledWith({ id: 31 }, 'Conexión de recepción actualizada');
+    expect(deps.responses.updated).toHaveBeenCalledWith(
+      { run_id: 90, status: 'cancelled', duplicate: false },
+      'Ejecución de recepción cancelada',
+    );
   });
 
   it('rejects a store_id query override before context resolution or service calls', async () => {
@@ -131,12 +146,14 @@ describe('document reception connection controllers', () => {
     await expect(controller.create({} as any, { store_id: 22 })).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.sync(31, {} as any, { store_id: 22 })).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.retry(31, 41, { store_id: 22 })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.cancelRun(31, 41, {} as any, { store_id: 22 })).rejects.toBeInstanceOf(BadRequestException);
     expect(deps.contexts.resolveStore).not.toHaveBeenCalled();
     expect(deps.connections.list).not.toHaveBeenCalled();
     expect(deps.connections.findOne).not.toHaveBeenCalled();
     expect(deps.connections.create).not.toHaveBeenCalled();
     expect(deps.manualSync.request).not.toHaveBeenCalled();
     expect(deps.manualSync.retry).not.toHaveBeenCalled();
+    expect(deps.runResolution.cancel).not.toHaveBeenCalled();
   });
 
   it('resolves the selected organization store independently for every action', async () => {
@@ -148,6 +165,7 @@ describe('document reception connection controllers', () => {
     } as any;
     const updateDto = { expected_version: 1, enabled: false } as any;
     const syncDto = { expected_version: 3, idempotency_key: 'e1f36e8d-141b-498c-9ac8-fb1d69af4382' } as any;
+    const cancelDto = { reason: 'Duplicate provider delivery confirmed' } as any;
 
     await controller.list({ ...scope, page: 2, limit: 10 });
     await controller.create(createDto, scope);
@@ -156,13 +174,15 @@ describe('document reception connection controllers', () => {
     await controller.update(31, updateDto, scope);
     await controller.sync(31, syncDto, scope);
     await controller.retry(31, 41, scope);
+    await controller.cancelRun(31, 41, cancelDto, scope);
 
-    for (let i = 1; i <= 7; i += 1) expect(deps.contexts.resolveOrganization).toHaveBeenNthCalledWith(i, 21);
+    for (let i = 1; i <= 8; i += 1) expect(deps.contexts.resolveOrganization).toHaveBeenNthCalledWith(i, 21);
     expect(deps.connections.list).toHaveBeenCalledWith(ORG_CONTEXT, { ...scope, page: 2, limit: 10 });
     expect(deps.connections.create).toHaveBeenCalledWith(ORG_CONTEXT, createDto);
     expect(deps.connections.update).toHaveBeenCalledWith(ORG_CONTEXT, 31, updateDto);
     expect(deps.manualSync.request).toHaveBeenCalledWith(ORG_CONTEXT, 31, syncDto);
     expect(deps.manualSync.retry).toHaveBeenCalledWith(ORG_CONTEXT, 31, 41);
+    expect(deps.runResolution.cancel).toHaveBeenCalledWith(ORG_CONTEXT, 31, 41, cancelDto);
   });
 
   it('leaves a missing organization store selection to the connection service failsafe', async () => {
@@ -199,6 +219,7 @@ describe('document reception connection controllers', () => {
       [StoreDocumentReceptionConnectionsController.prototype.listRuns, ':id/runs', RequestMethod.GET, 'invoicing:received:connections:configure'],
       [StoreDocumentReceptionConnectionsController.prototype.sync, ':id/sync', RequestMethod.POST, 'invoicing:received:connections:sync'],
       [StoreDocumentReceptionConnectionsController.prototype.retry, ':id/runs/:runId/retry', RequestMethod.POST, 'invoicing:received:connections:sync'],
+      [StoreDocumentReceptionConnectionsController.prototype.cancelRun, ':id/runs/:runId/cancel', RequestMethod.POST, 'invoicing:received:connections:sync'],
       [OrganizationDocumentReceptionConnectionsController.prototype.list, '/', RequestMethod.GET, 'organization:invoicing:received:connections:configure'],
       [OrganizationDocumentReceptionConnectionsController.prototype.create, '/', RequestMethod.POST, 'organization:invoicing:received:connections:configure'],
       [OrganizationDocumentReceptionConnectionsController.prototype.findOne, ':id', RequestMethod.GET, 'organization:invoicing:received:connections:configure'],
@@ -206,6 +227,7 @@ describe('document reception connection controllers', () => {
       [OrganizationDocumentReceptionConnectionsController.prototype.listRuns, ':id/runs', RequestMethod.GET, 'organization:invoicing:received:connections:configure'],
       [OrganizationDocumentReceptionConnectionsController.prototype.sync, ':id/sync', RequestMethod.POST, 'organization:invoicing:received:connections:sync'],
       [OrganizationDocumentReceptionConnectionsController.prototype.retry, ':id/runs/:runId/retry', RequestMethod.POST, 'organization:invoicing:received:connections:sync'],
+      [OrganizationDocumentReceptionConnectionsController.prototype.cancelRun, ':id/runs/:runId/cancel', RequestMethod.POST, 'organization:invoicing:received:connections:sync'],
     ] as const;
 
     for (const [handler, path, method, permission] of routeSpecs) {
@@ -222,6 +244,8 @@ describe('document reception connection controllers', () => {
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, StoreDocumentReceptionConnectionsController.prototype.retry)).toBe(HttpStatus.ACCEPTED);
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, OrganizationDocumentReceptionConnectionsController.prototype.sync)).toBe(HttpStatus.ACCEPTED);
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, OrganizationDocumentReceptionConnectionsController.prototype.retry)).toBe(HttpStatus.ACCEPTED);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, StoreDocumentReceptionConnectionsController.prototype.cancelRun)).toBe(HttpStatus.OK);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, OrganizationDocumentReceptionConnectionsController.prototype.cancelRun)).toBe(HttpStatus.OK);
     expect(Reflect.getMetadata(PATH_METADATA, StoreDocumentReceptionConnectionsController)).toBe('store/invoicing/received-documents/connections');
     expect(Reflect.getMetadata(PATH_METADATA, OrganizationDocumentReceptionConnectionsController)).toBe('organization/invoicing/received-documents/connections');
     // PermissionsGuard uses exact `route.path` + method matching. These are the

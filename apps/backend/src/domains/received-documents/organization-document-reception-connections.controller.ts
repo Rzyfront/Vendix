@@ -24,8 +24,10 @@ import {
   UpdateDocumentReceptionConnectionDto,
 } from './dto/document-reception-connection.dto';
 import { ManualDocumentReceptionSyncDto } from './dto/document-reception-sync.dto';
+import { CancelDocumentReceptionRunDto } from './dto/document-reception-run-resolution.dto';
 import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
 import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
+import { DocumentReceptionRunResolutionService } from './services/document-reception-run-resolution.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 
 /** Collection query preserves bounded pagination and validates the selected store. */
@@ -46,6 +48,7 @@ export class OrganizationDocumentReceptionConnectionsController {
   constructor(
     private readonly connections: DocumentReceptionConnectionsService,
     private readonly manualSync: DocumentReceptionManualSyncService,
+    private readonly runResolution: DocumentReceptionRunResolutionService,
     private readonly contexts: ReceivedDocumentsContextService,
     private readonly responses: ResponseService,
   ) {}
@@ -149,6 +152,22 @@ export class OrganizationDocumentReceptionConnectionsController {
     return this.responses.success(
       await this.manualSync.retry(context, id, runId),
       'Reintento de recepción solicitado',
+    );
+  }
+
+  @Post(':id/runs/:runId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Permissions(SYNC_PERMISSION)
+  async cancelRun(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('runId', ParseIntPipe) runId: number,
+    @Body() dto: CancelDocumentReceptionRunDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.updated(
+      await this.runResolution.cancel(context, id, runId, dto),
+      'Ejecución de recepción cancelada',
     );
   }
 }
