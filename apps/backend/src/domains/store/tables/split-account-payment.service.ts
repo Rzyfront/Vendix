@@ -331,11 +331,7 @@ export class SplitAccountPaymentService {
                 created_by_user_id: user_id,
                 authorized_store_id: store_id,
                 request_hash: requestHash,
-                cash_session_id:
-                  cashSession &&
-                  (type === 'cash' || registerSettings?.track_non_cash_payments)
-                    ? cashSession.id
-                    : null,
+                cash_session_id: cashSession ? cashSession.id : null,
                 payment_reference: dto.payment_reference ?? null,
                 amount_received: dto.amount_received ?? null,
                 wompi_payment_method: dto.wompi_payment_method ?? null,

@@ -15,6 +15,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { AlertBannerComponent } from '../../../../../../../shared/components/alert-banner/alert-banner.component';
@@ -40,6 +41,7 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
   imports: [
     ReactiveFormsModule,
     SettingToggleComponent,
+    ToggleComponent,
     SelectorComponent,
     AlertBannerComponent,
     BadgeComponent,
@@ -70,6 +72,9 @@ export class PosSettingsForm implements OnInit {
   /** Bloques colapsados por defecto para que la vista de entrada sea corta. */
   readonly scaleAdvancedOpen = signal(false);
   readonly scheduleOpen = signal(false);
+
+  /** Espejo en signal de `cash_register.enabled` (el control no es reactivo). */
+  readonly cashRegisterEnabled = signal(false);
 
   private destroyRef = inject(DestroyRef);
 
@@ -359,9 +364,14 @@ export class PosSettingsForm implements OnInit {
     for (const [master, dependents] of this.dependentLinks()) {
       this.applyDependents(master.value, dependents);
     }
+    this.cashRegisterEnabled.set(!!this.cashRegisterEnabledControl.value);
   }
 
   private wireDependentControls() {
+    this.cashRegisterEnabled.set(!!this.cashRegisterEnabledControl.value);
+    this.cashRegisterEnabledControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((enabled) => this.cashRegisterEnabled.set(!!enabled));
     for (const [master, dependents] of this.dependentLinks()) {
       this.applyDependents(master.value, dependents);
       master.valueChanges

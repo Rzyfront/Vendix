@@ -93,6 +93,24 @@ function formatCellValue(value: any, type?: string, key?: string): string {
   return num.toLocaleString('es-CO');
 }
 
+/**
+ * Formatea una FRACCION (0.08) como porcentaje de pantalla ("8,0%").
+ * La API de tasas devuelve fracciones (el XLSX `percent` las necesita asi);
+ * el tipo 'percentage' de `formatCellValue` espera unidades 0-100, por eso las
+ * columnas de fraccion usan este helper via `transform`.
+ */
+export function formatPercentFromFraction(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const num = Number(value);
+  if (isNaN(num)) return '—';
+  return (
+    (num * 100).toLocaleString('es-CO', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }) + '%'
+  );
+}
+
 function toTableColumns(columns: ReportColumn[]): TableColumn[] {
   return columns.map((col) => ({
     key: col.key,
@@ -466,6 +484,10 @@ export class ReportViewerComponent {
           return isNaN(v) ? acc : acc + v;
         }, 0);
         value = formatStatValue(sum, s.type);
+      } else if (data) {
+        // Dataset cargado pero vacío: el stat es 0, no '-'. `data`
+        // undefined (cargando) conserva '-' para no mentir con un cero.
+        value = formatStatValue(0, s.type);
       }
 
       return {

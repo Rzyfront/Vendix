@@ -426,10 +426,122 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
     });
   });
 
+  describe('getCloseReport — cierre consolidado', () => {
+    const ORDER_A = 501; // con domicilio con impuesto
+    const ORDER_B = 502; // reembolsada
+    const rows = {
+      orders: [
+        {
+          id: ORDER_A,
+          subtotal_amount: 100000,
+          discount_amount: 10000,
+          tax_amount: 7200,
+          shipping_cost: 10800, // BRUTO: 10.000 neto + 800 de impuesto
+          shipping_tax_amount: 800,
+          tip_amount: 2000,
+          grand_total: 110000,
+          coupon_code: null,
+        },
+        {
+          id: ORDER_B,
+          subtotal_amount: 50000,
+          discount_amount: 0,
+          tax_amount: 4000,
+          shipping_cost: 0,
+          shipping_tax_amount: 0,
+          tip_amount: 0,
+          grand_total: 54000,
+          coupon_code: null,
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        ...OPEN_SESSION,
+        opened_at: new Date('2026-09-28T13:00:00Z'),
+        closed_at: null,
+        opened_by: USER_ID,
+        closed_by: null,
+        register: null,
+        opened_by_user: null,
+        closed_by_user: null,
+      });
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        { id: 1, type: 'sale', amount: 110000, payment_method: 'cash', order_id: ORDER_A, session_id: SESSION_ID, created_at: new Date('2026-09-28T14:00:00Z') },
+        { id: 2, type: 'sale', amount: 54000, payment_method: 'bank_transfer', order_id: ORDER_B, session_id: SESSION_ID, created_at: new Date('2026-09-28T15:00:00Z') },
+        { id: 3, type: 'refund', amount: 54000, payment_method: 'bank_transfer', reference: 'refund:9', order_id: ORDER_B },
+        { id: 4, type: 'refund', amount: 1000, payment_method: 'cash', reference: 'payment_cancelled', order_id: ORDER_A },
+      ]);
+      prismaMock.orders = {
+        findMany: jest.fn().mockImplementation(async (args: any) => {
+          if (args?.where?.state) {
+            return [
+              { remaining_balance: 30000 },
+              { remaining_balance: 12500.5 },
+            ];
+          }
+          return rows.orders;
+        }),
+      };
+      prismaMock.order_promotions = { findMany: jest.fn().mockResolvedValue([]) };
+      prismaMock.coupon_uses = { findMany: jest.fn().mockResolvedValue([]) };
+      prismaMock.refunds = {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 9, amount: 54000, tax_refund: 4000, refund_method: 'bank_transfer' },
+        ]),
+      };
+    });
+
+    it('separa impuesto de productos y de domicilio, con envío neto y total cuadrado', async () => {
+      const report = await service.getCloseReport(SESSION_ID);
+      const s = report.sales;
+
+      expect(s.product_taxes).toBe(11200);
+      expect(s.shipping_taxes).toBe(800);
+      expect(s.taxes).toBe(s.product_taxes + s.shipping_taxes);
+      expect(s.shipping).toBe(10000);
+      // Subtotal − Descuentos + Impuestos + Envíos + Propinas === Total cobrado
+      expect(
+        s.subtotal - s.discounts + s.taxes + s.shipping + s.tips,
+      ).toBe(s.grand_total);
+      expect(s.grand_total).toBe(164000);
+    });
+
+    it('bloque returns y net se derivan de los mismos valores que refunds', async () => {
+      const report = await service.getCloseReport(SESSION_ID);
+
+      expect(report.returns).toEqual({
+        refunds_count: 1,
+        refunds_total: 54000,
+        refunds_tax: 4000,
+        payments_cancelled_count: 1,
+        payments_cancelled_total: 1000,
+      });
+      expect(report.returns.refunds_total).toBe(report.refunds.total);
+      expect(report.returns.payments_cancelled_total).toBe(
+        report.refunds.payment_cancellations.total,
+      );
+      expect(report.net.net_sales).toBe(164000 - 54000 - 1000);
+      expect(report.net.net_taxes).toBe(report.sales.taxes - 4000);
+    });
+
+    it('pending_collection cuenta órdenes shipped/delivered con saldo', async () => {
+      const report = await service.getCloseReport(SESSION_ID);
+
+      expect(report.pending_collection).toEqual({ count: 2, total: 42500.5 });
+      const call = prismaMock.orders.findMany.mock.calls.find(
+        (c: any[]) => c[0]?.where?.state,
+      );
+      expect(call[0].where.state).toEqual({ in: ['shipped', 'delivered'] });
+      expect(call[0].where.remaining_balance).toEqual({ gt: 0.01 });
+    });
+  });
+
   /**
    * Gate único de caja para cobros (`assertSessionForSales`): con
-   * `pos.cash_register.enabled && require_session_for_sales`, quien cobra
-   * debe tener SU sesión abierta. Lo consumen `processPosPayment` (ventas, no
+   * `pos.cash_register.enabled`, quien cobra debe tener SU sesión abierta
+   * (`require_session_for_sales` está obsoleto y se ignora). Lo consumen `processPosPayment` (ventas, no
    * borradores), `processPayment`, `payOrder`, `registerCreditPayment` y el
    * cobro de cuentas divididas.
    */
@@ -449,13 +561,13 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       ).not.toHaveBeenCalled();
     });
 
-    it('switch apagado (flag require_session_for_sales en false): no lanza', async () => {
+    it('caja activa + require_session_for_sales=false + sin sesión: igual lanza CASH_SESSION_REQUIRED_001 (flag obsoleto)', async () => {
       withCashSettings({ enabled: true, require_session_for_sales: false });
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
 
-      await expect(service.assertSessionForSales(USER_ID)).resolves.toBeUndefined();
-      expect(
-        prismaMock.cash_register_sessions.findFirst,
-      ).not.toHaveBeenCalled();
+      await expect(service.assertSessionForSales(USER_ID)).rejects.toMatchObject({
+        errorCode: 'CASH_SESSION_REQUIRED_001',
+      });
     });
 
     it('switch encendido + sesión propia: no lanza', async () => {

@@ -1,4 +1,5 @@
 import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
+import { formatPercentFromFraction } from '../components/report-viewer/report-viewer.component';
 
 export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'overview', label: 'Resumen', description: 'Reporte general consolidado del negocio', icon: 'layout-dashboard', color: 'var(--color-primary)' },
@@ -125,33 +126,35 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
-    // QUI-547: Tendencias de compra. Serie temporal con date_trunc sobre
-    // order_date al granularity del query (hour|day|week|month|year,
-    // default day). Permite ver el comportamiento de compras en el tiempo.
+    // QUI-547: Tendencias de compra a proveedores. Serie temporal agregada por
+    // período (día, semana, mes) y proveedor, detallando número de órdenes de compra,
+    // monto total comprado, ticket promedio y unidades recibidas.
     id: 'purchase-trends',
     category: 'purchases',
     title: 'Tendencias de Compra',
-    description: 'Serie temporal de órdenes de compra por período',
+    description: 'Serie temporal de compras a proveedores por período',
     detailedDescription:
-      'Evolución temporal de las compras: cuántas órdenes se generaron, monto total y desglose entre pendientes y recibidas en cada período (hora, día, semana, mes o año).',
+      'Evolución temporal de compras a proveedores por día, semana o mes: órdenes de compra emitidas, monto total comprado, ticket promedio y unidades recibidas.',
     icon: 'trending-up',
     route: '/admin/reports/purchases/purchase-trends',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
-    trackKey: 'period',
+    trackKey: 'track_id',
     columns: [
       { key: 'period', header: 'Período', type: 'date' },
-      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
-      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
-      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
-      { key: 'completed_count', header: 'Recibidas', type: 'number', footer: 'sum' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'purchase_count', header: 'Nº OC', type: 'number', footer: 'sum' },
+      { key: 'total_amount', header: 'Total Comprado', type: 'currency', footer: 'sum' },
+      { key: 'avg_purchase', header: 'Ticket Promedio', type: 'currency', footer: 'average' },
+      { key: 'items_received', header: 'Unidades Recibidas', type: 'number', footer: 'sum' },
     ],
     exportFilename: 'tendencias_compra',
     stats: [
-      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'file-text' },
-      { key: 'pending_count', label: 'Pendientes', type: 'number', icon: 'clock' },
+      { key: 'total_amount', label: 'Total Comprado', type: 'currency', icon: 'dollar-sign' },
+      { key: 'purchase_count', label: 'Nº Órdenes', type: 'number', icon: 'file-text' },
+      { key: 'avg_purchase', label: 'Ticket Promedio', type: 'currency', icon: 'trending-up' },
+      { key: 'items_received', label: 'Unidades Recibidas', type: 'number', icon: 'package' },
     ],
     dataEndpoint: 'store/analytics/purchases/trends',
     exportEndpoint: 'store/analytics/purchases/trends/export',
@@ -1329,7 +1332,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'tax_name', header: 'Tipo de Impuesto', type: 'text' },
       { key: 'taxable_amount', header: 'Base Gravable', type: 'currency', footer: 'sum' },
       { key: 'total_tax', header: 'Impuesto', type: 'currency', footer: 'sum' },
-      { key: 'tax_rate', header: 'Tasa', type: 'percentage' },
+      { key: 'tax_rate', header: 'Tasa', type: 'percentage', transform: formatPercentFromFraction },
     ],
     exportFilename: 'tax_summary',
     stats: [

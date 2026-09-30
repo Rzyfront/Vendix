@@ -2194,14 +2194,6 @@
       "prompts": 0
     },
     {
-      "id": "50c57abf",
-      "created_by": "dmin",
-      "created_at": "2026-09-12T00:22:11Z",
-      "sessions": 0,
-      "memories": 1,
-      "prompts": 0
-    },
-    {
       "id": "dae47f83",
       "created_by": "rzy",
       "created_at": "2026-09-15T00:33:00Z",
@@ -2630,6 +2622,14 @@
       "created_by": "rzy",
       "created_at": "2026-09-25T18:10:16Z",
       "sessions": 1,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "0cd0e09a",
+      "created_by": "dmin",
+      "created_at": "2026-09-25T07:04:06Z",
+      "sessions": 0,
       "memories": 1,
       "prompts": 0
     },
@@ -3069,6 +3069,22 @@
       "id": "0b2a80a0",
       "created_by": "rzy",
       "created_at": "2026-09-29T21:20:37Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "366031e5",
+      "created_by": "dmin",
+      "created_at": "2026-09-28T03:05:41Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "aa661a2a",
+      "created_by": "dmin",
+      "created_at": "2026-09-27T17:18:36Z",
       "sessions": 0,
       "memories": 1,
       "prompts": 0

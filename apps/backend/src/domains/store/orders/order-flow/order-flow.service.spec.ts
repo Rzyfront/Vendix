@@ -7377,3 +7377,189 @@ describe('OrderFlowService.confirmPayment — rechaza al personal sobre pago man
     expect(flip[0].where).toMatchObject({ id: 5010, state: 'pending' });
   });
 });
+
+/**
+ * Guard único de saldo (docs/plans/cierre-caja-impuestos-cod-plan.md paso 4):
+ * `updateOrderState('finished')` rechaza con ORD_FINISH_UNPAID_BALANCE_001
+ * cuando queda saldo por cobrar (salvo crédito, `payment_form === '2'`).
+ */
+describe('OrderFlowService — ORD_FINISH_UNPAID_BALANCE_001 (guard único de saldo)', () => {
+  const CODE = 'ORD_FINISH_UNPAID_BALANCE_001';
+
+  const codPending = {
+    state: 'delivered',
+    store_id: 4,
+    order_number: 'ORD-1',
+    grand_total: 100,
+    remaining_balance: 100,
+    payment_form: '1',
+    payments: [{ state: 'pending', amount: 100 }],
+    stores: { organization_id: 1 },
+  };
+
+  const build = (previous: any, orderOverrides: any = {}) => {
+    const emit = jest.fn();
+    const prisma: any = {
+      orders: {
+        findUnique: jest.fn().mockResolvedValue(previous),
+        findMany: jest.fn(),
+      },
+    };
+    prisma.$transaction = jest.fn().mockResolvedValue({
+      updated_order: { id: 1, store_id: 4, stores: { organization_id: 1 }, ...orderOverrides },
+      commit: { totalCost: 0 },
+    });
+    const service = new OrderFlowService(
+      prisma, { emit } as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any,
+    );
+    jest.spyOn(service as any, 'findLineAwaitingKitchenDelivery').mockResolvedValue(null);
+    return { service, prisma };
+  };
+
+  it('(a) forceOrderState/PATCH a finished con COD pendiente → ORD_FINISH_UNPAID_BALANCE_001', async () => {
+    const { service, prisma } = build(codPending);
+    await expect(
+      (service as any).updateOrderState(1, 'finished', {}, { source: 'forced' }),
+    ).rejects.toMatchObject({
+      errorCode: CODE,
+      response: expect.objectContaining({
+        details: { order_id: 1, remaining_balance: 100 },
+      }),
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('(a2) legacy: remaining_balance 0 por default y pago pending → usa grand_total', async () => {
+    const { service } = build({ ...codPending, remaining_balance: 0 });
+    await expect((service as any).updateOrderState(1, 'finished', {})).rejects.toMatchObject({
+      errorCode: CODE,
+    });
+  });
+
+  it('(a3) sin ningún pago → bloquea', async () => {
+    const { service } = build({ ...codPending, payments: [], remaining_balance: 0 });
+    await expect((service as any).updateOrderState(1, 'finished', {})).rejects.toMatchObject({
+      errorCode: CODE,
+    });
+  });
+
+  it('(b) confirmDelivery con saldo → mismo error (propaga desde updateOrderState)', async () => {
+    const { service } = build(codPending);
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({ id: 1, state: 'delivered' });
+    jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+    (service as any).prisma.kitchen_ticket_items = { findMany: jest.fn().mockResolvedValue([]) };
+    (service as any).prisma.order_items = { findMany: jest.fn().mockResolvedValue([]) };
+    await expect(service.confirmDelivery(1)).rejects.toMatchObject({ errorCode: CODE });
+  });
+
+  it('(c) venta a crédito con saldo → finaliza', async () => {
+    const { service, prisma } = build({ ...codPending, payment_form: '2', payments: [] });
+    await expect((service as any).updateOrderState(1, 'finished', {})).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('(d) orden pagada → finaliza', async () => {
+    const { service, prisma } = build({
+      ...codPending,
+      remaining_balance: 0,
+      payments: [{ state: 'succeeded', amount: 100 }],
+    });
+    await expect((service as any).updateOrderState(1, 'finished', {})).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('(d2) orden con total 0 (cupón 100 %) → finaliza', async () => {
+    const { service } = build({ ...codPending, grand_total: 0, remaining_balance: 0, payments: [] });
+    await expect((service as any).updateOrderState(1, 'finished', {})).resolves.toBeDefined();
+  });
+
+  it('(f) payOrder rama finished/COD: saldo liquidado en la MISMA escritura (metadata) → no dispara el guard', async () => {
+    const { service, prisma } = build(codPending);
+    // Mismo payload que `settledBalanceMetadata` de payOrder.
+    await expect(
+      (service as any).updateOrderState(
+        1,
+        'finished',
+        { paid_at: new Date(), finished_at: new Date(), total_paid: 100, remaining_balance: 0 },
+        { historyFromState: 'finished' },
+      ),
+    ).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('(g) venta POS directa (pago succeeded creado antes + metadata saldo 0) paga y finaliza', async () => {
+    const { service, prisma } = build({
+      ...codPending,
+      state: 'processing',
+      remaining_balance: 0,
+      payments: [{ state: 'succeeded', amount: 100 }],
+    });
+    await expect(
+      (service as any).updateOrderState(1, 'finished', {
+        paid_at: new Date(),
+        finished_at: new Date(),
+        total_paid: 100,
+        remaining_balance: 0,
+      }),
+    ).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  describe('(e) autoFinishDeliveredOrders', () => {
+    it('omite la orden con saldo sin lanzar y finaliza la pagada', async () => {
+      const { service, prisma } = build(codPending);
+      prisma.orders.findMany = jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 1 }, { id: 2 }]) // pase 1
+        .mockResolvedValueOnce([]) // pase 2
+        .mockResolvedValueOnce([
+          { id: 1, grand_total: 100, remaining_balance: 100, payment_form: '1', payments: [{ state: 'pending', amount: 100 }] },
+          { id: 2, grand_total: 50, remaining_balance: 0, payment_form: '1', payments: [{ state: 'succeeded', amount: 50 }] },
+        ]);
+      jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+      const update = jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({});
+      await expect(service.autoFinishDeliveredOrders()).resolves.toBe(1);
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith(2, 'finished', expect.anything(), { source: 'job' });
+    });
+  });
+});
+
+describe('getAvailableActions / canConfirmDelivery — saldo pendiente', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { canConfirmDelivery, getUnpaidBalanceForFinish } = require('./order-action-policy.util');
+
+  it('COD delivered con saldo → confirm_delivery deshabilitado con el código', () => {
+    const snap = {
+      state: 'delivered',
+      grand_total: 100,
+      remaining_balance: 100,
+      payment_form: '1',
+      payments: [{ state: 'pending', amount: 100 }],
+    };
+    expect(canConfirmDelivery(snap)).toEqual({
+      enabled: false,
+      reason: 'ORD_FINISH_UNPAID_BALANCE_001',
+    });
+  });
+
+  it('crédito y pagada siguen habilitadas; snapshot sin grand_total es permisivo', () => {
+    expect(
+      canConfirmDelivery({ state: 'delivered', grand_total: 100, remaining_balance: 100, payment_form: '2', payments: [] }),
+    ).toEqual({ enabled: true });
+    expect(
+      canConfirmDelivery({
+        state: 'delivered', grand_total: 100, remaining_balance: 0,
+        payments: [{ state: 'succeeded', amount: 100 }],
+      }),
+    ).toEqual({ enabled: true });
+    expect(canConfirmDelivery({ state: 'delivered' })).toEqual({ enabled: true });
+  });
+
+  it('el saldo resultante (override) manda sobre el previo', () => {
+    const order = { grand_total: 100, remaining_balance: 100, payment_form: '1', payments: [] as any[] };
+    expect(getUnpaidBalanceForFinish(order)).toBe(100);
+    expect(getUnpaidBalanceForFinish(order, 0)).toBe(0);
+  });
+});

@@ -1071,6 +1071,11 @@ export class PaymentsService {
       }
 
       let emitSessionPaidAfterCommit: (() => void) | undefined;
+      // QUI-540: `credit_sale.created` debe emitirse DESPUÉS del commit. El
+      // listener de CxC (y el de asientos) leen la orden en otra conexión y
+      // con READ COMMITTED no ven filas sin commitear: emitir dentro del
+      // `$transaction` dejaba la CxC en `null` silencioso, sin log.
+      let emitCreditSaleAfterCommit: (() => void) | undefined;
       const result = await this.prisma.$transaction(async (tx) => {
         // 1. Create or update order. Backend recalculates promotions/coupon
         // server-side and returns the persistence-ready snapshots so this
@@ -2114,32 +2119,55 @@ export class PaymentsService {
             }
           }
 
-          // 5c. Emit credit_sale.created for credit sales (no payment)
+          // 5c. Difere `credit_sale.created` hasta después del commit
+          // (QUI-540): el payload se captura aquí con la MISMA forma de
+          // siempre, pero la emisión ocurre fuera del `$transaction` para
+          // que los listeners vean la orden ya persistida.
           if (!createPosPaymentDto.requires_payment) {
-            this.eventEmitter.emit('credit_sale.created', {
-              order_id: order.id,
-              organization_id: order.stores?.organization_id,
-              store_id: createPosPaymentDto.store_id,
-              order_number: order.order_number,
-              customer_id: order.customer_id ? Number(order.customer_id) : null,
-              document_number: order.order_number,
-              subtotal_amount: Number(order.subtotal_amount || 0),
-              // Productos + impuesto del envío (si la orden tiene copia).
-              tax_amount: sale_tax.tax_amount,
-              // Plan Despacho Economía — FASE 4 paso 15. Crédito con flete →
-              // se reconoce también ingreso de flete en cuenta 414505, NETO
-              // del impuesto del envío.
-              shipping_amount: sale_tax.shipping_amount,
-              tax_breakdown,
-              withholding_breakdown: wh.lines,
-              // Parte de BASE del descuento de orden (ver payment.received).
-              discount_amount: sale_tax.discount_amount,
-              total_amount: Number(order.grand_total || 0),
-              // Propina incluida en grand_total: el asiento la acredita a su
-              // pasivo custodio (sin ella el DR 1305 no cuadra).
-              tip_amount: Number(order.tip_amount || 0),
-              user_id: user.id,
-            });
+            const creditSaleOrderId = order.id;
+            const creditSaleOrderNumber = order.order_number;
+            // QUI-540: `createOrderInstallments` corre post-commit sin `await`,
+            // así que al emitir el evento las filas de `order_installments`
+            // aún pueden no existir y el listener de CxC caía al +30 días.
+            // Se envía el vencimiento de la 1ª cuota en el payload (mismo
+            // parseo que `createOrderInstallments`) para no depender de esa
+            // carrera; sin cuotas queda `undefined` y el listener usa su fallback.
+            const creditSaleDueDate =
+              (createPosPaymentDto.credit_type || 'installments') ===
+                'installments' &&
+              createPosPaymentDto.installment_terms?.first_installment_date
+                ? new Date(
+                    createPosPaymentDto.installment_terms.first_installment_date,
+                  )
+                : undefined;
+            emitCreditSaleAfterCommit = () =>
+              this.eventEmitter.emit('credit_sale.created', {
+                order_id: creditSaleOrderId,
+                organization_id: order.stores?.organization_id,
+                store_id: createPosPaymentDto.store_id,
+                order_number: creditSaleOrderNumber,
+                customer_id: order.customer_id
+                  ? Number(order.customer_id)
+                  : null,
+                document_number: creditSaleOrderNumber,
+                subtotal_amount: Number(order.subtotal_amount || 0),
+                // Productos + impuesto del envío (si la orden tiene copia).
+                tax_amount: sale_tax.tax_amount,
+                // Plan Despacho Economía — FASE 4 paso 15. Crédito con flete →
+                // se reconoce también ingreso de flete en cuenta 414505, NETO
+                // del impuesto del envío.
+                shipping_amount: sale_tax.shipping_amount,
+                tax_breakdown,
+                withholding_breakdown: wh.lines,
+                // Parte de BASE del descuento de orden (ver payment.received).
+                discount_amount: sale_tax.discount_amount,
+                total_amount: Number(order.grand_total || 0),
+                // Propina incluida en grand_total: el asiento la acredita a su
+                // pasivo custodio (sin ella el DR 1305 no cuadra).
+                tip_amount: Number(order.tip_amount || 0),
+                due_date: creditSaleDueDate,
+                user_id: user.id,
+              });
 
             // Persist suffered withholding once for the credit-sale branch
             // (mutually exclusive with payment.received). Safe to call
@@ -2418,6 +2446,24 @@ export class PaymentsService {
       if ((result as any)._idempotentReplay === true) {
         delete (result as any)._idempotentReplay;
         return result as PosPaymentResponseDto;
+      }
+
+      // QUI-540: emitir `credit_sale.created` AFTER the payment $transaction
+      // commits, para que el listener de CxC (y el de asientos) vean la orden
+      // persistida. Un rollback habría lanzado antes de llegar aquí, así que
+      // ningún evento fantasma es posible. El listener es idempotente por
+      // (store_id, source_id, source_type), de modo que un reintento no duplica.
+      if (result.success && emitCreditSaleAfterCommit) {
+        try {
+          emitCreditSaleAfterCommit();
+        } catch (err) {
+          this.logger.error(
+            `Failed to emit credit_sale.created for order #${result.order?.id}: ${
+              (err as Error).message
+            }`,
+            (err as Error).stack,
+          );
+        }
       }
 
       // Plan KDS fire-flows (B5 / B9): AFTER the payment $transaction
@@ -6973,7 +7019,12 @@ export class PaymentsService {
       this.logger.debug(
         `[CashRegister] Active session for user ${user.id}: ${session ? `id=${session.id}` : 'NONE'}`,
       );
-      if (!session) return;
+      if (!session) {
+        this.logger.error(
+          `[CashRegister] No open session for user ${user.id}; sale movement NOT recorded (gate should have blocked)`,
+        );
+        return;
+      }
 
       const order_id = order?.id;
       const payment_id = payment?.id;
@@ -7031,17 +7082,7 @@ export class PaymentsService {
         return;
       }
 
-      this.logger.debug(
-        `[CashRegister] payment_method=${payment_method}, track_non_cash=${cr_settings.track_non_cash_payments}`,
-      );
-
-      // Only track non-cash if setting enabled
-      if (payment_method !== 'cash' && !cr_settings.track_non_cash_payments) {
-        this.logger.debug(
-          `[CashRegister] Skipping non-cash movement (tracking disabled)`,
-        );
-        return;
-      }
+      // Todo método se registra (el arqueo esperado sigue contando solo efectivo).
 
       await this.movementsService.recordSaleMovement(session.id, {
         store_id: dtoStoreId,

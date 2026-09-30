@@ -100,9 +100,11 @@ export class SessionsService {
   }
 
   /**
-   * Gate único de caja para cobros: con `pos.cash_register.enabled &&
-   * require_session_for_sales`, quien cobra debe tener SU sesión abierta
-   * (`getActiveSession` filtra por `opened_by`). Guardar un borrador POS no
+   * Gate único de caja para cobros de personal: con `pos.cash_register.enabled`,
+   * quien cobra (cualquier método) debe tener SU sesión abierta
+   * (`getActiveSession` filtra por `opened_by`). `require_session_for_sales`
+   * quedó obsoleto: se ignora (se conserva en schema/defaults por
+   * compatibilidad). Guardar un borrador POS no
    * pasa por aquí (guardar ≠ cobrar). Fail-closed: sin `userId` no hay sesión
    * propia que encontrar, así que se rechaza en vez de caer al lookup de
    * tienda de `getActiveSession`.
@@ -110,7 +112,7 @@ export class SessionsService {
   async assertSessionForSales(userId?: number): Promise<void> {
     const settings = await this.settingsService.getSettings();
     const cashRegister = (settings as any)?.pos?.cash_register;
-    if (!cashRegister?.enabled || !cashRegister?.require_session_for_sales) {
+    if (!cashRegister?.enabled) {
       return;
     }
     const session = userId ? await this.getActiveSession(userId) : null;
@@ -629,6 +631,7 @@ export class SessionsService {
             discount_amount: true,
             tax_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
             tip_amount: true,
             grand_total: true,
             coupon_code: true,
@@ -638,18 +641,23 @@ export class SessionsService {
 
     let subtotal = 0;
     let discounts = 0;
-    let taxes = 0;
+    let product_taxes = 0;
+    let shipping_taxes = 0;
     let shipping = 0;
     let tips = 0;
     let grand_total = 0;
     for (const o of orders) {
       subtotal += Number(o.subtotal_amount);
       discounts += Number(o.discount_amount);
-      taxes += Number(o.tax_amount);
-      shipping += Number(o.shipping_cost ?? 0);
+      product_taxes += Number(o.tax_amount);
+      shipping_taxes += Number(o.shipping_tax_amount ?? 0);
+      // `shipping_cost` es BRUTO (incluye su impuesto): se reporta neto.
+      shipping +=
+        Number(o.shipping_cost ?? 0) - Number(o.shipping_tax_amount ?? 0);
       tips += Number(o.tip_amount ?? 0);
       grand_total += Number(o.grand_total);
     }
+    const taxes = product_taxes + shipping_taxes;
 
     // --- Descuentos ---
     const discounted = orders.filter((o) => Number(o.discount_amount) > 0);
@@ -738,10 +746,16 @@ export class SessionsService {
           },
         ],
       },
-      select: { id: true, amount: true, refund_method: true },
+      select: {
+        id: true,
+        amount: true,
+        tax_refund: true,
+        refund_method: true,
+      },
     });
     const refund_map = new Map<string, { count: number; total: number }>();
     let refunds_total = 0;
+    let refunds_tax = 0;
     for (const rf of refunds_rows) {
       const method = rf.refund_method || 'unknown';
       const b = refund_map.get(method) ?? { count: 0, total: 0 };
@@ -749,7 +763,21 @@ export class SessionsService {
       b.total += Number(rf.amount);
       refund_map.set(method, b);
       refunds_total += Number(rf.amount);
+      refunds_tax += Number((rf as any).tax_refund ?? 0);
     }
+
+    // --- Pendientes por cobrar (foto al momento de la consulta) ---
+    const pending_orders = await this.prisma.orders.findMany({
+      where: {
+        state: { in: ['shipped', 'delivered'] },
+        remaining_balance: { gt: 0.01 },
+      },
+      select: { remaining_balance: true },
+    });
+    const pending_total = pending_orders.reduce(
+      (sum: number, o: any) => sum + Number(o.remaining_balance ?? 0),
+      0,
+    );
 
     const closed = session.status === 'closed';
     const currency_code = await this.settingsService.getStoreCurrency();
@@ -820,6 +848,8 @@ export class SessionsService {
         payments_count: sale_movements.length,
         subtotal: r2(subtotal),
         discounts: r2(discounts),
+        product_taxes: r2(product_taxes),
+        shipping_taxes: r2(shipping_taxes),
         taxes: r2(taxes),
         shipping: r2(shipping),
         tips: r2(tips),
@@ -834,6 +864,21 @@ export class SessionsService {
           count: cancellations.count,
           total: r2(cancellations.total),
         },
+      },
+      returns: {
+        refunds_count: refunds_rows.length,
+        refunds_total: r2(refunds_total),
+        refunds_tax: r2(refunds_tax),
+        payments_cancelled_count: cancellations.count,
+        payments_cancelled_total: r2(cancellations.total),
+      },
+      net: {
+        net_sales: r2(grand_total - refunds_total - cancellations.total),
+        net_taxes: r2(taxes - refunds_tax),
+      },
+      pending_collection: {
+        count: pending_orders.length,
+        total: r2(pending_total),
       },
       discounts: {
         orders_with_discount: discounted.length,

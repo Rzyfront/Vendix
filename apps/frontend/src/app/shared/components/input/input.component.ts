@@ -247,7 +247,7 @@ export class InputComponent implements ControlValueAccessor {
   readonly suffixIcon = input(false);
   readonly suffixClickable = input(false);
   readonly control = input<AbstractControl | null>();
-  readonly step = input<string>();
+  readonly step = input<string | number>();
   readonly min = input<string | number>();
   readonly max = input<string | number>();
   readonly maxlength = input<number | null>(null);

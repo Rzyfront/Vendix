@@ -28,6 +28,28 @@ export function cashMethodLabel(method: string): string {
   return CASH_METHOD_LABELS[method] ?? method;
 }
 
+/** Devoluciones normalizadas: usa `returns` y cae a `refunds` con backend viejo. */
+export function cashReportReturns(r: CashSessionCloseReport) {
+  const ret = r.returns;
+  return {
+    refundsCount: ret?.refunds_count ?? r.refunds.count,
+    refundsTotal: ret?.refunds_total ?? r.refunds.total,
+    refundsTax: ret?.refunds_tax ?? 0,
+    cancelledCount: ret?.payments_cancelled_count ?? r.refunds.payment_cancellations.count,
+    cancelledTotal: ret?.payments_cancelled_total ?? r.refunds.payment_cancellations.total,
+  };
+}
+
+/** Impuestos de venta separados; con backend viejo cae al total único. */
+export function cashReportTaxes(r: CashSessionCloseReport) {
+  const hasSplit = r.sales.product_taxes != null;
+  return {
+    hasSplit,
+    product: hasSplit ? Number(r.sales.product_taxes) : r.sales.taxes,
+    shipping: Number(r.sales.shipping_taxes ?? 0),
+  };
+}
+
 /**
  * Reporte consolidado de una sesión de caja. Presentacional: solo totales,
  * nunca movimientos uno a uno. El ticket impreso
@@ -112,42 +134,66 @@ export function cashMethodLabel(method: string): string {
         }
       </section>
 
-      <!-- Ventas -->
+      <!-- Ventas cobradas -->
       <section class="csr-sec">
-        <h3 class="csr-title">Ventas</h3>
+        <h3 class="csr-title">Ventas cobradas</h3>
         <div class="csr-row"><span>Órdenes</span><span class="csr-num">{{ r.sales.orders_count }}</span></div>
         <div class="csr-row"><span>Pagos</span><span class="csr-num">{{ r.sales.payments_count }}</span></div>
         <div class="csr-row"><span>Subtotal</span><span class="csr-num">{{ r.sales.subtotal | currency }}</span></div>
         <div class="csr-row"><span>Descuentos</span><span class="csr-num">{{ r.sales.discounts | currency }}</span></div>
-        <div class="csr-row"><span>Impuestos</span><span class="csr-num">{{ r.sales.taxes | currency }}</span></div>
+        <div class="csr-row">
+          <span>{{ taxes().hasSplit ? 'Impuestos productos' : 'Impuestos' }}</span>
+          <span class="csr-num">{{ taxes().product | currency }}</span>
+        </div>
+        @if (taxes().shipping > 0) {
+          <div class="csr-row"><span>Impuesto domicilios</span><span class="csr-num">{{ taxes().shipping | currency }}</span></div>
+        }
         <div class="csr-row"><span>Envíos</span><span class="csr-num">{{ r.sales.shipping | currency }}</span></div>
         <div class="csr-row"><span>Propinas</span><span class="csr-num">{{ r.sales.tips | currency }}</span></div>
-        <div class="csr-row csr-strong"><span>Total</span><span class="csr-num">{{ r.sales.grand_total | currency }}</span></div>
+        <div class="csr-row csr-strong csr-highlight"><span>Total cobrado</span><span class="csr-num">{{ r.sales.grand_total | currency }}</span></div>
         <div class="csr-row"><span>Ticket promedio</span><span class="csr-num">{{ r.sales.average_ticket | currency }}</span></div>
       </section>
 
-      <!-- Reembolsos -->
-      <section class="csr-sec">
-        <h3 class="csr-title">Reembolsos</h3>
-        <div class="csr-row csr-strong">
-          <span>Total ({{ r.refunds.count }})</span>
-          <span class="csr-num">{{ r.refunds.total | currency }}</span>
-        </div>
-        @for (m of r.refunds.by_method; track m.method) {
-          <div class="csr-row csr-sub">
-            <span>{{ label(m.method) }} ({{ m.count }})</span>
-            <span class="csr-num">{{ m.total | currency }}</span>
-          </div>
-        } @empty {
-          <p class="csr-empty">Sin reembolsos</p>
-        }
-        @if (r.refunds.payment_cancellations.count > 0) {
+      <!-- Devoluciones -->
+      @if (hasReturns()) {
+        @let ret = returns();
+        <section class="csr-sec">
+          <h3 class="csr-title">Devoluciones</h3>
           <div class="csr-row">
-            <span>Anulaciones de pago ({{ r.refunds.payment_cancellations.count }})</span>
-            <span class="csr-num">{{ r.refunds.payment_cancellations.total | currency }}</span>
+            <span>Reembolsos ({{ ret.refundsCount }})</span>
+            <span class="csr-num">{{ ret.refundsTotal | currency }}</span>
           </div>
-        }
-      </section>
+          @for (m of r.refunds.by_method; track m.method) {
+            <div class="csr-row csr-sub">
+              <span>{{ label(m.method) }} ({{ m.count }})</span>
+              <span class="csr-num">{{ m.total | currency }}</span>
+            </div>
+          }
+          <div class="csr-row"><span>Impuesto reembolsado</span><span class="csr-num">{{ ret.refundsTax | currency }}</span></div>
+          <div class="csr-row">
+            <span>Pagos anulados ({{ ret.cancelledCount }})</span>
+            <span class="csr-num">{{ ret.cancelledTotal | currency }}</span>
+          </div>
+        </section>
+      }
+
+      <!-- Neto -->
+      @if (r.net) {
+        <section class="csr-sec">
+          <h3 class="csr-title">Neto</h3>
+          <div class="csr-row csr-strong csr-highlight"><span>Ventas netas</span><span class="csr-num">{{ r.net.net_sales | currency }}</span></div>
+          <div class="csr-row"><span>Impuesto neto</span><span class="csr-num">{{ r.net.net_taxes | currency }}</span></div>
+        </section>
+      }
+
+      <!-- Pendientes por cobrar -->
+      @if (r.pending_collection && r.pending_collection.count > 0) {
+        <section class="csr-sec csr-warning" role="status">
+          {{ r.pending_collection.count }}
+          {{ r.pending_collection.count === 1 ? 'orden entregada o despachada con saldo por cobrar' : 'órdenes entregadas o despachadas con saldo por cobrar' }}:
+          <strong class="csr-num">{{ r.pending_collection.total | currency }}</strong>
+        </section>
+      }
 
       <!-- Descuentos -->
       <section class="csr-sec">
@@ -217,6 +263,13 @@ export function cashMethodLabel(method: string): string {
       .csr-strong { font-weight: 700; border-top: 1px dashed var(--color-border, #e5e7eb); margin-top: 3px; padding-top: 5px; }
       .csr-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
       .csr-empty { margin: 2px 0; font-size: 12px; color: var(--color-neutral-600, #4b5563); }
+      .csr-highlight { font-size: 15px; }
+      .csr-warning {
+        font-size: 13px;
+        color: var(--color-warning-800, #92400e);
+        background: var(--color-warning-50, #fffbeb);
+        border-color: var(--color-warning-300, #fcd34d);
+      }
       .csr-plus { color: var(--color-success-700, #15803d); }
       .csr-minus { color: var(--color-error-700, #b91c1c); }
     `,
@@ -233,6 +286,15 @@ export class CashSessionReportComponent {
   readonly closedAt = computed(() => {
     const closed = this.report().session.closed_at;
     return closed ? formatStoreDateTime(closed, this.settings.timezone()) : '';
+  });
+  readonly taxes = computed(() => cashReportTaxes(this.report()));
+  readonly returns = computed(() => cashReportReturns(this.report()));
+  readonly hasReturns = computed(() => {
+    const x = this.returns();
+    return (
+      x.refundsCount > 0 || x.refundsTotal > 0 || x.refundsTax > 0 ||
+      x.cancelledCount > 0 || x.cancelledTotal > 0
+    );
   });
   readonly differenceLabel = computed(() => {
     const diff = this.report().cash.difference ?? 0;

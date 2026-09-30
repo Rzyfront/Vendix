@@ -251,6 +251,13 @@ export const analyticsRoutes: Routes = [
               ),
           },
           {
+            path: 'trends',
+            loadComponent: () =>
+              import('./pages/purchases/purchase-trends.component').then(
+                (c) => c.PurchaseTrendsComponent,
+              ),
+          },
+          {
             path: 'payable-aging',
             loadComponent: () =>
               import('./pages/purchases/payable-aging.component').then(
@@ -333,6 +340,13 @@ export const analyticsRoutes: Routes = [
             loadComponent: () =>
               import('./pages/reviews/review-summary.component').then(
                 (c) => c.ReviewSummaryComponent,
+              ),
+          },
+          {
+            path: 'by-product',
+            loadComponent: () =>
+              import('./pages/reviews/review-by-product.component').then(
+                (c) => c.ReviewByProductComponent,
               ),
           },
         ],
