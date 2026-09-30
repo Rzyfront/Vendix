@@ -153,3 +153,7 @@ Lease120s/heartbeat30s excluye ejecución concurrente; versión/token se comprue
 ### D39 — Semántica del cursor nulo en sondeo API
 
 En un sondeo API, `next_cursor: null` significa fin de páginas, **no** escribir `connection.cursor = null`: conservar el último checkpoint durable evita volver al inicio del historial. Si la página trae documentos pero cursor nulo, el proveedor no ofrece checkpoint de avance y la ejecución queda parcial/para revisión, con cursor sin cambios. Un webhook sí puede entregar documentos con `next_cursor: null`, porque no pagina. El ingester sólo propone el cursor; el worker lo confirma cuando todos los originales y trabajos OCR de la página son durables. Un límite por ejecución de 10 páginas/100 documentos debe conservar el último cursor válido y programar continuación inmediata si quedan páginas; no esperar el intervalo normal.
+
+### D40 — Reintentos acotados y recuperación del outbox
+
+La base de datos es la fuente durable de ejecuciones; Redis sólo transporta `run_id`. BullMQ hace máximo tres intentos con backoff exponencial sobre el **mismo run**. El scheduler recupera pendientes/en cola y procesos cuyo lease expiró, además de sondeos API vencidos. No vuelve a crear indefinidamente trabajos fallidos/parciales agotados: quedan visibles para reintento autorizado del mismo run o resolución administrativa. Esto evita tráfico sin límite y posibles cobros OCR reiterados; jamás se abre un nuevo sondeo API mientras uno anterior siga sin resolver.
