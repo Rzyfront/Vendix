@@ -1,4 +1,5 @@
 import { RequestContextService } from '@common/context/request-context.service';
+import { BadRequestException } from '@nestjs/common';
 import { TaxDeclarationDraftService } from './tax-declaration-draft.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
 
@@ -98,6 +99,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
         ]),
       },
       fiscal_rule_sets: { findFirst: jest.fn().mockResolvedValue(null) },
+      fiscal_obligations: { findFirst: jest.fn().mockResolvedValue(null) },
       tax_declaration_drafts: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn((callback) => callback(tx)),
     };
@@ -172,6 +174,310 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
       ],
     });
     expect(getCreatedLines()).toHaveLength(2);
+  });
+
+  it('persists a bimonthly declaration range and its periodicity', async () => {
+    const { service, getDraftData } = createService();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2024,
+        period_month: 2,
+        periodicity: 'bimonthly',
+      }),
+    );
+
+    expect(getDraftData()).toMatchObject({
+      period_year: 2024,
+      period_month: 2,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+      jurisdiction_key: 'CO-DIAN',
+    });
+  });
+
+  it('persists a four-month declaration range and its periodicity', async () => {
+    const { service, getDraftData } = createService();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 5,
+        periodicity: 'four_monthly',
+      }),
+    );
+
+    expect(getDraftData()).toMatchObject({
+      period_year: 2026,
+      period_month: 8,
+      period_start: new Date('2026-05-01T00:00:00.000Z'),
+      period_end: new Date('2026-08-31T00:00:00.000Z'),
+      periodicity: 'four_monthly',
+    });
+  });
+
+  it('does not reuse a monthly declaration draft for the same closing month as bimonthly', async () => {
+    const { service, prisma, tx } = createService();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 2,
+        periodicity: 'monthly',
+      }),
+    );
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 2,
+        periodicity: 'bimonthly',
+      }),
+    );
+
+    expect(tx.tax_declaration_drafts.create).toHaveBeenCalledTimes(2);
+    expect(
+      prisma.tax_declaration_drafts.findFirst.mock.calls.map(
+        (call) => call[0].where,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        periodicity: 'monthly',
+        jurisdiction_key: 'CO-DIAN',
+        status: { notIn: ['approved', 'submitted', 'accepted', 'paid', 'voided'] },
+      }),
+      expect.objectContaining({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        periodicity: 'bimonthly',
+        jurisdiction_key: 'CO-DIAN',
+        status: { notIn: ['approved', 'submitted', 'accepted', 'paid', 'voided'] },
+      }),
+    ]);
+  });
+
+  it('recalculates a stored bimonthly draft using the same range', async () => {
+    const { service, prisma, tx } = createService();
+    const storedDraft = {
+      id: 33,
+      status: 'ready',
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      declaration_type: 'vat',
+      period_year: 2024,
+      period_month: 2,
+      period_quarter: null,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+      obligation_id: null,
+    };
+    prisma.tax_declaration_drafts.findFirst
+      .mockImplementationOnce(async () => storedDraft)
+      .mockImplementationOnce(async () => null);
+
+    await RequestContextService.run(requestContext, () =>
+      service.recalculateDraft([context], storedDraft.id),
+    );
+
+    expect(tx.tax_declaration_drafts.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          period_start: new Date('2024-01-01T00:00:00.000Z'),
+          period_end: new Date('2024-02-29T00:00:00.000Z'),
+          periodicity: 'bimonthly',
+        }),
+      }),
+    );
+  });
+
+  it('rejects malformed persisted periodicity rather than silently recalculating', async () => {
+    const { service, prisma, tx } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValue({
+      id: 34,
+      status: 'ready',
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      declaration_type: 'vat',
+      period_year: 2026,
+      period_month: 2,
+      period_quarter: null,
+      periodicity: 'quarterly',
+      obligation_id: null,
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.recalculateDraft([context], 34),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid period before any database access', async () => {
+    const { service, prisma, tx } = createService();
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 13,
+          periodicity: 'monthly',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.fiscal_obligations.findFirst).not.toHaveBeenCalled();
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+    expect(prisma.tax_declaration_drafts.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('inherits periodicity from a same-entity linked obligation', async () => {
+    const { service, prisma, getDraftData } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 88,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'vat_return',
+      period_year: 2024,
+      period_month: 2,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+    });
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2024,
+        period_month: 2,
+        obligation_id: 88,
+      }),
+    );
+
+    expect(prisma.fiscal_obligations.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 88,
+        organization_id: 1,
+        accounting_entity_id: 77,
+        jurisdiction_key: 'CO-DIAN',
+      },
+    });
+    expect(getDraftData()).toMatchObject({
+      obligation_id: 88,
+      periodicity: 'bimonthly',
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+    });
+  });
+
+  it('rejects a cross-entity linked obligation before calculation or mutation', async () => {
+    const { service, prisma, tx } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue(null);
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 3,
+          obligation_id: 99,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an obligation with a mismatched declaration type or period', async () => {
+    const { service, prisma } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 89,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'inc_return',
+      period_start: new Date('2026-03-01T00:00:00.000Z'),
+      period_end: new Date('2026-03-31T00:00:00.000Z'),
+      periodicity: 'monthly',
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 3,
+          periodicity: 'monthly',
+          obligation_id: 89,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an obligation date range that differs from the declaration period', async () => {
+    const { service, prisma } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 90,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'vat_return',
+      period_start: new Date('2026-01-01T00:00:00.000Z'),
+      period_end: new Date('2026-02-28T00:00:00.000Z'),
+      periodicity: 'monthly',
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 3,
+          periodicity: 'monthly',
+          obligation_id: 90,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an explicit periodicity that conflicts with its obligation', async () => {
+    const { service, prisma } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 91,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'vat_return',
+      period_start: new Date('2026-01-01T00:00:00.000Z'),
+      period_end: new Date('2026-02-28T00:00:00.000Z'),
+      periodicity: 'monthly',
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 2,
+          periodicity: 'bimonthly',
+          obligation_id: 91,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
   });
 });
 

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import {
   Prisma,
+  fiscal_obligation_type_enum,
   tax_declaration_status_enum,
   tax_declaration_type_enum,
   withholding_type_enum,
@@ -14,6 +15,8 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
 import {
+  FISCAL_CLOSE_TYPES,
+  FiscalCloseType,
   buildDateRangeFilter,
   resolveFiscalPeriodRange,
 } from './fiscal-period.util';
@@ -41,6 +44,36 @@ const LOCKED_DECLARATION_STATUSES: tax_declaration_status_enum[] = [
   'accepted',
   'paid',
 ];
+
+const DEFAULT_FISCAL_JURISDICTION_KEY = 'CO-DIAN';
+
+const DECLARATION_OBLIGATION_TYPE: Partial<
+  Record<tax_declaration_type_enum, fiscal_obligation_type_enum>
+> = {
+  vat: 'vat_return',
+  inc: 'inc_return',
+  withholding: 'withholding_return',
+  reteiva: 'reteiva_return',
+  reteica: 'reteica_return',
+  ica: 'ica_return',
+  exogenous: 'exogenous_report',
+  income_tax_precierre: 'income_tax_precierre',
+};
+
+function isFiscalCloseType(value: unknown): value is FiscalCloseType {
+  return (
+    typeof value === 'string' &&
+    FISCAL_CLOSE_TYPES.some((periodicity) => periodicity === value)
+  );
+}
+
+function sameDateOnly(left: Date, right: Date): boolean {
+  return (
+    left.getUTCFullYear() === right.getUTCFullYear() &&
+    left.getUTCMonth() === right.getUTCMonth() &&
+    left.getUTCDate() === right.getUTCDate()
+  );
+}
 
 const TERMINAL_DECLARATION_STATUSES: tax_declaration_status_enum[] = [
   'accepted',
@@ -161,7 +194,22 @@ export class TaxDeclarationDraftService {
     context: FiscalOperationsContext,
     dto: CreateTaxDeclarationDraftDto,
   ) {
-    const period = resolveFiscalPeriodRange(dto);
+    // Validate the caller's explicit period fields before any database read.
+    // A linked obligation may supply a missing periodicity below, which can
+    // require resolving the normalized range a second time.
+    this.resolveDeclarationPeriod(dto);
+    const obligation = await this.resolveLinkedObligation(context, dto);
+    const periodicity = this.resolveDeclarationPeriodicity(
+      dto.periodicity,
+      obligation?.periodicity,
+    );
+    const effectiveDto: CreateTaxDeclarationDraftDto = {
+      ...dto,
+      periodicity: periodicity ?? undefined,
+    };
+    const period = this.resolveDeclarationPeriod(effectiveDto);
+    if (obligation) this.assertObligationPeriodMatches(obligation, period);
+
     const calculation = await this.calculate(
       context,
       dto.declaration_type,
@@ -169,18 +217,28 @@ export class TaxDeclarationDraftService {
     );
     const existing = await this.prisma.tax_declaration_drafts.findFirst({
       where: {
+        organization_id: context.organization_id,
         accounting_entity_id: context.accounting_entity_id,
         declaration_type: dto.declaration_type,
         period_year: period.period_year,
         period_month: period.period_month,
         period_quarter: period.period_quarter,
-        status: { notIn: LOCKED_DECLARATION_STATUSES },
+        periodicity: periodicity ?? null,
+        jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
+        status: {
+          notIn: [...LOCKED_DECLARATION_STATUSES, 'voided'],
+        },
       },
       orderBy: { id: 'desc' },
     });
 
     const draft = await this.prisma.$transaction(async (tx) => {
-      const data = this.buildDraftData(context, dto, period, calculation);
+      const data = this.buildDraftData(
+        context,
+        effectiveDto,
+        period,
+        calculation,
+      );
       const draft = existing
         ? await tx.tax_declaration_drafts.update({
             where: { id: existing.id },
@@ -224,6 +282,8 @@ export class TaxDeclarationDraftService {
           period_year: period.period_year,
           period_month: period.period_month,
           period_quarter: period.period_quarter,
+          periodicity: periodicity ?? null,
+          jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
           line_count: calculation.lines.length,
           total_payable: Number(draft.total_payable || 0),
         },
@@ -241,6 +301,12 @@ export class TaxDeclarationDraftService {
       );
     }
 
+    if (draft.periodicity != null && !isFiscalCloseType(draft.periodicity)) {
+      throw new BadRequestException(
+        'Stored declaration has an unsupported periodicity and cannot be recalculated',
+      );
+    }
+
     const context = contexts.find(
       (item) => item.accounting_entity_id === draft.accounting_entity_id,
     );
@@ -251,6 +317,7 @@ export class TaxDeclarationDraftService {
       period_year: draft.period_year,
       period_month: draft.period_month ?? undefined,
       period_quarter: draft.period_quarter ?? undefined,
+      periodicity: draft.periodicity ?? undefined,
       obligation_id: draft.obligation_id ?? undefined,
       store_id: draft.store_id ?? undefined,
     });
@@ -475,6 +542,8 @@ export class TaxDeclarationDraftService {
       period_quarter: period.period_quarter,
       period_start: period.period_start,
       period_end: period.period_end,
+      periodicity: dto.periodicity ?? null,
+      jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
       currency: 'COP',
       gross_base_amount: calculation.totals.gross_base_amount ?? 0,
       taxable_base_amount: calculation.totals.taxable_base_amount ?? 0,
@@ -493,6 +562,97 @@ export class TaxDeclarationDraftService {
       validation_summary: calculation.validation_summary,
       created_by_user_id: RequestContextService.getUserId(),
     };
+  }
+
+  private async resolveLinkedObligation(
+    context: FiscalOperationsContext,
+    dto: CreateTaxDeclarationDraftDto,
+  ) {
+    if (dto.obligation_id == null) return null;
+
+    const obligation = await this.prisma.fiscal_obligations.findFirst({
+      where: {
+        id: dto.obligation_id,
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
+      },
+    });
+    if (!obligation) {
+      throw new BadRequestException(
+        'Linked fiscal obligation was not found in this accounting entity',
+      );
+    }
+
+    const expectedObligationType =
+      DECLARATION_OBLIGATION_TYPE[dto.declaration_type];
+    if (!expectedObligationType || obligation.type !== expectedObligationType) {
+      throw new BadRequestException(
+        'Declaration type does not match the linked fiscal obligation',
+      );
+    }
+    return obligation;
+  }
+
+  private resolveDeclarationPeriodicity(
+    requested: unknown,
+    obligationPeriodicity: unknown,
+  ): FiscalCloseType | null {
+    if (requested != null && !isFiscalCloseType(requested)) {
+      throw new BadRequestException('Unsupported declaration periodicity');
+    }
+    if (
+      obligationPeriodicity != null &&
+      !isFiscalCloseType(obligationPeriodicity)
+    ) {
+      throw new BadRequestException(
+        'Linked fiscal obligation has an unsupported periodicity',
+      );
+    }
+
+    if (
+      requested != null &&
+      obligationPeriodicity != null &&
+      requested !== obligationPeriodicity
+    ) {
+      throw new BadRequestException(
+        'Declaration periodicity conflicts with the linked fiscal obligation',
+      );
+    }
+
+    if (requested != null) return requested;
+    if (obligationPeriodicity != null) return obligationPeriodicity;
+    return null;
+  }
+
+  private resolveDeclarationPeriod(
+    dto: CreateTaxDeclarationDraftDto,
+  ): ReturnType<typeof resolveFiscalPeriodRange> {
+    try {
+      return resolveFiscalPeriodRange(dto);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+  }
+
+  private assertObligationPeriodMatches(
+    obligation: {
+      period_start: Date;
+      period_end: Date;
+    },
+    period: ReturnType<typeof resolveFiscalPeriodRange>,
+  ): void {
+    if (
+      !sameDateOnly(obligation.period_start, period.period_start) ||
+      !sameDateOnly(obligation.period_end, period.period_end)
+    ) {
+      throw new BadRequestException(
+        'Declaration period does not match the linked fiscal obligation',
+      );
+    }
   }
 
   private async calculate(
