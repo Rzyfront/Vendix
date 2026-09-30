@@ -16,6 +16,7 @@ import {
   VatResponsibilityResult,
 } from '@common/helpers/vat-responsibility.helper';
 import {
+  ExtractedLineTax,
   InvoiceScanResult,
   InvoiceMatchResult,
   SupplierMatch,
@@ -462,7 +463,10 @@ export class InvoiceScannerService {
 
       const factor = pack?.factor ?? 0;
       const canConvert =
-        pack != null && !pack.receiptConverts && Number.isFinite(factor) && factor > 1;
+        pack != null &&
+        !pack.receiptConverts &&
+        Number.isFinite(factor) &&
+        factor > 1;
       const converted = canConvert ? original * factor : NaN;
 
       const stockLabel = pack?.stockUnit || 'unidades';
@@ -1105,11 +1109,9 @@ export class InvoiceScannerService {
       ],
     };
 
-    const response = await this.aiEngine.run(
-      'payment_receipt_ocr',
-      {},
-      [imageMessage],
-    );
+    const response = await this.aiEngine.run('payment_receipt_ocr', {}, [
+      imageMessage,
+    ]);
 
     if (!response.success) {
       this.logger.error(
@@ -1208,9 +1210,9 @@ export class InvoiceScannerService {
       scanWarnings.push(
         lineTotalsSum > 0
           ? 'No se pudo leer el total impreso de la factura; se calculó sumando las ' +
-            'líneas. Verifícalo antes de confirmar.'
+              'líneas. Verifícalo antes de confirmar.'
           : 'No se pudo leer el total de la factura ni calcularlo desde las líneas. ' +
-            'Ingrésalo manualmente antes de confirmar.',
+              'Ingrésalo manualmente antes de confirmar.',
       );
     }
 
@@ -1282,7 +1284,11 @@ export class InvoiceScannerService {
     );
     const headerWasPrinted =
       Number.isFinite(rawHeaderDiscount) && rawHeaderDiscount > 0;
-    if (lineHasCommercialDiscount && headerWasPrinted && headerDiscountNet > 0) {
+    if (
+      lineHasCommercialDiscount &&
+      headerWasPrinted &&
+      headerDiscountNet > 0
+    ) {
       scanWarnings.push(
         'La factura muestra descuentos por línea y un descuento general en el pie. ' +
           'Se conservaron los descuentos por línea y se descartó el del pie para ' +
@@ -1332,9 +1338,7 @@ export class InvoiceScannerService {
    * inclusivo con tasas mixtas, que es raro; el descuento POR LÍNEA, que es el
    * camino preciso, usa la tasa de su propia línea.
    */
-  private dominantTaxRate(
-    lineItems: InvoiceScanResult['line_items'],
-  ): number {
+  private dominantTaxRate(lineItems: InvoiceScanResult['line_items']): number {
     let best = 0;
     let bestValue = -1;
     for (const item of lineItems) {
@@ -1361,6 +1365,107 @@ export class InvoiceScannerService {
    * in `unit_price_gross` (equal to net in the exclusive case). This lets
    * `unit_cost` persist net downstream and the UI show "bruto → neto".
    */
+  /**
+   * QUI-855 — normaliza `taxes[]` de una línea escaneada. Tipos desconocidos se
+   * descartan; una tasa en fracción (0 < r <= 1) se convierte a porcentaje;
+   * IBUA sin tasa es monto fijo por unidad; máx. 4 filas, una por tipo (gana la
+   * primera). Sin `taxes[]` pero con `tax_rate` legacy (fracción) => una fila IVA.
+   * `is_inclusive`: el flag de la fila, o el global de la factura para filas
+   * porcentuales; un monto fijo por unidad nunca se asume inclusivo.
+   */
+  private normalizeLineTaxes(
+    item: any,
+    pricesIncludeTax: boolean,
+    currency: StoreCurrencyInfo,
+    repairs: { count: number },
+  ): ExtractedLineTax[] {
+    const VALID = ['iva', 'inc', 'icui', 'ibua'] as const;
+    const out: ExtractedLineTax[] = [];
+    const seen = new Set<string>();
+    const round = (n: number) => Math.round(n * 10000) / 10000;
+
+    if (Array.isArray(item?.taxes) && item.taxes.length > 0) {
+      for (const raw of item.taxes) {
+        if (out.length >= 4) break;
+        const type = String(raw?.type ?? raw?.tax_type ?? '')
+          .trim()
+          .toLowerCase() as ExtractedLineTax['tax_type'];
+        if (!VALID.includes(type) || seen.has(type)) continue;
+
+        const rawRate = raw?.rate == null ? NaN : Number(raw.rate);
+        let rate = Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
+        if (rate !== null && rate > 0 && rate <= 1) rate = round(rate * 100);
+
+        const rawFixed =
+          raw?.fixed_amount_per_unit == null
+            ? NaN
+            : Number(raw.fixed_amount_per_unit);
+        const fixed =
+          Number.isFinite(rawFixed) && rawFixed > 0 ? rawFixed : null;
+
+        const rawAmount = raw?.amount == null ? NaN : Number(raw.amount);
+        let amount: number | null = null;
+        if (Number.isFinite(rawAmount) && rawAmount > 0) {
+          const repaired = repairScannedAmount(rawAmount, currency);
+          if (repaired.repaired) repairs.count++;
+          amount = repaired.value;
+        }
+
+        const fixedMode =
+          (fixed !== null && (rate === null || rate === 0)) ||
+          (type === 'ibua' && (rate === null || rate === 0));
+        const calcMode = fixedMode ? 'fixed_per_unit' : 'percent';
+
+        seen.add(type);
+        out.push({
+          tax_type: type,
+          tax_rate: fixedMode ? null : rate,
+          calc_mode: calcMode,
+          fixed_amount_per_unit: fixed,
+          amount_override: amount,
+          is_inclusive: fixedMode
+            ? false
+            : typeof raw?.inclusive === 'boolean'
+              ? raw.inclusive
+              : pricesIncludeTax,
+        });
+      }
+      // `taxes` sin fila IVA pero con `tax_rate` legacy > 0: se antepone la fila
+      // IVA (respetando el máximo de 4).
+      const legacyRate = Number(item?.tax_rate);
+      if (
+        !seen.has('iva') &&
+        out.length < 4 &&
+        item?.tax_rate != null &&
+        Number.isFinite(legacyRate) &&
+        legacyRate > 0
+      ) {
+        out.unshift({
+          tax_type: 'iva',
+          tax_rate: round(legacyRate <= 1 ? legacyRate * 100 : legacyRate),
+          calc_mode: 'percent',
+          fixed_amount_per_unit: null,
+          amount_override: null,
+          is_inclusive: pricesIncludeTax,
+        });
+      }
+      return out;
+    }
+
+    const legacy = Number(item?.tax_rate);
+    if (item?.tax_rate != null && Number.isFinite(legacy) && legacy >= 0) {
+      out.push({
+        tax_type: 'iva',
+        tax_rate: round(legacy > 0 && legacy <= 1 ? legacy * 100 : legacy),
+        calc_mode: 'percent',
+        fixed_amount_per_unit: null,
+        amount_override: null,
+        is_inclusive: pricesIncludeTax,
+      });
+    }
+    return out;
+  }
+
   private normalizeLineItem(
     item: any,
     pricesIncludeTax: boolean,
@@ -1385,11 +1490,9 @@ export class InvoiceScannerService {
     // NUNCA se repara: 0.19 es fraccionario por contrato, igual que
     // `quantity` (0,315 KGM es una cantidad real en un tiquete por peso).
     const rawRate = Number(item.tax_rate);
-    const taxRate =
-      Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
+    const taxRate = Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
     const r = taxRate ?? 0;
-    const unitNet =
-      pricesIncludeTax && r > 0 ? grossUnit / (1 + r) : grossUnit;
+    const unitNet = pricesIncludeTax && r > 0 ? grossUnit / (1 + r) : grossUnit;
 
     // Izada a const (antes se calculaba en línea dentro del return) porque el
     // descuento derivado de un porcentaje necesita la MISMA cantidad que se
@@ -1433,13 +1536,33 @@ export class InvoiceScannerService {
 
     const rawPackSize = Number(item.pack_size);
 
+    const taxes = this.normalizeLineTaxes(
+      item,
+      pricesIncludeTax,
+      currency,
+      repairs,
+    );
+    // Legacy `tax_rate` (fracción): si la IA no lo emitió pero sí trajo la fila
+    // IVA tipada, se deriva de ella. Si ambos existen, el legacy manda (no se
+    // altera el aplanado a neto que ya calculó `r`).
+    const legacyIvaRate =
+      taxRate === null
+        ? taxes.find((t) => t.tax_type === 'iva' && t.tax_rate !== null)
+            ?.tax_rate
+        : undefined;
+    const emittedTaxRate =
+      legacyIvaRate !== undefined && legacyIvaRate !== null
+        ? legacyIvaRate / 100
+        : taxRate;
+
     return {
       description: String(item.description || ''),
       quantity,
       // unit_price SIEMPRE queda en neto (aplastado si la factura era inclusiva).
       unit_price: unitNet,
       unit_price_gross: grossUnit,
-      tax_rate: taxRate,
+      tax_rate: emittedTaxRate,
+      taxes,
       total: totalRepair.value,
       sku_if_visible: item.sku_if_visible || undefined,
       // Fase 4: preserva las pistas de UoM emitidas por el perfil ingredient
@@ -1453,6 +1576,9 @@ export class InvoiceScannerService {
       // Neto, coherente con `unit_price`. Cero se emite como undefined para no
       // ensuciar las líneas sin descuento.
       discount_amount: discountNet > 0 ? discountNet : undefined,
+      // QUI-855 — descuento BRUTO tal como se imprimió (sin aplanar por IVA).
+      discount_amount_printed:
+        printedDiscount > 0 ? printedDiscount : undefined,
       // QUI-661 hotfix — el porcentaje NO se aplana: es adimensional, no vive
       // en ninguna base. Viaja como procedencia para que el modal muestre la
       // misma cifra que imprime el papel.
@@ -1539,7 +1665,11 @@ export class InvoiceScannerService {
         .withoutScope()
         .tax_categories.findMany({
           where: buildTaxCategoryScopeWhere(storeId, organizationId),
-          select: { id: true, store_id: true, tax_rates: { select: { rate: true } } },
+          select: {
+            id: true,
+            store_id: true,
+            tax_rates: { select: { rate: true } },
+          },
         });
       // Ante empate de tasa gana la categoría propia de la tienda: es la que el
       // comercio administra y la que sus reportes fiscales esperan.

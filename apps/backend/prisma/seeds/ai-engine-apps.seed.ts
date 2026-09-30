@@ -63,6 +63,7 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "unit_price": number,
       "total": number,
       "tax_rate": number,
+      "taxes": [{ "type": "iva|inc|icui|ibua", "rate": number or null, "fixed_amount_per_unit": number or null, "amount": number or null, "inclusive": boolean }],
       "discount_amount": number,
       "discount_percentage": number,
       "sku_if_visible": "string or null — product code/reference if visible"
@@ -119,7 +120,15 @@ RULES:
 15. SELF-CHECK before answering. For every line verify:
    prices_include_tax = true  -> quantity x unit_price - discount_amount ~= total
    prices_include_tax = false -> (quantity x unit_price - discount_amount) x (1 + tax_rate) ~= total
-   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.`,
+   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.
+16. TAXES ARRAY (per line, "taxes") — list EVERY tax printed for THAT line, one entry per tax, max 4 entries and at most one per type:
+   - "type": "iva" (IVA), "inc" (impuesto al consumo / impoconsumo), "icui" (impuesto a productos comestibles ultraprocesados), "ibua" (impuesto a bebidas azucaradas, charged per unit / per volume).
+   - "rate": the tax rate as a PERCENTAGE, e.g. 19 for 19%, 8 for 8%, 20 for 20% — NOT a fraction (this differs from the legacy "tax_rate", which stays a fraction). null when the tax is a fixed amount per unit (typical of ibua).
+   - "fixed_amount_per_unit": money per unit when the tax is a fixed amount per unit (e.g. IBUA 68 per unit), otherwise null.
+   - "amount": the tax money printed for that line, if the document prints it, otherwise null.
+   - "inclusive": true if the printed unit_price already includes THAT tax, false if it is added on top.
+   - Do NOT invent taxes that are not printed. If the document only shows a single IVA total, return exactly one "iva" entry. Use an empty array when the line is exempt / excluded / carries no tax.
+   - Keep the legacy "tax_rate" exactly as defined in the "tax_rate" rule (IVA rate as a DECIMAL FRACTION); "taxes" is additive and does not replace it. tax_amount stays the IVA total only.`,
       // prompt_template is null — for vision apps, text instructions must be
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
@@ -164,6 +173,7 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "unit_price": number,
       "total": number,
       "tax_rate": number,
+      "taxes": [{ "type": "iva|inc|icui|ibua", "rate": number or null, "fixed_amount_per_unit": number or null, "amount": number or null, "inclusive": boolean }],
       "discount_amount": number,
       "discount_percentage": number,
       "sku_if_visible": "string or null",
@@ -223,7 +233,15 @@ RULES:
 17. SELF-CHECK before answering. For every line verify:
    prices_include_tax = true  -> quantity x unit_price - discount_amount ~= total
    prices_include_tax = false -> (quantity x unit_price - discount_amount) x (1 + tax_rate) ~= total
-   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.`,
+   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.
+18. TAXES ARRAY (per line, "taxes") — list EVERY tax printed for THAT line, one entry per tax, max 4 entries and at most one per type:
+   - "type": "iva" (IVA), "inc" (impuesto al consumo / impoconsumo), "icui" (impuesto a productos comestibles ultraprocesados), "ibua" (impuesto a bebidas azucaradas, charged per unit / per volume).
+   - "rate": the tax rate as a PERCENTAGE, e.g. 19 for 19%, 8 for 8%, 20 for 20% — NOT a fraction (this differs from the legacy "tax_rate", which stays a fraction). null when the tax is a fixed amount per unit (typical of ibua).
+   - "fixed_amount_per_unit": money per unit when the tax is a fixed amount per unit (e.g. IBUA 68 per unit), otherwise null.
+   - "amount": the tax money printed for that line, if the document prints it, otherwise null.
+   - "inclusive": true if the printed unit_price already includes THAT tax, false if it is added on top.
+   - Do NOT invent taxes that are not printed. If the document only shows a single IVA total, return exactly one "iva" entry. Use an empty array when the line is exempt / excluded / carries no tax.
+   - Keep the legacy "tax_rate" exactly as defined in the "tax_rate" rule (IVA rate as a DECIMAL FRACTION); "taxes" is additive and does not replace it. tax_amount stays the IVA total only.`,
       prompt_template: null,
     },
     {

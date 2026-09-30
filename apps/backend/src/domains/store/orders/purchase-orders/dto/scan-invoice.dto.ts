@@ -19,6 +19,22 @@ export interface ExtractedSupplier {
   phone?: string;
 }
 
+/**
+ * QUI-855 — un impuesto tipado de la línea, ya normalizado. `tax_rate` es
+ * PORCENTAJE (19 = 19 %), a diferencia del campo legacy `tax_rate` de la línea
+ * que sigue siendo FRACCIÓN (0.19).
+ */
+export interface ExtractedLineTax {
+  tax_type: 'iva' | 'inc' | 'icui' | 'ibua';
+  /** Porcentaje (19), o null cuando el impuesto es un monto fijo por unidad. */
+  tax_rate: number | null;
+  calc_mode: 'percent' | 'fixed_per_unit';
+  fixed_amount_per_unit: number | null;
+  /** Monto de línea impreso en la factura (dinero), si lo hay. */
+  amount_override: number | null;
+  is_inclusive: boolean;
+}
+
 export interface ExtractedLineItem {
   description: string;
   quantity: number;
@@ -40,6 +56,11 @@ export interface ExtractedLineItem {
    * and (b) suggest a tax_category by rate match in `matchProducts`.
    */
   tax_rate?: number | null;
+  /**
+   * QUI-855 — impuestos tipados de la línea (IVA / INC / ICUI / IBUA), máx. 4,
+   * uno por tipo. `tax_rate` legacy = la fila IVA expresada en fracción.
+   */
+  taxes?: ExtractedLineTax[];
   /**
    * F3 IVA lifecycle: the ORIGINAL printed unit price as extracted from the
    * invoice (gross when the invoice was inclusive, net when exclusive).
@@ -71,6 +92,14 @@ export interface ExtractedLineItem {
    * Opcional: los escaneos anteriores a esta fase no lo emiten.
    */
   discount_amount?: number | null;
+  /**
+   * QUI-855 — descuento comercial de la línea BRUTO, tal como se imprimió (sin
+   * aplanar por IVA); undefined si no hay. El carrito multi-impuesto parte de
+   * `unit_price_gross` + `discount_amount_printed` y deja que el kernel despeje
+   * la base; `unit_price`/`discount_amount` (netos por IVA) quedan para el
+   * camino legacy.
+   */
+  discount_amount_printed?: number | null;
   /**
    * QUI-661 hotfix — descuento comercial de la línea en PORCENTAJE (0-100),
    * tal como lo imprime la factura ("-20%", "Dcto 20%"). Es PROCEDENCIA: el

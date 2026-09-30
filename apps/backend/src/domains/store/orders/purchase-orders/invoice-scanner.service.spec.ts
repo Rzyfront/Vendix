@@ -258,9 +258,7 @@ describe('InvoiceScannerService.normalizeOcrResponse', () => {
     });
 
     it('recorta a 100 un porcentaje fuera de rango', () => {
-      const result = normalize(
-        oneLine({ discount_percentage: 250 }),
-      );
+      const result = normalize(oneLine({ discount_percentage: 250 }));
 
       const item = result.line_items[0];
       expect(item.discount_percentage).toBe(100);
@@ -451,9 +449,9 @@ describe('InvoiceScannerService.matchProducts — D.1 productos archivados', () 
     expect(hasWarning(result.warnings, 'SKU AGU-600')).toBe(true);
     // No se degrada al aviso genérico: el operador tiene que saber que el
     // producto existe y está archivado, no que "no hay coincidencias".
-    expect(hasWarning(result.warnings, 'sin coincidencias en el catálogo')).toBe(
-      false,
-    );
+    expect(
+      hasWarning(result.warnings, 'sin coincidencias en el catálogo'),
+    ).toBe(false);
   });
 
   it('un producto ACTIVO con el mismo SKU sigue emparejando con confianza 95', async () => {
@@ -540,7 +538,9 @@ describe('InvoiceScannerService.matchProducts — D.1 productos archivados', () 
     );
 
     expect(result.items[0].selected_product_id).toBe(900);
-    expect(hasWarning(result.warnings, 'el SKU impreso pertenece a')).toBe(true);
+    expect(hasWarning(result.warnings, 'el SKU impreso pertenece a')).toBe(
+      true,
+    );
   });
 });
 
@@ -550,9 +550,7 @@ describe('InvoiceScannerService.matchProducts — D.1 productos archivados', () 
  * que el operador supiera que se había tomado una decisión fiscal por él.
  */
 describe('InvoiceScannerService.matchProducts — I.a aviso de estado fiscal', () => {
-  const line = [
-    { description: 'X', quantity: 1, unit_price: 100, total: 100 },
-  ];
+  const line = [{ description: 'X', quantity: 1, unit_price: 100, total: 100 }];
 
   it('cuando NO hay configuración fiscal, recomienda el asistente', async () => {
     const { service } = buildScanner({ fiscalData: {} });
@@ -1047,5 +1045,173 @@ describe('InvoiceScannerService.matchProducts — motivo por línea', () => {
 
     expect(result.items[0].match_reason).toBe('archived_candidate');
     expect(hasWarning(result.warnings, 'ARCHIVADO')).toBe(true);
+  });
+});
+
+describe('InvoiceScannerService.normalizeOcrResponse — QUI-855 taxes[]', () => {
+  const lineWith = (extra: Record<string, unknown>) =>
+    normalize(
+      invoice({
+        line_items: [
+          {
+            description: 'X',
+            quantity: 1,
+            unit_price: 1000,
+            total: 1190,
+            ...extra,
+          },
+        ],
+      }),
+    ).line_items[0];
+
+  it('IVA 19 % + ICUI 20 % => 2 filas en porcentaje', () => {
+    const line = lineWith({
+      tax_rate: 0.19,
+      taxes: [
+        {
+          type: 'iva',
+          rate: 19,
+          fixed_amount_per_unit: null,
+          amount: 190,
+          inclusive: false,
+        },
+        {
+          type: 'icui',
+          rate: 20,
+          fixed_amount_per_unit: null,
+          amount: null,
+          inclusive: false,
+        },
+      ],
+    });
+    expect(line.taxes).toHaveLength(2);
+    expect(line.taxes![0]).toMatchObject({
+      tax_type: 'iva',
+      tax_rate: 19,
+      calc_mode: 'percent',
+      amount_override: 190,
+    });
+    expect(line.taxes![1]).toMatchObject({
+      tax_type: 'icui',
+      tax_rate: 20,
+      calc_mode: 'percent',
+      amount_override: null,
+    });
+    expect(line.tax_rate).toBe(0.19);
+  });
+
+  it('tasa en fracción 0.19 se convierte a 19', () => {
+    const line = lineWith({
+      taxes: [{ type: 'iva', rate: 0.19, inclusive: false }],
+    });
+    expect(line.taxes![0].tax_rate).toBe(19);
+    expect(line.tax_rate).toBeCloseTo(0.19, 6);
+  });
+
+  it('IBUA con monto fijo 68 => fixed_per_unit', () => {
+    const line = lineWith({
+      taxes: [
+        {
+          type: 'ibua',
+          rate: null,
+          fixed_amount_per_unit: 68,
+          amount: null,
+          inclusive: false,
+        },
+      ],
+    });
+    expect(line.taxes![0]).toMatchObject({
+      tax_type: 'ibua',
+      tax_rate: null,
+      calc_mode: 'fixed_per_unit',
+      fixed_amount_per_unit: 68,
+    });
+  });
+
+  it('sin taxes pero tax_rate 0.19 => una fila IVA 19', () => {
+    const line = lineWith({ tax_rate: 0.19 });
+    expect(line.taxes).toEqual([
+      {
+        tax_type: 'iva',
+        tax_rate: 19,
+        calc_mode: 'percent',
+        fixed_amount_per_unit: null,
+        amount_override: null,
+        is_inclusive: false,
+      },
+    ]);
+    expect(line.tax_rate).toBe(0.19);
+  });
+
+  it('descarta tipos desconocidos, duplica el primero y limita a 4', () => {
+    const line = lineWith({
+      taxes: [
+        { type: 'foo', rate: 5 },
+        { type: 'iva', rate: 19 },
+        { type: 'iva', rate: 5 },
+        { type: 'inc', rate: 8 },
+        { type: 'icui', rate: 20 },
+        { type: 'ibua', fixed_amount_per_unit: 68 },
+      ],
+    });
+    expect(line.taxes!.map((t) => t.tax_type)).toEqual([
+      'iva',
+      'inc',
+      'icui',
+      'ibua',
+    ]);
+    expect(line.taxes![0].tax_rate).toBe(19);
+  });
+
+  it('taxes sin fila IVA pero tax_rate legacy > 0 antepone la fila IVA', () => {
+    const line = lineWith({
+      tax_rate: 0.19,
+      taxes: [{ type: 'icui', rate: 20 }],
+    });
+    expect(line.taxes!.map((t) => t.tax_type)).toEqual(['iva', 'icui']);
+    expect(line.taxes![0]).toMatchObject({
+      tax_rate: 19,
+      calc_mode: 'percent',
+      is_inclusive: false,
+    });
+  });
+
+  it('con INC + ICUI + IBUA sin IVA antepone IVA y queda en 4 filas (tope)', () => {
+    const line = lineWith({
+      tax_rate: 0.19,
+      taxes: [
+        { type: 'inc', rate: 8 },
+        { type: 'icui', rate: 20 },
+        { type: 'ibua', fixed_amount_per_unit: 68 },
+        { type: 'foo', rate: 1 },
+      ],
+    });
+    expect(line.taxes!.map((t) => t.tax_type)).toEqual([
+      'iva',
+      'inc',
+      'icui',
+      'ibua',
+    ]);
+  });
+
+  it('discount_amount_printed = descuento bruto sin aplanar', () => {
+    const res = normalize(
+      invoice({
+        prices_include_tax: true,
+        line_items: [
+          {
+            description: 'X',
+            quantity: 1,
+            unit_price: 1190,
+            total: 952,
+            tax_rate: 0.19,
+            discount_amount: 238,
+          },
+        ],
+      }),
+    ).line_items[0];
+    expect(res.discount_amount_printed).toBe(238);
+    expect(res.discount_amount).toBeCloseTo(200, 6);
+    expect(lineWith({ tax_rate: 0 }).discount_amount_printed).toBeUndefined();
   });
 });
