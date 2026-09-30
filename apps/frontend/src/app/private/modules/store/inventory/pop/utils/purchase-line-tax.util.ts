@@ -14,7 +14,10 @@
  * Regla de negocio (QUI-661): el descuento comercial se resta del BRUTO antes
  * del split de impuestos (reduce la base gravable).
  */
-import { resolvePurchaseLineTaxes } from '@money-kernel/purchase-line-taxes';
+import {
+  resolvePurchaseLineDiscount,
+  resolvePurchaseLineTaxes,
+} from '@money-kernel/purchase-line-taxes';
 import type {
   PurchaseLineTaxInput as KernelTaxInput,
   PurchaseTaxBaseMode,
@@ -92,6 +95,12 @@ export interface PurchaseLineTaxesResult extends PurchaseLineTaxResult {
   capitalized_tax_total: number;
   /** Costo capitalizable de la línea: neto + impuestos al costo. */
   cost_total: number;
+  /**
+   * QUI-855 — mensaje del kernel cuando rechazó la combinación (p. ej. IBUA
+   * incluido mayor que el bruto). La línea se muestra sin impuestos, pero el
+   * carrito la marca inválida y bloquea el envío: el backend respondería 400.
+   */
+  tax_error?: string;
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -165,22 +174,29 @@ function resolveWithKernel(
   unitPrice: number,
   quantity: number,
   discountTotal: number,
-): ResolvedPurchaseLine {
+  kernelDiscount: number,
+): ResolvedPurchaseLine & { error?: string } {
   const rawGross = round2(unitPrice * quantity);
   if (!(quantity > 0)) return EMPTY_KERNEL_LINE(0, 0);
   try {
     return resolvePurchaseLineTaxes({
       unit_price: unitPrice,
       quantity,
-      discount_amount: discountTotal,
+      discount_amount: kernelDiscount,
       prices_include_tax: effectiveInclude,
       taxes: toKernelTaxes(item),
     });
-  } catch {
-    return EMPTY_KERNEL_LINE(
-      Math.max(0, round2(rawGross - discountTotal)),
-      quantity,
-    );
+  } catch (err) {
+    return {
+      ...EMPTY_KERNEL_LINE(
+        Math.max(0, round2(rawGross - discountTotal)),
+        quantity,
+      ),
+      error:
+        err instanceof Error && err.message
+          ? err.message
+          : 'Los impuestos de la línea no son válidos.',
+    };
   }
 }
 
@@ -200,18 +216,18 @@ export function deriveLineTaxes(
     item.prices_include_tax ?? header.prices_include_tax ?? false;
   const rawGross = round2(unitPrice * quantity);
 
-  // `discount_amount` gana sobre `discount_percentage`: la cifra en dinero es la
-  // que se persiste y la que lee la contabilidad.
-  const ownDiscount =
-    item.discount_amount != null && num(item.discount_amount) > 0
-      ? num(item.discount_amount)
-      : round2(rawGross * (num(item.discount_percentage) / 100));
-
-  // Un descuento nunca puede volver la línea negativa (costo negativo
-  // envenena la capa FIFO): se topa al bruto.
-  const discount_total = quantity > 0
-    ? Math.min(rawGross, Math.max(0, ownDiscount + num(proratedHeaderDiscount)))
-    : 0;
+  // Descuento resuelto por el kernel compartido (mismo que el backend):
+  // `discount_amount` gana sobre `%`, tope en el bruto exacto, un solo redondeo.
+  const { discount_total, kernel_discount } =
+    quantity > 0
+      ? resolvePurchaseLineDiscount({
+          unit_price: unitPrice,
+          quantity,
+          discount_amount: item.discount_amount,
+          discount_percentage: item.discount_percentage,
+          prorated_header_discount: num(proratedHeaderDiscount),
+        })
+      : { discount_total: 0, kernel_discount: 0 };
 
   const r = resolveWithKernel(
     item,
@@ -219,6 +235,7 @@ export function deriveLineTaxes(
     unitPrice,
     quantity,
     discount_total,
+    kernel_discount,
   );
 
   const taxes: PurchaseDerivedTax[] = r.taxes.map((t) => ({
@@ -244,7 +261,7 @@ export function deriveLineTaxes(
     tax_amount_per_unit: perUnit(r.tax_total),
     tax_amount: r.tax_total,
     effective_include,
-    discount_total: quantity > 0 ? round2(discount_total) : 0,
+    discount_total,
     gross_line: rawGross,
     net_line: r.net_total,
     total_line: r.line_total,
@@ -253,6 +270,7 @@ export function deriveLineTaxes(
     deductible_per_unit: perUnit(r.non_capitalized_tax_total),
     capitalized_tax_total: r.capitalized_tax_total,
     cost_total: r.cost_total,
+    ...(r.error ? { tax_error: r.error } : {}),
   };
 }
 

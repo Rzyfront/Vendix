@@ -268,6 +268,12 @@ export interface PopCartItem {
    */
   tax_needs_review?: boolean;
   /**
+   * El kernel rechazó la combinación de impuestos de la línea (la vista previa
+   * no puede calcularla). Mensaje para el operador; bloquea el envío igual
+   * que `tax_needs_review`. Lo escribe quien detecte el fallo del kernel.
+   */
+  tax_error?: string;
+  /**
    * IVA cycle (F1): tax classification for this line. Defaults to 'iva'.
    * Passed through to the backend as-is (backend is the source of truth).
    */

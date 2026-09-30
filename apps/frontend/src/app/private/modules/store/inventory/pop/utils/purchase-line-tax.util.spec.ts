@@ -60,6 +60,18 @@ describe('purchase-line-tax.util — paridad con el backend', () => {
   });
 
   describe('deriveLineTax — precedencia del descuento', () => {
+    it('QUI-855: 85,71 × 7 con 50 % ⇒ neto 299,99 (igual que el backend)', () => {
+      // bruto exacto 599,97 · 50 % = 299,985 (float: 299,98499…) ⇒ descuento
+      // 299,98 a centavo y neto 299,99, como el backend (antes el carrito daba
+      // 299,98 al redondear el descuento sobre el bruto ya redondeado).
+      const r = deriveLineTaxes(
+        { unit_price: 85.71, quantity: 7, discount_percentage: 50, tax_rate: 0 },
+        ADDED,
+      );
+      expect(r.discount_total).toBe(299.98);
+      expect(r.net_line).toBe(299.99);
+    });
+
     it('el MONTO gana sobre el porcentaje (400 vence a 99%)', () => {
       // Ésta es la invariante del hotfix. `discount_amount` es la cifra que la
       // factura imprimió; el porcentaje es sólo procedencia. Un 99% aplicado a
@@ -477,6 +489,16 @@ describe('purchase-line-tax.util — paridad con el backend', () => {
 
       expect(d.tax_amount).toBe(0);
       expect(d.net_line).toBe(100);
+      // …pero la marca inválida para que el carrito bloquee el envío.
+      expect(d.tax_error).toBeTruthy();
+    });
+
+    it('una línea válida no lleva tax_error', () => {
+      const d = deriveLineTaxes(
+        { unit_cost: 1000, quantity: 5, tax_rate: 19, tax_type: 'iva' },
+        ADDED,
+      );
+      expect(d.tax_error).toBeUndefined();
     });
   });
 });

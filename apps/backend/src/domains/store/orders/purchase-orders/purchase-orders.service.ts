@@ -44,6 +44,7 @@ import { AccountsPayableService } from '../../accounts-payable/accounts-payable.
 import {
   differsByAtLeastCents,
   resolvePurchaseLineTaxes,
+  resolvePurchaseLineDiscount,
   type PurchaseLineTaxInput,
   type PurchaseTaxType,
   type ResolvedPurchaseLine,
@@ -238,31 +239,16 @@ export class PurchaseOrdersService {
     const zeroQty = quantity === 0;
     const calcQty = zeroQty ? 1 : quantity;
 
-    // QUI-661 — descuento total de la línea (propio + porción de cabecera).
-    const ownDiscount =
-      item.discount_amount != null && Number(item.discount_amount) > 0
-        ? Number(item.discount_amount)
-        : gross * quantity * (Number(item.discount_percentage ?? 0) / 100);
-    const requestedDiscount = Math.max(
-      0,
-      ownDiscount + Number(proratedHeaderDiscount || 0),
-    );
-    const discountPerUnit = Math.min(requestedDiscount / calcQty, gross);
-    // El tope se aplica sobre el descuento TOTAL (no por unidad antes de
-    // redondear): con 999 × 0,315 (bruto 314,685) redondear el descuento a
-    // 314,69 dejaría el neto en −0,01 (ROUND_HALF_UP del kernel) y lanzaría.
-    // Si el descuento pedido cubre la línea, al kernel se le pasa el bruto
-    // EXACTO de la línea (neto 0); `discount_total` se persiste a centavo.
-    const lineGrossExact = Math.round(gross * quantity * 1e6) / 1e6;
-    const discountCoversLine = requestedDiscount >= lineGrossExact;
-    const discount_total = zeroQty
-      ? 0
-      : Math.round(Math.min(requestedDiscount, lineGrossExact) * 100) / 100;
-    const kernelDiscount = zeroQty
-      ? Math.round(discountPerUnit * 100) / 100
-      : discountCoversLine
-        ? lineGrossExact
-        : discount_total;
+    // QUI-661/855 — descuento total de la línea (propio + porción de cabecera),
+    // resuelto por el kernel compartido (paridad al centavo con el frontend).
+    const { discount_total, kernel_discount: kernelDiscount } =
+      resolvePurchaseLineDiscount({
+        unit_price: gross,
+        quantity,
+        discount_amount: item.discount_amount,
+        discount_percentage: item.discount_percentage,
+        prorated_header_discount: proratedHeaderDiscount,
+      });
 
     // Entradas de impuesto: `taxes[]` gana; si no, el par legacy.
     const kernelTaxes: PurchaseLineTaxInput[] = [];

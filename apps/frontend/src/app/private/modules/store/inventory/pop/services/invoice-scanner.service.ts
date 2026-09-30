@@ -3,8 +3,10 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, throwError, timer } from 'rxjs';
 import {
   catchError,
+  exhaustMap,
   filter,
   map,
+  retry,
   switchMap,
   take,
   takeWhile,
@@ -133,7 +135,21 @@ export class InvoiceScannerService {
     return this.revalidate(body).pipe(
       switchMap((jobId) =>
         timer(0, InvoiceScannerService.REVALIDATE_POLL_INTERVAL_MS).pipe(
-          switchMap(() => this.getRevalidateStatus(jobId)),
+          // exhaustMap: si un GET sigue en vuelo cuando llega el siguiente tick,
+          // el tick se descarta (switchMap cancelaba el GET lento y podía no
+          // completar nunca con red lenta). Un fallo transitorio se reintenta
+          // 2 veces (1 s); un 404 (job evictado) es definitivo y no se reintenta.
+          exhaustMap(() =>
+            this.getRevalidateStatus(jobId).pipe(
+              retry({
+                count: 2,
+                delay: (err: unknown) =>
+                  err instanceof HttpErrorResponse && err.status === 404
+                    ? throwError(() => err)
+                    : timer(1000),
+              }),
+            ),
+          ),
           takeWhile(
             (s) => s.status !== 'completed' && s.status !== 'failed',
             true,

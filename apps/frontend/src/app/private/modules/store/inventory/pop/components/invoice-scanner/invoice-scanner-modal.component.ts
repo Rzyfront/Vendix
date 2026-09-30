@@ -51,6 +51,10 @@ import {
   mergeRevalidatedLines,
 } from '../../utils/revalidate-merge.util';
 import {
+  editedHeaderDiscountFields,
+  seedHeaderDiscount,
+} from '../../utils/scan-header-discount.util';
+import {
   deriveLineTax,
   derivePurchaseTotals,
   prorateHeaderDiscount,
@@ -1559,6 +1563,7 @@ export class InvoiceScannerModalComponent {
       invoiceNumber: this.editInvoiceNumber,
       invoiceDate: this.editInvoiceDate,
       headerDiscount: this.headerDiscount(),
+      headerDiscountGross: this.headerDiscountGross(),
       totals: {
         subtotal: totals.subtotal,
         tax_amount: totals.tax_amount,
@@ -1621,12 +1626,26 @@ export class InvoiceScannerModalComponent {
         subtotal: c.subtotal ?? scan.subtotal,
         tax_amount: c.tax_amount ?? scan.tax_amount,
         total: c.total ?? scan.total,
+        ...(c.discount_amount != null || c.discount_amount_printed != null
+          ? {
+              discount_amount: c.discount_amount ?? null,
+              discount_amount_printed: c.discount_amount_printed ?? null,
+            }
+          : {}),
       });
     }
     if (c.invoice_number) this.editInvoiceNumber = c.invoice_number;
     if (c.invoice_date) this.editInvoiceDate = c.invoice_date;
-    if (c.discount_amount != null) {
-      this.headerDiscount.set(Math.max(0, Number(c.discount_amount) || 0));
+    if (c.discount_amount != null || c.discount_amount_printed != null) {
+      // Misma regla de unidad que en la siembra, sobre las líneas ya fusionadas.
+      const discarded = this.discardedIndexes();
+      const seeded = seedHeaderDiscount(
+        c,
+        next.filter((_, i) => !discarded.has(i)),
+      );
+      this.headerDiscount.set(seeded.value);
+      this.headerDiscountGross.set(seeded.gross);
+      this.headerDiscountSeed = seeded.value;
     }
     this.finishRevalidation(false);
   }
@@ -1812,6 +1831,17 @@ export class InvoiceScannerModalComponent {
    * `scanResult` que emite `onConfirm`.
    */
   readonly headerDiscount = signal(0);
+
+  /**
+   * Unidad del descuento general: BRUTO (impreso) cuando hay líneas
+   * multi-impuesto y la factura trae el impreso; NETO si no (ver
+   * `scan-header-discount.util`). Se fija al sembrar / al usar la
+   * revalidación, y `onConfirm` emite la cifra editada en ESA unidad.
+   */
+  readonly headerDiscountGross = signal(false);
+
+  /** Cifra con que se sembró el descuento (para saber si hubo edición). */
+  private headerDiscountSeed = 0;
 
   /**
    * Descuento por PRONTO PAGO — sólo se muestra, NO se aplica. Es financiero:
@@ -2577,7 +2607,16 @@ export class InvoiceScannerModalComponent {
             // hay que sembrarla explícitamente en cada escaneo: si se dejara
             // al valor anterior, el segundo escaneo heredaría el descuento del
             // primero (el contenido proyectado en `app-modal` no se destruye).
-            this.headerDiscount.set(Number(scan.discount_amount ?? 0) || 0);
+            // QUI-855: en la unidad de las líneas (bruto impreso si hay líneas
+            // multi-impuesto y la factura trae el impreso; neto si no).
+            const discarded = this.discardedIndexes();
+            const seeded = seedHeaderDiscount(
+              scan,
+              this.editableItems().filter((_, i) => !discarded.has(i)),
+            );
+            this.headerDiscount.set(seeded.value);
+            this.headerDiscountGross.set(seeded.gross);
+            this.headerDiscountSeed = seeded.value;
           }
           this.currentStep.set(3);
         } else {
@@ -2867,7 +2906,19 @@ export class InvoiceScannerModalComponent {
       // carrito, así que emitir el `scan` crudo descartaría en silencio la
       // corrección que el operador acaba de hacer en la precarga — y con ella
       // el prorrateo por línea que el backend aplica sobre esa cifra.
-      scanResult: { ...scan, discount_amount: this.headerDiscount() },
+      //
+      // QUI-855: se emite en el campo de SU unidad (bruto ⇒ `_printed`; neto ⇒
+      // `discount_amount` y `_printed` null) para que `pop.component`
+      // (`resolveCartHeaderDiscount`) entregue al carrito lo que el operador ve.
+      scanResult: {
+        ...scan,
+        ...editedHeaderDiscountFields(
+          scan,
+          this.headerDiscount(),
+          this.headerDiscountGross(),
+          this.headerDiscountSeed,
+        ),
+      },
       matchResult: match,
       editedItems: kept,
       invoiceNumber: this.editInvoiceNumber || undefined,
@@ -2907,6 +2958,8 @@ export class InvoiceScannerModalComponent {
     this.editableItems.set([]);
     this.expandedTaxRow.set(null);
     this.headerDiscount.set(0);
+    this.headerDiscountGross.set(false);
+    this.headerDiscountSeed = 0;
     // QUI-644: obligatorio. El contenido proyectado en `app-modal` no se
     // destruye al cerrar (QUI-438), así que sin esto el descarte del escaneo
     // anterior se aplicaría a las líneas del siguiente.

@@ -41,6 +41,40 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 /**
  * Lot/Batch information for purchase order items (extended for service use)
  */
+/** Tipos de impuesto que el carrito conserva tal cual en una línea. */
+export const POP_LINE_TAX_TYPES = ['iva', 'inc', 'icui', 'ibua'] as const;
+
+/** `tax_type` de la línea si es uno conocido; si no, 'iva' (sin reclasificar). */
+export function normalizePopLineTaxType(
+  value: string | null | undefined,
+): string {
+  return (POP_LINE_TAX_TYPES as readonly string[]).includes(value ?? '')
+    ? (value as string)
+    : 'iva';
+}
+
+/**
+ * Líneas que bloquean el envío de la OC: con «¿Esta compra tiene IVA?»
+ * encendido, las que tienen el impuesto sin confirmar (`tax_needs_review`) o
+ * que el kernel no pudo calcular (`tax_error`). Con `has_vat` apagado no hay
+ * impuesto que confirmar y no bloquea.
+ */
+export function countLinesBlockingSubmit(
+  state: Pick<PopCartState, 'has_vat' | 'items'>,
+): number {
+  if (!state.has_vat) return 0;
+  return state.items.filter((i) => i.tax_needs_review || i.tax_error).length;
+}
+
+/** Mensaje de bloqueo del envío («Confirma el impuesto de N línea(s)»), o null. */
+export function submitBlockMessage(
+  state: Pick<PopCartState, 'has_vat' | 'items'>,
+): string | null {
+  const n = countLinesBlockingSubmit(state);
+  if (n === 0) return null;
+  return `Confirma el impuesto de ${n} ${n === 1 ? 'línea' : 'líneas'}`;
+}
+
 export interface PopCartItemLotInfo {
   batch_number?: string;
   manufacturing_date?: Date;
@@ -492,7 +526,10 @@ export class PopCartService {
    * divergence between the modal that edits an existing line and the
    * scanner that adds a new one with a discount already in the payload.
    */
-  private normalizeDiscount(value: number | null | undefined): number {
+  private normalizeDiscount(
+    value: number | null | undefined,
+    decimals = 0,
+  ): number {
     if (
       value === null ||
       value === undefined ||
@@ -500,7 +537,11 @@ export class PopCartService {
     ) {
       return 0;
     }
-    return Math.min(100, Math.max(0, Math.round(Number(value))));
+    const factor = 10 ** decimals;
+    return Math.min(
+      100,
+      Math.max(0, Math.round(Number(value) * factor) / factor),
+    );
   }
 
   /**
@@ -529,7 +570,9 @@ export class PopCartService {
     ) {
       return;
     }
-    const pct = this.normalizeDiscount(discountPercentage);
+    // Con 2 decimales (la columna es Decimal(5,2) y el DTO acepta decimales):
+    // 1,5 % debe quedarse en 1,5 %, no saltar a 2 %.
+    const pct = this.normalizeDiscount(discountPercentage, 2);
     const items = this.currentState.items.map((item) =>
       item.id === itemId
         ? { ...item, discount: pct, discount_amount: undefined }
@@ -742,7 +785,7 @@ export class PopCartService {
         // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
         // descuento; el alta manual sigue en 0. La normalización
         // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
-        discount: this.normalizeDiscount(request.discount),
+        discount: this.normalizeDiscount(request.discount, 2),
         // Paridad escáner: el MONTO viaja crudo. No pasa por
         // `normalizeDiscount` porque ese helper es el contrato del PORCENTAJE
         // entero 0-100; aplicarlo a pesos truncaría la cifra de la factura.
@@ -819,7 +862,7 @@ export class PopCartService {
         // pise el descuento de la línea con un 0 silencioso.
         discount:
           request.discount !== undefined
-            ? this.normalizeDiscount(request.discount)
+            ? this.normalizeDiscount(request.discount, 2)
             : existingItem.discount,
         // Paridad escáner: el descuento en DINERO sigue exactamente el mismo
         // patrón que `discount` / `unit_cost` / `tax_rate`. Sin esta línea el
@@ -865,7 +908,7 @@ export class PopCartService {
         // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
         // descuento; el alta manual sigue en 0. La normalización
         // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
-        discount: this.normalizeDiscount(request.discount),
+        discount: this.normalizeDiscount(request.discount, 2),
         // Paridad escáner: el MONTO en pesos viaja crudo (ver rama prebulk).
         discount_amount: request.discount_amount,
         // IVA cycle (F1/F3): defaults salvo override del request (escáner).
@@ -971,6 +1014,9 @@ export class PopCartService {
       ...currentState,
       items: updatedItems,
       summary: this.calculateSummary(updatedItems),
+      // La factura escaneada pertenece a las líneas que trajo: sin líneas no
+      // hay orden a la que adjuntarla (igual que `clearCart`).
+      ...(updatedItems.length === 0 ? { scan_attachment: undefined } : {}),
       updatedAt: new Date(),
     };
   }
@@ -1030,6 +1076,9 @@ export class PopCartService {
     item.subtotal = result.net_line; // NET line subtotal
     item.tax_amount = result.tax_amount; // impuestos de la línea
     item.total = result.total_line;
+    // QUI-855 — combinación que el kernel rechaza: la línea queda inválida y
+    // `countLinesBlockingSubmit` bloquea el envío (undefined la limpia).
+    item.tax_error = result.tax_error;
   }
 
   /**
@@ -1121,7 +1170,8 @@ export class PopCartService {
       item.taxes = safe.length > 0 ? safe : undefined;
       const iva = safe.find((t) => t.tax_type === 'iva');
       item.tax_rate = iva ? Number(iva.tax_rate) || 0 : 0;
-      item.tax_type = 'iva';
+      // No se reclasifica al editar: una línea legacy 'inc' sigue siendo 'inc'.
+      item.tax_type = normalizePopLineTaxType(item.tax_type);
       item.tax_needs_review = false;
     });
   }
@@ -1390,7 +1440,7 @@ export class PopCartService {
         // 0.20 != 20%, así que NO estamos perdiendo valor real, sólo
         // bloqueando que el bug se propague. Si el operador quiere mantener
         // el descuento, lo retipea explícito en el modal y se persiste como 20.
-        discount: this.normalizeDiscount(Number(item.discount_percentage)),
+        discount: this.normalizeDiscount(Number(item.discount_percentage), 2),
         // Paridad escáner: la OC persistida guarda el descuento de línea en
         // DINERO (`purchase_order_items.discount_amount`) y es la cifra que el
         // backend prefiere al recalcular. Hidratarla es lo que hace que una OC

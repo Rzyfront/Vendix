@@ -18,6 +18,7 @@ import {
   popLineTaxesToScanTaxes,
   scanLineHasTaxes,
 } from './scan-line-to-cart.util';
+import { editedHeaderDiscountFields } from './scan-header-discount.util';
 
 export type RevalidateConsolidated = Omit<InvoiceScanResult, 'scan_attachment'>;
 
@@ -28,8 +29,10 @@ export interface BuildRevalidateConsolidatedInput {
   items: readonly MatchedLineItem[];
   invoiceNumber?: string | null;
   invoiceDate?: string | null;
-  /** Descuento de pie EDITADO (neto). */
+  /** Descuento de pie EDITADO (en la unidad indicada por `headerDiscountGross`). */
   headerDiscount: number;
+  /** true ⇒ `headerDiscount` está en BRUTO impreso; false/omitido ⇒ neto. */
+  headerDiscountGross?: boolean;
   /** Totales derivados (`derivePurchaseTotals`); sin ellos se usa el escaneo. */
   totals?: { subtotal: number; tax_amount: number; total: number };
   /** Total derivado de cada línea enviada (paralelo a `items`). */
@@ -113,10 +116,14 @@ export function buildRevalidateConsolidated(
     ),
     subtotal: input.totals?.subtotal ?? scan.subtotal,
     tax_amount: input.totals?.tax_amount ?? scan.tax_amount,
-    discount_amount: headerDiscount,
-    discount_amount_printed: untouchedDiscount
-      ? (scan.discount_amount_printed ?? null)
-      : null,
+    ...(input.headerDiscountGross
+      ? editedHeaderDiscountFields(scan, headerDiscount, true)
+      : {
+          discount_amount: headerDiscount,
+          discount_amount_printed: untouchedDiscount
+            ? (scan.discount_amount_printed ?? null)
+            : null,
+        }),
     early_payment_discount: scan.early_payment_discount ?? null,
     total: input.totals?.total ?? scan.total,
     confidence: scan.confidence,

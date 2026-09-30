@@ -108,6 +108,63 @@ interface Norm {
   override: number | null;
 }
 
+export interface PurchaseLineDiscountInput {
+  unit_price: number;
+  /** 0 ⇒ vista previa de línea vacía: importes por unidad con cantidad 1, total 0. */
+  quantity: number;
+  /** Descuento propio en DINERO; gana sobre el porcentaje cuando es > 0. */
+  discount_amount?: number | null;
+  /** Descuento propio en PORCENTAJE (20 = 20 %). */
+  discount_percentage?: number | null;
+  /** Porción prorrateada del descuento de cabecera. */
+  prorated_header_discount?: number | null;
+}
+
+export interface ResolvedPurchaseLineDiscount {
+  /** Descuento total de la línea a centavo: lo que se persiste. */
+  discount_total: number;
+  /** Lo que se pasa a `resolvePurchaseLineTaxes` como `discount_amount`. */
+  kernel_discount: number;
+}
+
+/**
+ * Descuento de línea (propio + cabecera) — QUI-855. Única fuente para backend
+ * y frontend. Aritmética en float JS a propósito (semántica histórica del
+ * backend): el descuento propio por % NO se redondea, el tope es el bruto
+ * EXACTO de la línea y se redondea UNA vez a centavo. Si el descuento cubre la
+ * línea, al kernel se le pasa el bruto exacto (neto 0, sin −0,01 por
+ * ROUND_HALF_UP) mientras `discount_total` se persiste a centavo.
+ */
+export function resolvePurchaseLineDiscount(
+  input: PurchaseLineDiscountInput,
+): ResolvedPurchaseLineDiscount {
+  const gross = Number(input.unit_price ?? 0);
+  const quantity = Number(input.quantity ?? 0);
+  const zeroQty = quantity === 0;
+  const calcQty = zeroQty ? 1 : quantity;
+
+  const ownDiscount =
+    input.discount_amount != null && Number(input.discount_amount) > 0
+      ? Number(input.discount_amount)
+      : gross * quantity * (Number(input.discount_percentage ?? 0) / 100);
+  const requestedDiscount = Math.max(
+    0,
+    ownDiscount + Number(input.prorated_header_discount || 0),
+  );
+  const discountPerUnit = Math.min(requestedDiscount / calcQty, gross);
+  const lineGrossExact = Math.round(gross * quantity * 1e6) / 1e6;
+  const discountCoversLine = requestedDiscount >= lineGrossExact;
+  const discount_total = zeroQty
+    ? 0
+    : Math.round(Math.min(requestedDiscount, lineGrossExact) * 100) / 100;
+  const kernel_discount = zeroQty
+    ? Math.round(discountPerUnit * 100) / 100
+    : discountCoversLine
+      ? lineGrossExact
+      : discount_total;
+  return { discount_total, kernel_discount };
+}
+
 export function resolvePurchaseLineTaxes(
   line: PurchaseLineInput,
 ): ResolvedPurchaseLine {

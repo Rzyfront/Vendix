@@ -8,6 +8,8 @@ import {
   PopCartState,
   PopCartItem,
   PopCartSummary,
+  normalizePopLineTaxType,
+  submitBlockMessage,
 } from '../services/pop-cart.service';
 import type { PopLineTax } from '../interfaces/pop-cart.interface';
 import { LineTaxesEditorComponent } from './line-taxes-editor/line-taxes-editor.component';
@@ -199,6 +201,15 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 "
                 class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
               ></app-tooltip>
+              @if (submitBlock(); as blockMsg) {
+                <p
+                  class="mb-2 text-xs font-medium text-warning"
+                  role="alert"
+                  data-testid="pop-submit-block"
+                >
+                  {{ blockMsg }}
+                </p>
+              }
               <div class="grid grid-cols-2 gap-2">
                 <!-- Secondary CTAs (top row) -->
                 <app-button
@@ -216,7 +227,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   size="sm"
                   [fullWidth]="true"
                   (clicked)="onSubmitOrder()"
-                  [disabled]="actionState.loading || actionState.isEmpty"
+                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock()"
                   customClasses="!h-10 !font-semibold"
                 >
                   <app-icon name="file-text" [size]="18" slot="icon" ></app-icon>
@@ -229,7 +240,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   size="md"
                   [fullWidth]="true"
                   (clicked)="onCreateAndReceive()"
-                  [disabled]="actionState.loading || actionState.isEmpty"
+                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock()"
                   customClasses="!h-11 !font-semibold !shadow-sm"
                 >
                   Crear + Recibir
@@ -419,6 +430,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                             customWrapperClass="!mt-0"
                             min="0"
                             max="100"
+                            step="0.01"
                           ></app-input>
                         }
                       </div>
@@ -472,7 +484,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                           </span>
                         } @else {
                           <span class="text-text-secondary">
-                            (-{{ item.discount | number: '1.0-0' }}%)
+                            (-{{ item.discount | number: '1.0-2' }}%)
                           </span>
                         }
                       </div>
@@ -695,6 +707,16 @@ export class PopCartComponent {
     return this.cartState()?.has_vat ?? false;
   }
 
+  /**
+   * «Confirma el impuesto de N línea(s)» mientras alguna línea siga sin
+   * impuesto confirmado (o el kernel no la pudo calcular) con IVA encendido.
+   * Deshabilita «Crear orden» / «Crear + Recibir».
+   */
+  readonly submitBlock = computed(() => {
+    const st = this.cartState();
+    return st ? submitBlockMessage(st) : null;
+  });
+
   /** Encender/apagar el IVA de toda la orden (recomputa todas las líneas). */
   onHasVatToggle(value: boolean): void {
     this.cartService.setHasVat(value);
@@ -753,7 +775,7 @@ export class PopCartComponent {
     if (item.taxes && item.taxes.length > 0) return item.taxes;
     return [
       {
-        tax_type: 'iva',
+        tax_type: normalizePopLineTaxType(item.tax_type) as PopLineTax['tax_type'],
         tax_rate: item.tax_rate,
         calc_mode: 'percent',
         add_to_cost: false,
@@ -816,7 +838,7 @@ export class PopCartComponent {
   /**
    * Cambia el modo del descuento. Si la línea ya tenía un descuento, se
    * convierte a la otra unidad para que lo que se ve sea lo que se aplica
-   * (al pasar a % se redondea a entero, como el resto del carrito).
+   * (al pasar a % se redondea a 2 decimales: $1.500 sobre 100.000 ⇒ 1,5 %).
    */
   setDiscountMode(item: PopCartItem, mode: 'pct' | 'amount'): void {
     if (this.discountMode(item) === mode) return;
@@ -829,7 +851,7 @@ export class PopCartComponent {
     } else if (derived.discount_total > 0 && derived.gross_line > 0) {
       this.cartService.setItemDiscount(
         item.id,
-        (derived.discount_total / derived.gross_line) * 100,
+        Math.round((derived.discount_total / derived.gross_line) * 10000) / 100,
       );
     }
   }

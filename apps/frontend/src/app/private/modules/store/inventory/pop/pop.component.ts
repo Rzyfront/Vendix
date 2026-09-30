@@ -15,6 +15,7 @@ import {
   PopCartItem,
   PopProduct,
   ShippingMethod,
+  submitBlockMessage,
 } from './services/pop-cart.service';
 import {
   cartToPurchaseOrderRequest,
@@ -56,6 +57,7 @@ import {
   scanLineHasVat,
   scanLineToCartFields,
 } from './utils/scan-line-to-cart.util';
+import { resolveCartHeaderDiscount } from './utils/scan-header-discount.util';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
   InvoiceScanResult,
@@ -1085,15 +1087,15 @@ export class PopComponent implements OnInit, OnDestroy {
     // reportan los dos sobre el mismo dinero — el prompt lo prohíbe
     // explícitamente.
     // QUI-855: el descuento se prorratea en la MISMA unidad que el precio de la
-    // línea. Si alguna línea entra por el camino multi-impuesto (precio bruto
-    // impreso), el de cabecera también va impreso; si no, el neto de siempre.
-    const scannedHeaderDiscount =
-      (data.editedItems.some((i) => scanLineHasTaxes(i))
-        ? Number(data.scanResult?.discount_amount_printed)
-        : 0) ||
-      Number(data.scanResult?.discount_amount) ||
-      0;
-    if (scannedHeaderDiscount > 0) {
+    // línea. Regla única (`resolveCartHeaderDiscount`): con líneas multi-impuesto
+    // (precio bruto impreso) manda `discount_amount_printed` cuando es número
+    // —también 0, que es una edición del operador—; si no, `discount_amount`
+    // (neto). El modal emite la cifra editada en el campo de su unidad.
+    const scannedHeaderDiscount = resolveCartHeaderDiscount(
+      data.scanResult,
+      data.editedItems,
+    );
+    if (scannedHeaderDiscount != null) {
       this.popCartService.setDiscountAmount(scannedHeaderDiscount);
     }
 
@@ -1960,6 +1962,10 @@ export class PopComponent implements OnInit, OnDestroy {
   private openCheckoutShell(action: 'create' | 'create-receive'): void {
     const state = this.popCartService.currentState;
 
+    // Con IVA encendido, una línea con el impuesto sin confirmar viajaría con
+    // IVA 0: no se abre el wizard (ni se llama al backend) hasta confirmarlo.
+    if (this.blockSubmitIfTaxUnconfirmed()) return;
+
     // Primera línea a propósito: una apertura NUNCA puede empezar mostrando la
     // valoración de la compra anterior. `loadCostPreview` retorna temprano si
     // no hay bodega o el carrito está vacío, así que sin este reset el paso
@@ -2006,7 +2012,23 @@ export class PopComponent implements OnInit, OnDestroy {
    *  - Reintento de recepción (`pendingReceptionOrder`) → nunca se registra
    *    pago: la OC ya existe y solo falta que entre la mercancía.
    */
+  /**
+   * ¿Hay líneas con el impuesto sin confirmar / no calculable (con IVA
+   * encendido)? Avisa «Confirma el impuesto de N línea(s)» y devuelve true.
+   */
+  private blockSubmitIfTaxUnconfirmed(): boolean {
+    const msg = submitBlockMessage(this.popCartService.currentState);
+    if (!msg) return false;
+    this.toastService.warning(msg);
+    return true;
+  }
+
   onOrderConfirmed(): void {
+    // Punto de entrada real del envío. Un reintento de recepción no crea OC
+    // (ya existe), así que no se bloquea.
+    if (!this.pendingReceptionOrder() && this.blockSubmitIfTaxUnconfirmed()) {
+      return;
+    }
     // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: NO cerrar el modal antes del POST.
     // Antes `showOrderConfirmModal.set(false)` corría como primera línea y el
     // operador quedaba sin feedback durante el RTT. Ahora el modal se mantiene

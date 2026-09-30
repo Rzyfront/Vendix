@@ -5,6 +5,8 @@ import { PopCartService } from './pop-cart.service';
 import { WithholdingTaxService } from '../../../withholding-tax/services/withholding-tax.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
+const STORE_ID = 77;
+
 describe('PopCartService — scan_attachment (QUI-855)', () => {
   let service: PopCartService;
 
@@ -16,6 +18,7 @@ describe('PopCartService — scan_attachment (QUI-855)', () => {
   };
 
   beforeEach(() => {
+    localStorage.removeItem(`vendix_pop_cart_${STORE_ID}`);
     TestBed.configureTestingModule({
       providers: [
         PopCartService,
@@ -27,11 +30,16 @@ describe('PopCartService — scan_attachment (QUI-855)', () => {
         },
         {
           provide: AuthFacade,
-          useValue: { activeFiscalAreas: () => [], userStore: () => null },
+          useValue: { activeFiscalAreas: () => [], userStore: () => ({ id: STORE_ID }) },
         },
       ],
     });
     service = TestBed.inject(PopCartService);
+  });
+
+  afterEach(() => {
+    jasmine.clock().uninstall();
+    localStorage.removeItem(`vendix_pop_cart_${STORE_ID}`);
   });
 
   it('guarda el adjunto en el estado y un segundo escaneo lo reemplaza', () => {
@@ -55,9 +63,24 @@ describe('PopCartService — scan_attachment (QUI-855)', () => {
     expect(service.currentState.scan_attachment).toBeUndefined();
   });
 
-  it('el estado serializable (el que va a localStorage) conserva el adjunto', () => {
+  it('el adjunto sobrevive al guardado/carga REAL de localStorage del servicio', () => {
+    // El proyecto corre zoneless: sin fakeAsync, el debounce se avanza con jasmine.clock.
+    // Guardado: `initPersistence` escribe con debounce de 250 ms. Necesita al
+    // menos una línea (un carrito vacío borra la clave).
+    // mockDate: el debounce de rxjs compara contra Date.now().
+    jasmine.clock().install();
+    jasmine.clock().mockDate(new Date());
+    service.addToCart({ product: { id: 1, name: 'P', code: 'P1', price: 1, cost: 1, stock: 1, is_active: true } as any, quantity: 1, unit_cost: 1 }).subscribe();
     service.setScanAttachment(att);
-    const roundTrip = JSON.parse(JSON.stringify(service.currentState));
-    expect(roundTrip.scan_attachment).toEqual(att);
+    TestBed.tick();
+    jasmine.clock().tick(300);
+
+    const raw = localStorage.getItem(`vendix_pop_cart_${STORE_ID}`);
+    expect(raw).withContext('el servicio escribió el carrito').not.toBeNull();
+
+    // Carga: el mismo `loadFromStorage` que hidrata al abrir la pantalla.
+    const loaded = (service as any).loadFromStorage();
+    expect(loaded.scan_attachment).toEqual(att);
+    expect(loaded.items.length).toBe(1);
   });
 });
