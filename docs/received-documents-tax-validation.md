@@ -12,15 +12,15 @@ Goal completo; no declarar finalizado hasta que TODOS los requisitos estén prob
 
 ## Matriz requisito → evidencia
 
-| Requisito | Estado inicial | Evidencia necesaria / ubicación |
+| Requisito | Estado observado (parcial) | Evidencia necesaria / ubicación |
 |---|---|---|
 | Plan completo y decisiones | Estructura validada; commit local f0f0b8952 | Plan 21 pasos y Business Analysis Brief; decisiones adicionales registradas |
-| Recepción manual XML/manual/PDF/imagen | Manual/XML API local probados; PDF/imagen pendientes | UI/formularios y OCR aún pendientes |
-| IA asíncrona, edición y determinismo | Pendiente | PDF multipágina/imagen, job/poll IDOR, proveedor/fallo/cuota |
+| Recepción manual XML/manual/PDF/imagen | Manual/XML API y captura/revisión STORE UI probadas; PDF escaneado2p con IA real probado | Imagen IA, revisión OCR/nominal/XML UI y variantes ORG todavía pendientes |
+| IA asíncrona, edición y determinismo | Parcial: PDF escaneado2p202→completed; core nominal/manual verificados | Falta UI polling completo, imagen, gates/IDOR adicionales y todas variantes de revisión |
 | Recepción automática y sync total | Pendiente | Webhook/poll/mail configurado, cursor/lock/retry, fila visible E2E |
-| Tab Facturación STORE/ORG | Código integrado; watcher full OK; E2E pendiente | Navegación real, responsive, consola/network aún no probados |
+| Tab Facturación STORE/ORG | STORE directo y form E2E; ORG no probado. Hallazgo sidebar oculto si emisión INACTIVE | Corregir navegación de receptor sin habilitar emisión; probar ORG y responsive completo |
 | Matching N:M/recepción/gasto | Pendiente | API/UI + SQL vínculos, parciales/UoM/diferencias |
-| Deduplicación sin efectos repetidos | Pendiente | Multicanal/mismo número distinto emisor/concurrencia y stock/AP/ledger |
+| Deduplicación sin efectos repetidos | Parcial: replay manual/XML/PDF y original SHA, un solo provider log | Aún faltan multicanal/concurrencia de matching/AP/contabilidad y todas familias |
 | Eventos electrónicos correctos | Pendiente | Prerrequisitos, roles/XML/firmante y confirmación técnica; 034 observado |
 | Contabilidad y bridge IVA correctos | Pendiente | Asientos por fuente, DR=CR, no doble IVA/AP y ajustes/reintentos |
 | Posición por NIT/impuesto/período | Pendiente | Preview/borrador/API/UI/XLSX iguales y créditos de tipo correcto |
@@ -95,6 +95,20 @@ Se registrarán comandos exactos, fecha UTC, HEAD/árbol probado, resultados y a
 - UI real mediante Playwright MCP aislado: login seed owner tech, Fiscal → Facturación → Documentos recibidos seleccionado, bandeja GET **200**. Modal sin archivo deshabilita guardar, TXT inválido muestra error sin API; PDF válido habilita envío, POST **403** por suscripción vencida sin éxito/documento/job. Documento ajeno id1 retorna **404** y alerta sin datos externos. Artefactos locales `/tmp/vendix-rd-browser/scan-modal-open.png` y `foreign-doc-rejected.png`; no commit de trazas con credenciales.
 - E2E happy OCR con entitlement legítimo y selector ORG siguen pendientes. Hubo errores adicionales de SSE/notificaciones CORS, no se declara cero errores globales. Watcher root16630 y MCP98389 terminaron respectivamente143/0 antes de Jest43; el watcher no está actualmente vivo y su último OK es histórico hasta reinicio explícito único.
 - Descubrimientos para el objetivo completo: VAT draft usa subtotal en lugar de taxable_amount tipado; fallback legacy null como IVA requiere distinguir procedencia frente a desconocidos recibidos. Todavía no alimenta recibidos/créditos. Connections/runs sólo modelos; HTTP helper existente tiene ventana DNS rebinding; IMAP no instalado. Todo ello permanece pendiente, sin reducir el alcance.
+
+### Captura, OCR real y canvas seguro (30-09-2026, continuación local)
+
+- `1e8c1c987`: VAT explícito usa `taxable_amount` de filas IVA, Decimal y scope org/entidad. Null/invalid excluidos con errores bloqueantes/IDs; `needs_review` no permite nueva aprobación. **30/30 PASS**, `/tmp/vendix-rd-vat-typed-26864/backend-tests.log`. Sigue pendiente elegibilidad de compras, notas/equivalentes, fuentes recibidas/créditos y todas familias.
+- `39c5386bd`: IBUA nominal manual/revisión/OCR preserva cantidad/unidad/perunit y TaxableAmount opcional, con fórmula y precisión del parser. Core **53/53 PASS** `/tmp/vendix-rd-nominal-core-29563/backend-tests.log`; DTO **5/5 PASS** `/tmp/vendix-rd-nominal-dto2-29909/backend-tests.log`; scan **15/15 PASS** `/tmp/vendix-rd-nominal-scan-30407/backend-tests.log`. Primer spec DTO falló por assertion top-level en lugar de hijos anidados; corregido sin ocultar el fallo.
+- Fixture local aislado creado con script revisado `/tmp/vendix-rd-seed-owned-trial.cjs`: org40/owner262/store45/entity30, trial37 canónico/default, auto_renew=false. Store46/entity31 obtiene no_plan38 por servicio canónico. Repetición verificó mismos IDs sin cambios. Password/token sólo archivos0600; ningún correo, pago, DIAN o dominio externo. No licencias de clientes alteradas.
+- Manual nominal real **201 id3**, metadata nominal correcta, eligible0/fiscal+posting pending. PDF raster-only2p300dpi668050bytes inspeccionado visualmente completo: primer **202 id4/jobrd-40-30-45-4-v1** falló antes de IA por canvas interno, no por licencia/proveedor. Standalone Docker reprodujo exactamente BadRequest de superficie grande.
+- `2e8539045`: viewport2048/8MP separado de internals8192/40MP/64MP aggregate; reset libera dimensiones viejas antes de aplicar nuevas. Spec **14/14 PASS** `/tmp/vendix-rd-real-pdf-bounds3-37190/backend-tests.log`, tras dos fixtures fallidos (tipo context y límite64MP exacto). Docker sobre MISMO PDF300dpi prepara2p; retry MISMOdoc/job → **completed**, version2, page_count2, cifras100/19/119, líneas60/71.40 y40/47.60, sin errores aritméticos y sólo warning clave ausente. Un solo `ai_engine_logs` success id4761/appreceived_document_ocr/store45; replay202 retorna id4/jobnull/already_processedtrue y no segunda IA.
+- Descarga original **200**, SHA idéntico `f019b48efbb9d2182d6c0ee460e52d206ff1a6a66d31343f602eee0479fdf4d9`. QAorg40 tiene3docs,0links,0AP,0asientos; review/fiscal/posting independientes, sin aceptación legal.
+- `166e65ee2`: UI real STORE crea manual id5v1, revisa descripción/note→v2 y conserva raw original. API concurrente→v3; submit de formulario v2 recibe **409** y alerta explícita con Guardar deshabilitado y Recargar detalle funcional, sin overwrite. Captura vacía muestra validación y no crea documento. Watcher full30899 cicloOK en árbol final frontend; cerrado143 para Jest serial. MCP aislado56245 cerrado0. Screenshot QA `/tmp/vendix-rd-browser/manual-review-conflict.png`; no trazas con tokens en repo.
+- Durante ediciones simultáneas hubo respuestas502/reconexiones de backend watch. Tras congelar edición, health/API200 y flujos de revisión correctos; no se atribuyen todos los errores de consola a este módulo ni se afirma cero errores globales.
+- `2ca84a662`: transporte HTTPS con DNS pin/SNI/TLS, JSON5MiB/deadline10s/no redirects, cleanup y errores seguros. **51/51 PASS** `/tmp/vendix-rd-http-transport3-37663/backend-tests.log`; dos fallos previos TS de imports/literal timeout/callback recortados y corregidos. No está wired: CRUD/conectores/scheduler/cursor/webhook/IMAP aún pendientes.
+- **Pendiente UI confirmado**: sidebar Fiscal de store45 INACTIVE muestra sólo Operación fiscal, aunque URL de recibidos funciona. `MenuFilterService.matchesFiscalArea`, `requiresFiscalArea:'invoicing'` en layouts STORE/ORG y scope del padre ocultan la entrada. No arreglar activando DIAN ficticiamente ni eliminando gates de emisión; hace falta entrada estrecha al tab por permiso de recepción y panel_ui. ORG/nominal/XML/mobile y polling UI completo siguen pendientes.
+- Watcher nuevo único38142/session71891 iniciado DESPUÉS de tests terminales; verificar su último ciclo antes de informar estado vivo. No builds/typechecks ad hoc, push, PR o deploy.
 
 ## Auditoría de completitud
 

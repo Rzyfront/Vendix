@@ -95,9 +95,13 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 | D24 | Obligación única por entidad/tipo/rango/jurisdicción; deadline desconocido es NULL | Month/quarter nullable no protegen annual ni municipio y una fecha inventada no es vencimiento legal | Calendarios de nuevos años y jurisdicciones |
 | D25 | Clasificar IBUA 34 e ICUI 35 con fuente DIAN primaria; redondear half-to-even | Resuelve la incertidumbre del helper legacy y preserva tributos distintos de IVA y base nominal | Ampliar catálogo sólo con evidencia oficial |
 
-| D26 | PDF.js directo con canvas acotado y limpieza explícita; no wrapper que oculte recursos | PDF multipágina real requiere límites antes de asignar memoria y Node20 compatible; sharp sólo prepara imágenes | Límites iniciales10p/10MiB/2048px configurables después de métricas |
+| D26 | PDF.js directo con canvas acotado y limpieza explícita; no wrapper que oculte recursos | PDF multipágina real requiere límites antes de asignar memoria y Node20 compatible; sharp sólo prepara imágenes | 10p/10MiB; viewport2048px/8MP, internals8192px/40MP y agregado64MP. Reset libera superficie antes de redimensionar |
 | D27 | OCR requiere tienda operacional elegida aunque el NIT sea consolidado | Cuotas/suscripción pertenecen a tienda; no cobrar a la primera tienda arbitraria ni ejecutar sin cuota | Política de facturación de IA org futura |
 | D28 | Preview y declaración comparten cálculo, y lectura no produce borrador | Un segundo motor divergiría; preview preliminar se etiqueta hasta completar elegibilidad/créditos/todas familias | No presentar estimación como saldo definitivo |
+| D29 | Captura/revisión humana admite base nominal IBUA explícita y completa | No dejar impuestos nominales perpetuamente imposibles de corregir; p0–2 y fórmula del parser DIAN, sin convertir unidades a pesos | Ampliar familias nominales sólo con perfil técnico verificado |
+| D30 | VAT autoritativo exige clasificación explícita y base de cada fila IVA | El fallback legacy `null→iva` no es evidencia de naturaleza fiscal; desconocidos se excluyen con error/IDs y bloquean nueva aprobación sin reescribir históricos | Clasificar históricos con evidencia, nunca heurística silenciosa |
+| D31 | QA OCR usa organización aislada local con trial canónico y dueño autorizado | No modificar licencias/planes de clientes ni fabricar JWT para forzar un PASS; no correo, DIAN, pago o dominios externos | Fixture de prueba local, no configuración productiva |
+| D32 | Conector HTTPS fija IP validada para la conexión TLS, no sólo valida DNS antes de fetch | Evita DNS rebinding; no redirects, compresión ni puertos alternos; límite5MiB/deadline10s y errores sin secretos | Límites/protocolo de proveedor se documentarán al integrar CRUD/sync; transporte solo no es sincronización |
 
 ## Fuentes oficiales consultadas
 
@@ -111,6 +115,7 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 
 - [PDF.js ejemplos oficiales](https://mozilla.github.io/pdf.js/examples/): carga/documentos/páginas/render; API5.4.624 y Node>=20.16 verificados contra package distribuido.
 - [pdf-to-img](https://github.com/k-yle/pdf-to-img): wrapper evaluado; versión5 distribuida no expone destroy ni control previo de canvas, por eso se usa PDF.js directo.
+- [Estatuto Tributario, compilación DIAN](https://normograma.dian.gov.co/dian/compilacion/docs/estatuto_tributario.htm): arts. 484–490 distinguen ajustes, IVA retenido, requisitos y proporcionalidad de descontables. La aceptación del documento por sí sola no demuestra elegibilidad; permanece pendiente completar esta capa antes de presentar cifras definitivas.
 
 ## Registro de cambios de decisión
 

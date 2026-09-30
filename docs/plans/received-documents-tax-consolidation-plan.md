@@ -49,6 +49,7 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 - `apps/backend/src/domains/received-documents/received-documents.service.ts`
 - `apps/backend/src/domains/received-documents/received-documents.service.spec.ts`
 - `apps/backend/src/domains/received-documents/dto/received-document.dto.ts`
+- `apps/backend/src/domains/received-documents/dto/received-document.dto.spec.ts`
 - `apps/backend/src/domains/received-documents/dto/received-document-context.dto.ts`
 - `apps/backend/src/domains/received-documents/interfaces/received-document.interface.ts`
 - `apps/backend/src/domains/received-documents/services/received-document-parser.service.ts`
@@ -74,6 +75,8 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 - `apps/backend/src/domains/received-documents/services/received-document-reconciliation.service.ts`
 - `apps/backend/src/domains/received-documents/services/received-document-events.service.ts`
 - `apps/backend/src/domains/received-documents/services/document-reception-sync.service.ts`
+- `apps/backend/src/domains/received-documents/services/document-reception-http.service.ts`
+- `apps/backend/src/domains/received-documents/services/document-reception-http.service.spec.ts`
 - `apps/backend/src/domains/received-documents/services/document-reception-sync.processor.ts`
 - `apps/backend/src/domains/received-documents/services/document-reception-webhook.controller.ts`
 - `apps/backend/src/domains/store/invoicing/invoicing.module.ts`
@@ -121,6 +124,9 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 - `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-documents-page.component.ts`
 - `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-document-detail.component.ts`
 - `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-document-import.component.ts`
+- `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-document-form.component.ts`
+- `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-document-form.component.html`
+- `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-document-form.util.ts`
 - `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-document-connections.component.ts`
 - `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-documents.service.ts`
 - `apps/frontend/src/app/private/modules/store/invoicing/received-documents/received-documents.interface.ts`
