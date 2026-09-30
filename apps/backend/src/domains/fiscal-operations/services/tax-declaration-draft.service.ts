@@ -1602,18 +1602,25 @@ export class TaxDeclarationDraftService {
     // registrarse en fechas posteriores al cierre del periodo.
     const suffered = await this.prisma.withholding_calculations.findMany({
       where: {
+        organization_id: context.organization_id,
         accounting_entity_id: context.accounting_entity_id,
         role: 'suffered',
         year: period.period_year,
       },
     });
+    const incomeTaxWithholdings = suffered.filter(
+      (item) => item.withholding_type === 'retefuente',
+    );
+    const unclassifiedSuffered = suffered.filter(
+      (item) => item.withholding_type == null,
+    );
 
     const netTaxable = revenue - costsAndExpenses;
     // Base gravable estimada: una pérdida contable no genera impuesto.
     const taxableBase = Math.max(netTaxable, 0);
     const estimatedTax = this.round2((taxableBase * ratePercent) / 100);
     const sufferedCredit = this.round2(
-      suffered.reduce(
+      incomeTaxWithholdings.reduce(
         (sum, item) => sum + Number(item.withholding_amount || 0),
         0,
       ),
@@ -1634,11 +1641,11 @@ export class TaxDeclarationDraftService {
       },
     });
 
-    // Líneas de crédito por retenciones sufridas, agregadas por
-    // withholding_type (las filas legacy sin tipo se agrupan aparte).
+    // Solo retefuente sufrida se acredita a renta. ReteIVA/reteICA pertenecen
+    // a otras obligaciones; filas legacy sin tipo no se adivinan por concepto.
     const sufferedByType = new Map<string, { total: number; count: number }>();
-    for (const item of suffered) {
-      const key = item.withholding_type ?? 'untyped_legacy';
+    for (const item of incomeTaxWithholdings) {
+      const key = 'retefuente';
       const bucket = sufferedByType.get(key) ?? { total: 0, count: 0 };
       bucket.total += Number(item.withholding_amount || 0);
       bucket.count += 1;
@@ -1658,11 +1665,26 @@ export class TaxDeclarationDraftService {
       });
     }
 
-    const warnings: Array<{ code: string }> = [
+    const unclassifiedAmount = this.round2(
+      unclassifiedSuffered.reduce(
+        (sum, item) => sum + Number(item.withholding_amount || 0),
+        0,
+      ),
+    );
+    const warnings: Prisma.InputJsonObject[] = [
       // El precierre SIEMPRE es una estimación interna, nunca el formulario 110.
       { code: 'INCOME_TAX_PRECLOSE_ESTIMATE' },
     ];
     if (netTaxable < 0) warnings.push({ code: 'NEGATIVE_TAXABLE_BASE' });
+    if (unclassifiedSuffered.length > 0) {
+      warnings.push({
+        code: 'UNCLASSIFIED_SUFFERED_WITHHOLDING',
+        withholding_calculation_ids: unclassifiedSuffered.map((item) => item.id),
+        excluded_amount: unclassifiedAmount,
+        message:
+          'Withholdings without withholding_type were excluded from income-tax credits and require classification.',
+      });
+    }
 
     return {
       totals: {
@@ -1681,6 +1703,16 @@ export class TaxDeclarationDraftService {
       source_snapshot: {
         accounting_line_count: lines.length,
         suffered_calculation_ids: suffered.map((item) => item.id),
+        income_tax_credit_calculation_ids: incomeTaxWithholdings.map(
+          (item) => item.id,
+        ),
+        excluded_suffered_calculation_ids: suffered
+          .filter((item) => item.withholding_type !== 'retefuente')
+          .map((item) => item.id),
+        unclassified_suffered_calculation_ids: unclassifiedSuffered.map(
+          (item) => item.id,
+        ),
+        unclassified_suffered_withholding_amount: unclassifiedAmount,
       },
       validation_summary: { warnings },
     };

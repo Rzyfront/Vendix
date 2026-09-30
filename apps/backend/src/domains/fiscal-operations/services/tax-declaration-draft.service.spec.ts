@@ -1019,7 +1019,7 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
     });
   });
 
-  it('reports zero tax, negative-base warning, and full credit in favor on accounting loss', async () => {
+  it('reports an accounting loss without crediting untyped suffered withholding', async () => {
     const { service, getDraftData } = createService({
       accountingLines: [revenueLine(1, 10_000_000), expenseLine(2, 20_000_000)],
       sufferedCalculations: [
@@ -1038,13 +1038,80 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
     expect(draft.taxable_base_amount).toBe(-10_000_000);
     expect(draft.generated_tax_amount).toBe(0);
     expect(draft.balance_due).toBe(0);
-    expect(draft.balance_favor).toBe(5_000_000);
+    expect(draft.withholding_amount).toBe(0);
+    expect(draft.balance_favor).toBe(0);
     expect(draft.total_payable).toBe(0);
     expect(draft.validation_summary).toMatchObject({
       warnings: [
         { code: 'INCOME_TAX_PRECLOSE_ESTIMATE' },
         { code: 'NEGATIVE_TAXABLE_BASE' },
+        {
+          code: 'UNCLASSIFIED_SUFFERED_WITHHOLDING',
+          withholding_calculation_ids: [201],
+          excluded_amount: 5_000_000,
+        },
       ],
+    });
+    expect(draft.source_snapshot).toMatchObject({
+      suffered_calculation_ids: [201],
+      income_tax_credit_calculation_ids: [],
+      excluded_suffered_calculation_ids: [201],
+      unclassified_suffered_calculation_ids: [201],
+      unclassified_suffered_withholding_amount: 5_000_000,
+    });
+  });
+
+  it('credits only suffered retefuente and reports untyped rows requiring classification', async () => {
+    const { service, prisma, getDraftData, getCreatedLines } = createService({
+      accountingLines: [revenueLine(1, 100_000_000), expenseLine(2, 60_000_000)],
+      sufferedCalculations: [
+        { id: 301, withholding_type: 'retefuente', withholding_amount: 50 },
+        { id: 302, withholding_type: 'reteiva', withholding_amount: 30 },
+        { id: 303, withholding_type: 'reteica', withholding_amount: 20 },
+        { id: 304, withholding_type: null, withholding_amount: 25 },
+      ],
+    });
+
+    await runPreclose(service);
+
+    const draft = getDraftData();
+    expect(draft.generated_tax_amount).toBe(14_000_000);
+    expect(draft.withholding_amount).toBe(50);
+    expect(draft.balance_due).toBe(13_999_950);
+    expect(draft.source_snapshot).toMatchObject({
+      suffered_calculation_ids: [301, 302, 303, 304],
+      income_tax_credit_calculation_ids: [301],
+      excluded_suffered_calculation_ids: [302, 303, 304],
+      unclassified_suffered_calculation_ids: [304],
+      unclassified_suffered_withholding_amount: 25,
+    });
+    expect(draft.validation_summary).toMatchObject({
+      warnings: [
+        { code: 'INCOME_TAX_PRECLOSE_ESTIMATE' },
+        {
+          code: 'UNCLASSIFIED_SUFFERED_WITHHOLDING',
+          withholding_calculation_ids: [304],
+          excluded_amount: 25,
+        },
+      ],
+    });
+    expect(
+      getCreatedLines().filter(
+        (line: any) => line.line_type === 'withholding_suffered_credit',
+      ),
+    ).toMatchObject([
+      {
+        withholding_amount: 50,
+        metadata: { withholding_type: 'retefuente', calculation_count: 1 },
+      },
+    ]);
+    expect(prisma.withholding_calculations.findMany).toHaveBeenCalledWith({
+      where: {
+        organization_id: 1,
+        accounting_entity_id: 77,
+        role: 'suffered',
+        year: 2026,
+      },
     });
   });
 
@@ -1057,6 +1124,7 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
 
     expect(prisma.withholding_calculations.findMany).toHaveBeenCalledWith({
       where: {
+        organization_id: 1,
         accounting_entity_id: 77,
         role: 'suffered',
         year: 2026,
