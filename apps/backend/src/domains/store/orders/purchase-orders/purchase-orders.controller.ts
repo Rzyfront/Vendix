@@ -32,6 +32,15 @@ import { ConfigurePaymentPlanDto } from './dto/configure-payment-plan.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { CostPreviewDto } from './dto/cost-preview.dto';
+import {
+  RevalidateInvoiceDto,
+  REVALIDATE_CONSOLIDATED_MAX_BYTES,
+} from './dto/revalidate-invoice.dto';
+import {
+  InvoiceRevalidateJob,
+  InvoiceRevalidateJobStatusResult,
+} from './interfaces/invoice-revalidate-job.interface';
+import { isSafeS3Key } from '@common/helpers/s3-url.helper';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -108,6 +117,9 @@ export class PurchaseOrdersController {
     // purchase-orders.module.ts). Calque del patrón expenses.
     @InjectQueue('payment-receipt-scan')
     private readonly paymentReceiptScanQueue: Queue<PaymentReceiptScanJob>,
+    // QUI-855 paso 8a — cola `invoice-revalidate`.
+    @InjectQueue('invoice-revalidate')
+    private readonly invoiceRevalidateQueue: Queue<InvoiceRevalidateJob>,
   ) {}
 
   @Post()
@@ -299,6 +311,108 @@ export class PurchaseOrdersController {
     }
   }
 
+  // ===== QUI-855 paso 8a — Revalidación con IA (async) =====
+  //   POST /scan/revalidate         → 202 {job_id}
+  //   GET  /scan/revalidate/:jobId  → {status, result?, error?} (poll con IDOR)
+  // Declaradas ANTES de cualquier `@Get(':id')` / `@Post(':id/...')`.
+
+  @Post('scan/revalidate')
+  @Permissions('store:orders:purchase_orders:create')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async enqueueInvoiceRevalidate(@Body() dto: RevalidateInvoiceDto) {
+    const ctx = RequestContextService.getContext();
+    const store_id = (ctx as any)?.store_id ?? undefined;
+    const organization_id = (ctx as any)?.organization_id ?? undefined;
+    const user_id = (ctx as any)?.user_id ?? undefined;
+    if (store_id == null) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // La key debe colgar del prefijo de escaneos de ESTA tienda.
+    const prefix = await this.purchaseOrdersService.getScanStoragePrefix();
+    const key = dto.scan_attachment_key;
+    if (
+      // isSafeS3Key ya rechaza segmentos '..'; un `includes('..')` tumbaba
+      // nombres legítimos como la captura de macOS «… a.m..png».
+      !isSafeS3Key(key) ||
+      !key.startsWith(`${prefix}/`)
+    ) {
+      throw new BadRequestException(
+        'El documento escaneado no pertenece a esta tienda.',
+      );
+    }
+
+    if (
+      !dto.consolidated ||
+      typeof dto.consolidated !== 'object' ||
+      Array.isArray(dto.consolidated) ||
+      Buffer.byteLength(JSON.stringify(dto.consolidated), 'utf8') >
+        REVALIDATE_CONSOLIDATED_MAX_BYTES
+    ) {
+      throw new BadRequestException(
+        'Los datos consolidados son inválidos o superan los 200 KB.',
+      );
+    }
+
+    const request_id =
+      (ctx as any)?.request_id ?? `invoice-revalidate-${randomUUID()}`;
+
+    try {
+      const job = await this.invoiceRevalidateQueue.add(
+        'revalidate',
+        {
+          store_id,
+          organization_id,
+          user_id,
+          request_id,
+          scan_attachment_key: key,
+          order_type: dto.order_type === 'ingredient' ? 'ingredient' : 'retail',
+          consolidated: dto.consolidated,
+          note: dto.note,
+        },
+        {
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 50 },
+        },
+      );
+      return this.responseService.success(
+        { job_id: job.id },
+        'Revalidación encolada',
+      );
+    } catch (err: any) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
+    }
+  }
+
+  @Get('scan/revalidate/:jobId')
+  @Permissions('store:orders:purchase_orders:create')
+  async getInvoiceRevalidateStatus(
+    @Param('jobId') jobId: string,
+  ): Promise<InvoiceRevalidateJobStatusResult> {
+    const job = await this.invoiceRevalidateQueue.getJob(jobId);
+
+    // 🔒 IDOR: job.returnvalue viene de Redis (no scoped-prisma). Mismo 404 que
+    // un job inexistente para no filtrar existencia cross-tenant.
+    const callerStoreId = RequestContextService.getContext()?.store_id as
+      | number
+      | undefined;
+    if (
+      !job ||
+      callerStoreId == null ||
+      job.data?.store_id !== callerStoreId
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+
+    return {
+      status: (await job.getState()) as any,
+      result: (job.returnvalue as any) ?? undefined,
+      error: job.failedReason ?? undefined,
+    };
+  }
+
   @Post('cost-preview')
   @Permissions('store:orders:purchase_orders:read')
   async getCostPreview(@Body() dto: CostPreviewDto) {
@@ -392,8 +506,10 @@ export class PurchaseOrdersController {
     @Param('id') id: string,
     @Param('attachmentId') attachmentId: string,
   ) {
-    const result =
-      await this.purchaseOrdersService.removeAttachment(+attachmentId);
+    const result = await this.purchaseOrdersService.removeAttachment(
+      +id,
+      +attachmentId,
+    );
     return this.responseService.success(
       result,
       'Archivo adjunto eliminado exitosamente',

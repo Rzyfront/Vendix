@@ -16,6 +16,7 @@ import {
   VatResponsibilityResult,
 } from '@common/helpers/vat-responsibility.helper';
 import {
+  ExtractedLineTax,
   InvoiceScanResult,
   InvoiceMatchResult,
   SupplierMatch,
@@ -39,6 +40,20 @@ import {
   repairScannedAmount,
   StoreCurrencyInfo,
 } from '../../../../ai-engine/utils/ocr-money.util';
+import {
+  InvoiceRevalidateReport,
+  InvoiceRevalidateResult,
+} from './interfaces/invoice-revalidate-job.interface';
+import {
+  resolvePurchaseLineDiscount,
+  resolvePurchaseLineTaxes,
+} from '@common/money-kernel/purchase-line-taxes';
+import {
+  adaptInvoiceOcrV2ToV1,
+  InvoiceOcrV2Raw,
+  isInvoiceOcrV2,
+  toInvoiceOcrV2Shape,
+} from './invoice-ocr-v2.adapter';
 import sharp = require('sharp');
 
 /**
@@ -125,6 +140,19 @@ export class InvoiceScannerService {
       `[InvoiceScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
     );
 
+    // QUI-855 — el documento se guarda ANTES de la IA: sobrevive aunque el OCR
+    // falle. Un fallo de S3 nunca rompe el escaneo (scan_attachment = null).
+    let scanAttachment: InvoiceScanResult['scan_attachment'] = null;
+    try {
+      scanAttachment =
+        await this.purchaseOrdersService.uploadScanDocument(file);
+    } catch (err: any) {
+      this.logger.error(
+        `[InvoiceScan] No se pudo guardar el documento escaneado en S3: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+
     const { base64, mimeType } = await this.preprocessImage(file);
     const dataUri = `data:${mimeType};base64,${base64}`;
 
@@ -188,7 +216,10 @@ export class InvoiceScannerService {
     }
 
     try {
-      return this.normalizeOcrResponse(parsed, currency);
+      return {
+        ...this.normalizeOcrResponse(parsed, currency),
+        scan_attachment: scanAttachment,
+      };
     } catch (err: any) {
       if (err instanceof VendixHttpException) throw err;
       this.logger.error(
@@ -462,7 +493,10 @@ export class InvoiceScannerService {
 
       const factor = pack?.factor ?? 0;
       const canConvert =
-        pack != null && !pack.receiptConverts && Number.isFinite(factor) && factor > 1;
+        pack != null &&
+        !pack.receiptConverts &&
+        Number.isFinite(factor) &&
+        factor > 1;
       const converted = canConvert ? original * factor : NaN;
 
       const stockLabel = pack?.stockUnit || 'unidades';
@@ -1105,11 +1139,9 @@ export class InvoiceScannerService {
       ],
     };
 
-    const response = await this.aiEngine.run(
-      'payment_receipt_ocr',
-      {},
-      [imageMessage],
-    );
+    const response = await this.aiEngine.run('payment_receipt_ocr', {}, [
+      imageMessage,
+    ]);
 
     if (!response.success) {
       this.logger.error(
@@ -1144,11 +1176,231 @@ export class InvoiceScannerService {
     };
   }
 
+  /**
+   * QUI-855 paso 8a - revalidacion con IA de la precarga. Worker-side: la IA
+   * relee el documento original (imagen/PDF ya descargado de S3), lo compara
+   * contra los datos CONSOLIDADOS (lo que el usuario edito tras la precarga) y
+   * su nota, y devuelve datos re-consolidados + informe.
+   *
+   * - El documento pasa por `prepareImage` (igual que el escaneo; un PDF que
+   *   sharp no procesa viaja crudo con su mimetype).
+   * - `consolidated` llega en la forma NORMALIZADA del escaneo (unit_price neto,
+   *   unit_price_gross, taxes[].tax_type...). Se traduce a la forma CRUDA de
+   *   extraccion antes de enviarla a la IA y la respuesta se normaliza con la
+   *   MISMA `normalizeOcrResponse` del escaneo, de modo que el frontend recibe
+   *   exactamente la forma de un scan.
+   * - Llama `aiEngine.run` DIRECTO (nunca `runByApplicationType`, que descarta
+   *   extra_messages en apps image).
+   * Errores: VendixHttpException con mensaje en espanol.
+   */
+  async revalidateInvoice(params: {
+    fileBuffer: Buffer;
+    mimeType: string;
+    consolidated: Record<string, any>;
+    note?: string | null;
+    orderType?: 'retail' | 'ingredient';
+  }): Promise<InvoiceRevalidateResult> {
+    const { fileBuffer, mimeType, consolidated, note, orderType } = params;
+
+    const { base64, mimeType: preparedMime } = await this.prepareImage({
+      buffer: fileBuffer,
+      mimetype: mimeType,
+      size: fileBuffer.length,
+    } as Express.Multer.File);
+    const dataUri = `data:${preparedMime};base64,${base64}`;
+
+    const currency = await this.resolveScanCurrency();
+
+    const consolidatedJson = JSON.stringify(toInvoiceOcrV2Shape(consolidated));
+    const userNote = (note ?? '').trim() || '(sin nota del usuario)';
+
+    const imageMessage: AIMessage = {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text:
+            'Revalidate the consolidated data against this original purchase invoice document. Return ONLY the JSON envelope { "consolidated", "report" } defined in your system instructions.\n\n' +
+            (orderType === 'ingredient'
+              ? 'This is an INGREDIENT order: keep presentation / pack_size / uom_hint on each line exactly as they appear in the consolidated JSON.\n\n'
+              : '') +
+            buildCurrencyInstruction(currency),
+        },
+        {
+          type: 'image_url',
+          image_url: { url: dataUri, detail: 'high' },
+        },
+      ],
+    };
+
+    const response = await this.aiEngine.run(
+      'invoice_ocr_revalidate',
+      { consolidated_json: consolidatedJson, user_note: userNote },
+      [imageMessage],
+    );
+
+    if (!response.success || !response.content) {
+      this.logger.error(`[InvoiceRevalidate] AI failed: ${response.error}`);
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_AI_FAIL,
+        'La IA no pudo revalidar el documento. Intenta de nuevo en unos minutos.',
+      );
+    }
+
+    let parsed: any;
+    try {
+      parsed = parseAiJson(response.content);
+    } catch (err: any) {
+      this.logger.error(
+        `[InvoiceRevalidate] parse failed (${err?.message}). Raw: ${String(response.content).slice(0, 500)}`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_PARSE_FAIL,
+        'La IA devolvió una respuesta que no se pudo leer. Intenta revalidar de nuevo.',
+      );
+    }
+
+    const rawNext =
+      parsed && typeof parsed === 'object' ? parsed.consolidated : null;
+    if (!rawNext || typeof rawNext !== 'object') {
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_INCOMPLETE,
+        'La IA no devolvió los datos consolidados revalidados.',
+      );
+    }
+
+    let normalized: InvoiceScanResult;
+    try {
+      // La respuesta del prompt nuevo es v2: NO pasa por toRawScanShape (que
+      // espera la forma normalizada/v1 y pisaría unit_price/discount).
+      normalized = this.normalizeOcrResponse(
+        isInvoiceOcrV2(rawNext) ? rawNext : this.toRawScanShape(rawNext),
+        currency,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[InvoiceRevalidate] response incomplete (${err?.message})`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_INCOMPLETE,
+        'La IA devolvió datos incompletos (falta proveedor o líneas). Intenta revalidar de nuevo.',
+      );
+    }
+    const { scan_attachment: _omit, ...consolidatedOut } = normalized;
+
+    return {
+      consolidated: consolidatedOut,
+      report: this.sanitizeRevalidateReport(parsed.report),
+    };
+  }
+
+  /**
+   * Traduce datos en la forma NORMALIZADA del escaneo (o la cruda) a la forma
+   * CRUDA de extraccion que entiende la IA y `normalizeOcrResponse`:
+   * `unit_price` = precio IMPRESO (unit_price_gross ?? unit_price),
+   * `discount_amount` = descuento IMPRESO, `taxes[]` con type/rate/amount/inclusive.
+   * Idempotente: aplicarla sobre la forma cruda no la altera.
+   */
+  private toRawScanShape(input: Record<string, any>): Record<string, any> {
+    const src = input && typeof input === 'object' ? input : {};
+    const lines = Array.isArray(src.line_items) ? src.line_items : [];
+    const line_items = lines.map((li: any) => {
+      const item = li && typeof li === 'object' ? li : {};
+      const taxes = Array.isArray(item.taxes)
+        ? item.taxes.map((t: any) => ({
+            type: t?.type ?? t?.tax_type ?? null,
+            rate: t?.rate ?? t?.tax_rate ?? null,
+            fixed_amount_per_unit: t?.fixed_amount_per_unit ?? null,
+            amount: t?.amount ?? t?.amount_override ?? null,
+            inclusive:
+              typeof t?.inclusive === 'boolean'
+                ? t.inclusive
+                : typeof t?.is_inclusive === 'boolean'
+                  ? t.is_inclusive
+                  : undefined,
+          }))
+        : undefined;
+      const {
+        unit_price_gross,
+        discount_amount_printed,
+        taxes: _t,
+        ...rest
+      } = item;
+      return {
+        ...rest,
+        unit_price: unit_price_gross ?? item.unit_price,
+        discount_amount: discount_amount_printed ?? item.discount_amount,
+        ...(taxes ? { taxes } : {}),
+      };
+    });
+    const { scan_attachment: _a, scan_warnings: _w, ...header } = src;
+    return { ...header, line_items };
+  }
+
+  /** Sanea el informe de la IA: arreglos ausentes -> [], strings <= 1000, <= 100 divergencias. */
+  private sanitizeRevalidateReport(raw: any): InvoiceRevalidateReport {
+    const MAX_STR = 1000;
+    const str = (v: unknown): string =>
+      (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(
+        0,
+        MAX_STR,
+      );
+    const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+    const lineIndex = (v: unknown): number | null => {
+      if (v === null || v === undefined || v === '') return null;
+      const n = Number(v);
+      return Number.isInteger(n) && n >= 0 ? n : null;
+    };
+    const clip = (v: unknown): unknown =>
+      typeof v === 'string' ? v.slice(0, MAX_STR) : (v ?? null);
+
+    const r = raw && typeof raw === 'object' ? raw : {};
+    const confidence = ['high', 'medium', 'low'].includes(r.confidence)
+      ? r.confidence
+      : 'medium';
+
+    return {
+      summary: str(r.summary),
+      confidence,
+      findings: arr(r.findings)
+        .filter((f) => f && typeof f === 'object')
+        .map((f) => ({
+          severity: f.severity === 'warning' ? 'warning' : 'info',
+          message: str(f.message),
+        })),
+      red_flags: arr(r.red_flags)
+        .filter((f) => f && typeof f === 'object')
+        .map((f) => ({
+          message: str(f.message),
+          line_index: lineIndex(f.line_index),
+        })),
+      divergences: arr(r.divergences)
+        .filter((d) => d && typeof d === 'object')
+        .slice(0, 100)
+        .map((d) => ({
+          line_index: lineIndex(d.line_index),
+          field: str(d.field),
+          consolidated_value: clip(d.consolidated_value),
+          document_value: clip(d.document_value),
+          revalidated_value: clip(d.revalidated_value),
+          reason: str(d.reason),
+        })),
+    };
+  }
+
   private normalizeOcrResponse(
     raw: unknown,
     currency: StoreCurrencyInfo,
   ): InvoiceScanResult {
-    const parsed = raw as any;
+    // v2 → forma cruda v1; el resto del flujo no cambia.
+    const isV2 = isInvoiceOcrV2(raw);
+    const parsed = (
+      isV2
+        ? adaptInvoiceOcrV2ToV1(raw as InvoiceOcrV2Raw, {
+            decimalPlaces: currency.decimal_places,
+          })
+        : raw
+    ) as any;
 
     // El total impreso NO es un campo requerido. Una factura multipágina —o un
     // tiquete cuyo pie no alcanza a leerse— devuelve `supplier` y las N líneas
@@ -1208,9 +1460,9 @@ export class InvoiceScannerService {
       scanWarnings.push(
         lineTotalsSum > 0
           ? 'No se pudo leer el total impreso de la factura; se calculó sumando las ' +
-            'líneas. Verifícalo antes de confirmar.'
+              'líneas. Verifícalo antes de confirmar.'
           : 'No se pudo leer el total de la factura ni calcularlo desde las líneas. ' +
-            'Ingrésalo manualmente antes de confirmar.',
+              'Ingrésalo manualmente antes de confirmar.',
       );
     }
 
@@ -1234,6 +1486,10 @@ export class InvoiceScannerService {
           currency.code,
         );
     if (totalsWarning) scanWarnings.push(totalsWarning);
+
+    // Cuadre determinístico por línea (v1 y v2): un solo aviso agregado.
+    const reconcileWarning = this.buildReconcileWarning(lineItems, currency);
+    if (reconcileWarning) scanWarnings.push(reconcileWarning);
 
     // QUI-661 Fase 4 — descuentos de cabecera.
     const rawHeaderDiscount = Number(parsed.discount_amount);
@@ -1282,7 +1538,11 @@ export class InvoiceScannerService {
     );
     const headerWasPrinted =
       Number.isFinite(rawHeaderDiscount) && rawHeaderDiscount > 0;
-    if (lineHasCommercialDiscount && headerWasPrinted && headerDiscountNet > 0) {
+    if (
+      lineHasCommercialDiscount &&
+      headerWasPrinted &&
+      headerDiscountNet > 0
+    ) {
       scanWarnings.push(
         'La factura muestra descuentos por línea y un descuento general en el pie. ' +
           'Se conservaron los descuentos por línea y se descartó el del pie para ' +
@@ -1294,6 +1554,13 @@ export class InvoiceScannerService {
       // afectado: es financiero, vive en otro campo y no entra a este cálculo.
       headerDiscountNet = 0;
     }
+
+    const headerPct = Number(parsed.header_discount_percentage);
+    const headerKind =
+      parsed.header_discount_kind === 'percent' ||
+      parsed.header_discount_kind === 'amount'
+        ? (parsed.header_discount_kind as 'percent' | 'amount')
+        : undefined;
 
     return {
       supplier: {
@@ -1312,6 +1579,10 @@ export class InvoiceScannerService {
       // QUI-661 Fase 4 — descuento comercial de pie de factura, aplanado a neto
       // con la misma regla que las líneas.
       discount_amount: headerDiscountNet > 0 ? headerDiscountNet : undefined,
+      // QUI-855 — la misma cifra SIN aplanar: las líneas multi-impuesto viajan en
+      // bruto al carrito y el descuento de cabecera debe ir en su misma unidad.
+      discount_amount_printed:
+        headerDiscountNet > 0 ? headerDiscountPrinted : undefined,
       // El de PRONTO PAGO se extrae para mostrarlo, NUNCA para aplicarlo: es
       // financiero, se decide al pagar (QUI-647) y no rebaja el costo del
       // inventario. Va crudo, sin aplanar, porque no entra a ningún cálculo.
@@ -1319,7 +1590,95 @@ export class InvoiceScannerService {
       total,
       confidence: Number(parsed.confidence) || 0,
       scan_warnings: scanWarnings.length > 0 ? scanWarnings : undefined,
+      header_discount_percentage:
+        headerDiscountNet > 0 && headerKind === 'percent' && headerPct > 0
+          ? headerPct
+          : undefined,
+      header_discount_kind: headerDiscountNet > 0 ? headerKind : undefined,
+      schema_version: Number(parsed.schema_version) === 2 ? 2 : undefined,
     };
+  }
+
+  /**
+   * Aviso agregado de las líneas que no cuadran con su total impreso (máx. 5
+   * números listados + «y K más»). null si todas cuadran o no hay verificables.
+   */
+  private buildReconcileWarning(
+    lineItems: InvoiceScanResult['line_items'],
+    currency: StoreCurrencyInfo,
+  ): string | null {
+    const bad: Array<{ n: number; expected: number; printed: number }> = [];
+    lineItems.forEach((li, idx) => {
+      if (li.reconcile && li.reconcile.ok === false) {
+        bad.push({ n: idx + 1, ...li.reconcile });
+      }
+    });
+    if (bad.length === 0) return null;
+    const fmt = (v: number) =>
+      v.toLocaleString('es-CO', {
+        maximumFractionDigits: currency.decimal_places,
+      });
+    const listed = bad.slice(0, 5).map((b) => b.n);
+    const extra = bad.length - listed.length;
+    const first = bad[0];
+    const detail = `(calculado $${fmt(first.expected)} vs impreso $${fmt(first.printed)})`;
+    const numbers =
+      listed.join(', ') + (extra > 0 ? ` y ${extra} más` : '');
+    return (
+      (bad.length === 1
+        ? `La línea ${numbers} no cuadra con el total impreso ${detail}.`
+        : `Las líneas ${numbers} no cuadran con el total impreso ${detail}.`) +
+      ' Revisa descuento e impuestos antes de confirmar.'
+    );
+  }
+
+  /**
+   * Cuadre de UNA línea: total calculado por el kernel (mismo que usa la OC)
+   * vs total impreso. undefined si no es verificable (sin total impreso,
+   * bono, cantidad 0 o entradas que el kernel rechaza).
+   */
+  private reconcileLine(params: {
+    grossUnit: number;
+    quantity: number;
+    printedTotal: number;
+    discountAmount: number;
+    discountPct: number | undefined;
+    pricesIncludeTax: boolean;
+    taxes: ExtractedLineTax[];
+  }): { expected: number; printed: number; ok: boolean } | undefined {
+    const { grossUnit, quantity, printedTotal } = params;
+    if (!(printedTotal > 0) || !(quantity > 0)) return undefined;
+    try {
+      const { kernel_discount } = resolvePurchaseLineDiscount({
+        unit_price: grossUnit,
+        quantity,
+        discount_amount: params.discountAmount,
+        discount_percentage: params.discountPct ?? 0,
+      });
+      const resolved = resolvePurchaseLineTaxes({
+        unit_price: grossUnit,
+        quantity,
+        discount_amount: kernel_discount,
+        prices_include_tax: params.pricesIncludeTax,
+        taxes: params.taxes.map((t) => ({
+          tax_type: t.tax_type,
+          calc_mode: t.calc_mode,
+          rate: t.tax_rate,
+          fixed_amount_per_unit: t.fixed_amount_per_unit,
+          is_inclusive: t.is_inclusive,
+          amount_override: t.amount_override,
+        })),
+      });
+      const expected = resolved.line_total;
+      const tolerance = Math.max(1, printedTotal * 0.005);
+      return {
+        expected,
+        printed: printedTotal,
+        ok: Math.abs(expected - printedTotal) <= tolerance,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -1332,9 +1691,7 @@ export class InvoiceScannerService {
    * inclusivo con tasas mixtas, que es raro; el descuento POR LÍNEA, que es el
    * camino preciso, usa la tasa de su propia línea.
    */
-  private dominantTaxRate(
-    lineItems: InvoiceScanResult['line_items'],
-  ): number {
+  private dominantTaxRate(lineItems: InvoiceScanResult['line_items']): number {
     let best = 0;
     let bestValue = -1;
     for (const item of lineItems) {
@@ -1361,12 +1718,119 @@ export class InvoiceScannerService {
    * in `unit_price_gross` (equal to net in the exclusive case). This lets
    * `unit_cost` persist net downstream and the UI show "bruto → neto".
    */
-  private normalizeLineItem(
+  /**
+   * QUI-855 — normaliza `taxes[]` de una línea escaneada. Tipos desconocidos se
+   * descartan; una tasa en fracción (0 < r <= 1) se convierte a porcentaje;
+   * IBUA sin tasa es monto fijo por unidad; máx. 4 filas, una por tipo (gana la
+   * primera). Sin `taxes[]` pero con `tax_rate` legacy (fracción) => una fila IVA.
+   * `is_inclusive`: el flag de la fila, o el global de la factura para filas
+   * porcentuales; un monto fijo por unidad nunca se asume inclusivo.
+   */
+  private normalizeLineTaxes(
     item: any,
     pricesIncludeTax: boolean,
     currency: StoreCurrencyInfo,
     repairs: { count: number },
+  ): ExtractedLineTax[] {
+    const VALID = ['iva', 'inc', 'icui', 'ibua'] as const;
+    const out: ExtractedLineTax[] = [];
+    const seen = new Set<string>();
+    const round = (n: number) => Math.round(n * 10000) / 10000;
+
+    if (Array.isArray(item?.taxes) && item.taxes.length > 0) {
+      for (const raw of item.taxes) {
+        if (out.length >= 4) break;
+        const type = String(raw?.type ?? raw?.tax_type ?? '')
+          .trim()
+          .toLowerCase() as ExtractedLineTax['tax_type'];
+        if (!VALID.includes(type) || seen.has(type)) continue;
+
+        const rawRate = raw?.rate == null ? NaN : Number(raw.rate);
+        let rate = Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
+        if (rate !== null && rate > 0 && rate <= 1) rate = round(rate * 100);
+
+        const rawFixed =
+          raw?.fixed_amount_per_unit == null
+            ? NaN
+            : Number(raw.fixed_amount_per_unit);
+        const fixed =
+          Number.isFinite(rawFixed) && rawFixed > 0 ? rawFixed : null;
+
+        const rawAmount = raw?.amount == null ? NaN : Number(raw.amount);
+        let amount: number | null = null;
+        if (Number.isFinite(rawAmount) && rawAmount > 0) {
+          const repaired = repairScannedAmount(rawAmount, currency);
+          if (repaired.repaired) repairs.count++;
+          amount = repaired.value;
+        }
+
+        const fixedMode =
+          (fixed !== null && (rate === null || rate === 0)) ||
+          (type === 'ibua' && (rate === null || rate === 0));
+        const calcMode = fixedMode ? 'fixed_per_unit' : 'percent';
+
+        seen.add(type);
+        out.push({
+          tax_type: type,
+          tax_rate: fixedMode ? null : rate,
+          calc_mode: calcMode,
+          fixed_amount_per_unit: fixed,
+          amount_override: amount,
+          is_inclusive: fixedMode
+            ? false
+            : typeof raw?.inclusive === 'boolean'
+              ? raw.inclusive
+              : pricesIncludeTax,
+        });
+      }
+      // `taxes` sin fila IVA pero con `tax_rate` legacy > 0: se antepone la fila
+      // IVA (respetando el máximo de 4).
+      const legacyRate = Number(item?.tax_rate);
+      if (
+        !seen.has('iva') &&
+        out.length < 4 &&
+        item?.tax_rate != null &&
+        Number.isFinite(legacyRate) &&
+        legacyRate > 0
+      ) {
+        out.unshift({
+          tax_type: 'iva',
+          tax_rate: round(legacyRate <= 1 ? legacyRate * 100 : legacyRate),
+          calc_mode: 'percent',
+          fixed_amount_per_unit: null,
+          amount_override: null,
+          is_inclusive: pricesIncludeTax,
+        });
+      }
+      return out;
+    }
+
+    const legacy = Number(item?.tax_rate);
+    if (item?.tax_rate != null && Number.isFinite(legacy) && legacy >= 0) {
+      out.push({
+        tax_type: 'iva',
+        tax_rate: round(legacy > 0 && legacy <= 1 ? legacy * 100 : legacy),
+        calc_mode: 'percent',
+        fixed_amount_per_unit: null,
+        amount_override: null,
+        is_inclusive: pricesIncludeTax,
+      });
+    }
+    return out;
+  }
+
+  private normalizeLineItem(
+    item: any,
+    invoicePricesIncludeTax: boolean,
+    currency: StoreCurrencyInfo,
+    repairs: { count: number },
   ): InvoiceScanResult['line_items'][number] {
+    // v2: una línea puede declarar una base de precio distinta a la de la factura.
+    const pricesIncludeTax =
+      typeof item.line_prices_include_tax === 'boolean'
+        ? item.line_prices_include_tax
+        : invoicePricesIncludeTax;
+
     // ORDER MATTERS: repair the PRINTED gross before flattening to net. The
     // net-flattening below legitimately produces fractional values
     // (gross / 1.19), so running the repair afterwards would inflate a
@@ -1385,11 +1849,9 @@ export class InvoiceScannerService {
     // NUNCA se repara: 0.19 es fraccionario por contrato, igual que
     // `quantity` (0,315 KGM es una cantidad real en un tiquete por peso).
     const rawRate = Number(item.tax_rate);
-    const taxRate =
-      Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
+    const taxRate = Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
     const r = taxRate ?? 0;
-    const unitNet =
-      pricesIncludeTax && r > 0 ? grossUnit / (1 + r) : grossUnit;
+    const unitNet = pricesIncludeTax && r > 0 ? grossUnit / (1 + r) : grossUnit;
 
     // Izada a const (antes se calculaba en línea dentro del return) porque el
     // descuento derivado de un porcentaje necesita la MISMA cantidad que se
@@ -1433,13 +1895,66 @@ export class InvoiceScannerService {
 
     const rawPackSize = Number(item.pack_size);
 
+    const taxes = this.normalizeLineTaxes(
+      item,
+      pricesIncludeTax,
+      currency,
+      repairs,
+    );
+    // Legacy `tax_rate` (fracción): si la IA no lo emitió pero sí trajo la fila
+    // IVA tipada, se deriva de ella. Si ambos existen, el legacy manda (no se
+    // altera el aplanado a neto que ya calculó `r`).
+    const legacyIvaRate =
+      taxRate === null
+        ? taxes.find((t) => t.tax_type === 'iva' && t.tax_rate !== null)
+            ?.tax_rate
+        : undefined;
+    const emittedTaxRate =
+      legacyIvaRate !== undefined && legacyIvaRate !== null
+        ? legacyIvaRate / 100
+        : taxRate;
+
+    const isBonus = item.is_bonus === true;
+    const discountKind: 'percent' | 'amount' | undefined =
+      item.discount_kind === 'percent' || item.discount_kind === 'amount'
+        ? item.discount_kind
+        : printedAmountDiscount > 0
+          ? 'amount'
+          : discountPct !== undefined
+            ? 'percent'
+            : undefined;
+    const taxTreatment =
+      item.tax_treatment === 'gravado' ||
+      item.tax_treatment === 'exento' ||
+      item.tax_treatment === 'excluido'
+        ? (item.tax_treatment as 'gravado' | 'exento' | 'excluido')
+        : undefined;
+    const rawPrintedLineTotal = Number(item.printed_line_total);
+    const printedLineTotal =
+      Number.isFinite(rawPrintedLineTotal) && rawPrintedLineTotal > 0
+        ? totalRepair.value
+        : undefined;
+
+    const reconcile = isBonus
+      ? undefined
+      : this.reconcileLine({
+          grossUnit,
+          quantity,
+          printedTotal: totalRepair.value,
+          discountAmount: printedAmountDiscount,
+          discountPct,
+          pricesIncludeTax,
+          taxes,
+        });
+
     return {
       description: String(item.description || ''),
       quantity,
       // unit_price SIEMPRE queda en neto (aplastado si la factura era inclusiva).
       unit_price: unitNet,
       unit_price_gross: grossUnit,
-      tax_rate: taxRate,
+      tax_rate: emittedTaxRate,
+      taxes,
       total: totalRepair.value,
       sku_if_visible: item.sku_if_visible || undefined,
       // Fase 4: preserva las pistas de UoM emitidas por el perfil ingredient
@@ -1453,10 +1968,18 @@ export class InvoiceScannerService {
       // Neto, coherente con `unit_price`. Cero se emite como undefined para no
       // ensuciar las líneas sin descuento.
       discount_amount: discountNet > 0 ? discountNet : undefined,
+      // QUI-855 — descuento BRUTO tal como se imprimió (sin aplanar por IVA).
+      discount_amount_printed:
+        printedDiscount > 0 ? printedDiscount : undefined,
       // QUI-661 hotfix — el porcentaje NO se aplana: es adimensional, no vive
       // en ninguna base. Viaja como procedencia para que el modal muestre la
       // misma cifra que imprime el papel.
       discount_percentage: discountPct,
+      discount_kind: discountKind,
+      tax_treatment: taxTreatment,
+      is_bonus: isBonus ? true : undefined,
+      printed_line_total: printedLineTotal,
+      reconcile,
     };
   }
 
@@ -1539,7 +2062,11 @@ export class InvoiceScannerService {
         .withoutScope()
         .tax_categories.findMany({
           where: buildTaxCategoryScopeWhere(storeId, organizationId),
-          select: { id: true, store_id: true, tax_rates: { select: { rate: true } } },
+          select: {
+            id: true,
+            store_id: true,
+            tax_rates: { select: { rate: true } },
+          },
         });
       // Ante empate de tasa gana la categoría propia de la tienda: es la que el
       // comercio administra y la que sus reportes fiscales esperan.

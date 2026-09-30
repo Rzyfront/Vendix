@@ -1,7 +1,12 @@
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 
-import { PopCartService } from './pop-cart.service';
+import {
+  PopCartService,
+  countLinesBlockingSubmit,
+  normalizePopLineTaxType,
+  submitBlockMessage,
+} from './pop-cart.service';
 import { WithholdingTaxService } from '../../../withholding-tax/services/withholding-tax.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
@@ -78,16 +83,24 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
   });
 
   describe('setItemDiscount', () => {
-    it('0.20 → 0 (rounded down)', () => {
+    // QUI-855 (fix 8): el % manual conserva 2 decimales (la columna es
+    // Decimal(5,2) y el DTO acepta decimales): 1,5 % no salta a 2 %.
+    it('0.20 → 0.2 (2 decimales)', () => {
       const item = addItem();
       service.setItemDiscount(item.id, 0.2);
-      expect(service.currentState.items[0].discount).toBe(0);
+      expect(service.currentState.items[0].discount).toBe(0.2);
     });
 
-    it('20.6 → 21 (rounded up)', () => {
+    it('20.6 → 20.6 (2 decimales)', () => {
       const item = addItem();
       service.setItemDiscount(item.id, 20.6);
-      expect(service.currentState.items[0].discount).toBe(21);
+      expect(service.currentState.items[0].discount).toBe(20.6);
+    });
+
+    it('33.333 → 33.33 (redondea al 2.º decimal)', () => {
+      const item = addItem();
+      service.setItemDiscount(item.id, 33.333);
+      expect(service.currentState.items[0].discount).toBe(33.33);
     });
 
     it('100 → 100 (upper boundary, no clamp needed)', () => {
@@ -126,16 +139,16 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
       expect(service.currentState.items[0].discount).toBe(33);
     });
 
-    it('50.49 → 50 (banker-neutral: rounds toward zero at .49)', () => {
+    it('50.49 → 50.49 (2 decimales)', () => {
       const item = addItem();
       service.setItemDiscount(item.id, 50.49);
-      expect(service.currentState.items[0].discount).toBe(50);
+      expect(service.currentState.items[0].discount).toBe(50.49);
     });
 
-    it('50.5 → 51 (banker-neutral: rounds away from zero at .5)', () => {
+    it('50.5 → 50.5 (2 decimales)', () => {
       const item = addItem();
       service.setItemDiscount(item.id, 50.5);
-      expect(service.currentState.items[0].discount).toBe(51);
+      expect(service.currentState.items[0].discount).toBe(50.5);
     });
 
     it('101 → 100 (upper-clamp boundary, audit 7b)', () => {
@@ -165,9 +178,9 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
   });
 
   describe('addToCart — discount passes through normalizer', () => {
-    it('discount: 0.20 → item.discount === 0', () => {
+    it('discount: 0.20 → item.discount === 0.2 (2 decimales, igual que setItemDiscount)', () => {
       addItem(0.2);
-      expect(service.currentState.items[0].discount).toBe(0);
+      expect(service.currentState.items[0].discount).toBe(0.2);
     });
 
     it('discount: 20 → item.discount === 20', () => {
@@ -175,9 +188,9 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
       expect(service.currentState.items[0].discount).toBe(20);
     });
 
-    it('discount: 20.6 → item.discount === 21', () => {
+    it('discount: 20.6 → item.discount === 20.6 (2 decimales)', () => {
       addItem(20.6);
-      expect(service.currentState.items[0].discount).toBe(21);
+      expect(service.currentState.items[0].discount).toBe(20.6);
     });
 
     it('discount: NaN → item.discount === 0 (audit 7c: addToCart seam)', () => {
@@ -380,5 +393,110 @@ describe('PopCartService — contrato de setShippingCostAllocation (T2/D.1)', ()
     expect(service.currentState.shippingCostAllocation).toBeUndefined();
     expect(service.setShippingCostAllocation('prorate')).toBe(false);
     expect(service.currentState.shippingCostAllocation).toBeUndefined();
+  });
+});
+
+
+/**
+ * QUI-855 (auditoría) — tipo de impuesto legacy, scan_attachment al vaciar
+ * línea por línea y bloqueo de envío por impuesto sin confirmar.
+ */
+describe('PopCartService — QUI-855 correcciones de auditoría', () => {
+  let service: PopCartService;
+  const product: any = { id: 1, name: 'P', code: 'P1', price: 1000, cost: 100, stock: 1, is_active: true };
+  const att = { key: 'k/a.pdf', file_name: 'a.pdf', file_type: 'application/pdf', file_size: 1 };
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PopCartService,
+        { provide: WithholdingTaxService, useValue: { previewWithholding: () => of({ lines: [], total_withholding: 0 }) } },
+        { provide: AuthFacade, useValue: { activeFiscalAreas: () => [] } },
+      ],
+    });
+    service = TestBed.inject(PopCartService);
+  });
+
+  let nextProductId = 1000;
+  function add(over: Partial<AddToPopCartRequest> = {}): PopCartItem {
+    const id = nextProductId++;
+    service.addToCart({ product: { ...product, id }, quantity: 1, unit_cost: 100, ...over }).subscribe();
+    return service.currentState.items.find((i) => i.product.id === id)!;
+  }
+
+  describe('tax_type legacy', () => {
+    it('setItemTaxes conserva «inc» (no reclasifica a iva al editar)', () => {
+      const item = add({ tax_type: 'inc', tax_rate: 8 });
+      expect(item.tax_type).toBe('inc');
+      service.setItemTaxes(item.id, [{ tax_type: 'inc', tax_rate: 8, calc_mode: 'percent', add_to_cost: true } as any]);
+      expect(service.currentState.items[0].tax_type).toBe('inc');
+    });
+
+    it('un tax_type desconocido o vacío cae a iva', () => {
+      expect(normalizePopLineTaxType(undefined)).toBe('iva');
+      expect(normalizePopLineTaxType('zzz')).toBe('iva');
+      for (const t of ['iva', 'inc', 'icui', 'ibua']) expect(normalizePopLineTaxType(t)).toBe(t);
+    });
+  });
+
+  describe('scan_attachment al vaciar línea por línea', () => {
+    it('quitar la última línea limpia el adjunto; con líneas restantes lo conserva', () => {
+      const a = add();
+      const b = add();
+      service.setScanAttachment(att);
+
+      service.removeFromCart(a.id).subscribe();
+      expect(service.currentState.items.length).toBe(1);
+      expect(service.currentState.scan_attachment).toEqual(att);
+
+      service.removeFromCart(b.id).subscribe();
+      expect(service.currentState.items.length).toBe(0);
+      expect(service.currentState.scan_attachment).toBeUndefined();
+    });
+  });
+
+  describe('bloqueo de envío por impuesto sin confirmar', () => {
+    it('línea manual sin tasa + has_vat ⇒ bloquea con el mensaje; has_vat apagado ⇒ no', () => {
+      add({ tax_rate: null } as any);
+      expect(service.currentState.items[0].tax_needs_review).toBeTrue();
+
+      expect(submitBlockMessage(service.currentState)).toBeNull(); // has_vat apagado
+      service.setHasVat(true);
+      expect(submitBlockMessage(service.currentState)).toBe('Confirma el impuesto de 1 línea');
+
+      service.setItemTaxRate(service.currentState.items[0].id, 19); // confirma
+      expect(submitBlockMessage(service.currentState)).toBeNull();
+    });
+
+    it('tax_needs_review del request bloquea aunque traiga tasa, hasta confirmarla', () => {
+      add({ tax_rate: 19, tax_needs_review: true });
+      expect(service.currentState.items[0].tax_needs_review).toBeTrue();
+      service.setHasVat(true);
+      expect(submitBlockMessage(service.currentState)).toBe('Confirma el impuesto de 1 línea');
+      service.setItemTaxRate(service.currentState.items[0].id, 19);
+      expect(submitBlockMessage(service.currentState)).toBeNull();
+    });
+
+    it('una línea con tax_error también bloquea', () => {
+      service.setHasVat(true);
+      const state: any = { has_vat: true, items: [{ tax_error: 'combinación inválida' }, { tax_needs_review: true }] };
+      expect(countLinesBlockingSubmit(state)).toBe(2);
+      expect(submitBlockMessage(state)).toBe('Confirma el impuesto de 2 líneas');
+    });
+
+    it('el kernel rechaza la línea ⇒ el carrito marca tax_error y bloquea; corregirla desbloquea', () => {
+      service.setHasVat(true);
+      // IBUA incluido de 500 por unidad sobre un bruto de 100: base negativa.
+      const item = add({
+        prices_include_tax: true,
+        taxes: [{ tax_type: 'ibua', calc_mode: 'fixed_per_unit', fixed_amount_per_unit: 500, is_inclusive: true, add_to_cost: true } as any],
+      });
+      expect(service.currentState.items[0].tax_error).toBeTruthy();
+      expect(submitBlockMessage(service.currentState)).toBe('Confirma el impuesto de 1 línea');
+
+      service.setItemTaxes(item.id, [{ tax_type: 'ibua', calc_mode: 'fixed_per_unit', fixed_amount_per_unit: 5, is_inclusive: true, add_to_cost: true } as any]);
+      expect(service.currentState.items[0].tax_error).toBeUndefined();
+      expect(submitBlockMessage(service.currentState)).toBeNull();
+    });
   });
 });
