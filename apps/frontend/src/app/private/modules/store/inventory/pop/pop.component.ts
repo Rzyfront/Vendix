@@ -18,6 +18,7 @@ import {
 } from './services/pop-cart.service';
 import {
   cartToPurchaseOrderRequest,
+  mapPopLineTaxesToRequest,
   CreatePurchaseOrderRequest,
 } from './interfaces/pop-order.interface';
 
@@ -49,6 +50,12 @@ import {
 import { PopCheckoutShellComponent } from './components/pop-checkout-shell/pop-checkout-shell.component';
 import { PopOrderConfirmationModalComponent } from './components/pop-checkout-shell/pop-order-confirmation-modal/pop-order-confirmation-modal.component';
 import { PopPricingOverridesMap } from './components/pop-checkout-shell/steps/pop-receive-step.component';
+import {
+  buildScanAttachment,
+  scanLineHasTaxes,
+  scanLineHasVat,
+  scanLineToCartFields,
+} from './utils/scan-line-to-cart.util';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
   InvoiceScanResult,
@@ -1063,9 +1070,7 @@ export class PopComponent implements OnInit, OnDestroy {
     // cifra.
     const invoiceDeclaredIncludeTax =
       data.scanResult?.prices_include_tax === true;
-    const scanHasVat = data.editedItems.some(
-      (it) => it.tax_rate != null && Number(it.tax_rate) > 0,
-    );
+    const scanHasVat = data.editedItems.some((it) => scanLineHasVat(it));
     if (scanHasVat) {
       this.popCartService.setHasVat(true);
     }
@@ -1084,6 +1089,13 @@ export class PopComponent implements OnInit, OnDestroy {
       this.popCartService.setDiscountAmount(scannedHeaderDiscount);
     }
 
+    // QUI-855: la factura escaneada se adjunta a la OC (una por orden: un
+    // nuevo escaneo REEMPLAZA al anterior). Con los datos de cabecera ya
+    // revisados en el modal.
+    // Sin adjunto en el escaneo (subida fallida) se LIMPIA el anterior: el
+    // archivo viejo pertenece a otra factura y no debe viajar con ésta.
+    this.popCartService.setScanAttachment(buildScanAttachment(data));
+
     let addedCount = 0;
     for (const item of data.editedItems) {
       const candidate = item.selected_product_id
@@ -1095,38 +1107,13 @@ export class PopComponent implements OnInit, OnDestroy {
       const purchaseUomId = item.purchase_uom_id ?? null;
       const stockUomId = item.stock_uom_id ?? null;
 
-      // IVA cycle (F3 wiring): el escáner emite `tax_rate` como FRACCIÓN (0.19)
-      // y ya aplastó `unit_price` a neto (`normalizeOcrResponse`). Convertimos a
-      // PORCENTAJE (×100) para el carrito y forzamos modo adicional
-      // (`prices_include_tax=false`) para que el IVA se sume sobre el neto y el
-      // costeo lo trate según el estado fiscal. Sin tasa detectada ⇒ undefined
-      // (el carrito hereda header + default). Tasa 0 (exento) se respeta.
-      const scannedRate =
-        item.tax_rate != null ? Number(item.tax_rate) * 100 : undefined;
-      // SIEMPRE modo adicional, también para las líneas exentas (rate 0).
-      // La rama que preservaba `scanResult.prices_include_tax` para esas líneas
-      // marcaba "IVA incluido" sobre un precio que `normalizeOcrResponse` ya
-      // había dejado en neto. En una línea exenta no cambia el número hoy, pero
-      // deja el flag persistido y armado: basta que alguien le ponga tasa a esa
-      // línea para que el IVA se extraiga de un precio que no lo contiene.
-      const scannedIncludeMode = false;
-
-      // El descuento viaja como PORCENTAJE y nada más. En este punto no se
-      // convierte, no se prorratea y no se resta: se copia el mismo número que
-      // el operador acaba de ver y aprobar en la precarga al campo de descuento
-      // de la línea del carrito. Si la factura dice 5%, el carrito dice 5.
-      //
-      // Todo lo que vivía aquí antes —convertir pesos a porcentaje con
-      // `Math.round`, clampar a 1% cuando el redondeo daba 0, y empujar el
-      // residuo al descuento de CABECERA— movía dinero entre líneas al
-      // prorratearse, y las capas de costo FIFO se escriben por línea. El
-      // porcentaje no tiene ese problema: es invariante a la base y a la
-      // cantidad, así que copiarlo tal cual es exacto y además es lo que el
-      // operador puede cotejar de un vistazo contra el papel.
-      const scannedDiscountPct = Math.min(
-        100,
-        Math.max(0, Math.round(Number(item.discount_percentage) || 0)),
-      );
+      // QUI-855: el mapeo vive en una función pura (`scanLineToCartFields`) con
+      // dos caminos. Multi-impuesto (`taxes` no vacío): precio y descuento
+      // BRUTOS impresos, modo de precios de la factura aplicado a la línea y
+      // filas de impuestos sin forzar 'iva'. Legacy (sin `taxes`): el mapeo de
+      // siempre — neto aplanado, tasa ×100, modo adicional, descuento como
+      // porcentaje entero (ver el util para el detalle de cada decisión).
+      const cartFields = scanLineToCartFields(item, invoiceDeclaredIncludeTax);
 
       if (candidate) {
         this.popCartService
@@ -1135,31 +1122,15 @@ export class PopComponent implements OnInit, OnDestroy {
               id: candidate.id,
               name: candidate.name,
               code: candidate.sku || '',
-              cost: item.unit_price,
+              cost: cartFields.unit_cost,
               price: 0,
               stock: 0,
               is_active: true,
             },
             quantity: item.quantity,
-            unit_cost: item.unit_price,
             purchase_uom_id: purchaseUomId,
             stock_uom_id: stockUomId,
-            tax_rate: scannedRate,
-            tax_type: 'iva',
-            prices_include_tax: scannedIncludeMode,
-            // QUI-855: si el escáner declara varios impuestos por línea viajan
-            // tal cual (tasa a PORCENTAJE, modo adicional porque el precio ya
-            // viene en neto). Hoy emite uno solo; el carrito lo deriva igual.
-            taxes: (item as any).taxes?.map((t: any) => ({
-              tax_rate: Number(t.tax_rate) * 100,
-              tax_type: t.tax_type ?? 'iva',
-              is_inclusive: false,
-              add_to_cost: !!t.add_to_cost,
-            })),
-            // Solo el porcentaje. `discount_amount` se deja fuera a propósito:
-            // si viajara con valor ganaría por precedencia en `deriveLineTax` y
-            // el % que muestra el carrito dejaría de ser el que se aplica.
-            discount: scannedDiscountPct,
+            ...cartFields,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
@@ -1169,30 +1140,16 @@ export class PopComponent implements OnInit, OnDestroy {
               id: 0,
               name: item.description,
               code: item.sku_if_visible || '',
-              cost: item.unit_price,
+              cost: cartFields.unit_cost,
               price: 0,
               stock: 0,
               is_active: true,
             },
             quantity: item.quantity,
-            unit_cost: item.unit_price,
             is_prebulk: true,
             purchase_uom_id: purchaseUomId,
             stock_uom_id: stockUomId,
-            tax_rate: scannedRate,
-            tax_type: 'iva',
-            prices_include_tax: scannedIncludeMode,
-            // QUI-855: multi-impuesto del escáner (ver rama de arriba).
-            taxes: (item as any).taxes?.map((t: any) => ({
-              tax_rate: Number(t.tax_rate) * 100,
-              tax_type: t.tax_type ?? 'iva',
-              is_inclusive: false,
-              add_to_cost: !!t.add_to_cost,
-            })),
-            // También en el producto NUEVO: el descuento no depende de que el
-            // producto exista en el catálogo, depende de lo que imprimió la
-            // factura. Mismo porcentaje, misma vía.
-            discount: scannedDiscountPct,
+            ...cartFields,
             prebulk_data: {
               name: item.description,
               code: item.sku_if_visible || '',
@@ -1219,7 +1176,12 @@ export class PopComponent implements OnInit, OnDestroy {
     if (data.invoiceNumber) {
       invoiceNoteLines.push(`Factura escaneada: ${data.invoiceNumber}`);
     }
-    if (invoiceDeclaredIncludeTax) {
+    // Sólo si TODAS las líneas entraron en neto: las multi-impuesto entran en
+    // bruto con el modo de la factura y la nota sería falsa para ellas.
+    if (
+      invoiceDeclaredIncludeTax &&
+      !data.editedItems.some((it) => scanLineHasTaxes(it))
+    ) {
       invoiceNoteLines.push(
         'La factura declara precios con IVA incluido; los importes se capturaron en neto.',
       );
@@ -2145,14 +2107,7 @@ export class PopComponent implements OnInit, OnDestroy {
         // persistir, multi-impuesto incluido (ver `cartToPurchaseOrderRequest`).
         ...(state.has_vat && item.taxes && item.taxes.length > 0
           ? {
-              taxes: item.taxes.map((t) => ({
-                tax_rate_id: t.tax_rate_id,
-                tax_name: t.tax_name,
-                tax_rate: Number(t.tax_rate) || 0,
-                tax_type: t.tax_type ?? 'iva',
-                is_inclusive: t.is_inclusive,
-                add_to_cost: !!t.add_to_cost,
-              })),
+              taxes: mapPopLineTaxesToRequest(item.taxes),
             }
           : {}),
         ...(Number(item.discount) > 0

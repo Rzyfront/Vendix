@@ -22,6 +22,7 @@ import {
   PopCartSummary,
   PopCartState,
   PopLineTax,
+  PopScanAttachment,
   PopTaxGroup,
   AddToPopCartRequest,
   UpdatePopCartItemRequest,
@@ -588,6 +589,15 @@ export class PopCartService {
    */
   setNotes(notes: string) {
     this.updateState({ notes: notes.trim() });
+  }
+
+  /**
+   * QUI-855 — adjunta (o quita, con `null`) la factura escaneada. Una por OC:
+   * un nuevo adjunto REEMPLAZA al anterior. El estado completo se persiste en
+   * localStorage, así que sobrevive a recargar.
+   */
+  setScanAttachment(attachment: PopScanAttachment | null): void {
+    this.updateState({ scan_attachment: attachment ?? undefined });
   }
 
   /**

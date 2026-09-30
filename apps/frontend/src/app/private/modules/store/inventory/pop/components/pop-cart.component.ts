@@ -9,11 +9,8 @@ import {
   PopCartItem,
   PopCartSummary,
 } from '../services/pop-cart.service';
-import type {
-  PopLineTax,
-  PurchaseTaxBaseMode,
-  PurchaseTaxType,
-} from '../interfaces/pop-cart.interface';
+import type { PopLineTax } from '../interfaces/pop-cart.interface';
+import { LineTaxesEditorComponent } from './line-taxes-editor/line-taxes-editor.component';
 import {
   deriveLineTaxes,
   PurchaseLineTaxInput,
@@ -43,6 +40,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     FormsModule,
     QuantityControlComponent,
     ToggleComponent,
+    LineTaxesEditorComponent,
   ],
   template: `
     <div
@@ -94,6 +92,28 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             ariaLabel="¿Esta compra tiene IVA?"
           ></app-toggle>
         </div>
+
+        <!-- QUI-855: factura escaneada adjunta a la OC (una por orden). -->
+        @if (cartState()?.scan_attachment; as attachment) {
+          <div
+            class="px-5 py-2 border-b border-border/50 flex items-center justify-between gap-3 text-xs"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <app-icon name="paperclip" [size]="14" class="text-primary"></app-icon>
+              <span class="truncate text-text-primary">
+                Factura adjunta: {{ attachment.file_name }}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 text-text-secondary hover:text-destructive"
+              (click)="removeScanAttachment()"
+              aria-label="Quitar factura adjunta"
+            >
+              <app-icon name="trash" [size]="14"></app-icon>
+            </button>
+          </div>
+        }
 
         <!-- Totals Row (High Contrast) -->
         <div class="px-5 py-4 bg-muted/20">
@@ -529,178 +549,17 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                      hasta 4 filas, una por tipo (IVA / INC / ICUI / IBUA).
                      Solo visible cuando la orden marca IVA (maestro). -->
                 @if (hasVat()) {
-                  @let d = itemDerived(item);
-                  <div
-                    class="flex flex-col gap-1 pt-2 border-t border-border/50 text-[10px]"
-                  >
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span
-                        class="uppercase tracking-wider font-bold text-text-secondary/60"
-                      >
-                        Impuestos
-                      </span>
-                      @if (item.tax_needs_review) {
-                        <span
-                          class="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700"
-                        >
-                          <app-icon name="alert-triangle" [size]="10"></app-icon>
-                          Confirma el impuesto
-                        </span>
-                      }
-                      <div class="ml-auto flex items-center gap-1.5">
-                        <span class="text-text-secondary">
-                          {{ itemEffectiveInclude(item) ? 'Incluido' : 'Agregado' }}
-                        </span>
-                        <app-toggle
-                          [checked]="itemEffectiveInclude(item)"
-                          (changed)="onItemIncludeToggle(item, $event)"
-                          ariaLabel="Precio con impuestos incluidos para esta línea"
-                        ></app-toggle>
-                      </div>
-                    </div>
-
-                    @for (tax of taxEditorRows(item); track tax.tax_type) {
-                      <div
-                        class="flex flex-wrap items-center gap-x-2 gap-y-1 pt-1"
-                      >
-                        <span
-                          class="w-9 font-bold uppercase text-text-primary"
-                        >
-                          {{ taxLabel(tax.tax_type) }}
-                        </span>
-                        @if (tax.calc_mode === 'fixed_per_unit') {
-                          <div class="flex items-center gap-1">
-                            <span class="text-text-secondary">$</span>
-                            <app-input
-                              type="number"
-                              size="sm"
-                              [ngModel]="tax.fixed_amount_per_unit"
-                              (ngModelChange)="
-                                updateTaxFixedAmount(item, tax.tax_type, $event)
-                              "
-                              customInputClass="text-right !h-7 !py-0 !w-16"
-                              customWrapperClass="!mt-0"
-                              min="0"
-                              step="0.01"
-                            ></app-input>
-                            <span class="text-text-secondary">por unidad</span>
-                          </div>
-                        } @else {
-                          <div class="flex items-center gap-1">
-                            <app-input
-                              type="number"
-                              size="sm"
-                              [ngModel]="tax.tax_rate"
-                              (ngModelChange)="
-                                updateTaxRowRate(item, tax.tax_type, $event)
-                              "
-                              customInputClass="text-right !h-7 !py-0 !w-14"
-                              customWrapperClass="!mt-0"
-                              min="0"
-                              step="0.01"
-                            ></app-input>
-                            <span class="text-text-secondary">%</span>
-                          </div>
-                        }
-                        <div class="flex items-center gap-1">
-                          <span class="text-text-secondary">
-                            {{ rowInclusive(item, tax) ? 'Incl.' : 'Agr.' }}
-                          </span>
-                          <app-toggle
-                            [checked]="rowInclusive(item, tax)"
-                            (changed)="onTaxRowInclusiveToggle(item, tax.tax_type, $event)"
-                            [ariaLabel]="'Impuesto ' + taxLabel(tax.tax_type) + ' incluido en el precio'"
-                          ></app-toggle>
-                        </div>
-                        @if (tax.calc_mode !== 'fixed_per_unit' && taxEditorRows(item).length > 1) {
-                          <select
-                            class="h-7 text-[10px] px-1 py-0 border border-border rounded bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
-                            [value]="tax.base_mode ?? 'net'"
-                            (change)="onTaxRowBaseModeChange(item, tax.tax_type, $event)"
-                            aria-label="Base del impuesto"
-                          >
-                            <option value="net">Base: neto</option>
-                            <option value="net_plus_prior">Base: neto + anteriores</option>
-                          </select>
-                        }
-                        @if (tax.tax_type === 'iva') {
-                          <label class="flex items-center gap-1 text-text-secondary">
-                            <input
-                              type="checkbox"
-                              class="h-3.5 w-3.5 accent-primary"
-                              [checked]="tax.add_to_cost"
-                              (change)="
-                                onTaxRowAddToCostToggle(
-                                  item,
-                                  tax.tax_type,
-                                  $any($event.target).checked
-                                )
-                              "
-                            />
-                            Al costo
-                          </label>
-                        } @else {
-                          <span class="text-text-secondary">Al costo: sí</span>
-                        }
-                        <span class="ml-auto font-medium text-text-primary">
-                          {{ formatCurrency(taxAmountOf(d, tax.tax_type)) }}
-                        </span>
-                        @if (taxEditorRows(item).length > 1) {
-                          <button
-                            type="button"
-                            class="text-text-secondary hover:text-destructive"
-                            (click)="removeTaxRow(item, tax.tax_type)"
-                            [attr.aria-label]="'Quitar impuesto ' + taxLabel(tax.tax_type)"
-                          >
-                            <app-icon name="trash" [size]="12"></app-icon>
-                          </button>
-                        }
-                      </div>
-                    }
-
-                    @if (availableTaxTypes(item).length > 0) {
-                      @if (addingTaxItemId() === item.id) {
-                        <div class="flex flex-wrap items-center gap-1.5 pt-1">
-                          <span class="text-text-secondary">Tipo:</span>
-                          @for (type of availableTaxTypes(item); track type) {
-                            <button
-                              type="button"
-                              class="rounded border border-border px-2 py-0.5 font-medium text-text-primary hover:border-primary hover:bg-primary/5"
-                              (click)="addTaxRow(item, type)"
-                            >
-                              {{ taxLabel(type) }}
-                            </button>
-                          }
-                          <button
-                            type="button"
-                            class="text-text-secondary hover:underline"
-                            (click)="addingTaxItemId.set(null)"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      } @else {
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-1 self-start pt-1 font-medium text-primary hover:underline"
-                          (click)="addingTaxItemId.set(item.id)"
-                        >
-                          <app-icon name="plus" [size]="10"></app-icon>
-                          Agregar impuesto
-                        </button>
-                      }
-                    }
-
-                    <!-- Desglose con los montos del kernel. -->
-                    <div
-                      class="flex flex-wrap items-center gap-x-2 pt-1 text-text-secondary"
-                    >
-                      <span>Neto {{ formatCurrency(d.net_line) }}</span>
-                      <span>· Impuestos {{ formatCurrency(d.tax_amount) }}</span>
-                      @if (d.capitalized_tax_total > 0) {
-                        <span>· Al costo {{ formatCurrency(d.capitalized_tax_total) }}</span>
-                      }
-                    </div>
+                  <div class="pt-2 border-t border-border/50">
+                    <app-line-taxes-editor
+                      [taxes]="taxEditorRows(item)"
+                      [unitPrice]="item.unit_cost"
+                      [quantity]="item.quantity"
+                      [discountAmount]="itemOwnDiscount(item)"
+                      [pricesIncludeTax]="itemEffectiveInclude(item)"
+                      [needsReview]="!!item.tax_needs_review"
+                      (taxesChange)="onItemTaxesChange(item, $event)"
+                      (pricesIncludeTaxChange)="onItemIncludeToggle(item, $event)"
+                    ></app-line-taxes-editor>
                   </div>
                 }
                 <!-- Config Trigger (Variants / Lot / Unit) -->
@@ -881,28 +740,8 @@ export class PopCartComponent {
   // QUI-855: multi-impuesto por línea (IVA + INC / ICUI / IBUA)
   // ============================================================
 
-  /** Línea en la que el selector de tipo de impuesto está abierto. */
-  readonly addingTaxItemId = signal<string | null>(null);
-
   /** Modo del descuento elegido por línea; sin elección, lo dicta el dato. */
   private readonly discountModes = signal<Record<string, 'pct' | 'amount'>>({});
-
-  private static readonly TAX_LABELS: Record<PurchaseTaxType, string> = {
-    iva: 'IVA',
-    inc: 'INC',
-    icui: 'ICUI',
-    ibua: 'IBUA',
-  };
-  private static readonly TAX_ORDER: PurchaseTaxType[] = [
-    'iva',
-    'inc',
-    'icui',
-    'ibua',
-  ];
-
-  taxLabel(type: PurchaseTaxType): string {
-    return PopCartComponent.TAX_LABELS[type] ?? String(type).toUpperCase();
-  }
 
   /**
    * Filas del editor. Con `taxes` son esas; sin ellas, la fila 1 es el IVA
@@ -922,17 +761,22 @@ export class PopCartComponent {
     ];
   }
 
-  /** Tipos todavía no usados en la línea (sin duplicar; máx. 4). */
-  availableTaxTypes(item: PopCartItem): PurchaseTaxType[] {
-    const rows = this.taxEditorRows(item);
-    if (rows.length >= 4) return [];
-    const used = new Set(rows.map((t) => t.tax_type));
-    return PopCartComponent.TAX_ORDER.filter((t) => !used.has(t));
+  /** Descuento propio de la línea en DINERO (el monto gana sobre el %). */
+  itemOwnDiscount(item: PopCartItem): number {
+    const amount = Number(item.discount_amount) || 0;
+    if (amount > 0) return amount;
+    const gross = (Number(item.unit_cost) || 0) * (Number(item.quantity) || 0);
+    return Math.round(gross * ((Number(item.discount) || 0) / 100) * 100) / 100;
   }
 
-  /** Modo de inclusión efectivo de una fila: el suyo, o el de la línea. */
-  rowInclusive(item: PopCartItem, tax: PopLineTax): boolean {
-    return tax.is_inclusive ?? this.itemEffectiveInclude(item);
+  /** Quita la factura escaneada adjunta (la OC se crea sin ella). */
+  removeScanAttachment(): void {
+    this.cartService.setScanAttachment(null);
+  }
+
+  /** El editor emitió las filas nuevas de la línea. */
+  onItemTaxesChange(item: PopCartItem, taxes: PopLineTax[]): void {
+    this.cartService.setItemTaxes(item.id, taxes);
   }
 
   /** Entrada del util para derivar la línea con lo que el carrito guarda. */
@@ -955,112 +799,6 @@ export class PopCartComponent {
       this.lineTaxInput(item),
       { prices_include_tax: this.headerIncludeTax() },
       0,
-    );
-  }
-
-  taxAmountOf(
-    derived: ReturnType<PopCartComponent['itemDerived']>,
-    type: PurchaseTaxType,
-  ): number {
-    return derived.taxes.find((t) => t.tax_type === type)?.tax_amount ?? 0;
-  }
-
-  /** Agrega una fila del tipo elegido (arranca en 0; INC/ICUI/IBUA al costo). */
-  addTaxRow(item: PopCartItem, type: PurchaseTaxType): void {
-    const rows = this.taxEditorRows(item);
-    if (rows.length >= 4 || rows.some((t) => t.tax_type === type)) return;
-    const row: PopLineTax =
-      type === 'ibua'
-        ? {
-            tax_type: 'ibua',
-            calc_mode: 'fixed_per_unit',
-            fixed_amount_per_unit: 0,
-            tax_rate: null,
-            add_to_cost: true,
-          }
-        : {
-            tax_type: type,
-            calc_mode: 'percent',
-            tax_rate: 0,
-            add_to_cost: type !== 'iva',
-          };
-    this.cartService.setItemTaxes(item.id, [...rows, row]);
-    this.addingTaxItemId.set(null);
-  }
-
-  /** Quita la fila de ese tipo (siempre queda al menos una). */
-  removeTaxRow(item: PopCartItem, type: PurchaseTaxType): void {
-    const rows = this.taxEditorRows(item);
-    if (rows.length <= 1) return;
-    this.cartService.setItemTaxes(
-      item.id,
-      rows.filter((t) => t.tax_type !== type),
-    );
-  }
-
-  /** Tasa (%) de la fila de ese tipo. */
-  updateTaxRowRate(
-    item: PopCartItem,
-    type: PurchaseTaxType,
-    rate: number | string,
-  ): void {
-    const parsed = Number(rate);
-    this.patchTaxRow(item, type, {
-      tax_rate: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
-    });
-  }
-
-  /** Monto fijo por unidad (IBUA). */
-  updateTaxFixedAmount(
-    item: PopCartItem,
-    type: PurchaseTaxType,
-    amount: number | string,
-  ): void {
-    const parsed = Number(amount);
-    this.patchTaxRow(item, type, {
-      fixed_amount_per_unit:
-        Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
-    });
-  }
-
-  onTaxRowInclusiveToggle(
-    item: PopCartItem,
-    type: PurchaseTaxType,
-    value: boolean,
-  ): void {
-    this.patchTaxRow(item, type, { is_inclusive: value });
-  }
-
-  onTaxRowBaseModeChange(
-    item: PopCartItem,
-    type: PurchaseTaxType,
-    event: Event,
-  ): void {
-    const value = (event.target as HTMLSelectElement).value;
-    const base_mode: PurchaseTaxBaseMode =
-      value === 'net_plus_prior' ? 'net_plus_prior' : 'net';
-    this.patchTaxRow(item, type, { base_mode });
-  }
-
-  /** «Al costo» editable sólo para IVA; INC/ICUI/IBUA capitalizan siempre. */
-  onTaxRowAddToCostToggle(
-    item: PopCartItem,
-    type: PurchaseTaxType,
-    value: boolean,
-  ): void {
-    this.patchTaxRow(item, type, { add_to_cost: value });
-  }
-
-  private patchTaxRow(
-    item: PopCartItem,
-    type: PurchaseTaxType,
-    patch: Partial<PopLineTax>,
-  ): void {
-    this.cartService.setItemTaxes(
-      item.id,
-      this.taxEditorRows(item).map((t) =>
-        t.tax_type === type ? { ...t, ...patch } : t,
-      ),
     );
   }
 

@@ -211,6 +211,21 @@ export interface PopLineTax {
   amount_override?: number | null;
 }
 
+/**
+ * QUI-855 — factura escaneada que se adjunta a la OC. `key` es la KEY de S3
+ * devuelta por `POST purchase-orders/scan` (nunca una URL firmada). Los
+ * `supplier_invoice_*` son los datos de cabecera del escaneo, ya revisados.
+ */
+export interface PopScanAttachment {
+  key: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  supplier_invoice_number?: string;
+  supplier_invoice_date?: string;
+  supplier_invoice_amount?: number;
+}
+
 export interface PopCartItem {
   id: string;
   product: PopProduct;
@@ -378,6 +393,12 @@ export interface PopCartState {
    * header). El escáner de facturas lo enciende al detectar IVA.
    */
   has_vat: boolean;
+  /**
+   * QUI-855 — factura escaneada adjunta (una por OC; un re-escaneo la
+   * reemplaza). Vive en el estado que se persiste en localStorage y viaja en el
+   * payload de creación de la OC.
+   */
+  scan_attachment?: PopScanAttachment | null;
   supplierId: number | null;
   locationId: number | null;
   orderDate: Date;

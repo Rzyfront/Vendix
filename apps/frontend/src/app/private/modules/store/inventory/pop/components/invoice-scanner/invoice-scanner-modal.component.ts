@@ -21,6 +21,7 @@ import { StepsLineComponent } from '../../../../../../../shared/components/steps
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { LineTaxesEditorComponent, taxTypeLabel } from '../line-taxes-editor/line-taxes-editor.component';
 
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
 import { UomService, UnitOfMeasure } from '../../../services/uom.service';
@@ -33,7 +34,15 @@ import {
   InvoiceMatchResult,
   MatchedLineItem,
   ProductCandidate,
+  ScanAttachmentInfo,
+  ScanLineTax,
 } from '../../interfaces/invoice-scanner.interface';
+import type { PopLineTax } from '../../interfaces/pop-cart.interface';
+import {
+  mapScanTaxesToPopLineTaxes,
+  popLineTaxesToScanTaxes,
+  scanLineHasTaxes,
+} from '../../utils/scan-line-to-cart.util';
 import {
   deriveLineTax,
   derivePurchaseTotals,
@@ -60,6 +69,7 @@ import {
     PopSupplierQuickCreateComponent,
     AiReviewAckComponent,
     AiDiscardToggleComponent,
+    LineTaxesEditorComponent,
   ],
   template: `
     <app-modal
@@ -379,7 +389,7 @@ import {
                       del papel — esa se pinta debajo del input cuando la
                       factura venía con IVA incluido.
                     -->
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-28">P. Unit. neto</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-28">P. Unit.</th>
                     <!--
                       Espejo del backend: P. Neto Unit. = unit_price_net
                       que deriva deriveLineTax (util compartido). Es el precio
@@ -404,7 +414,7 @@ import {
                       confirmar, o se queda arrastrando el error hasta anular
                       la orden.
                     -->
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-16">% IVA</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-44">Impuestos</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Subtotal</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Total</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-20">Estado</th>
@@ -453,7 +463,7 @@ import {
                       <td class="py-2 px-3">
                         <input
                           type="number"
-                          [value]="item.unit_price"
+                          [value]="linePrice(item)"
                           (change)="updateItemPrice(i, $event)"
                           class="w-24 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                           min="0"
@@ -465,7 +475,7 @@ import {
                           se edita arriba. En facturas con IVA por fuera los dos
                           números son el mismo y pintarlo sería ruido.
                         -->
-                        @if (invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
+                        @if (!isGrossLine(item) && invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
                           <span class="block mt-0.5 text-[10px] text-text-secondary">
                             impreso {{ item.unit_price_gross | currency: 0 }}
                           </span>
@@ -481,7 +491,7 @@ import {
                       -->
                       @if (
                         lineTaxRows()[i]?.unit_price_net != null &&
-                        lineTaxRows()[i]!.unit_price_net < item.unit_price
+                        lineTaxRows()[i]!.unit_price_net < linePrice(item)
                       ) {
                         <td class="py-2 px-3 text-text-primary">
                           {{ lineTaxRows()[i]!.unit_price_net | currency: 0 }}
@@ -517,16 +527,10 @@ import {
                         piensa el operador. El handler convierte al guardar.
                       -->
                       <td class="py-2 px-3">
-                        <input
-                          type="number"
-                          [value]="displayPercent((item.tax_rate ?? 0) * 100)"
-                          (change)="updateItemTaxRate(i, $event)"
-                          class="w-14 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                          min="0"
-                          max="100"
-                          step="1"
-                          aria-label="Porcentaje de IVA"
-                        />
+                        <ng-container
+                          [ngTemplateOutlet]="taxChipsButton"
+                          [ngTemplateOutletContext]="{ i: i }"
+                        ></ng-container>
                       </td>
                       <!-- Subtotal = base gravable de la línea (neto tras descuento,
                            prorrateo de cabecera aplicado). Espejo del backend. -->
@@ -561,6 +565,16 @@ import {
                         ></app-ai-discard-toggle>
                       </td>
                     </tr>
+                    @if (expandedTaxRow() === i) {
+                      <tr class="border-b border-border/50 bg-muted/10">
+                        <td colspan="11" class="px-3 py-3">
+                          <ng-container
+                            [ngTemplateOutlet]="taxPanel"
+                            [ngTemplateOutletContext]="{ i: i }"
+                          ></ng-container>
+                        </td>
+                      </tr>
+                    }
                   }
                 </tbody>
               </table>
@@ -606,16 +620,16 @@ import {
                       />
                     </div>
                     <div>
-                      <label class="text-[10px] text-text-secondary">P. Unit. neto</label>
+                      <label class="text-[10px] text-text-secondary">{{ isGrossLine(item) ? 'P. Unit.' : 'P. Unit. neto' }}</label>
                       <input
                         type="number"
-                        [value]="item.unit_price"
+                        [value]="linePrice(item)"
                         (change)="updateItemPrice(i, $event)"
                         class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
                         min="0"
                         step="0.01"
                       />
-                      @if (invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
+                      @if (!isGrossLine(item) && invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
                         <span class="block mt-0.5 text-[10px] text-text-secondary">
                           impreso {{ item.unit_price_gross | currency: 0 }}
                         </span>
@@ -638,19 +652,19 @@ import {
                       />
                     </div>
                     <div>
-                      <label class="text-[10px] text-text-secondary">% IVA</label>
-                      <input
-                        type="number"
-                        [value]="displayPercent((item.tax_rate ?? 0) * 100)"
-                        (change)="updateItemTaxRate(i, $event)"
-                        class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
-                        min="0"
-                        max="100"
-                        step="1"
-                        aria-label="Porcentaje de IVA"
-                      />
+                      <label class="text-[10px] text-text-secondary">Impuestos</label>
+                      <ng-container
+                        [ngTemplateOutlet]="taxChipsButton"
+                        [ngTemplateOutletContext]="{ i: i }"
+                      ></ng-container>
                     </div>
                   </div>
+                  @if (expandedTaxRow() === i) {
+                    <ng-container
+                      [ngTemplateOutlet]="taxPanel"
+                      [ngTemplateOutletContext]="{ i: i }"
+                    ></ng-container>
+                  }
                   <!-- Desglose: subtotal / IVA / total, derivado igual que
                        desktop. Reemplaza al qty × unit_price que ignoraba
                        descuento e IVA en móvil. -->
@@ -672,7 +686,7 @@ import {
                     @if (
                       (item.quantity || 0) > 0 &&
                       lineTaxRows()[i]?.unit_price_net != null &&
-                      lineTaxRows()[i]!.unit_price_net < item.unit_price
+                      lineTaxRows()[i]!.unit_price_net < linePrice(item)
                     ) {
                       <div class="flex justify-between">
                         <span class="text-text-secondary">P. Neto Unit.</span>
@@ -682,7 +696,7 @@ import {
                       </div>
                     }
                     <div class="flex justify-between">
-                      <span class="text-text-secondary">IVA</span>
+                      <span class="text-text-secondary">Impuestos</span>
                       <span class="text-text-primary">
                         {{ lineTaxRows()[i]?.tax_amount || 0 | currency: 0 }}
                       </span>
@@ -867,6 +881,66 @@ import {
               </p>
             </div>
           }
+
+          <!--
+            QUI-855: resumen compacto de impuestos por línea. Sustituye a la
+            columna «% IVA»: una línea puede llevar IVA + INC / ICUI / IBUA y un
+            solo input no los expresa. El clic expande el editor completo.
+          -->
+          <ng-template #taxChipsButton let-i="i">
+            <button
+              type="button"
+              class="flex w-full flex-wrap items-center gap-1 rounded-md border border-border px-1.5 py-1 text-left hover:border-primary hover:bg-primary/5"
+              (click)="toggleTaxPanel(i)"
+              [attr.aria-expanded]="expandedTaxRow() === i"
+              aria-label="Editar impuestos de la línea"
+            >
+              @for (chip of taxChips()[i]; track chip.key) {
+                <span
+                  class="inline-flex whitespace-nowrap rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                >
+                  {{ chip.label }}
+                  @if (chip.fixed !== null) {
+                    &nbsp;{{ chip.fixed | currency: 0 }}/u
+                  }
+                </span>
+              }
+              <app-icon
+                [name]="expandedTaxRow() === i ? 'chevron-up' : 'chevron-down'"
+                [size]="12"
+                class="ml-auto text-text-secondary"
+              ></app-icon>
+            </button>
+          </ng-template>
+
+          <!-- QUI-855: panel expandido de una línea (descuento en dinero + editor). -->
+          <ng-template #taxPanel let-i="i">
+            @if (taxPanelData()[i]; as d) {
+              <div class="flex flex-col gap-2">
+                <div class="flex flex-wrap items-center gap-2 text-[10px]">
+                  <span class="text-text-secondary">Descuento $</span>
+                  <input
+                    type="number"
+                    [value]="d.discount_money"
+                    (change)="updateItemDiscountAmount(i, $event)"
+                    class="w-24 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                    min="0"
+                    step="0.01"
+                    aria-label="Descuento en dinero"
+                  />
+                </div>
+                <app-line-taxes-editor
+                  [taxes]="d.rows"
+                  [unitPrice]="d.unit_price"
+                  [quantity]="d.quantity"
+                  [discountAmount]="d.discount_money"
+                  [pricesIncludeTax]="d.include"
+                  (taxesChange)="onLineTaxesChange(i, $event)"
+                  (pricesIncludeTaxChange)="onLineIncludeChange(i, $event)"
+                ></app-line-taxes-editor>
+              </div>
+            }
+          </ng-template>
 
           <!-- Punto 3+4: picker de producto por línea, SIEMPRE editable.
                Une candidatos sugeridos + búsqueda de catálogo server-side +
@@ -1059,6 +1133,8 @@ export class InvoiceScannerModalComponent {
     invoiceNumber?: string;
     invoiceDate?: string;
     supplierId?: number | null;
+    /** QUI-855: la factura subida por el scan (null si no se pudo subir). */
+    scanAttachment?: ScanAttachmentInfo | null;
   }>();
 
   // Wizard state
@@ -1307,7 +1383,10 @@ export class InvoiceScannerModalComponent {
    * facturó el proveedor.
    */
   private readonly keptHeaderShares = computed(() =>
-    prorateHeaderDiscount(this.keptItems(), this.headerDiscount()),
+    prorateHeaderDiscount(
+      this.keptItems().map((i) => this.toTaxUtilItem(i)),
+      this.headerDiscount(),
+    ),
   );
 
   /**
@@ -1324,12 +1403,209 @@ export class InvoiceScannerModalComponent {
    * aplica dejaría de ser el que el operador ve y edita en el input. El monto
    * de la IA ya se convirtió a porcentaje una sola vez, al recibir el escaneo.
    */
-  private toTaxUtilItem = (item: MatchedLineItem): PurchaseLineTaxInput => ({
-    unit_price: item.unit_price,
-    quantity: item.quantity,
-    tax_rate: (Number(item.tax_rate ?? 0) || 0) * 100,
-    discount_percentage: item.discount_percentage,
-  });
+  private toTaxUtilItem = (item: MatchedLineItem): PurchaseLineTaxInput => {
+    // QUI-855 — camino multi-impuesto: la línea se trabaja en BRUTO (precio y
+    // descuento impresos), con el modo de precios de la línea y sus filas; el
+    // kernel deriva el neto. Aquí el monto SÍ viaja (gana por precedencia): el
+    // editor lo escribe y limpia el % cuando el operador teclea uno.
+    if (scanLineHasTaxes(item)) {
+      const printed = Number(item.discount_amount_printed) || 0;
+      return {
+        unit_price: this.linePrice(item),
+        quantity: item.quantity,
+        discount_percentage: item.discount_percentage,
+        ...(printed > 0 ? { discount_amount: printed } : {}),
+        prices_include_tax: this.lineInclude(item),
+        taxes: mapScanTaxesToPopLineTaxes(item.taxes!),
+      };
+    }
+    return {
+      unit_price: item.unit_price,
+      quantity: item.quantity,
+      tax_rate: (Number(item.tax_rate ?? 0) || 0) * 100,
+      discount_percentage: item.discount_percentage,
+    };
+  };
+
+  // ============================================================
+  // QUI-855: multi-impuesto por línea
+  // ============================================================
+
+  /** ¿La línea trabaja en bruto con sus filas de impuestos? */
+  isGrossLine(item: MatchedLineItem): boolean {
+    return scanLineHasTaxes(item);
+  }
+
+  /** Precio unitario que el operador edita: bruto impreso o neto legacy. */
+  linePrice(item: MatchedLineItem): number {
+    return this.isGrossLine(item)
+      ? Number(item.unit_price_gross ?? item.unit_price) || 0
+      : item.unit_price;
+  }
+
+  /** Modo de precios de la línea. Legacy: siempre neto (ya aplanado). */
+  private lineInclude(item: MatchedLineItem): boolean {
+    if (!this.isGrossLine(item)) return false;
+    return item.prices_include_tax ?? this.scanResult()?.prices_include_tax === true;
+  }
+
+  /** Descuento propio de la línea en DINERO (el monto gana sobre el %). */
+  private ownDiscountMoney(item: MatchedLineItem): number {
+    const gross = this.linePrice(item) * (Number(item.quantity) || 0);
+    if (this.isGrossLine(item)) {
+      const printed = Number(item.discount_amount_printed) || 0;
+      if (printed > 0) return this.round2(Math.min(printed, gross));
+    }
+    const pct = Math.min(100, Math.max(0, Number(item.discount_percentage) || 0));
+    return this.round2(gross * (pct / 100));
+  }
+
+  private round2(n: number): number {
+    return Math.round(n * 100) / 100;
+  }
+
+  /** Filas del editor: las de la línea o, si es legacy, su IVA (tasa ×100). */
+  private taxRowsOf(item: MatchedLineItem): PopLineTax[] {
+    if (this.isGrossLine(item)) return mapScanTaxesToPopLineTaxes(item.taxes!);
+    return [
+      {
+        tax_type: 'iva',
+        tax_rate: this.displayPercent((Number(item.tax_rate ?? 0) || 0) * 100),
+        calc_mode: 'percent',
+        add_to_cost: false,
+      },
+    ];
+  }
+
+  /** Línea del expandido: estable hasta que cambia una línea (no recrea el editor). */
+  readonly taxPanelData = computed(() =>
+    this.editableItems().map((item) => ({
+      rows: this.taxRowsOf(item),
+      unit_price: this.linePrice(item),
+      quantity: item.quantity,
+      discount_money: this.ownDiscountMoney(item),
+      include: this.lineInclude(item),
+    })),
+  );
+
+  /** Chips del resumen: «IVA 19 %», «ICUI 20 %», «IBUA $68/u». */
+  readonly taxChips = computed(() =>
+    this.editableItems().map((item) =>
+      this.taxRowsOf(item).map((t) => ({
+        key: t.tax_type,
+        label:
+          t.calc_mode === 'fixed_per_unit'
+            ? taxTypeLabel(t.tax_type)
+            : `${taxTypeLabel(t.tax_type)} ${this.displayPercent(t.tax_rate)} %`,
+        fixed:
+          t.calc_mode === 'fixed_per_unit'
+            ? Number(t.fixed_amount_per_unit) || 0
+            : null,
+      })),
+    ),
+  );
+
+  /** Línea con su panel de impuestos abierto (una a la vez). */
+  readonly expandedTaxRow = signal<number | null>(null);
+
+  toggleTaxPanel(index: number): void {
+    this.expandedTaxRow.update((cur) => (cur === index ? null : index));
+  }
+
+  /**
+   * El editor emitió las filas de la línea. Una línea legacy (neta) que sólo
+   * cambió la tasa del IVA sigue en el camino legacy; con cualquier otra cosa
+   * (otro impuesto, monto fijo, modo incluido, al costo…) pasa al camino
+   * multi-impuesto, conservando el precio neto como su base.
+   */
+  onLineTaxesChange(index: number, rows: PopLineTax[]): void {
+    const items = [...this.editableItems()];
+    const item = items[index];
+    if (!item) return;
+    if (this.isGrossLine(item)) {
+      items[index] = { ...item, taxes: popLineTaxesToScanTaxes(rows) };
+    } else if (this.isSimpleIvaRow(rows)) {
+      const pct = Math.min(100, Math.max(0, Number(rows[0].tax_rate) || 0));
+      items[index] = { ...item, tax_rate: pct / 100 };
+    } else {
+      items[index] = this.toGrossLine(item, popLineTaxesToScanTaxes(rows), false);
+    }
+    this.editableItems.set(items);
+  }
+
+  /** Toggle de modo (incluido/agregado) de LA LÍNEA; las filas vuelven a heredarlo. */
+  onLineIncludeChange(index: number, value: boolean): void {
+    const items = [...this.editableItems()];
+    const item = items[index];
+    if (!item) return;
+    if (this.isGrossLine(item)) {
+      items[index] = {
+        ...item,
+        prices_include_tax: value,
+        taxes: item.taxes!.map((t) => ({ ...t, is_inclusive: undefined })),
+      };
+    } else {
+      // Legacy ya es «agregado»: sólo «incluido» cambia algo.
+      if (!value) return;
+      items[index] = this.toGrossLine(
+        item,
+        popLineTaxesToScanTaxes(this.taxRowsOf(item)),
+        true,
+      );
+    }
+    this.editableItems.set(items);
+  }
+
+  private isSimpleIvaRow(rows: PopLineTax[]): boolean {
+    if (rows.length !== 1) return false;
+    const r = rows[0];
+    return (
+      r.tax_type === 'iva' &&
+      r.calc_mode !== 'fixed_per_unit' &&
+      r.amount_override == null &&
+      !r.add_to_cost &&
+      r.is_inclusive === undefined &&
+      r.base_mode === undefined
+    );
+  }
+
+  /** Pasa una línea neta legacy al camino multi-impuesto (su neto es su base). */
+  private toGrossLine(
+    item: MatchedLineItem,
+    taxes: ScanLineTax[],
+    include: boolean,
+  ): MatchedLineItem {
+    return {
+      ...item,
+      taxes,
+      unit_price_gross: item.unit_price,
+      prices_include_tax: include,
+      discount_amount_printed: null,
+    };
+  }
+
+  /**
+   * Descuento en DINERO tecleado. Sincroniza el %: línea multi-impuesto guarda
+   * el monto impreso (gana en el carrito y el backend); legacy sólo guarda el %.
+   */
+  updateItemDiscountAmount(index: number, event: Event): void {
+    const raw = Number((event.target as HTMLInputElement).value);
+    const items = [...this.editableItems()];
+    const item = items[index];
+    if (!item) return;
+    const gross = this.linePrice(item) * (Number(item.quantity) || 0);
+    const money = Math.min(Math.max(0, Number.isFinite(raw) ? raw : 0), gross);
+    const pct = gross > 0 ? Math.min(100, (money / gross) * 100) : 0;
+    items[index] = this.isGrossLine(item)
+      ? {
+          ...item,
+          discount_amount_printed: money > 0 ? money : null,
+          discount_percentage: pct,
+          discount_amount: null,
+        }
+      : { ...item, discount_percentage: pct, discount_amount: null };
+    this.editableItems.set(items);
+  }
 
   /**
    * Porcentaje para pintar en pantalla. Los porcentajes se muestran en ENTERO
@@ -1360,6 +1636,24 @@ export class InvoiceScannerModalComponent {
     }
     const money = Number(item.discount_amount) || 0;
     const gross = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+    if (money > 0 && gross > 0) return Math.min(100, (money / gross) * 100);
+    return 0;
+  }
+
+  /**
+   * QUI-855 — % inicial de una línea multi-impuesto: el impreso; si la factura
+   * sólo trae pesos, se deriva del monto BRUTO impreso contra el bruto de la
+   * línea.
+   */
+  private resolveGrossDiscountPercent(item: MatchedLineItem): number {
+    const printedPct = Number(item.discount_percentage);
+    if (Number.isFinite(printedPct) && printedPct > 0) {
+      return Math.min(100, printedPct);
+    }
+    const money = Number(item.discount_amount_printed) || 0;
+    const gross =
+      (Number(item.quantity) || 0) *
+      (Number(item.unit_price_gross ?? item.unit_price) || 0);
     if (money > 0 && gross > 0) return Math.min(100, (money / gross) * 100);
     return 0;
   }
@@ -1793,10 +2087,22 @@ export class InvoiceScannerModalComponent {
               const { purchase_uom_id, stock_uom_id } = this.resolveUomForHint(
                 item.uom_hint,
               );
+              const hasTaxes = scanLineHasTaxes(item);
               return {
                 ...item,
                 purchase_uom_id,
                 stock_uom_id,
+                // QUI-855: la línea multi-impuesto conserva el bruto impreso y
+                // el descuento impreso (no se aplanan por IVA).
+                ...(hasTaxes
+                  ? {
+                      unit_price_gross: item.unit_price_gross ?? item.unit_price,
+                      discount_amount_printed:
+                        Number(item.discount_amount_printed) > 0
+                          ? Number(item.discount_amount_printed)
+                          : null,
+                    }
+                  : {}),
                 // Única conversión monto → porcentaje de todo el flujo, y ocurre
                 // acá: al recibir el escaneo, una sola vez. De aquí en adelante
                 // el descuento es un porcentaje y nada más — se pinta así, se
@@ -1805,7 +2111,9 @@ export class InvoiceScannerModalComponent {
                 // Hay facturas que sólo imprimen la rebaja en pesos, sin el "%"
                 // al lado. Si no se normalizara, esa rebaja no tendría cómo
                 // expresarse y desaparecería de la orden sin aviso.
-                discount_percentage: this.resolveLineDiscountPercent(item),
+                discount_percentage: hasTaxes
+                  ? this.resolveGrossDiscountPercent(item)
+                  : this.resolveLineDiscountPercent(item),
                 // El monto se descarta a propósito: gana por precedencia en
                 // `deriveLineTax`, así que dejarlo vivo haría que el porcentaje
                 // que el operador ve y edita no fuera el que se aplica.
@@ -1866,6 +2174,9 @@ export class InvoiceScannerModalComponent {
       ...items[index],
       discount_percentage: pct,
       discount_amount: null,
+      // QUI-855: el monto impreso gana por precedencia; al teclear un %
+      // se limpia para que el % sea el que se aplica.
+      discount_amount_printed: null,
     };
     this.editableItems.set(items);
   }
@@ -1903,7 +2214,9 @@ export class InvoiceScannerModalComponent {
     const value = Number((event.target as HTMLInputElement).value);
     if (value < 0) return;
     const items = [...this.editableItems()];
-    items[index] = { ...items[index], unit_price: value };
+    items[index] = this.isGrossLine(items[index])
+      ? { ...items[index], unit_price_gross: value }
+      : { ...items[index], unit_price: value };
     this.editableItems.set(items);
   }
 
@@ -2114,6 +2427,7 @@ export class InvoiceScannerModalComponent {
       invoiceDate: this.editInvoiceDate || undefined,
       // Punto 2: proveedor elegido por el usuario (null = no cambiar).
       supplierId: this.selectedSupplierId(),
+      scanAttachment: scan.scan_attachment ?? null,
     });
 
     this.closeAndReset();
@@ -2144,6 +2458,7 @@ export class InvoiceScannerModalComponent {
     this.scanResult.set(null);
     this.matchResult.set(null);
     this.editableItems.set([]);
+    this.expandedTaxRow.set(null);
     this.headerDiscount.set(0);
     // QUI-644: obligatorio. El contenido proyectado en `app-modal` no se
     // destruye al cerrar (QUI-438), así que sin esto el descarte del escaneo

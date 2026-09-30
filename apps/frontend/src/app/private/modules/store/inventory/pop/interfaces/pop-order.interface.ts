@@ -7,6 +7,7 @@ import {
   PopCartState,
   PopCartItem,
   PopLineTax,
+  PopScanAttachment,
   LotInfo,
   PreBulkData,
   PurchaseTaxBaseMode,
@@ -197,7 +198,11 @@ export interface CreatePurchaseOrderRequest {
    * rejected by the backend.
    */
   order_type?: 'retail' | 'ingredient';
-
+  /**
+   * QUI-855 — factura escaneada adjunta. Espejo de `ScanAttachmentDto`.
+   * Sólo viaja cuando el carrito la trae.
+   */
+  scan_attachment?: PopScanAttachment;
 }
 
 /**
@@ -388,6 +393,9 @@ export function cartToPurchaseOrderRequest(
     internal_notes: cartState.internalNotes,
     created_by_user_id: userId,
     items,
+    ...(cartState.scan_attachment?.key
+      ? { scan_attachment: cartState.scan_attachment }
+      : {}),
   };
 }
 

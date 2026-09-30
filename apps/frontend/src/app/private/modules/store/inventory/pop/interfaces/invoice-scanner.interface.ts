@@ -14,6 +14,32 @@ export interface ExtractedSupplier {
   phone?: string;
 }
 
+/**
+ * QUI-855 — un impuesto de una línea, tal como lo emite el backend del scan.
+ * `tax_rate` es PORCENTAJE (19 = 19 %), a diferencia del `tax_rate` legacy de
+ * la línea, que es FRACCIÓN (0.19).
+ */
+export interface ScanLineTax {
+  tax_type: 'iva' | 'inc' | 'icui' | 'ibua';
+  tax_rate: number | null;
+  calc_mode: 'percent' | 'fixed_per_unit';
+  fixed_amount_per_unit: number | null;
+  amount_override: number | null;
+  /** Undefined ⇒ hereda el modo de la línea (sólo lo deja así el editor del modal). */
+  is_inclusive?: boolean;
+  /** Los fija el editor del modal (el backend no los emite). */
+  base_mode?: 'net' | 'net_plus_prior';
+  add_to_cost?: boolean;
+}
+
+/** Adjunto del escaneo: la factura ya subida a S3 por el backend. */
+export interface ScanAttachmentInfo {
+  key: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+}
+
 export interface ExtractedLineItem {
   description: string;
   quantity: number;
@@ -56,6 +82,21 @@ export interface ExtractedLineItem {
    */
   discount_percentage?: number | null;
   /**
+   * QUI-855 — N impuestos de la línea (camino multi-impuesto). Cuando trae
+   * elementos la línea se trabaja en BRUTO (`unit_price_gross` +
+   * `discount_amount_printed`) y el kernel deriva el neto; `unit_price`,
+   * `tax_rate` y `discount_amount` son el camino legacy (aplanado sólo por IVA).
+   */
+  taxes?: ScanLineTax[] | null;
+  /** QUI-855 — descuento impreso en la factura (BRUTO, sin aplanar por IVA). */
+  discount_amount_printed?: number | null;
+  /**
+   * QUI-855 — modo de precios de ESTA línea cuando difiere del de la factura.
+   * Lo fija el modal al pasar una línea legacy (neta) al camino multi-impuesto;
+   * el backend nunca lo emite. Undefined ⇒ hereda `prices_include_tax` del scan.
+   */
+  prices_include_tax?: boolean;
+  /**
    * Fase 4: pistas de unidad de medida emitidas por el perfil
    * `invoice_ocr_ingredient`. El perfil retail (`invoice_ocr`) no las
    * emite, por eso son opcionales. `uom_hint` es un código de unidad
@@ -79,6 +120,10 @@ export interface InvoiceScanResult {
    */
   prices_include_tax?: boolean;
   line_items: ExtractedLineItem[];
+  /**
+   * QUI-855 — la factura subida por el scan. Se adjunta a la OC al crearla.
+   */
+  scan_attachment?: ScanAttachmentInfo | null;
   subtotal: number;
   tax_amount: number;
   /**
