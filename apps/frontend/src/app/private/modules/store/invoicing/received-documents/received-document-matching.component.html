@@ -129,6 +129,18 @@
       (reloadRequested)="onReloadRequested()"
     />
 
+    <app-received-document-match-expense-confirm
+      [document]="document()"
+      [scope]="scope()"
+      [storeId]="storeId()"
+      [lineBalances]="lineBalances()"
+      [documentVersion]="documentVersion()"
+      [allocationsLoaded]="allocationsLoaded()"
+      [(isOpen)]="expenseMatchOpen"
+      (changed)="onMatchChanged()"
+      (reloadRequested)="onReloadRequested()"
+    />
+
     <section aria-labelledby="allocations-title" class="space-y-3 border-t border-border pt-4">
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>

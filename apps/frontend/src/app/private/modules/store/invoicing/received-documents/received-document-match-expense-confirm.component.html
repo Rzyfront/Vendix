@@ -1,0 +1,141 @@
+@if (permission() && eligible()) {
+  <div class="border-t border-border pt-4">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="font-semibold text-text-primary">Asignación manual a gasto</h3>
+        <p class="text-sm text-text-secondary">Busca el gasto por ID o descripción y selecciona expresamente el destino.</p>
+      </div>
+      <button type="button" class="min-h-11 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="!allocationsLoaded() || pending()" (click)="open()">Asignar a un gasto</button>
+    </div>
+  </div>
+
+  <app-modal [(isOpen)]="isOpen" [title]="'Asignación manual a gasto'" [subtitle]="'No se verifica la identidad del proveedor del gasto.'" [size]="'xl'" [fullScreenOnMobile]="true" [dialog]="true" [canClose]="canClose" (closed)="onClosed()">
+    <div class="max-h-[75vh] space-y-4 overflow-y-auto p-1">
+      <aside class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary" role="note">
+        La evidencia comercial es provisional. Esta asignación no crea inventario, cuentas por pagar ni asientos contables, y no autoriza IVA, efectos fiscales o aceptación DIAN.
+      </aside>
+      <p class="text-sm text-text-secondary">El buscador no muestra ni verifica NIT o proveedor. Compara el soporte manualmente antes de asignar.</p>
+
+      @if (mutationError()) {
+        <div class="space-y-3 rounded-lg border border-warning/40 bg-warning-light p-3" [attr.role]="conflict() ? 'alert' : 'status'">
+          <p class="text-sm text-text-primary">{{ mutationError() }}</p>
+          @if (conflict()) { <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm font-medium" (click)="reloadAfterConflict()">Recargar detalle y saldos</button> }
+        </div>
+      }
+      @if (searchError()) { <p class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">{{ searchError() }}</p> }
+
+      @if (!confirmationOpen()) {
+        <form class="space-y-3 rounded-lg border border-border p-3" (submit)="onSearchSubmit($event)">
+          <h3 class="font-semibold text-text-primary">Buscar gasto (selección manual)</h3>
+          <label class="field">ID o descripción del gasto
+            <input [formControl]="searchControl" type="search" maxlength="100" autocomplete="off" placeholder="Escribe un ID o descripción">
+          </label>
+          @if (searchStatus() !== 'VALID' && (searchAttempted())) { <p class="text-sm text-error" role="alert">La búsqueda admite máximo 100 caracteres.</p> }
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="submit" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" [disabled]="searchLoading()">{{ searchLoading() ? 'Buscando…' : 'Buscar gastos' }}</button>
+            @if (searchLoading()) { <span class="text-sm text-text-secondary" role="status">Consultando gastos permitidos…</span> }
+          </div>
+        </form>
+
+        @if (warnings().length > 0) {
+          <div class="rounded-lg border border-warning/30 bg-warning-light p-3" role="note">
+            <h3 class="font-medium text-text-primary">Advertencias de búsqueda</h3>
+            <ul class="mt-2 list-inside list-disc space-y-1 text-sm text-text-primary">
+              @for (warning of warnings(); track warning) { <li>{{ warningLabel(warning) }}</li> }
+            </ul>
+          </div>
+        }
+
+        @if (!searchAttempted()) { <p class="rounded-lg border border-border p-3 text-sm text-text-secondary" role="status">Escribe un ID o descripción y pulsa “Buscar gastos”; no se elige ni asigna ningún gasto automáticamente.</p> }
+        @if (searchAttempted() && !searchLoading() && !searchError()) {
+          @if (expenses().length === 0) { <p class="rounded-lg border border-border p-3 text-sm text-text-secondary" role="status">No se encontraron gastos en esta página. Esto no confirma que no exista otro gasto relacionado.</p> }
+          @for (expense of expenses(); track expense.id) {
+            <article class="space-y-2 rounded-lg border border-border p-3" [class.border-primary]="selectedExpenseId() === expense.id">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0">
+                  <h4 class="font-semibold text-text-primary">Gasto #{{ expense.id }} · {{ expense.description || 'Sin descripción' }}</h4>
+                  <p class="text-sm text-text-secondary">{{ dateLabel(expense.expense_date) }} · Estado: {{ expense.state }}</p>
+                  <p class="text-sm text-text-secondary">Total {{ money(expense.amount, expense.currency) }} · asignado globalmente {{ money(expense.allocated_net_amount, expense.currency) }} · saldo {{ money(expense.remaining_net_amount, expense.currency) }}</p>
+                </div>
+                <button type="button" class="min-h-11 w-full rounded-lg border border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary sm:w-auto" [attr.aria-pressed]="selectedExpenseId() === expense.id" [disabled]="searchLoading()" (click)="selectExpense(expense)">{{ selectedExpenseId() === expense.id ? 'Gasto seleccionado' : 'Seleccionar gasto' }}</button>
+              </div>
+              @if (expense.items.length > 0) {
+                <ul class="space-y-1 border-t border-border pt-2 text-sm text-text-secondary">
+                  @for (item of expense.items; track item.id) {
+                    <li>Línea #{{ item.id }} · {{ item.description }} · cantidad {{ item.quantity }} · neto {{ money(item.amount, expense.currency) }} · asignado {{ money(item.allocated_net_amount, expense.currency) }} · restante {{ money(item.remaining_net_amount, expense.currency) }}</li>
+                  }
+                </ul>
+              }
+            </article>
+          }
+          <nav class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3" aria-label="Paginación de gastos">
+            <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" [disabled]="searchLoading() || page() <= 1" (click)="previousPage()">Anterior</button>
+            <p class="text-sm text-text-secondary" aria-live="polite">Página {{ page() }} de {{ totalPages() }} · {{ total() }} gastos</p>
+            <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" [disabled]="searchLoading() || page() >= totalPages() || page() >= 1000" (click)="nextPage()">Siguiente</button>
+          </nav>
+        }
+
+        @if (selectedExpense(); as expense) {
+          <section class="space-y-3 rounded-lg border border-primary/40 p-3" aria-labelledby="selected-expense-title">
+            <h3 id="selected-expense-title" class="font-semibold text-text-primary">Destino seleccionado: gasto #{{ expense.id }}</h3>
+            <label class="field">Nivel del gasto destino
+              <select [value]="selectedExpenseItemId() ?? ''" (change)="selectExpenseItem($event)" [disabled]="pending()">
+                <option value="">Gasto completo (sin línea específica)</option>
+                @for (item of expense.items; track item.id) { <option [value]="item.id">Línea #{{ item.id }} · {{ item.description }} · saldo {{ money(item.remaining_net_amount, expense.currency) }}</option> }
+              </select>
+            </label>
+            <p class="text-sm text-text-secondary">Saldo neto del destino seleccionado: {{ money(targetRemainingAmount(), expense.currency) }}. La identidad del proveedor no está verificada.</p>
+            @if (expense.items.length > 0) { <p class="text-xs text-text-secondary">Elige “Gasto completo” o una línea; no se selecciona una línea automáticamente.</p> }
+          </section>
+        }
+
+        <form [formGroup]="form" class="space-y-4 border-t border-border pt-4" (ngSubmit)="prepareConfirmation()">
+          <h3 class="font-semibold text-text-primary">Datos de la asignación</h3>
+          <label class="field">Línea fuente del documento recibido
+            <select [value]="selectedDocumentItemId() ?? ''" (change)="selectSourceLine($event)" [disabled]="pending()">
+              <option value="">Selecciona una línea fuente</option>
+              @for (line of sourceLines(); track line.id) { <option [value]="line.id" [disabled]="!sourceAvailable(line.id)">Línea {{ line.line_number }} · {{ line.description }} · saldo {{ lineBalance(line.id)?.remaining_quantity ?? 'no disponible' }} {{ line.unit_code || '' }}</option> }
+            </select>
+          </label>
+          @if (selectedSourceLine(); as source) {
+            <div class="grid grid-cols-1 gap-2 rounded-lg border border-border bg-surface p-3 text-sm sm:grid-cols-2">
+              <p>Cantidad restante de fuente: {{ selectedSourceBalance()?.remaining_quantity ?? 'no disponible' }} {{ source.unit_code || 'unidad no informada' }}</p>
+              <p>Neto restante de fuente: {{ money(selectedSourceBalance()?.remaining_net_amount, document().currency) }}</p>
+            </div>
+          }
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label class="field">Cantidad fuente<input type="text" inputmode="decimal" autocomplete="off" formControlName="source_quantity"></label>
+            <label class="field">Cantidad asignada al destino (requerida)<input type="text" inputmode="decimal" autocomplete="off" formControlName="target_quantity"></label>
+            <label class="field sm:col-span-2">Importe neto a asignar ({{ document().currency || 'moneda no identificada' }})<input type="text" inputmode="decimal" autocomplete="off" formControlName="allocated_net_amount"></label>
+            <label class="field">Unidad destino manual (requerida)<input formControlName="target_unit_code" maxlength="30" autocomplete="off" placeholder="Ej. unidad, caja, kg"></label>
+            <label class="field sm:col-span-2">Motivo manual (requerido)<textarea formControlName="manual_reason" rows="3" maxlength="500" placeholder="Describe por qué relacionas estos conceptos (mínimo 10 caracteres)"></textarea></label>
+          </div>
+          <p class="text-xs text-text-secondary">No hay unidad destino persistida para el gasto. Ingresa la unidad y cantidad manualmente; no se realiza conversión. Los importes se manejan como strings decimales, sin cálculo flotante.</p>
+          @if (submitAttempted() && !canConfirm()) { <p class="text-sm text-error" role="alert">Selecciona una línea fuente y un gasto; completa cantidades decimales, neto, unidad destino y motivo manual.</p> }
+          @if (submitAttempted() && !amountBoundsValid()) { <p class="text-sm text-error" role="alert">La cantidad o el neto excede el saldo disponible de la línea fuente o del gasto seleccionado.</p> }
+          <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm" [disabled]="pending()" (click)="isOpen.set(false)">Cancelar</button>
+            <button type="submit" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" [disabled]="pending() || conflict()">Revisar asignación</button>
+          </div>
+        </form>
+      }
+
+      @if (confirmationOpen()) {
+        <app-modal [(isOpen)]="confirmationOpen" [title]="'Confirma asignación al gasto'" [subtitle]="'La relación es provisional y manual.'" [size]="'md'" [fullScreenOnMobile]="true" [dialog]="true" [canClose]="canClose">
+          <section class="space-y-4 p-1" aria-labelledby="confirm-expense-title">
+            <h3 id="confirm-expense-title" class="font-semibold text-text-primary">Revisa antes de confirmar</h3>
+            <p class="text-sm text-text-primary">Línea fuente {{ selectedSourceLine()?.line_number }} → gasto #{{ selectedExpense()?.id }}{{ selectedExpenseItem() ? ' · línea #' + selectedExpenseItem()?.id : ' · gasto completo' }}.</p>
+            <p class="text-sm text-text-primary">Cantidad fuente {{ formValue('source_quantity') }} {{ selectedSourceLine()?.unit_code || '' }} → {{ formValue('target_quantity') }} {{ formValue('target_unit_code') }}.</p>
+            <p class="text-sm text-text-primary">Neto asignado {{ money(formValue('allocated_net_amount'), document().currency) }}.</p>
+            <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm font-semibold text-text-primary">No se verifica proveedor ni se crea stock, cuentas por pagar, asiento, IVA ni aceptación DIAN.</p>
+            @if (mutationError()) { <p class="text-sm text-error" role="alert">{{ mutationError() }}</p> }
+            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm" [disabled]="pending()" (click)="confirmationOpen.set(false)">Volver a revisar</button>
+              <button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" [disabled]="!canConfirm() || pending()" (click)="confirm()">{{ pending() ? 'Confirmando…' : 'Confirmar asignación' }}</button>
+            </div>
+          </section>
+        </app-modal>
+      }
+    </div>
+  </app-modal>
+}

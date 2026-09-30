@@ -17,6 +17,7 @@ import type {
 } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentMatchConfirmComponent } from './received-document-match-confirm.component';
+import { ReceivedDocumentMatchExpenseConfirmComponent } from './received-document-match-expense-confirm.component';
 
 const WARNING_LABELS: Record<string, string> = {
   DOCUMENT_LINES_LIMIT_REACHED: 'Hay más líneas de las que se muestran; la comparación puede estar incompleta.',
@@ -35,6 +36,8 @@ const WARNING_LABELS: Record<string, string> = {
   PO_LINE_CROSS_ORGANIZATION_PRODUCT_EXCLUDED: 'Se excluyeron líneas con productos de otra organización.',
   RECEPTIONS_LIMIT_REACHED: 'Hay más recepciones de las que se muestran.',
   RECEPTION_ITEMS_LIMIT_REACHED: 'Hay más líneas de recepción de las que se muestran.',
+  PO_ITEM_ALLOCATION_EXCEEDS_ORDERED: 'Las asignaciones activas superan la cantidad pedida en una línea de OC; revisa sus saldos antes de continuar.',
+  RECEPTION_ITEM_ALLOCATION_EXCEEDS_RECEIVED: 'Las asignaciones activas superan la cantidad recibida en una recepción; revisa el saldo físico antes de continuar.',
   UNIT_OF_MEASURE_REQUIRES_REVIEW: 'La unidad de medida no coincide; compara cantidades manualmente.',
   CENTRAL_LOCATION_REQUIRES_REVIEW: 'La orden va a una bodega central; confirma la tienda receptora.',
   NO_RECEIPT_RECORDED: 'La orden candidata aún no tiene recepción física registrada.',
@@ -66,7 +69,7 @@ const REASON_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-received-document-matching',
   standalone: true,
-  imports: [CardComponent, ReceivedDocumentMatchConfirmComponent],
+  imports: [CardComponent, ReceivedDocumentMatchConfirmComponent, ReceivedDocumentMatchExpenseConfirmComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './received-document-matching.component.html',
 })
@@ -94,6 +97,7 @@ export class ReceivedDocumentMatchingComponent {
   readonly allocationsError = signal<string | null>(null);
   readonly allocationsLoaded = signal(false);
   readonly matchConfirmOpen = signal(false);
+  readonly expenseMatchOpen = signal(false);
   readonly changed = output<void>();
 
   private epoch = 0;
