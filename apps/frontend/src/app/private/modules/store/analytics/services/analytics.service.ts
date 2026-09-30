@@ -129,8 +129,14 @@ export interface PurchasesBySupplier {
 // Reviews interfaces
 export interface ReviewsSummary {
   total_reviews: number;
+  /** `null` = no hubo reseñas aprobadas en la ventana. */
+  total_reviews_growth: number | null;
   average_rating: number;
+  /** `null` = no hubo reseñas aprobadas en el período actual o previo. */
+  average_rating_growth: number | null;
   verified_purchases: number;
+  /** % de compras verificadas sobre las aprobadas. `null` = sin aprobadas. */
+  verified_purchase_rate: number | null;
   pending_reviews: number;
   approved_reviews: number;
   rejected_reviews: number;
@@ -142,6 +148,12 @@ export interface ReviewsSummary {
     5: number;
   };
   total_helpful_votes: number;
+}
+
+export interface RatingTrendPoint {
+  period: string;
+  average_rating: number;
+  review_count: number;
 }
 
 // Financial interfaces
@@ -1092,6 +1104,18 @@ export class AnalyticsService {
       this.http.get<ApiResponse<ReviewsSummary>>(this.getApiUrl('reviews/summary'), {
         params: this.buildParams(query),
       }),
+    );
+  }
+
+  getRatingTrend(
+    query: any = {},
+  ): Observable<ApiResponse<RatingTrendPoint[]>> {
+    const cacheKey = `reviews-rating-trend-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<RatingTrendPoint[]>>(
+        this.getApiUrl('reviews/rating-trend'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
