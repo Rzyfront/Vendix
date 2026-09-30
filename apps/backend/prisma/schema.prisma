@@ -56,6 +56,8 @@ model users {
   received_documents_created received_documents[]          @relation("received_documents_created_by")
   received_documents_reviewed received_documents[]         @relation("received_documents_reviewed_by")
   received_document_links_created received_document_links[] @relation("received_document_links_created_by")
+  received_document_match_allocations_created received_document_match_allocations[] @relation("received_document_match_allocations_created_by")
+  received_document_match_allocations_revoked received_document_match_allocations[] @relation("received_document_match_allocations_revoked_by")
   received_document_events_acted received_document_events[] @relation("received_document_events_actor")
   document_reception_connections_created document_reception_connections[] @relation("document_reception_connections_created_by")
   fiscal_tax_credits_created fiscal_tax_credits[]           @relation("fiscal_tax_credits_created_by")
@@ -665,6 +667,7 @@ model organizations {
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
   received_documents            received_documents[]
+  received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
   fiscal_tax_payments            fiscal_tax_payments[]
@@ -936,6 +939,7 @@ model stores {
   fiscal_close_sessions       fiscal_close_sessions[]
   fiscal_operation_events     fiscal_operation_events[]
   received_documents          received_documents[]
+  received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits           fiscal_tax_credits[]
   fiscal_tax_payments          fiscal_tax_payments[]
@@ -2825,6 +2829,7 @@ model expenses {
   refunded_by_user   users?              @relation("expenses_refunded_by", fields: [refunded_by_user_id], references: [id])
   expense_items      expense_items[]
   received_document_links received_document_links[] @relation("received_document_link_expense")
+  received_document_match_allocations received_document_match_allocations[]
 
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
@@ -2862,6 +2867,7 @@ model expense_items {
   updated_at  DateTime? @default(now()) @db.Timestamp(6)
 
   expenses expenses @relation(fields: [expense_id], references: [id], onDelete: Cascade)
+  received_document_match_allocations received_document_match_allocations[]
 
   @@index([expense_id])
 }
@@ -2996,6 +3002,7 @@ model purchase_orders {
   receptions              purchase_order_receptions[]
   dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
   received_document_links received_document_links[]          @relation("received_document_link_purchase_order")
+  received_document_match_allocations received_document_match_allocations[]
 
   @@unique([organization_id, order_number])
 }
@@ -3071,6 +3078,7 @@ model purchase_order_items {
   dispatch_note_items    dispatch_note_items[]
   inventory_cost_layers  inventory_cost_layers[]
   purchase_order_item_taxes purchase_order_item_taxes[]
+  received_document_match_allocations received_document_match_allocations[]
 
   @@index([purchase_order_id])
   @@index([product_id, purchase_order_id])
@@ -3165,6 +3173,7 @@ model purchase_order_receptions {
   items             purchase_order_reception_items[]
   ap_reception_link ap_reception_links?
   received_document_links received_document_links[] @relation("received_document_link_reception")
+  received_document_match_allocations received_document_match_allocations[]
 
   @@index([purchase_order_id])
 }
@@ -3179,6 +3188,7 @@ model purchase_order_reception_items {
 
   reception           purchase_order_receptions @relation(fields: [reception_id], references: [id], onDelete: Cascade)
   purchase_order_item purchase_order_items      @relation(fields: [purchase_order_item_id], references: [id], onDelete: Cascade)
+  received_document_match_allocations received_document_match_allocations[]
 
   @@index([reception_id])
   @@index([purchase_order_item_id])
@@ -6567,6 +6577,7 @@ model accounting_entities {
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
   received_documents            received_documents[]
+  received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
   fiscal_tax_payments            fiscal_tax_payments[]
@@ -11867,6 +11878,7 @@ model received_documents {
   items             received_document_items[]
   taxes             received_document_taxes[]
   links             received_document_links[]
+  match_allocations received_document_match_allocations[]
   events            received_document_events[]
 
   @@unique([accounting_entity_id, idempotency_key], map: "received_docs_entity_idempotency_key")
@@ -11914,8 +11926,10 @@ model received_document_items {
   product        products?          @relation("received_document_item_product", fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_items_product_fkey")
   product_variant product_variants? @relation("received_document_item_variant", fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_items_variant_fkey")
   taxes          received_document_taxes[]
+  match_allocations received_document_match_allocations[]
 
   @@unique([document_id, line_number], map: "received_doc_items_document_line_key")
+  @@unique([id, document_id], map: "received_doc_items_id_document_key")
   @@index([document_id], map: "received_doc_items_document_idx")
   @@index([product_id], map: "received_doc_items_product_idx")
   @@index([product_variant_id], map: "received_doc_items_variant_idx")
@@ -11938,10 +11952,83 @@ model received_document_taxes {
 
   document received_documents      @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_taxes_doc_fkey")
   item     received_document_items? @relation(fields: [item_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_taxes_item_fkey")
+  match_allocations received_document_match_tax_allocations[]
 
   @@index([document_id], map: "received_doc_taxes_document_idx")
   @@index([item_id], map: "received_doc_taxes_item_idx")
   @@index([document_id, tax_type], map: "received_doc_taxes_document_type_idx")
+}
+
+/// Durable human-confirmed match between a received document line and a
+/// commercial source line. Tax treatment/eligibility is intentionally not
+/// implied by this matching evidence.
+model received_document_match_allocations {
+  id                     Int       @id @default(autoincrement())
+  organization_id        Int
+  accounting_entity_id   Int
+  store_id               Int?
+  document_id            Int
+  document_item_id       Int
+  purchase_order_id      Int?
+  purchase_order_item_id Int?
+  reception_id           Int?
+  reception_item_id      Int?
+  expense_id             Int?
+  expense_item_id        Int?
+  source_quantity        Decimal   @db.Decimal(15, 4)
+  target_quantity        Decimal?  @db.Decimal(15, 4)
+  source_unit_code       String?   @db.VarChar(30)
+  target_unit_code       String?  @db.VarChar(30)
+  allocated_net_amount   Decimal   @db.Decimal(15, 2)
+  currency               String    @db.VarChar(10)
+  status                 String    @default("active") @db.VarChar(20)
+  idempotency_key        String    @db.VarChar(160)
+  created_by             Int
+  confirmed_at           DateTime  @default(now()) @db.Timestamp(6)
+  revoked_by             Int?
+  revoked_at             DateTime? @db.Timestamp(6)
+  revocation_reason      String?   @db.VarChar(500)
+  evidence               Json?
+  created_at             DateTime  @default(now()) @db.Timestamp(6)
+  updated_at             DateTime  @updatedAt @db.Timestamp(6)
+
+  organization        organizations                  @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_org_fkey")
+  accounting_entity   accounting_entities            @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_entity_fkey")
+  store               stores?                        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_store_fkey")
+  document            received_documents             @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_document_fkey")
+  document_item       received_document_items        @relation(fields: [document_item_id, document_id], references: [id, document_id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_item_document_fkey")
+  purchase_order      purchase_orders?               @relation(fields: [purchase_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_po_fkey")
+  purchase_order_item purchase_order_items?          @relation(fields: [purchase_order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_po_item_fkey")
+  reception           purchase_order_receptions?     @relation(fields: [reception_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_reception_fkey")
+  reception_item      purchase_order_reception_items? @relation(fields: [reception_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_reception_item_fkey")
+  expense             expenses?                      @relation(fields: [expense_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_expense_fkey")
+  expense_item        expense_items?                 @relation(fields: [expense_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_expense_item_fkey")
+  created_by_user     users                          @relation("received_document_match_allocations_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_created_by_fkey")
+  revoked_by_user     users?                         @relation("received_document_match_allocations_revoked_by", fields: [revoked_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_allocations_revoked_by_fkey")
+  tax_allocations     received_document_match_tax_allocations[]
+
+  @@unique([document_id, idempotency_key], map: "received_doc_match_alloc_doc_idempotency_key")
+  @@index([organization_id, accounting_entity_id, store_id, document_id, status], map: "received_doc_match_alloc_scope_status_idx")
+  @@index([document_item_id, status], map: "received_doc_match_alloc_item_status_idx")
+  @@index([purchase_order_item_id, status], map: "received_doc_match_alloc_po_item_status_idx")
+  @@index([reception_item_id, status], map: "received_doc_match_alloc_reception_item_status_idx")
+  @@index([expense_id, status], map: "received_doc_match_alloc_expense_status_idx")
+  @@index([expense_item_id, status], map: "received_doc_match_alloc_expense_item_status_idx")
+}
+
+/// Tax allocation is reconciliation evidence only, never an eligibility flag.
+model received_document_match_tax_allocations {
+  id               Int      @id @default(autoincrement())
+  allocation_id    Int
+  document_tax_id  Int
+  allocated_amount Decimal  @db.Decimal(15, 2)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+
+  allocation   received_document_match_allocations @relation(fields: [allocation_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_tax_alloc_allocation_fkey")
+  document_tax received_document_taxes             @relation(fields: [document_tax_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_match_tax_alloc_tax_fkey")
+
+  @@unique([allocation_id, document_tax_id], map: "received_doc_match_tax_alloc_allocation_tax_key")
+  @@index([document_tax_id], map: "received_doc_match_tax_alloc_tax_idx")
 }
 
 model received_document_links {
