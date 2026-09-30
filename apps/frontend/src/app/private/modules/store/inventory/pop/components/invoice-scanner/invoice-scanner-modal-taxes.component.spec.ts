@@ -216,4 +216,94 @@ describe('InvoiceScannerModalComponent — QUI-855 multi-impuesto por línea', (
     expect(arg.editedItems[0].taxes.length).toBe(2);
     expect(arg.editedItems[0].unit_price_gross).toBe(1270);
   });
+
+  // ---- Descuento por línea en % o $ (el monto gana, como en el kernel) ----
+
+  function scanWith(item: MatchedLineItem): void {
+    const scanner = TestBed.inject(InvoiceScannerService) as any;
+    scanner.scanInvoice = () => of({ success: true, data: buildScan() });
+    scanner.matchProducts = () =>
+      of({ success: true, data: { ...buildMatch(false), items: [item] } });
+    component.selectedFile.set(new File(['x'], 'factura.png'));
+    component.startScan();
+    fixture.detectChanges();
+  }
+
+  it('escaneo con monto 762 y % 19 (IVA mal leído) sobre 84 x 1370: gana el monto, unidad $', () => {
+    scanWith({
+      ...buildItem(),
+      quantity: 84,
+      unit_price: 1370,
+      discount_amount: 762,
+      discount_percentage: 19,
+    });
+    const item = component.editableItems()[0];
+    expect(component.discountUnit(0, item)).toBe('amount');
+    expect(component.discountInputValue(0, item)).toBe(762);
+    expect(component.ownDiscountMoney(item)).toBe(762);
+    // net_line = 115.080 - 762
+    expect(component.lineTaxRows()[0].net_line).toBe(114318);
+  });
+
+  it('escaneo multi-impuesto con monto impreso 762 y % 19: gana el monto', () => {
+    scanWith({
+      ...multiItem(),
+      quantity: 84,
+      unit_price: 1000,
+      unit_price_gross: 1370,
+      discount_amount_printed: 762,
+      discount_percentage: 19,
+    });
+    const item = component.editableItems()[0];
+    expect(component.discountUnit(0, item)).toBe('amount');
+    expect(component.discountInputValue(0, item)).toBe(762);
+    expect(item.discount_percentage).toBeCloseTo((762 / 115080) * 100, 5);
+  });
+
+  it('escaneo con solo 10 %: unidad % y valor 10', () => {
+    scanWith({ ...buildItem(), quantity: 1, unit_price: 1000, discount_percentage: 10 });
+    const item = component.editableItems()[0];
+    expect(component.discountUnit(0, item)).toBe('pct');
+    expect(component.discountInputValue(0, item)).toBe(10);
+  });
+
+  it('monto y % coherentes (redondeo del % impreso): se conserva el %', () => {
+    scanWith({
+      ...buildItem(),
+      quantity: 84,
+      unit_price: 1370,
+      discount_amount: 759.5,
+      discount_percentage: 0.66,
+    });
+    expect(component.editableItems()[0].discount_percentage).toBe(0.66);
+  });
+
+  it('cambiar de unidad conserva el descuento efectivo', () => {
+    prime({ ...buildItem(), quantity: 2, unit_price: 500, discount_percentage: 10 });
+    const before = component.lineTaxRows()[0].net_line;
+    const item = () => component.editableItems()[0];
+    expect(component.discountInputValue(0, item())).toBe(10);
+    component.setDiscountUnit(0, 'amount');
+    expect(component.discountInputValue(0, item())).toBe(100);
+    component.setDiscountUnit(0, 'pct');
+    expect(component.discountInputValue(0, item())).toBe(10);
+    expect(component.lineTaxRows()[0].net_line).toBe(before);
+  });
+
+  it('en unidad $ el input edita el monto y deriva el %', () => {
+    prime({ ...buildItem(), quantity: 1, unit_price: 1000 });
+    component.setDiscountUnit(0, 'amount');
+    component.updateItemDiscountAmount(0, { target: { value: '250.5' } } as unknown as Event);
+    const item = component.editableItems()[0];
+    expect(component.ownDiscountMoney(item)).toBe(250.5);
+    expect(item.discount_percentage).toBeCloseTo(25.05, 5);
+  });
+
+  it('el panel de impuestos ya no trae el input Descuento $', () => {
+    prime(multiItem());
+    component.expandedTaxRow.set(0);
+    fixture.detectChanges();
+    const html = (fixture.nativeElement as HTMLElement).innerHTML;
+    expect(html).not.toContain('Descuento $');
+  });
 });

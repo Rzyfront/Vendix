@@ -526,19 +526,10 @@ import {
                         corregirlo después implica anular la orden.
                       -->
                       <td class="py-2 px-3">
-                        <div class="flex items-center gap-1">
-                          <input
-                            type="number"
-                            [value]="linePercentDiscount(item)"
-                            (change)="updateItemDiscountPercent(i, $event)"
-                            class="w-16 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                            min="0"
-                            max="100"
-                            step="1"
-                            aria-label="Descuento en porcentaje"
-                          />
-                          <span class="text-[10px] text-text-secondary">%</span>
-                        </div>
+                        <ng-container
+                          [ngTemplateOutlet]="discountCell"
+                          [ngTemplateOutletContext]="{ i: i, item: item, compact: false }"
+                        ></ng-container>
                       </td>
                       <!--
                         Tasa de IVA: el scanner la emite como fracción (0.19);
@@ -665,17 +656,11 @@ import {
                          tasa de IVA, editables. Sin ellos el operador móvil no
                          puede corregir lo que la IA asignó antes de confirmar. -->
                     <div>
-                      <label class="text-[10px] text-text-secondary">Dcto %</label>
-                      <input
-                        type="number"
-                        [value]="linePercentDiscount(item)"
-                        (change)="updateItemDiscountPercent(i, $event)"
-                        class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
-                        min="0"
-                        max="100"
-                        step="1"
-                        aria-label="Descuento en porcentaje"
-                      />
+                      <label class="text-[10px] text-text-secondary">Descuento</label>
+                      <ng-container
+                        [ngTemplateOutlet]="discountCell"
+                        [ngTemplateOutletContext]="{ i: i, item: item, compact: true }"
+                      ></ng-container>
                     </div>
                     <div>
                       <label class="text-[10px] text-text-secondary">Impuestos</label>
@@ -939,22 +924,73 @@ import {
             </button>
           </ng-template>
 
-          <!-- QUI-855: panel expandido de una línea (descuento en dinero + editor). -->
-          <ng-template #taxPanel let-i="i">
-            @if (taxPanelData()[i]; as d) {
-              <div class="flex flex-col gap-2">
-                <div class="flex flex-wrap items-center gap-2 text-[10px]">
-                  <span class="text-text-secondary">Descuento $</span>
+          <!-- Descuento de la línea: selector de unidad % o $ + input. La unidad
+               sólo cambia cómo se muestra y edita; el descuento efectivo es el
+               mismo. Debajo, el equivalente en la otra unidad. -->
+          <ng-template #discountCell let-i="i" let-item="item" let-compact="compact">
+            <div class="flex flex-col gap-0.5">
+              <div class="flex items-center gap-1">
+                <div
+                  class="inline-flex rounded border border-border overflow-hidden text-[10px] leading-none shrink-0"
+                  role="group"
+                  aria-label="Unidad del descuento"
+                >
+                  <button
+                    type="button"
+                    class="px-1.5 py-1"
+                    [class]="discountUnit(i, item) === 'pct' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
+                    [attr.aria-pressed]="discountUnit(i, item) === 'pct'"
+                    (click)="setDiscountUnit(i, 'pct')"
+                  >
+                    %
+                  </button>
+                  <button
+                    type="button"
+                    class="px-1.5 py-1"
+                    [class]="discountUnit(i, item) === 'amount' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
+                    [attr.aria-pressed]="discountUnit(i, item) === 'amount'"
+                    (click)="setDiscountUnit(i, 'amount')"
+                  >
+                    $
+                  </button>
+                </div>
+                @if (discountUnit(i, item) === 'amount') {
                   <input
                     type="number"
-                    [value]="d.discount_money"
+                    [value]="discountInputValue(i, item)"
                     (change)="updateItemDiscountAmount(i, $event)"
-                    class="w-24 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                    [class]="compact ? 'w-full min-w-0' : 'w-24'"
+                    class="px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                     min="0"
                     step="0.01"
                     aria-label="Descuento en dinero"
                   />
-                </div>
+                } @else {
+                  <input
+                    type="number"
+                    [value]="discountInputValue(i, item)"
+                    (change)="updateItemDiscountPercent(i, $event)"
+                    [class]="compact ? 'w-full min-w-0' : 'w-16'"
+                    class="px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    aria-label="Descuento en porcentaje"
+                  />
+                }
+              </div>
+              @if (discountUnit(i, item) === 'amount') {
+                <span class="text-[10px] text-text-secondary">= {{ formatPercent(linePercentDiscount(item)) }} %</span>
+              } @else {
+                <span class="text-[10px] text-text-secondary">= {{ ownDiscountMoney(item) | currency: 0 }}</span>
+              }
+            </div>
+          </ng-template>
+
+          <!-- QUI-855: panel expandido de una línea (editor de impuestos). El descuento vive en la celda de la tabla. -->
+          <ng-template #taxPanel let-i="i">
+            @if (taxPanelData()[i]; as d) {
+              <div class="flex flex-col gap-2">
                 <app-line-taxes-editor
                   [taxes]="d.rows"
                   [unitPrice]="d.unit_price"
@@ -1951,7 +1987,7 @@ export class InvoiceScannerModalComponent {
   }
 
   /** Descuento propio de la línea en DINERO (el monto gana sobre el %). */
-  private ownDiscountMoney(item: MatchedLineItem): number {
+  ownDiscountMoney(item: MatchedLineItem): number {
     const gross = this.linePrice(item) * (Number(item.quantity) || 0);
     if (this.isGrossLine(item)) {
       const printed = Number(item.discount_amount_printed) || 0;
@@ -2086,6 +2122,43 @@ export class InvoiceScannerModalComponent {
   }
 
   /**
+   * Unidad en que se muestra/edita el descuento de cada línea, por índice.
+   * Se siembra al recibir el escaneo (monto impreso => '$'); sin entrada se
+   * cae al default de `discountUnit`. Las líneas nunca se borran ni reordenan
+   * (sólo se descartan), así que el índice es estable; se reinicia por escaneo.
+   */
+  readonly discountUnits = signal<Record<number, 'pct' | 'amount'>>({});
+
+  /** Unidad vigente de la línea: la elegida, o '$' si trae monto y '%' si no. */
+  discountUnit(index: number, item: MatchedLineItem): 'pct' | 'amount' {
+    const chosen = this.discountUnits()[index];
+    if (chosen) return chosen;
+    const hasMoney =
+      (Number(item.discount_amount_printed) || 0) > 0 ||
+      (Number(item.discount_amount) || 0) > 0;
+    return hasMoney ? 'amount' : 'pct';
+  }
+
+  /** Cambia sólo la unidad de edición; el descuento efectivo no se toca. */
+  setDiscountUnit(index: number, unit: 'pct' | 'amount'): void {
+    this.discountUnits.update((m) => ({ ...m, [index]: unit }));
+  }
+
+  /** Valor del input según la unidad: monto (2 decimales) o %. */
+  discountInputValue(index: number, item: MatchedLineItem): number {
+    return this.discountUnit(index, item) === 'amount'
+      ? this.ownDiscountMoney(item)
+      : this.linePercentDiscount(item);
+  }
+
+  /** Porcentaje legible en es-CO, hasta 2 decimales (0,66). */
+  formatPercent(value: number): string {
+    return this.displayPercent(value).toLocaleString('es-CO', {
+      maximumFractionDigits: 2,
+    });
+  }
+
+  /**
    * Descuento en DINERO tecleado. Sincroniza el %: línea multi-impuesto guarda
    * el monto impreso (gana en el carrito y el backend); legacy sólo guarda el %.
    */
@@ -2122,41 +2195,57 @@ export class InvoiceScannerModalComponent {
   }
 
   /**
-   * Porcentaje de descuento con el que arranca una línea recién escaneada.
+   * % inicial de descuento a partir de lo que la IA leyó (% y/o monto).
    *
-   * Prefiere el porcentaje que la IA leyó del papel: es la cifra impresa y es
-   * invariante a la base (un 20% es 20% con IVA o sin él). Sólo cuando no hay
-   * porcentaje se deriva del monto, contra el bruto de la línea. Con bruto 0
-   * (línea bonificada) no hay porcentaje posible y queda en 0 — dividir por
-   * cero pintaría NaN en el input.
+   * Regla: el MONTO gana sobre el %, como en el kernel compartido
+   * (`resolvePurchaseLineDiscount`). Si la línea trae monto > 0 y también %,
+   * y el % aplicado al bruto difiere del monto en más de 1 peso Y en más de
+   * 0,5 puntos porcentuales, el % se deriva del monto (típico: la IA leyó el
+   * IVA, 19, como descuento). Las dos tolerancias juntas absorben el redondeo
+   * de un % impreso con 2 decimales. Sólo % => se usa el %; sólo monto => se
+   * deriva. Con bruto 0 no hay % posible y se usa el % impreso o 0.
    */
-  private resolveLineDiscountPercent(item: MatchedLineItem): number {
-    const printedPct = Number(item.discount_percentage);
-    if (Number.isFinite(printedPct) && printedPct > 0) {
-      return Math.min(100, printedPct);
+  private resolveDiscountPercent(
+    printedPctRaw: unknown,
+    moneyRaw: unknown,
+    gross: number,
+  ): number {
+    const pctNum = Number(printedPctRaw);
+    const pct = Number.isFinite(pctNum) && pctNum > 0 ? Math.min(100, pctNum) : 0;
+    const money = Number(moneyRaw) || 0;
+    if (money > 0 && gross > 0) {
+      const derived = Math.min(100, (money / gross) * 100);
+      if (pct <= 0) return derived;
+      const pesosOff = Math.abs((gross * pct) / 100 - money);
+      const pointsOff = Math.abs(derived - pct);
+      return pesosOff > 1 && pointsOff > 0.5 ? derived : pct;
     }
-    const money = Number(item.discount_amount) || 0;
+    return pct;
+  }
+
+  /** % inicial de una línea legacy (neta). El monto gana sobre el %. */
+  private resolveLineDiscountPercent(item: MatchedLineItem): number {
     const gross = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
-    if (money > 0 && gross > 0) return Math.min(100, (money / gross) * 100);
-    return 0;
+    return this.resolveDiscountPercent(
+      item.discount_percentage,
+      item.discount_amount,
+      gross,
+    );
   }
 
   /**
-   * QUI-855 — % inicial de una línea multi-impuesto: el impreso; si la factura
-   * sólo trae pesos, se deriva del monto BRUTO impreso contra el bruto de la
-   * línea.
+   * QUI-855 — % inicial de una línea multi-impuesto: contra el bruto impreso y
+   * el monto BRUTO impreso. El monto gana sobre el %.
    */
   private resolveGrossDiscountPercent(item: MatchedLineItem): number {
-    const printedPct = Number(item.discount_percentage);
-    if (Number.isFinite(printedPct) && printedPct > 0) {
-      return Math.min(100, printedPct);
-    }
-    const money = Number(item.discount_amount_printed) || 0;
     const gross =
       (Number(item.quantity) || 0) *
       (Number(item.unit_price_gross ?? item.unit_price) || 0);
-    if (money > 0 && gross > 0) return Math.min(100, (money / gross) * 100);
-    return 0;
+    return this.resolveDiscountPercent(
+      item.discount_percentage,
+      item.discount_amount_printed,
+      gross,
+    );
   }
 
   /**
@@ -2583,6 +2672,16 @@ export class InvoiceScannerModalComponent {
           );
           // Create editable copy of items. Fase 4: en flujo ingredient,
           // resolvemos uom_hint → purchase/stock UoM como preselección.
+          // Unidad inicial del descuento por línea: '$' si la factura trae
+          // monto, '%' si no. Se siembra antes de que el monto se normalice.
+          const seededUnits: Record<number, 'pct' | 'amount'> = {};
+          matchResponse.data.items.forEach((it, idx) => {
+            const hasMoney =
+              (Number(it.discount_amount_printed) || 0) > 0 ||
+              (Number(it.discount_amount) || 0) > 0;
+            seededUnits[idx] = hasMoney ? 'amount' : 'pct';
+          });
+          this.discountUnits.set(seededUnits);
           this.editableItems.set(
             matchResponse.data.items.map((item) => {
               const { purchase_uom_id, stock_uom_id } = this.resolveUomForHint(
@@ -2988,6 +3087,7 @@ export class InvoiceScannerModalComponent {
     // destruye al cerrar (QUI-438), así que sin esto el descarte del escaneo
     // anterior se aplicaría a las líneas del siguiente.
     this.discardedIndexes.set(new Set());
+    this.discountUnits.set({});
     this.editInvoiceNumber = '';
     this.editInvoiceDate = '';
     // Punto 2 + 3/4: limpia estado de proveedor y del picker de productos.
