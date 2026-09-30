@@ -170,6 +170,22 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 - `apps/frontend/src/app/shared/constants/app-modules.constant.ts` — completar curation/default ORG del módulo existente Facturación, paso16.
 
 
+- `apps/backend/prisma/migrations/20260930140000_reception_run_payload/migration.sql` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/interfaces/document-reception-envelope.interface.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-envelope.service.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-envelope.service.spec.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-ingest.service.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-ingest.service.spec.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/interfaces/document-reception-sync.interface.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-sync-lease.service.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-sync-lease.service.spec.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-sync.service.spec.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-sync.processor.spec.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-webhook.service.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-webhook.service.spec.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/domains/received-documents/services/document-reception-webhook.controller.spec.ts` — ejecución durable y transporte del paso7.
+- `apps/backend/src/main.ts` — ejecución durable y transporte del paso7.
+
 ## Reusable Assets
 
 - `apps/backend/src/domains/fiscal-operations/services/fiscal-context-resolver.service.ts` — contextos validados por entidad fiscal y STORE/ORGANIZATION.

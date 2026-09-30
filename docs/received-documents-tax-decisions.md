@@ -141,3 +141,11 @@ Create/update de conexiones debe guardar audit_logs en la misma transacción; el
 ### D37 — Curación de Facturación en ORG_ADMIN
 
 La E2E federada ORG detectó que el módulo siempre-visible legado no tenía key `invoicing` en defaults/catálogo ORG. Se añade la misma key existente a ORG_ADMIN, no otro módulo/sidebar. `default_visible_for_privileged_users=true`: recepción del módulo existente debe ser descubrible. `show_new_badge=yes`: descubrimiento por banner/settings, nunca sidebar. Soft merge preserva false explícito y roles no privilegiados, sin backfill ni seed general. No debilitar rawtrue del fallback para tapar la ausencia.
+
+### D38 — Protocolo de ingreso automático y ejecución durable
+
+El adaptador API de Vendix define un envelope JSON version1 con documents[external_id,file_name,mime_type,content_base64] y next_cursor obligatorio string|null. No se asume una API universal DIAN. El transporte y webhook admiten hasta5MiB por batch/10documentos, base64 canónico y originales válidos; documentos individuales siguen el límite10MiB del intake. XML no consume IA; PDF/foto usa la cola OCR existente y su gate/cuota.
+
+Webhook requiere HMAC-SHA256 de timestamp.event_id.raw_bytes, UUIDeventid y ±300s, no autorización por UUID público. Run guarda connection_version y payload firmado durable hasta procesarlo; la cola sólo recibe runID. Ack202 sólo después de persistencia; un fallo de Redis no pierde el ingreso y el scheduler recupera outbox. Replay mismoevent/hash devuelve mismo run; hash distinto bajo mismoevent se rechaza.
+
+Lease120s/heartbeat30s excluye ejecución concurrente; versión/token se comprueban en cursor commit. Cursor sólo avanza después de TODOS los originales y trabajos OCR durables, no por respuesta del proveedor ni extracción parcial. Fallo conserva cursor; retry usa misma fuente/dedup. Contexto worker se resuelve por conexión/store/org y entidad fiscal vigente en lectura, sin crear entidades ni heredar JWT/superadmin. Ingest no mueve stock/AP/asientos/eventos legales. Pausa explícita y estado de suscripción bloquean nuevas ejecuciones; OCR conserva su capacidad independiente. IMAP y gating de capacidades del catálogo comercial se completan en su segmento, sin fingir soporte actual.
