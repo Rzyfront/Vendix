@@ -13,6 +13,8 @@ import { ReceivedDocumentPagesService } from './services/received-document-pages
 import { ReceivedDocumentScanService } from './services/received-document-scan.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 import { ReceivedDocumentScanProcessor } from './services/received-document-scan.processor';
+import { ReceivedDocumentMatchCandidatesService } from './services/received-document-match-candidates.service';
+import { ReceivedDocumentMatchAllocationsService } from './services/received-document-match-allocations.service';
 import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
 import { DocumentReceptionHttpService } from './services/document-reception-http.service';
 import { DocumentReceptionEnvelopeService } from './services/document-reception-envelope.service';
@@ -47,6 +49,8 @@ import { PublicDocumentReceptionWebhookController } from './public-document-rece
     ReceivedDocumentScanService,
     ReceivedDocumentScanQueueService,
     ReceivedDocumentScanProcessor,
+    ReceivedDocumentMatchCandidatesService,
+    ReceivedDocumentMatchAllocationsService,
     DocumentReceptionHttpService,
     DocumentReceptionConnectionsService,
     DocumentReceptionEnvelopeService,
@@ -64,6 +68,8 @@ import { PublicDocumentReceptionWebhookController } from './public-document-rece
     ReceivedDocumentsContextService,
     ReceivedDocumentsService,
     ReceivedDocumentScanQueueService,
+    ReceivedDocumentMatchCandidatesService,
+    ReceivedDocumentMatchAllocationsService,
     DocumentReceptionConnectionsService,
     DocumentReceptionManualSyncService,
     DocumentReceptionRunResolutionService,

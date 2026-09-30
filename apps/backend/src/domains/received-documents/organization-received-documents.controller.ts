@@ -32,6 +32,13 @@ import {
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
+import { ReceivedDocumentMatchCandidatesService } from './services/received-document-match-candidates.service';
+import { ReceivedDocumentMatchAllocationsService } from './services/received-document-match-allocations.service';
+import {
+  ConfirmReceivedDocumentMatchDto,
+  ReceivedDocumentMatchCandidatesQueryDto,
+  RevokeReceivedDocumentMatchDto,
+} from './dto/received-document-match.dto';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SAFE_FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
@@ -52,6 +59,8 @@ export class OrganizationReceivedDocumentsController {
     private readonly contexts: ReceivedDocumentsContextService,
     private readonly responses: ResponseService,
     private readonly scans: ReceivedDocumentScanQueueService,
+    private readonly matchCandidates: ReceivedDocumentMatchCandidatesService,
+    private readonly matchAllocations: ReceivedDocumentMatchAllocationsService,
   ) {}
 
   @Get()
@@ -89,6 +98,54 @@ export class OrganizationReceivedDocumentsController {
   ) {
     const context = await this.contexts.resolveOrganization(scope.store_id);
     return this.responses.success(await this.scans.getStatus(context, jobId));
+  }
+
+  @Get(':id/match-candidates')
+  @Permissions('organization:invoicing:received:read')
+  async matchCandidatesForDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ReceivedDocumentMatchCandidatesQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(query.store_id);
+    return this.responses.success(await this.matchCandidates.list(context, id, {
+      search: query.search,
+      limit: query.limit,
+    }));
+  }
+
+  @Get(':id/match-allocations')
+  @Permissions('organization:invoicing:received:read')
+  async listMatchAllocations(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.success(await this.matchAllocations.list(context, id));
+  }
+
+  @Post(':id/match-allocations')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('organization:invoicing:received:match:confirm')
+  async confirmMatchAllocation(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ConfirmReceivedDocumentMatchDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.created(await this.matchAllocations.confirm(context, id, dto));
+  }
+
+  @Post(':id/match-allocations/:allocationId/revoke')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('organization:invoicing:received:match:revoke')
+  async revokeMatchAllocation(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('allocationId', ParseIntPipe) allocationId: number,
+    @Body() dto: RevokeReceivedDocumentMatchDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.updated(await this.matchAllocations.revoke(context, id, allocationId, dto));
   }
 
   @Get(':id')

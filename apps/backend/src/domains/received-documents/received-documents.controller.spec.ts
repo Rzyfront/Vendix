@@ -2,6 +2,8 @@ import { BadRequestException, HttpStatus, NotFoundException, RequestMethod, Stre
 import { HTTP_CODE_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { AI_FEATURE_KEY, AiAccessGuard } from '../store/subscriptions/guards/ai-access.guard';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
+import { ReceivedDocumentMatchCandidatesService } from './services/received-document-match-candidates.service';
+import { ReceivedDocumentMatchAllocationsService } from './services/received-document-match-allocations.service';
 import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ResponseService } from '../../common/responses/response.service';
@@ -44,6 +46,12 @@ function dependencies() {
     }),
     getStatus: jest.fn().mockResolvedValue({ status: 'queued' }),
   };
+  const matchCandidates = { list: jest.fn().mockResolvedValue({ candidates: [], warnings: [] }) };
+  const matchAllocations = {
+    list: jest.fn().mockResolvedValue({ allocations: [] }),
+    confirm: jest.fn().mockResolvedValue({ allocation: { id: 1 } }),
+    revoke: jest.fn().mockResolvedValue({ allocation: { id: 1 } }),
+  };
   const contexts = {
     resolveStore: jest.fn().mockResolvedValue(STORE_CONTEXT),
     resolveOrganization: jest.fn().mockResolvedValue(ORG_CONTEXT),
@@ -54,7 +62,7 @@ function dependencies() {
     updated: jest.fn((data) => ({ data })),
     success: jest.fn((data) => ({ data })),
   };
-  return { documents, contexts, responses, scans };
+  return { documents, contexts, responses, scans, matchCandidates, matchAllocations };
 }
 
 describe('received-document route controllers', () => {
@@ -65,6 +73,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
     const file = {
       originalname: 'invoice.pdf',
@@ -107,6 +117,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
 
     await expect(controller.enqueueScan(undefined as never)).rejects.toThrow(
@@ -123,6 +135,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
     const file = {
       originalname: 'invoice.pdf',
@@ -154,6 +168,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
 
     await expect(controller.getScanStatus('scan-job-1', { store_id: 21 })).resolves.toEqual({
@@ -177,6 +193,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
     const query = { page: 1, limit: 25 } as ReceivedDocumentQueryDto;
 
@@ -199,6 +217,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
 
     await expect(controller.list({ store_id: 99 } as ReceivedDocumentQueryDto)).rejects.toThrow(BadRequestException);
@@ -213,6 +233,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
     const query = { page: 2, limit: 10, store_id: 21 } as ReceivedDocumentQueryDto;
 
@@ -232,12 +254,16 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
     const org = new OrganizationReceivedDocumentsController(
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
 
     await store.createManual({} as ManualReceivedDocumentDto);
@@ -265,6 +291,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
 
     await expect(controller.importXml(undefined as never, {})).rejects.toThrow(BadRequestException);
@@ -279,6 +307,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
     deps.documents.findOne.mockResolvedValue({
       id: 1,
@@ -305,6 +335,8 @@ describe('received-document route controllers', () => {
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
       deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
     );
     deps.documents.findOne.mockResolvedValue({ id: 1, files: [] });
 
