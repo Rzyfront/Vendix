@@ -12027,9 +12027,17 @@ model received_document_event_attempts {
 
 model document_reception_connections {
   id                    Int       @id @default(autoincrement())
+  /// Optimistic configuration/cursor version; database check enforces >= 1.
+  version               Int       @default(1)
   organization_id       Int
   store_id              Int?
   accounting_entity_id  Int
+  /// Stable opaque public identifier; nullable only for legacy rows.
+  public_token          String?   @unique(map: "doc_recv_conn_public_token_key") @db.VarChar(64)
+  /// Worker lease pair is nullable as a unit; database check enforces pairing.
+  lease_token           String?   @db.VarChar(64)
+  /// Lease expiry is a UTC instant (not a date-only business date).
+  lease_expires_at      DateTime? @db.Timestamp(6)
   name                  String    @db.VarChar(255)
   connection_type       String    @db.VarChar(30)
   enabled               Boolean   @default(false)
@@ -12053,11 +12061,14 @@ model document_reception_connections {
 
   @@index([accounting_entity_id], map: "doc_reception_connections_entity_idx")
   @@index([enabled, next_sync_at], map: "doc_reception_connections_enabled_next_idx")
+  @@index([lease_expires_at], map: "doc_recv_conn_lease_expires_at_idx")
 }
 
 model document_reception_runs {
   id               Int       @id @default(autoincrement())
   connection_id    Int
+  /// Token that proves which worker owns the connection lease for this run.
+  lease_token      String?   @db.VarChar(64)
   status           String    @default("pending") @db.VarChar(30)
   trigger          String    @default("manual") @db.VarChar(30)
   idempotency_key  String    @db.VarChar(160)
