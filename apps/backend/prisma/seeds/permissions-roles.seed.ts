@@ -2281,6 +2281,27 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
+    // Documentos recibidos tiene pares ruta/verbo propios; no reutilizar los
+    // permisos de facturas emitidas ni una ruta centinela compartida.
+    {
+      name: 'invoicing:received:read',
+      description: 'Leer documentos de proveedores recibidos por la tienda',
+      path: '/api/store/invoicing/received-documents',
+      method: 'GET',
+    },
+    {
+      name: 'invoicing:received:import',
+      description: 'Capturar manualmente o importar XML de documentos recibidos',
+      path: '/api/store/invoicing/received-documents/manual',
+      method: 'POST',
+    },
+    {
+      name: 'invoicing:received:review',
+      description: 'Revisar datos fiscales de documentos recibidos por la tienda',
+      path: '/api/store/invoicing/received-documents/:id/review',
+      method: 'PATCH',
+    },
+
     // Perfiles de facturación (CP-INVOICE-PROFILES-AIU-DIAN)
     //
     // El `path` de una fila NO es documentación: es una CONCESIÓN. `PermissionsGuard`
@@ -3899,6 +3920,24 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'organization:invoicing:received:read',
+      description: 'Leer documentos de proveedores recibidos a nivel organización',
+      path: '/api/organization/invoicing/received-documents',
+      method: 'GET',
+    },
+    {
+      name: 'organization:invoicing:received:import',
+      description: 'Capturar manualmente o importar XML de documentos recibidos de la organización',
+      path: '/api/organization/invoicing/received-documents/manual',
+      method: 'POST',
+    },
+    {
+      name: 'organization:invoicing:received:review',
+      description: 'Revisar datos fiscales de documentos recibidos a nivel organización',
+      path: '/api/organization/invoicing/received-documents/:id/review',
+      method: 'PATCH',
+    },
+    {
       name: 'organization:fiscal:migrate',
       description: 'Aplicar cambios de fiscal_scope de la organización',
       path: '/api/organization/fiscal-scope',
@@ -4666,6 +4705,7 @@ export async function seedPermissionsAndRoles(
     (p) =>
       p.name === 'organization:invoicing:read' ||
       p.name === 'organization:invoicing:resolutions:read' ||
+      p.name === 'organization:invoicing:received:read' ||
       p.name === 'organization:fiscal:supervise' ||
       p.name === 'organization:fiscal:dashboard:read' ||
       p.name === 'organization:fiscal:obligations:read' ||
@@ -4681,6 +4721,7 @@ export async function seedPermissionsAndRoles(
       p.name === 'store:fiscal:evidence:read' ||
       p.name === 'store:fiscal:history:read' ||
       p.name === 'store:fiscal:rules:read' ||
+      p.name === 'invoicing:received:read' ||
       p.name === 'organization:withholding:read' ||
       p.name === 'organization:payroll:read' ||
       p.name === 'organization:payroll:settings:read' ||
@@ -4715,12 +4756,18 @@ export async function seedPermissionsAndRoles(
       // Gestión de usuarios de tienda (incl. su panel_ui) es exclusiva de
       // owner/admin por decisión de negocio: manager NO administra usuarios.
       !p.name.startsWith('store:users:') &&
+      // Documentos recibidos en el espacio de organización requieren un rol
+      // ORG_ADMIN; el gerente conserva únicamente los tres permisos de tienda.
+      !p.name.startsWith('organization:invoicing:received:') &&
       // QUI-600 paso 6: la superficie `superadmin:*` pertenece al nivel
       // plataforma y manager nunca debe portarla. La exclusión se hace en el
       // catch-all de abajo con `startsWith('superadmin:')`, que sustituye los
       // parches puntuales `superadmin:roles:` / `superadmin:users:` y cubre
       // todo el prefijo.
       (p.name.startsWith('store:') ||
+        p.name === 'invoicing:received:read' ||
+        p.name === 'invoicing:received:import' ||
+        p.name === 'invoicing:received:review' ||
         // QUI-567: STORE_ADMIN es el consumidor principal del módulo de
         // edición masiva. Ya lo recoge el `startsWith('store:')` de arriba; se
         // lista explícito para documentar la decisión de negocio y para que la
