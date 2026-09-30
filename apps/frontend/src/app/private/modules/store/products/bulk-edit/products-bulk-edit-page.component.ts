@@ -867,6 +867,9 @@ export function coerceBulkEditValue(
     case 'number':
     case 'currency': {
       if (raw === null || raw === undefined || raw === '') {
+        if (field.key === 'min_stock_level') {
+          return null;
+        }
         return undefined;
       }
       const parsed = Number(raw);

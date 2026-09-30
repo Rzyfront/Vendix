@@ -1485,6 +1485,10 @@ export class PurchaseOrdersService {
                 weight: item.weight || 0,
                 product_type: productType,
                 track_inventory: trackInventory,
+                min_stock_level:
+                  item.min_stock_level !== undefined && item.min_stock_level !== null
+                    ? Number(item.min_stock_level)
+                    : 0,
                 pricing_type: pricingType,
                 brand_id: brandId,
                 ...ingredientOverrides,
