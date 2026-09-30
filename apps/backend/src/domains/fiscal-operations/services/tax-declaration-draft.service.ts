@@ -228,13 +228,18 @@ export class TaxDeclarationDraftService {
         period,
         calculation,
       );
+      const status =
+        Array.isArray(calculation.validation_summary.errors) &&
+        calculation.validation_summary.errors.length > 0
+          ? 'needs_review'
+          : 'ready';
       const draft = existing
         ? await tx.tax_declaration_drafts.update({
             where: { id: existing.id },
-            data: { ...data, status: 'ready' },
+            data: { ...data, status },
           })
         : await tx.tax_declaration_drafts.create({
-            data: { ...data, status: 'ready' },
+            data: { ...data, status },
           });
 
       await tx.tax_declaration_lines.deleteMany({
@@ -393,6 +398,16 @@ export class TaxDeclarationDraftService {
   async approveDraft(contexts: FiscalOperationsContext[], id: number) {
     const draft = await this.findOne(contexts, id);
     if (draft.status === 'approved') return draft;
+    const summary = draft.validation_summary;
+    const blockingErrors =
+      summary && typeof summary === 'object' && !Array.isArray(summary)
+        ? (summary as Record<string, unknown>).errors
+        : undefined;
+    if (Array.isArray(blockingErrors) && blockingErrors.length > 0) {
+      throw new BadRequestException(
+        'Draft has blocking fiscal validation errors and cannot be approved',
+      );
+    }
     this.assertStatusTransition(draft.status, 'approved');
     if (draft.status !== 'ready' && draft.status !== 'needs_review') {
       throw new BadRequestException('Only ready drafts can be approved');
@@ -732,6 +747,7 @@ export class TaxDeclarationDraftService {
   ): Promise<DeclarationCalculation> {
     const invoices = await this.prisma.invoices.findMany({
       where: {
+        organization_id: context.organization_id,
         accounting_entity_id: context.accounting_entity_id,
         issue_date: buildDateRangeFilter(
           period.period_start,
@@ -743,15 +759,18 @@ export class TaxDeclarationDraftService {
       orderBy: { issue_date: 'asc' },
     });
 
-    let generated = 0;
-    let deductible = 0;
-    let taxableBase = 0;
+    let generated = new Prisma.Decimal(0);
+    let deductible = new Prisma.Decimal(0);
+    let taxableBase = new Prisma.Decimal(0);
     const lines: Prisma.tax_declaration_linesCreateManyInput[] = [];
+    const validationErrors: Prisma.InputJsonObject[] = [];
+    const skippedTaxIds = new Set<number>();
     const requiresDianAcceptance = (invoiceType: string) =>
       [
         'sales_invoice',
         'debit_note',
         'credit_note',
+        'export_invoice',
         'purchase_invoice',
         'support_document',
         'support_adjustment_note',
@@ -778,19 +797,51 @@ export class TaxDeclarationDraftService {
         'export_invoice',
         'credit_note',
       ].includes(invoice.invoice_type);
-      // Only IVA rows feed the VAT declaration. INC/ICA/withholding live in
-      // their own declarations now that invoice_taxes carries tax_type. Legacy
-      // untyped rows (tax_type IS NULL) default to IVA for back-compat.
-      const invoiceTax =
-        invoice.invoice_taxes
-          .filter((tax) => ((tax as any).tax_type ?? 'iva') === 'iva')
-          .reduce((sum, tax) => sum + Number(tax.tax_amount || 0), 0) * sign;
-      const invoiceBase = Number(invoice.subtotal_amount || 0) * sign;
-      taxableBase += invoiceBase;
+      let invoiceTax = new Prisma.Decimal(0);
+      let invoiceBase = new Prisma.Decimal(0);
+      let hasUsableVatRow = false;
+      for (const tax of invoice.invoice_taxes) {
+        const taxType = tax.tax_type as string | null;
+        if (taxType == null || taxType === 'unclassified') {
+          validationErrors.push({
+            code: 'UNCLASSIFIED_INVOICE_TAX',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            tax_id: tax.id,
+            tax_type: taxType,
+          });
+          if (typeof tax.id === 'number') skippedTaxIds.add(tax.id);
+          continue;
+        }
+        if (taxType !== 'iva') continue;
 
-      if (isSale) generated += invoiceTax;
-      else deductible += invoiceTax;
+        const taxBase = this.parseFiniteMoney(tax.taxable_amount);
+        const taxAmount = this.parseFiniteMoney(tax.tax_amount);
+        if (!taxBase || !taxAmount) {
+          const invalidField = !taxBase ? 'taxable_amount' : 'tax_amount';
+          validationErrors.push({
+            code: !taxBase
+              ? 'INVALID_INVOICE_TAX_BASE'
+              : 'INVALID_INVOICE_TAX_AMOUNT',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            tax_id: tax.id,
+            field: invalidField,
+          });
+          if (typeof tax.id === 'number') skippedTaxIds.add(tax.id);
+          continue;
+        }
+        invoiceBase = invoiceBase.plus(taxBase);
+        invoiceTax = invoiceTax.plus(taxAmount);
+        hasUsableVatRow = true;
+      }
 
+      if (!hasUsableVatRow) continue;
+      const signedTax = invoiceTax.mul(sign);
+      const signedBase = invoiceBase.mul(sign);
+      taxableBase = taxableBase.plus(signedBase);
+      if (isSale) generated = generated.plus(signedTax);
+      else deductible = deductible.plus(signedTax);
       lines.push({
         declaration_id: 0,
         line_type: isSale ? 'vat_generated' : 'vat_deductible',
@@ -802,8 +853,8 @@ export class TaxDeclarationDraftService {
         third_party_tax_id:
           invoice.customer_tax_id ?? invoice.supplier?.tax_id ?? undefined,
         description: `${invoice.invoice_type} ${invoice.invoice_number}`,
-        base_amount: invoiceBase,
-        tax_amount: invoiceTax,
+        base_amount: this.moneyNumber(signedBase),
+        tax_amount: this.moneyNumber(signedTax),
         metadata: {
           dian_status: invoice.dian_status,
           issue_date: invoice.issue_date,
@@ -811,13 +862,16 @@ export class TaxDeclarationDraftService {
       });
     }
 
-    const balance = generated - deductible;
+    const roundedGenerated = this.moneyNumber(generated);
+    const roundedDeductible = this.moneyNumber(deductible);
+    const roundedBase = this.moneyNumber(taxableBase);
+    const balance = this.moneyNumber(generated.minus(deductible));
     return {
       totals: {
-        gross_base_amount: taxableBase,
-        taxable_base_amount: taxableBase,
-        generated_tax_amount: generated,
-        deductible_tax_amount: deductible,
+        gross_base_amount: roundedBase,
+        taxable_base_amount: roundedBase,
+        generated_tax_amount: roundedGenerated,
+        deductible_tax_amount: roundedDeductible,
         balance_due: Math.max(balance, 0),
         balance_favor: Math.max(balance * -1, 0),
         total_payable: Math.max(balance, 0),
@@ -834,6 +888,7 @@ export class TaxDeclarationDraftService {
           .map((line) => line.source_id)
           .filter((id): id is number => typeof id === 'number'),
         skipped_invoice_ids: nonAccepted.map((invoice) => invoice.id),
+        skipped_tax_ids: [...skippedTaxIds],
       },
       validation_summary: {
         warnings: nonAccepted.map((invoice) => ({
@@ -843,8 +898,27 @@ export class TaxDeclarationDraftService {
           invoice_type: invoice.invoice_type,
           dian_status: invoice.dian_status,
         })),
+        errors: validationErrors,
       },
     };
+  }
+
+  private parseFiniteMoney(
+    value: Prisma.Decimal | string | number | null | undefined,
+  ): Prisma.Decimal | null {
+    if (value == null) return null;
+    try {
+      const parsed = new Prisma.Decimal(value);
+      return parsed.isFinite() ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private moneyNumber(value: Prisma.Decimal): number {
+    return Number(
+      value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN).toString(),
+    );
   }
 
   /**
