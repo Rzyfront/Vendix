@@ -33,7 +33,21 @@ function makeDelegate() {
     updateMany: jest.fn(async ({ where, data }: any) => {
       let count = 0;
       for (const r of rows) {
-        if (r.id === where.id && r.store_id === where.store_id) {
+        const idMatch =
+          where.id === undefined ||
+          (typeof where.id === 'object' && where.id !== null
+            ? (where.id.in ?? []).includes(r.id)
+            : r.id === where.id);
+        const messageMatch =
+          where.message_id === undefined ||
+          (where.message_id === null
+            ? r.message_id === null || r.message_id === undefined
+            : r.message_id === where.message_id);
+        if (
+          idMatch &&
+          messageMatch &&
+          (where.store_id === undefined || r.store_id === where.store_id)
+        ) {
           Object.assign(r, data);
           count++;
         }
@@ -54,12 +68,24 @@ function makeDelegate() {
 
 describe('VexBlockService', () => {
   let delegate: ReturnType<typeof makeDelegate>;
+  let findConversation: jest.Mock;
   let service: VexBlockService;
   let getStoreId: jest.SpyInstance;
+  let getContext: jest.SpyInstance;
 
   beforeEach(() => {
     delegate = makeDelegate();
-    const prisma = { withoutScope: () => ({ ai_ui_blocks: delegate }) };
+    // El hilo 1 es del usuario 9 en la tienda 7; cualquier otro
+    // `conversation_id` (o usuario) no existe para este contexto.
+    findConversation = jest.fn(async ({ where }: any) =>
+      where.id === 1 && where.user_id === 9
+        ? { id: 1, store_id: 7, user_id: 9 }
+        : null,
+    );
+    const prisma = {
+      ai_ui_blocks: delegate,
+      ai_conversations: { findFirst: findConversation },
+    };
     const s3 = {
       getPresignedUrl: jest.fn(async (key: string) => `https://signed/${key}`),
     };
@@ -67,10 +93,14 @@ describe('VexBlockService', () => {
     getStoreId = jest
       .spyOn(RequestContextService, 'getStoreId')
       .mockReturnValue(7);
+    getContext = jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9, store_id: 7 } as any);
   });
 
   afterEach(() => {
     getStoreId.mockRestore();
+    getContext.mockRestore();
   });
 
   it('creates a table block and reads its rows back paged', async () => {
@@ -237,5 +267,69 @@ describe('VexBlockService', () => {
     await expect(service.delete('no-existe')).rejects.toMatchObject({
       errorCode: 'SYS_NOT_FOUND_001',
     });
+  });
+
+  it('create valida la conversación en tienda y usuario', async () => {
+    await service.create({
+      conversation_id: 1,
+      kind: 'markdown',
+      data: { text: 'ok' },
+    });
+    expect(findConversation).toHaveBeenCalledWith({
+      where: { id: 1, user_id: 9 },
+    });
+  });
+
+  it('create con conversation_id de otra tienda o usuario → 404 sin persistir', async () => {
+    await expect(
+      service.create({
+        conversation_id: 999,
+        kind: 'markdown',
+        data: { text: 'x' },
+      }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
+    expect(delegate.create).not.toHaveBeenCalled();
+
+    getContext.mockReturnValue({ user_id: 55, store_id: 7 } as any);
+    await expect(
+      service.create({
+        conversation_id: 1,
+        kind: 'markdown',
+        data: { text: 'x' },
+      }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
+    expect(delegate.create).not.toHaveBeenCalled();
+  });
+
+  it('attachToMessage enlaza solo huérfanos de la tienda', async () => {
+    const a = await service.create({
+      conversation_id: 1,
+      kind: 'markdown',
+      data: { text: 'a' },
+    });
+    const b = await service.create({
+      conversation_id: 1,
+      kind: 'markdown',
+      data: { text: 'b' },
+    });
+    const linked = await service.create({
+      conversation_id: 1,
+      kind: 'markdown',
+      message_id: 41,
+      data: { text: 'c' },
+    });
+
+    const count = await service.attachToMessage([a.id, b.id, linked.id], 77);
+    expect(count).toBe(2);
+
+    const where = delegate.updateMany.mock.calls[0][0].where;
+    expect(where).toEqual({
+      id: { in: [a.id, b.id, linked.id] },
+      store_id: 7,
+      message_id: null,
+    });
+    expect((await service.getById(a.id)).message_id).toBe(77);
+    expect((await service.getById(linked.id)).message_id).toBe(41);
+    expect(await service.attachToMessage([], 77)).toBe(0);
   });
 });

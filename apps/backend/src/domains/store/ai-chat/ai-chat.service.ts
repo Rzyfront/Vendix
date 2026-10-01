@@ -145,6 +145,35 @@ interface ResolvedChatAgent {
  */
 const VEX_AGENT_KEY = 'vex';
 
+/**
+ * Puntero que el mensaje del agente guarda por cada bloque del turno: lo
+ * justo para rehidratar (`GET blocks/:id` trae los datos firmados en
+ * lectura). Nunca el payload — un bloque vive en `ai_ui_blocks`, no copiado
+ * en el transcript.
+ */
+interface VexBlockRef {
+  block_id: string;
+  kind: string;
+  version: number;
+}
+
+/** Estados que `metadata.plan.status` puede tomar en un hilo de Vex. */
+const VEX_PLAN_STATUSES = ['proposed', 'approved', 'rejected', 'applied'] as const;
+type VexPlanStatus = (typeof VEX_PLAN_STATUSES)[number];
+
+/**
+ * Lo que un turno Vex produjo y el cierre del turno persiste. Se llena por
+ * tres caminos que se fusionan al final: el sink envuelve cada `save` de
+ * compactación, el stream captura los frames `ui_block`/`plan_approval`, y
+ * el cierre barre los bloques huérfanos (`message_id` NULL) más los
+ * envelopes de render en `tools_used` — así el camino sync, que no ve
+ * frames, persiste lo mismo que el SSE.
+ */
+interface VexTurnCollection {
+  blocks: Map<string, VexBlockRef>;
+  plan: { plan_id: string; steps: unknown[] } | null;
+}
+
 @Injectable()
 export class AIChatService {
   private readonly logger = new Logger(AIChatService.name);
@@ -376,6 +405,14 @@ export class AIChatService {
 
     let responseContent = '';
     let tokensUsed = 0;
+    // Solo los turnos Vex coleccionan: en cualquier otro agente es `null` y
+    // el cierre persiste byte-idéntico a hoy.
+    const vexTurn: VexTurnCollection | null =
+      agentKey === VEX_AGENT_KEY
+        ? { blocks: new Map(), plan: null }
+        : null;
+    let vexPlan: VexTurnCollection['plan'] = null;
+    let vexToolsUsed: Array<{ name: string; args: any; result: string }> = [];
 
     if (agentEnabled) {
       // Use Agent Loop with tools.
@@ -392,12 +429,17 @@ export class AIChatService {
           agentKey,
           conversationId,
         ),
-        ...this.resolveAgentLoopArgs(chatAgent, conversation),
+        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
         messages: this.buildContextWindow(conversation),
-        variables: await this.vexiContext.buildSnapshot(),
+        variables:
+          agentKey === VEX_AGENT_KEY
+            ? await this.buildVexVariables(conversationId)
+            : await this.vexiContext.buildSnapshot(),
       });
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
+      vexPlan = agentResult.pending_plan ?? null;
+      vexToolsUsed = agentResult.tools_used ?? [];
     } else {
       // Check if RAG is enabled
       const ragEnabled =
@@ -427,7 +469,18 @@ export class AIChatService {
       }
     }
 
-    // Save assistant response
+    // Save assistant response. En turnos Vex el metadata lleva los punteros
+    // a bloques y el plan propuesto, para que recargar la conversación
+    // rehidrate lo mismo que el turno mostró en vivo.
+    const vexBlockRefs = await this.resolveVexTurnBlocks(
+      conversationId,
+      vexTurn,
+      vexToolsUsed,
+    );
+    const vexMetadata = this.vexTurnMetadata(
+      vexBlockRefs,
+      vexPlan ?? vexTurn?.plan ?? null,
+    );
     const assistantMessage = await this.prisma.ai_messages.create({
       data: {
         conversation_id: conversationId,
@@ -435,8 +488,10 @@ export class AIChatService {
         content: responseContent,
         tokens_used: tokensUsed,
         cost_usd: 0,
+        ...(vexMetadata ? { metadata: vexMetadata } : {}),
       },
     });
+    await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
 
     // Update conversation timestamp
     await this.prisma.ai_conversations.update({
@@ -666,6 +721,11 @@ export class AIChatService {
      * endpoint y no deja rastro en la conversación hasta que se aplica.
      */
     let pendingProposal: string | null = null;
+    // Colector del turno Vex (`null` en cualquier otro agente: su cierre no
+    // cambia). El sink y los frames lo llenan mientras el turno corre.
+    const vexTurn: VexTurnCollection | null =
+      agentKey === VEX_AGENT_KEY ? { blocks: new Map(), plan: null } : null;
+    let vexPlan: VexTurnCollection['plan'] = null;
     // Held back until after the audio and timing frames. Both the SSE controller
     // and the browser close the connection the moment `done` arrives, so anything
     // emitted after it is never seen. See the agent branch below for the original
@@ -692,7 +752,7 @@ export class AIChatService {
         : await this.planState.get(conversationId);
       const agentStream = this.aiAgent.runAgentStream({
         goal,
-        ...this.resolveAgentLoopArgs(chatAgent, conversation),
+        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
         // El mismo flag que enciende la síntesis enciende el registro hablado.
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
@@ -709,16 +769,19 @@ export class AIChatService {
         ),
         // Vex no navega pantallas (`denied_tools` le quita las `ui_*`), así
         // que su snapshot no lleva `ui_context`: además de inútil, es
-        // material no confiable compuesto en el navegador. Los adjuntos sí
-        // viajan — Vex también lee documentos del turno.
-        variables: await this.vexiContext.buildSnapshot(
+        // material no confiable compuesto en el navegador — en su lugar trae
+        // `vex_blocks`, los bloques vivos de la conversación. Los adjuntos
+        // sí viajan: Vex también lee documentos del turno.
+        variables:
           agentKey === VEX_AGENT_KEY
-            ? { attachmentIds: intent.attachment_ids }
-            : {
+            ? await this.buildVexVariables(
+                conversationId,
+                intent.attachment_ids,
+              )
+            : await this.vexiContext.buildSnapshot({
                 uiContext: intent.ui_context,
                 attachmentIds: intent.attachment_ids,
-              },
-        ),
+              }),
         // What lets the loop wait for the browser instead of assuming its UI
         // commands worked. Only the chat surface passes it, because it is the only
         // one with an open SSE channel to a page that can answer.
@@ -737,6 +800,9 @@ export class AIChatService {
       // approval card would never render.
       while (!step.done) {
         const chunk = step.value;
+        // Lo que la persona VIO es lo que se persiste: el frame ya viaja al
+        // panel y el colector guarda su referencia para el cierre del turno.
+        if (vexTurn) this.collectVexFrame(vexTurn, chunk);
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content;
           // Segments are cut and queued here; nothing is awaited. The `await`
@@ -763,6 +829,9 @@ export class AIChatService {
       // full tool trace and, when the agent proposed a write, the token that
       // has to survive to the approval round trip.
       toolsUsed = result.tools_used;
+      // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
+      // sobre lo capturado por frames si ambos existen.
+      vexPlan = result.pending_plan ?? null;
       // `plan_continue`: el turno terminó a propósito sin texto (el cliente
       // encadena otro); `aborted`: otro turno lo reemplazó. En ambos casos el
       // silencio es correcto y el fallback sería ruido.
@@ -857,7 +926,26 @@ export class AIChatService {
 
     // Save assistant response after stream completes
     if (fullContent) {
-      await this.prisma.ai_messages.create({
+      const vexBlockRefs = await this.resolveVexTurnBlocks(
+        conversationId,
+        vexTurn,
+        toolsUsed,
+      );
+      const vexMetadata = this.vexTurnMetadata(
+        vexBlockRefs,
+        vexPlan ?? vexTurn?.plan ?? null,
+      );
+      // La propuesta no entra en `tool_calls`: la rama de confirmación del
+      // bucle sale por `continue` sin registrarla como herramienta usada.
+      // Sin esta marca, el turno siguiente no tiene forma de saber que hay
+      // una tarjeta esperando, y contestar "sí" en texto acuñaba otra
+      // propuesta idéntica en vez de señalar la que ya está en pantalla.
+      // Convive con los bloques/plan de Vex en el mismo objeto.
+      const metadata = {
+        ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
+        ...vexMetadata,
+      };
+      const assistantMessage = await this.prisma.ai_messages.create({
         data: {
           conversation_id: conversationId,
           role: 'assistant',
@@ -873,18 +961,12 @@ export class AIChatService {
                 result: tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
               })) as Prisma.InputJsonValue)
             : undefined,
-          // La propuesta no entra en `tool_calls`: la rama de confirmación del
-          // bucle sale por `continue` sin registrarla como herramienta usada.
-          // Sin esta marca, el turno siguiente no tiene forma de saber que hay
-          // una tarjeta esperando, y contestar "sí" en texto acuñaba otra
-          // propuesta idéntica en vez de señalar la que ya está en pantalla.
-          ...(pendingProposal && {
-            metadata: {
-              pending_confirmation: pendingProposal,
-            } as Prisma.InputJsonValue,
-          }),
+          ...(Object.keys(metadata).length > 0
+            ? { metadata: metadata as Prisma.InputJsonValue }
+            : {}),
         },
       });
+      await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
 
       await this.prisma.ai_conversations.update({
         where: { id: conversationId },
@@ -947,6 +1029,52 @@ export class AIChatService {
       where: { id },
       data: { title, updated_at: new Date() },
     });
+  }
+
+  /**
+   * Mueve el estado de la tarjeta de plan Vex (`metadata.plan.status`) en el
+   * mensaje que propuso ese `plan_id`. Lo llaman aprobar / rechazar / aplicar
+   * de la superficie Vex para que recargar la conversación muestre la tarjeta
+   * con su estado real en vez de una propuesta eterna.
+   *
+   * Propiedad del hilo vía `getConversation`: solo el dueño reescribe su
+   * tarjeta. `false` cuando ningún mensaje del hilo propuso ese plan — no es
+   * error: el plan pudo nacer en un turno que nunca persistió mensaje.
+   */
+  async updateVexPlanStatus(
+    conversationId: number,
+    planId: string,
+    status: string,
+  ): Promise<boolean> {
+    if (!(VEX_PLAN_STATUSES as readonly string[]).includes(status)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        `status debe ser uno de: ${VEX_PLAN_STATUSES.join(', ')}.`,
+      );
+    }
+    const conversation = await this.getConversation(conversationId);
+    const message = [...conversation.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === 'assistant' &&
+          (m.metadata as Record<string, any> | null)?.plan?.plan_id === planId,
+      );
+    if (!message) return false;
+    const previous = (message.metadata as Record<string, any>) ?? {};
+    const metadata = {
+      ...previous,
+      plan: { ...previous.plan, status },
+    };
+    // `updateMany` y no `update`: `ai_messages` es relational-scoped y la
+    // extensión funde `conversation: {...}` en el `where`, lo que rompe el
+    // `WhereUniqueInput` que `update` exige. Solo escalares acá: una llave
+    // `conversation` propia colisionaría con la inyectada.
+    const { count } = await this.prisma.ai_messages.updateMany({
+      where: { id: message.id, conversation_id: conversationId },
+      data: { metadata: metadata as Prisma.InputJsonValue },
+    });
+    return count > 0;
   }
 
   /**
@@ -1214,6 +1342,7 @@ export class AIChatService {
   private resolveAgentLoopArgs(
     agent: ResolvedChatAgent | null,
     conversation: ConversationWithMessages,
+    vexTurn?: VexTurnCollection | null,
   ): {
     app_key?: string;
     system_prompt?: string;
@@ -1245,7 +1374,9 @@ export class AIChatService {
     // únicamente en sus turnos, y ausente (no `undefined`) en los demás para
     // que su forma siga byte-idéntica a la de antes.
     const vexWiring =
-      agent.key === VEX_AGENT_KEY ? this.vexLoopWiring(conversation) : {};
+      agent.key === VEX_AGENT_KEY
+        ? this.vexLoopWiring(conversation, vexTurn)
+        : {};
     if (!agent.app_key && !conversation.app_key && agent.system_prompt) {
       return {
         system_prompt: agent.system_prompt,
@@ -1266,7 +1397,10 @@ export class AIChatService {
    * que approve rechazaría entero, y un sink sin servicio es indistinguible de
    * no compactar. El turno sigue corriendo en ambos casos.
    */
-  private vexLoopWiring(conversation: ConversationWithMessages): {
+  private vexLoopWiring(
+    conversation: ConversationWithMessages,
+    vexTurn?: VexTurnCollection | null,
+  ): {
     plan_approval?: AgentPlanApprovalHook;
     block_sink?: AgentBlockSink;
   } {
@@ -1282,7 +1416,7 @@ export class AIChatService {
         `Vex turn on conversation ${conversation.id} runs without the plan-approval hook (PlanApprovalService/VexiConfirmationService unresolved) — its plan cannot persist step hashes.`,
       );
     }
-    const sink = this.blockSinkFor(conversation);
+    const sink = this.blockSinkFor(conversation, vexTurn);
     if (sink) {
       wiring.block_sink = sink;
     } else {
@@ -1330,11 +1464,14 @@ export class AIChatService {
    * `VexBlockService` tal cual (sin tocarlo).
    *
    * Sin `message_id`: la fila del asistente se crea cuando el stream cierra,
-   * después del turno — el bloque nace huérfano de mensaje y el paso 6
-   * (persistencia `metadata.blocks`) lo enlaza.
+   * después del turno — el bloque nace huérfano de mensaje y el cierre del
+   * turno lo enlaza (`attachVexTurnBlocks`) y guarda su puntero en
+   * `metadata.blocks`. Cada `save` también alimenta el colector, para que el
+   * cierre no dependa de re-leer lo que el turno acaba de escribir.
    */
   private blockSinkFor(
     conversation: ConversationWithMessages,
+    vexTurn?: VexTurnCollection | null,
   ): AgentBlockSink | undefined {
     if (!this.vexBlocks) return undefined;
     const blocks = this.vexBlocks;
@@ -1347,9 +1484,231 @@ export class AIChatService {
           spec,
           data: data as Record<string, any>,
         });
+        vexTurn?.blocks.set(row.id, {
+          block_id: row.id,
+          kind: row.kind,
+          version: row.version,
+        });
         return row.id;
       },
     };
+  }
+
+  /**
+   * Variables del turno Vex: el snapshot de negocio SIN `ui_context` (Vex no
+   * toca el navegador y ese material lo compone el cliente) MÁS los bloques
+   * vivos de la conversación, para que el modelo siga trabajando sobre lo
+   * que ya mostró sin re-ejecutar consultas.
+   *
+   * Nunca rompe el turno: sin `VexBlockService` (construcciones posicionales
+   * de specs) o con el listado caído, el snapshot viaja sin bloques.
+   */
+  private async buildVexVariables(
+    conversationId: number,
+    attachmentIds?: string[],
+  ): Promise<Record<string, string>> {
+    let vexBlocks: Array<{
+      block_id: string;
+      kind: string;
+      version: number;
+      title?: string;
+      rows?: number;
+    }> | undefined;
+    if (this.vexBlocks) {
+      try {
+        const rows = await this.vexBlocks.listByConversation(conversationId);
+        vexBlocks = rows.map((row) => ({
+          block_id: row.id,
+          kind: row.kind,
+          version: row.version,
+          ...(typeof row.spec?.title === 'string'
+            ? { title: row.spec.title as string }
+            : {}),
+          ...(Array.isArray((row.data as Record<string, any>)?.rows)
+            ? { rows: ((row.data as Record<string, any>).rows as unknown[]).length }
+            : {}),
+        }));
+      } catch (error) {
+        this.logger.warn(
+          `Vex blocks unavailable for conversation ${conversationId}: ${
+            (error as Error)?.message ?? 'unknown'
+          }`,
+        );
+      }
+    }
+    return this.vexiContext.buildVexSnapshot({ attachmentIds, vexBlocks });
+  }
+
+  /**
+   * Guarda la referencia de lo que el turno mostró en vivo. Solo frames con
+   * identidad: `ui_block` con `block_id`, y `plan_approval` de plan completo
+   * (con `steps` + `plan_id`) — las tarjetas de un solo paso llevan
+   * `plan_id` sin `steps` y no redefinen el plan del turno.
+   */
+  private collectVexFrame(
+    vexTurn: VexTurnCollection,
+    chunk: AIStreamChunk,
+  ): void {
+    const uiBlock = chunk.ui_block;
+    if (chunk.type === 'ui_block' && uiBlock?.block_id) {
+      vexTurn.blocks.set(uiBlock.block_id, {
+        block_id: uiBlock.block_id,
+        kind: uiBlock.kind,
+        version: typeof uiBlock.version === 'number' ? uiBlock.version : 1,
+      });
+    }
+    const approval = chunk.plan_approval;
+    if (
+      chunk.type === 'plan_approval' &&
+      approval?.plan_id &&
+      approval.steps
+    ) {
+      vexTurn.plan = { plan_id: approval.plan_id, steps: approval.steps };
+    }
+  }
+
+  /**
+   * Referencias a bloques escondidas en la traza de tools (camino sync, que
+   * no ve frames): los envelopes de `vex_render_*` / `vex_block_transform`
+   * traen `data.block_id` + la vista del panel en `data.block`. Gana la
+   * vista cuando existe — es el mismo `block_id` que el frame `ui_block`
+   * llevó al panel en el camino SSE.
+   */
+  private renderBlockRefsOf(
+    toolsUsed: Array<{ name: string; args: any; result: string }>,
+  ): VexBlockRef[] {
+    const refs: VexBlockRef[] = [];
+    for (const tool of toolsUsed) {
+      const fallbackKind =
+        tool.name === 'vex_render_table'
+          ? 'table'
+          : tool.name === 'vex_render_chart'
+            ? 'chart'
+            : tool.name === 'vex_render_kpi'
+              ? 'kpi'
+              : tool.name === 'vex_render_image'
+                ? 'image'
+                : tool.name === 'vex_render_file'
+                  ? 'file'
+                  : tool.name === 'vex_block_transform'
+                    ? 'table'
+                    : null;
+      if (!fallbackKind) continue;
+      try {
+        const data = (JSON.parse(tool.result) as any)?.data;
+        const view =
+          data?.block && typeof data.block === 'object' ? data.block : null;
+        const block_id =
+          (typeof view?.block_id === 'string' && view.block_id) ||
+          data?.block_id;
+        if (typeof block_id !== 'string' || !block_id) continue;
+        const kind =
+          (typeof view?.kind === 'string' && view.kind) ||
+          (typeof data?.kind === 'string' && data.kind) ||
+          fallbackKind;
+        const rawVersion = view?.version ?? data?.version;
+        refs.push({
+          block_id,
+          kind,
+          version: typeof rawVersion === 'number' ? rawVersion : 1,
+        });
+      } catch {
+        // Resultado compactado o no-JSON: el barrido de huérfanos lo cubre.
+      }
+    }
+    return refs;
+  }
+
+  /**
+   * Fusión final de bloques del turno: lo coleccionado en vivo (sink +
+   * frames) manda, los envelopes de la traza agregan lo que el stream no
+   * vio, y el barrido de huérfanos (`message_id` NULL) sana dos casos que
+   * ningún otro camino cubre: resultados de render tan grandes que la traza
+   * guardó su forma compactada, y bloques de un turno anterior cuyo
+   * transporte cayó antes del cierre.
+   */
+  private async resolveVexTurnBlocks(
+    conversationId: number,
+    vexTurn: VexTurnCollection | null,
+    toolsUsed: Array<{ name: string; args: any; result: string }>,
+  ): Promise<VexBlockRef[]> {
+    if (!vexTurn) return [];
+    const merged = new Map(vexTurn.blocks);
+    for (const ref of this.renderBlockRefsOf(toolsUsed)) {
+      if (!merged.has(ref.block_id)) merged.set(ref.block_id, ref);
+    }
+    if (this.vexBlocks) {
+      try {
+        const rows = await this.vexBlocks.listByConversation(conversationId);
+        for (const row of rows) {
+          if (row.message_id !== null && row.message_id !== undefined) {
+            continue;
+          }
+          if (!merged.has(row.id)) {
+            merged.set(row.id, {
+              block_id: row.id,
+              kind: row.kind,
+              version: row.version,
+            });
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Vex turn block sweep failed for conversation ${conversationId}: ${
+            (error as Error)?.message ?? 'unknown'
+          }`,
+        );
+      }
+    }
+    return [...merged.values()];
+  }
+
+  /**
+   * `metadata` Vex del mensaje de cierre: punteros a bloques + plan en estado
+   * `proposed`. `null` cuando el turno no produjo nada persistible (o no es
+   * Vex), para que la fila quede byte-idéntica a hoy.
+   */
+  private vexTurnMetadata(
+    blocks: VexBlockRef[],
+    plan: VexTurnCollection['plan'] | null,
+  ): Record<string, unknown> | null {
+    if (blocks.length === 0 && !plan) return null;
+    return {
+      ...(blocks.length > 0 ? { blocks } : {}),
+      ...(plan
+        ? {
+            plan: {
+              plan_id: plan.plan_id,
+              steps: plan.steps,
+              status: 'proposed',
+            },
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Enlaza los bloques del turno con el mensaje que cierra. Aislado: si
+   * falla, los bloques quedan huérfanos pero el mensaje (con sus punteros)
+   * ya persistió, y el próximo turno los recoge en su barrido.
+   */
+  private async attachVexTurnBlocks(
+    blocks: VexBlockRef[],
+    messageId: number,
+  ): Promise<void> {
+    if (blocks.length === 0 || !this.vexBlocks) return;
+    try {
+      await this.vexBlocks.attachToMessage(
+        blocks.map((b) => b.block_id),
+        messageId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Vex turn blocks could not be linked to message ${messageId}: ${
+          (error as Error)?.message ?? 'unknown'
+        }`,
+      );
+    }
   }
 
   /**

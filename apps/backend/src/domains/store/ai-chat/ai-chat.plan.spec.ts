@@ -71,7 +71,10 @@ function build(opts: {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
     },
-    ai_messages: { create: jest.fn().mockResolvedValue({ id: 1 }) },
+    ai_messages: {
+      create: jest.fn().mockResolvedValue({ id: 1 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
   };
   const run = opts.run ?? agentGen([{ type: 'done' }], EMPTY_RESULT);
   const runSync = jest.fn().mockResolvedValue({ content: 'ok', total_tokens: 1 });
@@ -95,6 +98,7 @@ function build(opts: {
     isEnforce: jest.fn().mockReturnValue(opts.enforce ?? true),
   };
   const buildSnapshot = jest.fn().mockResolvedValue({});
+  const buildVexSnapshot = jest.fn().mockResolvedValue({});
   const planState: any = {
     getActive: jest.fn().mockResolvedValue(opts.plan ?? null),
     get: jest.fn().mockResolvedValue(opts.paused ?? opts.plan ?? null),
@@ -110,7 +114,11 @@ function build(opts: {
   const vexBlocks: any = opts.wireVex
     ? {
         recentSelections: jest.fn().mockResolvedValue([]),
-        create: jest.fn().mockResolvedValue({ id: 'block-1' }),
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'block-1', kind: 'markdown', version: 1 }),
+        listByConversation: jest.fn().mockResolvedValue([]),
+        attachToMessage: jest.fn().mockResolvedValue(0),
       }
     : undefined;
   const planApproval: any = opts.wireVex
@@ -139,7 +147,7 @@ function build(opts: {
     aiAgent as any,
     {} as any,
     { emit: jest.fn() } as any,
-    { buildSnapshot } as any,
+    { buildSnapshot, buildVexSnapshot } as any,
     streamIntents,
     { registerTurn: jest.fn(), releaseTurn: jest.fn() } as any,
     {} as any,
@@ -161,6 +169,7 @@ function build(opts: {
     findVexSettings,
     canUseAIFeature,
     buildSnapshot,
+    buildVexSnapshot,
     vexBlocks,
     planApproval,
     confirmations,
@@ -631,13 +640,23 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
     expect(b.findVexSettings).not.toHaveBeenCalled();
   });
 
-  it('turno SSE de Vex arma snapshot sin ui_context', async () => {
+  it('turno SSE de Vex arma snapshot Vex sin ui_context', async () => {
     asOwner();
     const b = build({
+      wireVex: true,
       agentRow: vexRow,
       conversation: vexThread,
       vexEnabled: true,
     });
+    b.vexBlocks.listByConversation.mockResolvedValue([
+      {
+        id: 'b1',
+        kind: 'table',
+        version: 2,
+        spec: { title: 'Ventas' },
+        data: { rows: [{ a: 1 }, { a: 2 }] },
+      },
+    ]);
     b.streamIntents.consume.mockResolvedValue({
       conversation_id: 7,
       user_id: 9,
@@ -647,7 +666,13 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
     });
     await collect(b.service, null);
     expect(b.run).toHaveBeenCalled();
-    expect(b.buildSnapshot).toHaveBeenCalledWith({ attachmentIds: ['a1'] });
+    expect(b.buildSnapshot).not.toHaveBeenCalled();
+    expect(b.buildVexSnapshot).toHaveBeenCalledWith({
+      attachmentIds: ['a1'],
+      vexBlocks: [
+        { block_id: 'b1', kind: 'table', version: 2, title: 'Ventas', rows: 2 },
+      ],
+    });
   });
 
   it('turno SSE de Vexi conserva ui_context en el snapshot', async () => {
@@ -864,5 +889,285 @@ describe('AIChatService — cableado de plan Vex (rx3)', () => {
     expect(b.run).toHaveBeenCalled();
     expect(params).not.toHaveProperty('plan_approval');
     expect(params).not.toHaveProperty('block_sink');
+  });
+});
+
+describe('AIChatService — persistencia vex (rx6)', () => {
+  const vexRow = {
+    key: 'vex',
+    app_key: 'vex_assistant',
+    system_prompt: null,
+    allowed_tools: [],
+    max_iterations: 40,
+    is_active: true,
+  };
+  const vexThread = { metadata: { agent_key: 'vex' } };
+  const STEPS = [
+    {
+      step_id: 's1',
+      order: 1,
+      tool: 'create_product',
+      arguments: { name: 'A' },
+      irreversible: false,
+    },
+    {
+      step_id: 's2',
+      order: 2,
+      tool: 'send_invoice_dian',
+      arguments: { order_id: 5 },
+      irreversible: true,
+    },
+  ];
+
+  const asOwner = () =>
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      user_id: 9,
+      organization_id: 1,
+      store_id: 1,
+      roles: ['owner'],
+    } as any);
+
+  afterEach(() => jest.restoreAllMocks());
+
+  const assistantCreate = (b: ReturnType<typeof build>) =>
+    b.prisma.ai_messages.create.mock.calls.find(
+      (c: any) => c[0].data.role === 'assistant',
+    )?.[0].data;
+
+  it('cierre SSE persiste blocks + plan proposed y enlaza message_id', async () => {
+    asOwner();
+    const run = agentGen(
+      [
+        { type: 'text', content: 'listo' },
+        {
+          type: 'ui_block',
+          ui_block: { block_id: 'b-table', kind: 'table', version: 2 },
+        },
+        {
+          type: 'ui_block',
+          ui_block: { block_id: 'b-chart', kind: 'chart' },
+        },
+        {
+          type: 'plan_approval',
+          plan_approval: {
+            plan_id: 'p1',
+            steps: STEPS,
+            covered_steps: [1],
+            reconfirm_steps: [2],
+          },
+        },
+        { type: 'done' },
+      ],
+      {
+        tools_used: [],
+        content: 'listo',
+        pending_plan: { plan_id: 'p1', steps: STEPS },
+      },
+    );
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      run,
+    });
+    // Huérfano de un turno anterior: el barrido lo recoge y también se enlaza.
+    b.vexBlocks.listByConversation.mockResolvedValue([
+      { id: 'b-old', kind: 'markdown', version: 1, message_id: null },
+      { id: 'b-linked', kind: 'table', version: 1, message_id: 41 },
+    ]);
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+
+    const data = assistantCreate(b);
+    expect(data.metadata).toEqual({
+      blocks: [
+        { block_id: 'b-table', kind: 'table', version: 2 },
+        { block_id: 'b-chart', kind: 'chart', version: 1 },
+        { block_id: 'b-old', kind: 'markdown', version: 1 },
+      ],
+      plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' },
+    });
+    expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(
+      ['b-table', 'b-chart', 'b-old'],
+      1,
+    );
+  });
+
+  it('el sink de compactación alimenta el metadata del cierre', async () => {
+    asOwner();
+    // El loop llama al sink a mitad del turno (compactación >6000 chars).
+    const run = jest.fn(async function* (params: any) {
+      yield { type: 'text', content: 'ok' };
+      await params.block_sink.save({
+        kind: 'markdown',
+        data: { text: 'x'.repeat(7000) },
+      });
+      yield { type: 'done' };
+      return { tools_used: [], content: 'ok' };
+    });
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      run,
+    });
+    b.vexBlocks.create.mockResolvedValue({
+      id: 'b-sink',
+      kind: 'markdown',
+      version: 1,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+
+    const data = assistantCreate(b);
+    expect(data.metadata).toEqual({
+      blocks: [{ block_id: 'b-sink', kind: 'markdown', version: 1 }],
+    });
+    expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(['b-sink'], 1);
+  });
+
+  it('camino sync persiste plan + bloques del envelope de render', async () => {
+    asOwner();
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    b.runSync.mockResolvedValue({
+      content: 'ok',
+      total_tokens: 3,
+      tools_used: [
+        {
+          name: 'vex_render_table',
+          args: {},
+          result: JSON.stringify({
+            data: {
+              block_id: 'b-sync',
+              kind: 'table',
+              version: 1,
+              block: { block_id: 'b-sync', kind: 'table', version: 1 },
+            },
+          }),
+        },
+        { name: 'list_orders', args: {}, result: '{"data":[]}' },
+      ],
+      pending_plan: { plan_id: 'p9', steps: STEPS },
+    });
+    await b.service.sendMessage(7, { content: 'hola' });
+
+    const data = assistantCreate(b);
+    expect(data.metadata).toEqual({
+      blocks: [{ block_id: 'b-sync', kind: 'table', version: 1 }],
+      plan: { plan_id: 'p9', steps: STEPS, status: 'proposed' },
+    });
+    expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(['b-sync'], 1);
+    expect(b.buildVexSnapshot).toHaveBeenCalled();
+    expect(b.buildSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('turno vexi no escribe blocks ni plan', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const run = agentGen([{ type: 'text', content: 'hola' }, { type: 'done' }], {
+      tools_used: [],
+      content: 'hola',
+    });
+    const b = build({ wireVex: true, run });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    const data = assistantCreate(b);
+    expect(data).not.toHaveProperty('metadata');
+    expect(b.vexBlocks.attachToMessage).not.toHaveBeenCalled();
+  });
+
+  it('updateVexPlanStatus mueve el estado con updateMany scope-safe', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 10,
+          role: 'assistant',
+          content: 'plan',
+          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+        },
+      ],
+    });
+    await expect(
+      b.service.updateVexPlanStatus(7, 'p1', 'approved'),
+    ).resolves.toBe(true);
+    expect(b.prisma.ai_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, conversation_id: 7 },
+      data: {
+        metadata: {
+          plan: { plan_id: 'p1', steps: STEPS, status: 'approved' },
+        },
+      },
+    });
+  });
+
+  it('updateVexPlanStatus conserva blocks y responde false sin match', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 11,
+          role: 'assistant',
+          content: 'x',
+          metadata: {
+            blocks: [{ block_id: 'b1', kind: 'table', version: 1 }],
+            plan: { plan_id: 'p1', steps: [], status: 'proposed' },
+          },
+        },
+      ],
+    });
+    await expect(
+      b.service.updateVexPlanStatus(7, 'otro-plan', 'rejected'),
+    ).resolves.toBe(false);
+    expect(b.prisma.ai_messages.updateMany).not.toHaveBeenCalled();
+
+    await expect(
+      b.service.updateVexPlanStatus(7, 'p1', 'rejected'),
+    ).resolves.toBe(true);
+    const metadata = b.prisma.ai_messages.updateMany.mock.calls[0][0].data
+      .metadata as any;
+    expect(metadata.blocks).toEqual([
+      { block_id: 'b1', kind: 'table', version: 1 },
+    ]);
+    expect(metadata.plan.status).toBe('rejected');
+  });
+
+  it('updateVexPlanStatus rechaza estados fuera del enum', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    await expect(
+      b.service.updateVexPlanStatus(7, 'p1', 'archived'),
+    ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+    expect(b.prisma.ai_messages.updateMany).not.toHaveBeenCalled();
   });
 });

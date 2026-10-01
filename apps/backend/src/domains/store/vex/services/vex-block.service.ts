@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { S3Service } from '../../../../common/services/s3.service';
@@ -83,14 +83,12 @@ export interface VexBlockInteraction {
 }
 
 /**
- * Structural view of the `ai_ui_blocks` delegate on the RAW client.
- *
- * Both Prisma services expose only the delegates they wrap as getters, so
- * reading `ai_ui_blocks` off either answers `undefined` and every call dies
- * with "Cannot read properties of undefined (reading 'create')".
- * `withoutScope()` returns the underlying `PrismaClient`, which carries
- * every generated delegate; store isolation stays exact because each query
- * below filters by `store_id` explicitly.
+ * Structural view of the `ai_ui_blocks` delegate. The model is registered in
+ * `StorePrismaService` (direct store scoping), so the tenant filter is
+ * injected by the extension; every query below ALSO filters by `store_id`
+ * explicitly — the scope-safe shape from `vendix-prisma-scopes`, and what
+ * keeps the cross-store answer a 404 instead of a leak if the registration
+ * ever drifts.
  */
 interface AiUiBlocksDelegate {
   findFirst(args: any): Promise<VexBlockRow | null>;
@@ -120,16 +118,12 @@ function isRecord(value: unknown): value is Record<string, any> {
 @Injectable()
 export class VexBlockService {
   constructor(
-    private readonly prisma: GlobalPrismaService,
+    private readonly prisma: StorePrismaService,
     private readonly s3: S3Service,
   ) {}
 
   private get blocks(): AiUiBlocksDelegate {
-    return (
-      this.prisma.withoutScope() as unknown as {
-        ai_ui_blocks: AiUiBlocksDelegate;
-      }
-    ).ai_ui_blocks;
+    return this.prisma.ai_ui_blocks as unknown as AiUiBlocksDelegate;
   }
 
   private storeIdOrThrow(): number {
@@ -154,6 +148,23 @@ export class VexBlockService {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
         `Bloque ${input.kind} inválido: ${errors.join(' ')}`,
+      );
+    }
+    // La conversación es el ancla de tenant del bloque: tiene que existir en
+    // esta tienda (`ai_conversations` es store-scoped) Y pertenecer al usuario
+    // del turno. Sin esto, un `conversation_id` adivinado colgaría bloques en
+    // un hilo ajeno. 404 y no 403: la existencia de la conversación tampoco se
+    // confirma (misma regla que `getById` para los bloques).
+    const conversation = await this.prisma.ai_conversations.findFirst({
+      where: {
+        id: input.conversation_id,
+        user_id: RequestContextService.getContext()?.user_id,
+      },
+    });
+    if (!conversation) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Conversación no encontrada.',
       );
     }
     return this.blocks.create({
@@ -536,6 +547,25 @@ export class VexBlockService {
         'Bloque no encontrado.',
       );
     }
+  }
+
+  /**
+   * Links turn blocks to the assistant message that closed the turn.
+   *
+   * Blocks are born with `message_id` NULL — the assistant row only exists
+   * when the stream closes, after the turn ran — and the chat surface calls
+   * this right after persisting it. Scoped by store AND restricted to
+   * still-unlinked rows, so a retried turn can never steal another message's
+   * blocks. Returns how many rows were linked.
+   */
+  async attachToMessage(blockIds: string[], messageId: number): Promise<number> {
+    if (blockIds.length === 0) return 0;
+    const storeId = this.storeIdOrThrow();
+    const { count } = await this.blocks.updateMany({
+      where: { id: { in: blockIds }, store_id: storeId, message_id: null },
+      data: { message_id: messageId },
+    });
+    return count;
   }
 
   // ── validation ────────────────────────────────────────────────────────
