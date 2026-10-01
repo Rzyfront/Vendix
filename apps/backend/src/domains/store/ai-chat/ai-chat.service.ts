@@ -522,10 +522,19 @@ export class AIChatService {
     // plan se pausó, venció o se abandonó entre la tarjeta y el clic) y no es un
     // error que la persona deba ver ni un turno que valga la pena pagar: se
     // cierra sin texto y sin persistir nada.
+    //
+    // Excepción Vex: sus escrituras directas (sin `propose_plan`) aplican con
+    // tokens de un solo uso y nunca crean un plan en `planState`, así que el
+    // turno aprobado/cancelado llegaría siempre huérfano y la tarjeta quedaría
+    // muda: sin narración y sin continuar con lo que sigue (p. ej. enviar la
+    // cotización recién creada). Esos turnos sí corren el loop.
     let continuationPlan: AgentPlan | null = null;
     if (intent.continuation) {
       continuationPlan = await this.planState.getActive(conversationId);
-      if (!continuationPlan) {
+      if (
+        !continuationPlan &&
+        this.turnAgentKey(conversation) !== VEX_AGENT_KEY
+      ) {
         yield { type: 'done' };
         return;
       }
