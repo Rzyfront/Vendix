@@ -487,6 +487,18 @@ export class InvoiceDataRequestsService {
       request.store,
     );
 
+    // QUI-863 — `stores.logo_url` persiste un S3 key, no una URL pública: se
+    // firma en lectura (igual que las imágenes de producto de este método).
+    // Defensivo: si S3 falla, el logo va `null` y el comprobante igual se
+    // genera — el guest no pierde el soporte de su compra.
+    let storeLogoUrl: string | null = null;
+    try {
+      storeLogoUrl =
+        (await this.s3Service.signUrl(request.store?.logo_url)) ?? null;
+    } catch {
+      storeLogoUrl = null;
+    }
+
     return {
       token: request.token,
       invoice_data_status: request.status,
@@ -503,7 +515,7 @@ export class InvoiceDataRequestsService {
       store: {
         id: request.store.id,
         name: request.store.name,
-        logo_url: request.store.logo_url,
+        logo_url: storeLogoUrl,
       },
       order: {
         id: request.order.id,

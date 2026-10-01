@@ -363,12 +363,19 @@ export class GuestOrderPrintService {
           </span>
         </p>`;
 
+    // QUI-863 — `onerror` retira el logo si la URL igual no carga (key
+    // huérfana en S3, firma vencida): el comprobante nunca muestra el ícono
+    // de imagen rota ni el alt "Logo" en la vista previa ni en el papel.
+    const logoHtml = store?.logo_url
+      ? `<img src="${this.esc(store.logo_url)}" style="max-height: 50px; margin-bottom: 8px;" alt="Logo" onerror="this.remove()" />`
+      : '';
+
     return `
   <div class="container">
     <!-- Header -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
       <div>
-        ${store?.logo_url ? `<img src="${this.esc(store.logo_url)}" style="max-height: 50px; margin-bottom: 8px;" alt="Logo" />` : ''}
+        ${logoHtml}
         <h1 style="margin: 0; font-size: 22px; font-weight: 700;">${this.esc(storeName)}</h1>
       </div>
       <div style="text-align: right;">

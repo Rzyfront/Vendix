@@ -368,3 +368,100 @@ describe('InvoiceDataRequestsService (paso 3: summary guest)', () => {
     expect(kitchenStatusFor(null)).toBeNull();
   });
 });
+
+describe('InvoiceDataRequestsService (QUI-863: logo firmado en order-summary)', () => {
+  const RAW_LOGO_KEY = 'stores/2/logo/logo.png';
+  const SIGNED_LOGO_URL = 'https://s3.signed/stores/2/logo/logo.png?x=1';
+
+  const summaryRequest = (logoUrl: string | null) => ({
+    token: 'tok-863',
+    status: 'pending',
+    expires_at: new Date(),
+    first_name: 'Ana',
+    last_name: 'Diaz',
+    document_type: 'CC',
+    document_number: '123',
+    email: 'ana@example.com',
+    phone: null,
+    store: {
+      id: 2,
+      name: 'Tienda',
+      logo_url: logoUrl,
+      store_settings: null,
+      organizations: null,
+    },
+    order: {
+      id: 30,
+      order_number: '1',
+      state: 'created',
+      channel: 'ecommerce',
+      subtotal_amount: 0,
+      discount_amount: 0,
+      tax_amount: 0,
+      shipping_cost: 0,
+      grand_total: 0,
+      currency: 'COP',
+      created_at: new Date(),
+      placed_at: null,
+      estimated_ready_at: null,
+      estimated_delivered_at: null,
+      delivery_type: null,
+      shipping_address_snapshot: null,
+      order_items: [],
+      order_promotions: [],
+      coupon_uses: [],
+      payments: [],
+      invoices: [],
+    },
+  });
+
+  const createSummaryService = (
+    logoUrl: string | null,
+    signUrlImpl: jest.Mock,
+  ) => {
+    const prisma = {
+      invoice_data_requests: {
+        findUnique: jest.fn().mockResolvedValue(summaryRequest(logoUrl)),
+      },
+    };
+    return new InvoiceDataRequestsService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { signUrl: signUrlImpl } as any,
+      {} as any,
+    );
+  };
+
+  it('firma el S3 key del logo en lectura (no devuelve el key crudo)', async () => {
+    const signUrl = jest.fn().mockResolvedValue(SIGNED_LOGO_URL);
+    const service = createSummaryService(RAW_LOGO_KEY, signUrl);
+
+    const result = await service.getOrderSummaryByToken('tok-863');
+
+    expect(signUrl).toHaveBeenCalledWith(RAW_LOGO_KEY);
+    expect(result.store.logo_url).toBe(SIGNED_LOGO_URL);
+  });
+
+  it('si S3 falla, el logo va null y el summary igual se genera', async () => {
+    const signUrl = jest.fn().mockRejectedValue(new Error('S3 down'));
+    const service = createSummaryService(RAW_LOGO_KEY, signUrl);
+
+    const result = await service.getOrderSummaryByToken('tok-863');
+
+    expect(result.store.logo_url).toBeNull();
+    expect(result.order.order_number).toBe('1');
+  });
+
+  it('tienda sin logo: logo_url null sin romper el summary', async () => {
+    const signUrl = jest.fn().mockResolvedValue(undefined);
+    const service = createSummaryService(null, signUrl);
+
+    const result = await service.getOrderSummaryByToken('tok-863');
+
+    expect(result.store.logo_url).toBeNull();
+    expect(result.store.name).toBe('Tienda');
+  });
+});
