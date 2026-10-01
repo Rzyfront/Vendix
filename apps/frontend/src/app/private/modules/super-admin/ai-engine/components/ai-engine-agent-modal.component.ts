@@ -1,4 +1,12 @@
-import { Component, input, output, OnChanges, SimpleChanges, inject, computed } from '@angular/core';
+import {
+  Component,
+  computed,
+  inject,
+  input,
+  OnChanges,
+  output,
+  SimpleChanges,
+} from '@angular/core';
 
 import {
   ReactiveFormsModule,
@@ -119,7 +127,11 @@ const AGENT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
               [options]="toolOptions()"
               [disabled]="isSubmitting()"
               helpText="Busca por nombre, dominio o descripción. Vacío = sin filtro adicional. Máximo 100 herramientas explícitas."
-              [errorText]="allowedToolsControl.hasError('maxlength') ? 'Selecciona máximo 100 herramientas o deja el campo vacío para no aplicar un filtro adicional.' : ''"
+              [errorText]="
+                allowedToolsControl.hasError('maxlength')
+                  ? 'Selecciona máximo 100 herramientas o deja el campo vacío para no aplicar un filtro adicional.'
+                  : ''
+              "
             ></app-multi-selector>
             <p class="text-xs text-text-secondary">
               Los nombres guardados que ya no figuren en el catálogo se conservan hasta que los retires.
