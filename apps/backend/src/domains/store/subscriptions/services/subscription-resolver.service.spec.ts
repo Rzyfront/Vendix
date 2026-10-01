@@ -72,6 +72,27 @@ describe('SubscriptionResolverService', () => {
     };
   }
 
+  function makeSubscriptionWithTools(
+    toolsAllowed: string[] | undefined,
+    overrides: any = {},
+  ) {
+    const subscription = makeSubscription(overrides);
+    return {
+      ...subscription,
+      paid_plan: {
+        ...subscription.paid_plan,
+        ai_feature_flags: {
+          ...baseAIFlags,
+          tool_agents: {
+            enabled: true,
+            degradation: 'warn',
+            ...(toolsAllowed !== undefined && { tools_allowed: toolsAllowed }),
+          },
+        },
+      },
+    };
+  }
+
   it('base plan only → returns plan.ai_feature_flags verbatim', async () => {
     prismaMock.store_subscriptions.findUnique.mockResolvedValue(
       makeSubscription(),
@@ -152,6 +173,59 @@ describe('SubscriptionResolverService', () => {
     expect(resolved.features.text_generation?.monthly_tokens_cap).toBe(200000);
   });
 
+  it('partner restricts wildcard tool scope to the requested domains', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(['*'], {
+        partner_override: {
+          organization_id: 42,
+          updated_at: new Date(),
+          feature_overrides: {
+            tool_agents: { enabled: true, tools_allowed: ['orders'] },
+          },
+          base_plan: {},
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['orders']);
+  });
+
+  it('partner wildcard does not widen a domain or empty base scope', async () => {
+    for (const baseScope of [['orders'], []]) {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValueOnce(
+        makeSubscriptionWithTools(baseScope, {
+          partner_override: {
+            organization_id: 42,
+            updated_at: new Date(),
+            feature_overrides: {
+              tool_agents: { enabled: true, tools_allowed: ['*'] },
+            },
+            base_plan: {},
+          },
+        }),
+      );
+      const resolved = await service.resolveSubscription(10);
+      expect(resolved.features.tool_agents?.tools_allowed).toEqual(baseScope);
+    }
+  });
+
+  it('partner can restrict a base plan with no declared tool list', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(undefined, {
+        partner_override: {
+          organization_id: 42,
+          updated_at: new Date(),
+          feature_overrides: {
+            tool_agents: { enabled: true, tools_allowed: ['orders'] },
+          },
+          base_plan: {},
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['orders']);
+  });
+
   it('active promo overlay → union-of-max', async () => {
     const now = new Date();
     const appliedAt = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000); // 5 days ago
@@ -183,6 +257,40 @@ describe('SubscriptionResolverService', () => {
     const tools = resolved.features.tool_agents?.tools_allowed ?? [];
     expect(tools).toContain('x');
     expect(tools).toContain('y');
+  });
+
+  it('promo wildcard expands a restricted scope without losing the wildcard', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(['orders'], {
+        promotional_applied_at: new Date(),
+        promotional_plan: {
+          ai_feature_flags: {
+            tool_agents: { enabled: true, tools_allowed: ['*'] },
+          },
+          promo_rules: { duration_days: 30 },
+          updated_at: new Date(),
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['*']);
+  });
+
+  it('promo preserves an explicit empty tool scope', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools([], {
+        promotional_applied_at: new Date(),
+        promotional_plan: {
+          ai_feature_flags: {
+            tool_agents: { enabled: true, tools_allowed: [] },
+          },
+          promo_rules: { duration_days: 30 },
+          updated_at: new Date(),
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual([]);
   });
 
   it('expired promo (applied_at + duration_days < now) → overlay ignored', async () => {
