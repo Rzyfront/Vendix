@@ -20,33 +20,50 @@ import {
 export const VEX_AGENT_KEY = 'vex';
 
 /**
- * Prefix for client-side plan ids. The backend emits one `plan_approval`
- * frame per proposed write, usually WITHOUT a server plan (no `plan_id`):
- * the model wrote directly instead of going through `propose_plan`. Those
- * frames still need a `VexPlanProposal` for the card, so the adapter groups
- * them under this synthetic id and the store applies each step through its
- * own single-use token. A frame that DOES carry `plan_id` keeps it and
- * approves through `POST /store/vex/plans/:id/approve`.
+ * Prefix for client-side plan ids. A Vex turn emits ONE `plan_approval` frame
+ * with every write step (`steps` + server `plan_id`); only a single-step
+ * fallback frame (a write proposed outside an accumulated plan) arrives
+ * without `plan_id`, and the adapter groups it under this synthetic id so the
+ * card still renders. The store applies that lone step through its own
+ * single-use token — never through the plan endpoint, which would 404 on a
+ * synthetic id. Whole-plan frames keep their server `plan_id` and approve
+ * through `POST /store/vex/plans/:id/approve`.
  */
 export const VEX_SINGLE_PLAN_PREFIX = 'single-';
 
-/** Backend `plan_approval` payload shape (`AIStreamChunk.plan_approval`). */
-interface VexRawPlanApproval {
+interface VexRawPreview {
+  status: 'ok' | 'warning' | 'error';
+  target: string;
+  changes: Array<{
+    field: string;
+    label: string;
+    from: unknown;
+    to: unknown;
+  }>;
+  message?: string;
+}
+
+interface VexRawPlanStep {
+  step_id: string;
+  order: number;
   tool: string;
   arguments: Record<string, unknown>;
-  confirmation_token: string;
-  preview?: {
-    status: 'ok' | 'warning' | 'error';
-    target: string;
-    changes: Array<{
-      field: string;
-      label: string;
-      from: unknown;
-      to: unknown;
-    }>;
-    message?: string;
-  };
+  preview?: VexRawPreview;
+  irreversible: boolean;
+}
+
+/** Backend `plan_approval` payload shape (`AIStreamChunk.plan_approval`). */
+interface VexRawPlanApproval {
+  /** Single-step fallback only; absent on whole-plan frames. */
+  tool?: string;
+  arguments?: Record<string, unknown>;
+  confirmation_token?: string;
+  preview?: VexRawPreview;
   plan_id?: string;
+  covered_steps?: number[];
+  reconfirm_steps?: number[];
+  /** Whole-plan proposal (Vex only); absent on single-step frames. */
+  steps?: VexRawPlanStep[];
 }
 
 /** Backend `ui_block` payload shape (`AIStreamChunk.ui_block`). */
@@ -58,42 +75,85 @@ interface VexRawUiBlock {
   data?: unknown;
 }
 
-function adaptPlanStep(
-  payload: VexRawPlanApproval,
-  order: number,
-): VexPlanStep {
-  const summary =
-    payload.preview?.target?.trim() ||
-    payload.tool.replace(/_/g, ' ');
+function adaptPreview(
+  preview: VexRawPreview | undefined,
+): VexPlanStep['preview'] {
+  if (!preview) return undefined;
   return {
-    step_id: `s${order}-${payload.tool}`,
-    tool: payload.tool,
-    summary,
+    status: preview.status,
+    target: preview.target,
+    changes: preview.changes ?? [],
+    message: preview.message,
+  };
+}
+
+function stepSummary(tool: string, preview?: VexRawPreview): string {
+  return preview?.target?.trim() || tool.replace(/_/g, ' ');
+}
+
+function adaptPlanStep(step: VexRawPlanStep): VexPlanStep {
+  return {
+    // The server id (`s1`, `s2`, …) is the merge key — never the tool name:
+    // two `create_product` steps are two steps, not one.
+    step_id: step.step_id,
+    tool: step.tool,
+    summary: stepSummary(step.tool, step.preview),
+    arguments: step.arguments ?? {},
+    preview: adaptPreview(step.preview),
+    irreversible: step.irreversible === true,
+    status: 'pending',
+  };
+}
+
+function adaptFallbackStep(payload: VexRawPlanApproval): VexPlanStep {
+  const tool = payload.tool ?? 'unknown_tool';
+  return {
+    step_id: `s1-${tool}`,
+    tool,
+    summary: stepSummary(tool, payload.preview),
     arguments: payload.arguments ?? {},
-    preview: payload.preview
-      ? {
-          status: payload.preview.status,
-          target: payload.preview.target,
-          changes: payload.preview.changes ?? [],
-          message: payload.preview.message,
-        }
-      : undefined,
-    // The frame carries no irreversibility flag; a step proposed here always
-    // redeems its own token, so it is confirmed individually either way.
+    preview: adaptPreview(payload.preview),
+    // A fallback step always redeems its own single-use token, so it is
+    // confirmed individually either way.
     irreversible: false,
     confirmation_token: payload.confirmation_token,
     status: 'pending',
   };
 }
 
-function adaptPlanProposal(payload: VexRawPlanApproval): VexPlanProposal {
-  const target = payload.preview?.target?.trim();
-  return {
-    plan_id: payload.plan_id ?? `${VEX_SINGLE_PLAN_PREFIX}${payload.tool}`,
-    title: target ? `Vex propone: ${target}` : 'Vex propone un plan',
-    steps: [adaptPlanStep(payload, 1)],
-    status: 'proposed',
-  };
+/**
+ * Turns a `plan_approval` frame into the card's proposal. Whole-plan frames
+ * (with `steps`) keep the server `plan_id` and per-step flags; single-step
+ * fallback frames become a one-step synthetic plan carrying their own token.
+ * Returns `null` for a frame with neither — malformed, ignored by the stream.
+ */
+function adaptPlanProposal(payload: VexRawPlanApproval): VexPlanProposal | null {
+  if (Array.isArray(payload.steps) && payload.steps.length > 0) {
+    const steps = payload.steps.map(adaptPlanStep);
+    const target = payload.steps.length === 1
+      ? payload.steps[0].preview?.target?.trim()
+      : undefined;
+    return {
+      plan_id: payload.plan_id ?? `${VEX_SINGLE_PLAN_PREFIX}plan`,
+      title: target
+        ? `Vex propone: ${target}`
+        : steps.length > 1
+          ? `Vex propone un plan (${steps.length} pasos)`
+          : 'Vex propone un plan',
+      steps,
+      status: 'proposed',
+    };
+  }
+  if (typeof payload.tool === 'string') {
+    const target = payload.preview?.target?.trim();
+    return {
+      plan_id: payload.plan_id ?? `${VEX_SINGLE_PLAN_PREFIX}${payload.tool}`,
+      title: target ? `Vex propone: ${target}` : 'Vex propone un plan',
+      steps: [adaptFallbackStep(payload)],
+      status: 'proposed',
+    };
+  }
+  return null;
 }
 
 function adaptUiBlock(payload: VexRawUiBlock): VexUiBlock {
@@ -158,6 +218,20 @@ export interface VexAttachment {
   original_name: string;
   mime_type: string;
   size_bytes: number;
+}
+
+/** `POST /store/vex/plans/:id/approve` response (`ApprovePlanResult`). */
+export interface VexApprovePlanResult {
+  plan_id: string;
+  /** Single-use plan token (TTL 15 min); the caller keeps it for `applyPlanStep`. */
+  plan_token: string;
+  expires_in_seconds: number;
+  /** Step orders the plan token covers (run with no further confirmation). */
+  covered_steps: number[];
+  /** Step orders needing their own confirmation card. */
+  reconfirm_steps: number[];
+  /** Client orders matching no server hash (altered, invented, or stale). */
+  ignored_steps: number[];
 }
 
 export interface VexConversationsPage {
@@ -297,8 +371,10 @@ export class VexApiService {
         if (chunk.type === 'plan_approval') {
           const payload = (raw as { plan_approval?: VexRawPlanApproval })
             .plan_approval;
-          if (!payload || typeof payload.tool !== 'string') return;
-          chunk.plan = adaptPlanProposal(payload);
+          if (!payload) return;
+          const plan = adaptPlanProposal(payload);
+          if (!plan) return;
+          chunk.plan = plan;
         } else if (chunk.type === 'ui_block') {
           const payload = (raw as { ui_block?: VexRawUiBlock }).ui_block;
           if (!payload || typeof payload.block_id !== 'string') return;
@@ -357,14 +433,16 @@ export class VexApiService {
   }
 
   /**
-   * Approves a whole SERVER plan at once (`plan_id` came in the frame).
-   * The steps travel with the approval because the plan token stores only
-   * hashes: the server verifies each step is byte-for-byte what was shown.
-   * Reversible steps whose `(tool, args)` still match run without further
-   * confirmation; irreversible steps keep asking their own. Execution
-   * resumes on the same stream that emitted the `plan_approval` frame; when
-   * that socket is gone the caller reopens the turn with a
-   * `continuation: 'approved'` intent instead.
+   * Approves a whole SERVER plan at once (`plan_id` came in the frame) and
+   * mints its single-use plan token (TTL 15 min, bound to user + plan +
+   * ORDERED step hashes). The steps travel with the approval only as a
+   * subset selector: the server verifies each one against the hashes the
+   * proposing turn persisted, and anything unverifiable lands in
+   * `ignored_steps`. `covered_steps` (orders) run under the plan token with
+   * no further confirmation; `reconfirm_steps` always get their own card.
+   * The caller keeps `plan_token` and drives each step through
+   * `applyPlanStep`; when the turn's socket is gone it reopens narration
+   * with a `continuation: 'approved'` intent instead.
    */
   approvePlan(
     planId: string,
@@ -374,11 +452,39 @@ export class VexApiService {
       tool: string;
       arguments: Record<string, unknown>;
     }>,
-  ): Observable<VexPlanProposal> {
+  ): Observable<VexApprovePlanResult> {
     return this.http
-      .post<{ data: VexPlanProposal }>(
+      .post<{ data: VexApprovePlanResult }>(
         `${this.vexBase}/plans/${encodeURIComponent(planId)}/approve`,
         { conversation_id: conversationId, steps },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Applies one step of an approved plan. `planToken` is the token approve
+   * minted — NOT a single-use token. Each step redeems independently: a
+   * retry of step 2 never re-runs step 1.
+   *
+   * Any non-`ok` outcome answers `AI_AGENT_005` carrying a FRESH single-use
+   * token in `details` (same shape the registry uses): the step needs its
+   * own card, confirmed individually through `applyStepConfirmation`.
+   */
+  applyPlanStep(
+    tool: string,
+    args: Record<string, unknown>,
+    planToken: string,
+    conversationId: number,
+  ): Observable<{ tool: string; output: string; summary?: string | null }> {
+    return this.http
+      .post<{ data: { tool: string; output: string; summary?: string | null } }>(
+        `${this.vexBase}/confirmations/apply`,
+        {
+          tool,
+          arguments: args,
+          confirmation_token: planToken,
+          conversation_id: conversationId,
+        },
       )
       .pipe(map((res) => res.data));
   }

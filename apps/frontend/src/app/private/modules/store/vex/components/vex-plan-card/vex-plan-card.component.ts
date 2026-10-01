@@ -13,13 +13,18 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
 /**
  * Approval card for a whole Vex plan.
  *
- * Each step renders its diff through the shared `app-vexi-confirmation-card`
- * (same `from → to` rows the owner already knows). One approval executes all
- * reversible steps; irreversible steps keep their own confirmation, emitted
- * via `stepApprove` when the backend issued a step token.
+ * Every step renders its diff through the shared
+ * `app-vexi-confirmation-card` (same `from → to` rows the owner already
+ * knows), footer hidden: steps are information, not buttons. One plan
+ * approval executes the reversible steps only; each pending irreversible
+ * step (once the plan is approved) renders its OWN card with its own
+ * approve/reject footer, emitted via `stepApprove` / `cancel`. Rejecting
+ * any step rejects the whole plan explicitly — there is no per-step undo.
  *
- * There is no default action and no timeout: neither button is autofocused, so
- * an Enter pressed out of habit in the composer can never approve a write.
+ * Token-clean: the card never sees the plan token and passes a step's own
+ * token through untouched. There is no default action and no timeout:
+ * neither button is autofocused, so an Enter pressed out of habit in the
+ * composer can never approve a write.
  */
 @Component({
   selector: 'vendix-vex-plan-card',
@@ -81,16 +86,34 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
                 {{ step_status_label(step.status) }}
               </span>
             </div>
-            <app-vexi-confirmation-card
-              [proposal]="toProposal(step)"
-              (approve)="onStepApprove(step)"
-              (reject)="cancel.emit()"
-            ></app-vexi-confirmation-card>
+            @if (show_own_card(step)) {
+              <app-vexi-confirmation-card
+                [proposal]="toProposal(step)"
+                (approve)="onStepApprove(step)"
+                (reject)="cancel.emit()"
+              ></app-vexi-confirmation-card>
+            } @else {
+              <app-vexi-confirmation-card
+                [proposal]="toProposal(step)"
+                [hideFooter]="true"
+              ></app-vexi-confirmation-card>
+              @if (step.irreversible && is_open()) {
+                <p class="text-xs text-[var(--color-text-secondary)] m-0">
+                  Este paso pedirá tu confirmación por separado al aprobar el plan.
+                </p>
+              }
+            }
           </li>
         }
       </ol>
 
       @if (is_open()) {
+        @if (irreversible_count() > 0) {
+          <p class="text-xs text-[var(--color-text-secondary)] m-0" role="note">
+            Aprobar el plan ejecuta los pasos reversibles. Los irreversibles
+            quedan fuera y piden su propia confirmación.
+          </p>
+        }
         <footer class="flex gap-2">
           <button
             type="button"
@@ -208,16 +231,27 @@ export class VexPlanCardComponent {
     };
   }
 
+  /**
+   * Whether the step renders its OWN confirmation card (with approve/reject
+   * footer) instead of a diff-only one. Only after the plan approval minted
+   * the plan token, only while the step is still pending, and only for
+   * steps outside the plan click: irreversibles, or reversibles the token
+   * routed to their own card (drifted args, replay) carrying a live token.
+   */
+  show_own_card(step: VexPlanStep): boolean {
+    const status = this.plan().status;
+    if (status !== 'approved' && status !== 'executing') return false;
+    if (step.status !== 'pending') return false;
+    return step.irreversible || !!step.confirmation_token;
+  }
+
   onStepApprove(step: VexPlanStep): void {
-    // An irreversible step with its own token confirms just that step; any
-    // other approval is the whole-plan approval, which is the same outcome.
-    if (step.irreversible && step.confirmation_token) {
-      this.stepApprove.emit({
-        step_id: step.step_id,
-        confirmation_token: step.confirmation_token,
-      });
-      return;
-    }
-    this.approve.emit();
+    // The step's own token travels through untouched; the store resolves
+    // the step fresh by `step_id` and falls back to a plan-token redeem
+    // when no token is attached yet.
+    this.stepApprove.emit({
+      step_id: step.step_id,
+      confirmation_token: step.confirmation_token ?? '',
+    });
   }
 }

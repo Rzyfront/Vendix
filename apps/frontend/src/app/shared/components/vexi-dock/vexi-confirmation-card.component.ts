@@ -105,7 +105,10 @@ interface DiffRow {
       <!-- Two explicit actions of the same size and the same adjacency: there
            is no default, no timeout and no "approve on inactivity". Neither
            button is autofocused, so an Enter pressed out of habit in the
-           composer can never approve a write. -->
+           composer can never approve a write. Vex plan steps reuse this card
+           as a diff-only block ('hideFooter'), with the approval living on
+           the plan footer or the step's own card instead. -->
+      @if (!hideFooter()) {
       <footer class="vexi-card__actions">
         <button
           type="button"
@@ -131,6 +134,7 @@ interface DiffRow {
           }
         </button>
       </footer>
+      }
 
       @if (status() === 'error') {
         <p class="vexi-card__blocked">
@@ -338,6 +342,8 @@ export class VexiConfirmationCardComponent {
   private readonly auth = inject(AuthFacade);
 
   readonly proposal = input.required<VexiProposal>();
+  /** Hides the approve/reject footer, rendering the card as a diff-only block. */
+  readonly hideFooter = input<boolean>(false);
   readonly approve = output<void>();
   readonly reject = output<void>();
 
