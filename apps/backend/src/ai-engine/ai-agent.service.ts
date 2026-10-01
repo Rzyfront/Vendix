@@ -68,6 +68,16 @@ const VEX_PLANNED_MAX_ITERATIONS = 60;
 const VEX_PLANNED_TIMEOUT_MS = 600_000;
 
 /**
+ * Absolute iteration ceiling for any agent row. Mirrors `@Max(60)` in
+ * `CreateAIAgentDto` (inherited by `UpdateAIAgentDto` via `PartialType`).
+ *
+ * The plan widening below never exceeds it: an explicit row value amplified
+ * for a planned turn is capped here via `Math.min`, so superadmin's setting
+ * is respected instead of forced up to a fixed constant.
+ */
+const SUPERADMIN_MAX_ITERATIONS = 60;
+
+/**
  * Tool results longer than this never travel to the model in full: they are
  * compacted to `{summary, block_id, rows}` and the complete payload is kept
  * server-side as a block when a sink is present (step 5 of the Vex plan).
@@ -83,6 +93,11 @@ export interface AgentRunParams {
   app_key?: string;
   tools?: string[];
   max_iterations?: number;
+  /**
+   * Wall-clock budget for the turn. The caller resolves it from the agent
+   * row when one exists; absent, Vex defaults to 300 s and everyone else to
+   * 60 s. An open plan widens it alongside the iteration budget.
+   */
   timeout_ms?: number;
   config_id?: number;
   /**
@@ -251,7 +266,20 @@ export class AIAgentService {
   }
 
   /**
-   * F3 — allowlist efectiva de tools del plan (`tool_agents.tools_allowed`).
+   * Metering key for the turn: Vex burns its own `vex_agent` budget, every
+   * other agent (Vexi included) keeps the historical `tool_agents` one.
+   * Unknown or absent keys fall back to `tool_agents` — fail-open on
+   * identity, fail-closed on the gate itself.
+   */
+  private quotaFeatureFor(
+    agentKey: string | undefined,
+  ): 'vex_agent' | 'tool_agents' {
+    return agentKey === 'vex' ? 'vex_agent' : 'tool_agents';
+  }
+
+  /**
+   * F3 — allowlist efectiva de tools del plan (`tools_allowed` de la feature
+   * de cuota del turno: `vex_agent` en turnos Vex, `tool_agents` en el resto).
    *
    * - Sin `storeId` → `null`: llamada interna, sin alcance de plan.
    * - Gate bloqueado (feature deshabilitada → `SUBSCRIPTION_005`, cuota
@@ -270,18 +298,21 @@ export class AIAgentService {
    */
   private async resolvePlanToolAllowlist(
     storeId: number | undefined,
+    agentKey?: string,
   ): Promise<Set<string> | null> {
     if (!storeId) return null;
+    const feature = this.quotaFeatureFor(agentKey);
     try {
       const [gate, config] = await Promise.all([
-        this.subscriptionAccess.canUseAIFeature(storeId, 'tool_agents'),
-        this.subscriptionAccess.getAIFeatureConfig(storeId, 'tool_agents'),
+        this.subscriptionAccess.canUseAIFeature(storeId, feature),
+        this.subscriptionAccess.getAIFeatureConfig(storeId, feature),
       ]);
 
       this.logger.log(
         JSON.stringify({
           event: 'AI_TOOLS_GATE',
           storeId,
+          feature,
           allowed: gate.allowed,
           reason: gate.reason ?? null,
           tools_allowed_declared: Array.isArray(config?.tools_allowed)
@@ -325,14 +356,16 @@ export class AIAgentService {
     storeId: number | undefined,
     toolCallId: string | undefined,
     toolName: string,
+    agentKey?: string,
   ): Promise<void> {
     if (!storeId) return;
+    const feature = this.quotaFeatureFor(agentKey);
     try {
       const base =
         RequestContextService.getRequestId() ?? `internal-${randomUUID()}`;
       await this.subscriptionAccess.consumeAIQuota(
         storeId,
-        'tool_agents',
+        feature,
         1,
         `${base}:tool:${toolCallId || randomUUID()}`,
       );
@@ -340,6 +373,7 @@ export class AIAgentService {
         JSON.stringify({
           event: 'AI_TOOL_CONSUMED',
           storeId,
+          feature,
           tool: toolName,
         }),
       );
@@ -617,9 +651,19 @@ export class AIAgentService {
       : PLANNED_MAX_ITERATIONS;
     const plannedTimeout = isVex ? VEX_PLANNED_TIMEOUT_MS : PLANNED_TIMEOUT_MS;
     // Not `const`: a declared plan widens it mid-turn (see PLANNED_MAX_ITERATIONS).
-    let maxIterations =
-      params.max_iterations ||
-      (isVex ? VEX_MAX_ITERATIONS : this.DEFAULT_MAX_ITERATIONS);
+    // The row value comes from superadmin (`ai_agents.max_iterations`); absent,
+    // the agent default holds (Vex 40, everyone else 10).
+    const baseDefault = isVex ? VEX_MAX_ITERATIONS : this.DEFAULT_MAX_ITERATIONS;
+    let maxIterations = params.max_iterations || baseDefault;
+    // Plan-amplified budget: the row value (or the agent default) plus the
+    // plan headroom, capped at the superadmin absolute max. `Math.min`, not a
+    // fixed `Math.max`: forcing every planned turn up to a constant would
+    // override a superadmin who deliberately set a lower row value, and would
+    // let a high row value grow past the ceiling the DTO enforces for new rows.
+    const plannedBudget = Math.min(
+      maxIterations + (plannedMax - baseDefault),
+      SUPERADMIN_MAX_ITERATIONS,
+    );
     // Widened alongside the iteration budget, and for a second reason: a turn
     // that drives the interface now blocks up to 25 s per command waiting for the
     // browser, so two UI steps alone can consume the whole one-minute default and
@@ -658,7 +702,10 @@ export class AIAgentService {
     // store_id (llamadas internas, cron, super-admin) se conserva el
     // comportamiento actual. `null` = sin alcance de plan; un `Set` (quizá
     // vacío) = alcance aplicado.
-    const planAllowed = await this.resolvePlanToolAllowlist(context?.store_id);
+    const planAllowed = await this.resolvePlanToolAllowlist(
+      context?.store_id,
+      params.agent_key,
+    );
     const toolDefinitions =
       planAllowed === null || planAllowed.has('*')
         ? permissionTools
@@ -699,7 +746,7 @@ export class AIAgentService {
     // An already-active plan (a continuation turn) gets the wide budget from the
     // first iteration instead of waiting for a propose_plan that will not come.
     if (params.plan && (await params.plan.snapshot())) {
-      maxIterations = Math.max(maxIterations, plannedMax);
+      maxIterations = Math.max(maxIterations, plannedBudget);
       timeoutMs = Math.max(timeoutMs, plannedTimeout);
     }
 
@@ -954,7 +1001,7 @@ export class AIAgentService {
               planContent = outcome.result;
 
               if (toolName === PROPOSE_PLAN_TOOL) {
-                maxIterations = Math.max(maxIterations, plannedMax);
+                maxIterations = Math.max(maxIterations, plannedBudget);
                 timeoutMs = Math.max(timeoutMs, plannedTimeout);
               }
 
@@ -1032,6 +1079,39 @@ export class AIAgentService {
                 : {}),
             },
           };
+
+          // Execution backstop for the offered catalog. The model may only run
+          // tools from the set it was offered this turn (permissions ∩ plan ∩
+          // agent scope − denies). A call outside that set — a hallucinated
+          // name or a tool denied for this agent, e.g. `ui_navigate` in a Vex
+          // turn — is rejected HERE, before the clientSide branch and before
+          // `executeTool`: nothing reaches the browser, nothing executes,
+          // nothing consumes quota. The rejection goes back as a tool result
+          // so the model can correct itself on the next iteration.
+          if (!offeredNames.has(toolName)) {
+            const notAllowed =
+              `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
+              `está en el catálogo ofrecido en este turno. Usa solo las ` +
+              `herramientas ofrecidas; si ninguna sirve, dilo y pide lo que falte.`;
+            messages.push({
+              role: 'tool',
+              content: JSON.stringify({
+                error: notAllowed,
+                error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
+              }),
+              tool_call_id: toolCall.id,
+            });
+            yield {
+              type: 'tool_result',
+              tool: {
+                id: toolCall.id,
+                name: toolName,
+                summary: notAllowed.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                failed: true,
+              },
+            };
+            continue;
+          }
 
           // A UI command is dispatched by the browser off the `tool_call`
           // frame just emitted; there is no router or cart in this process to
@@ -1128,6 +1208,7 @@ export class AIAgentService {
               context?.store_id,
               toolCall.id,
               toolName,
+              params.agent_key,
             );
 
             // A plan is a promise about the rest of the turn, so the turn is
@@ -1136,7 +1217,7 @@ export class AIAgentService {
             // budget set before the first provider call would have to guess, and
             // guessing high makes every simple question slower.
             if (toolName === PROPOSE_PLAN_TOOL) {
-              maxIterations = Math.max(maxIterations, plannedMax);
+              maxIterations = Math.max(maxIterations, plannedBudget);
               timeoutMs = Math.max(timeoutMs, plannedTimeout);
             }
 
@@ -1254,6 +1335,7 @@ export class AIAgentService {
                     context?.store_id,
                     toolCall.id,
                     toolName,
+                    params.agent_key,
                   );
                   messages.push({
                     role: 'tool',

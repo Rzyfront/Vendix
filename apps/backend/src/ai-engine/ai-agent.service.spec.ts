@@ -50,6 +50,7 @@ describe('AIAgentService.runAgentStream', () => {
   let registry: any;
   let canUseAIFeature: jest.Mock;
   let getAIFeatureConfig: jest.Mock;
+  let consumeAIQuota: jest.Mock;
   let service: AIAgentService;
 
   beforeEach(() => {
@@ -69,6 +70,9 @@ describe('AIAgentService.runAgentStream', () => {
       def('list_orders'),
       def('list_customers'),
       def('ui_navigate'),
+      def('create_expense'),
+      def('send_invoice_dian'),
+      def('vex_render_table'),
     ];
     const domains: Record<string, string> = {
       list_things: 'things',
@@ -78,6 +82,9 @@ describe('AIAgentService.runAgentStream', () => {
       list_orders: 'orders',
       list_customers: 'customers',
       ui_navigate: 'ui',
+      create_expense: 'expenses',
+      send_invoice_dian: 'invoicing',
+      vex_render_table: 'vex',
     };
     registry = {
       getAvailableDefinitions: jest.fn((scopes: string[]) =>
@@ -101,6 +108,7 @@ describe('AIAgentService.runAgentStream', () => {
     };
     canUseAIFeature = jest.fn();
     getAIFeatureConfig = jest.fn();
+    consumeAIQuota = jest.fn().mockResolvedValue(undefined);
     service = new AIAgentService(
       { chat, run: jest.fn(), chatWith: jest.fn() } as any,
       {} as any,
@@ -110,7 +118,7 @@ describe('AIAgentService.runAgentStream', () => {
       {
         canUseAIFeature,
         getAIFeatureConfig,
-        consumeAIQuota: jest.fn().mockResolvedValue(undefined),
+        consumeAIQuota,
       } as any,
     );
   });
@@ -673,4 +681,171 @@ describe('AIAgentService.runAgentStream', () => {
   function definitionsFor(scopes: string[]) {
     return registry.getAvailableDefinitions(scopes);
   }
+
+  function agentScopeRegistry() {
+    registry.getAgentDefinitions = jest.fn(
+      (scopes: string[], agentScope: any) =>
+        definitionsFor(scopes).filter(
+          (tool) =>
+            !(agentScope?.denied_tools ?? []).includes(tool.function.name),
+        ),
+    );
+  }
+
+  it('(rx2-a) vex turn calling denied ui_navigate is rejected before dispatch, execute or quota', async () => {
+    agentScopeRegistry();
+    configureStorePlan(['*']);
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'ui_navigate', { module: 'pos' })] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'entendido' }));
+
+    const { chunks, result } = await drain({
+      agent_key: 'vex',
+      agent_denied_tools: ['ui_navigate'],
+      stream_id: 's1',
+    });
+
+    // Zero execution surface: no server run, no browser dispatch, no quota.
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(awaitResult).not.toHaveBeenCalled();
+    expect(consumeAIQuota).not.toHaveBeenCalled();
+    expect(result.tools_used).toEqual([]);
+    expect(chunks.map((c) => c.type)).toEqual([
+      'tool_call',
+      'tool_result',
+      'text',
+      'done',
+    ]);
+    const toolResult = chunks[1] as any;
+    expect(toolResult.tool.failed).toBe(true);
+    expect(toolResult.tool.summary).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    // The rejection goes back as a tool message so the model self-corrects.
+    const followUp = chat.mock.calls[1][0];
+    const toolMsg = [...followUp].reverse().find((m: any) => m.role === 'tool');
+    expect(JSON.parse(toolMsg.content).error_code).toBe(
+      'AI_AGENT_TOOL_NOT_ALLOWED',
+    );
+  });
+
+  it('(rx2-a2) hallucinated tool name is rejected without reaching executeTool', async () => {
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'invented_tool', {})] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'ok' }));
+
+    const { chunks, result } = await drain({});
+
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(result.tools_used).toEqual([]);
+    expect(chunks.map((c) => c.type)).toEqual([
+      'tool_call',
+      'tool_result',
+      'text',
+      'done',
+    ]);
+    expect((chunks[1] as any).tool.summary).toContain(
+      'AI_AGENT_TOOL_NOT_ALLOWED',
+    );
+  });
+
+  it('(rx2-b) planned budget is min(row + headroom, 60), not a fixed max', async () => {
+    const openPlan: AgentPlanHook = {
+      execute: jest.fn(),
+      snapshot: jest
+        .fn()
+        .mockResolvedValue(makePlan({ steps: [step(1, 'pending')] })),
+    };
+    const firstBudget = () =>
+      emit.mock.calls.find((c: any[]) => c[0] === 'ai.agent.iteration')?.[1]
+        ?.max_iterations;
+
+    chat.mockResolvedValue(ok({ content: 'listo' }));
+    await drain({ agent_key: 'vex', max_iterations: 20, plan: openPlan });
+    expect(firstBudget()).toBe(40);
+
+    emit.mockClear();
+    await drain({ agent_key: 'vex', max_iterations: 50, plan: openPlan });
+    expect(firstBudget()).toBe(60);
+
+    // No row value: the historical fixed widening is unchanged.
+    emit.mockClear();
+    await drain({ agent_key: 'vex', plan: openPlan });
+    expect(firstBudget()).toBe(60);
+
+    emit.mockClear();
+    await drain({ plan: openPlan });
+    expect(firstBudget()).toBe(25);
+  });
+
+  it('(rx2-b2) explicit row max_iterations=40 runs 40 iterations without a plan', async () => {
+    chat.mockImplementation((_msgs: any, opts: any) =>
+      opts && Object.keys(opts).length === 0
+        ? ok({ content: 'cierre' })
+        : ok({ tool_calls: [call(`c${chat.mock.calls.length}`, 'list_things')] }),
+    );
+
+    await drain({ agent_key: 'vex', max_iterations: 40 });
+
+    expect(chat).toHaveBeenCalledTimes(41);
+  });
+
+  it('(rx2-c) vex turn meters vex_agent, vexi keeps tool_agents', async () => {
+    configureStorePlan(['*']);
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_orders')] }))
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    await drain({ agent_key: 'vex' });
+
+    expect(canUseAIFeature).toHaveBeenCalledWith(42, 'vex_agent');
+    expect(getAIFeatureConfig).toHaveBeenCalledWith(42, 'vex_agent');
+    expect(consumeAIQuota).toHaveBeenCalledWith(
+      42,
+      'vex_agent',
+      1,
+      expect.any(String),
+    );
+    expect(canUseAIFeature).not.toHaveBeenCalledWith(42, 'tool_agents');
+    expect(consumeAIQuota).not.toHaveBeenCalledWith(
+      42,
+      'tool_agents',
+      expect.anything(),
+      expect.anything(),
+    );
+
+    // Control leg: no agent identity → historical key.
+    canUseAIFeature.mockClear();
+    getAIFeatureConfig.mockClear();
+    consumeAIQuota.mockClear();
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c2', 'list_orders')] }))
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    await drain({});
+
+    expect(canUseAIFeature).toHaveBeenCalledWith(42, 'tool_agents');
+    expect(consumeAIQuota).toHaveBeenCalledWith(
+      42,
+      'tool_agents',
+      1,
+      expect.any(String),
+    );
+  });
+
+  it('(rx2-d) exhausted monthly quota denies the catalog and executes nothing', async () => {
+    configureStorePlan(['*']);
+    canUseAIFeature.mockResolvedValue({
+      allowed: false,
+      reason: 'SUBSCRIPTION_006',
+    });
+
+    await drain({ agent_key: 'vex' });
+
+    expect(offeredToolNames()).toEqual([]);
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(consumeAIQuota).not.toHaveBeenCalled();
+  });
 });
