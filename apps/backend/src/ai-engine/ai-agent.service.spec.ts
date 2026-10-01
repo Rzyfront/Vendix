@@ -166,6 +166,14 @@ describe('AIAgentService.runAgentStream', () => {
     expect(offeredToolNames()).toContain('list_orders');
     expect(offeredToolNames()).not.toContain('list_customers');
     expect(offeredToolNames()).not.toContain('ui_navigate');
+    expect(chat.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining('No puedes mover la pantalla'),
+        }),
+      ]),
+    );
   });
 
   it('offers only an exact tool name from the plan', async () => {
@@ -190,6 +198,16 @@ describe('AIAgentService.runAgentStream', () => {
     await drain({});
 
     expect(offeredToolNames()).toEqual([]);
+    expect(chat.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining(
+            'No tienes herramientas operativas para consultar datos actuales',
+          ),
+        }),
+      ]),
+    );
   });
 
   it('does not offer operational tools when the subscription gate denies access', async () => {

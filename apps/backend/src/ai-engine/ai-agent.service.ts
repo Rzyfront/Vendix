@@ -474,6 +474,36 @@ export class AIAgentService {
       });
     }
 
+    // The stored Vexi prompt describes what the product can do in general,
+    // not what this subscription/user/agent can do in this particular turn.
+    // Without this correction a plan with no UI tool still makes Vexi offer
+    // to navigate, and an empty catalog makes it offer live lookups it cannot do.
+    const offeredNames = new Set(
+      filteredTools.map((tool) =>
+        this.toolRegistry.canonicalName(tool.function.name),
+      ),
+    );
+    const hasOperationalTools = [...offeredNames].some(
+      (name) => !isAgentPlanTool(name),
+    );
+    if (!hasOperationalTools || !offeredNames.has('ui_navigate')) {
+      const limits: string[] = [];
+      if (!hasOperationalTools) {
+        limits.push(
+          'No tienes herramientas operativas para consultar datos actuales ni ejecutar acciones en este turno.',
+        );
+      }
+      if (!offeredNames.has('ui_navigate')) {
+        limits.push(
+          'No puedes mover la pantalla del usuario ni ofrecer llevarlo a un módulo.',
+        );
+      }
+      messages.push({
+        role: 'system',
+        content: `${limits.join(' ')} Explica esa limitación con claridad y no prometas una acción que no puedes ejecutar.`,
+      });
+    }
+
     if (params.messages?.length) {
       messages.push(...params.messages);
     }
