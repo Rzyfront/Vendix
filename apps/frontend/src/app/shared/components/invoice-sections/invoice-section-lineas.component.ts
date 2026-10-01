@@ -200,6 +200,7 @@ export interface LineasRowErrors {
                   label="Precio unitario"
                   [currency]="true"
                   [formControl]="rowControl(row, rowPaths().unit_price)"
+                  [attr.data-control-name]="'unit_price'"
                   [control]="rowControl(row, rowPaths().unit_price)"
                   [error]="errorsFor(i).unit_price"
                   [required]="true"
@@ -422,6 +423,7 @@ export interface LineasRowErrors {
             <app-input
               label="Precio"
               [formControl]="rowControl(row, rowPaths().unit_price)"
+                  [attr.data-control-name]="'unit_price'"
               [control]="rowControl(row, rowPaths().unit_price)"
               size="sm"
               placeholder="Se teclea"

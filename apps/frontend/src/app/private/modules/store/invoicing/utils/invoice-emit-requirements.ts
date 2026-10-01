@@ -198,6 +198,12 @@ export const INVOICE_EMIT_REQUIREMENTS_MAP: Record<
     actionLabel: 'Ir a la línea',
     actionTarget: 'quantity',
   },
+  'items[].unit_price': {
+    label: 'Precio unitario de la línea',
+    actionKind: 'focus',
+    actionLabel: 'Ir a la línea',
+    actionTarget: 'unit_price',
+  },
   'items[].unit_code': {
     label: 'Unidad de medida de la línea',
     actionKind: 'focus',
@@ -407,9 +413,14 @@ export function configActionLabel(cta: string): string {
  *    mismo `code`, y un mismo `code` puede repetirse en varias líneas; el modal
  *    itera con `track req.id`, así que un id repetido no es un detalle estético.
  *
+ * Además de `identity` y `fiscal_document`, se recorren los `blockers` y
+ * `warnings` de la RAÍZ del veredicto (origen `'document'`): ahí viajan los
+ * hallazgos que no pertenecen a ninguno de los dos (proyección fallida, emisor,
+ * recolectados). Sólo se añaden los que no estén ya en identity/fiscal, con
+ * clave `code|field`.
+ *
  * `readiness` se tipa como el NÚCLEO compartido (`EmitReadinessVerdict`), no
- * como `InvoiceEmitReadiness`: esta función sólo lee `identity` y
- * `fiscal_document`, así que sirve IGUAL para el veredicto de un documento ya
+ * como `InvoiceEmitReadiness`: no necesita `invoice_id` ni `status`, así que sirve IGUAL para el veredicto de un documento ya
  * persistido (`GET /:id/emit-readiness`) y para el de un borrador que todavía
  * no existe (`POST /validate-draft`, `DraftEmitReadinessReport`) — ninguno de
  * los dos usos declara `invoice_id`/`invoice_number`/`status`.
@@ -440,6 +451,43 @@ export function toEmitRequirements(
       rows.push(toRequirement('fiscal', finding, 'required'));
     }
   }
+
+  // Hallazgos que el backend publica SOLO en la raíz del veredicto: proyección
+  // fallida del borrador, emisor (config DIAN, certificado, resolución, TRM) y
+  // recolectados (DV, producto en línea, retenciones). Se añaden únicamente los
+  // que identity/fiscal no trajeron ya: el veredicto persistido viejo aplana la
+  // identidad en la raíz y, sin esta deduplicación, saldría cada fila dos veces.
+  const seen = new Set<string>();
+  const keyOf = (f: InvoiceEmitReadinessFinding): string =>
+    `${f.code}|${f.field ?? ''}`;
+  const collect = (list: InvoiceEmitReadinessFinding[] | undefined): void => {
+    for (const f of list ?? []) {
+      seen.add(keyOf(f));
+    }
+  };
+  collect(identity.blockers);
+  collect(identity.warnings);
+  collect(fiscal?.blockers);
+  collect(fiscal?.warnings);
+
+  const rootRows = (
+    list: unknown,
+    severity: 'blocker' | 'required',
+  ): void => {
+    if (!Array.isArray(list)) {
+      return;
+    }
+    for (const f of list as InvoiceEmitReadinessFinding[]) {
+      const key = keyOf(f);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      rows.push(toRequirement('document', f, severity));
+    }
+  };
+  rootRows(readiness.blockers, 'blocker');
+  rootRows(readiness.warnings, 'required');
 
   return dedupeIds(rows);
 }
@@ -483,7 +531,7 @@ function identityReportOf(
 
 /** Un hallazgo, ya convertido en fila del modal. */
 function toRequirement(
-  origin: 'identity' | 'fiscal',
+  origin: 'identity' | 'fiscal' | 'document',
   finding: InvoiceEmitReadinessFinding,
   severity: 'blocker' | 'required',
 ): SaveRequirement {

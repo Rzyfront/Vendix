@@ -42,6 +42,79 @@ function verdict(
 }
 
 describe('toEmitRequirements', () => {
+  it('proyección fallida: blocker de raíz con línea -> 1 fila focus a items.2', () => {
+    const f = finding({
+      code: 'INVOICING_CALC_005',
+      field: 'items[2].unit_price',
+      problem: 'p',
+      fix: 'f',
+      target: 'form',
+    });
+    const rows = toEmitRequirements({
+      emittable: false,
+      blockers: [f],
+      warnings: [],
+      findings: [f],
+      has_items: true,
+      identity: {
+        emittable: true,
+        mode: 'final_consumer',
+        findings: [],
+        blockers: [],
+        warnings: [],
+        normalized: null,
+      },
+      fiscal_document: null,
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].severity).toBe('blocker');
+    expect(rows[0].action?.kind).toBe('focus');
+    expect(rows[0].action?.target).toBe('items.2.unit_price');
+  });
+
+  it('proyección fallida: blocker de raíz con campo mapeado de línea -> focus a items.2', () => {
+    const f = finding({ code: 'INVOICING_CALC_005', field: 'items[2].quantity' });
+    const rows = toEmitRequirements({ ...verdict([]), blockers: [f], findings: [f] });
+    expect(rows.length).toBe(1);
+    expect(rows[0].action?.kind).toBe('focus');
+    expect(rows[0].action?.target).toBe('items.2.quantity');
+  });
+
+  it('blocker de raíz config + cta -> 1 fila navigate', () => {
+    const rows = toEmitRequirements({
+      ...verdict([]),
+      blockers: [
+        finding({
+          code: 'DIAN_CERT_003',
+          field: 'dian_config.certificate_expiry',
+          target: 'config',
+          cta: '/admin/invoicing/dian-config',
+        }),
+      ],
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].action).toEqual({
+      label: 'Configurar DIAN',
+      kind: 'navigate',
+      target: '/admin/invoicing/dian-config',
+    });
+  });
+
+  it('mismo hallazgo en identity y en la raíz -> 1 sola fila', () => {
+    const f = finding({ code: 'ID_001', field: 'document_number' });
+    const rows = toEmitRequirements(verdict([f]));
+    expect(rows.length).toBe(1);
+  });
+
+  it('warning de raíz -> severity required', () => {
+    const rows = toEmitRequirements({
+      ...verdict([]),
+      warnings: [finding({ code: 'W_1', field: 'email', severity: 'warning' as never })],
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].severity).toBe('required');
+  });
+
   it('config + cta -> navigate con la ruta del backend y etiqueta por ruta', () => {
     const rows = toEmitRequirements(
       verdict([
