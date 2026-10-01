@@ -79,6 +79,16 @@ export async function seedSubscriptionPlans(
       monthly_voice_seconds_cap: 7200,
       degradation: 'block',
     },
+    // Vex agent turn budget. Trial-only: the canonical production plans in
+    // subscription-plans-production.seed.ts intentionally omit vex_agent —
+    // it is enabled per plan from the super-admin UI (commercial decision).
+    vex_agent: {
+      enabled: true,
+      monthly_tool_calls_cap: 5000,
+      monthly_tokens_cap: 1000000,
+      daily_messages_cap: 1000,
+      degradation: 'warn',
+    },
   };
 
   const planData = {

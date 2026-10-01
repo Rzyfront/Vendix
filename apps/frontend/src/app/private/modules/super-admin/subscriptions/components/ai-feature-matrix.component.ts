@@ -17,6 +17,12 @@ import {
   SelectorComponent,
 } from '../../../../../shared/components';
 
+interface CapDefinition {
+  field: keyof AIFeatureConfig;
+  label: string;
+  help?: string;
+}
+
 interface FeatureDefinition {
   key: AIFeatureKey;
   label: string;
@@ -24,6 +30,8 @@ interface FeatureDefinition {
   capField?: keyof AIFeatureConfig;
   capLabel?: string;
   capHelp?: string;
+  /** Extra numeric caps after the primary one (e.g. vex_agent's 3 caps). */
+  extraCaps?: CapDefinition[];
 }
 
 @Component({
@@ -78,6 +86,17 @@ interface FeatureDefinition {
                 [ngModel]="capValue(feature)"
                 (ngModelChange)="updateCap(feature, $event)"
                 [helperText]="feature.capHelp ?? ''"
+              ></app-input>
+            }
+
+            @for (cap of feature.extraCaps ?? []; track cap.field) {
+              <app-input
+                [label]="cap.label"
+                type="number"
+                [min]="0"
+                [ngModel]="capFieldValue(feature.key, cap.field)"
+                (ngModelChange)="updateCapField(feature.key, cap.field, $event)"
+                [helperText]="cap.help ?? ''"
               ></app-input>
             }
 
@@ -233,6 +252,28 @@ export class AiFeatureMatrixComponent {
       capHelp:
         'Se mide en segundos de sesion, no en sesiones: un turno de push-to-talk dura 5-20 s. 3600 = 1 hora, 7200 = 2 horas. Cero significa ILIMITADO: lo que habilita o corta la funcion es el switch, no el cupo.',
     },
+    {
+      key: 'vex_agent',
+      label: 'Vex (agente)',
+      description:
+        'Autoriza al agente Vex a ejecutar turnos con herramientas sobre el catalogo del plan. El cupo de tool calls es el que el gate cobra por ejecucion; los otros dos alimentan la contabilidad del turno.',
+      capField: 'monthly_tool_calls_cap',
+      capLabel: 'Tool calls al mes',
+      capHelp:
+        'Presupuesto mensual de ejecuciones de tools (1 unidad por tool_result exitoso). Cero significa ILIMITADO: para restringir hay que poner un numero mayor que cero.',
+      extraCaps: [
+        {
+          field: 'monthly_tokens_cap',
+          label: 'Tokens mensuales',
+          help: 'Cupo mensual de tokens consumido por los turnos Vex. Cero significa ILIMITADO.',
+        },
+        {
+          field: 'daily_messages_cap',
+          label: 'Mensajes diarios',
+          help: 'Cupo diario de mensajes de turnos Vex por tienda.',
+        },
+      ],
+    },
   ];
 
   readonly degradationOptions = [
@@ -271,13 +312,25 @@ export class AiFeatureMatrixComponent {
 
   updateCap(feature: FeatureDefinition, value: unknown): void {
     if (!feature.capField) return;
-    this.updateFeature(feature.key, {
-      [feature.capField]: this.toNullableNumber(value),
-    } as Partial<AIFeatureConfig>);
+    this.updateCapField(feature.key, feature.capField, value);
   }
 
   capValue(feature: FeatureDefinition): any {
     return feature.capField ? this.config(feature.key)[feature.capField] : null;
+  }
+
+  updateCapField(
+    key: AIFeatureKey,
+    field: keyof AIFeatureConfig,
+    value: unknown,
+  ): void {
+    this.updateFeature(key, {
+      [field]: this.toNullableNumber(value),
+    } as Partial<AIFeatureConfig>);
+  }
+
+  capFieldValue(key: AIFeatureKey, field: keyof AIFeatureConfig): any {
+    return this.config(key)[field];
   }
 
   updateDegradation(key: AIFeatureKey, value: string | number | null): void {
