@@ -48,7 +48,7 @@ interface ValidatedInput {
   manual_reason?: string;
 }
 
-interface AllocationResult {
+export interface AllocationResult {
   allocation: MatchAllocation | Record<string, unknown>;
   document_version: number;
   matching_status: string;
