@@ -415,7 +415,7 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal', '/admin/invoicing/received-documents']);
     expect(service.diagnose(buildTree()[0].children![1]).visible).toBe(true);
     expect(service.isMenuItemVisible(buildTree()[0].children![1])).toBe(true);
-    expect(result[0].children?.[1]).toMatchObject({ label: 'Facturación', _fiscalReadFallbackActive: true, alwaysVisible: false });
+    expect(result[0].children?.[1]).toEqual(jasmine.objectContaining({ label: 'Facturación', _fiscalReadFallbackActive: true, alwaysVisible: false }) as any);
     expect(result[0].children?.[1]?.requiresFiscalArea).toBeUndefined();
     expect(result[0].children?.[1]?.requiredFiscalScope).toBeUndefined();
   });
@@ -457,7 +457,7 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
   it('keeps a fiscal group that has only its read-only received-document child', async () => {
     const tree: MenuItem[] = [{ label: 'Fiscal', icon: 'landmark', children: [buildTree()[0].children![1]] }];
     const result = await firstValueFrom(service.filterMenuItems(tree).pipe(take(1)));
-    expect(result).toHaveLength(1);
+    expect(result.length).toBe(1);
     expect(result[0].children?.map((child) => child.route)).toEqual(['/admin/invoicing/received-documents']);
   });
 
