@@ -129,6 +129,7 @@ export class VexActivityFeedService {
       select: {
         conversation_id: true,
         created_at: true,
+        role: true,
         tool_calls: true,
         conversation: { select: { metadata: true } },
       },
@@ -147,9 +148,15 @@ export class VexActivityFeedService {
       const calls = Array.isArray(message.tool_calls)
         ? (message.tool_calls as Array<Record<string, any>>)
         : [];
+      // `role: 'tool'` rows exist ONLY as `recordApplied` receipts: the write
+      // they carry landed by construction, even when the tool's own output
+      // carries no `applied: true` marker (typed domain tools describe the
+      // change instead). Assistant rows still need the marker to tell an
+      // applied `write_endpoint` result from a mere proposal.
+      const appliedByConstruction = (message as any).role === 'tool';
       for (const call of calls) {
         if (isUiAuditEntry(call?.name)) continue;
-        if (!this.wasApplied(call?.result)) continue;
+        if (!appliedByConstruction && !this.wasApplied(call?.result)) continue;
         entries.push({
           category: 'agent',
           title:
