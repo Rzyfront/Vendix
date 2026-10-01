@@ -14,6 +14,7 @@ import {
   VexConversation,
   VexMessage,
   VexPlanProposal,
+  VexPlanStatus,
   VexPlanStep,
   VexUiBlock,
 } from '../models/vex.models';
@@ -36,20 +37,199 @@ function buildMessage(
   return { id: crypto.randomUUID(), role, content, created_at };
 }
 
-function adaptMessage(row: VexBackendMessage): VexMessage | null {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Pointer the turn close persists per block (`ai-chat.service.ts`
+ * `vexTurnMetadata`): just enough to rehydrate. The payload lives in
+ * `ai_ui_blocks` and arrives via `GET blocks/:id` with fresh signed URLs.
+ */
+interface VexBlockRef {
+  block_id: string;
+  kind: string;
+  version: number;
+}
+
+const FRONTEND_PLAN_STATUSES: readonly VexPlanStatus[] = [
+  'proposed',
+  'approved',
+  'rejected',
+  'executing',
+  'done',
+  'failed',
+];
+
+/**
+ * Splits persisted `metadata.blocks` into full blocks (already renderable,
+ * kept as-is) and refs (rehydrated via `GET blocks/:id`). A ref carries no
+ * `spec` — that is the discriminator, not `kind`/`version`, which both
+ * shapes share. Duplicated ids collapse to the first occurrence.
+ */
+function splitPersistedBlocks(raw: unknown): {
+  hydrated: VexUiBlock[];
+  refs: VexBlockRef[];
+} {
+  if (!Array.isArray(raw)) return { hydrated: [], refs: [] };
+  const hydrated: VexUiBlock[] = [];
+  const refs: VexBlockRef[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const block_id = item['block_id'];
+    if (typeof block_id !== 'string' || !block_id || seen.has(block_id)) {
+      continue;
+    }
+    seen.add(block_id);
+    if (isRecord(item['spec']) && isRecord(item['data'])) {
+      hydrated.push(item as unknown as VexUiBlock);
+      continue;
+    }
+    const kind = item['kind'];
+    const version = item['version'];
+    refs.push({
+      block_id,
+      kind: typeof kind === 'string' ? kind : 'markdown',
+      version: typeof version === 'number' ? version : 1,
+    });
+  }
+  return { hydrated, refs };
+}
+
+/** Backend plan status → card status. `applied` is the only foreign value. */
+function adaptPlanStatus(raw: unknown): VexPlanStatus {
+  if (raw === 'applied') return 'done';
+  if (
+    typeof raw === 'string' &&
+    (FRONTEND_PLAN_STATUSES as readonly string[]).includes(raw)
+  ) {
+    return raw as VexPlanStatus;
+  }
+  return 'proposed';
+}
+
+function adaptPersistedPreview(
+  raw: unknown,
+): VexPlanStep['preview'] {
+  if (!isRecord(raw)) return undefined;
+  if (typeof raw['target'] !== 'string') return undefined;
+  const status = raw['status'];
+  if (status !== 'ok' && status !== 'warning' && status !== 'error') {
+    return undefined;
+  }
+  const changes: Array<{
+    field: string;
+    label: string;
+    from: unknown;
+    to: unknown;
+  }> = [];
+  if (Array.isArray(raw['changes'])) {
+    for (const item of raw['changes']) {
+      if (
+        isRecord(item) &&
+        typeof item['field'] === 'string' &&
+        typeof item['label'] === 'string'
+      ) {
+        changes.push({
+          field: item['field'],
+          label: item['label'],
+          from: item['from'],
+          to: item['to'],
+        });
+      }
+    }
+  }
+  return {
+    status,
+    target: raw['target'],
+    changes,
+    message: typeof raw['message'] === 'string' ? raw['message'] : undefined,
+  };
+}
+
+/**
+ * One persisted plan step → card step. Raw steps (`step_id`, `order`, `tool`,
+ * `arguments`, `preview`, `irreversible`) gain their summary from the preview
+ * target, falling back to the tool name — the same rule the live frame
+ * adapter uses. Already-adapted steps (with `summary` + `status`) pass
+ * through, except their status: single-use tokens never survive a reload, so
+ * a rehydrated step is `pending` unless the whole plan landed (`done`), where
+ * every step reads `done`. `confirmation_token` never persists — the
+ * plan-token redeem mints fresh ones.
+ */
+function adaptPersistedStep(
+  raw: unknown,
+  index: number,
+  plan_status: VexPlanStatus,
+): VexPlanStep | null {
+  if (!isRecord(raw) || typeof raw['tool'] !== 'string') return null;
+  const step_id =
+    typeof raw['step_id'] === 'string' && raw['step_id']
+      ? raw['step_id']
+      : `s${index + 1}`;
+  const preview = adaptPersistedPreview(raw['preview']);
+  const summary =
+    typeof raw['summary'] === 'string' && raw['summary'].trim()
+      ? raw['summary']
+      : preview?.target?.trim() || raw['tool'].replace(/_/g, ' ');
+  return {
+    step_id,
+    tool: raw['tool'],
+    summary,
+    arguments: isRecord(raw['arguments'])
+      ? (raw['arguments'] as Record<string, unknown>)
+      : {},
+    preview,
+    irreversible: raw['irreversible'] === true,
+    status: plan_status === 'done' ? 'done' : 'pending',
+  };
+}
+
+/**
+ * `metadata.plan` (`{plan_id, steps, status}`) → card proposal, with its
+ * persisted status. Steps are raw (`VexRawPlanStep`) — never tool-name-merged:
+ * the server `step_id` stays the identity, two `create_product` steps stay
+ * two steps. Returns `null` without a usable `plan_id` or step list.
+ */
+function adaptPersistedPlan(raw: unknown): VexPlanProposal | null {
+  if (!isRecord(raw)) return null;
+  if (typeof raw['plan_id'] !== 'string' || !raw['plan_id']) return null;
+  if (!Array.isArray(raw['steps'])) return null;
+  const status = adaptPlanStatus(raw['status']);
+  const steps = raw['steps']
+    .map((s, i) => adaptPersistedStep(s, i, status))
+    .filter((s): s is VexPlanStep => s !== null);
+  if (steps.length === 0) return null;
+  const title =
+    typeof raw['title'] === 'string' && raw['title'].trim()
+      ? raw['title']
+      : steps.length === 1 && steps[0].preview?.target?.trim()
+        ? `Vex propone: ${steps[0].preview?.target?.trim()}`
+        : steps.length > 1
+          ? `Vex propone un plan (${steps.length} pasos)`
+          : 'Vex propone un plan';
+  return { plan_id: raw['plan_id'], title, steps, status };
+}
+
+function adaptMessage(row: VexBackendMessage): {
+  message: VexMessage;
+  refs: VexBlockRef[];
+} | null {
   if (row.role !== 'user' && row.role !== 'assistant') return null;
   const meta = (row.metadata ?? {}) as Record<string, unknown>;
-  const blocks = Array.isArray(meta['blocks'])
-    ? (meta['blocks'] as VexUiBlock[])
-    : undefined;
-  const plan = (meta['plan'] as VexPlanProposal | undefined) ?? null;
+  const { hydrated, refs } = splitPersistedBlocks(meta['blocks']);
+  const plan = adaptPersistedPlan(meta['plan']);
   return {
-    id: `m-${row.id}`,
-    role: row.role === 'assistant' ? 'agent' : 'user',
-    content: row.content ?? '',
-    created_at: new Date(row.created_at),
-    blocks,
-    plan,
+    message: {
+      id: `m-${row.id}`,
+      role: row.role === 'assistant' ? 'agent' : 'user',
+      content: row.content ?? '',
+      created_at: new Date(row.created_at),
+      blocks: hydrated.length > 0 ? hydrated : undefined,
+      plan,
+    },
+    refs,
   };
 }
 
@@ -632,27 +812,91 @@ export class VexChatStore {
     this._loading_thread.set(true);
     return firstValueFrom(this.api.getConversation(numeric))
       .then((row) => {
-        const messages = (row.messages ?? [])
+        const adapted = (row.messages ?? [])
           .map(adaptMessage)
-          .filter((m): m is VexMessage => m !== null);
+          .filter(
+            (m): m is { message: VexMessage; refs: VexBlockRef[] } =>
+              m !== null,
+          );
         this._conversations.update((list) =>
           list.map((c) =>
             c.id === id
               ? {
                   ...c,
                   title: row.title?.trim() ? row.title : c.title,
-                  messages,
+                  messages: adapted.map((a) => a.message),
                   updated_at: new Date(row.updated_at),
                 }
               : c,
           ),
         );
         this.loaded_ids.add(id);
+        // Blocks arrive as refs; their payloads (with fresh signed URLs)
+        // land per message as each read resolves. Plans need no fetch —
+        // their steps + status already adapted above.
+        for (const { message, refs } of adapted) {
+          if (refs.length > 0) this.rehydrateBlocks(id, message.id, refs);
+        }
       })
       .catch((error) => {
         this.toast.error(extractApiErrorMessage(error), 'No se pudo abrir');
       })
       .finally(() => this._loading_thread.set(false));
+  }
+
+  /**
+   * Resolves persisted block refs into renderable blocks. One `GET
+   * blocks/:id` per ref — the read mints fresh signed URLs for image/file
+   * kinds, which is why the payload never persists inline. Failures are
+   * per-block and silent: a deleted block drops out, the rest of the thread
+   * still renders. Order follows the persisted refs, so a reload shows the
+   * same blocks in the same sequence the turn produced.
+   */
+  private rehydrateBlocks(
+    conversation_id: string,
+    message_id: string,
+    refs: VexBlockRef[],
+  ): void {
+    void Promise.allSettled(
+      refs.map((ref) => firstValueFrom(this.api.getBlock(ref.block_id))),
+    ).then((results) => {
+      const fetched = new Map<string, VexUiBlock>();
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        const block = result.value;
+        if (
+          !block ||
+          typeof block.block_id !== 'string' ||
+          !block.block_id
+        ) {
+          continue;
+        }
+        fetched.set(block.block_id, block);
+      }
+      if (fetched.size === 0) return;
+      this._conversations.update((list) =>
+        list.map((c) => {
+          if (c.id !== conversation_id) return c;
+          return {
+            ...c,
+            messages: c.messages.map((m) => {
+              if (m.id !== message_id) return m;
+              const previous = m.blocks ?? [];
+              const by_id = new Map<string, VexUiBlock>();
+              for (const b of previous) by_id.set(b.block_id, b);
+              for (const [id, b] of fetched) by_id.set(id, b);
+              const ordered = refs
+                .map((r) => by_id.get(r.block_id))
+                .filter((b): b is VexUiBlock => b !== undefined);
+              const extras = [...by_id.values()].filter(
+                (b) => !refs.some((r) => r.block_id === b.block_id),
+              );
+              return { ...m, blocks: [...ordered, ...extras] };
+            }),
+          };
+        }),
+      );
+    });
   }
 
   private runTurn(text: string, attachment_ids: string[]): Promise<void> {
