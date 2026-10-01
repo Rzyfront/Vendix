@@ -1,4 +1,9 @@
-import { IsOptional, ValidateNested, IsObject } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  ValidateNested,
+  IsObject,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 import {
@@ -27,6 +32,24 @@ import {
   PromotionsSettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
+
+/**
+ * Vex master switch. Declared here (not in `settings-schemas.dto.ts`) so the
+ * section stays whole in one file: without a declared property, the global
+ * `ValidationPipe` (`whitelist: true`) strips `vex` before the service merge
+ * ever sees it and the PATCH answers 200 with the old value.
+ */
+export class VexSettingsDto {
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Habilita el agente Vex para toda la tienda. Con false la vista /admin/vex no se monta y los turnos de Vex responden agente deshabilitado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
 
 @ApiSchema({ name: 'StoreUpdateSettingsDto' })
 export class UpdateSettingsDto {
@@ -131,6 +154,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => VexiSettingsDto)
   vexi?: VexiSettingsDto;
+
+  @ApiProperty({ type: VexSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VexSettingsDto)
+  vex?: VexSettingsDto;
 
   @ApiProperty({ type: InvoicingSettingsDto, required: false })
   @IsOptional()

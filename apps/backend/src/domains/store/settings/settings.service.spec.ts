@@ -376,6 +376,99 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       expect(stored.vexi.voice_engine).toBe('realtime');
     });
   });
+
+  // -------------------------------------------- interruptor maestro de Vex
+
+  /**
+   * `vex.enabled` es el tercer interruptor opt-in de la tienda, con el mismo
+   * contrato fail-closed que `vexi`: default `false`, solo `true` explícito
+   * habilita, merge por clave y compuerta owner/admin propia. Quitar
+   * cualquiera de las cuatro patas (`VexSettings`, default, `KNOWN_SECTIONS`
+   * + DTO, merge, compuerta) debe romper al menos un caso de aquí.
+   */
+  describe('updateSettings — interruptor maestro de vex', () => {
+    let stored: any;
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['owner'] as any);
+
+      stored = {
+        ...STORED_WITH_CASH_REGISTER_ON,
+        vex: { enabled: true },
+      };
+
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(
+        async ({ update }: any) => {
+          stored = update?.settings ?? stored;
+          return { store_id: STORE_ID, settings: stored };
+        },
+      );
+    });
+
+    it('un PATCH que no menciona vex conserva el true explícito', async () => {
+      await service.updateSettings({ inventory: { low_stock_threshold: 5 } });
+
+      expect(stored.vex).toEqual({ enabled: true });
+    });
+
+    it('el interruptor se mueve en ambas direcciones', async () => {
+      // Sin `vex` en `KNOWN_SECTIONS` o sin la propiedad en el DTO, estos dos
+      // PATCH responden 200 con el valor viejo: el interruptor que se niega
+      // a moverse en silencio.
+      await service.updateSettings({ vex: { enabled: false } });
+      expect(stored.vex).toEqual({ enabled: false });
+
+      await service.updateSettings({ vex: { enabled: true } });
+      expect(stored.vex).toEqual({ enabled: true });
+    });
+
+    it('una tienda sin bloque vex lo lee apagado', async () => {
+      stored = { ...STORED_WITH_CASH_REGISTER_ON };
+
+      const settings: any = await service.updateSettings({
+        inventory: { low_stock_threshold: 5 },
+      });
+
+      expect(settings.vex.enabled).toBe(false);
+    });
+
+    it('vexi y vex son independientes', async () => {
+      stored = {
+        ...STORED_WITH_CASH_REGISTER_ON,
+        vexi: { enabled: true, voice_engine: 'pipeline' },
+        vex: { enabled: false },
+      };
+
+      await service.updateSettings({ vex: { enabled: true } });
+
+      expect(stored.vex).toEqual({ enabled: true });
+      expect(stored.vexi).toEqual({
+        enabled: true,
+        voice_engine: 'pipeline',
+      });
+    });
+
+    it('un manager no puede encender Vex aunque edite settings', async () => {
+      stored.vex = { enabled: false };
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['manager'] as any);
+
+      await expect(
+        service.updateSettings({ vex: { enabled: true } }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_FORBIDDEN_001' });
+
+      expect(stored.vex).toEqual({ enabled: false });
+    });
+  });
 });
 
 /**

@@ -359,12 +359,16 @@ export class SubscriptionResolverService {
       };
 
       // Numeric caps: take min of defined values (partner can only LOWER).
+      // `monthly_tool_calls_cap` budgets the agent features (`tool_agents`,
+      // `vex_agent`): without it in this list a partner override touching the
+      // feature would silently drop the cap while keeping `enabled`.
       const capFields: Array<keyof FeatureConfig> = [
         'monthly_tokens_cap',
         'daily_messages_cap',
         'retention_days',
         'indexed_docs_cap',
         'monthly_jobs_cap',
+        'monthly_tool_calls_cap',
       ];
       for (const f of capFields) {
         const bv = b[f];
@@ -428,12 +432,15 @@ export class SubscriptionResolverService {
         degradation: b!.degradation ?? o!.degradation,
       };
 
+      // Same list as the partner path plus union semantics: the promo keeps
+      // the higher agent budget instead of dropping the cap it did not set.
       const capFields: Array<keyof FeatureConfig> = [
         'monthly_tokens_cap',
         'daily_messages_cap',
         'retention_days',
         'indexed_docs_cap',
         'monthly_jobs_cap',
+        'monthly_tool_calls_cap',
       ];
       for (const f of capFields) {
         const bv = b![f];
