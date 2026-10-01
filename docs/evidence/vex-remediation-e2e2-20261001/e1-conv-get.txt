@@ -1,0 +1,37 @@
+n_messages: 2
+--- user id= 287
+  metadata keys: []
+  content: Haz 3 cambios en el catálogo: 1) crea el producto E2E2A-vex precio 1000, 2) crea el producto E2E2B-vex precio 2000, 3) e
+--- assistant id= 288
+  metadata keys: ['plan']
+  plan: {
+ "steps": [
+  {
+   "tool": "create_product",
+   "order": 1,
+   "preview": {
+    "domain": "products",
+    "status": "ok",
+    "target": "E2E2A-vex",
+    "changes": [
+     {
+      "to": "E2E2A-vex",
+      "from": null,
+      "field": "name",
+      "label": "Nombre"
+     },
+     {
+      "to": 1000,
+      "from": null,
+      "field": "base_price",
+      "label": "Precio base (sin impuestos)"
+     },
+     {
+      "to": "physical",
+      "from": null,
+      "field": "product_type",
+      "label": "Tipo"
+     }
+    ],
+    "message": "El producto se crea activo y sin impuestos asignados; revisa sus
+  content: Tengo listo un plan con 3 pasos: 1. E2E2A-vex; 2. E2E2B-vex; 3. E2E2Z-sacrificial. 1 necesita su propia confirmación por

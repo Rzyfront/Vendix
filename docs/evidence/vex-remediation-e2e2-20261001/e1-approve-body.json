@@ -1,0 +1,1 @@
+{"conversation_id": 80, "steps": [{"order": 1, "tool": "create_product", "arguments": {"name": "E2E2A-vex", "base_price": 1000}}, {"order": 2, "tool": "create_product", "arguments": {"name": "E2E2B-vex", "base_price": 2000}}, {"order": 3, "tool": "archive_product", "arguments": {"product_id": 2513, "confirmed_total_units": 0, "confirmed_total_value": 0}}]}
