@@ -6,8 +6,9 @@ import { NotificationsApiService } from '../../../../../core/services/notificati
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { VexLogCategory, VexLogEvent } from '../models/vex.models';
 
-/** One row of `GET /store/vex/activity-feed`, the planned wave-1 contract. */
+/** One row of `GET /store/vex/activity-feed`: stable `notif-<id>` / `agent-<message>-<idx>` ids. */
 interface ActivityFeedRow {
+  id?: string;
   category: VexLogCategory;
   title: string;
   description: string;
@@ -15,14 +16,28 @@ interface ActivityFeedRow {
   is_new: boolean;
 }
 
-/** Live frame of the shared store channel (`/store/notifications/stream`). */
+/**
+ * Live frame of the shared store channel (`/store/notifications/stream`).
+ * Persisted notifications carry a numeric id; live-only agent frames
+ * (`vex_agent_action`, see `buildAgentLiveEvent` in
+ * `VexActivityFeedService`) carry their stable `agent-…` string id — never
+ * persisted, so the string never touches the `notifications` table.
+ */
 interface LiveNotification {
-  id: number;
+  id: number | string;
   type: string;
   title: string;
   body: string;
   created_at: string;
+  data?: {
+    agent?: string;
+    tool?: string;
+    conversation_id?: number;
+  };
 }
+
+/** Must match `AGENT_LIVE_EVENT_TYPE` in `vex-activity-feed.service.ts`. */
+const AGENT_LIVE_EVENT_TYPE = 'vex_agent_action';
 
 const FEED_LIMIT = 50;
 const MAX_EVENTS = 200;
@@ -61,7 +76,11 @@ function isValidCategory(value: unknown): value is VexLogCategory {
 function adaptRow(row: ActivityFeedRow): VexLogEvent | null {
   if (!row || typeof row.title !== 'string') return null;
   return {
-    id: crypto.randomUUID(),
+    // Stable backend id when present (`notif-<id>` / `agent-<m>-<i>`): the
+    // same event re-read after a reload collapses onto the live one instead
+    // of duplicating. Random only as a rollout fallback for stale backends.
+    id:
+      typeof row.id === 'string' && row.id ? row.id : crypto.randomUUID(),
     category: isValidCategory(row.category) ? row.category : 'alert',
     title: row.title,
     description: typeof row.description === 'string' ? row.description : '',
@@ -73,9 +92,24 @@ function adaptRow(row: ActivityFeedRow): VexLogEvent | null {
 }
 
 function adaptLive(payload: LiveNotification): VexLogEvent | null {
-  if (!payload || typeof payload.id !== 'number') return null;
+  if (!payload) return null;
+  // Agent frames carry their stable `agent-…` id and their own category; a
+  // persisted notification reuses the feed's `notif-<id>` shape so the live
+  // row and the later feed row dedupe in `prepend`.
+  if (payload.type === AGENT_LIVE_EVENT_TYPE) {
+    if (typeof payload.id !== 'string' || !payload.id) return null;
+    return {
+      id: payload.id,
+      category: 'agent',
+      title: payload.title ?? '',
+      description: payload.body ?? '',
+      created_at: payload.created_at ? new Date(payload.created_at) : new Date(),
+      is_new: true,
+    };
+  }
+  if (typeof payload.id !== 'number') return null;
   return {
-    id: `sse-${payload.id}`,
+    id: `notif-${payload.id}`,
     category: categoryFor(payload.type),
     title: payload.title ?? '',
     description: payload.body ?? '',
@@ -128,9 +162,8 @@ export class VexLogStore {
 
   /**
    * IANA zone of the active store (`America/Bogota` fallback), the zone feed
-   * instants must render in. Seam for the sidebar step:
-   * `{{ event.created_at | date:'HH:mm':timezone() }}` — until that template
-   * change lands, the (correct) instant renders in the browser zone.
+   * instants render in. The sidebar reads it for `formatStoreDateTime`, so
+   * the bitácora shows the same clock as the POS of the store.
    */
   readonly timezone = this.settings.timezone;
 
@@ -152,19 +185,45 @@ export class VexLogStore {
   }
 
   /**
-   * Logs an applied agent write live. The notifications channel never carries
-   * agent actions, so whoever lands one from this view (plan approval, tool
-   * apply) calls this instead of waiting for a reload.
+   * Logs an applied agent write live. The notifications channel carries
+   * `vex_agent_action` frames for these, so whoever lands one from this view
+   * (plan approval, tool apply) calls this only as the fallback for an SSE
+   * gap — passing the frame's stable `agent-…` id when it is known so the
+   * late frame dedupes instead of duplicating.
    */
-  prependAgentEvent(title: string, description = ''): void {
+  prependAgentEvent(title: string, description = '', stable_id?: string): void {
     this.prepend({
-      id: crypto.randomUUID(),
+      id:
+        typeof stable_id === 'string' && stable_id
+          ? stable_id
+          : crypto.randomUUID(),
       category: 'agent',
       title,
       description,
       created_at: new Date(),
       is_new: true,
     });
+  }
+
+  /**
+   * Fallback seam for an applied `tool_result` frame: prepends only when the
+   * result actually landed (`applied: true`, same marker the backend feed
+   * uses). Proposals and failures never reach the bitácora. The chat store
+   * calls this when its stream reports an applied write and no
+   * `vex_agent_action` SSE frame is expected (e.g. the socket was down).
+   */
+  prependAppliedToolResult(result: {
+    applied?: unknown;
+    title: string;
+    description?: string;
+    stable_id?: string;
+  }): void {
+    if (result?.applied !== true) return;
+    this.prependAgentEvent(
+      result.title,
+      result.description ?? '',
+      result.stable_id,
+    );
   }
 
   private loadFeed(): Promise<void> {
@@ -210,7 +269,12 @@ export class VexLogStore {
     }
     // Same shared-channel guards as `NotificationsEffects.connectSse$`: the
     // store hub multiplexes non-bell frames (ambient access, order telemetry).
-    if (!payload || typeof payload.id !== 'number') return null;
+    // Agent frames are the exception to the numeric-id rule: they are
+    // live-only (`agent-…` string ids, never persisted rows).
+    if (!payload) return null;
+    if (payload.type !== AGENT_LIVE_EVENT_TYPE && typeof payload.id !== 'number') {
+      return null;
+    }
     if (payload.type === 'membership-access') return null;
     if (typeof payload.type === 'string' && payload.type.startsWith('order.')) {
       return null;

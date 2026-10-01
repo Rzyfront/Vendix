@@ -4,8 +4,8 @@ import {
   inject,
   model,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import {
   VEX_LOG_CATEGORY_META,
   VexLogCategory,
@@ -29,7 +29,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
 @Component({
   selector: 'vendix-vex-log-sidebar',
   standalone: true,
-  imports: [IconComponent, DatePipe],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full' },
   template: `
@@ -142,7 +142,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
                       <span class="w-2 h-2 rounded-full bg-[var(--color-primary)]" aria-label="Nuevo"></span>
                     }
                     <span class="text-xs text-[var(--color-text-secondary)]">
-                      {{ event.created_at | date: 'HH:mm' }}
+                      {{ formatTime(event.created_at) }}
                     </span>
                   </div>
                 </div>
@@ -173,6 +173,18 @@ export class VexLogSidebarComponent {
 
   tint(category: VexLogCategory): string {
     return CATEGORY_TINT[category];
+  }
+
+  /**
+   * Feed instants render in the STORE zone, never the browser's — the same
+   * clock the POS prints. `formatStoreDateTime` with explicit time options
+   * keeps the `HH:mm` shape already on screen and only changes the zone.
+   */
+  formatTime(created_at: Date): string {
+    return formatStoreDateTime(created_at, this.store.timezone(), {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   chipClass(active: boolean): string {
