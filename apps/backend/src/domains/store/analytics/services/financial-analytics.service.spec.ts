@@ -15,6 +15,9 @@ type MockStorePrismaService = {
   expenses: { aggregate: jest.Mock; findMany: jest.Mock };
   cash_register_sessions: { findMany: jest.Mock };
   store_settings: { findFirst: jest.Mock };
+  organizations: { findFirst: jest.Mock };
+  accounting_entities: { findFirst: jest.Mock };
+  withholding_calculations: { groupBy: jest.Mock };
   // QUI-630: getTaxSummary moved to $queryRaw. Each call returns the rows the
   // SQL would have produced; the first call is the GROUP BY for taxes, the
   // second is the taxable/exempt split.
@@ -48,6 +51,9 @@ describe('FinancialAnalyticsService', () => {
       expenses: { aggregate: jest.fn(), findMany: jest.fn() },
       cash_register_sessions: { findMany: jest.fn() },
       store_settings: { findFirst: jest.fn() },
+      organizations: { findFirst: jest.fn() },
+      accounting_entities: { findFirst: jest.fn() },
+      withholding_calculations: { groupBy: jest.fn().mockResolvedValue([]) },
       $queryRaw: jest.fn(),
       withoutScope: jest.fn(),
     } as MockStorePrismaService;
@@ -56,6 +62,13 @@ describe('FinancialAnalyticsService', () => {
     // Returning null yields DEFAULT_STORE_TIMEZONE ('America/Bogota'), so the
     // tz-aware parseDateRange path runs (the legacy UTC path is not used here).
     prisma.store_settings.findFirst.mockResolvedValue(null);
+    prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+    prisma.organizations.findFirst.mockResolvedValue({
+      fiscal_scope: 'STORE',
+      operating_scope: 'STORE',
+      account_type: 'SINGLE_STORE',
+    });
+    prisma.accounting_entities.findFirst.mockResolvedValue({ id: 71 });
 
     // QUI-630: the unscoped prisma client returned by withoutScope() is the
     // surface that getTaxSummary calls $queryRaw on. Share the mock function
@@ -77,7 +90,12 @@ describe('FinancialAnalyticsService', () => {
 
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ store_id: 1, is_super_admin: false, is_owner: false });
+      .mockReturnValue({
+        organization_id: 12,
+        store_id: 1,
+        is_super_admin: false,
+        is_owner: false,
+      });
 
     // Cache mock: get() -> undefined forces a cache miss so the real compute
     // path runs and the existing assertions hold; set() is a no-op.
@@ -624,11 +642,9 @@ describe('FinancialAnalyticsService', () => {
       expect(result.iva_generado).toBe(190);
     });
 
-    it('QUI-630 defect 4: emits retenciones practicadas from sales breakdown (withholding + reteiva + reteica)', async () => {
-      // One delivered order with three tax rows: IVA 19% (190), retefuente 1%
-      // (tax_type='withholding', 10), reteiva 15% (tax_type='reteiva', 15).
-      // The OLD endpoint ignored these — the new contract sums them as
-      // `rete_practicadas` (a credit against the DIAN obligación).
+    it('reads practiced withholdings from the typed role ledger, not tax rows', async () => {
+      // Order tax rows remain visible in the raw tax report. The role-aware
+      // withholding sums below come only from withholding_calculations.
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           tax_type: 'iva',
@@ -647,6 +663,22 @@ describe('FinancialAnalyticsService', () => {
           taxable_amount: '1000.0000000000',
         },
         {
+          tax_type: 'icui',
+          tax_name: 'ICUI',
+          tax_rate: 0.05,
+          is_compound: false,
+          total_tax: '25.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'ibua',
+          tax_name: 'IBUA',
+          tax_rate: 0.02,
+          is_compound: false,
+          total_tax: '30.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
           tax_type: 'reteiva',
           tax_name: 'ReteIVA 15%',
           tax_rate: 0.15,
@@ -662,19 +694,72 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([]);
       // No purchase rows in the period.
       prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.withholding_calculations.groupBy.mockResolvedValue([
+        { role: 'practiced', withholding_type: 'retefuente', _sum: { withholding_amount: 10 } },
+        { role: 'practiced', withholding_type: 'reteiva', _sum: { withholding_amount: 15 } },
+        { role: 'practiced', withholding_type: 'reteica', _sum: { withholding_amount: 5 } },
+      ]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
       const result = await service.getTaxSummary(QUERY as any);
 
-      expect(result.rete_practicadas).toBe(25);
+      expect(result.rete_practicadas).toBe(30);
+      expect(result.rete_sufridas).toBe(0);
+      expect(result.net_vat_position).toBe(190);
+      expect(prisma.withholding_calculations.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            organization_id: 12,
+            store_id: 1,
+            accounting_entity_id: 71,
+            created_at: expect.objectContaining({ gte: expect.any(Date), lte: expect.any(Date) }),
+          }),
+        }),
+      );
+      expect(prisma.accounting_entities.findFirst).toHaveBeenCalledWith({
+        where: {
+          organization_id: 12,
+          store_id: 1,
+          scope: 'STORE',
+          fiscal_scope: 'STORE',
+          is_active: true,
+        },
+        select: { id: true },
+      });
     });
 
-    it('QUI-630 defect 4: emits retenciones sufridas from purchase_order_items (withholding + reteiva + reteica)', async () => {
-      // Sales side: 1 delivered order with IVA 19% of 1000 = 190 tax.
-      // Purchase side: 1 received order with tax_type='reteiva' total_tax=15.
-      // `rete_sufridas` is the credit (purchase-side withholding reduces the
-      // store's tax obligation, since the supplier already moved the money
-      // to the DIAN on the store's behalf).
+    it('fails closed when this store has no active fiscal accounting entity', async () => {
+      prisma.accounting_entities.findFirst.mockResolvedValue(null);
+
+      await expect(service.getTaxSummary(QUERY as any)).rejects.toThrow();
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.withholding_calculations.groupBy).not.toHaveBeenCalled();
+    });
+
+    it('resolves the consolidated organization entity when fiscal_scope is ORGANIZATION', async () => {
+      prisma.organizations.findFirst.mockResolvedValue({
+        fiscal_scope: 'ORGANIZATION',
+        operating_scope: 'ORGANIZATION',
+        account_type: 'MULTI_STORE_ORG',
+      });
+      await service.getTaxSummary(QUERY as any);
+
+      expect(prisma.accounting_entities.findFirst).toHaveBeenCalledWith({
+        where: {
+          organization_id: 12,
+          store_id: null,
+          scope: 'ORGANIZATION',
+          fiscal_scope: 'ORGANIZATION',
+          is_active: true,
+        },
+        select: { id: true },
+      });
+    });
+
+    it('reads suffered types from the role ledger and only reteIVA affects the IVA estimate', async () => {
+      // The purchase tax rows are not the withholding source; role and type
+      // come from the canonical withholding ledger.
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           tax_type: 'iva',
@@ -693,19 +778,23 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { tax_type: 'reteiva', total_tax: '15.000', deductible_tax: '0.000' },
       ]);
+      prisma.withholding_calculations.groupBy.mockResolvedValue([
+        { role: 'suffered', withholding_type: 'reteiva', _sum: { withholding_amount: 15 } },
+        { role: 'suffered', withholding_type: 'retefuente', _sum: { withholding_amount: 20 } },
+        { role: 'suffered', withholding_type: 'reteica', _sum: { withholding_amount: 5 } },
+      ]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
       const result = await service.getTaxSummary(QUERY as any);
 
-      expect(result.rete_sufridas).toBe(15);
+      expect(result.rete_sufridas).toBe(40);
+      expect(result.reteiva_sufrida).toBe(15);
+      expect(result.net_vat_position).toBe(175);
     });
 
-    it('QUI-630: net_vat_position uses computeNetVatPosition (formula = iva_generado + inc_generado + ica_generado − iva_descontable − rete_sufridas − rete_practicadas)', async () => {
-      // Sales: IVA 190 + INC 80 + ICA 50 = 320 collected.
-      // Purchases: IVA descontable 95 + reteiva sufrida 15.
-      // Retenciones practicadas on sales: retefuente 10.
-      // Formula (both retenciones are credits, both subtracted):
-      //   net_vat_position = (190 + 80 + 50) − 95 − 15 − 10 = 200
+    it('reports all tax types without netting non-IVA taxes or practiced withholding from IVA', async () => {
+      // Sales: IVA 190 + INC 80 + ICA 50 + ICUI 25 + IBUA 30, with
+      // deductible IVA 95 and suffered reteIVA 15.
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           tax_type: 'iva',
@@ -732,6 +821,22 @@ describe('FinancialAnalyticsService', () => {
           taxable_amount: '1000.0000000000',
         },
         {
+          tax_type: 'icui',
+          tax_name: 'ICUI',
+          tax_rate: 0.05,
+          is_compound: false,
+          total_tax: '25.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
+          tax_type: 'ibua',
+          tax_name: 'IBUA',
+          tax_rate: 0.02,
+          is_compound: false,
+          total_tax: '30.000',
+          taxable_amount: '1000.0000000000',
+        },
+        {
           tax_type: 'withholding',
           tax_name: 'ReteFuente 1%',
           tax_rate: 0.01,
@@ -749,6 +854,11 @@ describe('FinancialAnalyticsService', () => {
         { tax_type: 'iva', total_tax: '190.000', deductible_tax: '95.000' },
         { tax_type: 'reteiva', total_tax: '15.000', deductible_tax: '0.000' },
       ]);
+      prisma.withholding_calculations.groupBy.mockResolvedValue([
+        { role: 'practiced', withholding_type: 'retefuente', _sum: { withholding_amount: 10 } },
+        { role: 'suffered', withholding_type: 'reteiva', _sum: { withholding_amount: 15 } },
+        { role: 'suffered', withholding_type: 'retefuente', _sum: { withholding_amount: 20 } },
+      ]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
       const result = await service.getTaxSummary(QUERY as any);
@@ -756,23 +866,21 @@ describe('FinancialAnalyticsService', () => {
       expect(result.iva_generado).toBe(190);
       expect(result.inc_generado).toBe(80);
       expect(result.ica_generado).toBe(50);
+      expect(result.breakdown.map((row) => row.tax_type)).toEqual(
+        expect.arrayContaining(['icui', 'ibua']),
+      );
       expect(result.iva_descontable).toBe(95);
       expect(result.rete_practicadas).toBe(10);
-      expect(result.rete_sufridas).toBe(15);
-      // (190 + 80 + 50) − 95 − 15 − 10 = 200 (both retenciones are credits).
-      // Was 220 before the fix — the old `+ rete_practicadas` over-counted
-      // the sales-side credit by 2x.
-      expect(result.net_vat_position).toBe(200);
-      // `net_tax` is the historical definition (all collected − refunds) and
-      // is no longer the DIAN posición — it sums every tax row including
-      // withholding/reteiva. 190 (IVA) + 80 (INC) + 50 (ICA) + 10 (retefuente)
-      // = 330.
-      expect(result.net_tax).toBe(330);
+      expect(result.rete_sufridas).toBe(35);
+      expect(result.reteiva_sufrida).toBe(15);
+      // 190 - 95 - 15 = 80; INC, ICA and other withholding types do not net.
+      expect(result.net_vat_position).toBe(80);
+      // Legacy net_tax remains all collected tax types minus refunds.
+      expect(result.net_tax).toBe(385);
     });
 
-    it('QUI-630: net_vat_position can be NEGATIVE (saldo a favor) when descontable + rete_sufridas exceed generado', async () => {
-      // Sales: only IVA 50 generated. Purchases: IVA descontable 200.
-      // Net = 50 − 200 = −150 (saldo a favor).
+    it('IVA estimate can be negative when deductible IVA + suffered reteIVA exceed generated IVA', async () => {
+      // IVA generated 50, deductible 200, suffered reteIVA 20 => estimate -170.
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           tax_type: 'iva',
@@ -791,20 +899,22 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([
         { tax_type: 'iva', total_tax: '380.000', deductible_tax: '200.000' },
       ]);
+      prisma.withholding_calculations.groupBy.mockResolvedValue([
+        { role: 'suffered', withholding_type: 'reteiva', _sum: { withholding_amount: 20 } },
+      ]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
       const result = await service.getTaxSummary(QUERY as any);
 
       expect(result.iva_generado).toBe(50);
       expect(result.iva_descontable).toBe(200);
-      expect(result.net_vat_position).toBe(-150);
+      expect(result.net_vat_position).toBe(-170);
     });
 
-    it('QUI-630 review: sales-side retenciones practicadas are credits (subtracted). Locks in the sign semantics for rete_practicadas', async () => {
+    it('practiced withholding never reduces the IVA-only estimate', async () => {
       // Sales: IVA 100 + retefuente 40 (practicada on sales) = 100 generated.
       // Purchases: none. No descontable, no sufridas.
-      // OLD formula (bug): 100 − 0 − 0 + 40 = 140 (over-counted by 80)
-      // NEW formula:        100 − 0 − 0 − 40 = 60  (correct: credit subtracted)
+      // The sales breakdown row is not a role-aware withholding record.
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           tax_type: 'iva',
@@ -830,6 +940,9 @@ describe('FinancialAnalyticsService', () => {
       prisma.$queryRaw.mockResolvedValueOnce([]);
       // No purchase rows in the period.
       prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.withholding_calculations.groupBy.mockResolvedValue([
+        { role: 'practiced', withholding_type: 'reteiva', _sum: { withholding_amount: 40 } },
+      ]);
       prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
 
       const result = await service.getTaxSummary(QUERY as any);
@@ -838,9 +951,7 @@ describe('FinancialAnalyticsService', () => {
       expect(result.rete_practicadas).toBe(40);
       expect(result.rete_sufridas).toBe(0);
       expect(result.iva_descontable).toBe(0);
-      // Lock in the credit semantics: a $40 sales-side retencion reduces
-      // the position by $40, not increases it.
-      expect(result.net_vat_position).toBe(60);
+      expect(result.net_vat_position).toBe(100);
     });
 
     it('QUI-630: effective_tax_rate is null (NOT 0) when the period has no taxable revenue', async () => {

@@ -181,6 +181,7 @@ export interface DocumentoSectionErrors {
           <app-input
             label="Fecha de emisión"
             type="date"
+            data-control-name="issue_date"
             [formControl]="issueDateControl()!"
             [error]="errors().issue_date"
             [required]="true"
@@ -197,6 +198,7 @@ export interface DocumentoSectionErrors {
       >
         <app-selector
           label="Forma de pago"
+          data-control-name="payment_form"
           [formControl]="paymentFormControl()"
           [options]="paymentFormOptions()"
           [errorText]="errors().payment_form ?? ''"
@@ -205,6 +207,7 @@ export interface DocumentoSectionErrors {
         ></app-selector>
         <app-selector
           label="Medio de pago"
+          data-control-name="payment_means_code"
           [formControl]="paymentMeansCodeControl()"
           [options]="paymentMeansOptions()"
           [errorText]="errors().payment_means_code ?? ''"
@@ -215,6 +218,7 @@ export interface DocumentoSectionErrors {
           <app-input
             label="Vencimiento"
             type="date"
+            data-control-name="due_date"
             [formControl]="dueDateControl()!"
             [error]="errors().due_date"
             [required]="dueDateRequired()"

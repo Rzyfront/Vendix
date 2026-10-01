@@ -43,6 +43,7 @@ export class OrgInvoicingComponent {
 
   readonly activeSection = computed(() => {
     const url = this.currentUrl();
+    if (url.includes('/received-documents')) return 'received-documents';
     if (url.includes('/resolutions')) return 'resolutions';
     if (url.includes('/dian-config')) return 'dian-config';
     return 'invoices';
@@ -56,6 +57,12 @@ export class OrgInvoicingComponent {
         label: 'Facturas',
         icon: 'receipt',
         variant: active === 'invoices' ? 'primary' : 'outline',
+      },
+      {
+        id: 'received-documents',
+        label: 'Documentos recibidos',
+        icon: 'inbox',
+        variant: active === 'received-documents' ? 'primary' : 'outline',
       },
       {
         id: 'resolutions',

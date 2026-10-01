@@ -1,0 +1,147 @@
+@if (permission() && eligible()) {
+  <div class="border-t border-border pt-4">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="font-semibold text-text-primary">Confirmar asignación a orden de compra</h3>
+        <p class="text-sm text-text-secondary">Selecciona explícitamente la línea de origen y el destino. Las sugerencias no se asignan automáticamente.</p>
+      </div>
+      <button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="!allocationsLoaded() || pending()" (click)="openForm()">
+        {{ allocationsLoaded() ? 'Asignar a una OC' : 'Cargando saldos…' }}
+      </button>
+    </div>
+  </div>
+
+  <app-modal [(isOpen)]="isOpen" [title]="'Confirmar asignación comercial'" [subtitle]="'La asignación no registra recepción física ni efectos contables o fiscales.'" [size]="'xl'" [fullScreenOnMobile]="true" [dialog]="true" [canClose]="canClose" (closed)="onClosed()">
+    <div class="max-h-[75vh] space-y-4 overflow-y-auto p-1">
+      <aside class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary" role="note">
+        Confirmar esta relación comercial no significa que la mercancía haya sido recibida, no genera inventario ni cuentas por pagar y no acepta el documento ante DIAN.
+      </aside>
+      @if (conflict()) {
+        <div class="space-y-3 rounded-lg border border-warning/40 bg-warning-light p-3" role="alert">
+          <p class="text-sm text-text-primary">{{ error() }}</p>
+          <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm font-medium" (click)="reloadAfterConflict()">Recargar asignaciones y saldos</button>
+        </div>
+      } @else if (error()) {
+        <p class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">{{ error() }}</p>
+      }
+
+      @if (!confirmationOpen()) {
+        <form [formGroup]="form" class="space-y-4" (ngSubmit)="prepareConfirmation()">
+          <section class="space-y-3">
+            <h4 class="font-semibold text-text-primary">1. Línea del documento proveedor</h4>
+            <label class="field">Línea fuente
+              <select [value]="selectedDocumentItemId() ?? ''" (change)="selectSource($event)" [disabled]="pending()">
+                <option value="">Selecciona una línea</option>
+                @for (line of sourceLines(); track line.id) {
+                  <option [value]="line.id" [disabled]="!sourceLineAvailable(line.id)">Línea {{ line.line_number }} · {{ line.description }} · pendiente {{ lineBalance(line.id)?.remaining_quantity ?? 'no disponible' }} {{ line.unit_code || '' }}</option>
+                }
+              </select>
+            </label>
+            @if (selectedSourceLine(); as source) {
+              <div class="grid grid-cols-1 gap-2 rounded-lg border border-border bg-surface p-3 text-sm sm:grid-cols-2">
+                <p class="text-text-primary">Cantidad original: {{ source.quantity }} {{ source.unit_code || 'unidad no informada' }}</p>
+                <p class="text-text-primary">Saldo pendiente: {{ selectedSourceBalance()?.remaining_quantity ?? 'no disponible' }} {{ source.unit_code || '' }}</p>
+                <p class="text-text-primary">Neto original: {{ documentMoney(source.net_amount) }}</p>
+                <p class="text-text-primary">Neto pendiente: {{ documentMoney(selectedSourceBalance()?.remaining_net_amount) }}</p>
+              </div>
+            }
+          </section>
+
+          <section class="space-y-3 border-t border-border pt-4">
+            <h4 class="font-semibold text-text-primary">2. Orden y línea destino</h4>
+            <label class="field">Orden de compra (selección manual)
+              <select [value]="selectedPurchaseOrderId() ?? ''" (change)="selectPurchaseOrder($event)" [disabled]="pending()">
+                <option value="">Selecciona una orden candidata</option>
+                @for (candidate of candidates(); track candidate.purchase_order_id) {
+                  <option [value]="candidate.purchase_order_id">{{ candidate.order_number || 'OC #' + candidate.purchase_order_id }} · {{ candidate.supplier.name }} · {{ candidate.location.name }}</option>
+                }
+              </select>
+            </label>
+            @if (selectedCandidate(); as candidate) {
+              <p class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary" role="note">
+                La moneda de la OC no está registrada. No se valida ni convierte el neto de destino ({{ poAmount(candidate.total_amount) }}).
+              </p>
+              <label class="field">Línea de orden de compra
+                <select [value]="selectedPurchaseOrderItemId() ?? ''" (change)="selectPurchaseOrderItem($event)" [disabled]="pending()">
+                  <option value="">Selecciona una línea de la OC</option>
+                  @for (line of candidate.items; track line.id) {
+                    <option [value]="line.id">{{ line.product_name }} · pedido {{ line.quantity_ordered }} · recibido {{ line.quantity_received }} · SKU {{ line.product_sku || line.variant_sku || 'sin SKU' }}</option>
+                  }
+                </select>
+              </label>
+            }
+            @if (selectedTargetLine(); as target) {
+              <div class="grid grid-cols-1 gap-2 rounded-lg border border-border bg-surface p-3 text-sm sm:grid-cols-2">
+                <p class="text-text-primary">Unidad de OC: {{ unitForLine(target) }}</p>
+                <p class="text-text-primary">Cantidad pedida {{ target.quantity_ordered }} · recibida {{ target.quantity_received }}</p>
+                <p class="text-text-primary">Asignado globalmente entre documentos: {{ selectedTargetBalance()?.allocated_quantity ?? 'no disponible' }}</p>
+                <p class="text-text-primary">Saldo global de la línea OC: {{ selectedTargetBalance()?.remaining_quantity ?? 'no disponible' }}</p>
+                <p class="text-text-primary">Neto destino: {{ poAmount(target.unit_price_net ?? target.unit_cost) }}</p>
+              </div>
+              <label class="field">Recepción física específica (opcional)
+                <select [value]="selectedReceptionItemKey()" (change)="selectReception($event)" [disabled]="pending()">
+                  <option value="">Sin vincular a una recepción específica</option>
+                  @for (receipt of receptionsForSelectedLine(); track receipt.key) { <option [value]="receipt.key">{{ receipt.label }}</option> }
+                </select>
+              </label>
+              @if (selectedReceipt()) {
+                <p class="text-sm text-warning" role="note">Recepción física · asignado globalmente: {{ selectedReceiptBalance()?.allocated_quantity ?? 'no disponible' }} · saldo global: {{ selectedReceiptBalance()?.remaining_quantity ?? 'no disponible' }} · la relación no crea ni modifica el registro de recepción.</p>
+              }
+            }
+          </section>
+
+          <section class="space-y-3 border-t border-border pt-4">
+            <h4 class="font-semibold text-text-primary">3. Cantidades e importe neto asignado</h4>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label class="field">Cantidad de la línea fuente
+                <input type="text" inputmode="decimal" autocomplete="off" formControlName="source_quantity" aria-describedby="source-quantity-help">
+              </label>
+              <label class="field">Cantidad en la unidad del destino @if (targetQuantityRequired()) { <span class="text-error">(requerida cuando las unidades difieren o falta unidad fuente)</span> } @else { <span class="text-text-secondary">(opcional)</span> }
+                <input type="text" inputmode="decimal" autocomplete="off" formControlName="target_quantity" aria-describedby="target-quantity-help">
+              </label>
+              <label class="field sm:col-span-2">Importe neto asignado ({{ document().currency || 'moneda no identificada' }})
+                <input type="text" inputmode="decimal" autocomplete="off" formControlName="allocated_net_amount" aria-describedby="net-amount-help">
+              </label>
+              <label class="field">Unidad informada para el destino @if (targetUnitRequired()) { <span class="text-error">(requerida)</span> }
+                <input formControlName="target_unit_code" maxlength="30" autocomplete="off" [readOnly]="targetUnitLocked()">
+              </label>
+              @if (needsReason()) {
+                <label class="field sm:col-span-2">Motivo de revisión manual (requerido por unidad o destino central)
+                  <textarea formControlName="manual_reason" rows="3" maxlength="500" placeholder="Explica la unidad o relación manual (mínimo 10 caracteres)"></textarea>
+                </label>
+              }
+            </div>
+            <p id="source-quantity-help" class="text-xs text-text-secondary">Se propone el saldo de la línea fuente; puedes editarlo. Usa punto decimal y no excedas el saldo pendiente.</p>
+            <p id="target-quantity-help" class="text-xs text-text-secondary">No se convierte la unidad automáticamente. Ingresa una cantidad sólo si conoces la equivalencia destino.</p>
+            <p id="net-amount-help" class="text-xs text-text-secondary">Se propone el neto pendiente de la línea fuente. Los importes se envían como texto decimal, sin cálculo flotante.</p>
+            @if (submitAttempted() && !canConfirm()) { <p class="text-sm text-error" role="alert">Selecciona una línea fuente, una OC y su línea destino; completa cantidades y neto con el formato decimal permitido. Si se requiere revisión manual, informa unidad destino y motivo.</p> }
+            @if (targetUnitRequired() && !formValue('target_unit_code').trim() && submitAttempted()) { <p class="text-sm text-error" role="alert">Ingresa el código de unidad destino; no se inferirá una conversión.</p> }
+            @if (targetQuantityRequired() && !formValue('target_quantity').trim() && submitAttempted()) { <p class="text-sm text-error" role="alert">Ingresa la cantidad en la unidad destino cuando no coincide con la unidad fuente o ésta no está informada.</p> }
+            @if (needsReason() && formValue('manual_reason').trim().length < 10 && submitAttempted()) { <p class="text-sm text-error" role="alert">El motivo manual debe tener al menos 10 caracteres.</p> }
+          </section>
+
+          <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
+            <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm font-medium" [disabled]="pending()" (click)="isOpen.set(false)">Cancelar</button>
+            <button type="submit" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" [disabled]="pending() || conflict()">Revisar asignación</button>
+          </div>
+        </form>
+      }
+      @if (confirmationOpen()) {
+        <app-modal [(isOpen)]="confirmationOpen" [title]="'Confirma la relación comercial'" [subtitle]="'Esta acción sólo registra una asignación comercial.'" [size]="'md'" [fullScreenOnMobile]="true" [dialog]="true" [canClose]="canClose">
+          <section class="space-y-4 p-1" aria-labelledby="confirm-match-title">
+            <h4 id="confirm-match-title" class="font-semibold text-text-primary">Revisa la asignación</h4>
+            <p class="text-sm text-text-primary">Vas a asignar la línea {{ selectedSourceLine()?.line_number }} del documento a {{ selectedCandidate()?.order_number || 'la OC seleccionada' }}, línea {{ selectedTargetLine()?.product_name }}.</p>
+            <p class="text-sm text-text-primary">Cantidad fuente {{ formValues().source_quantity }} {{ selectedSourceLine()?.unit_code || '' }} · cantidad destino {{ formValue('target_quantity') || 'no informada' }} {{ formValue('target_unit_code') }}</p>
+            <p class="text-sm text-text-primary">Neto asignado {{ documentMoney(formValues().allocated_net_amount) }}.</p>
+            <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm font-semibold text-text-primary">Esto no confirma recepción física y no ejecuta inventario, cuentas por pagar, contabilización ni aceptación DIAN.</p>
+            @if (error()) { <p class="text-sm text-error" role="alert">{{ error() }}</p> }
+            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm" [disabled]="pending()" (click)="confirmationOpen.set(false)">Volver a revisar</button>
+              <button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" [disabled]="!canConfirm() || pending()" (click)="confirm()">{{ pending() ? 'Confirmando…' : 'Confirmar asignación' }}</button>
+            </div>
+          </section>
+        </app-modal>
+      }
+    </div>
+  </app-modal>
+}

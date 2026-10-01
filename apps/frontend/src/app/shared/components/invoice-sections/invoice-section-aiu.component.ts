@@ -207,6 +207,7 @@ const SECTION = 'AIU';
       <div class="w-full">
         <app-textarea
           label="Objeto del contrato"
+          data-control-name="aiu_contract_object"
           [formControl]="contractObjectControl()"
           [rows]="2"
           [helperText]="contractObjectHelp()"

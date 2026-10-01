@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalObligationService } from './fiscal-obligation.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
+import { FiscalTaxCalendarService } from './fiscal-tax-calendar.service';
 
 describe('FiscalObligationService', () => {
   const context: FiscalOperationsContext = {
@@ -60,6 +61,7 @@ describe('FiscalObligationService', () => {
         fiscalStatus as any,
         eventEmitter,
         audit as any,
+        new FiscalTaxCalendarService(),
       ),
       client,
       eventEmitter,
@@ -211,6 +213,7 @@ describe('FiscalObligationService', () => {
           fiscalStatus as any,
           eventEmitter,
           audit as any,
+          new FiscalTaxCalendarService(),
         ),
         client,
         fiscalStatus,
@@ -349,6 +352,7 @@ describe('FiscalObligationService', () => {
           fiscalStatus as any,
           eventEmitter,
           audit as any,
+          new FiscalTaxCalendarService(),
         ),
         client,
       };
@@ -536,6 +540,247 @@ describe('FiscalObligationService', () => {
       const types = generatedTypes(client);
       expect(types).not.toContain('vat_return');
       expect(types).not.toContain('inc_return');
+    });
+  });
+
+  describe('verified tax-calendar integration', () => {
+    const makeCalendarService = (options: {
+      nit?: string;
+      responsibilities?: string[];
+      existing?: any;
+      stores?: boolean;
+    } = {}) => {
+      const obligationModel = {
+        findFirst: jest.fn().mockResolvedValue(options.existing ?? null),
+        create: jest.fn().mockImplementation(({ data }) =>
+          Promise.resolve({ id: 15, ...data }),
+        ),
+        update: jest.fn().mockImplementation(({ where, data }) =>
+          Promise.resolve({ id: where.id, ...options.existing, ...data }),
+        ),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+      const settings = {
+        fiscal_data: {
+          ...(options.nit ? { nit: options.nit } : {}),
+          ...(options.responsibilities
+            ? { tax_responsibilities: options.responsibilities }
+            : {}),
+        },
+      };
+      const client = {
+        fiscal_obligations: obligationModel,
+        withholding_calculations: { groupBy: jest.fn().mockResolvedValue([]) },
+        employees: { count: jest.fn().mockResolvedValue(0) },
+        organization_settings: {
+          findUnique: jest.fn().mockResolvedValue(
+            options.stores ? null : { settings },
+          ),
+        },
+        store_settings: {
+          findUnique: jest.fn().mockResolvedValue(
+            options.stores ? { settings } : null,
+          ),
+        },
+      };
+      const fiscalStatus = { getStatusBlock: jest.fn() };
+      const audit = { logForResource: jest.fn().mockResolvedValue(undefined) };
+      const service = new FiscalObligationService(
+        client as any,
+        fiscalStatus as any,
+        { emit: jest.fn() } as unknown as EventEmitter2,
+        audit as any,
+        new FiscalTaxCalendarService(),
+      );
+      return { service, client, obligationModel };
+    };
+
+    it('uses a verified monthly withholding deadline and stores the resolved range', async () => {
+      const { service, obligationModel } = makeCalendarService({ nit: '123456781' });
+      const [created] = await service.generateForContext(context, {
+        period_year: 2026,
+        period_month: 1,
+        periodicity: 'monthly',
+        types: ['withholding_return'],
+      });
+
+      expect(created).toMatchObject({
+        period_start: new Date('2026-01-01T00:00:00.000Z'),
+        period_end: new Date('2026-01-31T00:00:00.000Z'),
+        periodicity: 'monthly',
+        due_date: new Date('2026-02-10T00:00:00.000Z'),
+        due_date_verified: true,
+        status: 'pending',
+      });
+      expect(obligationModel.findFirst).toHaveBeenCalledWith({
+        where: {
+          organization_id: 1,
+          accounting_entity_id: 77,
+          type: 'withholding_return',
+          period_start: new Date('2026-01-01T00:00:00.000Z'),
+          period_end: new Date('2026-01-31T00:00:00.000Z'),
+          jurisdiction_key: 'CO-DIAN',
+        },
+      });
+    });
+
+    it('uses the closing month and normalized fiscal range for bimonthly and four-month VAT', async () => {
+      const { service } = makeCalendarService({ nit: '123456781' });
+      const [bimonthly] = await service.generateForContext(context, {
+        period_year: 2026,
+        period_month: 2,
+        periodicity: 'bimonthly',
+        types: ['vat_return'],
+      });
+      const [fourMonthly] = await service.generateForContext(context, {
+        period_year: 2026,
+        period_month: 4,
+        periodicity: 'four_monthly',
+        types: ['vat_return'],
+      });
+
+      expect(bimonthly).toMatchObject({
+        period_start: new Date('2026-01-01T00:00:00.000Z'),
+        period_end: new Date('2026-02-28T00:00:00.000Z'),
+        due_date: new Date('2026-03-10T00:00:00.000Z'),
+        due_date_verified: true,
+      });
+      expect(fourMonthly).toMatchObject({
+        period_start: new Date('2026-01-01T00:00:00.000Z'),
+        period_end: new Date('2026-04-30T00:00:00.000Z'),
+        due_date: new Date('2026-05-12T00:00:00.000Z'),
+        due_date_verified: true,
+      });
+    });
+
+    it('leaves unsupported year, missing NIT, SIMPLE, and legacy periodicity blocked without a fake deadline', async () => {
+      const cases = [
+        { options: { nit: '123456781' }, year: 2027, month: 2, periodicity: 'bimonthly' as const },
+        { options: {}, year: 2026, month: 1, periodicity: 'monthly' as const },
+        { options: { nit: '123456781', responsibilities: ['O-47'] }, year: 2026, month: 2, periodicity: 'bimonthly' as const },
+        { options: { nit: '123456781' }, year: 2026, month: 2, periodicity: undefined },
+      ];
+
+      for (const testCase of cases) {
+        const { service } = makeCalendarService(testCase.options);
+        const [created] = await service.generateForContext(context, {
+          period_year: testCase.year,
+          period_month: testCase.month,
+          periodicity: testCase.periodicity,
+          types: ['vat_return'],
+        });
+        expect(created).toMatchObject({
+          due_date: null,
+          due_date_verified: false,
+          status: 'blocked',
+        });
+        expect(created.blocking_reason).toContain('[CALENDAR_UNVERIFIED]');
+      }
+    });
+
+    it('does not overwrite final obligations during force refresh', async () => {
+      const final = {
+        id: 32,
+        organization_id: 1,
+        accounting_entity_id: 77,
+        status: 'paid',
+        blocking_reason: null,
+      };
+      const { service, obligationModel } = makeCalendarService({
+        nit: '123456781',
+        existing: final,
+      });
+      const result = await service.generateForContext(context, {
+        period_year: 2026,
+        period_month: 1,
+        periodicity: 'monthly',
+        types: ['withholding_return'],
+        force_refresh: true,
+      });
+      expect(result).toEqual([final]);
+      expect(obligationModel.update).not.toHaveBeenCalled();
+    });
+
+    it('clears only a prior calendar block when a refresh finds a verified deadline', async () => {
+      const priorCalendarBlock = {
+        id: 33,
+        organization_id: 1,
+        accounting_entity_id: 77,
+        status: 'blocked',
+        blocking_reason: '[CALENDAR_UNVERIFIED] No configured deadline.',
+      };
+      const { service, obligationModel } = makeCalendarService({
+        nit: '123456781',
+        existing: priorCalendarBlock,
+      });
+      const [updated] = await service.generateForContext(context, {
+        period_year: 2026,
+        period_month: 1,
+        periodicity: 'monthly',
+        types: ['withholding_return'],
+        force_refresh: true,
+      });
+
+      expect(obligationModel.update).toHaveBeenCalledWith({
+        where: { id: 33 },
+        data: expect.objectContaining({ status: 'pending', blocking_reason: null }),
+      });
+      expect(updated.due_date_verified).toBe(true);
+    });
+
+    it('preserves a non-calendar blocking reason during a verified refresh', async () => {
+      const manualBlock = {
+        id: 34,
+        organization_id: 1,
+        accounting_entity_id: 77,
+        status: 'blocked',
+        blocking_reason: 'Awaiting accountant review.',
+      };
+      const { service, obligationModel } = makeCalendarService({
+        nit: '123456781',
+        existing: manualBlock,
+      });
+      await service.generateForContext(context, {
+        period_year: 2026,
+        period_month: 1,
+        periodicity: 'monthly',
+        types: ['withholding_return'],
+        force_refresh: true,
+      });
+
+      expect(obligationModel.update).toHaveBeenCalledWith({
+        where: { id: 34 },
+        data: expect.not.objectContaining({ status: 'pending', blocking_reason: null }),
+      });
+    });
+
+    it('maps invalid periods to BadRequest before reading or writing obligations', async () => {
+      const { service, obligationModel } = makeCalendarService({ nit: '123456781' });
+      await expect(
+        service.generateForContext(context, {
+          period_year: 2026,
+          period_month: 2,
+          period_quarter: 1,
+          periodicity: 'bimonthly',
+          types: ['vat_return'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(obligationModel.findFirst).not.toHaveBeenCalled();
+      expect(obligationModel.create).not.toHaveBeenCalled();
+    });
+
+    it('does not transition unverified obligations to overdue', async () => {
+      const { service, obligationModel } = makeCalendarService();
+      await service.refreshOverdue();
+      expect(obligationModel.findMany).toHaveBeenCalledWith({
+        where: {
+          status: { in: ['pending', 'in_progress', 'blocked', 'ready'] },
+          due_date: { lt: expect.any(Date) },
+          due_date_verified: true,
+        },
+        select: expect.any(Object),
+      });
+      expect(obligationModel.update).not.toHaveBeenCalled();
     });
   });
 });

@@ -7,6 +7,7 @@ import { InvoicingService } from '../invoicing.service';
 import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalDocumentFinding } from '../validators/fiscal-document.validator';
+import type { EmitReadinessFinding } from '../invoice-flow/emit-readiness.contract';
 import { PosFiscalState, PosFiscalStatus } from './pos-fiscal-status.interface';
 import { INVOICE_AUTO_SEND_FAILED_ALERT } from './presential-pos-sale';
 // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
@@ -319,6 +320,7 @@ export class PosFiscalEmissionService {
           draft,
           this.describe(error),
           this.blockersOf(error),
+          this.blockersOf(error),
         );
       }
     }
@@ -327,6 +329,24 @@ export class PosFiscalEmissionService {
     // transmisible porque la máquina de estados lo permite (rejected → sent)
     // una vez corregida la causa.
     if (invoice.status === 'validated' || invoice.status === 'rejected') {
+      // MISMO veredicto que la factura manual (`emit-readiness`): incluye los
+      // hallazgos del emisor (config DIAN, certificado, resolución). Si hay
+      // bloqueantes NO se transmite: sería un rechazo con consecutivo gastado.
+      // Si la consulta misma falla, se sigue con el flujo de siempre
+      // (`validate()` ya corrió): es red de seguridad, no un nuevo punto de falla.
+      const readiness_blockers = await this.readinessBlockers(invoice.id);
+      if (readiness_blockers && readiness_blockers.length > 0) {
+        this.logger.warn(
+          `POS: la factura #${invoice.id} del pedido #${order_id} no es emitible: ${readiness_blockers[0].problem}`,
+        );
+        return this.failed(
+          order_id,
+          invoice,
+          readiness_blockers[0].problem,
+          [],
+          readiness_blockers,
+        );
+      }
       try {
         await this.invoice_flow.send(invoice.id);
       } catch (error) {
@@ -394,7 +414,35 @@ export class PosFiscalEmissionService {
       };
     }
 
-    return this.buildStatus(order_id, invoice, []);
+    const status = await this.buildStatus(order_id, invoice, []);
+    // Sólo en `failed` por prevalidación (documento aún sin transmitir): en
+    // `pending`/`issued` no se hace ninguna llamada extra.
+    if (
+      status.state === 'failed' &&
+      (invoice.status === 'draft' || invoice.status === 'validated')
+    ) {
+      const requirements = await this.readinessBlockers(invoice.id);
+      if (requirements) status.requirements = requirements;
+    }
+    return status;
+  }
+
+  /**
+   * Bloqueantes del veredicto de emisión, o `null` si no se pudo consultar.
+   * Nunca lanza: corre en la ruta de una venta ya cobrada.
+   */
+  private async readinessBlockers(
+    invoice_id: number,
+  ): Promise<EmitReadinessFinding[] | null> {
+    try {
+      const readiness = await this.invoice_flow.getEmitReadiness(invoice_id);
+      return readiness.blockers ?? [];
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo consultar emit-readiness de la factura #${invoice_id}: ${this.describe(error)}`,
+      );
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -634,6 +682,7 @@ export class PosFiscalEmissionService {
     invoice: { id: number; invoice_number: string; status: string } | null,
     message: string,
     blockers: FiscalDocumentFinding[] = [],
+    requirements?: EmitReadinessFinding[],
   ): PosFiscalStatus {
     return {
       ...this.emptyStatus(order_id),
@@ -643,6 +692,7 @@ export class PosFiscalEmissionService {
       invoice_number: invoice?.invoice_number ?? null,
       invoice_status: invoice?.status ?? null,
       blockers,
+      ...(requirements && requirements.length > 0 ? { requirements } : {}),
     };
   }
 

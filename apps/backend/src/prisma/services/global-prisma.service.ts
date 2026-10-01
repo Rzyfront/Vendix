@@ -1,10 +1,20 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { BasePrismaService } from '../base/base-prisma.service';
 
 @Injectable()
 export class GlobalPrismaService extends BasePrismaService {
   // Global service provides access to ALL models without any scoping
   // This is used for superadmin operations that need cross-tenant access
+
+  /**
+   * Runs a tagged SQL query on the deliberately unscoped global client.
+   * Every caller must include and validate explicit organization/entity/store
+   * predicates where the queried data is tenant-owned.
+   */
+  $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T> {
+    return this.baseClient.$queryRaw<T>(query);
+  }
 
   // Organization-scoped models (accessible without scoping in global service)
   get users() {
@@ -729,6 +739,65 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get saas_metrics_snapshot() {
     return this.baseClient.saas_metrics_snapshot;
+  }
+
+  // Received supplier documents and auditable fiscal settlement. Callers must
+  // always supply and validate explicit organization/entity predicates because
+  // this service intentionally bypasses tenant scoping.
+  get received_documents() {
+    return this.baseClient.received_documents;
+  }
+
+  get received_document_files() {
+    return this.baseClient.received_document_files;
+  }
+
+  get received_document_items() {
+    return this.baseClient.received_document_items;
+  }
+
+  get received_document_taxes() {
+    return this.baseClient.received_document_taxes;
+  }
+
+  get received_document_match_allocations() {
+    return this.baseClient.received_document_match_allocations;
+  }
+
+  get received_document_match_tax_allocations() {
+    return this.baseClient.received_document_match_tax_allocations;
+  }
+
+  get received_document_links() {
+    return this.baseClient.received_document_links;
+  }
+
+  get received_document_events() {
+    return this.baseClient.received_document_events;
+  }
+
+  get received_document_event_attempts() {
+    return this.baseClient.received_document_event_attempts;
+  }
+
+  get document_reception_connections() {
+    return this.baseClient.document_reception_connections;
+  }
+
+  get document_reception_runs() {
+    return this.baseClient.document_reception_runs;
+  }
+
+  get fiscal_tax_credits() {
+    return this.baseClient.fiscal_tax_credits;
+  }
+
+  get fiscal_credit_applications() {
+    return this.baseClient.fiscal_credit_applications;
+  }
+
+  get fiscal_tax_payments() {
+    return this.baseClient.fiscal_tax_payments;
   }
 
   // Inbound vendor support documents (super-admin step 5)

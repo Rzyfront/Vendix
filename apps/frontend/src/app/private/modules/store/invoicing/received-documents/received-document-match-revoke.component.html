@@ -1,0 +1,50 @@
+@if (canOpen()) {
+  <div class="mt-3 border-t border-border pt-3">
+    <button type="button" class="min-h-11 rounded-lg border border-error/40 px-3 py-2 text-sm font-medium text-error hover:bg-error-light focus:outline-none focus:ring-2 focus:ring-error" (click)="open()">Revocar asignación</button>
+  </div>
+
+  <app-modal [(isOpen)]="isOpen" [title]="'Revocar asignación comercial'" [subtitle]="'La asignación permanecerá en el historial como revocada.'" [size]="'md'" [fullScreenOnMobile]="true" [dialog]="true" [canClose]="canClose" (closed)="onClosed()">
+    <div class="space-y-4 p-1">
+      @if (error()) {
+        <div class="space-y-3 rounded-lg border border-warning/40 bg-warning-light p-3" [attr.role]="conflict() ? 'alert' : 'status'">
+          <p class="text-sm text-text-primary">{{ error() }}</p>
+          @if (conflict()) { <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm font-medium" (click)="reloadAfterConflict()">Recargar detalle y saldos</button> }
+        </div>
+      }
+      @if (!confirmationOpen()) {
+        <form [formGroup]="form" class="space-y-4" (ngSubmit)="prepareConfirmation()">
+          <section class="space-y-2 rounded-lg border border-border bg-surface p-3 text-sm" aria-label="Asignación seleccionada">
+            <h3 class="font-semibold text-text-primary">Destino: {{ target() }}</h3>
+            <p class="text-text-secondary">Línea fuente #{{ allocation().document_item_id }} · cantidad {{ allocation().source_quantity }} {{ allocation().source_unit_code || '' }}</p>
+            <p class="text-text-secondary">Cantidad destino {{ allocation().target_quantity ?? 'no informada' }} {{ allocation().target_unit_code || '' }}</p>
+            <p class="text-text-secondary">Importe neto {{ money(allocation().allocated_net_amount, allocation().currency) }}</p>
+            <p class="text-text-secondary">Confirmada: {{ dateTimeLabel(allocation().confirmed_at) }}</p>
+            @if (allocation().receipt_state) { <p class="text-text-secondary">Recepción vinculada: {{ receiptStateLabel(allocation().receipt_state) }}</p> }
+          </section>
+          <aside class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary" role="note">
+            Revocar libera el saldo comercial para nuevas asignaciones. No deshace una recepción física ni revierte inventario, cuentas por pagar, asientos contables o aceptación DIAN. El registro seguirá visible en el historial.
+          </aside>
+          <label class="field">Motivo de revocación (10–500 caracteres, sin caracteres de control)
+            <textarea formControlName="reason" rows="4" maxlength="500" placeholder="Explica por qué debe revocarse esta asignación"></textarea>
+          </label>
+          @if (attempted() && formStatus() !== 'VALID') { <p class="text-sm text-error" role="alert">El motivo debe tener entre 10 y 500 caracteres después de quitar espacios externos y no puede incluir controles.</p> }
+          <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm" [disabled]="pending()" (click)="isOpen.set(false)">Cancelar</button>
+            <button type="submit" class="min-h-11 rounded-lg bg-error px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" [disabled]="pending() || conflict()">Continuar a confirmación</button>
+          </div>
+        </form>
+      } @else {
+        <section class="space-y-4" aria-labelledby="confirm-revoke-title">
+          <h3 id="confirm-revoke-title" class="font-semibold text-text-primary">Confirma la revocación</h3>
+          <p class="text-sm text-text-primary">Revocarás la asignación activa a {{ target() }} por {{ money(allocation().allocated_net_amount, allocation().currency) }}.</p>
+          <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm font-semibold text-text-primary">No se revierte inventario, recepción, cuentas por pagar, contabilidad ni DIAN. La relación quedará registrada como revocada y se recalcularán los saldos comerciales.</p>
+          @if (error()) { <p class="text-sm text-error" role="alert">{{ error() }}</p> }
+          <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm" [disabled]="pending()" (click)="confirmationOpen.set(false)">Volver</button>
+            <button type="button" class="min-h-11 rounded-lg bg-error px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" [disabled]="!canRevoke() || pending()" (click)="confirmRevoke()">{{ pending() ? 'Revocando…' : 'Confirmar revocación' }}</button>
+          </div>
+        </section>
+      }
+    </div>
+  </app-modal>
+}

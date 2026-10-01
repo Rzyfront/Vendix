@@ -180,11 +180,10 @@ export class InvoicingController {
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
   async validateDraft(@Body() create_dto: CreateInvoiceDto) {
-    const { invoice, resolution_secret } =
-      await this.invoicing_service.buildDraftProjection(create_dto);
-    const result = await this.invoice_flow_service.getDraftEmitReadiness(
-      invoice,
-      { resolution_secret },
+    // La proyección se pasa COMO FUNCIÓN: `getDraftEmitReadiness` atrapa los
+    // rechazos de las puertas de datos y los devuelve como hallazgos.
+    const result = await this.invoice_flow_service.getDraftEmitReadiness(() =>
+      this.invoicing_service.buildDraftProjection(create_dto),
     );
     return this.response_service.success(result);
   }

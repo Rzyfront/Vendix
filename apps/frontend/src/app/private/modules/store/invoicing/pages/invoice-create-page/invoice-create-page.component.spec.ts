@@ -12,6 +12,9 @@ import {
   buildAiuSummaryRows,
   deriveAiuTotals,
   isAiuOperation,
+  isLocalRequirement,
+  localRequirement,
+  mergeRequirementsByTarget,
   resolveAiuBucketTaxes,
   resolveSubmitHint,
   shouldAutoApplyAiuBase,
@@ -902,5 +905,65 @@ describe('invoice-create-page · el Modelo 2 no cambia (paso 6)', () => {
       ),
     );
     expect(shares).toEqual([0, 0, 0, 1]);
+  });
+});
+
+/**
+ * Checklist viva — los helpers PUROS del faltante local y de la unión con los
+ * hallazgos del backend. La orquestación (focus, debounce, validate-draft)
+ * vive en el componente y exige el harness completo del store.
+ */
+describe('invoice-create-page · requisitos locales con destino', () => {
+  it('localRequirement arma una fila focus con id local:', () => {
+    const row = localRequirement(
+      'customer_name',
+      'Nombre del adquiriente',
+      'Falta el nombre.',
+      'customer_name',
+    );
+    expect(row.id).toBe('local:customer_name');
+    expect(row.severity).toBe('blocker');
+    expect(row.action).toEqual({
+      label: 'Ir al campo',
+      kind: 'focus',
+      target: 'customer_name',
+    });
+    expect(isLocalRequirement(row)).toBe(true);
+  });
+
+  it('un aviso lleva severity required y una fila navigate conserva la ruta', () => {
+    const warn = localRequirement('a', 'A', 'r', 'items.0.unit_code', {
+      severity: 'required',
+    });
+    const nav = localRequirement('res', 'Resolución', 'r', '/admin/x', {
+      kind: 'navigate',
+    });
+    expect(warn.severity).toBe('required');
+    expect(nav.action?.kind).toBe('navigate');
+    expect(nav.action?.target).toBe('/admin/x');
+  });
+
+  it('mergeRequirementsByTarget deja ganar a la primera lista y no repite destino', () => {
+    const local = localRequirement('n', 'Nombre', 'local', 'customer_name');
+    const backend = {
+      id: 'identity:legal_name',
+      label: 'Razón social',
+      reason: 'backend',
+      severity: 'blocker' as const,
+      action: { label: 'Ir', kind: 'focus' as const, target: 'customer_name' },
+    };
+    const other = {
+      ...backend,
+      id: 'identity:email',
+      action: { label: 'Ir', kind: 'focus' as const, target: 'customer_email' },
+    };
+    const merged = mergeRequirementsByTarget([local], [backend, other]);
+    expect(merged.map((r) => r.id)).toEqual(['local:n', 'identity:email']);
+  });
+
+  it('una fila navigate y una focus al mismo texto de destino no se pisan', () => {
+    const focus = localRequirement('a', 'A', 'r', 'x');
+    const nav = localRequirement('b', 'B', 'r', 'x', { kind: 'navigate' });
+    expect(mergeRequirementsByTarget([focus], [nav]).length).toBe(2);
   });
 });

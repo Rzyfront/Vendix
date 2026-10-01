@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -119,6 +119,12 @@ import type {
   EmitReadinessFinding,
   EmitReadinessVerdict,
 } from './emit-readiness.contract';
+import { FiscalProductionReadinessService } from '../providers/fiscal-production-readiness.service';
+import {
+  EMIT_READINESS_CTA,
+  exceptionToFinding,
+} from '../utils/exception-to-finding.util';
+import { tryResolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 
 /**
  * Re-export del hallazgo unificado. La definición vive en
@@ -697,6 +703,11 @@ export class InvoiceFlowService {
     private readonly fiscalDocument: FiscalDocumentValidator,
     private readonly technicalKeyVault: TechnicalKeyVaultService,
     private readonly invoice_number_generator: InvoiceNumberGenerator,
+    // Opcional: sólo lo necesita el bloque del emisor de `validate-draft`. Los
+    // specs que construyen el servicio con `new` sin él siguen funcionando (el
+    // bloque del emisor se omite).
+    @Optional()
+    private readonly fiscalReadiness?: FiscalProductionReadinessService,
   ) {}
 
   /**
@@ -1059,6 +1070,63 @@ export class InvoiceFlowService {
       throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     return context;
+  }
+
+  /**
+   * PUERTA DE PAGO — una factura que nace de una orden no se emite mientras la
+   * orden deba saldo (pagos `succeeded`/`captured` < `grand_total`), salvo que
+   * sea venta a crédito (`orders.payment_form === '2'`). Facturar dinero que no
+   * entró dejó una factura aceptada sobre una orden sin un solo pago (orden
+   * 9117). Aplica sólo a documentos de VENTA con `order_id`; notas, documentos
+   * soporte y facturas manuales (sin orden) no pasan por aquí. Todo camino de
+   * emisión (POS, webhook, solicitud de datos, manual) cruza `validate()`/`send()`.
+   * Devuelve el saldo pendiente (string) o `null` cuando no hay bloqueo.
+   */
+  private async resolveUnpaidOrderBalance(invoice: {
+    order_id?: number | null;
+    invoice_type?: string | null;
+  }): Promise<string | null> {
+    if (invoice.order_id == null) return null;
+    if (
+      !['sales_invoice', 'export_invoice', 'pos_equivalent_document'].includes(
+        String(invoice.invoice_type),
+      )
+    ) {
+      return null;
+    }
+    const order = await this.prisma.orders.findFirst({
+      where: { id: Number(invoice.order_id) },
+      select: {
+        grand_total: true,
+        payment_form: true,
+        payments: { select: { state: true, amount: true } },
+      },
+    });
+    if (!order || order.payment_form === '2') return null;
+    const settled = (order.payments ?? []).reduce(
+      (sum, payment) =>
+        ['succeeded', 'captured'].includes(String(payment.state))
+          ? sum.plus(payment.amount)
+          : sum,
+      new Prisma.Decimal(0),
+    );
+    const remaining = new Prisma.Decimal(order.grand_total).minus(settled);
+    return remaining.greaterThanOrEqualTo(0.01) ? remaining.toFixed(2) : null;
+  }
+
+  private async assertOrderPaidForEmission(invoice: {
+    id?: number;
+    order_id?: number | null;
+    invoice_type?: string | null;
+  }): Promise<void> {
+    const remaining = await this.resolveUnpaidOrderBalance(invoice);
+    if (remaining !== null) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_ORDER_UNPAID_001,
+        undefined,
+        { order_id: invoice.order_id, remaining_balance: remaining },
+      );
+    }
   }
 
   private async getInvoice(id: number) {
@@ -1689,6 +1757,7 @@ export class InvoiceFlowService {
   async validate(id: number) {
     let invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'validated');
+    await this.assertOrderPaidForEmission(invoice);
     await this.assertFiscalPeriodOpen(
       invoice.accounting_entity_id,
       invoice.issue_date,
@@ -1807,30 +1876,56 @@ export class InvoiceFlowService {
    */
   async getEmitReadiness(id: number): Promise<EmitReadinessReport> {
     const invoice = await this.getInvoice(id);
-    const identity = this.acquirerIdentity.validate(
-      this.buildAcquirerIdentityInput(invoice),
+    const customer_id: number | null =
+      invoice.customer_id != null ? Number(invoice.customer_id) : null;
+    // MISMA decoración y MISMO bloque del emisor que `validate-draft`: la
+    // factura persistida y el borrador tienen que decir lo mismo.
+    const identity = this.decorateIdentityReport(
+      this.acquirerIdentity.validate(this.buildAcquirerIdentityInput(invoice)),
+      customer_id,
     );
-    const fiscal_document = await this.runFiscalDocumentPrevalidation(invoice);
+    const raw_fiscal_document =
+      await this.runFiscalDocumentPrevalidation(invoice);
+    const fiscal_document = raw_fiscal_document
+      ? this.decorateFiscalDocumentReport(raw_fiscal_document)
+      : null;
+    const issuer = fiscal_document
+      ? await this.collectDraftIssuerFindings(invoice, fiscal_document)
+      : [];
+    const unpaid_balance = await this.resolveUnpaidOrderBalance(invoice);
+    const findings: EmitReadinessFinding[] = [
+      ...identity.findings,
+      ...(fiscal_document?.findings ?? []),
+      ...issuer,
+      ...(unpaid_balance !== null
+        ? [
+            {
+              code: 'ORDER_UNPAID',
+              severity: 'blocker' as const,
+              field: 'order.remaining_balance',
+              problem: `La orden tiene saldo pendiente de ${unpaid_balance}.`,
+              fix: 'Registra el pago de la orden antes de emitir la factura, o márcala como venta a crédito.',
+              target: 'config' as const,
+            },
+          ]
+        : []),
+    ];
+    const blockers = findings.filter((f) => f.severity === 'blocker');
+    const warnings = findings.filter((f) => f.severity === 'warning');
 
     return {
       // Los campos de identidad siguen aplanados en la raíz: es el contrato que
       // ya consume el formulario y romperlo no aporta nada.
       ...identity,
-      // …pero `emittable` pasa a ser el AND de las DOS puertas. Si sólo
-      // reflejara la identidad, la pantalla diría «listo para emitir» sobre un
-      // documento que `validate()` va a rechazar un clic después — que es
-      // exactamente la desincronización que este endpoint existe para evitar.
-      emittable: identity.emittable && (fiscal_document?.emittable ?? true),
-      // Y las LISTAS aplanadas se unen por la misma razón. Aplanar sólo la
-      // identidad mientras `emittable` mira las dos puertas produce el peor
-      // desenlace posible para el usuario: «no se puede emitir» con la lista de
-      // requisitos VACÍA, porque el bloqueante real (ClTec, aritmética,
-      // resolución) vive en `fiscal_document` y el modal lee la raíz. Se
-      // conservan `identity` y `fiscal_document` intactos abajo para quien
-      // necesite distinguir de qué puerta vino cada hallazgo.
-      findings: [...identity.findings, ...(fiscal_document?.findings ?? [])],
-      blockers: [...identity.blockers, ...(fiscal_document?.blockers ?? [])],
-      warnings: [...identity.warnings, ...(fiscal_document?.warnings ?? [])],
+      // `emittable` es el AND de TODAS las fuentes (identidad, documento fiscal
+      // y emisor), y las listas aplanadas se unen por la misma razón: «no se
+      // puede emitir» con la lista vacía es la desincronización que este
+      // endpoint existe para evitar. `identity` y `fiscal_document` se conservan
+      // intactos para quien necesite distinguir la puerta de origen.
+      emittable: blockers.length === 0,
+      findings,
+      blockers,
+      warnings,
       identity,
       fiscal_document,
       invoice_id: invoice.id,
@@ -1866,19 +1961,30 @@ export class InvoiceFlowService {
    * lectura: sirve para que la regla de rango del prevalidador tenga algo real
    * que medir, y se descarta con la proyección.
    *
-   * ## Qué NO contesta esta puerta
+   * ## Qué contesta (MOTOR ÚNICO de prevalidación)
    *
    * Las puertas de datos del request —periodo fiscal cerrado, aritmética que no
    * cuadra, perfil inactivo, régimen AIU contradictorio, cliente de otro
-   * tenant— NO se convierten en hallazgos: se dejan LANZAR desde
-   * `buildDraftProjection`, con el mismo `VendixHttpException` y el mismo texto
-   * que devolvería «Crear factura». Traducirlas a una lista de requisitos
-   * exigiría un catálogo de códigos paralelo al de los dos validadores, y ese
-   * catálogo se desincronizaría del mensaje real que el usuario ve al crear —
-   * que es precisamente el desenlace que esta pantalla existe para evitar.
+   * tenant— siguen lanzando `VendixHttpException` desde `buildDraftProjection`
+   * con el mismo texto que «Crear factura». Esta puerta, cuando recibe la
+   * función de proyección, ATRAPA esas excepciones y las traduce con
+   * `exceptionToFinding` (código → campo, `target`, `cta`): el mensaje es el
+   * real, la tabla sólo añade a dónde ir. Un error desconocido se relanza.
+   *
+   * Si la proyección tiene éxito se suma el bloque del emisor (configuración
+   * DIAN, certificado, resolución vigente hoy, identidad fiscal, TRM) y lo que
+   * la proyección recolectó (NIT/DV, producto en línea, retenciones).
+   *
+   * Los 400 de class-validator (forma del DTO) no pasan por aquí.
    */
   async getDraftEmitReadiness(
-    invoice: any,
+    source:
+      | any
+      | (() => Promise<{
+          invoice: any;
+          resolution_secret: StoredTechnicalKey | null;
+          collected_findings?: EmitReadinessFinding[];
+        }>),
     options: {
       /**
        * La fila de `invoice_resolutions` con sus DOS columnas de clave, tal
@@ -1886,35 +1992,241 @@ export class InvoiceFlowService {
        * vault que usa `revealResolutionTechnicalKey`, para que la ClTec en
        * claro no exista fuera de este servicio ni pase por el controlador.
        * `null` cuando no hay resolución que respalde el documento.
+       *
+       * Se ignora cuando `source` es la función de proyección: ella la trae.
        */
-      resolution_secret: StoredTechnicalKey | null;
-    },
+      resolution_secret?: StoredTechnicalKey | null;
+      /** Hallazgos ya recolectados por la proyección (Hueco 3). */
+      collected_findings?: EmitReadinessFinding[];
+    } = {},
   ): Promise<DraftEmitReadinessReport> {
-    const identity = this.acquirerIdentity.validate(
+    // MOTOR ÚNICO. `source` puede ser el borrador ya proyectado o la función que
+    // lo proyecta. Con la función, un rechazo de las puertas de datos
+    // (`INVOICING_CALC_*`, `INVOICING_AIU_*`, período cerrado...) NO se lanza:
+    // se convierte en el hallazgo que la pantalla sabe pintar y lleva al campo.
+    // Un error desconocido se relanza: un 500 real no es un requisito.
+    let invoice: any = source;
+    let resolution_secret = options.resolution_secret ?? null;
+    let collected = options.collected_findings ?? [];
+    if (typeof source === 'function') {
+      try {
+        const projection = await source();
+        invoice = projection.invoice;
+        resolution_secret = projection.resolution_secret;
+        collected = projection.collected_findings ?? [];
+      } catch (error) {
+        const finding = exceptionToFinding(error);
+        if (!finding) throw error;
+        return this.buildProjectionFailureVerdict(finding);
+      }
+    }
+
+    const customer_id: number | null =
+      invoice.customer_id != null ? Number(invoice.customer_id) : null;
+
+    const raw_identity = this.acquirerIdentity.validate(
       this.buildAcquirerIdentityInput(invoice),
     );
     // Por la BÓVEDA, no por la columna plana: mismo motivo que en
     // `revealResolutionTechnicalKey`. Validar una clave distinta de la que se
     // va a hashear es lo que dejó pasar la ClTec de 38 caracteres.
-    const fiscal_document = await this.runFiscalDocumentPrevalidation(
+    const raw_fiscal_document = await this.runFiscalDocumentPrevalidation(
       invoice,
       undefined,
-      this.technicalKeyVault.reveal(options.resolution_secret),
+      this.technicalKeyVault.reveal(resolution_secret),
     );
 
+    // Destino de cada hallazgo. Los de identidad se corrigen en la FICHA cuando
+    // la factura la trae (`resolveAcquirerIdentity` le da prioridad), y en el
+    // formulario cuando no.
+    const identity = this.decorateIdentityReport(raw_identity, customer_id);
+    const fiscal_document = raw_fiscal_document
+      ? this.decorateFiscalDocumentReport(raw_fiscal_document)
+      : null;
+
+    const extra: EmitReadinessFinding[] = [...collected];
+    if (fiscal_document) {
+      // Sin `fiscal_document` el tipo no se emite a la DIAN: no hay emisor,
+      // resolución ni TRM que juzgar.
+      const issuer = await this.collectDraftIssuerFindings(
+        invoice,
+        fiscal_document,
+      );
+      extra.push(...issuer);
+    }
+
+    const findings: EmitReadinessFinding[] = [
+      ...identity.findings,
+      ...(fiscal_document?.findings ?? []),
+      ...extra,
+    ];
+    const blockers = findings.filter((f) => f.severity === 'blocker');
+    const warnings = findings.filter((f) => f.severity === 'warning');
+
     const verdict: EmitReadinessVerdict = {
-      // MISMO AND que `getEmitReadiness`. Un `emittable` que mirara una sola
-      // puerta dejaría al usuario con «no se puede emitir» y la lista vacía.
-      emittable: identity.emittable && (fiscal_document?.emittable ?? true),
-      findings: [...identity.findings, ...(fiscal_document?.findings ?? [])],
-      blockers: [...identity.blockers, ...(fiscal_document?.blockers ?? [])],
-      warnings: [...identity.warnings, ...(fiscal_document?.warnings ?? [])],
+      // MISMO AND que `getEmitReadiness`, más lo recolectado. Un `emittable` que
+      // mirara una sola puerta dejaría al usuario con «no se puede emitir» y la
+      // lista vacía.
+      emittable: blockers.length === 0,
+      findings,
+      blockers,
+      warnings,
       has_items: (invoice.invoice_items?.length ?? 0) > 0,
       identity,
       fiscal_document,
     };
 
     return verdict;
+  }
+
+  /**
+   * Veredicto cuando la PROYECCIÓN misma no se pudo armar. No hay documento que
+   * pasar por los validadores, así que `identity` va vacío y `fiscal_document`
+   * `null`; lo único que dice el veredicto es el bloqueante.
+   */
+  private buildProjectionFailureVerdict(
+    finding: EmitReadinessFinding,
+  ): DraftEmitReadinessReport {
+    const blockers = [finding];
+    return {
+      emittable: false,
+      findings: [finding],
+      blockers,
+      warnings: [],
+      has_items: false,
+      identity: {
+        emittable: true,
+        mode: 'final_consumer',
+        findings: [],
+        blockers: [],
+        warnings: [],
+        normalized: null,
+      },
+      fiscal_document: null,
+    };
+  }
+
+  private decorateIdentityReport<
+    R extends {
+      findings: any[];
+      blockers: any[];
+      warnings: any[];
+    },
+  >(report: R, customer_id: number | null): R {
+    const decorate = (finding: any): EmitReadinessFinding =>
+      customer_id != null
+        ? {
+            ...finding,
+            target: 'config',
+            cta: EMIT_READINESS_CTA.customer(customer_id),
+            details: { ...(finding.details ?? {}), customer_id },
+          }
+        : { ...finding, target: 'form' };
+    return {
+      ...report,
+      findings: report.findings.map(decorate),
+      blockers: report.blockers.map(decorate),
+      warnings: report.warnings.map(decorate),
+    };
+  }
+
+  private decorateFiscalDocumentReport<
+    R extends {
+      findings: any[];
+      blockers: any[];
+      warnings: any[];
+    },
+  >(report: R): R {
+    // Numeración y clave técnica se corrigen en la configuración de
+    // resoluciones; contenido y aritmética, en el formulario.
+    const decorate = (finding: any): EmitReadinessFinding =>
+      finding.category === 'resolution' || finding.category === 'technical_key'
+        ? {
+            ...finding,
+            target: 'config',
+            cta: EMIT_READINESS_CTA.resolutions,
+          }
+        : { ...finding, target: 'form' };
+    return {
+      ...report,
+      findings: report.findings.map(decorate),
+      blockers: report.blockers.map(decorate),
+      warnings: report.warnings.map(decorate),
+    };
+  }
+
+  /**
+   * BLOQUE DEL EMISOR de `validate-draft`: lo que hoy sólo se descubría en
+   * `send()`. Sólo base de datos y configuración local — nada de red.
+   *
+   * - Configuración DIAN, certificado, habilitación e identidad fiscal del
+   *   emisor: `FiscalProductionReadinessService.collectIssuerReadiness`.
+   * - Resolución vigente HOY, rango y prefijo: la variante no-throw de
+   *   `resolveInvoiceControl`, que `send()` ejecuta (salvo documento soporte,
+   *   que no cuelga de una resolución DIAN).
+   * - TRM: la misma regla que `buildExchangeRateDeclaration`.
+   *
+   * Si el prevalidador del documento ya reportó un bloqueante de numeración, se
+   * omiten los hallazgos de `resolution*` del emisor: dirían lo mismo dos veces.
+   */
+  private async collectDraftIssuerFindings(
+    invoice: any,
+    fiscal_document: { blockers: Array<{ category?: string }> },
+  ): Promise<EmitReadinessFinding[]> {
+    const out: EmitReadinessFinding[] = [];
+
+    if (this.fiscalReadiness && invoice.accounting_entity_id) {
+      out.push(
+        ...(await this.fiscalReadiness.collectIssuerReadiness({
+          organization_id: invoice.organization_id,
+          store_id: invoice.store_id ?? null,
+          accounting_entity_id: invoice.accounting_entity_id,
+          configuration_type: this.configurationType(invoice.invoice_type),
+          document_type: invoice.fiscal_document_type,
+        })),
+      );
+    }
+
+    if (!this.isSupportDocumentType(invoice.invoice_type)) {
+      const control = tryResolveInvoiceControl(
+        invoice.resolution,
+        'America/Bogota',
+        new Date(),
+        {
+          resolution_id: invoice.resolution?.id ?? undefined,
+          document_type: invoice.invoice_type,
+        },
+      );
+      if (control.error) {
+        const finding = exceptionToFinding(control.error);
+        if (!finding) throw control.error;
+        out.push(finding);
+      }
+    }
+
+    try {
+      this.buildExchangeRateDeclaration(invoice);
+    } catch (error) {
+      const finding = exceptionToFinding(error);
+      if (!finding) throw error;
+      out.push(finding);
+    }
+
+    const numbering_already_reported = fiscal_document.blockers.some(
+      (b) => b.category === 'resolution',
+    );
+    const deduped = out.filter(
+      (f) =>
+        !(numbering_already_reported && (f.field ?? '').startsWith('resolution')),
+    );
+    // La misma causa puede llegar por dos caminos (readiness y control).
+    const seen = new Set<string>();
+    return deduped.filter((f) => {
+      const key = `${f.code}|${f.field ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   /**
@@ -3891,6 +4203,7 @@ export class InvoiceFlowService {
     const invoice = await this.getInvoice(id);
     await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'sent');
+    await this.assertOrderPaidForEmission(invoice);
 
     // REENVÍO DE UN RECHAZO — `rejected -> sent` es una transición LEGAL en
     // `VALID_TRANSITIONS`, pero legal no es lo mismo que revisada. Hasta acá

@@ -420,6 +420,10 @@ jobs:
       # producción de abajo.
       - name: Typecheck de specs (buildcheck:types)
         working-directory: apps/backend
+        # El heap por defecto de Node ya no alcanza para src + specs (OOM
+        # "Ineffective mark-compacts", exit 134 en el PR #881); el runner tiene 16 GB.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run buildcheck:types
       # SALVEDAD (KG-9(a)) -- actualizado por F-161: el paso de arriba ya cierra
       # la mitad de este hueco, así que lo que sigue describe sólo lo que AÚN no

@@ -5,6 +5,9 @@ import { certificateNitMatches } from '../dian-config/certificates/nit-match.uti
 import { resolveTestSetProof } from '../dian-config/test-set-wait.util';
 import { EncryptionService } from '@common/services/encryption.service';
 import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
+import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import type { EmitReadinessFinding } from '../invoice-flow/emit-readiness.contract';
+import { exceptionToFinding } from '../utils/exception-to-finding.util';
 
 type DianConfigurationType =
   | 'invoicing'
@@ -913,27 +916,8 @@ export class FiscalProductionReadinessService {
     // Certificate identity/expiry keep their dedicated error codes: they are not
     // "incomplete setup" but an actively wrong certificate, and the frontend maps
     // them to specific remediation copy.
-    if (
-      config.certificate_nit &&
-      config.nit &&
-      !certificateNitMatches({
-        certificateTaxId: config.certificate_nit,
-        nit: config.nit,
-        dv: config.nit_dv,
-      })
-    ) {
-      throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
-        dian_configuration_id: config.id,
-        expected_nit: this.onlyDigits(config.nit),
-        certificate_nit: this.onlyDigits(config.certificate_nit),
-      });
-    }
-    if (config.certificate_expiry && config.certificate_expiry <= new Date()) {
-      throw new VendixHttpException(ErrorCodes.DIAN_CERT_003, undefined, {
-        dian_configuration_id: config.id,
-        certificate_expiry: config.certificate_expiry,
-      });
-    }
+    this.assertCertificateNitMatches(config);
+    this.assertCertificateNotExpired(config);
 
     const report = this.evaluateProductionReadiness(config);
     // `operation_mode` already threw above; drop it so the payload keeps the
@@ -950,6 +934,189 @@ export class FiscalProductionReadinessService {
         },
       );
     }
+  }
+
+  /**
+   * El NIT del certificado tiene que ser el NIT fiscal. Extraído de
+   * `assertProductionReady` sin cambio de comportamiento para que
+   * `collectIssuerReadiness` reutilice la MISMA regla en vez de copiarla.
+   */
+  private assertCertificateNitMatches(config: ReadinessConfig): void {
+    if (
+      config.certificate_nit &&
+      config.nit &&
+      !certificateNitMatches({
+        certificateTaxId: config.certificate_nit,
+        nit: config.nit,
+        dv: config.nit_dv,
+      })
+    ) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
+        dian_configuration_id: config.id,
+        expected_nit: this.onlyDigits(config.nit),
+        certificate_nit: this.onlyDigits(config.certificate_nit),
+      });
+    }
+  }
+
+  /** El certificado no puede estar vencido. Ver `assertCertificateNitMatches`. */
+  private assertCertificateNotExpired(config: ReadinessConfig): void {
+    if (config.certificate_expiry && config.certificate_expiry <= new Date()) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_003, undefined, {
+        dian_configuration_id: config.id,
+        certificate_expiry: config.certificate_expiry,
+      });
+    }
+  }
+
+  /**
+   * LO QUE EL EMISOR LE DEBE AL DOCUMENTO, COMO LISTA Y SIN LANZAR.
+   *
+   * Reúne los chequeos que hoy sólo corren en `send()` (vía
+   * `InvoiceProviderResolver.resolve` → `resolveOwnSoftwareConfig`) para que
+   * `POST /store/invoicing/validate-draft` los anuncie ANTES de emitir: config
+   * DIAN activa (producción), software propio, certificado vigente, NIT del
+   * certificado = NIT fiscal, habilitación e identidad fiscal del emisor.
+   *
+   * NO duplica reglas: llama a las MISMAS funciones que lanzan y traduce su
+   * `VendixHttpException` con `exceptionToFinding`. Todo hallazgo sale con
+   * `target: 'config'` y su `cta`.
+   *
+   * SÓLO BASE DE DATOS Y CONFIG LOCAL: ninguna llamada a la DIAN, así que es
+   * seguro con el debounce de 800 ms de la pantalla.
+   *
+   * ESPEJO DEL RESOLVEDOR FUERA DE PRODUCCIÓN: `InvoiceProviderResolver` degrada
+   * al proveedor mock cuando no hay configuración y `NODE_ENV !== 'production'`.
+   * En ese caso la ausencia de configuración NO es un hallazgo (no se emitiría
+   * por la DIAN). Con una configuración presente sí se juzga certificado e
+   * identidad, porque ahí sí firma el proveedor DIAN.
+   *
+   * Un error que no sea una excepción tipada conocida SE RELANZA: un 500 real no
+   * debe disfrazarse de «todo listo».
+   */
+  async collectIssuerReadiness(
+    params: ResolveConfigParams,
+  ): Promise<EmitReadinessFinding[]> {
+    const findings: EmitReadinessFinding[] = [];
+    const push = (error: unknown): void => {
+      const finding = exceptionToFinding(error);
+      if (!finding) throw error;
+      findings.push(finding);
+    };
+
+    let config: Awaited<
+      ReturnType<FiscalProductionReadinessService['resolveOwnSoftwareConfig']>
+    >;
+    try {
+      config = await this.resolveOwnSoftwareConfig(params);
+    } catch (error) {
+      if (this.isProductionRuntime()) push(error);
+      return findings;
+    }
+
+    // En producción `resolveOwnSoftwareConfig` ya corrió `assertProductionReady`.
+    // Fuera de ella sólo se juzga el certificado, que firma igual.
+    if (!(params.requireProduction ?? this.isProductionRuntime())) {
+      for (const check of [
+        () => this.assertCertificateNitMatches(config as any),
+        () => this.assertCertificateNotExpired(config as any),
+      ]) {
+        try {
+          check();
+        } catch (error) {
+          push(error);
+        }
+      }
+    }
+
+    try {
+      await this.assertIssuerIdentityResolvable(params, config);
+    } catch (error) {
+      push(error);
+    }
+
+    return findings;
+  }
+
+  /**
+   * ¿Tiene el emisor razón social, municipio y departamento? Es la MISMA
+   * `resolveTenantFiscalIdentity` que usa la emisión, alimentada con la misma
+   * fuente (entidad contable → organización/tienda → dirección `billing`).
+   */
+  private async assertIssuerIdentityResolvable(
+    params: ResolveConfigParams,
+    config: { nit: string },
+  ): Promise<void> {
+    const entity = await this.prisma.withoutScope().accounting_entities.findFirst({
+      where: {
+        id: params.accounting_entity_id,
+        organization_id: params.organization_id,
+        is_active: true,
+      },
+      include: {
+        organization: {
+          include: {
+            addresses: {
+              where: { type: 'billing' },
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+            organization_settings: true,
+          },
+        },
+        store: {
+          include: {
+            addresses: {
+              where: { type: 'billing' },
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+            store_settings: true,
+          },
+        },
+      },
+    });
+    // Sin entidad no hay identidad que juzgar: es un problema de configuración
+    // fiscal que la propia emisión reporta; aquí no se inventa un hallazgo.
+    if (!entity) return;
+
+    const organization = entity.organization;
+    const store = entity.store;
+    const address =
+      entity.fiscal_scope === 'STORE'
+        ? store?.addresses?.[0]
+        : organization?.addresses?.[0];
+    const settings =
+      entity.fiscal_scope === 'STORE'
+        ? store?.store_settings?.settings
+        : organization?.organization_settings?.settings;
+
+    resolveTenantFiscalIdentity({
+      nit: config.nit,
+      fiscal_data: (settings as any)?.fiscal_data ?? {},
+      entity: { legal_name: entity.legal_name, name: entity.name },
+      organization: organization
+        ? {
+            legal_name: organization.legal_name,
+            name: organization.name,
+            email: organization.email,
+            phone: organization.phone,
+            document_type: organization.document_type,
+            person_type: organization.person_type,
+          }
+        : null,
+      address: address
+        ? {
+            address_line1: address.address_line1,
+            city: address.city,
+            state_province: address.state_province,
+            municipality_code: address.municipality_code,
+            postal_code: address.postal_code,
+            phone_number: address.phone_number,
+          }
+        : null,
+      email: organization?.email,
+    });
   }
 
   /**

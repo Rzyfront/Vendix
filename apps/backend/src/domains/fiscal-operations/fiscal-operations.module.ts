@@ -19,6 +19,7 @@ import { FiscalRulesService } from './services/fiscal-rules.service';
 import { FiscalAuditService } from './services/fiscal-audit.service';
 import { FiscalConfigChecklistService } from './services/fiscal-config-checklist.service';
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
+import { FiscalTaxCalendarService } from './services/fiscal-tax-calendar.service';
 import { InvoicingModule } from '../store/invoicing/invoicing.module';
 import { InvoicingService } from '../store/invoicing/invoicing.service';
 
@@ -31,6 +32,7 @@ import { InvoicingService } from '../store/invoicing/invoicing.service';
     FiscalContextResolverService,
     FiscalFlowStateService,
     FiscalObligationService,
+    FiscalTaxCalendarService,
     TaxDeclarationDraftService,
     FiscalCloseService,
     FiscalEvidenceService,

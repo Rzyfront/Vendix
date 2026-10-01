@@ -407,14 +407,13 @@ export class OrganizationAdminLayoutComponent {
       // surface for organizations that OWN their fiscal scope
       // (fiscal_scope=ORGANIZATION). Each child is a leaf whose module renders
       // its sub-sections as internal sticky-header tabs (org invoicing/payroll
-      // shells, the org accounting shell, the fiscal compliance hub). The whole
-      // group hides when STORES own fiscal. When fiscal is NOT yet activated,
-      // only "Operación fiscal" stays visible (no requiresFiscalArea) so the
-      // owner can always reach the activation wizard.
+      // shells, the org accounting shell, the fiscal compliance hub). The
+      // parent is scope-neutral; each full operational leaf retains its
+      // ORGANIZATION scope and activation gate, while a reader may reach only
+      // the received-documents route when invoicing is not active.
       label: 'Fiscal',
       icon: 'landmark',
       alwaysVisible: true,
-      requiredFiscalScope: 'ORGANIZATION',
       children: [
         {
           label: 'Operación fiscal',
@@ -430,6 +429,10 @@ export class OrganizationAdminLayoutComponent {
           alwaysVisible: true,
           requiredFiscalScope: 'ORGANIZATION',
           requiresFiscalArea: 'invoicing',
+          fiscalReadFallback: {
+            permission: 'organization:invoicing:received:read',
+            route: '/admin/invoicing/received-documents',
+          },
         },
         {
           label: 'Contabilidad',

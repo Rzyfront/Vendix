@@ -68,6 +68,12 @@ export class DefaultPanelUIService {
         settings_fiscal_management: true,
         accounting: true,
         payroll: true,
+        // D37: default_visible_for_privileged_users=true and
+        // show_new_badge=yes. Received fiscal documents are a read surface
+        // independent of emission enablement. Privileged users discover the
+        // existing Facturación module by default; explicit per-user false
+        // remains authoritative in mergePanelUIWithFallback.
+        invoicing: true,
         fiscal_operations: true,
         fiscal_dashboard: true,
         fiscal_obligations: true,

@@ -5,6 +5,9 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { OrgInvoicingController } from './invoicing.controller';
 import { OrgInvoicingService } from './invoicing.service';
+import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
+import { OrganizationReceivedDocumentsController } from '../../received-documents/organization-received-documents.controller';
+import { OrganizationDocumentReceptionConnectionsController } from '../../received-documents/organization-document-reception-connections.controller';
 
 @Module({
   imports: [
@@ -12,8 +15,13 @@ import { OrgInvoicingService } from './invoicing.service';
     ResponseModule,
     OrgDianConfigModule,
     OrgInvoiceResolutionsModule,
+    SharedReceivedDocumentsModule,
   ],
-  controllers: [OrgInvoicingController],
+  controllers: [
+    OrganizationDocumentReceptionConnectionsController,
+    OrganizationReceivedDocumentsController,
+    OrgInvoicingController,
+  ],
   providers: [OrgInvoicingService],
   exports: [
     OrgDianConfigModule,

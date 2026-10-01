@@ -1,0 +1,137 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  title="Conexiones de recepción"
+  subtitle="Configura conexiones seguras y supervisa las ejecuciones de recepción."
+  [size]="'xxl'"
+  [fullScreenOnMobile]="true"
+  [dialog]="true"
+  [canClose]="canClose"
+  (closed)="onClosed()"
+>
+  <div class="space-y-4">
+    @if (scope() === 'organization') {
+      <section class="space-y-3 rounded-xl border border-border bg-surface p-3 md:p-4" aria-labelledby="connection-store-title">
+        <div>
+          <h2 id="connection-store-title" class="font-semibold text-text-primary">Tienda receptora</h2>
+          <p class="text-sm text-text-secondary">Selecciona explícitamente la tienda operativa que recibirá y pagará la conexión. No cambia la identidad fiscal.</p>
+        </div>
+        <label class="field" for="reception-store-select">Tienda
+          <select id="reception-store-select" [value]="selectedOperationalStoreId() ?? ''" [disabled]="storeLoading()" (change)="onOperationalStoreChange($event)">
+            <option value="">Selecciona una tienda</option>
+            @for (store of stores(); track store.id) { <option [value]="store.id">{{ store.name }}</option> }
+          </select>
+        </label>
+        @if (storeLoading()) { <p role="status" class="text-sm text-text-secondary">Cargando tiendas…</p> }
+        @if (storeError()) { <div role="alert" class="flex items-center justify-between gap-3 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error"><span>{{ storeError() }}</span><button class="min-h-11 rounded-lg border border-error/40 px-3" type="button" (click)="loadStores(storePage(), selectedStoreId())">Reintentar</button></div> }
+        @if (storePages() > 1) {
+          <div class="flex flex-wrap items-center justify-between gap-2 text-sm text-text-secondary">
+            <span>Tiendas {{ (storePage() - 1) * 200 + 1 }}–{{ storeRangeEnd() }} de {{ storeTotal() }}</span>
+            <div class="flex gap-2"><button type="button" class="min-h-11 rounded-lg border border-border px-3" [disabled]="storePage() <= 1 || storeLoading()" (click)="changeStorePage(storePage() - 1)">Anterior</button><button type="button" class="min-h-11 rounded-lg border border-border px-3" [disabled]="storePage() >= storePages() || storeLoading()" (click)="changeStorePage(storePage() + 1)">Siguiente</button></div>
+          </div>
+        }
+        @if (storeTotal() === 0 && !storeLoading() && !storeError()) { <p class="text-sm text-warning" role="status">No hay tiendas disponibles para configurar una recepción.</p> }
+      </section>
+    }
+
+    @if (!scopeReady()) {
+      <div class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary" role="status">Selecciona una tienda válida antes de consultar o guardar conexiones.</div>
+    } @else {
+      <section class="space-y-3" aria-labelledby="connection-list-title">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div><h2 id="connection-list-title" class="font-semibold text-text-primary">Proveedores configurados</h2><p class="text-sm text-text-secondary">{{ total() }} conexiones · tienda operativa {{ scope() === 'store' ? 'actual' : currentStoreName }}</p></div>
+          <button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" [disabled]="loading() || saving()" (click)="openCreate()">Agregar conexión</button>
+        </div>
+        @if (loadError()) { <div role="alert" class="flex items-center justify-between gap-3 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error"><span>{{ loadError() }}</span><button type="button" class="min-h-11 rounded-lg border border-error/40 px-3" (click)="loadConnections(page())">Reintentar</button></div> }
+        @if (loading() && list().length === 0) { <p class="p-5 text-center text-sm text-text-secondary" role="status">Cargando conexiones…</p> }
+        @if (!loading() && list().length === 0 && !loadError()) { <p class="rounded-lg border border-border p-4 text-sm text-text-secondary">No hay proveedores configurados para esta tienda.</p> }
+        @if (list().length > 0) {
+          <div class="space-y-2">
+            @for (connection of list(); track connection.id) {
+              <button type="button" class="w-full rounded-xl border border-border bg-surface p-3 text-left hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary md:p-4" [class.border-primary]="selectedId() === connection.id" [attr.aria-pressed]="selectedId() === connection.id" (click)="selectConnection(connection)">
+                <span class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span class="min-w-0"><strong class="block truncate text-text-primary">{{ connection.name }}</strong><span class="block text-sm text-text-secondary">{{ connectionTypeLabel(connection.connection_type) }} · cada {{ connection.poll_interval_minutes }} min</span></span>
+                  <span class="flex flex-wrap gap-2 text-xs"><span class="rounded-full border border-border px-2 py-1">{{ connection.enabled ? 'Habilitada' : 'Pausada' }}</span><span class="rounded-full border border-border px-2 py-1">{{ connection.has_secret ? 'Credencial guardada' : 'Sin credencial' }}</span></span>
+                </span>
+                @if (connection.last_error_code) { <span class="mt-2 block text-xs text-warning">Último código reportado: {{ safeStatus(connection.last_error_code) }}</span> }
+              </button>
+            }
+          </div>
+          @if (listPages() > 1) { <div class="flex items-center justify-between text-sm"><span>Página {{ page() }} de {{ listPages() }}</span><div class="flex gap-2"><button type="button" class="min-h-11 rounded-lg border border-border px-3" [disabled]="page() <= 1 || loading()" (click)="changeListPage(page() - 1)">Anterior</button><button type="button" class="min-h-11 rounded-lg border border-border px-3" [disabled]="page() >= listPages() || loading()" (click)="changeListPage(page() + 1)">Siguiente</button></div></div> }
+        }
+      </section>
+
+      @if (formMode(); as mode) {
+        <section class="space-y-4 rounded-xl border border-border bg-surface p-3 md:p-4" aria-labelledby="connection-form-title">
+          <div class="flex items-start justify-between gap-3"><div><h2 id="connection-form-title" class="font-semibold text-text-primary">{{ mode === 'create' ? 'Nueva conexión' : 'Editar conexión' }}</h2><p class="text-sm text-text-secondary">La credencial es de escritura única y nunca se recupera en el formulario.</p></div><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" [disabled]="saving()" (click)="closeEditor()">Cerrar</button></div>
+          @if (loadingDetail()) { <p role="status" class="text-sm text-text-secondary">Cargando configuración…</p> }
+          @if (detail(); as connection) {
+            @if (connection.connection_type === 'webhook' && connection.webhook_path) {
+              <div class="space-y-2 rounded-lg border border-info/30 bg-info-light p-3 text-sm text-text-primary">
+                <p class="font-medium">URL pública del webhook</p><code class="block break-all rounded bg-surface p-2">{{ webhookUrl(connection.webhook_path) }}</code>
+                <p>El proveedor debe firmar cada solicitud con HMAC usando la credencial secreta. El token público de la URL no autoriza solicitudes. No existe una bandeja universal de DIAN; configura un proveedor compatible.</p>
+              </div>
+            }
+            @if (connection.connection_type === 'api_poll' && connection.endpoint) { <p class="break-all text-xs text-text-secondary">Endpoint HTTPS: {{ connection.endpoint }}</p> }
+          }
+          <form [formGroup]="form" (ngSubmit)="submit()" class="space-y-4">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label class="field">Nombre<input formControlName="name" maxlength="100" autocomplete="off" placeholder="Ej. Proveedor electrónico"></label>
+              <label class="field">Tipo<select formControlName="connection_type" (change)="getConnectionType($event)"><option value="api_poll">API de proveedor</option><option value="webhook">Webhook firmado</option></select></label>
+              @if (form.controls.connection_type.value === 'api_poll') {
+                <label class="field sm:col-span-2">Endpoint HTTPS público<input type="url" formControlName="endpoint" maxlength="2048" autocomplete="url" placeholder="https://api.proveedor.co/..." aria-describedby="endpoint-help"></label>
+                <p id="endpoint-help" class="-mt-2 text-xs text-text-secondary sm:col-span-2">Solo HTTPS público. No uses URLs internas ni credenciales dentro de la URL.</p>
+              }
+              @if (mode === 'create') {
+                <label class="field sm:col-span-2">Secreto API / clave HMAC<input type="password" formControlName="secret" autocomplete="new-password" maxlength="4096" placeholder="Credencial del proveedor"></label>
+              } @else {
+                <label class="field sm:col-span-2">Rotar secreto (opcional)<input type="password" formControlName="secret" autocomplete="new-password" maxlength="4096" placeholder="Deja vacío para conservar la credencial"></label>
+              }
+              <label class="field">Intervalo de consulta (minutos)<input type="number" inputmode="numeric" formControlName="poll_interval_minutes" min="1" max="1440" step="1"></label>
+              <label class="mt-6 inline-flex min-h-11 items-center gap-3 text-sm text-text-primary"><input type="checkbox" class="h-5 w-5 accent-primary" formControlName="enabled"> Habilitar configuración</label>
+            </div>
+            @if (submitAttempted() && form.invalid) { <div role="alert" class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary">Revisa los campos: nombre y secreto son obligatorios; endpoint API debe usar HTTPS público, e intervalo debe ser un entero entre 1 y 1440.</div> }
+            @if (form.controls.connection_type.value === 'webhook') { <p class="rounded-lg border border-border p-3 text-sm text-text-secondary">Un webhook requiere firma HMAC del proveedor y la clave secreta configurada. Habilitarlo no inicia una sincronización ni garantiza conexión.</p> }
+            @if (saveError()) { <div role="alert" class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">{{ saveError() }} @if (conflict()) { <button type="button" class="ml-2 min-h-11 underline" [disabled]="loadingDetail()" (click)="reloadAfterConflict()">Recargar desde servidor</button> }</div> }
+            @if (savedMessage()) { <p role="status" class="rounded-lg border border-success/30 bg-success-light p-3 text-sm text-text-primary">{{ savedMessage() }}</p> }
+            <div class="flex flex-col-reverse justify-end gap-2 border-t border-border pt-3 sm:flex-row"><button type="button" class="min-h-11 rounded-lg border border-border px-4 text-sm" [disabled]="saving()" (click)="closeEditor()">Cancelar</button><button type="submit" class="min-h-11 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50" [disabled]="!canEdit || form.invalid">{{ saving() ? 'Guardando…' : mode === 'create' ? 'Guardar conexión' : 'Guardar cambios' }}</button></div>
+          </form>
+        </section>
+      }
+
+      @if (selectedId()) {
+        <section class="space-y-3 rounded-xl border border-border p-3 md:p-4" aria-labelledby="runs-title">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 id="runs-title" class="font-semibold text-text-primary">Historial de ejecuciones</h2><p class="text-sm text-text-secondary">Solo se muestran estado, cantidades y códigos seguros; no se exponen cursores ni cuerpos del proveedor.</p></div><div class="flex flex-wrap items-center gap-2"><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" [disabled]="loadingDetail() || loadingRuns() || actionBusy() || cancelBusy()" (click)="loadDetail(selectedId()!)">Actualizar</button>@if (canSync() && detail()?.enabled && detail()?.connection_type === 'api_poll') {<button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" [disabled]="syncActionDisabled" (click)="requestSyncNow()">{{ actionBusy() ? 'Solicitando…' : pollingRunId() ? 'Sincronización en curso…' : 'Sincronizar ahora' }}</button>}</div></div>
+          @if (syncHasUnsavedChanges && canSync() && detail()?.connection_type === 'api_poll') { <p class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary" role="status">Guarda primero los cambios del formulario. La sincronización usa únicamente la configuración persistida.</p> }
+          @if (pollingRunId()) { <p class="rounded-lg border border-info/30 bg-info-light p-3 text-sm text-text-primary" role="status">Consultando ejecución {{ pollingRunId() }}. La solicitud aceptada todavía no equivale a una recepción confirmada.</p> }
+          @if (actionMessage()) { <p class="rounded-lg border border-success/30 bg-success-light p-3 text-sm text-text-primary" role="status">{{ actionMessage() }}</p> }
+          @if (actionWarning()) { <p class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary" role="status">{{ actionWarning() }}</p> }
+          @if (actionError()) { <p class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">{{ actionError() }}</p> }
+          @if (loadingRuns()) { <p role="status" class="text-sm text-text-secondary">Cargando historial…</p> }
+          @if (runsError()) { <div role="alert" class="flex items-center justify-between gap-3 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error"><span>{{ runsError() }}</span><button type="button" class="min-h-11 rounded-lg border border-error/40 px-3" (click)="loadRuns(selectedId()!, runPage())">Reintentar</button></div> }
+          @if (!loadingRuns() && runs().length === 0 && !runsError()) { <p class="text-sm text-text-secondary">Todavía no hay ejecuciones registradas. Si la conexión es API, puedes solicitar una sincronización manual.</p> }
+          @for (run of runs(); track run.id) {
+            <article class="rounded-lg border border-border bg-surface p-3">
+              <div class="flex flex-wrap justify-between gap-2"><strong>{{ safeStatus(run.status) }}</strong><span class="text-xs text-text-secondary">{{ runDate(run.created_at) }} · {{ safeStatus(run.trigger) }}</span></div>
+              <dl class="mt-2 grid grid-cols-3 gap-2 text-sm"><div><dt class="text-xs text-text-secondary">Recibidos</dt><dd>{{ run.received_count }}</dd></div><div><dt class="text-xs text-text-secondary">Duplicados</dt><dd>{{ run.duplicate_count }}</dd></div><div><dt class="text-xs text-text-secondary">Errores</dt><dd>{{ run.error_count }}</dd></div></dl>
+              @if (safeErrorCodes(run).length > 0) { <p class="mt-2 text-xs text-warning">Códigos: {{ safeErrorCodes(run).join(', ') }}</p> }
+              @if (canSync() && detail()?.enabled && (run.status === 'failed' || run.status === 'partial')) { <button type="button" class="mt-3 min-h-11 rounded-lg border border-primary px-3 text-sm font-medium text-primary disabled:opacity-50" [disabled]="syncActionDisabled" (click)="retryRunNow(run)">Reintentar ejecución</button> }
+              @if (canSync() && isUnresolved(run.status)) {
+                @if (cancelingRunId() === run.id) {
+                  <div class="mt-3 space-y-3 rounded-lg border border-warning/40 bg-warning-light p-3" role="group" aria-label="Confirmar cancelación de ejecución">
+                    <p class="text-sm text-text-primary">La cancelación puede descartar elementos aún no procesados de esta captura. No cancela documentos ya creados ni eventos fiscales DIAN.</p>
+                    <label class="field">Motivo de cancelación (10–500 caracteres)<textarea rows="3" maxlength="500" [value]="cancelReason()" (input)="onCancelReasonChange($event)" aria-describedby="cancel-reason-hint"></textarea></label>
+                    <p id="cancel-reason-hint" class="text-xs text-text-secondary">El motivo se registra en auditoría. Mínimo 10 caracteres, máximo 500.</p>
+                    <div class="flex flex-wrap gap-2"><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" [disabled]="cancelBusy()" (click)="cancelCancelConfirmation()">Volver</button><button type="button" class="min-h-11 rounded-lg bg-error px-3 text-sm font-semibold text-white disabled:opacity-50" [disabled]="cancelBusy() || actionBusy() || loadingDetail() || !scopeReady() || !canSync() || !cancelReasonValid()" (click)="confirmCancelRun(run)">{{ cancelBusy() ? 'Cancelando…' : 'Confirmar cancelación' }}</button></div>
+                  </div>
+                } @else {
+                  <button type="button" class="mt-3 min-h-11 rounded-lg border border-error/50 px-3 text-sm font-medium text-error disabled:opacity-50" [disabled]="!canSync() || !scopeReady() || loadingDetail() || actionBusy() || cancelBusy()" (click)="beginCancel(run)">Cancelar ejecución</button>
+                }
+              }
+            </article>
+          }
+          @if (runPages() > 1) { <div class="flex items-center justify-between text-sm"><span>Página {{ runPage() }} de {{ runPages() }}</span><div class="flex gap-2"><button type="button" class="min-h-11 rounded-lg border border-border px-3" [disabled]="runPage() <= 1 || loadingRuns()" (click)="changeRunPage(runPage() - 1)">Anterior</button><button type="button" class="min-h-11 rounded-lg border border-border px-3" [disabled]="runPage() >= runPages() || loadingRuns()" (click)="changeRunPage(runPage() + 1)">Siguiente</button></div></div> }
+        </section>
+      }
+    }
+  </div>
+</app-modal>

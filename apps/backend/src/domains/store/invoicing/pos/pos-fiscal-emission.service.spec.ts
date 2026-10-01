@@ -136,6 +136,132 @@ describe('PosFiscalEmissionService', () => {
     );
   });
 
+  describe('protocolo de prevalidación compartido (emit-readiness)', () => {
+    const blocker = {
+      code: 'ISSUER_CERT_MISSING',
+      severity: 'blocker',
+      field: 'certificate',
+      problem: 'Falta el certificado de firma.',
+      fix: 'Sube el certificado en Configuración DIAN.',
+      target: 'config',
+      cta: 'Ir a configuración',
+    };
+
+    it('readiness con 1 blocker: no llama send() y devuelve requirements', async () => {
+      const { service, invoice_flow } = createService({
+        invoice_flow: {
+          getEmitReadiness: jest.fn().mockResolvedValue({ blockers: [blocker] }),
+        },
+      });
+
+      const result = await service.emitForOrder(1);
+
+      expect(invoice_flow.send).not.toHaveBeenCalled();
+      expect(result.state).toBe('failed');
+      expect(result.message).toBe(blocker.problem);
+      expect(result.requirements).toEqual([blocker]);
+    });
+
+    it('readiness sin blockers: llama send()', async () => {
+      const { service, invoice_flow } = createService({
+        invoice_flow: {
+          getEmitReadiness: jest.fn().mockResolvedValue({ blockers: [] }),
+        },
+      });
+
+      await service.emitForOrder(1);
+
+      expect(invoice_flow.send).toHaveBeenCalledWith(5);
+    });
+
+    it('readiness lanza: sigue el flujo actual y llama send()', async () => {
+      const { service, invoice_flow } = createService({
+        invoice_flow: {
+          getEmitReadiness: jest.fn().mockRejectedValue(new Error('boom')),
+        },
+      });
+
+      await service.emitForOrder(1);
+
+      expect(invoice_flow.send).toHaveBeenCalledWith(5);
+    });
+
+    it('validate() lanza con details.blockers: requirements poblado', async () => {
+      const { VendixHttpException, ErrorCodes } = require('src/common/errors');
+      const draft = {
+        id: 5,
+        invoice_number: 'FE-5',
+        status: 'draft',
+        transmission_status: null,
+        cufe: null,
+        pdf_url: null,
+        contingency_deadline: null,
+      };
+      const { service, prisma, invoice_flow } = createService();
+      prisma.invoices.findFirst.mockResolvedValue(draft);
+      invoice_flow.validate.mockRejectedValue(
+        new VendixHttpException(
+          ErrorCodes.INVOICING_FIND_003,
+          'No pasó la prevalidación',
+          { blockers: [blocker] },
+        ),
+      );
+
+      const result = await service.emitForOrder(1);
+
+      expect(invoice_flow.send).not.toHaveBeenCalled();
+      expect(result.state).toBe('failed');
+      expect(result.requirements).toEqual([blocker]);
+    });
+
+    it('getStatusForOrder failed por prevalidación pobla requirements; si readiness falla los omite', async () => {
+      const draft = {
+        id: 5,
+        invoice_number: 'FE-5',
+        status: 'draft',
+        transmission_status: null,
+        cufe: null,
+        pdf_url: null,
+        contingency_deadline: null,
+      };
+      const failedRetry = new Map([
+        [5, { status: 'failed', attempts: 0, max_attempts: 3, next_retry_at: new Date(), last_error: 'x' }],
+      ]);
+      const ok = createService({
+        invoice_flow: {
+          getEmitReadiness: jest.fn().mockResolvedValue({ blockers: [blocker] }),
+        },
+        retry_queue: {
+          getRetryStatusByInvoiceIds: jest.fn().mockResolvedValue(failedRetry),
+        },
+      });
+      ok.prisma.invoices.findFirst.mockResolvedValue(draft);
+      const withReq = await ok.service.getStatusForOrder(1);
+      expect(withReq.state).toBe('failed');
+      expect(withReq.requirements).toEqual([blocker]);
+
+      const bad = createService({
+        invoice_flow: {
+          getEmitReadiness: jest.fn().mockRejectedValue(new Error('boom')),
+        },
+        retry_queue: {
+          getRetryStatusByInvoiceIds: jest.fn().mockResolvedValue(failedRetry),
+        },
+      });
+      bad.prisma.invoices.findFirst.mockResolvedValue(draft);
+      const without = await bad.service.getStatusForOrder(1);
+      expect(without.state).toBe('failed');
+      expect(without.requirements).toBeUndefined();
+    });
+
+    it('getStatusForOrder en pending no consulta readiness', async () => {
+      const getEmitReadiness = jest.fn();
+      const { service } = createService({ invoice_flow: { getEmitReadiness } });
+      await service.getStatusForOrder(1);
+      expect(getEmitReadiness).not.toHaveBeenCalled();
+    });
+  });
+
   it('sigue reportando `pending` cuando NO hubo ningún intento fallido todavía', async () => {
     const { service } = createService();
 

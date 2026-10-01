@@ -111,6 +111,13 @@ describe('InvoiceFlowService support documents', () => {
       store_settings: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
+      // Puerta de pago de la emisión (INVOICING_ORDER_UNPAID_001): por defecto la
+      // orden de origen está saldada para que estos specs sigan juzgando lo suyo.
+      orders: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ grand_total: 0, payment_form: '1', payments: [] }),
+      },
       withoutScope: () => configClient,
       ...overrides.prisma,
     };
@@ -1404,5 +1411,485 @@ describe('InvoiceFlowService.persistWithholdingBatches — enlace de la sufrida 
     expect(prisma.withholding_calculations.findMany).not.toHaveBeenCalled();
     expect(prisma.withholding_calculations.updateMany).not.toHaveBeenCalled();
     expect(withholdingFlow.persistWithholdingLines).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * MOTOR ÚNICO DE PREVALIDACIÓN — `getDraftEmitReadiness`.
+ *
+ * `validate-draft` tiene que devolver TODO lo que falta como hallazgos con
+ * `field` / `target` / `cta`, en vez de lanzar el primer rechazo de las puertas
+ * de datos. Ver `exception-to-finding.util.ts`.
+ */
+describe('InvoiceFlowService.getDraftEmitReadiness (motor único)', () => {
+  // Imports locales para no tocar la cabecera del archivo.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { VendixHttpException, ErrorCodes } = require('../../../../common/errors');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const {
+    FiscalProductionReadinessService,
+  } = require('../providers/fiscal-production-readiness.service');
+
+  const cleanFiscalDocument = (extra: any = {}) => ({
+    emittable: true,
+    document_type: 'sales_invoice',
+    findings: [],
+    blockers: [],
+    warnings: [],
+    computed: {},
+    ...extra,
+  });
+
+  const buildService = (options: { readiness?: any } = {}) => {
+    const service = new InvoiceFlowService(
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      new CustomerFiscalIdentityValidator(),
+      {} as any,
+      { reveal: jest.fn().mockReturnValue(null) } as any,
+      {} as any,
+      options.readiness,
+    );
+    jest
+      .spyOn(service as any, 'runFiscalDocumentPrevalidation')
+      .mockResolvedValue(cleanFiscalDocument());
+    return service;
+  };
+
+  const validResolution = () => ({
+    id: 3,
+    resolution_number: '18760000001',
+    prefix: 'FE',
+    range_from: 1,
+    range_to: 1000,
+    current_number: 10,
+    valid_from: new Date('2020-01-01T00:00:00Z'),
+    valid_to: new Date('2099-01-01T00:00:00Z'),
+    is_active: true,
+  });
+
+  const baseDraft = (overrides: any = {}) => ({
+    id: -1,
+    organization_id: 1,
+    store_id: 2,
+    accounting_entity_id: 77,
+    fiscal_document_type: 'sales_invoice',
+    invoice_type: 'sales_invoice',
+    invoice_number: 'FE11',
+    customer_id: null,
+    supplier_id: null,
+    customer: null,
+    supplier: null,
+    customer_name: null,
+    customer_tax_id: null,
+    customer_document_type: null,
+    foreign_currency: null,
+    exchange_rate: null,
+    resolution: validResolution(),
+    invoice_items: [{ id: -1, description: 'x' }],
+    ...overrides,
+  });
+
+  it('la proyección lanza CALC_005: veredicto con blocker, sin lanzar', async () => {
+    const service = buildService();
+    const verdict = await service.getDraftEmitReadiness(async () => {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_005,
+        'La línea 3 no cierra',
+        { line_index: 2 },
+      );
+    });
+    expect(verdict.emittable).toBe(false);
+    expect(verdict.blockers).toHaveLength(1);
+    expect(verdict.blockers[0]).toMatchObject({
+      code: 'INVOICING_CALC_005',
+      field: 'items[2].unit_price',
+      target: 'form',
+    });
+    expect(verdict.findings).toEqual(verdict.blockers);
+  });
+
+  it('un error desconocido de la proyección se relanza', async () => {
+    const service = buildService();
+    await expect(
+      service.getDraftEmitReadiness(async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+  });
+
+  it('proyección exitosa por función: suma lo recolectado por la proyección', async () => {
+    const service = buildService();
+    const collected = {
+      code: 'INVOICING_WITHHOLDING_002',
+      severity: 'blocker' as const,
+      field: 'withholdings',
+      problem: 'p',
+      fix: 'f',
+      target: 'form' as const,
+    };
+    const verdict = await service.getDraftEmitReadiness(async () => ({
+      invoice: baseDraft(),
+      resolution_secret: null,
+      collected_findings: [collected],
+    }));
+    expect(verdict.emittable).toBe(false);
+    expect(verdict.blockers).toContainEqual(collected);
+  });
+
+  describe('bloque del emisor', () => {
+    const readinessWith = (config: any, entity: any) => {
+      const client = {
+        dian_configurations: { findFirst: jest.fn().mockResolvedValue(config) },
+        accounting_entities: { findFirst: jest.fn().mockResolvedValue(entity) },
+        invoice_resolutions: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+      };
+      return new FiscalProductionReadinessService(
+        { withoutScope: () => client } as any,
+        {
+          isUsingFallbackKey: () => false,
+          needsReencryption: () => false,
+        } as any,
+      );
+    };
+    const completeEntity = {
+      fiscal_scope: 'STORE',
+      legal_name: 'ACME SAS',
+      name: 'ACME',
+      organization: {
+        legal_name: 'ACME SAS',
+        name: 'ACME',
+        addresses: [],
+        organization_settings: null,
+      },
+      store: {
+        addresses: [
+          {
+            address_line1: 'Calle 1',
+            city: 'Bogotá',
+            state_province: 'Bogotá D.C.',
+            municipality_code: '11001',
+          },
+        ],
+        store_settings: null,
+      },
+    };
+    const config = (overrides: any = {}) => ({
+      id: 1,
+      nit: '900123456',
+      operation_mode: 'own_software',
+      enablement_status: 'enabled',
+      environment: 'production',
+      certificate_nit: '900123456',
+      certificate_expiry: new Date('2099-01-01T00:00:00Z'),
+      ...overrides,
+    });
+
+    it('certificado vencido: blocker de configuración con cta a la config DIAN', async () => {
+      const service = buildService({
+        readiness: readinessWith(
+          config({ certificate_expiry: new Date('2020-01-01T00:00:00Z') }),
+          completeEntity,
+        ),
+      });
+      const verdict = await service.getDraftEmitReadiness(baseDraft(), {
+        resolution_secret: null,
+      });
+      expect(verdict.emittable).toBe(false);
+      expect(verdict.blockers).toContainEqual(
+        expect.objectContaining({
+          code: 'DIAN_CERT_003',
+          target: 'config',
+          cta: '/admin/invoicing/dian-config',
+        }),
+      );
+    });
+
+    it('NIT del certificado distinto del fiscal: DIAN_CERT_004 de configuración', async () => {
+      const service = buildService({
+        readiness: readinessWith(
+          config({ certificate_nit: '800999888' }),
+          completeEntity,
+        ),
+      });
+      const verdict = await service.getDraftEmitReadiness(baseDraft());
+      expect(verdict.blockers.map((b) => b.code)).toContain('DIAN_CERT_004');
+    });
+
+    it('identidad del emisor sin municipio: issuer.municipality_code a /admin/fiscal/wizard', async () => {
+      const entity = {
+        ...completeEntity,
+        store: { addresses: [{ address_line1: 'x', state_province: 'Bog' }], store_settings: null },
+      };
+      const service = buildService({
+        readiness: readinessWith(config(), entity),
+      });
+      const verdict = await service.getDraftEmitReadiness(baseDraft());
+      expect(verdict.blockers).toContainEqual(
+        expect.objectContaining({
+          code: 'FISCAL_IDENTITY_INCOMPLETE',
+          field: 'issuer.municipality_code',
+          target: 'config',
+          cta: '/admin/fiscal/wizard',
+        }),
+      );
+    });
+
+    it('emisor completo y certificado vigente: sin hallazgos del emisor', async () => {
+      const service = buildService({
+        readiness: readinessWith(config(), completeEntity),
+      });
+      const verdict = await service.getDraftEmitReadiness(baseDraft());
+      expect(
+        verdict.findings.filter((f) => f.target === 'config'),
+      ).toEqual([]);
+      expect(verdict.emittable).toBe(true);
+    });
+
+    it('sin configuración DIAN en producción: blocker a la configuración DIAN', async () => {
+      const original = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        const service = buildService({
+          readiness: readinessWith(null, completeEntity),
+        });
+        const verdict = await service.getDraftEmitReadiness(baseDraft());
+        expect(verdict.blockers).toContainEqual(
+          expect.objectContaining({
+            code: 'FISCAL_CONFIG_INCOMPLETE',
+            target: 'config',
+            cta: '/admin/invoicing/dian-config',
+          }),
+        );
+      } finally {
+        process.env.NODE_ENV = original;
+      }
+    });
+
+    it('fuera de producción sin configuración DIAN no bloquea (proveedor mock)', async () => {
+      const service = buildService({
+        readiness: readinessWith(null, completeEntity),
+      });
+      const verdict = await service.getDraftEmitReadiness(baseDraft());
+      expect(verdict.blockers).toEqual([]);
+    });
+  });
+
+  describe('resolución y TRM', () => {
+    it('resolución inactiva: FISCAL_RESOLUTION_MISSING con field resolution y cta', async () => {
+      const service = buildService();
+      const verdict = await service.getDraftEmitReadiness(
+        baseDraft({ resolution: { ...validResolution(), is_active: false } }),
+      );
+      expect(verdict.blockers).toContainEqual(
+        expect.objectContaining({
+          code: 'FISCAL_RESOLUTION_MISSING',
+          target: 'config',
+          cta: '/admin/invoicing/resolutions',
+        }),
+      );
+    });
+
+    it('si el prevalidador ya reportó numeración no se repite la del emisor', async () => {
+      const service = buildService();
+      (service as any).runFiscalDocumentPrevalidation.mockResolvedValue(
+        cleanFiscalDocument({
+          emittable: false,
+          findings: [
+            {
+              code: 'RESOLUTION_MISSING',
+              severity: 'blocker',
+              category: 'resolution',
+              field: 'resolution',
+              problem: 'p',
+              fix: 'f',
+            },
+          ],
+          blockers: [
+            {
+              code: 'RESOLUTION_MISSING',
+              severity: 'blocker',
+              category: 'resolution',
+              field: 'resolution',
+              problem: 'p',
+              fix: 'f',
+            },
+          ],
+        }),
+      );
+      const verdict = await service.getDraftEmitReadiness(
+        baseDraft({ resolution: null }),
+      );
+      expect(verdict.blockers.map((b) => b.code)).toEqual(['RESOLUTION_MISSING']);
+      expect(verdict.blockers[0]).toMatchObject({
+        target: 'config',
+        cta: '/admin/invoicing/resolutions',
+      });
+    });
+
+    it('divisa distinta de COP sin tasa (o con tasa 1): exchange_rate en el formulario', async () => {
+      const service = buildService();
+      for (const exchange_rate of [null, 1]) {
+        const verdict = await service.getDraftEmitReadiness(
+          baseDraft({ foreign_currency: 'USD', exchange_rate }),
+        );
+        expect(verdict.blockers).toContainEqual(
+          expect.objectContaining({
+            code: 'INVOICING_TRM_001',
+            field: 'exchange_rate',
+            target: 'form',
+          }),
+        );
+      }
+    });
+
+    it('divisa con tasa real: sin hallazgo de TRM', async () => {
+      const service = buildService();
+      const verdict = await service.getDraftEmitReadiness(
+        baseDraft({ foreign_currency: 'USD', exchange_rate: 4000 }),
+      );
+      expect(verdict.blockers.map((b) => b.code)).not.toContain(
+        'INVOICING_TRM_001',
+      );
+    });
+  });
+
+  describe('datos mínimos (identidad del adquiriente)', () => {
+    it('sin cliente (sin customer_id ni número): cero blockers de identidad, modo final_consumer', async () => {
+      const service = buildService();
+      const verdict = await service.getDraftEmitReadiness(baseDraft());
+      expect(verdict.identity.mode).toBe('final_consumer');
+      expect(verdict.identity.blockers).toEqual([]);
+      expect(verdict.blockers).toEqual([]);
+      expect(verdict.emittable).toBe(true);
+    });
+
+    it('nominativo sin document_type CON customer_id: config + cta a la ficha', async () => {
+      const service = buildService();
+      const verdict = await service.getDraftEmitReadiness(
+        baseDraft({
+          customer_id: 5,
+          customer_name: 'Ana Pérez',
+          customer_tax_id: '900123456',
+        }),
+      );
+      const finding = verdict.blockers.find(
+        (b) => b.code === 'DOCUMENT_TYPE_REQUIRED',
+      );
+      expect(finding).toMatchObject({
+        target: 'config',
+        cta: '/admin/customers/5',
+        details: { customer_id: 5 },
+      });
+      // El mismo hallazgo vive en el informe de identidad sin aplanar.
+      expect(
+        verdict.identity.blockers.find((b) => b.code === 'DOCUMENT_TYPE_REQUIRED'),
+      ).toMatchObject({ target: 'config', cta: '/admin/customers/5' });
+    });
+
+    it('nominativo sin document_type SIN customer_id: target form', async () => {
+      const service = buildService();
+      const verdict = await service.getDraftEmitReadiness(
+        baseDraft({ customer_name: 'Ana Pérez', customer_tax_id: '900123456' }),
+      );
+      const finding = verdict.blockers.find(
+        (b) => b.code === 'DOCUMENT_TYPE_REQUIRED',
+      );
+      expect(finding).toMatchObject({ target: 'form' });
+      expect(finding?.cta).toBeUndefined();
+    });
+
+    it('nominativo completo sin dirección, correo, responsabilidades ni código postal: sólo warnings', async () => {
+      const service = buildService();
+      const verdict = await service.getDraftEmitReadiness(
+        baseDraft({
+          customer_name: 'Ana Pérez',
+          customer_tax_id: '79123456',
+          customer_document_type: '13',
+          customer_person_type: 'NATURAL',
+        }),
+      );
+      expect(verdict.identity.blockers).toEqual([]);
+      expect(verdict.emittable).toBe(true);
+      expect(verdict.warnings.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('getEmitReadiness (factura persistida) = mismo veredicto que el borrador', () => {
+    const persisted = (overrides: any = {}) => ({
+      ...baseDraft({ id: 9 }),
+      status: 'draft',
+      invoice_number: 'FE11',
+      invoice_items: [{ id: 1, description: 'x' }],
+      ...overrides,
+    });
+
+    it('identidad incompleta con customer_id: blocker config + cta a la ficha, y la raíz lo lista', async () => {
+      const service = buildService();
+      jest
+        .spyOn(service as any, 'getInvoice')
+        .mockResolvedValue(
+          persisted({
+            customer_id: 5,
+            customer_name: 'Ana Pérez',
+            customer_tax_id: '900123456',
+          }),
+        );
+      const report = await service.getEmitReadiness(9);
+      const finding = report.blockers.find(
+        (b) => b.code === 'DOCUMENT_TYPE_REQUIRED',
+      );
+      expect(finding).toMatchObject({
+        target: 'config',
+        cta: '/admin/customers/5',
+        details: { customer_id: 5 },
+      });
+      expect(report.emittable).toBe(false);
+      expect(report.invoice_id).toBe(9);
+    });
+
+    it('certificado vencido (mock de fiscalReadiness): blocker dian_config.certificate_expiry', async () => {
+      const collectIssuerReadiness = jest.fn().mockResolvedValue([
+        {
+          code: 'DIAN_CERT_003',
+          severity: 'blocker',
+          field: 'dian_config.certificate_expiry',
+          problem: 'vencido',
+          fix: 'renueva',
+          target: 'config',
+          cta: '/admin/invoicing/dian-config',
+        },
+      ]);
+      const service = buildService({ readiness: { collectIssuerReadiness } });
+      jest.spyOn(service as any, 'getInvoice').mockResolvedValue(persisted());
+      const report = await service.getEmitReadiness(9);
+      expect(report.emittable).toBe(false);
+      expect(report.blockers).toContainEqual(
+        expect.objectContaining({
+          field: 'dian_config.certificate_expiry',
+          target: 'config',
+        }),
+      );
+      expect(report.findings).toEqual(
+        expect.arrayContaining(report.blockers),
+      );
+    });
+
+    it('sin problemas: emittable true', async () => {
+      const service = buildService({
+        readiness: { collectIssuerReadiness: jest.fn().mockResolvedValue([]) },
+      });
+      jest.spyOn(service as any, 'getInvoice').mockResolvedValue(persisted());
+      const report = await service.getEmitReadiness(9);
+      expect(report.emittable).toBe(true);
+    });
   });
 });
