@@ -554,6 +554,13 @@ export class AIEngineComponent implements OnInit {
         value && value.length ? `${value.length} tools` : 'Sin filtro',
     },
     {
+      key: 'denied_tools',
+      label: 'Denegadas',
+      priority: 3,
+      transform: (value: string[]) =>
+        value && value.length ? `${value.length} denegadas` : '—',
+    },
+    {
       key: 'max_iterations',
       label: 'Max iter.',
       priority: 3,
@@ -584,6 +591,12 @@ export class AIEngineComponent implements OnInit {
         transform: (value: string | null) => value || '—',
       },
       { key: 'description', label: 'Descripcion' },
+      {
+        key: 'denied_tools',
+        label: 'Denegadas',
+        transform: (value: string[]) =>
+          value && value.length ? `${value.length} denegadas` : '—',
+      },
     ],
   };
 

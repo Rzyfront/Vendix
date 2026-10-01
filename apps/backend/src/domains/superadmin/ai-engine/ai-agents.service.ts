@@ -28,7 +28,9 @@ import {
  * - `allowed_tools` solo tiene validación BLANDA contra el catálogo vivo del
  *   registry: los nombres desconocidos se aceptan y se registran en warn. El
  *   catálogo vive en memoria y cambia con cada deploy/registro de dominio;
- *   rechazarlos acoplaría el admin al boot del backend.
+ *   rechazarlos acoplaría el admin al boot del backend. `denied_tools` sigue
+ *   la misma validación blanda y se persiste por el mismo path (`update` hace
+ *   spread del DTO, así que no necesita caso propio).
  * - Los errores propios del agente (no encontrado, key duplicada) usan
  *   excepciones Nest planas: el catálogo `ErrorCodes` no tiene códigos de
  *   agente y ese archivo está fuera del scope F4.
@@ -55,6 +57,7 @@ export class AIAgentsService {
 
     await this.assertAppExists(dto.app_key);
     this.warnUnknownTools(dto.key, dto.allowed_tools);
+    this.warnUnknownTools(dto.key, dto.denied_tools);
 
     return this.prisma.ai_agents.create({
       data: {
@@ -64,6 +67,7 @@ export class AIAgentsService {
         app_key: dto.app_key ?? null,
         system_prompt: dto.system_prompt ?? null,
         allowed_tools: dto.allowed_tools ?? [],
+        denied_tools: dto.denied_tools ?? [],
         max_iterations: dto.max_iterations ?? null,
         requires_confirmation_default:
           dto.requires_confirmation_default ?? false,
@@ -164,6 +168,7 @@ export class AIAgentsService {
       await this.assertAppExists(dto.app_key);
     }
     this.warnUnknownTools(dto.key ?? existing.key, dto.allowed_tools);
+    this.warnUnknownTools(dto.key ?? existing.key, dto.denied_tools);
 
     // Spread directo: las props ausentes llegan `undefined` y Prisma las deja
     // intactas; un `null` explícito limpia la columna (desanclar `app_key` o

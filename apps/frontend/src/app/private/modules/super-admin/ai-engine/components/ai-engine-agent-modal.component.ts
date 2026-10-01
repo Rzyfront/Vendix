@@ -138,6 +138,25 @@ const AGENT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
             </p>
           </div>
 
+          <div class="space-y-1">
+            <app-multi-selector
+              formControlName="denied_tools"
+              label="Herramientas denegadas"
+              placeholder="Sin exclusiones"
+              [options]="toolOptions()"
+              [disabled]="isSubmitting()"
+              helpText="Se restan del catálogo después de todos los filtros: lo que esté aquí nunca se ofrece. Vacío = sin exclusiones. Máximo 100 herramientas."
+              [errorText]="
+                deniedToolsControl.hasError('maxlength')
+                  ? 'Selecciona máximo 100 herramientas o deja el campo vacío para no excluir ninguna.'
+                  : ''
+              "
+            ></app-multi-selector>
+            <p class="text-xs text-text-secondary">
+              Vex lo usa para excluir las herramientas de interfaz (ui_*); Vexi lo deja vacío.
+            </p>
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <app-input
               formControlName="max_iterations"
@@ -241,6 +260,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
     app_key: [''],
     system_prompt: [''],
     allowed_tools: [[] as string[], [Validators.maxLength(100)]],
+    denied_tools: [[] as string[], [Validators.maxLength(100)]],
     max_iterations: [null as number | null, [Validators.min(1), Validators.max(50)]],
     requires_confirmation_default: [false],
     is_active: [true],
@@ -264,6 +284,10 @@ export class AIEngineAgentModalComponent implements OnChanges {
 
   get allowedToolsControl(): FormControl<string[]> {
     return this.form.get('allowed_tools') as FormControl<string[]>;
+  }
+
+  get deniedToolsControl(): FormControl<string[]> {
+    return this.form.get('denied_tools') as FormControl<string[]>;
   }
 
   get maxIterationsControl(): FormControl<number | null> {
@@ -292,6 +316,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
         app_key: a.app_key || '',
         system_prompt: a.system_prompt || '',
         allowed_tools: [...(a.allowed_tools || [])],
+        denied_tools: [...(a.denied_tools || [])],
         max_iterations: a.max_iterations ?? null,
         requires_confirmation_default:
           a.requires_confirmation_default ?? false,
@@ -311,6 +336,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
 
     const raw = this.form.getRawValue();
     const allowedTools = (raw.allowed_tools as string[] | null) ?? [];
+    const deniedTools = (raw.denied_tools as string[] | null) ?? [];
     const maxIterations = this.toFiniteInt(raw.max_iterations);
 
     const data: CreateAIAgentDto | UpdateAIAgentDto = {
@@ -320,6 +346,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
       app_key: raw.app_key?.trim() ? raw.app_key.trim() : null,
       system_prompt: raw.system_prompt?.trim() ? raw.system_prompt : null,
       allowed_tools: allowedTools,
+      denied_tools: deniedTools,
       max_iterations: maxIterations,
       requires_confirmation_default: !!raw.requires_confirmation_default,
       is_active: !!raw.is_active,
@@ -348,6 +375,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
       app_key: '',
       system_prompt: '',
       allowed_tools: [],
+      denied_tools: [],
       max_iterations: null,
       requires_confirmation_default: false,
       is_active: true,
