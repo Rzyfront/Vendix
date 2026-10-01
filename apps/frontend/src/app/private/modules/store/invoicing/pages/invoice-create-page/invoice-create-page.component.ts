@@ -23,15 +23,28 @@ import {
 import { Router } from '@angular/router';
 import { Actions, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, Subscription, of, startWith, take } from 'rxjs';
+import {
+  Observable,
+  Subject,
+  Subscription,
+  defaultIfEmpty,
+  of,
+  startWith,
+  take,
+} from 'rxjs';
 import {
   catchError,
   debounceTime,
   distinctUntilChanged,
+  filter,
   map,
   switchMap,
 } from 'rxjs/operators';
-import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  toObservable,
+  toSignal,
+  takeUntilDestroyed,
+} from '@angular/core/rxjs-interop';
 
 import {
   MutationFailure,
@@ -76,7 +89,14 @@ import {
   InvoiceEmitReadiness,
   InvoiceEmitReadinessService,
 } from '../../services/invoice-emit-readiness.service';
-import { toEmitRequirements } from '../../utils/invoice-emit-requirements';
+import {
+  sortRequirements,
+  toEmitRequirements,
+} from '../../utils/invoice-emit-requirements';
+import {
+  InvoiceSummaryAsideComponent,
+  InvoiceSummaryTotals,
+} from '../../components/invoice-create/invoice-summary-aside.component';
 import { isHabilitationNumbering } from '../../../../../../shared/utils/habilitation-numbering.util';
 import {
   compareResolutionsForSelection,
@@ -104,6 +124,8 @@ import {
   DianMunicipalitySelectComponent,
   ModalComponent,
   SaveRequirement,
+  SaveRequirementAction,
+  SaveRequirementSeverity,
   SaveRequirementsModalComponent,
   StickyHeaderActionButton,
   StickyHeaderComponent,
@@ -1410,6 +1432,69 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
   notas_internas: [],
 };
 
+/** Ruta de la pantalla de Resoluciones (CTA cuando no hay rango que elegir). */
+const RESOLUTIONS_ROUTE = '/admin/invoicing/resolutions';
+
+/**
+ * Un faltante LOCAL (detectado sin red) con destino: enfoca el control
+ * `target`. El `id` lleva el prefijo `local:` para distinguirlo de los que
+ * traduce `toEmitRequirements` (ver `isLocalRequirement`).
+ */
+export function localRequirement(
+  key: string,
+  label: string,
+  reason: string,
+  target: string,
+  options: {
+    severity?: SaveRequirementSeverity;
+    kind?: 'focus' | 'navigate';
+    actionLabel?: string;
+  } = {},
+): SaveRequirement {
+  const kind = options.kind ?? 'focus';
+  return {
+    id: `local:${key}`,
+    label,
+    reason,
+    severity: options.severity ?? 'blocker',
+    action: {
+      label:
+        options.actionLabel ??
+        (kind === 'navigate' ? 'Ir a configuración' : 'Ir al campo'),
+      kind,
+      target,
+    },
+  };
+}
+
+export function isLocalRequirement(requirement: SaveRequirement): boolean {
+  return requirement.id.startsWith('local:');
+}
+
+/**
+ * Une listas de requisitos sin repetir destino. La clave es `kind+target`
+ * cuando la fila tiene destino y el `id` si no; gana la PRIMERA aparición, así
+ * que el orden de los argumentos decide cuál redacción se conserva.
+ */
+export function mergeRequirementsByTarget(
+  ...lists: ReadonlyArray<readonly SaveRequirement[]>
+): SaveRequirement[] {
+  const seen = new Set<string>();
+  const merged: SaveRequirement[] = [];
+  for (const list of lists) {
+    for (const requirement of list) {
+      const action = requirement.action;
+      const key = action?.target
+        ? `${action.kind === 'navigate' ? 'navigate' : 'focus'}:${action.target}`
+        : `id:${requirement.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(requirement);
+    }
+  }
+  return merged;
+}
+
 /**
  * VISTA DE FACTURA AVANZADA (superficie fiscal).
  *
@@ -1519,6 +1604,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceSectionDivisaComponent,
     InvoiceSectionFormatoComponent,
     InvoiceSectionNotasComponent,
+    InvoiceSummaryAsideComponent,
     ModalComponent,
   ],
   template: `
@@ -1552,7 +1638,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         («space-y-4» = 1 rem, la misma que usan los formularios de producto y
         ajustes), sin valores sueltos.
       -->
-      <div class="px-2 md:px-4 pb-6 space-y-4">
+      <div class="px-2 md:px-4 pb-6 grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div class="lg:col-span-9 min-w-0 space-y-4">
         <!-- Banner de error: persistente a propósito. El usuario tiene que
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
@@ -3007,147 +3094,9 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             </vendix-invoice-form-section>
           </form>
 
-          <!-- ── FORMATO DE IMPRESIÓN (B.7/E.1) ─────────────────
-               Fuera del «form» a propósito, igual que la sección
-               Previsualización del editor de perfiles: el selector escribe en
-               su FormGroup local y no enlaza ningún control del payload
-               fiscal. La precedencia real (perfil congelado → tienda →
-               sistema) viaja como etiqueta, no como suposición. -->
-          <vendix-invoice-form-section
-            title="Formato de impresión"
-            [help]="help('formato')"
-            icon="printer"
-            [optional]="true"
-            [summary]="formatoSummary()"
-            [expanded]="formatoSectionOpen()"
-            (expandedChange)="formatoSectionOpen.set($event)"
-          >
-            <vendix-invoice-section-formato
-              context="invoice"
-              [form]="printFormatForm"
-              [paths]="formatoSectionPaths"
-              [templateOptions]="printTemplateOptions()"
-              [libraryFailed]="printLibraryFailed()"
-              [effectivePrintLabel]="effectivePrintLabel()"
-              [storeTemplateSaving]="storeTemplateSaving()"
-              (templateSelectionChange)="onStoreTemplateSelected($event)"
-            ></vendix-invoice-section-formato>
-          </vendix-invoice-form-section>
-
-          <!-- ── NOTAS INTERNAS ────────────────────────────────── -->
-          <!-- B.7: misma sustitución — el par Descripción/Nota
-               interna vive ahora en el componente compartido. -->
-          <vendix-invoice-form-section
-            title="Notas internas"
-            [help]="help('notas_internas')"
-            icon="sticky-note"
-            [optional]="true"
-            [expanded]="isSectionOpen('notas_internas')"
-            (expandedChange)="setSection('notas_internas', $event)"
-          >
-            <vendix-invoice-section-notas
-              context="invoice"
-              [form]="invoiceForm"
-              [paths]="notasSectionPaths"
-            ></vendix-invoice-section-notas>
-          </vendix-invoice-form-section>
-
-          <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
-          <!-- F-052: el total corregido SE ANUNCIA. 'aria-live="polite"' con
-               'atomic' hace que el lector de pantalla reciba el valor central
-               del fix sin mover el foco del campo que se está editando. -->
-          <div
-            class="rounded-lg border border-border p-3 bg-[var(--color-surface-muted)]"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <div
-              class="grid grid-cols-2 gap-3 text-sm"
-              [ngClass]="aiuTotals() ? 'md:grid-cols-7' : 'md:grid-cols-6'"
-            >
-              <!--
-                En operación AIU (09) la «base gravable» a secas miente: el
-                contrato entero no grava, sólo la porción de
-                AIU_TAXABLE_BUCKETS_BY_BASIS. Se rotula la base real y se
-                añade el valor del contrato; fuera de 09 (aiuTotals() en
-                null) esta rama no existe y la barra queda idéntica.
-              -->
-              @if (aiuTotals(); as aiu) {
-                <div>
-                  <div class="text-[var(--color-text-secondary)]">
-                    Base gravable AIU
-                  </div>
-                  <div class="font-semibold">
-                    {{ formatCurrency(aiu.taxableBase) }}
-                  </div>
-                </div>
-                <div>
-                  <div class="text-[var(--color-text-secondary)]">
-                    Valor del contrato
-                  </div>
-                  <div class="font-semibold">
-                    {{ formatCurrency(aiu.contractAmount) }}
-                  </div>
-                </div>
-              } @else {
-                <div>
-                  <div class="text-[var(--color-text-secondary)]">
-                    Base gravable
-                  </div>
-                  <div class="font-semibold">
-                    {{ formatCurrency(totals().base) }}
-                  </div>
-                </div>
-              }
-              <div>
-                <div class="text-[var(--color-text-secondary)]">Descuento</div>
-                <div class="font-semibold">
-                  -{{ formatCurrency(totals().discount) }}
-                </div>
-              </div>
-              <div>
-                <div class="text-[var(--color-text-secondary)]">
-                  Impuesto incluido
-                </div>
-                <div class="font-semibold">
-                  {{ formatCurrency(totals().taxInclusive) }}
-                </div>
-              </div>
-              <div>
-                <div class="text-[var(--color-text-secondary)]">
-                  Impuesto adicional
-                </div>
-                <div class="font-semibold">
-                  {{ formatCurrency(totals().taxAdditional) }}
-                </div>
-              </div>
-              <div>
-                <div class="text-[var(--color-text-secondary)]">
-                  Total del documento
-                </div>
-                <div class="font-bold text-primary">
-                  {{ formatCurrency(totals().total) }}
-                </div>
-              </div>
-              <div>
-                <div class="text-[var(--color-text-secondary)]">
-                  Neto a recibir
-                </div>
-                <div class="font-semibold">
-                  {{ formatCurrency(totals().total - effectiveWithholding()) }}
-                </div>
-              </div>
-            </div>
-            <!-- El total EN LETRAS del documento que se va a emitir: la misma
-                 cifra de arriba, en palabras. Referencia de comprensión —el
-                 valor legal lo compone el servidor sobre el snapshot—, para
-                 que cifras y letras se lean juntas ANTES de gastar el
-                 consecutivo. -->
-            @if (totalInWords(); as words) {
-              <p class="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
-                Son: <span class="font-semibold text-text-primary">{{ words }}</span>
-              </p>
-            }
+          <!-- Desglose del AIU y nota de paridad: viven en la columna principal porque
+               el resumen lateral sólo recibe cifras. -->
+          <div class="space-y-2">
             <!--
               PASO 7 — EL DESGLOSE DEL AIU VIVE EN EL RESUMEN DE COBRO.
 
@@ -3212,50 +3161,85 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                  que se emite. Solo las cifras que el servidor totaliza
                  (retenciones manuales) pueden moverse al guardar. -->
             <p class="mt-2 text-[11px] text-[var(--color-text-secondary)]">
-              Este total es el que se emite: se calcula con la misma regla del
+              El total del resumen lateral es el que se emite: se calcula con la misma regla del
               servidor y el total es el precio publicado. Con impuesto incluido,
               la base absorbe 1–2¢ del truncado (p. ej. $3.000 al 8 % ⇒ base
               $2.777,78 + impuesto $222,22); solo las retenciones manuales las
               totaliza el servidor al guardar.
             </p>
           </div>
-        }
 
-        <!--
-          El pie se conserva aunque la cabecera ya lleve las mismas acciones: la
-          página mide ocho secciones y quien acaba de escribir la última línea
-          está al final, no arriba. La frase de la izquierda es la misma que la
-          cabecera enseña como metadato — un botón apagado sin motivo a la vista
-          es un callejón sin salida.
-        -->
-        <div
-          class="flex flex-col gap-3 rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <span class="min-w-0 truncate text-xs text-[var(--color-text-secondary)]">
-            {{ submitHint() }}
-          </span>
-          <div class="flex shrink-0 items-center gap-3">
-            <!-- Nunca se apaga por «submitting»: salir siempre tiene que poder. -->
-            <app-button variant="outline" (clicked)="cancel()">
-              Cancelar
-            </app-button>
-            <!--
-              Se apaga también con el borrador ya creado: en ese estado la vista
-              sigue en pie sólo para enseñar lo que la puerta de emisión
-              encontró, y pulsar de nuevo crearía una factura gemela.
-            -->
-            <app-button
-              variant="primary"
-              (clicked)="onSubmit()"
-              [disabled]="
-                submitting() || checkingEmitReadiness() || draftCreated()
-              "
-              [loading]="submitting() || checkingEmitReadiness()"
-            >
-              {{ mode() === 'from_order' ? 'Crear desde pedido' : 'Crear factura' }}
-            </app-button>
-          </div>
+          <!-- ── FORMATO DE IMPRESIÓN (B.7/E.1) ─────────────────
+               Fuera del «form» a propósito, igual que la sección
+               Previsualización del editor de perfiles: el selector escribe en
+               su FormGroup local y no enlaza ningún control del payload
+               fiscal. La precedencia real (perfil congelado → tienda →
+               sistema) viaja como etiqueta, no como suposición. -->
+          <vendix-invoice-form-section
+            title="Formato de impresión"
+            [help]="help('formato')"
+            icon="printer"
+            [optional]="true"
+            [summary]="formatoSummary()"
+            [expanded]="formatoSectionOpen()"
+            (expandedChange)="formatoSectionOpen.set($event)"
+          >
+            <vendix-invoice-section-formato
+              context="invoice"
+              [form]="printFormatForm"
+              [paths]="formatoSectionPaths"
+              [templateOptions]="printTemplateOptions()"
+              [libraryFailed]="printLibraryFailed()"
+              [effectivePrintLabel]="effectivePrintLabel()"
+              [storeTemplateSaving]="storeTemplateSaving()"
+              (templateSelectionChange)="onStoreTemplateSelected($event)"
+            ></vendix-invoice-section-formato>
+          </vendix-invoice-form-section>
+
+          <!-- ── NOTAS INTERNAS ────────────────────────────────── -->
+          <!-- B.7: misma sustitución — el par Descripción/Nota
+               interna vive ahora en el componente compartido. -->
+          <vendix-invoice-form-section
+            title="Notas internas"
+            [help]="help('notas_internas')"
+            icon="sticky-note"
+            [optional]="true"
+            [expanded]="isSectionOpen('notas_internas')"
+            (expandedChange)="setSection('notas_internas', $event)"
+          >
+            <vendix-invoice-section-notas
+              context="invoice"
+              [form]="invoiceForm"
+              [paths]="notasSectionPaths"
+            ></vendix-invoice-section-notas>
+          </vendix-invoice-form-section>
+
+        }
         </div>
+
+        <!-- Resumen lateral: totales, checklist viva y acciones. En móvil queda debajo del contenido. -->
+        <aside
+          id="invoice-summary-aside"
+          tabindex="-1"
+          class="lg:col-span-3 lg:sticky lg:top-24 lg:self-start outline-none"
+          aria-label="Resumen y acciones de la factura"
+        >
+          <vendix-invoice-summary-aside
+            [totals]="summaryTotals()"
+            [showTotals]="mode() === 'manual'"
+            [requirements]="readinessRequirements()"
+            [warnings]="readinessWarnings()"
+            [checking]="readinessChecking() || validatingDraft()"
+            [busy]="submitting() || checkingEmitReadiness()"
+            [submitLabel]="mode() === 'from_order' ? 'Crear desde pedido' : 'Crear factura'"
+            [canSubmit]="!draftCreated()"
+            (submit)="onSubmit()"
+            (validate)="onValidateDraft()"
+            (preview)="openPrintPreview()"
+            (cancel)="cancel()"
+            (requirementAction)="onAsideRequirementAction($event)"
+          />
+        </aside>
       </div>
     </div>
 
@@ -6904,6 +6888,26 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (this.isAiu() && this.aiuNoteBlocked()) {
       counts.aiu += 1;
     }
+    // Faltantes de la checklist viva que los contadores de arriba no ven:
+    // municipio, resolución, unidad de medida, dirección y divisa (locales) y
+    // todo lo que devolvió `validate-draft`. `alreadyCounted` evita sumar dos
+    // veces un campo inválido y tocado que ya contó el bucle de campos.
+    const uncountedLocal = (target: string): boolean =>
+      target === 'customer_municipality_code' ||
+      target === 'customer_address' ||
+      target === 'resolution_id' ||
+      target === 'foreign_currency' ||
+      target === 'exchange_rate' ||
+      /^items\.\d+\.unit_code$/.test(target);
+    for (const requirement of this.readinessRequirements()) {
+      const action = requirement.action;
+      if (!action?.target || action.kind === 'navigate') continue;
+      if (isLocalRequirement(requirement) && !uncountedLocal(action.target)) {
+        continue;
+      }
+      if (this.requirementAlreadyCounted(action.target, backend)) continue;
+      counts[this.sectionOfTarget(action.target)] += 1;
+    }
     return counts;
   });
 
@@ -6950,17 +6954,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   );
 
   /**
-   * Acciones de la cabecera.
-   *
-   * `computed` y no un arreglo fijo: dependen de `submitting()`,
-   * `checkingEmitReadiness()`, `validatingDraft()`, `draftCreated()` y `mode()`
-   * (este último apaga «Validar» en modo «desde pedido»), y un arreglo plano en
-   * zoneless dejaría el botón congelado en su estado inicial.
-   *
-   * Guardar NO se apaga por `formStatus()`. Es una decisión de esta pantalla:
-   * un botón mudo con ocho secciones plegadas no dice dónde está el problema,
-   * así que el envío arranca siempre y `collectBlockers()` enumera qué falta.
-   * Cancelar NUNCA se deshabilita: salir siempre tiene que poder.
+   * Acciones de la cabecera: sólo Cancelar. Crear, Validar y Vista previa viven
+   * en el resumen lateral (`vendix-invoice-summary-aside`), junto a los totales
+   * y a la checklist «Para emitir falta». Cancelar NUNCA se deshabilita: salir
+   * siempre tiene que poder.
    */
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
@@ -6969,46 +6966,111 @@ export class InvoiceCreatePageComponent implements OnInit {
       variant: 'outline',
       icon: 'x',
     },
-    {
-      id: 'preview',
-      label: 'Ver como saldrá',
-      variant: 'outline',
-      icon: 'eye',
-      // Paso 5 del plan AIU: el botón abre el XML con lo capturado MÁS la
-      // representación gráfica de muestra —ya no sólo uno de los dos—.
-      title:
-        'Previsualización del XML con tus datos y la representación gráfica de muestra: no emite ni toma consecutivo.',
-    },
-    {
-      id: 'validate',
-      label: 'Validar',
-      variant: 'outline',
-      icon: 'shield-check',
-      loading: this.validatingDraft(),
-      disabled:
-        this.submitting() ||
-        this.checkingEmitReadiness() ||
-        this.validatingDraft() ||
-        this.draftCreated(),
-      // Sólo en modo manual: «Crear desde pedido» no arma un `CreateInvoiceDto`
-      // en el cliente —el backend construye la factura A PARTIR del pedido—,
-      // así que no hay borrador propio que mandar a validar.
-      visible: this.mode() === 'manual',
-      title:
-        'Pregúntale al servidor si esto va a pasar ANTES de crear el documento. No toma consecutivo.',
-    },
-    {
-      id: 'save',
-      label:
-        this.mode() === 'from_order' ? 'Crear desde pedido' : 'Crear factura',
-      variant: 'primary',
-      icon: 'save',
-      loading: this.submitting() || this.checkingEmitReadiness(),
-      disabled:
-        this.submitting() || this.checkingEmitReadiness() || this.draftCreated(),
-      title: this.submitHint(),
-    },
   ]);
+
+  // ── Checklist viva («Para emitir falta») ───────────────────────
+
+  /** `true` desde el primer intento de crear o validar. */
+  private readonly attemptedSubmit = signal(false);
+
+  /** Filas que dejó la última consulta a `validate-draft` (blockers + avisos). */
+  private readonly backendRequirements = signal<SaveRequirement[]>([]);
+
+  /** `true` mientras corre la prevalidación viva en segundo plano. */
+  readonly readinessChecking = signal(false);
+
+  private readonly hasDescribedLine = computed(() =>
+    this.itemsValue().some((item) => String(item?.description ?? '').trim()),
+  );
+
+  /**
+   * La checklist se pinta cuando ya hay algo que juzgar (una línea con
+   * descripción) o cuando el usuario ya intentó crear/validar. Antes sólo
+   * enumeraría todo lo que falta en un formulario virgen.
+   */
+  private readonly checklistActive = computed(
+    () =>
+      this.mode() === 'manual' &&
+      (this.attemptedSubmit() || this.hasDescribedLine()),
+  );
+
+  // `formStatus()` es el disparador de lo que el `FormControl` no expone como
+  // señal (p. ej. el error de formato del correo).
+  private readonly localBlockers = computed(() => {
+    this.formStatus();
+    return this.mode() === 'manual' ? this.collectBlockers() : [];
+  });
+
+  private readonly localAdvisories = computed(() => {
+    this.formStatus();
+    return this.mode() === 'manual' ? this.collectAdvisories() : [];
+  });
+
+  /** Faltantes que impiden emitir: locales + backend, sin repetir destino. */
+  readonly readinessRequirements = computed<SaveRequirement[]>(() =>
+    this.checklistActive()
+      ? sortRequirements(
+          mergeRequirementsByTarget(
+            this.localBlockers(),
+            this.backendRequirements().filter((r) => r.severity === 'blocker'),
+          ),
+        )
+      : [],
+  );
+
+  /** Avisos: no impiden emitir. */
+  readonly readinessWarnings = computed<SaveRequirement[]>(() =>
+    this.checklistActive()
+      ? mergeRequirementsByTarget(
+          this.localAdvisories(),
+          this.backendRequirements().filter((r) => r.severity !== 'blocker'),
+        )
+      : [],
+  );
+
+  /**
+   * Borrador que se manda a `validate-draft` en segundo plano. `null` fuera del
+   * modo manual o sin ninguna línea con descripción.
+   */
+  private readonly liveDraftDto = computed<CreateInvoiceDto | null>(() => {
+    if (this.mode() !== 'manual') return null;
+    this.formValue();
+    if (!this.hasDescribedLine()) return null;
+    try {
+      return this.buildPayload();
+    } catch {
+      return null;
+    }
+  });
+
+  /**
+   * Totales para el resumen lateral. Reutiliza los mismos signals que pintaba
+   * la tarjeta de totales: no recalcula nada.
+   */
+  readonly summaryTotals = computed<InvoiceSummaryTotals>(() => {
+    const totals = this.totals();
+    const aiu = this.aiuTotals();
+    const withholding = this.effectiveWithholding();
+    return {
+      subtotal: totals.base,
+      discount: totals.discount,
+      taxable_base: aiu ? aiu.taxableBase : totals.base,
+      taxable_base_label: aiu ? 'Base gravable AIU' : undefined,
+      taxes: this.taxBreakdown().map((row) => ({
+        label: `${row.name} ${row.rate}%`,
+        amount: row.amount,
+      })),
+      included_tax: totals.taxInclusive,
+      additional_tax: totals.taxAdditional,
+      withholdings:
+        withholding > 0
+          ? [{ label: 'Retenciones', amount: withholding }]
+          : [],
+      total: totals.total,
+      net_receivable: totals.total - withholding,
+      amount_in_words: this.totalInWords() ?? undefined,
+    };
+  });
 
   /** Suscripciones que limpian el error del backend cuando el usuario corrige. */
   private backendErrorSubs = new Subscription();
@@ -7017,6 +7079,39 @@ export class InvoiceCreatePageComponent implements OnInit {
   constructor() {
     this.currencyService.loadCurrency();
     this.destroyRef.onDestroy(() => this.backendErrorSubs.unsubscribe());
+
+    // PREVALIDACIÓN VIVA. Activa sólo en modo manual y con al menos una línea
+    // con descripción (`liveDraftDto` es `null` si no). Un fallo de red se
+    // ignora a propósito: es un asistente, no una puerta, y un toast por cada
+    // tecleo sería ruido. Nunca corre mientras se crea el documento.
+    toObservable(this.liveDraftDto)
+      .pipe(
+        debounceTime(800),
+        filter(
+          () =>
+            !this.submitting() &&
+            !this.checkingEmitReadiness() &&
+            !this.validatingDraft() &&
+            !this.draftCreated(),
+        ),
+        switchMap((dto) => {
+          if (!dto) return of(null);
+          this.readinessChecking.set(true);
+          return this.emitReadinessService.validateDraft(dto).pipe(
+            catchError(() => of(undefined)),
+            defaultIfEmpty(undefined),
+          );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((verdict) => {
+        this.readinessChecking.set(false);
+        if (verdict === null) {
+          this.backendRequirements.set([]);
+        } else if (verdict) {
+          this.backendRequirements.set(toEmitRequirements(verdict));
+        }
+      });
 
     // LA BASE GRAVABLE Y EL PISO SE SIEMBRAN DE LO QUE MANDA, y llegan
     // congelados (ver `aiuFrozenFields`). Sin esto los controles mostrarían la
@@ -8612,25 +8707,115 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.syncDueDate();
     this.invoiceForm.markAllAsTouched();
 
-    const blockers = this.collectBlockers();
-    if (blockers.length > 0) {
+    this.attemptedSubmit.set(true);
+    if (this.validatingDraft()) return;
+
+    // 1) Lo que se ve sin red. Si falta algo, se enfoca el PRIMERO (en el orden
+    //    de la pantalla) y no se crea nada.
+    const local = this.collectBlockers();
+    if (local.length > 0) {
+      this.presentBlockers(local, 'send');
+      return;
+    }
+
+    // 2) Lo que sólo sabe el servidor, ANTES de gastar el consecutivo.
+    const payload = this.buildPayload();
+    this.validatingDraft.set(true);
+    this.emitReadinessService
+      .validateDraft(payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (readiness) => {
+          this.validatingDraft.set(false);
+          const rows = toEmitRequirements(readiness);
+          this.backendRequirements.set(rows);
+          const blocking = rows.filter((row) => row.severity === 'blocker');
+          if (blocking.length > 0) {
+            this.presentBlockers(blocking, 'send');
+            return;
+          }
+          this.createInvoiceNow(payload);
+        },
+        // La prevalidación es asesora: si la red falla se conserva el flujo de
+        // siempre (la puerta posterior a crear sigue en pie).
+        error: () => {
+          this.validatingDraft.set(false);
+          this.createInvoiceNow(payload);
+        },
+        // `validateDraft` puede completar SIN emitir (cuerpo irreconocible).
+        complete: () => {
+          if (!this.validatingDraft()) return;
+          this.validatingDraft.set(false);
+          this.createInvoiceNow(payload);
+        },
+      });
+  }
+
+  private createInvoiceNow(payload: CreateInvoiceDto): void {
+    if (this.submitting()) return;
+    this.submitting.set(true);
+    this.store.dispatch(createInvoice({ invoice: payload }));
+  }
+
+  /**
+   * Presenta faltantes bloqueantes: banner con los mensajes, secciones dueñas
+   * abiertas y foco en el PRIMERO (orden de `sortRequirements`). Si sólo hay
+   * filas que navegan a otra pantalla no hay campo que enfocar: se deja la
+   * checklist del resumen lateral a la vista.
+   */
+  private presentBlockers(
+    blockers: SaveRequirement[],
+    intent: 'send' | 'validate',
+  ): void {
+    const sorted = sortRequirements(blockers);
+    const count = sorted.length;
+    if (intent === 'send') {
       this.submitError.set(
-        blockers.length === 1
+        count === 1
           ? 'La factura no se envió: falta 1 dato que la DIAN rechazaría, y el consecutivo autorizado no se recupera.'
-          : `La factura no se envió: faltan ${blockers.length} datos que la DIAN rechazaría, y el consecutivo autorizado no se recupera.`,
+          : `La factura no se envió: faltan ${count} datos que la DIAN rechazaría, y el consecutivo autorizado no se recupera.`,
       );
       // Los avisos viajan JUNTO a los bloqueantes, no en una segunda pasada: el
       // usuario corrige una vez y vuelve a enviar una vez.
       this.submitErrorDetails.set([
-        ...blockers,
-        ...this.collectAdvisories().map((advisory) => 'Aviso: ' + advisory),
+        ...sorted.map((row) => row.reason),
+        ...this.readinessWarnings().map((row) => 'Aviso: ' + row.reason),
       ]);
-      this.expandSectionsWithErrors();
-      return;
+    } else {
+      this.submitError.set(
+        count === 1
+          ? 'No se pudo validar: falta 1 dato del formulario.'
+          : `No se pudo validar: faltan ${count} datos del formulario.`,
+      );
+      this.submitErrorDetails.set(sorted.map((row) => row.reason));
     }
 
-    this.submitting.set(true);
-    this.store.dispatch(createInvoice({ invoice: this.buildPayload() }));
+    for (const row of sorted) {
+      const action = row.action;
+      if (action?.target && action.kind !== 'navigate') {
+        this.setSection(this.sectionOfTarget(action.target), true);
+      }
+    }
+    this.expandSectionsWithErrors();
+
+    const first = sorted[0]?.action;
+    if (first?.target && first.kind !== 'navigate') {
+      this.revealFormTarget(first.target);
+    } else {
+      this.focusSummaryAside();
+    }
+  }
+
+  /** Lleva la vista y el foco al bloque «Para emitir falta» del resumen. */
+  private focusSummaryAside(): void {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      const aside = document.getElementById('invoice-summary-aside');
+      aside?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      aside?.focus?.();
+    });
   }
 
   /**
@@ -8656,12 +8841,19 @@ export class InvoiceCreatePageComponent implements OnInit {
    * es un callejón sin salida, y con ocho secciones plegables el campo culpable
    * puede estar fuera de la vista.
    */
-  private collectBlockers(): string[] {
-    const blockers: string[] = [];
+  private collectBlockers(): SaveRequirement[] {
+    const blockers: SaveRequirement[] = [];
     const raw = this.rawValue();
 
     if (!raw['customer_name']) {
-      blockers.push('El adquiriente necesita nombre o razón social.');
+      blockers.push(
+        localRequirement(
+          'customer_name',
+          'Nombre del adquiriente',
+          'El adquiriente necesita nombre o razón social.',
+          'customer_name',
+        ),
+      );
     }
     // A.8 — el DV ya no se verifica aquí porque ya no se DIGITA: la pantalla
     // lo deriva del NIT con el mismo módulo 11 que `@NitDvMatches()` en el
@@ -8681,35 +8873,78 @@ export class InvoiceCreatePageComponent implements OnInit {
       // necesitarla, ver `collectAdvisories`.
       if (!addressLine && this.isNamedAcquirer()) {
         blockers.push(
-          'El adquiriente tiene documento declarado y necesita dirección fiscal. Sólo un consumidor final (sin documento) puede omitirla.',
+          localRequirement(
+            'customer_address',
+            'Dirección fiscal del adquiriente',
+            'El adquiriente tiene documento declarado y necesita dirección fiscal. Sólo un consumidor final (sin documento) puede omitirla.',
+            'customer_address',
+          ),
         );
       } else if (addressLine && !cityCode) {
         blockers.push(
-          'La dirección fiscal necesita su municipio DANE: búscalo por nombre en «Municipio (DANE)» y selecciónalo. Sin ese código la DIAN rechaza el documento.',
+          localRequirement(
+            'customer_municipality_code',
+            'Municipio (DANE) del adquiriente',
+            'La dirección fiscal necesita su municipio DANE: búscalo por nombre en «Municipio (DANE)» y selecciónalo. Sin ese código la DIAN rechaza el documento.',
+            'customer_municipality_code',
+          ),
         );
       } else if (!addressLine && cityCode) {
         blockers.push(
-          'Hay un municipio DANE elegido pero la dirección fiscal está vacía: escribe la dirección o quita el municipio.',
+          localRequirement(
+            'customer_address',
+            'Dirección fiscal del adquiriente',
+            'Hay un municipio DANE elegido pero la dirección fiscal está vacía: escribe la dirección o quita el municipio.',
+            'customer_address',
+          ),
         );
       }
     }
     if (this.itemsArray.length === 0) {
-      blockers.push('La factura necesita al menos una línea.');
+      blockers.push(
+        localRequirement(
+          'items',
+          'Líneas de la factura',
+          'La factura necesita al menos una línea.',
+          'items',
+        ),
+      );
     }
     // Se prefiere el motivo REAL de la lista vacía (vencidas / agotadas /
     // ninguna) al genérico: son tres arreglos distintos y el usuario no puede
-    // adivinar cuál le toca.
+    // adivinar cuál le toca. Con rangos elegibles el arreglo es ELEGIR uno en
+    // este formulario; sin ninguno, el arreglo vive en Resoluciones.
     if (!this.activeResolution()) {
-      blockers.push(
+      const reason =
         this.resolutionEmptyReason() ??
-          'No hay resolución activa para ' +
-            this.documentLabel().toLowerCase() +
-            '. El servidor no tendría de dónde tomar el consecutivo.',
+        'No hay resolución activa para ' +
+          this.documentLabel().toLowerCase() +
+          '. El servidor no tendría de dónde tomar el consecutivo.';
+      blockers.push(
+        this.resolutionOptions().length > 0
+          ? localRequirement(
+              'resolution_id',
+              'Resolución de numeración',
+              reason,
+              'resolution_id',
+            )
+          : localRequirement(
+              'resolution_id',
+              'Resolución de numeración',
+              reason,
+              RESOLUTIONS_ROUTE,
+              { kind: 'navigate', actionLabel: 'Ir a Resoluciones' },
+            ),
       );
     }
     if (this.isCredit() && !raw['due_date']) {
       blockers.push(
-        'La venta es a crédito y no tiene fecha de vencimiento. Declara el plazo o cámbiala a contado.',
+        localRequirement(
+          'due_date',
+          'Fecha de vencimiento',
+          'La venta es a crédito y no tiene fecha de vencimiento. Declara el plazo o cámbiala a contado.',
+          'due_date',
+        ),
       );
     }
     if (
@@ -8718,7 +8953,12 @@ export class InvoiceCreatePageComponent implements OnInit {
       String(raw['due_date']) < String(raw['issue_date'])
     ) {
       blockers.push(
-        'El vencimiento es anterior a la fecha de emisión. Corrige una de las dos.',
+        localRequirement(
+          'due_date_before_issue',
+          'Fecha de vencimiento',
+          'El vencimiento es anterior a la fecha de emisión. Corrige una de las dos.',
+          'due_date',
+        ),
       );
     }
     // Antes bloqueaba toda línea sin componente diciendo que la DIAN rechazaría
@@ -8733,7 +8973,12 @@ export class InvoiceCreatePageComponent implements OnInit {
     // `CustomizationID`.
     if (this.isAiu() && this.aiuWithoutAnyComponent()) {
       blockers.push(
-        'La operación es AIU (09) y ninguna línea es administración, imprevistos o utilidad: el documento no declararía AIU alguno. Marca las líneas del AIU o aplica la base configurada en el perfil.',
+        localRequirement(
+          'aiu_without_component',
+          'Componentes del AIU',
+          'La operación es AIU (09) y ninguna línea es administración, imprevistos o utilidad: el documento no declararía AIU alguno. Marca las líneas del AIU o aplica la base configurada en el perfil.',
+          'items',
+        ),
       );
     }
     // Paso 8: la tarifa gravable que el catálogo no resolvió entra con nombre
@@ -8741,15 +8986,29 @@ export class InvoiceCreatePageComponent implements OnInit {
     // consecutivo. Es el mismo hecho que pinta el recuadro.
     const aiuPlan = this.aiuApplyPlan();
     if (aiuPlan && aiuPlan.unresolvedTaxes.length > 0) {
-      for (const item of aiuPlan.unresolvedTaxes) {
-        blockers.push(item.message);
-      }
+      aiuPlan.unresolvedTaxes.forEach((item, index) => {
+        blockers.push(
+          localRequirement(
+            `aiu_unresolved_tax_${index}`,
+            'Impuesto del AIU sin resolver',
+            item.message,
+            'taxes_section',
+          ),
+        );
+      });
     }
     // Paso 9: si la carga del catálogo falló, el AIU no puede resolverse
     // contra nada —las líneas gravables viajarían sin impuesto—. Se bloquea
     // nombrando la carga, no un vacío que nadie vio.
     if (this.isAiu() && this.taxCatalogState() !== 'ok') {
-      blockers.push(taxCatalogLoadMessage(this.taxCatalogState()));
+      blockers.push(
+        localRequirement(
+          'tax_catalog',
+          'Catálogo de impuestos',
+          taxCatalogLoadMessage(this.taxCatalogState()),
+          'taxes_section',
+        ),
+      );
     }
     // Espejo exacto de lo que el backend valida en `resolveAiuContext` antes de
     // tomar consecutivo. Se repite acá para que el usuario lo lea con la factura
@@ -8758,19 +9017,36 @@ export class InvoiceCreatePageComponent implements OnInit {
       const note = this.aiuEffectiveNote();
       if (note && !note.valid) {
         blockers.push(
-          note.length > note.max
-            ? `El objeto del contrato AIU deja la nota CAV03 en ${note.length} caracteres y el máximo es ${note.max}. Recórtalo.`
-            : 'La operación es AIU (09) y no hay objeto del contrato. La regla CAV03 exige la nota en la línea de Administración: descríbelo en la sección AIU o en Ajustes → Facturación.',
+          localRequirement(
+            'aiu_contract_object',
+            'Objeto del contrato AIU',
+            note.length > note.max
+              ? `El objeto del contrato AIU deja la nota CAV03 en ${note.length} caracteres y el máximo es ${note.max}. Recórtalo.`
+              : 'La operación es AIU (09) y no hay objeto del contrato. La regla CAV03 exige la nota en la línea de Administración: descríbelo en la sección AIU o en Ajustes → Facturación.',
+            'aiu_contract_object',
+          ),
         );
       }
     }
     if (this.usesForeignCurrency()) {
       if (!raw['foreign_currency']) {
-        blockers.push('Declaraste conversión a divisa pero no elegiste cuál.');
+        blockers.push(
+          localRequirement(
+            'foreign_currency',
+            'Divisa',
+            'Declaraste conversión a divisa pero no elegiste cuál.',
+            'foreign_currency',
+          ),
+        );
       }
       if (!(Number(raw['exchange_rate']) > 0)) {
         blockers.push(
-          'La conversión a divisa necesita la tasa del día (pesos por unidad de divisa).',
+          localRequirement(
+            'exchange_rate',
+            'Tasa de cambio',
+            'La conversión a divisa necesita la tasa del día (pesos por unidad de divisa).',
+            'exchange_rate',
+          ),
         );
       }
     }
@@ -8778,20 +9054,47 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.itemControls().forEach((group, index) => {
       const label = this.lineLabel(index);
       const value = group.value as InvoiceItemFormValue;
+      const at = (field: string) => `items.${index}.${field}`;
       if (!String(group.get('description')?.value ?? '').trim()) {
         blockers.push(
-          label +
-            ': falta la descripción. Es lo único que el adquiriente lee en el documento.',
+          localRequirement(
+            at('description'),
+            label + ': descripción',
+            label +
+              ': falta la descripción. Es lo único que el adquiriente lee en el documento.',
+            at('description'),
+          ),
         );
       }
       if (!(Number(group.get('quantity')?.value) >= 0.0001)) {
-        blockers.push(label + ': la cantidad debe ser mayor que cero.');
+        blockers.push(
+          localRequirement(
+            at('quantity'),
+            label + ': cantidad',
+            label + ': la cantidad debe ser mayor que cero.',
+            at('quantity'),
+          ),
+        );
       }
       if (Number(group.get('unit_price')?.value) < 0) {
-        blockers.push(label + ': el precio unitario no puede ser negativo.');
+        blockers.push(
+          localRequirement(
+            at('unit_price'),
+            label + ': precio unitario',
+            label + ': el precio unitario no puede ser negativo.',
+            at('unit_price'),
+          ),
+        );
       }
       if (Number(group.get('discount_amount')?.value) < 0) {
-        blockers.push(label + ': el descuento no puede ser negativo.');
+        blockers.push(
+          localRequirement(
+            at('discount_amount'),
+            label + ': descuento',
+            label + ': el descuento no puede ser negativo.',
+            at('discount_amount'),
+          ),
+        );
       }
       // El descuento que se come la línea NO produce un error ni un negativo:
       // `lineGross` la recorta a cero y la factura sale con un renglón de cero
@@ -8799,26 +9102,30 @@ export class InvoiceCreatePageComponent implements OnInit {
       // esta pantalla desde que el descuento por línea existe.
       if (lineDiscountExceedsSubtotal(value)) {
         blockers.push(
-          label +
-            `: el descuento (${this.formatCurrency(Number(value.discount_amount) || 0)}) iguala o supera el subtotal de la línea (${this.formatCurrency(
-              (Number(value.quantity) || 0) * (Number(value.unit_price) || 0),
-            )}). La línea quedaría en cero.`,
+          localRequirement(
+            at('discount_amount') + ':exceeds',
+            label + ': descuento',
+            label +
+              `: el descuento (${this.formatCurrency(Number(value.discount_amount) || 0)}) iguala o supera el subtotal de la línea (${this.formatCurrency(
+                (Number(value.quantity) || 0) * (Number(value.unit_price) || 0),
+              )}). La línea quedaría en cero.`,
+            at('discount_amount'),
+          ),
         );
       }
-      // Una unidad de medida vacía saldría al XML como `@unitCode` en blanco y
-      // la DIAN rechaza el documento entero por una línea (regla FAJ).
-      if (!String(value.unit_code ?? '').trim()) {
-        blockers.push(
-          label +
-            ': falta la unidad de medida. Sale al XML como @unitCode y la DIAN no acepta el atributo vacío.',
-        );
-      }
+      // La unidad de medida vacía YA NO bloquea: `buildPayload()` omite el
+      // campo y el backend emite `EA`. Se avisa en `collectAdvisories()`.
     });
 
     const email = String(raw['customer_email'] ?? '').trim();
     if (email && this.invoiceForm.get('customer_email')?.hasError('email')) {
       blockers.push(
-        'El correo del adquiriente no es válido. Es la dirección a la que se entrega la factura electrónica.',
+        localRequirement(
+          'customer_email',
+          'Correo del adquiriente',
+          'El correo del adquiriente no es válido. Es la dirección a la que se entrega la factura electrónica.',
+          'customer_email',
+        ),
       );
     }
     // OJO: la FALTA de correo NO entra aquí. Una venta a consumidor final se
@@ -8836,18 +9143,30 @@ export class InvoiceCreatePageComponent implements OnInit {
    * una recomendación en un muro: un aviso que bloquea es un bloqueo, y esta
    * pantalla ya tiene la fama de decir «revisa el formulario» sin decir qué.
    */
-  private collectAdvisories(): string[] {
-    const advisories: string[] = [];
+  private collectAdvisories(): SaveRequirement[] {
+    const advisories: SaveRequirement[] = [];
     const raw = this.rawValue();
 
     if (!String(raw['customer_email'] ?? '').trim()) {
       advisories.push(
-        'El adquiriente no tiene correo: la factura se emite igual, pero no hay a dónde entregarla electrónicamente.',
+        localRequirement(
+          'advisory_customer_email',
+          'Correo del adquiriente',
+          'El adquiriente no tiene correo: la factura se emite igual, pero no hay a dónde entregarla electrónicamente.',
+          'customer_email',
+          { severity: 'required' },
+        ),
       );
     }
     if (!String(raw['customer_tax_id'] ?? '').trim()) {
       advisories.push(
-        'El adquiriente no declara número de documento. Sólo es correcto si la venta es a consumidor final.',
+        localRequirement(
+          'advisory_customer_tax_id',
+          'Documento del adquiriente',
+          'El adquiriente no declara número de documento. Sólo es correcto si la venta es a consumidor final.',
+          'customer_tax_id',
+          { severity: 'required' },
+        ),
       );
     }
     if (
@@ -8855,10 +9174,57 @@ export class InvoiceCreatePageComponent implements OnInit {
       this.itemsValue().every((item) => (item.taxes ?? []).length === 0)
     ) {
       advisories.push(
-        'Ninguna línea declara impuesto y tu tienda sí tiene catálogo. Sólo es correcto si toda la operación es excluida o exenta.',
+        localRequirement(
+          'advisory_taxes',
+          'Impuestos de las líneas',
+          'Ninguna línea declara impuesto y tu tienda sí tiene catálogo. Sólo es correcto si toda la operación es excluida o exenta.',
+          'taxes_section',
+          { severity: 'required' },
+        ),
       );
     }
+    // Sin unidad de medida la línea sale con `EA` (unidad): no rechaza la DIAN,
+    // pero es un valor que el usuario no eligió.
+    this.itemControls().forEach((group, index) => {
+      if (!String(group.get('unit_code')?.value ?? '').trim()) {
+        advisories.push(
+          localRequirement(
+            `advisory_items.${index}.unit_code`,
+            this.lineLabel(index) + ': unidad de medida',
+            this.lineLabel(index) +
+              ': sin unidad de medida. Se emite como «EA» (unidad); elige la correcta si no lo es.',
+            `items.${index}.unit_code`,
+            { severity: 'required' },
+          ),
+        );
+      }
+    });
     return advisories;
+  }
+
+  /** ¿Ese destino ya lo contó `sectionErrors` por su propio control? */
+  private requirementAlreadyCounted(
+    target: string,
+    backend: Record<string, unknown>,
+  ): boolean {
+    const line = /^items\.(\d+)\.(.+)$/.exec(target);
+    if (line) {
+      if (backend[target]) return true;
+      const field = line[2];
+      if (!['description', 'quantity', 'unit_price'].includes(field)) {
+        return false;
+      }
+      const control = this.itemControls()[Number(line[1])]?.get(field);
+      return !!control && control.invalid && control.touched;
+    }
+    if (backend[target]) return true;
+    const control = this.invoiceForm.get(target);
+    return (
+      SECTION_FIELDS[this.sectionOfTarget(target)].includes(target) &&
+      !!control &&
+      control.invalid &&
+      control.touched
+    );
   }
 
   /** Abre toda sección que tenga algo mal, para que el error sea alcanzable. */
@@ -9288,16 +9654,11 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.clearSubmitError();
     this.syncDueDate();
     this.invoiceForm.markAllAsTouched();
+    this.attemptedSubmit.set(true);
 
-    const blockers = this.collectBlockers();
-    if (blockers.length > 0) {
-      this.submitError.set(
-        blockers.length === 1
-          ? 'No se pudo validar: falta 1 dato del formulario.'
-          : `No se pudo validar: faltan ${blockers.length} datos del formulario.`,
-      );
-      this.submitErrorDetails.set(blockers);
-      this.expandSectionsWithErrors();
+    const local = this.collectBlockers();
+    if (local.length > 0) {
+      this.presentBlockers(local, 'validate');
       return;
     }
 
@@ -9307,22 +9668,24 @@ export class InvoiceCreatePageComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (readiness) => {
-          const opened = this.openEmitReadinessModal(readiness);
-          if (!opened) {
-            // Nada que corregir: el silencio acá sería indistinguible de un
-            // botón roto. Es la única rama de esta puerta que SÍ celebra el
-            // veredicto positivo, porque es la única que el usuario pidió a
-            // propósito para saberlo.
-            this.toastService.success(
-              readiness.emittable
-                ? 'Todo listo: el documento puede emitirse tal como está.'
-                : 'El servidor no reportó ningún hallazgo que mostrar.',
-            );
+          const rows = toEmitRequirements(readiness);
+          this.backendRequirements.set(rows);
+          const blocking = rows.filter((row) => row.severity === 'blocker');
+          if (blocking.length > 0) {
+            this.presentBlockers(blocking, 'validate');
+            return;
           }
+          // Nada que corregir: el silencio acá sería indistinguible de un
+          // botón roto. Los avisos, si los hay, quedan en la checklist.
+          this.toastService.success(
+            readiness.emittable
+              ? 'Todo listo: el documento puede emitirse tal como está.'
+              : 'El servidor no reportó ningún hallazgo que mostrar.',
+          );
         },
         error: (error) => {
           this.validatingDraft.set(false);
-          // A DIFERENCIA de `check()` (puerta asesora, silenciosa), acá SÍ se
+          // A DIFERENCIA de la prevalidación viva (silenciosa), acá SÍ se
           // avisa: el usuario pulsó un botón y un error tragado en silencio es
           // un botón que no responde.
           this.toastService.error(describeApiFailure(error).message);
@@ -9354,8 +9717,18 @@ export class InvoiceCreatePageComponent implements OnInit {
    * acá no hace falta adivinar nada.
    */
   onEmitRequirementAction(requirement: SaveRequirement): void {
-    const action = requirement.action;
     this.emitRequirementsOpen.set(false);
+    this.runRequirementAction(requirement.action);
+  }
+
+  /** CTA de una fila de la checklist del resumen lateral. */
+  onAsideRequirementAction(action: SaveRequirementAction): void {
+    this.runRequirementAction(action);
+  }
+
+  private runRequirementAction(
+    action: SaveRequirementAction | undefined,
+  ): void {
     if (!action?.target) return;
 
     if (action.kind === 'navigate') {
@@ -9452,6 +9825,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   private sectionOfTarget(target: string): SectionId {
     if (target === 'items' || target.startsWith('items.')) return 'lineas';
     if (target === 'taxes_section') return 'impuestos';
+    if (target.startsWith('customer_')) return 'adquiriente';
     for (const section of Object.keys(SECTION_FIELDS) as SectionId[]) {
       if (SECTION_FIELDS[section].includes(target)) return section;
     }

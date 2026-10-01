@@ -33,6 +33,7 @@ export interface InvoiceSummaryTotals {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="w-full space-y-4">
+      @if (showTotals()) {
       <section
         class="rounded-2xl border border-border bg-surface p-5 shadow-sm space-y-4"
         aria-label="Resumen de la factura"
@@ -85,6 +86,7 @@ export interface InvoiceSummaryTotals {
           </p>
         }
       </section>
+      }
 
       <section
         class="rounded-xl border border-border/80 bg-surface-secondary/40 p-4 space-y-2"
@@ -211,6 +213,8 @@ export class InvoiceSummaryAsideComponent {
   readonly busy = input(false);
   readonly submitLabel = input('Crear factura');
   readonly canSubmit = input(true);
+  /** `false` cuando la página aún no tiene cifras propias (p. ej. desde pedido). */
+  readonly showTotals = input(true);
 
   readonly submit = output<void>();
   readonly validate = output<void>();
