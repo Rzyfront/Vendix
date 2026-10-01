@@ -257,6 +257,7 @@ export interface LineasRowErrors {
                   @if (carriesAiu()(row, i)) {
                     <div class="min-w-0 flex-1">
                       <app-selector
+                        data-control-name="aiu_component"
                         [formControl]="rowControl(row, rowPaths().aiu_field)"
                         [options]="aiuComponentOptions()"
                         [errorText]="errorsFor(i).aiu_field ?? ''"
@@ -349,7 +350,8 @@ export interface LineasRowErrors {
                 </div>
                 @if (carriesAiu()(row, i)) {
                   <app-selector
-                    [formControl]="rowControl(row, rowPaths().aiu_field)"
+                    data-control-name="aiu_component"
+                        [formControl]="rowControl(row, rowPaths().aiu_field)"
                     [options]="aiuComponentOptions()"
                     size="sm"
                   ></app-selector>
