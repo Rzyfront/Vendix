@@ -5620,9 +5620,11 @@ model ai_engine_logs {
   store_id          Int?
   user_id           Int?
   model             String?  @db.VarChar(100)
-  prompt_tokens     Int      @default(0)
-  completion_tokens Int      @default(0)
-  cost_usd          Decimal  @default(0) @db.Decimal(12, 8)
+  prompt_tokens         Int      @default(0)
+  completion_tokens     Int      @default(0)
+  cache_read_tokens     Int      @default(0)
+  cache_creation_tokens Int      @default(0)
+  cost_usd              Decimal  @default(0) @db.Decimal(12, 8)
   latency_ms        Int      @default(0)
   status            String   @default("success") @db.VarChar(20)
   error_message     String?  @db.Text

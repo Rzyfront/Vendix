@@ -156,7 +156,12 @@ export class AnthropicCompatibleProvider implements AIProvider {
               completionTokens: response.usage.output_tokens || 0,
               totalTokens:
                 (response.usage.input_tokens || 0) +
-                (response.usage.output_tokens || 0),
+                (response.usage.output_tokens || 0) +
+                (response.usage.cache_read_input_tokens || 0) +
+                (response.usage.cache_creation_input_tokens || 0),
+              cacheReadTokens: response.usage.cache_read_input_tokens || 0,
+              cacheCreationTokens:
+                response.usage.cache_creation_input_tokens || 0,
             }
           : undefined,
         model: response.model,
@@ -278,7 +283,12 @@ export class AnthropicCompatibleProvider implements AIProvider {
           completionTokens: finalMessage.usage?.output_tokens || 0,
           totalTokens:
             (finalMessage.usage?.input_tokens || 0) +
-            (finalMessage.usage?.output_tokens || 0),
+            (finalMessage.usage?.output_tokens || 0) +
+            (finalMessage.usage?.cache_read_input_tokens || 0) +
+            (finalMessage.usage?.cache_creation_input_tokens || 0),
+          cacheReadTokens: finalMessage.usage?.cache_read_input_tokens || 0,
+          cacheCreationTokens:
+            finalMessage.usage?.cache_creation_input_tokens || 0,
         },
       };
     } catch (error: any) {

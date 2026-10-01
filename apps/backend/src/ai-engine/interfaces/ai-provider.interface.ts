@@ -81,6 +81,10 @@ export interface AIResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Input tokens served from the provider prompt cache (Anthropic). */
+    cacheReadTokens?: number;
+    /** Input tokens written to the provider prompt cache (Anthropic). */
+    cacheCreationTokens?: number;
   };
   model?: string;
   error?: string;
@@ -151,6 +155,10 @@ export interface AIStreamChunk {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Input tokens served from the provider prompt cache (Anthropic). */
+    cacheReadTokens?: number;
+    /** Input tokens written to the provider prompt cache (Anthropic). */
+    cacheCreationTokens?: number;
   };
   error?: string;
 }
