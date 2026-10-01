@@ -111,6 +111,20 @@ export interface ReceivedDocumentsPage {
   meta: { total: number; page: number; limit: number; totalPages?: number };
 }
 
+export type ReceivedDocumentAccountingEvidenceStatus =
+  | 'linked' | 'missing' | 'ambiguous' | 'foreign_entity' | 'not_posted' | 'unresolved_entity';
+
+export interface ReceivedDocumentAccountingEvidence {
+  ledger_evidence_complete: boolean;
+  evidence: Array<{
+    reference: { source_type: string; source_id: number; accounting_entity_id: number };
+    status: ReceivedDocumentAccountingEvidenceStatus;
+    accounting_entry_id?: number;
+  }>;
+  unresolved_allocation_ids: number[];
+  fiscal_eligibility: 'pending';
+}
+
 export interface ApiEnvelope<T> {
   success: boolean;
   data: T;

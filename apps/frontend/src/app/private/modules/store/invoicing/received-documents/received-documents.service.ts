@@ -7,6 +7,7 @@ import type {
   ConfirmReceivedDocumentMatchInput,
   ManualReceivedDocumentInput,
   ReceivedDocument,
+  ReceivedDocumentAccountingEvidence,
   ReceivedDocumentMatchAllocationsResponse,
   ReceivedDocumentMatchCandidatesResponse,
   ReceivedDocumentMatchExpensesResponse,
@@ -44,6 +45,13 @@ export class ReceivedDocumentsService {
     return this.http.get<ApiEnvelope<ReceivedDocument>>(`${this.base(scope)}/${id}`, {
       params: this.scopeParams(scope, storeId),
     });
+  }
+
+  getAccountingEvidence(scope: ReceivedDocumentsScope, id: number, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentAccountingEvidence>> {
+    return this.http.get<ApiEnvelope<ReceivedDocumentAccountingEvidence>>(
+      `${this.base(scope)}/${id}/accounting-evidence`,
+      { params: this.scopeParams(scope, storeId) },
+    );
   }
 
   getMatchCandidates(
