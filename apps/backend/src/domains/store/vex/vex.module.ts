@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { AIEngineModule } from '../../../ai-engine/ai-engine.module';
@@ -10,6 +10,8 @@ import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { PlanApprovalService } from './services/plan-approval.service';
 import { VexBlockService } from './services/vex-block.service';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
 
 /**
  * Vex: whole-plan approval, UI blocks and the business log.
@@ -21,9 +23,8 @@ import { VexActivityFeedService } from './services/vex-activity-feed.service';
  * `VexiModule` does not export it, so sharing the instance would require
  * editing that module.
  *
- * Deliberately NO `onModuleInit` tool registration: wiring (registry,
- * agent-loop hooks, module mount) is owned by wave 2. The `vex-blocks`
- * factory declares only.
+ * Owns the `vex_blocks` tool family: no other domain holds `VexBlockService`,
+ * so this is the only module that can register it without a cross-import.
  */
 @Module({
   imports: [
@@ -43,4 +44,13 @@ import { VexActivityFeedService } from './services/vex-activity-feed.service';
   ],
   exports: [PlanApprovalService, VexBlockService, VexActivityFeedService],
 })
-export class VexModule {}
+export class VexModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly blocks: VexBlockService,
+  ) {}
+
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(createVexBlockTools({ blocks: this.blocks }));
+  }
+}

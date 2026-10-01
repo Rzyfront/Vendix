@@ -99,6 +99,9 @@ export class VexController {
     }));
     const { covered, reconfirm } = this.planApproval.classifySteps(steps);
     const userId = RequestContextService.getContext()?.user_id;
+    // Persisted next to the plan so a later turn can prove the approved
+    // arguments did not drift; the token itself carries the same hashes.
+    await this.planState.setStepHashes(dto.conversation_id, steps);
     const token = await this.planApproval.issuePlanToken(planId, userId, steps);
 
     return this.responseService.success(
@@ -160,6 +163,7 @@ export class VexController {
       tool: dto.tool,
       args: dto.arguments,
       output,
+      agent_key: 'vex',
     });
     const summary = this.applySummary(output);
     await this.activity.recordAppliedNarration({

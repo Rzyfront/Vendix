@@ -90,7 +90,19 @@ export class AnthropicCompatibleProvider implements AIProvider {
 
       const response = await this.client.messages.create({
         model: options?.model || this.config.modelId,
-        ...(systemPrompt && { system: systemPrompt }),
+        // Prompt caching (Vex step 5): with 240+ tools the system prompt +
+        // tool definitions dominate every iteration. Both blocks are marked
+        // ephemeral so the second iteration of a turn reads them from cache.
+        // Anthropic caches by prefix: system first, then the LAST tool block.
+        ...(systemPrompt && {
+          system: [
+            {
+              type: 'text' as const,
+              text: systemPrompt,
+              cache_control: { type: 'ephemeral' as const },
+            },
+          ],
+        }),
         messages: transformedMessages,
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
@@ -99,10 +111,13 @@ export class AnthropicCompatibleProvider implements AIProvider {
           this.config.settings?.temperature ??
           undefined,
         ...(options?.tools?.length && {
-          tools: options.tools.map((t) => ({
+          tools: options.tools.map((t, i, arr) => ({
             name: t.function.name,
             description: t.function.description,
             input_schema: t.function.parameters as any,
+            ...(i === arr.length - 1
+              ? { cache_control: { type: 'ephemeral' as const } }
+              : {}),
           })),
         }),
       });
@@ -197,7 +212,17 @@ export class AnthropicCompatibleProvider implements AIProvider {
 
       const stream = this.client.messages.stream({
         model: options?.model || this.config.modelId,
-        ...(systemPrompt && { system: systemPrompt }),
+        // Same ephemeral marking as `chat()`: the streamed turns of an agent
+        // loop re-send the same prefix on every iteration.
+        ...(systemPrompt && {
+          system: [
+            {
+              type: 'text' as const,
+              text: systemPrompt,
+              cache_control: { type: 'ephemeral' as const },
+            },
+          ],
+        }),
         messages: userMessages.map((m) => ({
           role: m.role as 'user' | 'assistant',
           content: this.transformContentForAnthropic(m.content) as any,
@@ -209,10 +234,13 @@ export class AnthropicCompatibleProvider implements AIProvider {
           this.config.settings?.temperature ??
           undefined,
         ...(options?.tools?.length && {
-          tools: options.tools.map((t) => ({
+          tools: options.tools.map((t, i, arr) => ({
             name: t.function.name,
             description: t.function.description,
             input_schema: t.function.parameters as any,
+            ...(i === arr.length - 1
+              ? { cache_control: { type: 'ephemeral' as const } }
+              : {}),
           })),
         }),
       });

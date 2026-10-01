@@ -35,6 +35,18 @@ export interface RegisteredTool {
   requiredPermissions?: string[];
   requiresConfirmation?: boolean;
   /**
+   * Marks a write whose effect cannot be walked back (DIAN issuance/voids,
+   * payments/refunds, payroll settlement, fiscal/cash/period closings,
+   * voids, deletes/archives).
+   *
+   * Read by whole-plan approval: an irreversible step always asks for its own
+   * confirmation card even inside an approved plan. Opt-in and fail-open on
+   * purpose — the plan service ALSO matches the tool's domain and, for
+   * `write_endpoint`, the path segments, so a tool that forgets the flag is
+   * still caught by its domain.
+   */
+  irreversible?: boolean;
+  /**
    * Marks the tool as free of side effects. Surfaces that cannot show a
    * confirmation step before executing — realtime voice, where the model acts
    * on a transcription the user never reviews — expose ONLY tools with this

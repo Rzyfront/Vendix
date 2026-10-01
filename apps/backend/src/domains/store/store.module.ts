@@ -42,6 +42,7 @@ import { ReservationsModule } from './reservations/reservations.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
 import { VexiModule } from './vexi/vexi.module';
+import { VexModule } from './vex/vex.module';
 import { DispatchNotesModule } from './dispatch-notes/dispatch-notes.module';
 import { DispatchRoutesModule } from './dispatch-routes/dispatch-routes.module';
 import { CarrierModule } from './carrier/carrier.module';
@@ -116,6 +117,7 @@ import { CrmModule } from './crm/crm.module';
     ReviewsModule,
     AIChatModule,
     VexiModule,
+    VexModule,
     DispatchNotesModule,
     DispatchRoutesModule,
     CarrierModule,

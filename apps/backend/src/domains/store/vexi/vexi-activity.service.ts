@@ -27,6 +27,8 @@ const APPLIED_RESULT_MAX_CHARS = 1000;
 export interface ActivityEntry {
   at: Date;
   conversation_id: number;
+  /** Which agent applied the change (`vexi`, `vex`, …). Absent on legacy rows. */
+  agent_key?: string;
   tool: string;
   /** What the person asked for, in the words the tool recorded. */
   operation: string;
@@ -157,6 +159,8 @@ export class VexiActivityService {
     tool: string;
     args: Record<string, unknown>;
     output: string;
+    /** Agent that applied the change; stamped on the trace for the audit feed. */
+    agent_key?: string;
   }): Promise<void> {
     if (!input.conversationId) {
       this.logger.warn(
@@ -180,6 +184,7 @@ export class VexiActivityService {
               // Truncated to the same budget the loop uses when it persists a
               // result, so `wasApplied`'s tolerance for truncation still holds.
               result: input.output.slice(0, APPLIED_RESULT_MAX_CHARS),
+              ...(input.agent_key ? { agent_key: input.agent_key } : {}),
             },
           ],
         },
@@ -318,6 +323,9 @@ export class VexiActivityService {
         entries.push({
           at: message.created_at,
           conversation_id: message.conversation_id,
+          ...(typeof call?.agent_key === 'string' && call.agent_key
+            ? { agent_key: call.agent_key }
+            : {}),
           tool: String(call?.name ?? 'desconocida'),
           operation: this.describeOperation(call),
           applied: true,
@@ -400,6 +408,9 @@ export class VexiActivityService {
     return {
       at: message.created_at,
       conversation_id: message.conversation_id,
+      ...(typeof call?.agent_key === 'string' && call.agent_key
+        ? { agent_key: call.agent_key }
+        : {}),
       tool: String(call?.name ?? 'desconocida'),
       operation: argSummary
         ? `${String(call?.name)} ${argSummary}`
