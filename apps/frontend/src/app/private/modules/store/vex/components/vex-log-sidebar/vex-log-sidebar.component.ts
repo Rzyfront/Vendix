@@ -19,11 +19,11 @@ interface VexLogCategoryItem {
 }
 
 const CATEGORY_TINT: Record<VexLogCategory, string> = {
-  sale: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
-  inventory: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
-  cash: 'bg-sky-500/15 text-sky-600 dark:text-sky-300',
-  alert: 'bg-rose-500/15 text-rose-600 dark:text-rose-300',
-  agent: 'bg-violet-500/15 text-violet-600 dark:text-violet-300',
+  sale: 'bg-[rgba(var(--color-success-rgb),0.15)] text-[var(--color-success)]',
+  inventory: 'bg-[rgba(var(--color-warning-rgb),0.15)] text-[var(--color-warning)]',
+  cash: 'bg-[rgba(var(--color-info-rgb),0.15)] text-[var(--color-info)]',
+  alert: 'bg-[rgba(var(--color-error-rgb),0.15)] text-[var(--color-error)]',
+  agent: 'bg-[rgba(var(--color-primary-rgb),0.12)] text-[var(--color-primary)]',
 };
 
 @Component({
@@ -42,7 +42,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
         <div class="flex flex-col items-center gap-1 py-3">
           <button
             type="button"
-            class="relative w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10"
+            class="relative w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
             title="Expandir bitácora"
             aria-label="Expandir bitácora"
             (click)="collapsed.set(false)"
@@ -50,7 +50,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
             <app-icon name="panel-right-open" [size]="18" />
             @if (store.new_count() > 0) {
               <span
-                class="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] leading-4 text-center"
+                class="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-[10px] leading-4 text-center"
               >
                 {{ store.new_count() }}
               </span>
@@ -59,7 +59,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
           @for (cat of categories; track cat.key) {
             <button
               type="button"
-              class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10"
+              class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
               [title]="cat.label"
               [attr.aria-label]="cat.label"
               (click)="onCategory(cat.key)"
@@ -75,7 +75,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
             <span class="font-semibold truncate">Bitácora empresarial</span>
             @if (store.new_count() > 0) {
               <span
-                class="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-xs leading-5 text-center"
+                class="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-xs leading-5 text-center"
               >
                 {{ store.new_count() }}
               </span>
@@ -83,7 +83,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
           </div>
           <button
             type="button"
-            class="w-10 h-10 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10"
+            class="w-10 h-10 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
             aria-label="Contraer bitácora"
             (click)="collapsed.set(true)"
           >
@@ -117,7 +117,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
           <div class="px-3 pb-2 shrink-0">
             <button
               type="button"
-              class="min-h-10 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              class="min-h-10 text-sm text-[var(--color-primary)] hover:underline"
               (click)="store.markAllSeen()"
             >
               Marcar como vistos
@@ -139,7 +139,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
                   <p class="text-sm font-medium">{{ event.title }}</p>
                   <div class="shrink-0 flex items-center gap-1.5">
                     @if (event.is_new) {
-                      <span class="w-2 h-2 rounded-full bg-blue-500" aria-label="Nuevo"></span>
+                      <span class="w-2 h-2 rounded-full bg-[var(--color-primary)]" aria-label="Nuevo"></span>
                     }
                     <span class="text-xs text-[var(--color-text-secondary)]">
                       {{ event.created_at | date: 'HH:mm' }}
@@ -177,8 +177,8 @@ export class VexLogSidebarComponent {
 
   chipClass(active: boolean): string {
     return active
-      ? 'bg-[var(--color-text-primary)] text-[var(--color-surface)] border-transparent'
-      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10';
+      ? 'bg-[var(--color-primary)] text-[var(--color-text-on-primary)] border-transparent'
+      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]';
   }
 
   onCategory(category: VexLogCategory): void {

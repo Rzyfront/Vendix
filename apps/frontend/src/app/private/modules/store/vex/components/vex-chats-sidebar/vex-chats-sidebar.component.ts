@@ -34,7 +34,7 @@ interface VexSidebarUser {
           <img src="assets/vex/vexicon-96.webp" alt="" class="w-7 h-7 mb-2" />
           <button
             type="button"
-            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10"
+            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
             title="Expandir chats"
             aria-label="Expandir chats"
             (click)="collapsed.set(false)"
@@ -43,7 +43,7 @@ interface VexSidebarUser {
           </button>
           <button
             type="button"
-            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10"
+            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
             title="Nuevo chat"
             aria-label="Nuevo chat"
             (click)="onNewChat()"
@@ -52,7 +52,7 @@ interface VexSidebarUser {
           </button>
           <button
             type="button"
-            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10"
+            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
             title="Buscar chats"
             aria-label="Buscar chats"
             (click)="collapsed.set(false)"
@@ -68,7 +68,7 @@ interface VexSidebarUser {
           </div>
           <button
             type="button"
-            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-black/5 dark:hover:bg-white/10"
+            class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
             aria-label="Contraer chats"
             (click)="collapsed.set(true)"
           >
@@ -79,7 +79,7 @@ interface VexSidebarUser {
         <div class="px-3 pb-2 flex flex-col gap-2 shrink-0">
           <button
             type="button"
-            class="w-full min-h-10 flex items-center gap-2 px-3 rounded-lg border border-[var(--color-border)] text-sm font-medium hover:bg-black/5 dark:hover:bg-white/10"
+            class="w-full min-h-10 flex items-center gap-2 px-3 rounded-lg border border-[var(--color-border)] text-sm font-medium hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
             (click)="onNewChat()"
           >
             <app-icon name="square-pen" [size]="18" />
@@ -108,9 +108,8 @@ interface VexSidebarUser {
           </p>
           @for (conversation of chat_store.filtered_conversations(); track conversation.id) {
             <div
-              class="group relative flex items-center rounded-lg cursor-pointer min-h-10 hover:bg-black/5 dark:hover:bg-white/10"
-              [class.bg-black/5]="conversation.id === chat_store.active_id()"
-              [class.dark:bg-white/10]="conversation.id === chat_store.active_id()"
+              class="group relative flex items-center rounded-lg cursor-pointer min-h-10 hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
+              [style.background-color]="conversation.id === chat_store.active_id() ? 'rgba(var(--color-primary-rgb),0.12)' : null"
               (click)="onSelect(conversation.id)"
             >
               <button
@@ -123,7 +122,7 @@ interface VexSidebarUser {
               </button>
               <button
                 type="button"
-                class="shrink-0 w-10 h-10 mr-0.5 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-rose-500"
+                class="shrink-0 w-10 h-10 mr-0.5 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-[var(--color-error)]"
                 aria-label="Eliminar chat"
                 (click)="onDelete($event, conversation.id)"
               >
@@ -141,7 +140,7 @@ interface VexSidebarUser {
           class="shrink-0 flex items-center gap-3 px-3 py-3 border-t border-[var(--color-border)]"
         >
           <div
-            class="w-9 h-9 shrink-0 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-300 flex items-center justify-center text-sm font-semibold"
+            class="w-9 h-9 shrink-0 rounded-full bg-[rgba(var(--color-primary-rgb),0.12)] text-[var(--color-primary)] flex items-center justify-center text-sm font-semibold"
           >
             {{ initials() }}
           </div>

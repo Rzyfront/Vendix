@@ -85,7 +85,7 @@ const MAX_LINES = 8;
         @if (can_send()) {
           <button
             type="button"
-            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-[var(--color-primary)] text-white transition-opacity hover:opacity-90"
+            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-[var(--color-primary)] text-[var(--color-text-on-primary)] transition-opacity hover:opacity-90"
             aria-label="Enviar"
             (click)="send()"
           >

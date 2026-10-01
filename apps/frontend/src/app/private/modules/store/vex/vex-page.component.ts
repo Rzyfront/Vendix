@@ -86,8 +86,8 @@ function writeFlag(key: string, value: boolean): void {
 
       <main class="relative flex-1 min-w-0 flex flex-col">
         <div
-          class="absolute inset-0 pointer-events-none opacity-60 dark:opacity-100"
-          style="background: radial-gradient(ellipse 60% 50% at 50% 45%, rgba(59,130,246,0.22), transparent 70%)"
+          class="absolute inset-0 pointer-events-none"
+          style="background: radial-gradient(ellipse 60% 50% at 50% 45%, rgba(var(--color-primary-rgb),0.18), transparent 70%), radial-gradient(ellipse 40% 35% at 60% 60%, rgba(var(--color-accent-rgb),0.12), transparent 70%)"
           aria-hidden="true"
         ></div>
 
