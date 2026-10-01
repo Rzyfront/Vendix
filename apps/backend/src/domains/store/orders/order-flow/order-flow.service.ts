@@ -2951,6 +2951,23 @@ export class OrderFlowService {
       ) {
         throw new VendixHttpException(ErrorCodes.ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001);
       }
+      // Una orden SIN pago `pending` por confirmar y con saldo abierto no
+      // puede pasar a `processing` con un clic del personal: no hay dinero que
+      // asentar y el estado mentiría (total_paid 0, sin caja ni asiento). El
+      // personal debe REGISTRAR el cobro por `flow/pay`. Exentos: el webhook,
+      // la orden ya saldada y la venta a crédito (`payment_form === '2'`).
+      if (opts?.source !== 'webhook' && !pendingPayment && order.payment_form !== '2') {
+        const settledBeforeConfirm = order.payments.reduce(
+          (sum, payment) =>
+            ['succeeded', 'captured'].includes(payment.state)
+              ? sum.plus(payment.amount)
+              : sum,
+          new Prisma.Decimal(0),
+        );
+        if (settledBeforeConfirm.lessThan(new Prisma.Decimal(order.grand_total))) {
+          throw new VendixHttpException(ErrorCodes.ORD_CONFIRM_PAYMENT_NO_PAYMENT_001);
+        }
+      }
       if (pendingPayment) {
         await tx.payments.updateMany({
           where: { id: pendingPayment.id, state: 'pending' },

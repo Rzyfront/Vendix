@@ -1072,6 +1072,63 @@ export class InvoiceFlowService {
     return context;
   }
 
+  /**
+   * PUERTA DE PAGO — una factura que nace de una orden no se emite mientras la
+   * orden deba saldo (pagos `succeeded`/`captured` < `grand_total`), salvo que
+   * sea venta a crédito (`orders.payment_form === '2'`). Facturar dinero que no
+   * entró dejó una factura aceptada sobre una orden sin un solo pago (orden
+   * 9117). Aplica sólo a documentos de VENTA con `order_id`; notas, documentos
+   * soporte y facturas manuales (sin orden) no pasan por aquí. Todo camino de
+   * emisión (POS, webhook, solicitud de datos, manual) cruza `validate()`/`send()`.
+   * Devuelve el saldo pendiente (string) o `null` cuando no hay bloqueo.
+   */
+  private async resolveUnpaidOrderBalance(invoice: {
+    order_id?: number | null;
+    invoice_type?: string | null;
+  }): Promise<string | null> {
+    if (invoice.order_id == null) return null;
+    if (
+      !['sales_invoice', 'export_invoice', 'pos_equivalent_document'].includes(
+        String(invoice.invoice_type),
+      )
+    ) {
+      return null;
+    }
+    const order = await this.prisma.orders.findFirst({
+      where: { id: Number(invoice.order_id) },
+      select: {
+        grand_total: true,
+        payment_form: true,
+        payments: { select: { state: true, amount: true } },
+      },
+    });
+    if (!order || order.payment_form === '2') return null;
+    const settled = (order.payments ?? []).reduce(
+      (sum, payment) =>
+        ['succeeded', 'captured'].includes(String(payment.state))
+          ? sum.plus(payment.amount)
+          : sum,
+      new Prisma.Decimal(0),
+    );
+    const remaining = new Prisma.Decimal(order.grand_total).minus(settled);
+    return remaining.greaterThanOrEqualTo(0.01) ? remaining.toFixed(2) : null;
+  }
+
+  private async assertOrderPaidForEmission(invoice: {
+    id?: number;
+    order_id?: number | null;
+    invoice_type?: string | null;
+  }): Promise<void> {
+    const remaining = await this.resolveUnpaidOrderBalance(invoice);
+    if (remaining !== null) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_ORDER_UNPAID_001,
+        undefined,
+        { order_id: invoice.order_id, remaining_balance: remaining },
+      );
+    }
+  }
+
   private async getInvoice(id: number) {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id },
@@ -1700,6 +1757,7 @@ export class InvoiceFlowService {
   async validate(id: number) {
     let invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'validated');
+    await this.assertOrderPaidForEmission(invoice);
     await this.assertFiscalPeriodOpen(
       invoice.accounting_entity_id,
       invoice.issue_date,
@@ -1834,10 +1892,23 @@ export class InvoiceFlowService {
     const issuer = fiscal_document
       ? await this.collectDraftIssuerFindings(invoice, fiscal_document)
       : [];
+    const unpaid_balance = await this.resolveUnpaidOrderBalance(invoice);
     const findings: EmitReadinessFinding[] = [
       ...identity.findings,
       ...(fiscal_document?.findings ?? []),
       ...issuer,
+      ...(unpaid_balance !== null
+        ? [
+            {
+              code: 'ORDER_UNPAID',
+              severity: 'blocker' as const,
+              field: 'order.remaining_balance',
+              problem: `La orden tiene saldo pendiente de ${unpaid_balance}.`,
+              fix: 'Registra el pago de la orden antes de emitir la factura, o márcala como venta a crédito.',
+              target: 'config' as const,
+            },
+          ]
+        : []),
     ];
     const blockers = findings.filter((f) => f.severity === 'blocker');
     const warnings = findings.filter((f) => f.severity === 'warning');
@@ -4132,6 +4203,7 @@ export class InvoiceFlowService {
     const invoice = await this.getInvoice(id);
     await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'sent');
+    await this.assertOrderPaidForEmission(invoice);
 
     // REENVÍO DE UN RECHAZO — `rejected -> sent` es una transición LEGAL en
     // `VALID_TRANSITIONS`, pero legal no es lo mismo que revisada. Hasta acá

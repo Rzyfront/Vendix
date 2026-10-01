@@ -3112,6 +3112,14 @@
       "sessions": 7,
       "memories": 258,
       "prompts": 0
+    },
+    {
+      "id": "2aca0703",
+      "created_by": "rzy",
+      "created_at": "2026-10-01T02:41:24Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

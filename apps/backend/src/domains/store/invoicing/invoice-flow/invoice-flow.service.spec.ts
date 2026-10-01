@@ -111,6 +111,13 @@ describe('InvoiceFlowService support documents', () => {
       store_settings: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
+      // Puerta de pago de la emisión (INVOICING_ORDER_UNPAID_001): por defecto la
+      // orden de origen está saldada para que estos specs sigan juzgando lo suyo.
+      orders: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ grand_total: 0, payment_form: '1', payments: [] }),
+      },
       withoutScope: () => configClient,
       ...overrides.prisma,
     };

@@ -1189,6 +1189,22 @@ export class OrderDetailsPageComponent {
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
   readonly isCodPending = computed(() => isCodAwaitingConfirmation(this.order()));
+  /**
+   * Sin pago `pending` por confirmar y con saldo abierto (pagos liquidados <
+   * total, excepto venta a crédito): "Confirmar pago" no tiene nada que
+   * asentar, así que se abre Registrar pago (el backend lo exige con 409
+   * `ORD_CONFIRM_PAYMENT_NO_PAYMENT_001`). UI advisory, API authoritative.
+   */
+  readonly hasUnregisteredBalance = computed(() => {
+    const order = this.order();
+    if (!order || order.payment_form === '2') return false;
+    const payments = order.payments ?? [];
+    if (payments.some((payment) => payment?.state === 'pending')) return false;
+    const settled = payments
+      .filter((payment) => payment && ['succeeded', 'captured'].includes(String(payment.state)))
+      .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+    return (Number(order.grand_total) || 0) - settled >= 0.01;
+  });
   /** Fase 2 (paso 8): cobro manual pendiente → "Registrar pago" por `flow/pay`. */
   readonly isManualPayPending = computed(() => isManualPaymentPending(this.order()));
   readonly codActualMethods = computed(() => this.paymentMethods().filter((method) => {
@@ -3388,7 +3404,7 @@ export class OrderDetailsPageComponent {
     // Fase 2 (paso 8): un pago manual nunca se confirma con un clic — se
     // REGISTRA (monto + método) por el modal de cobro (`flow/pay`). El backend
     // rechaza al personal en `confirm-payment` con 409 en este caso.
-    if (this.isCodPending() || this.isManualPayPending()) {
+    if (this.isCodPending() || this.isManualPayPending() || this.hasUnregisteredBalance()) {
       this.openPayModal();
       return;
     }
@@ -3424,6 +3440,10 @@ export class OrderDetailsPageComponent {
             error: (err) => {
               this.isProcessingAction.set(false);
               this.toastService.error(err.message || 'Error al confirmar el pago');
+              if ((err as { errorCode?: string | null })?.errorCode === 'ORD_CONFIRM_PAYMENT_NO_PAYMENT_001') {
+                this.loadData();
+                this.openPayModal();
+              }
             },
           });
       });
