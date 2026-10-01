@@ -3817,7 +3817,7 @@ export class InvoiceCreatePageComponent implements OnInit {
 
     // Adquiriente
     customer_id: [null],
-    customer_name: ['', [Validators.required, Validators.minLength(2)]],
+    customer_name: ['', [Validators.minLength(2)]], // vacío = Consumidor Final
     customer_document_type: [DOCUMENT_TYPE_NIT_CODE],
     customer_tax_id: [''],
     customer_verification_digit: [''],
@@ -8845,7 +8845,14 @@ export class InvoiceCreatePageComponent implements OnInit {
     const blockers: SaveRequirement[] = [];
     const raw = this.rawValue();
 
-    if (!raw['customer_name']) {
+    // Sin documento ni nombre la factura sale a Consumidor Final (el backend
+    // lo resuelve; `customer_name` es opcional en el DTO). El nombre sólo se
+    // exige cuando se identificó al adquiriente con un número: emitir con
+    // mínima información es la regla, no la excepción.
+    const hasCustomerId =
+      raw['customer_id'] != null && raw['customer_id'] !== '';
+    const hasTaxId = String(raw['customer_tax_id'] ?? '').trim() !== '';
+    if (!raw['customer_name'] && hasTaxId && !hasCustomerId) {
       blockers.push(
         localRequirement(
           'customer_name',
