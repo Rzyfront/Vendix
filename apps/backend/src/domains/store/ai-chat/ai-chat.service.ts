@@ -108,9 +108,9 @@ export type ChatStreamFrame = AIStreamChunk | VexiVoiceFrame;
 /**
  * Fila de `ai_agents` tal como la consume el turno (F4).
  *
- * Sin agente (`null`) el turno sigue el camino exacto de hoy: `app_key` de la
+ * Sin agente (`null`) el turno sigue el camino anterior: `app_key` de la
  * conversación o `'chat_assistant'`, rama por `metadata.agent_enabled` de la
- * app. La fila `vexi` del seed replica ese default, no lo sustituye.
+ * app. La fila activa `vexi` configura los turnos del chat por defecto.
  */
 interface ResolvedChatAgent {
   key: string;
@@ -284,9 +284,9 @@ export class AIChatService {
     // Build context window
     const contextMessages = this.buildContextWindow(conversation, dto.content);
 
-    // F4: el override por mensaje gana sobre el agente de la conversación.
+    // El override por mensaje y el agente fijado en el hilo ganan sobre Vexi.
     const chatAgent = await this.resolveChatAgent(
-      dto.agent_key ?? this.conversationAgentKey(conversation),
+      this.turnAgentKey(conversation, dto.agent_key),
     );
 
     // Call AI Engine
@@ -537,10 +537,10 @@ export class AIChatService {
     // siguiente iteración (`shouldAbort`).
     await this.streamIntents.claimTurn(conversationId, streamId);
 
-    // F4: en SSE no hay DTO por mensaje (el intent solo trae `content`), así
-    // que el agente sale de `metadata.agent_key` de la conversación.
+    // En SSE no hay override por mensaje: agente fijado en el hilo, o Vexi
+    // para el chat por defecto (también en conversaciones preexistentes).
     const chatAgent = await this.resolveChatAgent(
-      this.conversationAgentKey(conversation),
+      this.turnAgentKey(conversation),
     );
 
     const appKey =
@@ -843,6 +843,20 @@ export class AIChatService {
     const raw = (conversation.metadata as Record<string, unknown> | null)
       ?.agent_key;
     return typeof raw === 'string' && raw.trim() ? raw : null;
+  }
+
+  /** Aplica el agente configurable solo al chat por defecto, sin migrar hilos. */
+  private turnAgentKey(
+    conversation: ConversationWithMessages,
+    override?: string,
+  ): string | null {
+    return (
+      override ??
+      this.conversationAgentKey(conversation) ??
+      (!conversation.app_key || conversation.app_key === 'chat_assistant'
+        ? 'vexi'
+        : null)
+    );
   }
 
   /**

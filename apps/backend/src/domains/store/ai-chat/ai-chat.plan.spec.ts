@@ -50,16 +50,22 @@ function build(opts: {
   paused?: AgentPlan | null;
   run?: jest.Mock;
   messages?: any[];
+  conversation?: Record<string, unknown>;
+  agentRow?: Record<string, unknown> | null;
 }) {
   const prisma: any = {
     ai_conversations: {
-      findFirst: jest.fn().mockResolvedValue(conversation(opts.messages)),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ ...conversation(opts.messages), ...opts.conversation }),
       update: jest.fn().mockResolvedValue({}),
     },
     ai_messages: { create: jest.fn().mockResolvedValue({ id: 1 }) },
   };
   const run = opts.run ?? agentGen([{ type: 'done' }], EMPTY_RESULT);
-  const aiAgent = { runAgentStream: run };
+  const runSync = jest.fn().mockResolvedValue({ content: 'ok', total_tokens: 1 });
+  const aiAgent = { runAgentStream: run, runAgent: runSync };
+  const findAgent = jest.fn().mockResolvedValue(opts.agentRow ?? null);
   const planState: any = {
     getActive: jest.fn().mockResolvedValue(opts.plan ?? null),
     get: jest.fn().mockResolvedValue(opts.paused ?? opts.plan ?? null),
@@ -73,7 +79,7 @@ function build(opts: {
   };
   const service = new AIChatService(
     prisma,
-    { ai_agents: { findUnique: jest.fn() } } as any,
+    { ai_agents: { findUnique: findAgent } } as any,
     {
       getApplication: jest
         .fn()
@@ -89,7 +95,7 @@ function build(opts: {
     {} as any,
     planState,
   );
-  return { service, prisma, run, planState, streamIntents };
+  return { service, prisma, run, runSync, findAgent, planState, streamIntents };
 }
 
 async function collect(service: AIChatService, intent: any) {
@@ -261,6 +267,98 @@ describe('AIChatService — plan interno de Vexi', () => {
     expect(await shouldAbort()).toBe(false);
     expect(b.streamIntents.isCurrentTurn).toHaveBeenCalledWith(7, 's1');
   });
+});
+
+describe('AIChatService — agente configurable del chat por defecto', () => {
+  const vexi = {
+    key: 'vexi',
+    app_key: 'chat_assistant',
+    system_prompt: null,
+    allowed_tools: ['list_orders', 'ui_navigate'],
+    max_iterations: 9,
+    is_active: true,
+  };
+
+  beforeEach(() => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([null, 'chat_assistant'])(
+    'usa la fila vexi en un hilo sin agente y app_key=%s, en sync y SSE',
+    async (appKey) => {
+      const b = build({ agentRow: vexi, conversation: { app_key: appKey } });
+      await b.service.sendMessage(7, { content: 'últimas órdenes' });
+      expect(b.runSync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          app_key: 'chat_assistant',
+          tools: ['list_orders', 'ui_navigate'],
+          max_iterations: 9,
+        }),
+      );
+      b.streamIntents.consume.mockResolvedValue({
+        conversation_id: 7,
+        user_id: 9,
+        content: 'llévame',
+      });
+      await collect(b.service, null);
+      expect(b.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          app_key: 'chat_assistant',
+          tools: ['list_orders', 'ui_navigate'],
+          max_iterations: 9,
+        }),
+      );
+      expect(b.findAgent).toHaveBeenCalledWith({ where: { key: 'vexi' } });
+    },
+  );
+
+  it('respeta el agente explícito del hilo y el override sync', async () => {
+    const b = build({
+      agentRow: { ...vexi, key: 'soporte', allowed_tools: ['list_products'] },
+      conversation: { metadata: { agent_key: 'soporte' } },
+    });
+    await b.service.sendMessage(7, { content: 'hola', agent_key: 'otro' });
+    expect(b.findAgent).toHaveBeenLastCalledWith({ where: { key: 'otro' } });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    expect(b.findAgent).toHaveBeenLastCalledWith({ where: { key: 'soporte' } });
+    expect(b.run.mock.calls[0][0].tools).toEqual(['list_products']);
+  });
+
+  it('no usa vexi para una app distinta sin agente explícito', async () => {
+    const b = build({ conversation: { app_key: 'otra_app' } });
+    await b.service.sendMessage(7, { content: 'hola' });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    expect(b.findAgent).not.toHaveBeenCalled();
+    expect(b.runSync.mock.calls[0][0]).toMatchObject({ app_key: 'otra_app' });
+    expect(b.run.mock.calls[0][0]).toMatchObject({ app_key: 'otra_app' });
+    expect(b.run.mock.calls[0][0]).not.toHaveProperty('tools');
+  });
+
+  it.each([null, { ...vexi, is_active: false }])(
+    'fila vexi ausente o inactiva conserva el fallback del chat',
+    async (agentRow) => {
+      const b = build({ agentRow });
+      await b.service.sendMessage(7, { content: 'hola' });
+      expect(b.runSync.mock.calls[0][0]).toMatchObject({
+        app_key: 'chat_assistant',
+      });
+      expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('tools');
+      expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('max_iterations');
+    },
+  );
 });
 
 describe('VexiStreamIntentService — claim de turno', () => {

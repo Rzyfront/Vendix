@@ -661,13 +661,14 @@ export class AIEngineComponent implements OnInit {
       this.loadApps();
       this.loadAppStats();
     }
-    if (tab === 'tools' && this.tools().length === 0) {
-      this.loadTools();
+    if (tab === 'tools') {
+      this.ensureToolCatalog();
     }
     if (tab === 'jobs' && this.queues().length === 0) {
       this.loadQueues();
     }
     if (tab === 'agents') {
+      this.ensureToolCatalog();
       if (this.agents().length === 0) {
         this.loadAgents();
       }
@@ -1104,6 +1105,12 @@ export class AIEngineComponent implements OnInit {
       });
   }
 
+  private ensureToolCatalog(): void {
+    if (this.tools().length === 0 && !this.isLoadingTools()) {
+      this.loadTools();
+    }
+  }
+
   onToolSearchChange(searchTerm: string): void {
     this.toolSearch.set(searchTerm);
   }
@@ -1249,11 +1256,13 @@ export class AIEngineComponent implements OnInit {
   }
 
   openCreateAgentModal(): void {
+    this.ensureToolCatalog();
     this.selectedAgent.set(null);
     this.showAgentModal.set(true);
   }
 
   editAgent(agent: AIAgent): void {
+    this.ensureToolCatalog();
     this.selectedAgent.set(agent);
     this.showAgentModal.set(true);
   }

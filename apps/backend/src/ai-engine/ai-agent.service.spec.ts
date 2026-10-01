@@ -46,6 +46,9 @@ describe('AIAgentService.runAgentStream', () => {
   let executeTool: jest.Mock;
   let awaitResult: jest.Mock;
   let emit: jest.Mock;
+  let registry: any;
+  let canUseAIFeature: jest.Mock;
+  let getAIFeatureConfig: jest.Mock;
   let service: AIAgentService;
 
   beforeEach(() => {
@@ -57,20 +60,46 @@ describe('AIAgentService.runAgentStream', () => {
     executeTool = jest.fn().mockResolvedValue('{"ok":true}');
     awaitResult = jest.fn().mockResolvedValue('{"ui":"ok"}');
     emit = jest.fn();
-    const registry: any = {
-      getAvailableDefinitions: jest
-        .fn()
-        .mockReturnValue([
-          def('list_things'),
-          def('ui_go'),
-          def('propose_plan'),
-          def('ask_user'),
-        ]),
+    const definitions = [
+      def('list_things'),
+      def('ui_go'),
+      def('propose_plan'),
+      def('ask_user'),
+      def('list_orders'),
+      def('list_customers'),
+      def('ui_navigate'),
+    ];
+    const domains: Record<string, string> = {
+      list_things: 'things',
+      ui_go: 'ui',
+      propose_plan: 'planning',
+      ask_user: 'planning',
+      list_orders: 'orders',
+      list_customers: 'customers',
+      ui_navigate: 'ui',
+    };
+    registry = {
+      getAvailableDefinitions: jest.fn((scopes: string[]) =>
+        definitions.filter((tool) => {
+          const name = tool.function.name;
+          if (name === 'list_orders') {
+            return scopes.includes('store:orders:read');
+          }
+          if (name === 'list_customers') {
+            return scopes.includes('store:customers:read');
+          }
+          return true;
+        }),
+      ),
       canonicalName: (n: string) => n,
+      get: (n: string) =>
+        domains[n] ? { name: n, domain: domains[n] } : undefined,
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
       executeTool,
     };
+    canUseAIFeature = jest.fn();
+    getAIFeatureConfig = jest.fn();
     service = new AIAgentService(
       { chat, run: jest.fn(), chatWith: jest.fn() } as any,
       {} as any,
@@ -78,8 +107,8 @@ describe('AIAgentService.runAgentStream', () => {
       { emit } as any,
       { awaitResult } as any,
       {
-        canUseAIFeature: jest.fn(),
-        getAIFeatureConfig: jest.fn(),
+        canUseAIFeature,
+        getAIFeatureConfig,
         consumeAIQuota: jest.fn().mockResolvedValue(undefined),
       } as any,
     );
@@ -97,6 +126,80 @@ describe('AIAgentService.runAgentStream', () => {
     }
     return { chunks, result: next.value };
   }
+
+  function configureStorePlan(toolsAllowed: string[], permissions = ['store:orders:read']) {
+    jest.mocked(RequestContextService.getContext).mockReturnValue({
+      store_id: 42,
+      permissions,
+      roles: [],
+    } as any);
+    canUseAIFeature.mockResolvedValue({ allowed: true });
+    getAIFeatureConfig.mockResolvedValue({ tools_allowed: toolsAllowed });
+    chat.mockResolvedValue(ok({ content: 'listo' }));
+  }
+
+  function offeredToolNames(): string[] {
+    return (chat.mock.calls[0][1].tools ?? []).map(
+      (tool: any) => tool.function.name,
+    );
+  }
+
+  it('offers orders and UI tools when the plan allows the wildcard', async () => {
+    configureStorePlan(['*']);
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual(
+      expect.arrayContaining(['list_orders', 'ui_navigate']),
+    );
+    expect(canUseAIFeature).toHaveBeenCalledWith(42, 'tool_agents');
+  });
+
+  it('offers only tools in the allowed domain', async () => {
+    configureStorePlan(['orders'], ['store:orders:read', 'store:customers:read']);
+
+    await drain({});
+
+    expect(offeredToolNames()).toContain('list_orders');
+    expect(offeredToolNames()).not.toContain('list_customers');
+    expect(offeredToolNames()).not.toContain('ui_navigate');
+  });
+
+  it('accepts an exact tool name and preserves a narrower agent filter', async () => {
+    configureStorePlan(['list_orders', 'ui']);
+
+    await drain({ tools: ['list_orders'] });
+
+    expect(offeredToolNames()).toEqual(['list_orders']);
+  });
+
+  it('does not offer operational tools for an explicit empty plan list', async () => {
+    configureStorePlan([]);
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual([]);
+  });
+
+  it('does not offer operational tools when the subscription gate denies access', async () => {
+    configureStorePlan(['*']);
+    canUseAIFeature.mockResolvedValue({ allowed: false, reason: 'blocked' });
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual([]);
+  });
+
+  it('keeps the permission filter when the plan allows all tools', async () => {
+    configureStorePlan(['*'], []);
+
+    await drain({});
+
+    expect(registry.getAvailableDefinitions).toHaveBeenCalledWith([]);
+    expect(offeredToolNames()).toContain('ui_navigate');
+    expect(offeredToolNames()).not.toContain('list_orders');
+    expect(offeredToolNames()).not.toContain('list_customers');
+  });
 
   it('(i) processes tool_calls even when finish_reason is stop', async () => {
     chat
