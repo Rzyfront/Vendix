@@ -1,4 +1,5 @@
 import { FiscalDocumentFinding } from '../validators/fiscal-document.validator';
+import type { EmitReadinessFinding } from '../invoice-flow/emit-readiness.contract';
 
 /**
  * Estado fiscal de una venta de mostrador, tal como lo pinta el POS.
@@ -47,6 +48,12 @@ export interface PosFiscalStatus {
    * qué está mal y dónde se corrige. Vacío en cualquier otro estado.
    */
   blockers: FiscalDocumentFinding[];
+  /**
+   * Mismos hallazgos que la factura manual (`emit-readiness`), sólo los
+   * blockers, con `target`/`cta` cuando el veredicto los trae. Ausente si no
+   * hay nada que corregir.
+   */
+  requirements?: EmitReadinessFinding[];
   /** Intento actual de la cola de reintentos, cuando hay uno vivo. */
   retry: {
     attempts: number;
