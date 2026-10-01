@@ -335,6 +335,13 @@ export class OrderTrackingProgressComponent {
   readonly baseMinutes = input<number | null>(null);
   /** `prefers-reduced-motion`: salta al % real, sin sheen ni deriva. */
   readonly reducedMotion = input(false);
+  /**
+   * La orden tiene al menos un plato prepared (o líneas legacy sin tipo).
+   * Sin prepared, el hito 1 dice "Procesando" en vez de "En preparación":
+   * un físico o servicio nunca pasa por cocina. Default `true` = conducta
+   * histórica para consumidores que no lo pasan.
+   */
+  readonly hasPreparedItems = input(true);
 
   private readonly destroyRef = inject(DestroyRef);
 
@@ -383,7 +390,9 @@ export class OrderTrackingProgressComponent {
     const delivery = this.hasShippingAddress();
     switch (this.milestoneIndex()) {
       case 1:
-        return 'Tu pedido se está preparando';
+        return this.hasPreparedItems()
+          ? 'Tu pedido se está preparando'
+          : 'Tu pedido se está procesando';
       case 2:
         return delivery
           ? 'Tu pedido va en camino'
@@ -400,7 +409,10 @@ export class OrderTrackingProgressComponent {
     const current = this.milestoneIndex();
     const defs: Array<{ label: string; icon: IconName }> = [
       { label: 'Confirmado', icon: 'shopping-bag' },
-      { label: 'En preparación', icon: 'flame' },
+      {
+        label: this.hasPreparedItems() ? 'En preparación' : 'Procesando',
+        icon: this.hasPreparedItems() ? 'flame' : 'package',
+      },
       {
         label: delivery ? 'En camino' : 'Listo para recoger',
         icon: delivery ? 'truck' : 'store',

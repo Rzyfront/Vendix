@@ -297,6 +297,10 @@ export class InvoiceDataRequestsService {
                 },
                 products: {
                   select: {
+                    // Tipo por línea (physical/service/prepared): la vista
+                    // guest apaga cocina y "En preparación" sin prepared.
+                    // Paridad con `account.service.ts#getOrderDetail`.
+                    product_type: true,
                     preparation_time_minutes: true,
                     product_images: {
                       where: { is_main: true },
@@ -420,6 +424,8 @@ export class InvoiceDataRequestsService {
         // líneas del mismo producto ya no comparten estado. Aditivo.
         order_item_id: item.id,
         product_name: item.product_name,
+        // Paridad con `account.service.ts`: null si el producto se eliminó.
+        product_type: item.products?.product_type ?? null,
         variant_sku: item.variant_sku,
         variant_attributes: item.variant_attributes,
         quantity: item.quantity,

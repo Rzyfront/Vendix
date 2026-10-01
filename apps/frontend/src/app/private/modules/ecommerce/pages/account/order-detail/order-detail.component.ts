@@ -72,6 +72,49 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     return o.items.some((item) => item.product_type !== 'service');
   });
 
+  /**
+   * La orden tiene cocina real: al menos un plato prepared (o líneas sin
+   * tipo, legacy: se preserva "En preparación"). Solo con todas las líneas
+   * en físico/servicio conocido el timeline dice "Procesando".
+   */
+  readonly hasPreparedItems = computed(() => {
+    const o = this.order();
+    if (!o) return false;
+    const items = o.items ?? [];
+    if (!items.length) return true;
+    return items.some(
+      (item) => item.product_type == null || item.product_type === 'prepared',
+    );
+  });
+
+  /** "Servicios (N)" solo si todo es servicio; si no, "Productos (N)". */
+  readonly itemsSectionTitle = computed(() => {
+    const o = this.order();
+    const items = o?.items ?? [];
+    const allService =
+      items.length > 0 &&
+      items.every((item) => item.product_type === 'service');
+    return `${allService ? 'Servicios' : 'Productos'} (${this.totalItems()})`;
+  });
+
+  /** "2 productos · 1 servicio" en unidades, solo partes no-cero. */
+  readonly itemsSummary = computed(() => {
+    const o = this.order();
+    const items = o?.items ?? [];
+    let products = 0;
+    let services = 0;
+    for (const item of items) {
+      if (item.product_type === 'service') services += item.quantity;
+      else products += item.quantity;
+    }
+    const parts: string[] = [];
+    if (products > 0)
+      parts.push(`${products} producto${products === 1 ? '' : 's'}`);
+    if (services > 0)
+      parts.push(`${services} servicio${services === 1 ? '' : 's'}`);
+    return parts.join(' · ') || '0 productos';
+  });
+
   readonly postPurchaseMessage = computed(() => {
     const o = this.order();
     if (o?.bookings?.length) {
@@ -206,7 +249,10 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     const deliveryType = (o as any).delivery_type || 'other';
     const states = [
       { key: 'created', label: 'Pedido creado' },
-      { key: 'processing', label: 'En preparación' },
+      {
+        key: 'processing',
+        label: this.hasPreparedItems() ? 'En preparación' : 'Procesando',
+      },
       { key: 'shipped', label: deliveryType === 'pickup' ? 'Listo para recoger' : 'Enviado' },
       { key: 'delivered', label: deliveryType === 'pickup' ? 'Recogido' : 'Entregado' },
     ];

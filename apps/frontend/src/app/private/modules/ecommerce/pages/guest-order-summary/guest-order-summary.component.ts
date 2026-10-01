@@ -43,6 +43,10 @@ interface GuestOrderItem {
   // CP-853-fix (paso 5): clave por línea para la cocina en vivo (aditivo).
   order_item_id?: number | null;
   product_name: string;
+  // physical/service/prepared (null si el producto se eliminó). La vista
+  // apaga cocina y "En preparación" salvo prepared; servicio se etiqueta.
+  // Paridad con `account.service.ts#getOrderDetail`.
+  product_type?: string | null;
   variant_sku?: string | null;
   variant_attributes?: string | null;
   quantity: number;
@@ -269,11 +273,7 @@ interface GuestOrderSummary {
                 data.order.created_at | date: 'dd/MM/yyyy HH:mm'
               }}</span>
               <span class="meta-sep" aria-hidden="true">·</span>
-              <span
-                >{{ data.order.items.length }} producto{{
-                  data.order.items.length === 1 ? '' : 's'
-                }}</span
-              >
+              <span>{{ itemsSummary(data.order) }}</span>
               @if (worstPaymentState(data.order.payments); as payState) {
                 <span class="meta-sep" aria-hidden="true">·</span>
                 <span class="meta-pay-state">{{
@@ -312,10 +312,9 @@ interface GuestOrderSummary {
               <div class="eta-text">
                 <strong class="eta-line">{{ etaLabel(data.order) }}</strong>
                 @if (isPaymentPending(data.order)) {
-                  <span class="eta-note"
-                    >Tu pago está pendiente de confirmación; la preparación inicia al
-                    confirmarse y el tiempo puede variar.</span
-                  >
+                  <span class="eta-note">{{
+                    paymentPendingNote(data.order)
+                  }}</span>
                 }
               </div>
             </div>
@@ -338,6 +337,7 @@ interface GuestOrderSummary {
                 [animateFromZero]="justPurchased()"
                 [baseMinutes]="etaMinutes(data.order)"
                 [reducedMotion]="sse.prefersReducedMotion()"
+                [hasPreparedItems]="orderHasPreparedItems(data.order)"
               />
             </section>
           }
@@ -345,11 +345,14 @@ interface GuestOrderSummary {
           <!-- GRID (contenido + resumen lateral) -->
           <div class="order-grid">
             <div class="order-main">
-          <!-- PRODUCTOS -->
-          <section class="order-section order-card" aria-label="Productos pedidos">
+          <!-- PRODUCTOS / SERVICIOS -->
+          <section
+            class="order-section order-card"
+            [attr.aria-label]="itemsSectionTitle(data.order)"
+          >
             <div class="section-header">
               <app-icon name="shopping-bag" [size]="18" />
-              <h2>Productos ({{ data.order.items.length }})</h2>
+              <h2>{{ itemsSectionTitle(data.order) }}</h2>
             </div>
             <div class="items">
               @for (
@@ -388,6 +391,10 @@ interface GuestOrderSummary {
                         <app-badge variant="warning" size="sm">
                           <app-icon name="x-circle" [size]="11" />
                           Cancelado
+                        </app-badge>
+                      } @else if (isServiceItem(item)) {
+                        <app-badge variant="service" size="sm">
+                          Servicio
                         </app-badge>
                       }
                     </div>
@@ -1581,11 +1588,16 @@ export class GuestOrderSummaryComponent implements OnInit {
           `  - ${i.product_name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity}`,
       )
       .join('\n');
+    const waItems = data.order.items ?? [];
+    const waItemsHeader =
+      waItems.length > 0 && waItems.every((i) => i.product_type === 'service')
+        ? 'Servicios'
+        : 'Productos';
     const message = encodeURIComponent(
       `¡Hola! 👋 Quisiera consultar el estado de mi pedido en ${storeName}.\n\n` +
         `*Pedido:* #${data.order.order_number}\n` +
         `*Estado:* ${this.getStateLabel(data.order.state)}\n` +
-        (itemLines ? `\n*Productos:*\n${itemLines}\n` : '') +
+        (itemLines ? `\n*${waItemsHeader}:*\n${itemLines}\n` : '') +
         `\n*Total:* ${this.currencyService.format(Number(data.order.grand_total || 0))}\n\n¡Muchas gracias!`,
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
@@ -1806,7 +1818,61 @@ export class GuestOrderSummaryComponent implements OnInit {
    * así que aquí solo se desempaqueta: null/ausente = plato no disparado,
    * sin badge. Sin deep-link al KDS: el guest no ve nada interno.
    */
+  /**
+   * La orden tiene cocina real: al menos un plato prepared (o líneas sin
+   * tipo, legacy: se preserva "En preparación" como hasta ahora). Solo
+   * cuando TODAS las líneas son físico/servicio conocido se apaga el
+   * lenguaje de cocina (tracking, ETA, badges).
+   */
+  orderHasPreparedItems(order: GuestOrderData): boolean {
+    const items = order.items ?? [];
+    if (!items.length) return true;
+    return items.some(
+      (i) => i.product_type == null || i.product_type === 'prepared',
+    );
+  }
+
+  isServiceItem(item: GuestOrderItem): boolean {
+    return item.product_type === 'service';
+  }
+
+  /** "Servicios (N)" solo si todo es servicio; si no, "Productos (N)". */
+  itemsSectionTitle(order: GuestOrderData): string {
+    const items = order.items ?? [];
+    const allService =
+      items.length > 0 && items.every((i) => this.isServiceItem(i));
+    return `${allService ? 'Servicios' : 'Productos'} (${items.length})`;
+  }
+
+  /**
+   * "2 productos · 1 servicio" (solo partes no-cero; prepared cuenta como
+   * producto). En líneas (no unidades), igual que el conteo anterior.
+   */
+  itemsSummary(order: GuestOrderData): string {
+    const items = order.items ?? [];
+    const services = items.filter((i) => this.isServiceItem(i)).length;
+    const products = items.length - services;
+    const parts: string[] = [];
+    if (products > 0)
+      parts.push(`${products} producto${products === 1 ? '' : 's'}`);
+    if (services > 0)
+      parts.push(`${services} servicio${services === 1 ? '' : 's'}`);
+    return parts.join(' · ') || '0 productos';
+  }
+
+  /** Nota de pago pendiente sin palabra "preparación" si no hay cocina. */
+  paymentPendingNote(order: GuestOrderData): string {
+    return this.orderHasPreparedItems(order)
+      ? 'Tu pago está pendiente de confirmación; la preparación inicia al confirmarse y el tiempo puede variar.'
+      : 'Tu pago está pendiente de confirmación; tu pedido se procesa al confirmarse y el tiempo puede variar.';
+  }
+
   kitchenStateFor(item: GuestOrderItem): string | null {
+    // Solo prepared muestra cocina; físico/servicio explícitos nunca
+    // (null = legacy: se respeta el ticket como hasta ahora).
+    if (item.product_type != null && item.product_type !== 'prepared') {
+      return null;
+    }
     return item.kitchen_status ?? null;
   }
 

@@ -386,6 +386,7 @@ describe('InvoiceDataRequestsService (guest store identity: logo + branding)', (
   const summaryRequest = (
     logoUrl: string | null,
     branding: Record<string, string> | null,
+    orderItems: any[] = [],
   ) => ({
     token: 'tok-brand',
     status: 'pending',
@@ -420,7 +421,7 @@ describe('InvoiceDataRequestsService (guest store identity: logo + branding)', (
       estimated_delivered_at: null,
       delivery_type: null,
       shipping_address_snapshot: null,
-      order_items: [],
+      order_items: orderItems,
       order_promotions: [],
       coupon_uses: [],
       payments: [],
@@ -481,5 +482,68 @@ describe('InvoiceDataRequestsService (guest store identity: logo + branding)', (
 
     expect(result.store.logo_url).toBeNull();
     expect(result.store.branding).toBeNull();
+  });
+
+  it('proyecta product_type por línea (service; null si no hay producto)', async () => {
+    const signUrl = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      invoice_data_requests: {
+        findUnique: jest.fn().mockResolvedValue(
+          summaryRequest(null, null, [
+            {
+              id: 1,
+              product_name: 'Corte de cabello',
+              variant_sku: null,
+              variant_attributes: null,
+              quantity: 1,
+              unit_price: 30000,
+              total_price: 30000,
+              tax_amount_item: 0,
+              final_unit_price: null,
+              price_unit_quantity: null,
+              kitchen_ticket_items: [],
+              product_variants: null,
+              products: {
+                product_type: 'service',
+                preparation_time_minutes: null,
+                product_images: [],
+              },
+              variant_image_url: null,
+            },
+            {
+              id: 2,
+              product_name: 'Producto eliminado',
+              variant_sku: null,
+              variant_attributes: null,
+              quantity: 1,
+              unit_price: 10000,
+              total_price: 10000,
+              tax_amount_item: 0,
+              final_unit_price: null,
+              price_unit_quantity: null,
+              kitchen_ticket_items: [],
+              product_variants: null,
+              products: null,
+              variant_image_url: null,
+            },
+          ]),
+        ),
+      },
+    };
+    const service = new InvoiceDataRequestsService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { signUrl } as any,
+      {} as any,
+    );
+
+    const result = await service.getOrderSummaryByToken('tok-types');
+
+    expect(result.order.items).toHaveLength(2);
+    expect(result.order.items[0].product_type).toBe('service');
+    expect(result.order.items[1].product_type).toBeNull();
   });
 });

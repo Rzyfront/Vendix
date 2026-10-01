@@ -18,6 +18,8 @@ interface VoucherItem {
   // Paso 8 (roku-shop-checkout): paridad con la vista (cocina por plato).
   kitchen_status?: string | null;
   preparation_time_minutes?: number | null;
+  // Tipo por línea: solo prepared imprime línea de cocina (paridad vista).
+  product_type?: string | null;
 }
 
 interface VoucherAddress {
@@ -294,7 +296,13 @@ export class GuestOrderPrintService {
                 item.kitchen_status === 'in_preparation'
                   ? kitchenLabel
                   : `Preparación: ${kitchenLabel}`;
-              const kitchenLine = item.kitchen_status
+              // Solo prepared imprime cocina; físico/servicio explícitos
+              // nunca (null = legacy: se respeta el ticket, paridad vista).
+              const showsKitchen =
+                item.kitchen_status != null &&
+                (item.product_type == null ||
+                  item.product_type === 'prepared');
+              const kitchenLine = showsKitchen
                 ? `<br><span style="font-size: 11px; color: #6b7280;">${this.esc(kitchenText)}</span>`
                 : '';
               return `

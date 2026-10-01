@@ -57,7 +57,7 @@
           </span>
           <span class="meta-item">
             <app-icon name="package" [size]="14"></app-icon>
-            {{ totalItems() }} {{ totalItems() === 1 ? "producto" : "productos" }}
+            {{ itemsSummary() }}
           </span>
           <span class="meta-item total-highlight">
             <app-icon name="receipt" [size]="14"></app-icon>
@@ -73,7 +73,7 @@
       <section class="card-section">
         <div class="section-header">
           <app-icon name="shopping-bag" [size]="18"></app-icon>
-          <h3>Productos ({{ totalItems() }})</h3>
+          <h3>{{ itemsSectionTitle() }}</h3>
         </div>
         <div class="section-divider"></div>
         <div class="items-list">
