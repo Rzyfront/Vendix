@@ -197,7 +197,7 @@ export class VexController {
    */
   @Get('blocks/:id')
   async getBlock(@Param('id', ParseUUIDPipe) id: string) {
-    const block = await this.blocks.getById(id);
+    const block = await this.blocks.getUiBlock(id);
     return this.responseService.success(block, 'Bloque');
   }
 
@@ -211,9 +211,20 @@ export class VexController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: BlockInteractionDto,
   ) {
+    // The panel sends the payload under kind-specific keys; `payload` stays
+    // the canonical stored shape.
+    const payload =
+      dto.payload ??
+      (dto.selection !== undefined
+        ? { selection: dto.selection }
+        : dto.point !== undefined
+          ? { point: dto.point }
+          : dto.filter !== undefined
+            ? { filter: dto.filter }
+            : {});
     const block = await this.blocks.recordInteraction(id, {
       type: dto.type,
-      payload: dto.payload,
+      payload,
     });
     return this.responseService.success(block, 'Interacción registrada');
   }

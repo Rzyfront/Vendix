@@ -531,7 +531,18 @@ export class AIAgentService {
     if (!renderKind && toolName !== 'vex_block_transform') return null;
     try {
       const parsed = JSON.parse(result) as {
-        data?: { block_id?: unknown; kind?: unknown; version?: unknown };
+        data?: {
+          block_id?: unknown;
+          kind?: unknown;
+          version?: unknown;
+          block?: {
+            block_id?: unknown;
+            kind?: unknown;
+            version?: unknown;
+            spec?: unknown;
+            data?: unknown;
+          };
+        };
       };
       const data = parsed?.data;
       if (!data || typeof data.block_id !== 'string' || !data.block_id) {
@@ -545,12 +556,23 @@ export class AIAgentService {
         )
           ? (data.kind as NonNullable<AIStreamChunk['ui_block']>['kind'])
           : 'table');
+      // The render tools attach the panel-ready view (`VexUiBlock`) as
+      // `data.block`; without it the frame is a bare reference the panel
+      // cannot draw, so legacy envelopes keep answering the old shape.
+      const view =
+        data.block && typeof data.block === 'object' ? data.block : null;
+      const version = view?.version ?? data.version;
       return {
-        block_id: data.block_id,
+        block_id:
+          typeof view?.block_id === 'string' && view.block_id
+            ? view.block_id
+            : data.block_id,
         kind,
-        ...(typeof data.version === 'number'
-          ? { version: data.version }
+        ...(typeof version === 'number' ? { version } : {}),
+        ...(view && typeof view.spec === 'object' && view.spec !== null
+          ? { spec: view.spec as Record<string, any> }
           : {}),
+        ...(view && view.data !== undefined ? { data: view.data } : {}),
       };
     } catch {
       return null;
@@ -1074,6 +1096,19 @@ export class AIAgentService {
           }
 
           try {
+            // Las `vex_*` de bloques viven bajo una conversación que el modelo
+            // no conoce: el turno inyecta su id como default para que la
+            // herramienta no tenga que inventarlo (y no falle validación).
+            if (
+              toolName.startsWith('vex_') &&
+              params.conversation_id != null &&
+              !Number.isInteger(toolArgs.conversation_id)
+            ) {
+              toolArgs = {
+                ...toolArgs,
+                conversation_id: params.conversation_id,
+              };
+            }
             const raw = await this.toolRegistry.executeTool(toolName, toolArgs);
             // Oversized results travel compacted from here on: the trace, the
             // persisted transcript and the model all see `{summary, block_id,

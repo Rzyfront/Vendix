@@ -50,7 +50,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
         properties: {
           conversation_id: {
             type: 'number',
-            description: 'Conversación donde vive el bloque.',
+            description:
+              'Conversación donde vive el bloque. Opcional: el servidor usa la actual.',
           },
           title: { type: 'string', description: 'Título de la tabla.' },
           columns: {
@@ -71,7 +72,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
             items: { type: 'object' },
           },
         },
-        required: ['conversation_id', 'columns', 'rows'],
+        required: ['columns', 'rows'],
       },
       handler: async (args) => {
         const conversationId = conversationIdOf(args);
@@ -89,6 +90,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
               kind: 'table',
               rows: (args.rows as unknown[]).length,
               version: block.version,
+              block: await blocks.toUiBlock(block),
             }),
           );
         } catch (error: any) {
@@ -114,7 +116,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
         properties: {
           conversation_id: {
             type: 'number',
-            description: 'Conversación donde vive el bloque.',
+            description:
+              'Conversación donde vive el bloque. Opcional: el servidor usa la actual.',
           },
           title: { type: 'string', description: 'Título del gráfico.' },
           chart_type: {
@@ -133,7 +136,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
             items: { type: 'object' },
           },
         },
-        required: ['conversation_id', 'chart_type', 'series'],
+        required: ['chart_type', 'series'],
       },
       handler: async (args) => {
         const conversationId = conversationIdOf(args);
@@ -150,6 +153,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
               block_id: block.id,
               kind: 'chart',
               version: block.version,
+              block: await blocks.toUiBlock(block),
             }),
           );
         } catch (error: any) {
@@ -175,7 +179,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
         properties: {
           conversation_id: {
             type: 'number',
-            description: 'Conversación donde vive el bloque.',
+            description:
+              'Conversación donde vive el bloque. Opcional: el servidor usa la actual.',
           },
           label: { type: 'string', description: 'Etiqueta del indicador.' },
           value: {
@@ -190,7 +195,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
             description: 'Texto de apoyo bajo el valor (periodo, comparativo).',
           },
         },
-        required: ['conversation_id', 'label', 'value'],
+        required: ['label', 'value'],
       },
       handler: async (args) => {
         const conversationId = conversationIdOf(args);
@@ -212,6 +217,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
               block_id: block.id,
               kind: 'kpi',
               version: block.version,
+              block: await blocks.toUiBlock(block),
             }),
           );
         } catch (error: any) {
@@ -237,7 +243,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
         properties: {
           conversation_id: {
             type: 'number',
-            description: 'Conversación donde vive el bloque.',
+            description:
+              'Conversación donde vive el bloque. Opcional: el servidor usa la actual.',
           },
           s3_key: {
             type: 'string',
@@ -245,7 +252,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
           },
           alt: { type: 'string', description: 'Texto alternativo.' },
         },
-        required: ['conversation_id', 's3_key'],
+        required: ['s3_key'],
       },
       handler: async (args) => {
         const conversationId = conversationIdOf(args);
@@ -262,6 +269,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
               block_id: block.id,
               kind: 'image',
               version: block.version,
+              block: await blocks.toUiBlock(block),
             }),
           );
         } catch (error: any) {
@@ -287,7 +295,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
         properties: {
           conversation_id: {
             type: 'number',
-            description: 'Conversación donde vive el bloque.',
+            description:
+              'Conversación donde vive el bloque. Opcional: el servidor usa la actual.',
           },
           s3_key: {
             type: 'string',
@@ -299,7 +308,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
           },
           mime_type: { type: 'string', description: 'Tipo MIME del archivo.' },
         },
-        required: ['conversation_id', 's3_key', 'filename'],
+        required: ['s3_key', 'filename'],
       },
       handler: async (args) => {
         const conversationId = conversationIdOf(args);
@@ -320,6 +329,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
               block_id: block.id,
               kind: 'file',
               version: block.version,
+              block: await blocks.toUiBlock(block),
             }),
           );
         } catch (error: any) {
@@ -433,6 +443,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
               version: block.version,
               rows: rows.length,
               preview: rows.slice(0, 5),
+              block: await blocks.toUiBlock(block),
             }),
           );
         } catch (error: any) {

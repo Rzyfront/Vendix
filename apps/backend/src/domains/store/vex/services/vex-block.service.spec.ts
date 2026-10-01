@@ -59,7 +59,7 @@ describe('VexBlockService', () => {
 
   beforeEach(() => {
     delegate = makeDelegate();
-    const prisma = { ai_ui_blocks: delegate };
+    const prisma = { withoutScope: () => ({ ai_ui_blocks: delegate }) };
     const s3 = {
       getPresignedUrl: jest.fn(async (key: string) => `https://signed/${key}`),
     };

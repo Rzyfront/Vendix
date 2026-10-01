@@ -29,6 +29,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { SubscriptionGateConfig } from '../subscriptions/config/subscription-gate.config';
+import { VexBlockService } from '../vex/services/vex-block.service';
 import { Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
@@ -125,6 +126,7 @@ interface ResolvedChatAgent {
   app_key: string | null;
   system_prompt: string | null;
   allowed_tools: string[];
+  denied_tools: string[];
   max_iterations: number | null;
 }
 
@@ -165,6 +167,10 @@ export class AIChatService {
     // falla cerrado en `assertVexTurnAccess` en vez de colgar.
     @Optional() private readonly subscriptionAccess?: SubscriptionAccessService,
     @Optional() private readonly gateConfig?: SubscriptionGateConfig,
+    // Block selections as turn context (Vex only). Optional-trailing like
+    // the gate above: same positional-construction rule, and a Vex turn
+    // without it simply sees no selection instead of failing.
+    @Optional() private readonly vexBlocks?: VexBlockService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -367,7 +373,11 @@ export class AIChatService {
       // (Con agente y sin app enlazada —ni en la fila ni en la conversación—,
       // `resolveAgentLoopArgs` omite `app_key` y el prompt propio sí viaja.)
       const agentResult = await this.aiAgent.runAgent({
-        goal: dto.content,
+        goal: await this.withBlockSelection(
+          dto.content,
+          agentKey,
+          conversationId,
+        ),
         ...this.resolveAgentLoopArgs(chatAgent, conversation),
         messages: this.buildContextWindow(conversation),
         variables: await this.vexiContext.buildSnapshot(),
@@ -654,9 +664,13 @@ export class AIChatService {
       // `agent_enabled`, so simply opening the SSE connection turned the agent
       // off — the same question answered with data over POST and with a shrug
       // over SSE. It now runs the identical loop, narrating each tool call.
-      const goal = intent.continuation
-        ? CONTINUATION_GOALS[intent.continuation]
-        : intent.content;
+      const goal = await this.withBlockSelection(
+        intent.continuation
+          ? CONTINUATION_GOALS[intent.continuation]
+          : intent.content,
+        agentKey,
+        conversationId,
+      );
       const activePlan =
         continuationPlan ?? (await this.planState.getActive(conversationId));
       const storedPlan = activePlan
@@ -1110,8 +1124,55 @@ export class AIChatService {
       app_key: row.app_key,
       system_prompt: row.system_prompt,
       allowed_tools: row.allowed_tools ?? [],
+      denied_tools: row.denied_tools ?? [],
       max_iterations: row.max_iterations,
     };
+  }
+
+  /**
+   * Folds the person's latest block interactions into the turn goal, so
+   * "esas filas" resolves to the actual selection.
+   *
+   * Vex turns only: Vexi never renders blocks, so its goal stays byte-identical.
+   * Never throws — a selection lookup failure must not fail the turn, and
+   * without `VexBlockService` (positional test constructions) there is simply
+   * no selection to fold.
+   */
+  private async withBlockSelection(
+    goal: string,
+    agentKey: string | null,
+    conversationId: number,
+  ): Promise<string> {
+    if (agentKey !== VEX_AGENT_KEY || !this.vexBlocks) return goal;
+    let selections: Awaited<
+      ReturnType<VexBlockService['recentSelections']>
+    > = [];
+    try {
+      selections = await this.vexBlocks.recentSelections(conversationId);
+    } catch (error) {
+      this.logger.warn(
+        `Block selections unavailable for conversation ${conversationId}: ${
+          (error as Error)?.message ?? 'unknown'
+        }`,
+      );
+      return goal;
+    }
+    if (selections.length === 0) return goal;
+    const notes = selections.map((s) => {
+      const what =
+        s.type === 'row_select'
+          ? `filas seleccionadas (${s.selection.length}${
+              s.truncated ? '+, truncadas a 50' : ''
+            })`
+          : `interacción ${s.type}`;
+      const label = s.title ? ` (“${s.title}”)` : '';
+      return `- Bloque ${s.kind}${label} ${s.block_id}: ${what}:\n${JSON.stringify(s.selection)}`;
+    });
+    return (
+      `${goal}\n\n[Contexto de pantalla: la persona interactuó con estos bloques. ` +
+      `Si se refiere a "esas", "las seleccionadas" o "lo marcado", usa estos datos, ` +
+      `no los adivines ni pidas que los repita.]\n${notes.join('\n')}`
+    );
   }
 
   /**
@@ -1128,6 +1189,11 @@ export class AIChatService {
    * - `allowed_tools` no vacío como filtro adicional sobre el plan (F3); el
    *   loop lo intersecta con permisos del caller y `tools_allowed`.
    * - `max_iterations` de la fila cuando está definido.
+   * - `agent_key` + `agent_allowed_tools` / `agent_denied_tools`: alcance de
+   *   la fila (sin esto Vex vería las `ui_*` que tiene denegadas y correría
+   *   con presupuesto por defecto en vez del suyo).
+   * - `conversation_id`: el loop lo usa como default de las `vex_*` que
+   *   guardan bloques, para que el modelo no tenga que adivinarlo.
    */
   private resolveAgentLoopArgs(
     agent: ResolvedChatAgent | null,
@@ -1137,6 +1203,10 @@ export class AIChatService {
     system_prompt?: string;
     tools?: string[];
     max_iterations?: number;
+    agent_key?: string;
+    agent_allowed_tools?: string[];
+    agent_denied_tools?: string[];
+    conversation_id?: number;
   } {
     const appKey = agent?.app_key || conversation.app_key || 'chat_assistant';
     if (!agent) {
@@ -1145,10 +1215,23 @@ export class AIChatService {
     const tools =
       agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined;
     const max_iterations = agent.max_iterations ?? undefined;
+    const scope = {
+      agent_key: agent.key,
+      agent_allowed_tools:
+        agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined,
+      agent_denied_tools:
+        agent.denied_tools.length > 0 ? agent.denied_tools : undefined,
+      conversation_id: conversation.id,
+    };
     if (!agent.app_key && !conversation.app_key && agent.system_prompt) {
-      return { system_prompt: agent.system_prompt, tools, max_iterations };
+      return {
+        system_prompt: agent.system_prompt,
+        tools,
+        max_iterations,
+        ...scope,
+      };
     }
-    return { app_key: appKey, tools, max_iterations };
+    return { app_key: appKey, tools, max_iterations, ...scope };
   }
 
   /**

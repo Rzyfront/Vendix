@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { S3Service } from '../../../../common/services/s3.service';
@@ -32,6 +32,8 @@ export const MAX_BLOCK_ROWS = 5000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 500;
 const MAX_BLOCKS_PER_CONVERSATION = 100;
+/** Selected rows folded into the next turn's goal before truncation. */
+const MAX_SELECTION_ROWS_IN_CONTEXT = 50;
 
 /** A signed block URL lives as long as a chat link: enough to click, not to leak. */
 const BLOCK_LINK_TTL_SECONDS = 900;
@@ -46,6 +48,18 @@ export interface VexBlockRow {
   data: Record<string, any>;
   version: number;
   created_at: Date;
+}
+
+/**
+ * A block as the panel renders it. Mirrors the frontend `VexUiBlock`:
+ * `spec` describes HOW to render, `data` carries the payload.
+ */
+export interface VexUiBlockView {
+  block_id: string;
+  kind: VexBlockKind;
+  version: number;
+  spec: Record<string, any>;
+  data: Record<string, any>;
 }
 
 export interface CreateVexBlockInput {
@@ -69,12 +83,14 @@ export interface VexBlockInteraction {
 }
 
 /**
- * Structural view of the `ai_ui_blocks` delegate.
+ * Structural view of the `ai_ui_blocks` delegate on the RAW client.
  *
- * The model lands with the sibling migration (`ai_ui_blocks`); until the
- * Prisma client regenerates, this cast is what keeps the service compiling
- * and the runtime working the moment the table exists. Wave 2 replaces the
- * cast with the generated delegate — no call below changes shape.
+ * Both Prisma services expose only the delegates they wrap as getters, so
+ * reading `ai_ui_blocks` off either answers `undefined` and every call dies
+ * with "Cannot read properties of undefined (reading 'create')".
+ * `withoutScope()` returns the underlying `PrismaClient`, which carries
+ * every generated delegate; store isolation stays exact because each query
+ * below filters by `store_id` explicitly.
  */
 interface AiUiBlocksDelegate {
   findFirst(args: any): Promise<VexBlockRow | null>;
@@ -104,13 +120,16 @@ function isRecord(value: unknown): value is Record<string, any> {
 @Injectable()
 export class VexBlockService {
   constructor(
-    private readonly prisma: StorePrismaService,
+    private readonly prisma: GlobalPrismaService,
     private readonly s3: S3Service,
   ) {}
 
   private get blocks(): AiUiBlocksDelegate {
-    return (this.prisma as unknown as { ai_ui_blocks: AiUiBlocksDelegate })
-      .ai_ui_blocks;
+    return (
+      this.prisma.withoutScope() as unknown as {
+        ai_ui_blocks: AiUiBlocksDelegate;
+      }
+    ).ai_ui_blocks;
   }
 
   private storeIdOrThrow(): number {
@@ -181,6 +200,152 @@ export class VexBlockService {
   }
 
   /**
+   * One block as the panel renders it (`VexUiBlock`): `spec` carries HOW to
+   * render (columns, chart type, labels) and `data` the payload. Storage
+   * keeps the tool shape (`data.columns`, `data.labels/series`, S3 keys);
+   * this mapper is the single bridge between the two, shared by the live
+   * `ui_block` frame and the `GET blocks/:id` refresh path.
+   */
+  async getUiBlock(id: string): Promise<VexUiBlockView> {
+    return this.toUiBlock(await this.getById(id));
+  }
+
+  async toUiBlock(
+    row: VexBlockRow & { signed_url?: string },
+  ): Promise<VexUiBlockView> {
+    const spec = isRecord(row.spec) ? row.spec : {};
+    const data = isRecord(row.data) ? row.data : {};
+    switch (row.kind) {
+      case 'table':
+        return {
+          block_id: row.id,
+          kind: 'table',
+          version: row.version,
+          spec: {
+            kind: 'table',
+            ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
+            columns: Array.isArray(data.columns) ? data.columns : [],
+            selectable: true,
+          },
+          data: { rows: Array.isArray(data.rows) ? data.rows : [] },
+        };
+      case 'chart': {
+        const labels: unknown[] = Array.isArray(data.labels) ? data.labels : [];
+        const series: Array<Record<string, any>> = Array.isArray(data.series)
+          ? data.series.filter(isRecord)
+          : [];
+        const keys = series.map((s, i) =>
+          typeof s.name === 'string' && s.name
+            ? `s${i}_${s.name.replace(/[^a-zA-Z0-9_]+/g, '_')}`
+            : `s${i}`,
+        );
+        const rowCount = Math.max(
+          labels.length,
+          ...series.map((s) => (Array.isArray(s.data) ? s.data.length : 0)),
+        );
+        const rows: Array<Record<string, any>> = [];
+        for (let i = 0; i < rowCount; i++) {
+          const r: Record<string, any> = {
+            label: labels[i] ?? `Punto ${i + 1}`,
+          };
+          series.forEach((s, si) => {
+            r[keys[si]] = Array.isArray(s.data) ? (s.data[i] ?? null) : null;
+          });
+          rows.push(r);
+        }
+        return {
+          block_id: row.id,
+          kind: 'chart',
+          version: row.version,
+          spec: {
+            kind: 'chart',
+            ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
+            chart_type: spec.chart_type,
+            x_axis_key: 'label',
+            series: series.map((s, i) => ({
+              key: keys[i],
+              ...(typeof s.name === 'string' ? { label: s.name } : {}),
+            })),
+          },
+          data: { rows },
+        };
+      }
+      case 'kpi':
+        return {
+          block_id: row.id,
+          kind: 'kpi',
+          version: row.version,
+          spec: {
+            kind: 'kpi',
+            label:
+              typeof data.label === 'string' && data.label
+                ? data.label
+                : 'Indicador',
+          },
+          data: {
+            value: data.value ?? null,
+            ...(data.delta !== undefined ? { delta: data.delta } : {}),
+            ...(typeof data.hint === 'string' ? { hint: data.hint } : {}),
+          },
+        };
+      case 'image':
+      case 'file': {
+        const signed =
+          row.signed_url ?? (await this.withSignedUrl(row)).signed_url;
+        const baseSpec =
+          row.kind === 'image'
+            ? {
+                kind: 'image' as const,
+                ...(typeof data.alt === 'string' ? { alt: data.alt } : {}),
+              }
+            : {
+                kind: 'file' as const,
+                ...(typeof data.filename === 'string'
+                  ? { filename: data.filename }
+                  : {}),
+                ...(typeof data.mime_type === 'string'
+                  ? { mime_type: data.mime_type }
+                  : {}),
+              };
+        return {
+          block_id: row.id,
+          kind: row.kind,
+          version: row.version,
+          spec: baseSpec,
+          data: {
+            ...(signed ? { url: signed } : {}),
+            ...(typeof data.filename === 'string'
+              ? { filename: data.filename }
+              : {}),
+            ...(typeof data.mime_type === 'string'
+              ? { mime_type: data.mime_type }
+              : {}),
+          },
+        };
+      }
+      case 'markdown':
+      default:
+        return {
+          block_id: row.id,
+          kind: 'markdown',
+          version: row.version,
+          spec: {
+            kind: 'markdown',
+            ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
+          },
+          data: {
+            content:
+              typeof data.content === 'string'
+                ? data.content
+                : typeof data.text === 'string'
+                  ? data.text
+                  : '',
+          },
+        };
+    }
+  }
+
+  /**
    * Paged read of a block's rows for a later turn. The model never receives
    * the whole dataset blindly — it pages through it, exactly as a person
    * would scroll the rendered table.
@@ -197,12 +362,20 @@ export class VexBlockService {
     page_size: number;
     total_rows: number;
     rows: Array<Record<string, any>>;
+    selection: Array<Record<string, any>>;
   }> {
     const row = await this.getById(id);
     const rows = this.rowsOf(row);
     const size = Math.min(Math.max(pageSize || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
     const current = Math.max(page || 1, 1);
     const start = (current - 1) * size;
+    const last = isRecord(row.spec) ? row.spec.last_interaction : undefined;
+    const payload =
+      isRecord(last) && isRecord(last.payload) ? last.payload : undefined;
+    const selection =
+      payload && Array.isArray(payload.selection)
+        ? payload.selection.filter(isRecord)
+        : [];
     return {
       block_id: row.id,
       kind: row.kind,
@@ -211,6 +384,7 @@ export class VexBlockService {
       page_size: size,
       total_rows: rows.length,
       rows: rows.slice(start, start + size),
+      selection,
     };
   }
 
@@ -288,6 +462,67 @@ export class VexBlockService {
       data: { spec },
     });
     return { ...row, spec };
+  }
+
+  /**
+   * The latest thing the person did on each block of the conversation that
+   * heard from them, newest first. The chat surface folds this into the next
+   * turn's goal so "esas filas" resolves to the actual selection instead of
+   * a guess. Selections travel whole (the turn may have to total them) but
+   * capped: past 50 rows the model gets the count and reads the block.
+   */
+  async recentSelections(
+    conversationId: number,
+  ): Promise<
+    Array<{
+      block_id: string;
+      kind: VexBlockKind;
+      title?: string;
+      type: string;
+      at: string;
+      selection: Array<Record<string, any>>;
+      truncated: boolean;
+    }>
+  > {
+    const storeId = this.storeIdOrThrow();
+    const rows = await this.blocks.findMany({
+      where: { store_id: storeId, conversation_id: conversationId },
+      orderBy: { created_at: 'desc' },
+      take: MAX_BLOCKS_PER_CONVERSATION,
+    });
+    const out: Array<{
+      block_id: string;
+      kind: VexBlockKind;
+      title?: string;
+      type: string;
+      at: string;
+      selection: Array<Record<string, any>>;
+      truncated: boolean;
+    }> = [];
+    for (const row of rows) {
+      const last = isRecord(row.spec)
+        ? (row.spec as Record<string, any>).last_interaction
+        : undefined;
+      if (!isRecord(last) || typeof last.type !== 'string') continue;
+      const payload = isRecord(last.payload)
+        ? (last.payload as Record<string, any>)
+        : {};
+      const raw = Array.isArray(payload.selection)
+        ? payload.selection.filter(isRecord)
+        : [];
+      out.push({
+        block_id: row.id,
+        kind: row.kind,
+        ...(typeof (row.spec as Record<string, any>)?.title === 'string'
+          ? { title: (row.spec as Record<string, any>).title as string }
+          : {}),
+        type: last.type,
+        at: typeof last.at === 'string' ? last.at : '',
+        selection: raw.slice(0, MAX_SELECTION_ROWS_IN_CONTEXT),
+        truncated: raw.length > MAX_SELECTION_ROWS_IN_CONTEXT,
+      });
+    }
+    return out;
   }
 
   async delete(id: string): Promise<void> {
