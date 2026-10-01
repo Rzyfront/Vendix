@@ -3136,6 +3136,14 @@
       "sessions": 2,
       "memories": 32,
       "prompts": 0
+    },
+    {
+      "id": "c400028d",
+      "created_by": "dmin",
+      "created_at": "2026-10-01T16:27:15Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
