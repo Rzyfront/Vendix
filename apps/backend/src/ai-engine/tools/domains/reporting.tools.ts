@@ -452,7 +452,7 @@ export function createReportingTools({ s3 }: ReportingToolDeps): RegisteredTool[
       domain: 'reporting',
       readOnly: true,
       description:
-        'Genera el XLSX de un reporte y devuelve un enlace de descarga. Úsala SOLO cuando la persona pide explícitamente descargar o exportar el archivo ("descarga el XLSX", "expórtame las ventas"); para conversar sobre cifras o validar antes de actuar usa analyze_report. El archivo lo construye el propio endpoint de export, con las mismas columnas, totales y fechas en la zona horaria de la tienda que el módulo de Reportes. El enlace vence en 15 minutos: dilo al entregarlo.',
+        'Genera el XLSX de un reporte y devuelve un enlace de descarga. Úsala SOLO cuando la persona pide explícitamente descargar o exportar el archivo ("descarga el XLSX", "expórtame las ventas"); para conversar sobre cifras o validar antes de actuar usa analyze_report. El archivo lo construye el propio endpoint de export, con las mismas columnas, totales y fechas en la zona horaria de la tienda que el módulo de Reportes. El enlace vence en 15 minutos: dilo al entregarlo. En turnos Vex, encadena con vex_render_file pasando s3_key (nunca download_url) para mostrar el archivo como bloque descargable: una URL firmada vence y jamás se persiste en un bloque.',
       parameters: {
         type: 'object',
         properties: {
@@ -547,9 +547,10 @@ export function createReportingTools({ s3 }: ReportingToolDeps): RegisteredTool[
             report_id: reportId,
             file_name: fileName,
             size_kb: Math.round(buffer.length / 1024),
+            s3_key: key,
             download_url: signedUrl,
             expires_in_minutes: Math.round(LINK_TTL_SECONDS / 60),
-            note: 'Entrégale el enlace tal cual, di de qué reporte es y avísale que vence en 15 minutos. No describas el contenido: no lo leíste, solo lo generaste.',
+            note: 'Entrégale el enlace tal cual, di de qué reporte es y avísale que vence en 15 minutos. No describas el contenido: no lo leíste, solo lo generaste. En turnos Vex, muestra el archivo con vex_render_file pasando s3_key; nunca persistas download_url en un bloque porque vence.',
           });
         } catch (error: any) {
           logger.warn(

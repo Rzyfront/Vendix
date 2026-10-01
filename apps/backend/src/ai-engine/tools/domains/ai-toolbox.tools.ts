@@ -269,7 +269,7 @@ export function createAiToolboxTools({
         IMAGE_KIND_TO_APP,
       ).join(
         ', ',
-      )}. Devuelve un enlace para que la persona la vea; asignarla a un producto o publicarla como anuncio es una escritura aparte que requiere su aprobación. Si la persona adjuntó una foto para mejorar, pásala en reference_attachment_id.`,
+      )}. Devuelve un enlace para que la persona la vea; asignarla a un producto o publicarla como anuncio es una escritura aparte que requiere su aprobación. Si la persona adjuntó una foto para mejorar, pásala en reference_attachment_id. En turnos Vex, encadena con vex_render_image pasando s3_key (nunca image_url) para mostrar la imagen como bloque: una URL firmada vence y jamás se persiste en un bloque.`,
       parameters: {
         type: 'object',
         properties: {
@@ -318,7 +318,7 @@ export function createAiToolboxTools({
             s3_key: key,
             revised_prompt: outcome.revisedPrompt,
             next_step:
-              'Muéstrasela describiéndola en una frase y pregúntale si la quiere usar. No la asignes a nada sin su sí.',
+              'Muéstrasela describiéndola en una frase y pregúntale si la quiere usar. No la asignes a nada sin su sí. En turnos Vex, muéstrala con vex_render_image pasando s3_key; nunca guardes image_url en un bloque porque vence.',
           });
         } catch (error: any) {
           logger.warn(`Could not persist generated image: ${error?.message}`);
