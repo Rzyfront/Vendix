@@ -1,0 +1,12 @@
+# Corrección a e3-quota-after.txt (orquestador, 2026-10-01)
+
+`e3-quota-after.txt` capturó `126` por lectura stale (timing del read tras el
+turno de medición). El estado vivo de Redis prueba el incremento real:
+
+- `GET ai:quota:10:vex_agent:202610` → `127` (antes: 126, +1 por el turno de
+  1 tool `find_product` en e3-meter-stream.sse)
+- `GET ai:quota:10:tool_agents:202610` → `48` (sin movimiento atribuible a Vex)
+
+Comando: `docker exec vendix_redis redis-cli GET <key>`.
+Conclusión E2E-3 (medición en `vex_agent`, no en `tool_agents`): CONFIRMADA.
+No se modifica el artefacto original para preservar la cadena de evidencia.
