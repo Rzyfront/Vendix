@@ -1289,6 +1289,7 @@ export function createFiscalTools(deps: FiscalToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PERM_DECLARATIONS_WRITE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context) => {
         const resolved = await resolveGuardedContext(context);
         if ('error' in resolved) {
@@ -1619,6 +1620,7 @@ export function createFiscalTools(deps: FiscalToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PERM_CLOSE_WRITE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context) => {
         const resolved = await resolveGuardedContext(context);
         if ('error' in resolved) {

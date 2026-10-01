@@ -869,6 +869,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PAYROLL_RUNS_MANAGE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args): Promise<ToolPreview> => {
         const runId = toPositiveInt(args.payroll_run_id);
         if (!runId) {
@@ -966,6 +967,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PAYROLL_RUNS_MANAGE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args): Promise<ToolPreview> => {
         const runId = toPositiveInt(args.payroll_run_id);
         if (!runId) {
@@ -2075,6 +2077,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [SETTLEMENTS_MANAGE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args): Promise<ToolPreview> => {
         const settlementId = toPositiveInt(args.settlement_id);
         if (!settlementId) {

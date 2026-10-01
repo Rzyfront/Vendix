@@ -857,6 +857,7 @@ export function createInvoicingTools(
       },
       requiredPermissions: ['invoicing:write'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context): Promise<ToolPreview> => {
         const invoiceId = toPositiveInt(args.invoice_id);
         if (!invoiceId) {
@@ -982,6 +983,7 @@ export function createInvoicingTools(
       },
       requiredPermissions: ['invoicing:write'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context): Promise<ToolPreview> => {
         const invoiceId = toPositiveInt(args.invoice_id);
         if (!invoiceId) {

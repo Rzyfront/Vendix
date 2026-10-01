@@ -1273,6 +1273,7 @@ export function createWithholdingTools(
       },
       requiredPermissions: ['exogenous:write'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context): Promise<ToolPreview> => {
         const reportId = toPositiveInt(args.report_id);
         if (!reportId) {

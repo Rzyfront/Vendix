@@ -56,6 +56,15 @@ const ACTION_BY_METHOD: Record<string, string> = {
  * to infer from a route name at runtime. Matching is by the domain segment of the
  * path, so a new endpoint inside an already-listed domain inherits the warning
  * instead of silently arriving unlabelled.
+ *
+ * SINGLE SOURCE for irreversibility segments: `PlanApprovalService` imports
+ * `IRREVERSIBLE_DOMAIN_SEGMENTS` below instead of mirroring this map — the
+ * mirror drifted once (`cash-register` vs `cash-registers`) and DIAN/cash
+ * writes slipped through whole-plan approval. Both spellings are listed on
+ * purpose: routes use `cash-registers`, the typed cash tools declare
+ * `cash-register`; same for `receivables`/`payables` (routes) and
+ * `receivables-payables` (typed tools). A segment with no route today is
+ * harmless — if a route ever uses it, the warning is already correct.
  */
 export const IRREVERSIBLE_DOMAINS: Record<string, string> = {
   invoicing:
@@ -75,7 +84,36 @@ export const IRREVERSIBLE_DOMAINS: Record<string, string> = {
     'Cambiar el plan modifica lo que el comercio paga por Vendix a partir del próximo periodo.',
   declarations:
     'Una declaración presentada queda radicada; su corrección es un trámite aparte.',
+  // Typed-tool domain spelling (routes use `cash-registers` above).
+  'cash-register':
+    'Cerrar una caja es un acto de control con responsable: el arqueo queda registrado y no se reabre.',
+  fiscal:
+    'Un cierre de periodo fiscal bloquea sus movimientos y una declaración radicada solo se corrige con un trámite aparte.',
+  returns:
+    'Procesar una devolución reingresa o da de baja el stock y emite el evento contable del reembolso.',
+  accounting:
+    'Un asiento publicado o un periodo contable cerrado no se borran: se corrigen con un reverso o un ajuste.',
+  orders:
+    'Cancelar o anular una orden cierra su ciclo comercial: su cobro solo se devuelve con un reembolso.',
+  withholding:
+    'Un reporte exógeno presentado o una retención certificada quedan radicados: su corrección es un trámite aparte.',
+  receivables:
+    'Un cobro aplicado mueve dinero real y salda cartera: revertirlo exige un ajuste, no un borrado.',
+  payables:
+    'Un pago a proveedores mueve dinero real y queda en la contabilidad: revertirlo exige un ajuste, no un borrado.',
+  // Typed-tool domain spelling (routes use `receivables`/`payables` above).
+  'receivables-payables':
+    'Un cobro o pago aplicado mueve dinero real y queda en la contabilidad: revertirlo exige un ajuste, no un borrado.',
 };
+
+/**
+ * Membership view of `IRREVERSIBLE_DOMAINS`, derived so the two cannot drift.
+ * Consumed by whole-plan approval for the domain safety net; the warning
+ * sentences above stay the only place that prose lives.
+ */
+export const IRREVERSIBLE_DOMAIN_SEGMENTS: ReadonlySet<string> = new Set(
+  Object.keys(IRREVERSIBLE_DOMAINS),
+);
 
 /**
  * What this user can actually do, derived rather than curated.

@@ -272,6 +272,7 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
         'store:orders:return_orders:delete',
       ],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context) => {
         const action = String(args.action ?? '');
         if (

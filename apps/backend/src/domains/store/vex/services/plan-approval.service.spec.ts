@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { PlanApprovalService } from './plan-approval.service';
+import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../../../../ai-engine/tools/bridge/capability-registry.service';
 
 /** Mirrors the service's canonical JSON so the spec hashes identically. */
 function canonicalJson(value: unknown): string {
@@ -78,6 +79,10 @@ function makeRegistry() {
     ['adjust_stock', { domain: 'inventory' }],
     ['send_invoice_dian', { domain: 'invoicing' }],
     ['settle_payroll', { domain: 'payroll', irreversible: true }],
+    // Sin marca explícita a propósito: la red por dominio debe atraparlos.
+    ['close_cash_session', { domain: 'cash-register' }],
+    ['collect_receivable', { domain: 'receivables-payables' }],
+    ['submit_exogenous_report', { domain: 'withholding', irreversible: true }],
     ['write_endpoint', { domain: 'bridge' }],
   ]);
   return { get: jest.fn((name: string) => tools.get(name)) };
@@ -231,6 +236,95 @@ describe('PlanApprovalService', () => {
   it('fails closed on unknown tools', async () => {
     const steps = [{ order: 1, tool: 'invented_tool', args: {} }];
     expect(service.classifySteps(steps).reconfirm).toHaveLength(1);
+  });
+
+  it('pins the shared irreversible segment membership (single source)', () => {
+    // Si un segmento se retira de IRREVERSIBLE_DOMAINS, este pin obliga a
+    // decidirlo aquí en vez de silenciar la red de seguridad por dominio.
+    for (const segment of [
+      'invoicing',
+      'dian-config',
+      'payroll',
+      'pila',
+      'cash-register',
+      'cash-registers',
+      'payments',
+      'refunds',
+      'subscriptions',
+      'declarations',
+      'fiscal',
+      'returns',
+      'accounting',
+      'orders',
+      'withholding',
+      'receivables',
+      'payables',
+      'receivables-payables',
+    ]) {
+      expect(IRREVERSIBLE_DOMAIN_SEGMENTS.has(segment)).toBe(true);
+    }
+  });
+
+  it('reconfirms the cash-register singular spelling via the shared net', async () => {
+    // Regresión del espejo local: la lista vieja solo traía `cash-registers`
+    // (rutas) y el dominio tipado `cash-register` colaba como reversible.
+    // La entrada del registry no porta la marca: solo la red la atrapa.
+    const steps = [
+      { order: 1, tool: 'close_cash_session', args: { session_id: 5 } },
+    ];
+    expect(service.classifySteps(steps).covered).toEqual([]);
+    const token = await service.issuePlanToken('plan-cash', 11, steps);
+    await expect(
+      service.redeemPlanStep(token, 'plan-cash', 11, 'close_cash_session', {
+        session_id: 5,
+      }),
+    ).resolves.toBe('irreversible');
+  });
+
+  it('reconfirms receivables/payables typed tools and bridge paths', () => {
+    const typed = {
+      order: 1,
+      tool: 'collect_receivable',
+      args: { receivable_id: 9 },
+    };
+    const bridgeRecv = {
+      order: 2,
+      tool: 'write_endpoint',
+      args: { path: 'store/receivables/9/collect', method: 'POST', body: {} },
+    };
+    const bridgePay = {
+      order: 3,
+      tool: 'write_endpoint',
+      args: { path: 'store/payables/4/pay', method: 'POST', body: {} },
+    };
+    const { covered, reconfirm } = service.classifySteps([
+      typed,
+      bridgeRecv,
+      bridgePay,
+    ]);
+    expect(covered).toEqual([]);
+    expect(reconfirm.map((s) => s.order)).toEqual([1, 2, 3]);
+  });
+
+  it('honors the explicit mark on withholding declarations', async () => {
+    const steps = [
+      { order: 1, tool: 'submit_exogenous_report', args: { report_id: 3 } },
+    ];
+    expect(service.classifySteps(steps).covered).toEqual([]);
+    const token = await service.issuePlanToken('plan-exog', 11, steps);
+    await expect(
+      service.redeemPlanStep(token, 'plan-exog', 11, 'submit_exogenous_report', {
+        report_id: 3,
+      }),
+    ).resolves.toBe('irreversible');
+  });
+
+  it('marks unknown steps irreversible at redeem time, not only classify', async () => {
+    const steps = [{ order: 1, tool: 'invented_tool', args: {} }];
+    const token = await service.issuePlanToken('plan-unknown', 11, steps);
+    await expect(
+      service.redeemPlanStep(token, 'plan-unknown', 11, 'invented_tool', {}),
+    ).resolves.toBe('irreversible');
   });
 
   it('binds the fingerprint to the approved step list, not the call sequence', async () => {

@@ -1650,6 +1650,7 @@ export function createAccountingTools(
       },
       requiredPermissions: [PERM_JOURNAL_VOID],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context) => {
         const resolved = await resolveEntryForFlow(args ?? {}, 'anula');
         if (!resolved.ok) {
@@ -1860,6 +1861,7 @@ export function createAccountingTools(
       },
       requiredPermissions: [PERM_PERIODS_UPDATE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context) => {
         const label = `Periodo fiscal #${args?.fiscal_period_id ?? '?'}`;
         const fiscal_period_id = toPositiveInt(args?.fiscal_period_id);

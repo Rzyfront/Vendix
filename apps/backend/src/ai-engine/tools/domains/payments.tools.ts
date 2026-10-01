@@ -270,6 +270,7 @@ export function createPaymentTools(deps: PaymentToolDeps): RegisteredTool[] {
       },
       requiredPermissions: ['store:pos:access'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context) => {
         const missing = requireStore(context);
         if (missing) {
@@ -540,6 +541,7 @@ export function createPaymentTools(deps: PaymentToolDeps): RegisteredTool[] {
       },
       requiredPermissions: ['store:pos:access'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context) => {
         const missing = requireStore(context);
         if (missing) {

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
+import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../../../../ai-engine/tools/bridge/capability-registry.service';
 
 /** One approval covers the whole plan; 15 minutes to run it before re-asking. */
 export const PLAN_TOKEN_TTL_SECONDS = 900;
@@ -51,22 +52,12 @@ return 1
 /**
  * Domain segments whose writes always re-confirm, even inside an approved plan.
  *
- * Mirrors the canonical `IRREVERSIBLE_DOMAINS` map in
- * `ai-engine/tools/bridge/capability-registry.service.ts` as a plain set so
- * this service does not import the catalog module for one constant. If a
- * segment is added there, it must be added here — the spec pins the list.
+ * Single-sourced from `IRREVERSIBLE_DOMAINS` in
+ * `ai-engine/tools/bridge/capability-registry.service.ts` (imported above):
+ * the local mirror drifted once (`cash-register` vs `cash-registers`) and let
+ * irreversible writes slip through whole-plan approval. Membership is pinned
+ * by the spec; the matching logic below is unchanged.
  */
-const IRREVERSIBLE_DOMAIN_SEGMENTS = new Set([
-  'invoicing',
-  'dian-config',
-  'payroll',
-  'pila',
-  'cash-registers',
-  'payments',
-  'refunds',
-  'subscriptions',
-  'declarations',
-]);
 
 /**
  * Deterministic JSON: object keys sorted at every depth, arrays kept in order.
