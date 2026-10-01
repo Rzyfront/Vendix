@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ExpensesController } from './expenses.controller';
 import { ExpensesService } from './expenses.service';
@@ -7,6 +7,8 @@ import { ExpenseScannerService } from './expense-scanner.service';
 import { ExpenseScanProcessor } from './expense-scan.processor';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createExpenseTools } from '../../../ai-engine/tools/domains/expenses.tools';
 
 @Module({
   imports: [
@@ -26,4 +28,19 @@ import { PrismaModule } from '../../../prisma/prisma.module';
   ],
   exports: [ExpensesService],
 })
-export class ExpensesModule {}
+export class ExpensesModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly expenses: ExpensesService,
+    private readonly expenseFlow: ExpenseFlowService,
+  ) {}
+
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createExpenseTools({
+        expensesService: this.expenses,
+        expenseFlowService: this.expenseFlow,
+      }),
+    );
+  }
+}

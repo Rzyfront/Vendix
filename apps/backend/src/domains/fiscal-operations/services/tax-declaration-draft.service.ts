@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import {
   Prisma,
+  fiscal_obligation_type_enum,
   tax_declaration_status_enum,
   tax_declaration_type_enum,
   withholding_type_enum,
@@ -14,6 +15,8 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
 import {
+  FISCAL_CLOSE_TYPES,
+  FiscalCloseType,
   buildDateRangeFilter,
   resolveFiscalPeriodRange,
 } from './fiscal-period.util';
@@ -35,12 +38,49 @@ interface DeclarationCalculation {
   validation_summary: Prisma.InputJsonObject;
 }
 
+interface PreparedDeclarationCalculation {
+  effectiveDto: CreateTaxDeclarationDraftDto;
+  periodicity: FiscalCloseType | null;
+  period: ReturnType<typeof resolveFiscalPeriodRange>;
+  calculation: DeclarationCalculation;
+}
+
 const LOCKED_DECLARATION_STATUSES: tax_declaration_status_enum[] = [
   'approved',
   'submitted',
   'accepted',
   'paid',
 ];
+
+const DEFAULT_FISCAL_JURISDICTION_KEY = 'CO-DIAN';
+
+const DECLARATION_OBLIGATION_TYPE: Partial<
+  Record<tax_declaration_type_enum, fiscal_obligation_type_enum>
+> = {
+  vat: 'vat_return',
+  inc: 'inc_return',
+  withholding: 'withholding_return',
+  reteiva: 'reteiva_return',
+  reteica: 'reteica_return',
+  ica: 'ica_return',
+  exogenous: 'exogenous_report',
+  income_tax_precierre: 'income_tax_precierre',
+};
+
+function isFiscalCloseType(value: unknown): value is FiscalCloseType {
+  return (
+    typeof value === 'string' &&
+    FISCAL_CLOSE_TYPES.some((periodicity) => periodicity === value)
+  );
+}
+
+function sameDateOnly(left: Date, right: Date): boolean {
+  return (
+    left.getUTCFullYear() === right.getUTCFullYear() &&
+    left.getUTCMonth() === right.getUTCMonth() &&
+    left.getUTCDate() === right.getUTCDate()
+  );
+}
 
 const TERMINAL_DECLARATION_STATUSES: tax_declaration_status_enum[] = [
   'accepted',
@@ -161,33 +201,45 @@ export class TaxDeclarationDraftService {
     context: FiscalOperationsContext,
     dto: CreateTaxDeclarationDraftDto,
   ) {
-    const period = resolveFiscalPeriodRange(dto);
-    const calculation = await this.calculate(
-      context,
-      dto.declaration_type,
-      period,
-    );
+    const prepared = await this.prepareCalculation(context, dto);
+    const { effectiveDto, periodicity, period, calculation } = prepared;
+
     const existing = await this.prisma.tax_declaration_drafts.findFirst({
       where: {
+        organization_id: context.organization_id,
         accounting_entity_id: context.accounting_entity_id,
         declaration_type: dto.declaration_type,
         period_year: period.period_year,
         period_month: period.period_month,
         period_quarter: period.period_quarter,
-        status: { notIn: LOCKED_DECLARATION_STATUSES },
+        periodicity: periodicity ?? null,
+        jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
+        status: {
+          notIn: [...LOCKED_DECLARATION_STATUSES, 'voided'],
+        },
       },
       orderBy: { id: 'desc' },
     });
 
     const draft = await this.prisma.$transaction(async (tx) => {
-      const data = this.buildDraftData(context, dto, period, calculation);
+      const data = this.buildDraftData(
+        context,
+        effectiveDto,
+        period,
+        calculation,
+      );
+      const status =
+        Array.isArray(calculation.validation_summary.errors) &&
+        calculation.validation_summary.errors.length > 0
+          ? 'needs_review'
+          : 'ready';
       const draft = existing
         ? await tx.tax_declaration_drafts.update({
             where: { id: existing.id },
-            data: { ...data, status: 'ready' },
+            data: { ...data, status },
           })
         : await tx.tax_declaration_drafts.create({
-            data: { ...data, status: 'ready' },
+            data: { ...data, status },
           });
 
       await tx.tax_declaration_lines.deleteMany({
@@ -224,6 +276,8 @@ export class TaxDeclarationDraftService {
           period_year: period.period_year,
           period_month: period.period_month,
           period_quarter: period.period_quarter,
+          periodicity: periodicity ?? null,
+          jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
           line_count: calculation.lines.length,
           total_payable: Number(draft.total_payable || 0),
         },
@@ -233,11 +287,84 @@ export class TaxDeclarationDraftService {
     return draft;
   }
 
+  /**
+   * Calculates a reviewable estimate through the same period, obligation, and
+   * calculation path as createDraft, without persisting or transitioning state.
+   */
+  async preview(
+    context: FiscalOperationsContext,
+    dto: CreateTaxDeclarationDraftDto,
+  ) {
+    const { periodicity, period, calculation } =
+      await this.prepareCalculation(context, dto);
+    return {
+      declaration_type: dto.declaration_type,
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+      accounting_entity_id: context.accounting_entity_id,
+      period_year: period.period_year,
+      period_month: period.period_month,
+      period_quarter: period.period_quarter,
+      period_start: period.period_start,
+      period_end: period.period_end,
+      periodicity,
+      jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
+      totals: calculation.totals,
+      lines: calculation.lines.map((line) => {
+        const { declaration_id, ...previewLine } = line;
+        // Calculation lines use 0 only as a createMany placeholder. A preview
+        // is not a persisted declaration and must not expose that sentinel.
+        void declaration_id;
+        return previewLine;
+      }),
+      rules_snapshot: calculation.rules_snapshot,
+      source_snapshot: calculation.source_snapshot,
+      validation_summary: calculation.validation_summary,
+      is_estimate: true,
+      label:
+        'Estimación preliminar; el motor fiscal completo está pendiente. No apta para presentar a DIAN.',
+    };
+  }
+
+  private async prepareCalculation(
+    context: FiscalOperationsContext,
+    dto: CreateTaxDeclarationDraftDto,
+  ): Promise<PreparedDeclarationCalculation> {
+    // Validate the caller's explicit period fields before any database read.
+    // A linked obligation may supply a missing periodicity below, which can
+    // require resolving the normalized range a second time.
+    this.resolveDeclarationPeriod(dto);
+    const obligation = await this.resolveLinkedObligation(context, dto);
+    const periodicity = this.resolveDeclarationPeriodicity(
+      dto.periodicity,
+      obligation?.periodicity,
+    );
+    const effectiveDto: CreateTaxDeclarationDraftDto = {
+      ...dto,
+      periodicity: periodicity ?? undefined,
+    };
+    const period = this.resolveDeclarationPeriod(effectiveDto);
+    if (obligation) this.assertObligationPeriodMatches(obligation, period);
+
+    const calculation = await this.calculate(
+      context,
+      dto.declaration_type,
+      period,
+    );
+    return { effectiveDto, periodicity, period, calculation };
+  }
+
   async recalculateDraft(contexts: FiscalOperationsContext[], id: number) {
     const draft = await this.findOne(contexts, id);
     if (LOCKED_DECLARATION_STATUSES.includes(draft.status)) {
       throw new BadRequestException(
         'Approved/submitted declarations cannot be recalculated in place',
+      );
+    }
+
+    if (draft.periodicity != null && !isFiscalCloseType(draft.periodicity)) {
+      throw new BadRequestException(
+        'Stored declaration has an unsupported periodicity and cannot be recalculated',
       );
     }
 
@@ -251,6 +378,7 @@ export class TaxDeclarationDraftService {
       period_year: draft.period_year,
       period_month: draft.period_month ?? undefined,
       period_quarter: draft.period_quarter ?? undefined,
+      periodicity: draft.periodicity ?? undefined,
       obligation_id: draft.obligation_id ?? undefined,
       store_id: draft.store_id ?? undefined,
     });
@@ -270,6 +398,16 @@ export class TaxDeclarationDraftService {
   async approveDraft(contexts: FiscalOperationsContext[], id: number) {
     const draft = await this.findOne(contexts, id);
     if (draft.status === 'approved') return draft;
+    const summary = draft.validation_summary;
+    const blockingErrors =
+      summary && typeof summary === 'object' && !Array.isArray(summary)
+        ? (summary as Record<string, unknown>).errors
+        : undefined;
+    if (Array.isArray(blockingErrors) && blockingErrors.length > 0) {
+      throw new BadRequestException(
+        'Draft has blocking fiscal validation errors and cannot be approved',
+      );
+    }
     this.assertStatusTransition(draft.status, 'approved');
     if (draft.status !== 'ready' && draft.status !== 'needs_review') {
       throw new BadRequestException('Only ready drafts can be approved');
@@ -475,6 +613,8 @@ export class TaxDeclarationDraftService {
       period_quarter: period.period_quarter,
       period_start: period.period_start,
       period_end: period.period_end,
+      periodicity: dto.periodicity ?? null,
+      jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
       currency: 'COP',
       gross_base_amount: calculation.totals.gross_base_amount ?? 0,
       taxable_base_amount: calculation.totals.taxable_base_amount ?? 0,
@@ -493,6 +633,97 @@ export class TaxDeclarationDraftService {
       validation_summary: calculation.validation_summary,
       created_by_user_id: RequestContextService.getUserId(),
     };
+  }
+
+  private async resolveLinkedObligation(
+    context: FiscalOperationsContext,
+    dto: CreateTaxDeclarationDraftDto,
+  ) {
+    if (dto.obligation_id == null) return null;
+
+    const obligation = await this.prisma.fiscal_obligations.findFirst({
+      where: {
+        id: dto.obligation_id,
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
+      },
+    });
+    if (!obligation) {
+      throw new BadRequestException(
+        'Linked fiscal obligation was not found in this accounting entity',
+      );
+    }
+
+    const expectedObligationType =
+      DECLARATION_OBLIGATION_TYPE[dto.declaration_type];
+    if (!expectedObligationType || obligation.type !== expectedObligationType) {
+      throw new BadRequestException(
+        'Declaration type does not match the linked fiscal obligation',
+      );
+    }
+    return obligation;
+  }
+
+  private resolveDeclarationPeriodicity(
+    requested: unknown,
+    obligationPeriodicity: unknown,
+  ): FiscalCloseType | null {
+    if (requested != null && !isFiscalCloseType(requested)) {
+      throw new BadRequestException('Unsupported declaration periodicity');
+    }
+    if (
+      obligationPeriodicity != null &&
+      !isFiscalCloseType(obligationPeriodicity)
+    ) {
+      throw new BadRequestException(
+        'Linked fiscal obligation has an unsupported periodicity',
+      );
+    }
+
+    if (
+      requested != null &&
+      obligationPeriodicity != null &&
+      requested !== obligationPeriodicity
+    ) {
+      throw new BadRequestException(
+        'Declaration periodicity conflicts with the linked fiscal obligation',
+      );
+    }
+
+    if (requested != null) return requested;
+    if (obligationPeriodicity != null) return obligationPeriodicity;
+    return null;
+  }
+
+  private resolveDeclarationPeriod(
+    dto: CreateTaxDeclarationDraftDto,
+  ): ReturnType<typeof resolveFiscalPeriodRange> {
+    try {
+      return resolveFiscalPeriodRange(dto);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+  }
+
+  private assertObligationPeriodMatches(
+    obligation: {
+      period_start: Date;
+      period_end: Date;
+    },
+    period: ReturnType<typeof resolveFiscalPeriodRange>,
+  ): void {
+    if (
+      !sameDateOnly(obligation.period_start, period.period_start) ||
+      !sameDateOnly(obligation.period_end, period.period_end)
+    ) {
+      throw new BadRequestException(
+        'Declaration period does not match the linked fiscal obligation',
+      );
+    }
   }
 
   private async calculate(
@@ -516,68 +747,161 @@ export class TaxDeclarationDraftService {
   ): Promise<DeclarationCalculation> {
     const invoices = await this.prisma.invoices.findMany({
       where: {
+        organization_id: context.organization_id,
         accounting_entity_id: context.accounting_entity_id,
         issue_date: buildDateRangeFilter(
           period.period_start,
           period.period_end,
         ),
-        status: { notIn: ['cancelled', 'voided'] },
+        OR: [
+          { status: { notIn: ['cancelled', 'voided'] } },
+          // POS equivalents are fetched even after cancellation/voiding only
+          // so the strict accepted+DIAN-accepted gate can report them as
+          // excluded; no other document family changes its legacy query set.
+          { invoice_type: 'pos_equivalent_document' },
+        ],
       },
       include: { invoice_taxes: true, supplier: true },
       orderBy: { issue_date: 'asc' },
     });
 
-    let generated = 0;
-    let deductible = 0;
-    let taxableBase = 0;
+    let generated = new Prisma.Decimal(0);
+    let deductible = new Prisma.Decimal(0);
+    let taxableBase = new Prisma.Decimal(0);
     const lines: Prisma.tax_declaration_linesCreateManyInput[] = [];
+    const validationErrors: Prisma.InputJsonObject[] = [];
+    const skippedTaxIds = new Set<number>();
+    const skippedInvoiceIds = new Set<number>();
     const requiresDianAcceptance = (invoiceType: string) =>
       [
         'sales_invoice',
         'debit_note',
         'credit_note',
+        'export_invoice',
         'purchase_invoice',
         'support_document',
         'support_adjustment_note',
+        'pos_equivalent_document',
+        'equivalent_adjustment_note',
       ].includes(invoiceType);
-    const isAcceptedForTax = (invoice: (typeof invoices)[number]) =>
-      !requiresDianAcceptance(invoice.invoice_type) ||
-      invoice.dian_status === 'accepted' ||
-      invoice.dian_status === 'not_applicable';
+    const isAcceptedForTax = (invoice: (typeof invoices)[number]) => {
+      if (
+        invoice.invoice_type === 'pos_equivalent_document' ||
+        invoice.invoice_type === 'equivalent_adjustment_note'
+      ) {
+        return (
+          invoice.status === 'accepted' && invoice.dian_status === 'accepted'
+        );
+      }
+      return (
+        !requiresDianAcceptance(invoice.invoice_type) ||
+        invoice.dian_status === 'accepted' ||
+        invoice.dian_status === 'not_applicable'
+      );
+    };
     const nonAccepted = invoices.filter(
       (invoice) => !isAcceptedForTax(invoice),
     );
 
     for (const invoice of invoices) {
+      const direction = (() => {
+        switch (invoice.invoice_type as string) {
+          case 'sales_invoice':
+          case 'debit_note':
+          case 'export_invoice':
+          case 'pos_equivalent_document':
+            return { line_type: 'vat_generated' as const, sign: 1 };
+          case 'credit_note':
+            return { line_type: 'vat_generated' as const, sign: -1 };
+          case 'purchase_invoice':
+          case 'support_document':
+            return { line_type: 'vat_deductible' as const, sign: 1 };
+          case 'support_adjustment_note':
+            return { line_type: 'vat_deductible' as const, sign: -1 };
+          default:
+            return null;
+        }
+      })();
+
+      if (invoice.invoice_type === 'equivalent_adjustment_note') {
+        if (isAcceptedForTax(invoice)) {
+          validationErrors.push({
+            code: 'UNSUPPORTED_EQUIVALENT_ADJUSTMENT_DIRECTION',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            invoice_type: invoice.invoice_type,
+            message:
+              'Accepted equivalent adjustment cannot be classified without a reliable 93/94 direction.',
+          });
+          skippedInvoiceIds.add(invoice.id);
+        }
+        continue;
+      }
+
+      if (!direction) {
+        validationErrors.push({
+          code: 'UNSUPPORTED_VAT_DOCUMENT_TYPE',
+          invoice_id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          invoice_type: String(invoice.invoice_type),
+        });
+        skippedInvoiceIds.add(invoice.id);
+        continue;
+      }
+
       if (!isAcceptedForTax(invoice)) continue;
 
-      const sign =
-        invoice.invoice_type === 'credit_note' ||
-        invoice.invoice_type === 'support_adjustment_note'
-          ? -1
-          : 1;
-      const isSale = [
-        'sales_invoice',
-        'debit_note',
-        'export_invoice',
-        'credit_note',
-      ].includes(invoice.invoice_type);
-      // Only IVA rows feed the VAT declaration. INC/ICA/withholding live in
-      // their own declarations now that invoice_taxes carries tax_type. Legacy
-      // untyped rows (tax_type IS NULL) default to IVA for back-compat.
-      const invoiceTax =
-        invoice.invoice_taxes
-          .filter((tax) => ((tax as any).tax_type ?? 'iva') === 'iva')
-          .reduce((sum, tax) => sum + Number(tax.tax_amount || 0), 0) * sign;
-      const invoiceBase = Number(invoice.subtotal_amount || 0) * sign;
-      taxableBase += invoiceBase;
+      let invoiceTax = new Prisma.Decimal(0);
+      let invoiceBase = new Prisma.Decimal(0);
+      let hasUsableVatRow = false;
+      for (const tax of invoice.invoice_taxes) {
+        const taxType = tax.tax_type as string | null;
+        if (taxType == null || taxType === 'unclassified') {
+          validationErrors.push({
+            code: 'UNCLASSIFIED_INVOICE_TAX',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            tax_id: tax.id,
+            tax_type: taxType,
+          });
+          if (typeof tax.id === 'number') skippedTaxIds.add(tax.id);
+          continue;
+        }
+        if (taxType !== 'iva') continue;
 
-      if (isSale) generated += invoiceTax;
-      else deductible += invoiceTax;
+        const taxBase = this.parseFiniteMoney(tax.taxable_amount);
+        const taxAmount = this.parseFiniteMoney(tax.tax_amount);
+        if (!taxBase || !taxAmount) {
+          const invalidField = !taxBase ? 'taxable_amount' : 'tax_amount';
+          validationErrors.push({
+            code: !taxBase
+              ? 'INVALID_INVOICE_TAX_BASE'
+              : 'INVALID_INVOICE_TAX_AMOUNT',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            tax_id: tax.id,
+            field: invalidField,
+          });
+          if (typeof tax.id === 'number') skippedTaxIds.add(tax.id);
+          continue;
+        }
+        invoiceBase = invoiceBase.plus(taxBase);
+        invoiceTax = invoiceTax.plus(taxAmount);
+        hasUsableVatRow = true;
+      }
 
+      if (!hasUsableVatRow) continue;
+      const signedTax = invoiceTax.mul(direction.sign);
+      const signedBase = invoiceBase.mul(direction.sign);
+      taxableBase = taxableBase.plus(signedBase);
+      if (direction.line_type === 'vat_generated') {
+        generated = generated.plus(signedTax);
+      } else {
+        deductible = deductible.plus(signedTax);
+      }
       lines.push({
         declaration_id: 0,
-        line_type: isSale ? 'vat_generated' : 'vat_deductible',
+        line_type: direction.line_type,
         source_type: 'invoice',
         source_id: invoice.id,
         third_party_id: invoice.supplier_id ?? invoice.customer_id ?? undefined,
@@ -586,8 +910,8 @@ export class TaxDeclarationDraftService {
         third_party_tax_id:
           invoice.customer_tax_id ?? invoice.supplier?.tax_id ?? undefined,
         description: `${invoice.invoice_type} ${invoice.invoice_number}`,
-        base_amount: invoiceBase,
-        tax_amount: invoiceTax,
+        base_amount: this.moneyNumber(signedBase),
+        tax_amount: this.moneyNumber(signedTax),
         metadata: {
           dian_status: invoice.dian_status,
           issue_date: invoice.issue_date,
@@ -595,13 +919,16 @@ export class TaxDeclarationDraftService {
       });
     }
 
-    const balance = generated - deductible;
+    const roundedGenerated = this.moneyNumber(generated);
+    const roundedDeductible = this.moneyNumber(deductible);
+    const roundedBase = this.moneyNumber(taxableBase);
+    const balance = this.moneyNumber(generated.minus(deductible));
     return {
       totals: {
-        gross_base_amount: taxableBase,
-        taxable_base_amount: taxableBase,
-        generated_tax_amount: generated,
-        deductible_tax_amount: deductible,
+        gross_base_amount: roundedBase,
+        taxable_base_amount: roundedBase,
+        generated_tax_amount: roundedGenerated,
+        deductible_tax_amount: roundedDeductible,
         balance_due: Math.max(balance, 0),
         balance_favor: Math.max(balance * -1, 0),
         total_payable: Math.max(balance, 0),
@@ -617,7 +944,13 @@ export class TaxDeclarationDraftService {
         counted_invoice_ids: lines
           .map((line) => line.source_id)
           .filter((id): id is number => typeof id === 'number'),
-        skipped_invoice_ids: nonAccepted.map((invoice) => invoice.id),
+        skipped_invoice_ids: [
+          ...new Set([
+            ...nonAccepted.map((invoice) => invoice.id),
+            ...skippedInvoiceIds,
+          ]),
+        ],
+        skipped_tax_ids: [...skippedTaxIds],
       },
       validation_summary: {
         warnings: nonAccepted.map((invoice) => ({
@@ -627,8 +960,27 @@ export class TaxDeclarationDraftService {
           invoice_type: invoice.invoice_type,
           dian_status: invoice.dian_status,
         })),
+        errors: validationErrors,
       },
     };
+  }
+
+  private parseFiniteMoney(
+    value: Prisma.Decimal | string | number | null | undefined,
+  ): Prisma.Decimal | null {
+    if (value == null) return null;
+    try {
+      const parsed = new Prisma.Decimal(value);
+      return parsed.isFinite() ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private moneyNumber(value: Prisma.Decimal): number {
+    return Number(
+      value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN).toString(),
+    );
   }
 
   /**
@@ -1442,18 +1794,25 @@ export class TaxDeclarationDraftService {
     // registrarse en fechas posteriores al cierre del periodo.
     const suffered = await this.prisma.withholding_calculations.findMany({
       where: {
+        organization_id: context.organization_id,
         accounting_entity_id: context.accounting_entity_id,
         role: 'suffered',
         year: period.period_year,
       },
     });
+    const incomeTaxWithholdings = suffered.filter(
+      (item) => item.withholding_type === 'retefuente',
+    );
+    const unclassifiedSuffered = suffered.filter(
+      (item) => item.withholding_type == null,
+    );
 
     const netTaxable = revenue - costsAndExpenses;
     // Base gravable estimada: una pérdida contable no genera impuesto.
     const taxableBase = Math.max(netTaxable, 0);
     const estimatedTax = this.round2((taxableBase * ratePercent) / 100);
     const sufferedCredit = this.round2(
-      suffered.reduce(
+      incomeTaxWithholdings.reduce(
         (sum, item) => sum + Number(item.withholding_amount || 0),
         0,
       ),
@@ -1474,11 +1833,11 @@ export class TaxDeclarationDraftService {
       },
     });
 
-    // Líneas de crédito por retenciones sufridas, agregadas por
-    // withholding_type (las filas legacy sin tipo se agrupan aparte).
+    // Solo retefuente sufrida se acredita a renta. ReteIVA/reteICA pertenecen
+    // a otras obligaciones; filas legacy sin tipo no se adivinan por concepto.
     const sufferedByType = new Map<string, { total: number; count: number }>();
-    for (const item of suffered) {
-      const key = item.withholding_type ?? 'untyped_legacy';
+    for (const item of incomeTaxWithholdings) {
+      const key = 'retefuente';
       const bucket = sufferedByType.get(key) ?? { total: 0, count: 0 };
       bucket.total += Number(item.withholding_amount || 0);
       bucket.count += 1;
@@ -1498,11 +1857,26 @@ export class TaxDeclarationDraftService {
       });
     }
 
-    const warnings: Array<{ code: string }> = [
+    const unclassifiedAmount = this.round2(
+      unclassifiedSuffered.reduce(
+        (sum, item) => sum + Number(item.withholding_amount || 0),
+        0,
+      ),
+    );
+    const warnings: Prisma.InputJsonObject[] = [
       // El precierre SIEMPRE es una estimación interna, nunca el formulario 110.
       { code: 'INCOME_TAX_PRECLOSE_ESTIMATE' },
     ];
     if (netTaxable < 0) warnings.push({ code: 'NEGATIVE_TAXABLE_BASE' });
+    if (unclassifiedSuffered.length > 0) {
+      warnings.push({
+        code: 'UNCLASSIFIED_SUFFERED_WITHHOLDING',
+        withholding_calculation_ids: unclassifiedSuffered.map((item) => item.id),
+        excluded_amount: unclassifiedAmount,
+        message:
+          'Withholdings without withholding_type were excluded from income-tax credits and require classification.',
+      });
+    }
 
     return {
       totals: {
@@ -1521,6 +1895,16 @@ export class TaxDeclarationDraftService {
       source_snapshot: {
         accounting_line_count: lines.length,
         suffered_calculation_ids: suffered.map((item) => item.id),
+        income_tax_credit_calculation_ids: incomeTaxWithholdings.map(
+          (item) => item.id,
+        ),
+        excluded_suffered_calculation_ids: suffered
+          .filter((item) => item.withholding_type !== 'retefuente')
+          .map((item) => item.id),
+        unclassified_suffered_calculation_ids: unclassifiedSuffered.map(
+          (item) => item.id,
+        ),
+        unclassified_suffered_withholding_amount: unclassifiedAmount,
       },
       validation_summary: { warnings },
     };

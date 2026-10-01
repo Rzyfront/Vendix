@@ -31,8 +31,6 @@ import {
   computeEffectiveTaxRate,
   round2 as roundMoney,
   sqlStateList,
-  WITHHOLDING_TAX_TYPES,
-  WITHHOLDING_SET,
 } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
@@ -160,6 +158,47 @@ export class FinancialAnalyticsService {
     return roundMoney(value);
   }
 
+  /** Resolve the entity used to read role-aware withholding records. */
+  private async resolveTaxSummaryAccountingEntity(
+    organizationId: number,
+    storeId: number,
+  ): Promise<number> {
+    const organization = await this.prisma.organizations.findFirst({
+      where: { id: organizationId },
+      select: {
+        fiscal_scope: true,
+        operating_scope: true,
+        account_type: true,
+      },
+    });
+    if (!organization) {
+      throw new VendixHttpException(ErrorCodes.SYS_FORBIDDEN_001);
+    }
+
+    const operatingScope =
+      organization.operating_scope ||
+      (organization.account_type === 'MULTI_STORE_ORG'
+        ? 'ORGANIZATION'
+        : 'STORE');
+    const fiscalScope = organization.fiscal_scope || operatingScope;
+    const entity = await this.prisma.accounting_entities.findFirst({
+      where: {
+        organization_id: organizationId,
+        store_id: fiscalScope === 'ORGANIZATION' ? null : storeId,
+        scope: operatingScope,
+        fiscal_scope: fiscalScope,
+        is_active: true,
+      },
+      select: { id: true },
+    });
+    if (!entity) {
+      // Never substitute an org-wide or store-local entity when the fiscal
+      // entity for this request cannot be resolved.
+      throw new VendixHttpException(ErrorCodes.SYS_FORBIDDEN_001);
+    }
+    return entity.id;
+  }
+
   async getTaxSummary(query: AnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
@@ -169,7 +208,14 @@ export class FinancialAnalyticsService {
     // form and explicitly filter by store_id in the WHERE clause (the same
     // pattern used by `aggregateRevenueOrders` below for org-level reads).
     const context = RequestContextService.getContext();
-    const storeId = context?.store_id ?? 0;
+    if (!context?.organization_id || !context.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+    const accountingEntityId = await this.resolveTaxSummaryAccountingEntity(
+      context.organization_id,
+      storeId,
+    );
     const rawClient: PrismaClient = this.prisma.withoutScope();
 
     // SAFE_STATE_REGEX-equivalent guard for the inlined IN list. SQLSTATE list
@@ -310,25 +356,14 @@ export class FinancialAnalyticsService {
         AND oi.cancelled_at IS NULL
     `);
 
-    // QUI-630 defect 4: the DIAN posición needs ALL sides — ventas IVA generado,
-    // compras IVA descontable, retenciones practicadas (sales) y retenciones
-    // sufridas (purchases). The OLD endpoint only summed IVA from sales and
-    // called it `net_tax`, which is NOT the obligation with the DIAN — it's the
-    // IVA neto después de reembolsos del cliente, no la posición fiscal real.
+    // The following legacy purchase-order aggregate supplies only the
+    // operational IVA-descontable estimate. Role-aware withholdings come from
+    // withholding_calculations below; neither source is a supplier-document
+    // reconciled fiscal declaration dataset.
     //
-    // Source of truth for the formula: `analytics-metrics.contract.ts`
-    // (`computeNetVatPosition`). The service is a CONSUMER of that helper.
-    //
-    // Tenant scoping: `purchase_orders` carries `organization_id` (NOT a
-    // direct `store_id`); per `vendix-prisma-scopes` we resolve the store
-    // scope through `inventory_locations.store_id`, which `purchase_orders`
-    // already FKs to via `location_id`. This keeps the read inside the store
-    // tenant without scanning the whole org.
-    //
-    // KNOWN LIMITATION (QUI-630 review): the INNER JOIN to inventory_locations
-    // silently drops any purchase_order whose location_id was deleted (FK not
-    // ON DELETE RESTRICT). The store then sees an under-credited posición
-    // with no warning. We detect the orphan count via a parallel LEFT JOIN
+    // KNOWN LIMITATION: the INNER JOIN to inventory_locations silently drops
+    // any purchase_order whose location_id was deleted (FK not ON DELETE
+    // RESTRICT). We detect the orphan count via a parallel LEFT JOIN
     // probe and log a warning so the discrepancy is visible in app logs;
     // the data is still NOT counted into the aggregate (a LEFT JOIN would
     // risk including orphaned rows that actually belong to a DIFFERENT store,
@@ -351,19 +386,17 @@ export class FinancialAnalyticsService {
         `getTaxSummary: ${orphanCount} purchase_order(s) in store_id=${storeId} ` +
           `period ${startDate.toISOString()}..${endDate.toISOString()} reference a ` +
           `deleted inventory_location. Their tax rows are EXCLUDED from the ` +
-          `aggregate (inner join). The DIAN posición will be under-counted. ` +
+          `aggregate (inner join), so the operational estimate may be incomplete. ` +
           `See QUI-630 follow-up for the FK enforcement fix.`,
       );
     }
 
     const purchaseTaxRows = await rawClient.$queryRaw<Array<{
       tax_type: string;
-      total_tax: string | number;
       deductible_tax: string | number;
     }>>(Prisma.sql`
       SELECT
         COALESCE(poi.tax_type::text, 'unclassified') AS tax_type,
-        SUM(poi.tax_amount)::decimal AS total_tax,
         SUM(poi.deductible_tax_amount)::decimal AS deductible_tax
       FROM purchase_order_items poi
       -- purchase_orders.created_at is an INSTANTE (not a midnight business
@@ -418,37 +451,59 @@ export class FinancialAnalyticsService {
     const taxableRevenueRounded = this.round2(taxableRevenue);
     const exemptRevenueRounded = this.round2(exemptRevenue);
 
-    // Block sums: IVA generado / INC / ICA (sales) + IVA descontable +
-    // retenciones practicadas (sales) / sufridas (purchases). Defaults are 0
-    // for blocks with no rows in the period, so the contract's helper is
-    // safely called on every period.
+    // Keep the typed sales breakdown for reporting; the IVA position below
+    // consumes IVA only. INC and ICA remain independent tax dimensions.
     const ivaGenerado = this.sumTaxByType(breakdown, 'iva');
     const incGenerado = this.sumTaxByType(breakdown, 'inc');
     const icaGenerado = this.sumTaxByType(breakdown, 'ica');
-    const retePracticadas = this.sumRetenciones(breakdown, WITHHOLDING_TAX_TYPES);
     const ivaDescontable = this.round2(
       purchaseTaxRows
         .filter((r) => r.tax_type === 'iva')
         .reduce((sum, r) => sum + Number(r.deductible_tax ?? 0), 0),
     );
-    const reteSufridas = this.round2(
-      purchaseTaxRows
-        .filter((r) => WITHHOLDING_SET.has(r.tax_type))
-        .reduce((sum, r) => sum + Number(r.total_tax ?? 0), 0),
+    // Withholding role/type is sourced from its canonical ledger, not inferred
+    // from tax_type rows on sales or purchase items. This operational report
+    // uses captured created_at; the fiscal declaration owns the final legal
+    // period and eligibility rules.
+    const withholdingGroups = await this.prisma.withholding_calculations.groupBy({
+      by: ['role', 'withholding_type'],
+      where: {
+        organization_id: context.organization_id,
+        store_id: context.store_id,
+        accounting_entity_id: accountingEntityId,
+        created_at: { gte: startDate, lte: endDate },
+      },
+      _sum: { withholding_amount: true },
+    });
+    const sumWithholdingRole = (role: 'practiced' | 'suffered') =>
+      this.round2(
+        withholdingGroups
+          .filter((group) => group.role === role)
+          .reduce(
+            (sum, group) => sum + Number(group._sum.withholding_amount ?? 0),
+            0,
+          ),
+      );
+    const retePracticadas = sumWithholdingRole('practiced');
+    const reteSufridas = sumWithholdingRole('suffered');
+    const reteivaSufrida = this.round2(
+      withholdingGroups
+        .filter(
+          (group) =>
+            group.role === 'suffered' && group.withholding_type === 'reteiva',
+        )
+        .reduce(
+          (sum, group) => sum + Number(group._sum.withholding_amount ?? 0),
+          0,
+        ),
     );
 
-    // NET VAT POSITION — la cifra que la declaración DIAN cierra. Formula
-    // belongs to the CONTRACT (`computeNetVatPosition`); this is the
-    // single point that reads the helper, so a change to the formula
-    // propagates to every consumer instead of silently diverging here.
+    // IVA-only operational estimate, not the final DIAN declaration balance.
     const netVatPosition = this.round2(
       computeNetVatPosition({
         iva_generado: ivaGenerado,
-        inc_generado: incGenerado,
-        ica_generado: icaGenerado,
         iva_descontable: ivaDescontable,
-        rete_practicadas: retePracticadas,
-        rete_sufridas: reteSufridas,
+        reteiva_sufrida: reteivaSufrida,
       }),
     );
 
@@ -473,11 +528,10 @@ export class FinancialAnalyticsService {
       iva_descontable: ivaDescontable,
       rete_practicadas: retePracticadas,
       rete_sufridas: reteSufridas,
+      reteiva_sufrida: reteivaSufrida,
       /**
-       * NET VAT POSITION — what the store owes the DIAN at the end of the
-       * period. Positive: saldo a cargo. Negative: saldo a favor. Formula is
-       * in `computeNetVatPosition` (analytics-metrics.contract.ts), which is
-       * the single source of truth.
+       * IVA-only operational estimate. It excludes INC/ICA, retefuente,
+       * reteICA and practiced withholdings; final settlement is fiscal-owned.
        */
       net_vat_position: netVatPosition,
       /**
@@ -513,23 +567,6 @@ export class FinancialAnalyticsService {
     return this.round2(
       breakdown
         .filter((b) => b.tax_type === taxType)
-        .reduce((sum, b) => sum + b.total_tax, 0),
-    );
-  }
-
-  /**
-   * Sums the `total_tax` field across all retenciones in the breakdown. Used
-   * for `rete_practicadas` (sales side). `reteSufridas` is derived from the
-   * purchase-side aggregate instead, because purchase-side rows do not
-   * belong to the sales breakdown.
-   */
-  private sumRetenciones(
-    breakdown: ReadonlyArray<{ tax_type: string | null; total_tax: number }>,
-    taxTypes: readonly string[],
-  ): number {
-    return this.round2(
-      breakdown
-        .filter((b) => b.tax_type !== null && taxTypes.includes(b.tax_type))
         .reduce((sum, b) => sum + b.total_tax, 0),
     );
   }

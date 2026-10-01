@@ -3104,6 +3104,38 @@
       "sessions": 1,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "91348ca5",
+      "created_by": "rzy",
+      "created_at": "2026-10-01T02:05:12Z",
+      "sessions": 7,
+      "memories": 258,
+      "prompts": 0
+    },
+    {
+      "id": "2aca0703",
+      "created_by": "rzy",
+      "created_at": "2026-10-01T02:41:24Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "7ead54c8",
+      "created_by": "rzy",
+      "created_at": "2026-10-01T03:57:00Z",
+      "sessions": 0,
+      "memories": 4,
+      "prompts": 0
+    },
+    {
+      "id": "ec82474a",
+      "created_by": "rzy",
+      "created_at": "2026-10-01T14:58:18Z",
+      "sessions": 2,
+      "memories": 32,
+      "prompts": 0
     }
   ]
 }

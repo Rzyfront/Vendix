@@ -91,6 +91,13 @@ export interface MenuItem {
    */
   requiresFiscalArea?: FiscalArea | 'any';
   /**
+   * Narrow read-only route used when the fiscal owner cannot access the full
+   * module yet. It never enables the emission module or changes fiscal state.
+   */
+  fiscalReadFallback?: { permission: string; route: string };
+  /** Internal marker used only while filtering a permission-scoped fiscal fallback. */
+  _fiscalReadFallbackActive?: boolean;
+  /**
    * Internal metadata flag set by `MenuFilterService` when the item is rendered
    * in locked state (scope mismatch + showLocked === true). Consumers should
    * treat this as read-only — it is not meant to be set by config sites.

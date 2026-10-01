@@ -2,6 +2,7 @@ import { AIAgentService } from './ai-agent.service';
 import { RequestContextService } from '../common/context/request-context.service';
 import { AgentPlan, AgentPlanHook } from './interfaces/agent-plan.interface';
 import { AIStreamChunk } from './interfaces/ai-provider.interface';
+import { ErrorCodes, VendixHttpException } from '../common/errors';
 
 const def = (name: string) => ({
   type: 'function' as const,
@@ -46,6 +47,9 @@ describe('AIAgentService.runAgentStream', () => {
   let executeTool: jest.Mock;
   let awaitResult: jest.Mock;
   let emit: jest.Mock;
+  let registry: any;
+  let canUseAIFeature: jest.Mock;
+  let getAIFeatureConfig: jest.Mock;
   let service: AIAgentService;
 
   beforeEach(() => {
@@ -57,20 +61,46 @@ describe('AIAgentService.runAgentStream', () => {
     executeTool = jest.fn().mockResolvedValue('{"ok":true}');
     awaitResult = jest.fn().mockResolvedValue('{"ui":"ok"}');
     emit = jest.fn();
-    const registry: any = {
-      getAvailableDefinitions: jest
-        .fn()
-        .mockReturnValue([
-          def('list_things'),
-          def('ui_go'),
-          def('propose_plan'),
-          def('ask_user'),
-        ]),
+    const definitions = [
+      def('list_things'),
+      def('ui_go'),
+      def('propose_plan'),
+      def('ask_user'),
+      def('list_orders'),
+      def('list_customers'),
+      def('ui_navigate'),
+    ];
+    const domains: Record<string, string> = {
+      list_things: 'things',
+      ui_go: 'ui',
+      propose_plan: 'planning',
+      ask_user: 'planning',
+      list_orders: 'orders',
+      list_customers: 'customers',
+      ui_navigate: 'ui',
+    };
+    registry = {
+      getAvailableDefinitions: jest.fn((scopes: string[]) =>
+        definitions.filter((tool) => {
+          const name = tool.function.name;
+          if (name === 'list_orders') {
+            return scopes.includes('store:orders:read');
+          }
+          if (name === 'list_customers') {
+            return scopes.includes('store:customers:read');
+          }
+          return true;
+        }),
+      ),
       canonicalName: (n: string) => n,
+      get: (n: string) =>
+        domains[n] ? { name: n, domain: domains[n] } : undefined,
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
       executeTool,
     };
+    canUseAIFeature = jest.fn();
+    getAIFeatureConfig = jest.fn();
     service = new AIAgentService(
       { chat, run: jest.fn(), chatWith: jest.fn() } as any,
       {} as any,
@@ -78,8 +108,8 @@ describe('AIAgentService.runAgentStream', () => {
       { emit } as any,
       { awaitResult } as any,
       {
-        canUseAIFeature: jest.fn(),
-        getAIFeatureConfig: jest.fn(),
+        canUseAIFeature,
+        getAIFeatureConfig,
         consumeAIQuota: jest.fn().mockResolvedValue(undefined),
       } as any,
     );
@@ -97,6 +127,109 @@ describe('AIAgentService.runAgentStream', () => {
     }
     return { chunks, result: next.value };
   }
+
+  function configureStorePlan(
+    toolsAllowed: string[],
+    permissions = ['store:orders:read'],
+  ) {
+    jest.mocked(RequestContextService.getContext).mockReturnValue({
+      store_id: 42,
+      permissions,
+      roles: [],
+    } as any);
+    canUseAIFeature.mockResolvedValue({ allowed: true });
+    getAIFeatureConfig.mockResolvedValue({ tools_allowed: toolsAllowed });
+    chat.mockResolvedValue(ok({ content: 'listo' }));
+  }
+
+  function offeredToolNames(): string[] {
+    return (chat.mock.calls[0][1].tools ?? []).map(
+      (tool: any) => tool.function.name,
+    );
+  }
+
+  it('offers orders and UI tools when the plan allows the wildcard', async () => {
+    configureStorePlan(['*']);
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual(
+      expect.arrayContaining(['list_orders', 'ui_navigate']),
+    );
+    expect(canUseAIFeature).toHaveBeenCalledWith(42, 'tool_agents');
+  });
+
+  it('offers only tools in the allowed domain', async () => {
+    configureStorePlan(['orders'], ['store:orders:read', 'store:customers:read']);
+
+    await drain({});
+
+    expect(offeredToolNames()).toContain('list_orders');
+    expect(offeredToolNames()).not.toContain('list_customers');
+    expect(offeredToolNames()).not.toContain('ui_navigate');
+    expect(chat.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining('No puedes mover la pantalla'),
+        }),
+      ]),
+    );
+  });
+
+  it('offers only an exact tool name from the plan', async () => {
+    configureStorePlan(['list_orders']);
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual(['list_orders']);
+  });
+
+  it('preserves a narrower agent filter after applying the plan', async () => {
+    configureStorePlan(['*']);
+
+    await drain({ tools: ['list_orders'] });
+
+    expect(offeredToolNames()).toEqual(['list_orders']);
+  });
+
+  it('does not offer operational tools for an explicit empty plan list', async () => {
+    configureStorePlan([]);
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual([]);
+    expect(chat.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining(
+            'No tienes herramientas operativas para consultar datos actuales',
+          ),
+        }),
+      ]),
+    );
+  });
+
+  it('does not offer operational tools when the subscription gate denies access', async () => {
+    configureStorePlan(['*']);
+    canUseAIFeature.mockResolvedValue({ allowed: false, reason: 'blocked' });
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual([]);
+  });
+
+  it('keeps the permission filter when the plan allows all tools', async () => {
+    configureStorePlan(['*'], []);
+
+    await drain({});
+
+    expect(registry.getAvailableDefinitions).toHaveBeenCalledWith([]);
+    expect(offeredToolNames()).toContain('ui_navigate');
+    expect(offeredToolNames()).not.toContain('list_orders');
+    expect(offeredToolNames()).not.toContain('list_customers');
+  });
 
   it('(i) processes tool_calls even when finish_reason is stop', async () => {
     chat
@@ -311,4 +444,233 @@ describe('AIAgentService.runAgentStream', () => {
     });
     expect(chat).not.toHaveBeenCalled();
   });
+
+  it('(vex-i) vex catalog excludes denied ui tools, vexi keeps them', async () => {
+    registry.getAgentDefinitions = jest.fn(
+      (scopes: string[], agentScope: any) =>
+        definitionsFor(scopes).filter(
+          (tool) =>
+            !(agentScope?.denied_tools ?? []).includes(tool.function.name),
+        ),
+    );
+    chat.mockResolvedValue(ok({ content: 'listo' }));
+
+    await drain({ agent_key: 'vex', agent_denied_tools: ['ui_navigate'] });
+
+    expect(registry.getAgentDefinitions).toHaveBeenCalledWith(['p'], {
+      allowed_tools: undefined,
+      denied_tools: ['ui_navigate'],
+    });
+    const vexOffered = (chat.mock.calls[0][1].tools ?? []).map(
+      (tool: any) => tool.function.name,
+    );
+    expect(vexOffered).not.toContain('ui_navigate');
+    expect(vexOffered).toContain('list_things');
+
+    chat.mockClear();
+    await drain({});
+
+    expect(registry.getAvailableDefinitions).toHaveBeenCalled();
+    const vexiOffered = (chat.mock.calls[0][1].tools ?? []).map(
+      (tool: any) => tool.function.name,
+    );
+    expect(vexiOffered).toContain('ui_navigate');
+  });
+
+  it('(vex-ii) vex default budget is 40 iterations, default stays 10', async () => {
+    chat.mockImplementation((_msgs: any, opts: any) =>
+      opts && Object.keys(opts).length === 0
+        ? ok({ content: 'cierre' })
+        : ok({ tool_calls: [call(`c${chat.mock.calls.length}`, 'list_things')] }),
+    );
+
+    await drain({ agent_key: 'vex' });
+    // 40 tool iterations + 1 closing turn without tools.
+    expect(chat).toHaveBeenCalledTimes(41);
+
+    chat.mockClear();
+    await drain({});
+    expect(chat).toHaveBeenCalledTimes(11);
+  });
+
+  it('(vex-iii) results over 6000 chars compact to summary+block_id+rows', async () => {
+    const rows = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      name: `producto-${i}`,
+      pad: 'x'.repeat(200),
+    }));
+    executeTool.mockResolvedValueOnce(JSON.stringify(rows));
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_things')] }))
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { result } = await drain({});
+
+    const stored = JSON.parse(result.tools_used[0].result);
+    expect(stored.truncated).toBe(true);
+    expect(stored.block_id).toBeNull();
+    expect(stored.rows).toBe(50);
+    expect(typeof stored.summary).toBe('string');
+    expect(result.tools_used[0].result.length).toBeLessThan(7000);
+  });
+
+  it('(vex-iv) compaction keeps the full payload in a block when a sink exists', async () => {
+    const save = jest.fn().mockResolvedValue('block-1');
+    executeTool.mockResolvedValueOnce(`{"data":"${'y'.repeat(7000)}"}`);
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_things')] }))
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { result } = await drain({
+      block_sink: { save },
+      conversation_id: 7,
+    });
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_id: 7,
+        kind: 'markdown',
+      }),
+    );
+    expect(JSON.parse(result.tools_used[0].result).block_id).toBe('block-1');
+  });
+
+  it('(vex-v) a render tool success emits a ui_block frame', async () => {
+    executeTool.mockResolvedValueOnce(
+      JSON.stringify({
+        tool: 'vex_render_table',
+        version: '1',
+        data: { block_id: 'b-9', kind: 'table', rows: 3, version: 1 },
+      }),
+    );
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'vex_render_table', {})] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { chunks } = await drain({});
+
+    expect(chunks).toContainEqual({
+      type: 'ui_block',
+      ui_block: { block_id: 'b-9', kind: 'table', version: 1 },
+    });
+  });
+
+  it('(vex-vi) a write proposal emits plan_approval and ends the turn', async () => {
+    executeTool.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.AI_AGENT_005, 'requiere confirmación', {
+        tool: 'create_expense',
+        arguments: { total: 5 },
+        preview: { target: 'gasto' },
+        confirmation_token: 'tok-1',
+      } as any),
+    );
+    chat.mockResolvedValueOnce(
+      ok({ tool_calls: [call('c1', 'create_expense', { total: 5 })] }),
+    );
+
+    const { chunks, result } = await drain({});
+
+    expect(chunks.map((c) => c.type)).toEqual([
+      'tool_call',
+      'tool_result',
+      'plan_approval',
+      'text',
+      'done',
+    ]);
+    expect(chunks[2]).toMatchObject({
+      type: 'plan_approval',
+      plan_approval: {
+        tool: 'create_expense',
+        confirmation_token: 'tok-1',
+      },
+    });
+    expect(result.pending_confirmation).toMatchObject({
+      tool: 'create_expense',
+      confirmation_token: 'tok-1',
+    });
+  });
+
+  it('(vex-vii) an approved plan step executes in the same stream', async () => {
+    executeTool
+      .mockRejectedValueOnce(
+        new VendixHttpException(
+          ErrorCodes.AI_AGENT_005,
+          'requiere confirmación',
+          {
+            tool: 'create_expense',
+            arguments: { total: 5 },
+            preview: { target: 'gasto' },
+            confirmation_token: 'tok-1',
+          } as any,
+        ),
+      )
+      .mockResolvedValueOnce('{"applied":true}');
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'create_expense', { total: 5 })] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'aplicado' }));
+    const redeem = jest.fn().mockResolvedValue('ok');
+    const issueSingleUse = jest.fn().mockResolvedValue('su-1');
+
+    const { chunks, result } = await drain({
+      plan_approval: { token: 'plan-tok', plan_id: 'plan-1', redeem, issueSingleUse },
+    });
+
+    expect(redeem).toHaveBeenCalledWith('create_expense', { total: 5 });
+    expect(issueSingleUse).toHaveBeenCalledWith('create_expense', { total: 5 });
+    expect(executeTool).toHaveBeenNthCalledWith(2, 'create_expense', { total: 5 }, {
+      confirmationToken: 'su-1',
+    });
+    expect(result.pending_confirmation).toBeUndefined();
+    expect(result.content).toBe('aplicado');
+    expect(chunks.map((c) => c.type)).toEqual([
+      'tool_call',
+      'tool_result',
+      'text',
+      'done',
+    ]);
+  });
+
+  it('(vex-viii) an irreversible plan step falls back to its own card', async () => {
+    executeTool.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.AI_AGENT_005, 'requiere confirmación', {
+        tool: 'send_invoice_dian',
+        arguments: { id: 1 },
+        preview: { target: 'factura' },
+        confirmation_token: 'tok-9',
+      } as any),
+    );
+    chat.mockResolvedValueOnce(
+      ok({ tool_calls: [call('c1', 'send_invoice_dian', { id: 1 })] }),
+    );
+
+    const { chunks, result } = await drain({
+      plan_approval: {
+        token: 'plan-tok',
+        plan_id: 'plan-1',
+        redeem: jest.fn().mockResolvedValue('irreversible'),
+        issueSingleUse: jest.fn(),
+      },
+    });
+
+    expect(result.pending_confirmation).toMatchObject({
+      tool: 'send_invoice_dian',
+      confirmation_token: 'tok-9',
+    });
+    expect(chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'plan_approval',
+        plan_approval: expect.objectContaining({ plan_id: 'plan-1' }),
+      }),
+    );
+    // The step never executed: only the proposing call happened.
+    expect(executeTool).toHaveBeenCalledTimes(1);
+  });
+
+  function definitionsFor(scopes: string[]) {
+    return registry.getAvailableDefinitions(scopes);
+  }
 });

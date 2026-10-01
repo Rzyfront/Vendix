@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { GlobalPrismaService } from './services/global-prisma.service';
 import { OrganizationPrismaService } from './services/organization-prisma.service';
 import { StorePrismaService } from './services/store-prisma.service';
@@ -14,6 +14,7 @@ import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 
+@Global()
 @Module({
   providers: [
     GlobalPrismaService,

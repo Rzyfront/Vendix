@@ -14,7 +14,35 @@ import type {
  * `severity`, `field`, `problem`, `fix`— y difieren sólo en el universo de
  * `code` y en que el fiscal añade `category` y la regla del Anexo.
  */
-export type EmitReadinessFinding =
+export interface EmitReadinessFinding {
+  code: string;
+  severity: 'blocker' | 'warning';
+  /**
+   * Campo al que apunta el hallazgo, en la notación de los validadores:
+   * `items[0].quantity`, `address.city_code`, `resolution.prefix`,
+   * `issue_date`, `due_date`. Los del emisor usan `issuer.<campo>` y los de la
+   * configuración DIAN `dian_config.<campo>`.
+   */
+  field?: string;
+  problem: string;
+  fix: string;
+  /**
+   * DÓNDE se corrige. `form` = en el formulario del documento. `config` = no se
+   * corrige ahí: hay que salir a la configuración (`cta` dice a dónde).
+   */
+  target?: 'form' | 'config';
+  /** Ruta del frontend que corrige el hallazgo cuando `target === 'config'`. */
+  cta?: string;
+  category?: string;
+  details?: any;
+  dian_rule?: any;
+}
+
+/**
+ * Compatibilidad: las dos formas de hallazgo de los validadores siguen siendo
+ * asignables a {@link EmitReadinessFinding}.
+ */
+export type ValidatorEmitReadinessFinding =
   | CustomerFiscalIdentityFinding
   | FiscalDocumentFinding;
 

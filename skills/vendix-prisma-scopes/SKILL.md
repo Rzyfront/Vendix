@@ -8,13 +8,15 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Working with Prisma scoped services"
     - "Adding new models to domain scopes"
     - "Debugging Forbidden errors in Prisma queries"
     - "Debugging Prisma WhereUnique/AND errors in scoped queries"
+    - "Debugging high backend heap or Reached heap limit"
+    - "Declaring or providing a scoped Prisma service in a module"
 ---
 
 ## Source of Truth
@@ -39,6 +41,17 @@ metadata:
 Current base uses Prisma 7 with `pg.Pool`, `PrismaPg` adapter, and `new PrismaClient({ adapter, log: ['error', 'warn'] })`.
 
 `withoutScope()` returns the raw base client. It bypasses all tenant isolation.
+
+## Singleton Rule (HARD)
+
+The four scoped services are **global singletons provided ONLY by `PrismaModule`**, which is `@Global()`.
+
+- NEVER list `GlobalPrismaService`, `OrganizationPrismaService`, `StorePrismaService` or `EcommercePrismaService` in the `providers:` or `exports:` of any other module. Importing `PrismaModule` is also unnecessary; just inject.
+- Why: in Nest each re-declaration creates a new instance = a new `PrismaClient` + `pg.Pool`. In Prisma 7 with the driver adapter each client loads the query compiler and data model into the V8 heap (~68 MB per instance with the ~11k-line schema). 27 instances kept prod heap flat at ~1.95 GB of 2.1 GB. A local copy also loses `@Optional` dependencies (e.g. `OperatingScopeService` in `OrganizationPrismaService`), so `getScopedWhere()` throws `OperatingScopeService is not available in this context`.
+- Detect: `grep -rnE "(Global|Organization|Store|Ecommerce)PrismaService" apps/backend/src --include=*.module.ts` must only hit `prisma/prisma.module.ts`. Symptom: high, flat `heapUsed` in `/api/health` from startup. Flat = baseline, not a leak; sample several times before hunting leaks.
+- Pool size: `base-prisma.service.ts` uses `max` = env `DATABASE_POOL_MAX` (default 20). With 4 pools instead of 27, total connection capacity is lower; tune it if connections saturate.
+- Enforcement: the CI guard `scripts/prisma-singleton-audit.sh` (job "Prisma Singleton Audit") enforces this rule. Run `npm run prisma-singleton:audit` before pushing any change to backend `*.module.ts`. Escape hatch (needs a ticket): `prisma-singleton-audit:ignore <TICKET>`.
+- Tests: providing mocks in `Test.createTestingModule({ providers: [...] })` is fine.
 
 ## Registration Rule
 

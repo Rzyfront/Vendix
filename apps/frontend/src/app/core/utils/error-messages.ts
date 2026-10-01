@@ -278,6 +278,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta cuenta pertenece a una mesa abierta. Cierra o cobra la cuenta desde Mesas antes de cancelar la orden.',
   ORD_CANCEL_CREDIT_NOTE_REQUIRED_001:
     'Esta orden tiene una factura electrónica aceptada por la DIAN. Emite primero la nota crédito correspondiente y luego cancela la orden.',
+  ORD_CONFIRM_PAYMENT_NO_PAYMENT_001:
+    'Esta orden no tiene un pago registrado. Usa Registrar pago con el monto y método recibidos.',
+  INVOICING_ORDER_UNPAID_001:
+    'La orden tiene saldo pendiente; registra el pago antes de emitir la factura, o márcala como venta a crédito.',
   ORD_ITEM_CANCEL_PAID_001:
     'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
   ORD_ITEM_CANCEL_STATE_001:

@@ -55,6 +55,28 @@ const PLANNED_TIMEOUT_MS = 180_000;
  */
 const MAX_PLAN_NUDGES = 2;
 
+/**
+ * Vex's own budgets (`ai_agents.key='vex'`).
+ *
+ * A whole-business turn with the full catalog does not fit the one-shot
+ * defaults: 40 iterations / 300 s base, widened to 60 / 600 s once a plan is
+ * on the table. Vexi keeps the historical 10/60s and 25/180s.
+ */
+const VEX_MAX_ITERATIONS = 40;
+const VEX_TIMEOUT_MS = 300_000;
+const VEX_PLANNED_MAX_ITERATIONS = 60;
+const VEX_PLANNED_TIMEOUT_MS = 600_000;
+
+/**
+ * Tool results longer than this never travel to the model in full: they are
+ * compacted to `{summary, block_id, rows}` and the complete payload is kept
+ * server-side as a block when a sink is present (step 5 of the Vex plan).
+ */
+const TOOL_RESULT_COMPACT_CHARS = 6000;
+
+/** Head of a compacted result shown to the model as its summary. */
+const COMPACT_SUMMARY_CHARS = 600;
+
 export interface AgentRunParams {
   goal: string;
   system_prompt?: string;
@@ -97,6 +119,66 @@ export interface AgentRunParams {
    * this one, so it stops silently: no text, no error.
    */
   shouldAbort?: () => Promise<boolean>;
+  /**
+   * Agent identity for this turn (`ai_agents.key`). Drives the budget table
+   * (Vex gets 40/300s, 60/600s with an open plan) and travels to the audit
+   * trail. Absent means the historical single-agent behavior.
+   */
+  agent_key?: string;
+  /**
+   * Agent-row tool scope. Intersected with the caller's permissions and the
+   * plan allowlist (`allowed_tools` when non-empty), minus `denied_tools`
+   * LAST — a deny always wins, never inverted.
+   */
+  agent_allowed_tools?: string[];
+  agent_denied_tools?: string[];
+  /**
+   * Whole-plan approval for this stream. When a write tool proposes
+   * (`AI_AGENT_005` with a token), the loop redeems the step against the plan
+   * token INSTEAD of ending the turn: `ok` executes the step right away
+   * through the same choke point (permissions re-checked, single-use inner
+   * token), any other outcome falls back to the step's own confirmation card.
+   */
+  plan_approval?: AgentPlanApprovalHook;
+  /**
+   * Where compacted tool payloads (>6000 chars) are kept server-side. Absent
+   * on surfaces with no conversation: compaction still shrinks what the model
+   * sees, but no `block_id` is issued.
+   */
+  block_sink?: AgentBlockSink;
+  /** Conversation the sink stores blocks under. */
+  conversation_id?: number;
+}
+
+/**
+ * Same-stream execution of an approved plan, without the loop importing the
+ * Vex domain (that direction would close a DI cycle: VexModule imports the
+ * global AIEngineModule). Implemented by the chat surface on top of
+ * `PlanApprovalService` + `VexiConfirmationService`.
+ */
+export interface AgentPlanApprovalHook {
+  token: string;
+  plan_id: string;
+  redeem(
+    tool: string,
+    args: Record<string, any>,
+  ): Promise<
+    'ok' | 'missing' | 'mismatch' | 'unknown_step' | 'replayed' | 'irreversible'
+  >;
+  issueSingleUse(tool: string, args: Record<string, any>): Promise<string>;
+}
+
+/**
+ * Server-side keep for payloads too large for the turn window. Returns the
+ * `block_id` the compacted reference points at.
+ */
+export interface AgentBlockSink {
+  save(input: {
+    conversation_id?: number;
+    kind: 'table' | 'chart' | 'kpi' | 'image' | 'file' | 'markdown';
+    spec?: Record<string, any>;
+    data: unknown;
+  }): Promise<string>;
 }
 
 export interface AgentResult {
@@ -175,7 +257,8 @@ export class AIAgentService {
    * - Gate bloqueado (feature deshabilitada → `SUBSCRIPTION_005`, cuota
    *   agotada → `SUBSCRIPTION_006`, estado terminal) → set vacío: el turno
    *   sigue sin tools en lugar de ofrecer el catálogo completo.
-   * - Gate permitido + `tools_allowed` declarado → intersección exacta.
+   * - Gate permitido + `tools_allowed` declarado → `*` habilita el catálogo
+   *   permitido, un dominio habilita sus tools y un nombre solo esa tool.
    * - Gate permitido + sin lista declarada → `null` (el plan no acota).
    * - Fallo del gate → `null` + warn: no se rompe el turno por un fallo de
    *   infraestructura de metering; cada iteración sigue pasando por el gate
@@ -357,6 +440,146 @@ export class AIAgentService {
   }
 
   /**
+   * Shrinks an oversized tool result to `{summary, block_id, rows}`.
+   *
+   * The model keeps a head summary plus the row count; the complete payload is
+   * kept server-side as a markdown block when a sink (and a conversation) is
+   * present, so a later turn can page through it with `vex_block_read`
+   * instead of re-running the query. Short results pass through untouched.
+   * Never throws: a sink failure degrades to a sink-less compaction.
+   */
+  private async compactToolResult(
+    toolName: string,
+    result: string,
+    params: AgentRunParams,
+  ): Promise<string> {
+    if (result.length <= TOOL_RESULT_COMPACT_CHARS) return result;
+    let rows: number | null = null;
+    try {
+      const parsed: unknown = JSON.parse(result);
+      const rowsOf = (v: unknown): unknown[] | null => {
+        if (Array.isArray(v)) return v;
+        if (v && typeof v === 'object') {
+          const o = v as Record<string, unknown>;
+          for (const key of ['rows', 'data', 'items', 'results']) {
+            if (Array.isArray(o[key])) return o[key] as unknown[];
+          }
+          const data = o.data;
+          if (data && typeof data === 'object' && !Array.isArray(data)) {
+            for (const key of ['rows', 'items', 'results']) {
+              const nested = (data as Record<string, unknown>)[key];
+              if (Array.isArray(nested)) return nested;
+            }
+          }
+        }
+        return null;
+      };
+      const found = rowsOf(parsed);
+      if (found) rows = found.length;
+    } catch {
+      // Not JSON: no row count, still compacted.
+    }
+    let blockId: string | null = null;
+    if (params.block_sink && params.conversation_id) {
+      try {
+        blockId = await params.block_sink.save({
+          conversation_id: params.conversation_id,
+          kind: 'markdown',
+          spec: { title: `Resultado de ${toolName}`, source_tool: toolName },
+          data: { text: result },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Compaction sink failed for tool "${toolName}": ${(err as Error).message}`,
+        );
+      }
+    }
+    return JSON.stringify({
+      summary: result.slice(0, COMPACT_SUMMARY_CHARS),
+      block_id: blockId,
+      rows,
+      truncated: true,
+      next_step: blockId
+        ? 'El resultado completo quedó guardado en el bloque block_id: léelo por partes con vex_block_read en vez de repetir la consulta.'
+        : 'El resultado venía truncado: refina la consulta si necesitas el resto.',
+    });
+  }
+
+  /**
+   * Extracts the `ui_block` frame from a render tool's success envelope.
+   *
+   * Only `vex_render_*` and `vex_block_transform` produce blocks; anything
+   * else — including error envelopes and non-JSON results — answers null and
+   * the turn simply carries no frame for that call.
+   */
+  private uiBlockOf(
+    toolName: string,
+    result: string,
+  ): AIStreamChunk['ui_block'] | null {
+    const renderKind =
+      toolName === 'vex_render_table'
+        ? 'table'
+        : toolName === 'vex_render_chart'
+          ? 'chart'
+          : toolName === 'vex_render_kpi'
+            ? 'kpi'
+            : toolName === 'vex_render_image'
+              ? 'image'
+              : toolName === 'vex_render_file'
+                ? 'file'
+                : null;
+    if (!renderKind && toolName !== 'vex_block_transform') return null;
+    try {
+      const parsed = JSON.parse(result) as {
+        data?: {
+          block_id?: unknown;
+          kind?: unknown;
+          version?: unknown;
+          block?: {
+            block_id?: unknown;
+            kind?: unknown;
+            version?: unknown;
+            spec?: unknown;
+            data?: unknown;
+          };
+        };
+      };
+      const data = parsed?.data;
+      if (!data || typeof data.block_id !== 'string' || !data.block_id) {
+        return null;
+      }
+      const kind =
+        renderKind ??
+        (typeof data.kind === 'string' &&
+        ['table', 'chart', 'kpi', 'image', 'file', 'markdown'].includes(
+          data.kind,
+        )
+          ? (data.kind as NonNullable<AIStreamChunk['ui_block']>['kind'])
+          : 'table');
+      // The render tools attach the panel-ready view (`VexUiBlock`) as
+      // `data.block`; without it the frame is a bare reference the panel
+      // cannot draw, so legacy envelopes keep answering the old shape.
+      const view =
+        data.block && typeof data.block === 'object' ? data.block : null;
+      const version = view?.version ?? data.version;
+      return {
+        block_id:
+          typeof view?.block_id === 'string' && view.block_id
+            ? view.block_id
+            : data.block_id,
+        kind,
+        ...(typeof version === 'number' ? { version } : {}),
+        ...(view && typeof view.spec === 'object' && view.spec !== null
+          ? { spec: view.spec as Record<string, any> }
+          : {}),
+        ...(view && view.data !== undefined ? { data: view.data } : {}),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Non-streaming entry point. Drains the streaming loop and keeps its return
    * value, so there is exactly one implementation of the agent protocol —
    * a second copy for the SSE path would drift the moment either is touched.
@@ -388,13 +611,21 @@ export class AIAgentService {
     params: AgentRunParams,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
     const startTime = Date.now();
+    const isVex = params.agent_key === 'vex';
+    const plannedMax = isVex
+      ? VEX_PLANNED_MAX_ITERATIONS
+      : PLANNED_MAX_ITERATIONS;
+    const plannedTimeout = isVex ? VEX_PLANNED_TIMEOUT_MS : PLANNED_TIMEOUT_MS;
     // Not `const`: a declared plan widens it mid-turn (see PLANNED_MAX_ITERATIONS).
-    let maxIterations = params.max_iterations || this.DEFAULT_MAX_ITERATIONS;
+    let maxIterations =
+      params.max_iterations ||
+      (isVex ? VEX_MAX_ITERATIONS : this.DEFAULT_MAX_ITERATIONS);
     // Widened alongside the iteration budget, and for a second reason: a turn
     // that drives the interface now blocks up to 25 s per command waiting for the
     // browser, so two UI steps alone can consume the whole one-minute default and
     // abort a turn that was working correctly.
-    let timeoutMs = params.timeout_ms || this.DEFAULT_TIMEOUT_MS;
+    let timeoutMs =
+      params.timeout_ms || (isVex ? VEX_TIMEOUT_MS : this.DEFAULT_TIMEOUT_MS);
 
     const context = RequestContextService.getContext();
 
@@ -406,8 +637,21 @@ export class AIAgentService {
     // `[]` is truthy, so the fallback needs a length check.
     const granted = context?.permissions;
     const authScopes = granted?.length ? granted : (context?.roles ?? []);
+    // Agent scope narrows the permission catalog: user perms ∩ agent
+    // allowed_tools (when non-empty) − agent denied_tools, deny applied last.
+    // The plan allowlist intersects below, so the final catalog is the triple
+    // intersection minus the deny list. Without agent scope this is exactly
+    // `getAvailableDefinitions` and Vexi behaves as before.
+    const hasAgentScope =
+      (params.agent_allowed_tools?.length ?? 0) > 0 ||
+      (params.agent_denied_tools?.length ?? 0) > 0;
     const permissionTools =
-      this.toolRegistry.getAvailableDefinitions(authScopes);
+      hasAgentScope && typeof this.toolRegistry.getAgentDefinitions === 'function'
+        ? this.toolRegistry.getAgentDefinitions(authScopes, {
+            allowed_tools: params.agent_allowed_tools,
+            denied_tools: params.agent_denied_tools,
+          })
+        : this.toolRegistry.getAvailableDefinitions(authScopes);
 
     // F3 — el plan del tenant filtra el catálogo del turno: el modelo solo ve
     // la intersección entre los permisos del caller y `tools_allowed`. Sin
@@ -416,11 +660,16 @@ export class AIAgentService {
     // vacío) = alcance aplicado.
     const planAllowed = await this.resolvePlanToolAllowlist(context?.store_id);
     const toolDefinitions =
-      planAllowed === null
+      planAllowed === null || planAllowed.has('*')
         ? permissionTools
-        : permissionTools.filter((t) =>
-            planAllowed.has(this.toolRegistry.canonicalName(t.function.name)),
-          );
+        : permissionTools.filter((tool) => {
+            const name = this.toolRegistry.canonicalName(tool.function.name);
+            const domain = this.toolRegistry.get(name)?.domain;
+            return (
+              planAllowed.has(name) ||
+              (domain !== undefined && planAllowed.has(domain))
+            );
+          });
 
     // Filter tools if specific ones requested
     const filteredTools = params.tools?.length
@@ -450,8 +699,8 @@ export class AIAgentService {
     // An already-active plan (a continuation turn) gets the wide budget from the
     // first iteration instead of waiting for a propose_plan that will not come.
     if (params.plan && (await params.plan.snapshot())) {
-      maxIterations = Math.max(maxIterations, PLANNED_MAX_ITERATIONS);
-      timeoutMs = Math.max(timeoutMs, PLANNED_TIMEOUT_MS);
+      maxIterations = Math.max(maxIterations, plannedMax);
+      timeoutMs = Math.max(timeoutMs, plannedTimeout);
     }
 
     const messages: AIMessage[] = [];
@@ -465,6 +714,36 @@ export class AIAgentService {
         content:
           params.system_prompt ??
           'You are a helpful business assistant for Vendix. Use the available tools to answer questions with real data. Always provide specific numbers and insights. Respond in the same language the user uses.',
+      });
+    }
+
+    // The stored Vexi prompt describes what the product can do in general,
+    // not what this subscription/user/agent can do in this particular turn.
+    // Without this correction a plan with no UI tool still makes Vexi offer
+    // to navigate, and an empty catalog makes it offer live lookups it cannot do.
+    const offeredNames = new Set(
+      filteredTools.map((tool) =>
+        this.toolRegistry.canonicalName(tool.function.name),
+      ),
+    );
+    const hasOperationalTools = [...offeredNames].some(
+      (name) => !isAgentPlanTool(name),
+    );
+    if (!hasOperationalTools || !offeredNames.has('ui_navigate')) {
+      const limits: string[] = [];
+      if (!hasOperationalTools) {
+        limits.push(
+          'No tienes herramientas operativas para consultar datos actuales ni ejecutar acciones en este turno.',
+        );
+      }
+      if (!offeredNames.has('ui_navigate')) {
+        limits.push(
+          'No puedes mover la pantalla del usuario ni ofrecer llevarlo a un módulo.',
+        );
+      }
+      messages.push({
+        role: 'system',
+        content: `${limits.join(' ')} Explica esa limitación con claridad y no prometas una acción que no puedes ejecutar.`,
       });
     }
 
@@ -675,8 +954,8 @@ export class AIAgentService {
               planContent = outcome.result;
 
               if (toolName === PROPOSE_PLAN_TOOL) {
-                maxIterations = Math.max(maxIterations, PLANNED_MAX_ITERATIONS);
-                timeoutMs = Math.max(timeoutMs, PLANNED_TIMEOUT_MS);
+                maxIterations = Math.max(maxIterations, plannedMax);
+                timeoutMs = Math.max(timeoutMs, plannedTimeout);
               }
 
               if (outcome.endTurn) {
@@ -817,10 +1096,24 @@ export class AIAgentService {
           }
 
           try {
-            const result = await this.toolRegistry.executeTool(
-              toolName,
-              toolArgs,
-            );
+            // Las `vex_*` de bloques viven bajo una conversación que el modelo
+            // no conoce: el turno inyecta su id como default para que la
+            // herramienta no tenga que inventarlo (y no falle validación).
+            if (
+              toolName.startsWith('vex_') &&
+              params.conversation_id != null &&
+              !Number.isInteger(toolArgs.conversation_id)
+            ) {
+              toolArgs = {
+                ...toolArgs,
+                conversation_id: params.conversation_id,
+              };
+            }
+            const raw = await this.toolRegistry.executeTool(toolName, toolArgs);
+            // Oversized results travel compacted from here on: the trace, the
+            // persisted transcript and the model all see `{summary, block_id,
+            // rows}`, never the full payload twice.
+            const result = await this.compactToolResult(toolName, raw, params);
 
             toolsUsed.push({
               name: toolName,
@@ -843,8 +1136,8 @@ export class AIAgentService {
             // budget set before the first provider call would have to guess, and
             // guessing high makes every simple question slower.
             if (toolName === PROPOSE_PLAN_TOOL) {
-              maxIterations = Math.max(maxIterations, PLANNED_MAX_ITERATIONS);
-              timeoutMs = Math.max(timeoutMs, PLANNED_TIMEOUT_MS);
+              maxIterations = Math.max(maxIterations, plannedMax);
+              timeoutMs = Math.max(timeoutMs, plannedTimeout);
             }
 
             messages.push({
@@ -861,6 +1154,11 @@ export class AIAgentService {
                 summary: result.slice(0, TOOL_RESULT_SUMMARY_CHARS),
               },
             };
+
+            const uiBlock = this.uiBlockOf(toolName, raw);
+            if (uiBlock) {
+              yield { type: 'ui_block', ui_block: uiBlock };
+            }
           } catch (error: any) {
             // A confirmation demand is not a failure — it is the proposal
             // step of the write protocol. The registry answers `AI_AGENT_005`
@@ -909,6 +1207,75 @@ export class AIAgentService {
                 continue;
               }
 
+              // Same-stream plan execution: the turn carries an approved plan
+              // token, so a covered step runs NOW instead of ending the turn
+              // on a card. `redeem` verifies the ordered canonical hashes
+              // server-side; anything but `ok` (altered args, irreversible
+              // step, replay, expired token) falls through to the step's own
+              // proposal below. The inner single-use token keeps the choke
+              // point honest: permissions + roles are re-validated and the
+              // handler re-checks its preconditions on the way through.
+              if (params.plan_approval) {
+                let approved: Awaited<
+                  ReturnType<AgentPlanApprovalHook['redeem']>
+                > = 'missing';
+                try {
+                  approved = await params.plan_approval.redeem(
+                    toolName,
+                    toolArgs,
+                  );
+                } catch (redeemError: any) {
+                  this.logger.warn(
+                    `Plan redeem failed for tool "${toolName}": ${redeemError?.message ?? 'unknown'}`,
+                  );
+                }
+                if (approved === 'ok') {
+                  const singleUse =
+                    await params.plan_approval.issueSingleUse(
+                      toolName,
+                      toolArgs,
+                    );
+                  const appliedRaw = await this.toolRegistry.executeTool(
+                    toolName,
+                    toolArgs,
+                    { confirmationToken: singleUse },
+                  );
+                  const applied = await this.compactToolResult(
+                    toolName,
+                    appliedRaw,
+                    params,
+                  );
+                  toolsUsed.push({
+                    name: toolName,
+                    args: toolArgs,
+                    result: applied,
+                  });
+                  await this.consumeToolCallQuota(
+                    context?.store_id,
+                    toolCall.id,
+                    toolName,
+                  );
+                  messages.push({
+                    role: 'tool',
+                    content: applied,
+                    tool_call_id: toolCall.id,
+                  });
+                  yield {
+                    type: 'tool_result',
+                    tool: {
+                      id: toolCall.id,
+                      name: toolName,
+                      summary: applied.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                    },
+                  };
+                  const appliedBlock = this.uiBlockOf(toolName, appliedRaw);
+                  if (appliedBlock) {
+                    yield { type: 'ui_block', ui_block: appliedBlock };
+                  }
+                  continue;
+                }
+              }
+
               pendingConfirmation = {
                 tool: toolName,
                 arguments: toolArgs,
@@ -931,6 +1298,18 @@ export class AIAgentService {
                   id: toolCall.id,
                   name: toolName,
                   summary: 'Esperando confirmación del usuario.',
+                },
+              };
+              yield {
+                type: 'plan_approval',
+                plan_approval: {
+                  tool: toolName,
+                  arguments: toolArgs,
+                  confirmation_token: details.confirmation_token,
+                  preview: details?.preview,
+                  ...(params.plan_approval
+                    ? { plan_id: params.plan_approval.plan_id }
+                    : {}),
                 },
               };
               continue;

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { canonicalJson } from './vexi-confirmation.service';
 import {
   AgentPlan,
   AgentPlanDeliverable,
@@ -15,6 +16,29 @@ import { MAX_PLAN_STEPS } from '../../../ai-engine/tools/domains/planning.tools'
 
 /** Un plan sin movimiento en este lapso se da por abandonado. */
 export const PLAN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Canonical hash of one approved-plan step: `sha256(tool|canonicalJson(args))`.
+ *
+ * Same shape `PlanApprovalService` redeems against, so the hashes persisted
+ * next to the plan and the hashes inside the plan token are computed by one
+ * rule: if the model alters arguments after approval, the hash stops matching
+ * and the step re-confirms on its own card.
+ */
+export function canonicalStepHash(
+  tool: string,
+  args: Record<string, any>,
+): string {
+  return createHash('sha256')
+    .update(`${tool}|${canonicalJson(args ?? {})}`)
+    .digest('hex');
+}
+
+export interface PlanStepHash {
+  order: number;
+  tool: string;
+  args_hash: string;
+}
 
 const DONE_LIKE: AgentPlanStepStatus[] = ['done', 'skipped', 'rejected'];
 
@@ -127,6 +151,52 @@ export class VexiPlanStateService {
     delete step.question;
     await this.save(conversationId, metadata, plan);
     return plan;
+  }
+
+  /**
+   * Ordered `(tool, args)` hashes of the plan's write steps, persisted next to
+   * the plan in `metadata.agent_plan_step_hashes`.
+   *
+   * Lives OUTSIDE `agent_plan` on purpose: the plan shape is the agent loop's
+   * cognitive scaffolding (shared with Vexi), while the hashes are the
+   * approval binding (Vex). The apply path compares these against the plan
+   * token's server-stored list — a mismatch means the model moved the goalposts
+   * after approval and the step re-confirms alone.
+   */
+  async getStepHashes(conversationId: number): Promise<PlanStepHash[]> {
+    const { metadata, plan } = await this.load(conversationId);
+    if (!plan) return [];
+    const raw = (metadata as Record<string, any>).agent_plan_step_hashes;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+      (h): h is PlanStepHash =>
+        !!h &&
+        typeof h.order === 'number' &&
+        typeof h.tool === 'string' &&
+        typeof h.args_hash === 'string',
+    );
+  }
+
+  async setStepHashes(
+    conversationId: number,
+    steps: Array<{ order: number; tool: string; args: Record<string, any> }>,
+  ): Promise<PlanStepHash[]> {
+    const { plan, metadata } = await this.load(conversationId);
+    if (!plan) return [];
+    const hashes: PlanStepHash[] = [...steps]
+      .sort((a, b) => a.order - b.order)
+      .map((s) => ({
+        order: s.order,
+        tool: s.tool,
+        args_hash: canonicalStepHash(s.tool, s.args),
+      }));
+    await this.prisma.ai_conversations.updateMany({
+      where: { id: conversationId },
+      data: {
+        metadata: { ...metadata, agent_plan_step_hashes: hashes } as any,
+      },
+    });
+    return hashes;
   }
 
   createHook(conversationId: number): AgentPlanHook {

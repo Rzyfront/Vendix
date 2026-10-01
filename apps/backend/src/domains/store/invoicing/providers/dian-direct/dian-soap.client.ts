@@ -184,6 +184,26 @@ export class DianSoapClient {
     return this.executeWithRetry(endpoint, soap_action, soap_body);
   }
 
+  /** Reads the raw DIAN status of an ApplicationResponse event by its CUFE. */
+  async getStatusEvent(
+    invoice_cufe: string,
+    environment: 'test' | 'production',
+    credentials?: WsSecurityCredentials,
+  ): Promise<DianSoapResult> {
+    if (!invoice_cufe.trim()) {
+      throw new Error('CUFE is required to query a DIAN event status');
+    }
+    const endpoint = DIAN_ENDPOINTS[environment].url;
+    const soap_action = DIAN_SOAP_ACTIONS.GetStatusEvent;
+    const soap_body = await this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:GetStatusEvent><wcf:trackId>${this.escapeXmlText(invoice_cufe)}</wcf:trackId></wcf:GetStatusEvent>`,
+      credentials,
+    );
+    return this.executeWithRetry(endpoint, soap_action, soap_body);
+  }
+
   /**
    * Polls the validation status of an async submission (SendTestSetAsync).
    * The ZipKey returned by the async submit is used as the trackId here.
@@ -533,6 +553,20 @@ export class DianSoapClient {
       `<soap:Body>${body_content}</soap:Body>`,
       '</soap:Envelope>',
     ].join('');
+  }
+
+  /** Escapes untrusted text inserted into XML element content. */
+  private escapeXmlText(value: string): string {
+    return value.replace(/[&<>"']/g, (character) => {
+      const entities: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&apos;',
+      };
+      return entities[character];
+    });
   }
 
   /**

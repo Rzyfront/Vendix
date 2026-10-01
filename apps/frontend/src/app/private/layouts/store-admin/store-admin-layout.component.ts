@@ -904,14 +904,12 @@ export class StoreAdminLayoutComponent {
       // for stores that OWN their fiscal scope. Each child is a leaf whose
       // module renders its own sub-sections as internal sticky-header tabs
       // (invoicing/accounting/payroll shells + the fiscal compliance hub).
-      // The whole group hides when the ORGANIZATION owns fiscal
-      // (requiredFiscalScope: 'STORE'). When fiscal is NOT yet activated, only
-      // "Operación fiscal" stays visible (no requiresFiscalArea) so the owner
-      // can always reach the activation wizard; the operational modules appear
-      // once their area reaches ACTIVE/LOCKED.
+      // The parent is scope-neutral so a permissioned reader can reach the
+      // received-documents-only fallback when the organization owns fiscal.
+      // The activation, accounting, payroll and full invoicing leaves remain
+      // scoped/gated; emission still appears only after invoicing is active.
       label: 'Fiscal',
       icon: 'landmark',
-      requiredFiscalScope: 'STORE',
       children: [
         {
           label: 'Operación fiscal',
@@ -925,6 +923,10 @@ export class StoreAdminLayoutComponent {
           route: '/admin/invoicing',
           requiredFiscalScope: 'STORE',
           requiresFiscalArea: 'invoicing',
+          fiscalReadFallback: {
+            permission: 'invoicing:received:read',
+            route: '/admin/invoicing/received-documents',
+          },
         },
         {
           label: 'Contabilidad',
@@ -1016,15 +1018,16 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/security',
         },
         {
-          // `alwaysVisible` because Vexi deliberately has NO `panel_ui` key:
-          // the assistant is not a module an admin curates per user, it is a
-          // store-wide capability. Without this flag the entry falls into the
-          // filter's "no mapping, no children" branch and is dropped outright.
-          // Its real gate is `passesAuthorizationGates` (owner/admin), which
-          // runs before every case.
-          label: 'Vexi',
-          icon: 'circle',
-          route: '/admin/settings/vexi',
+          // `alwaysVisible` because "Agentes IA" deliberately has NO
+          // `panel_ui` key: the agents are not a module an admin curates per
+          // user, they are a store-wide capability. Without this flag the
+          // entry falls into the filter's "no mapping, no children" branch
+          // and is dropped outright. Its real gate is
+          // `passesAuthorizationGates` (owner/admin), which runs before every
+          // case.
+          label: 'Agentes IA',
+          icon: 'bot',
+          route: '/admin/settings/ai-agents',
           alwaysVisible: true,
         },
         {

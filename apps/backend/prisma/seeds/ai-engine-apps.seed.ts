@@ -1,5 +1,6 @@
 import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { RECEIVED_DOCUMENT_OCR_APPLICATION } from './received-document-ocr.application';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;
@@ -139,6 +140,7 @@ Example D — a line with "IBUA $65/u" in an "Otros imp." column (value per unit
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
     },
+    RECEIVED_DOCUMENT_OCR_APPLICATION,
     {
       key: 'invoice_ocr_ingredient',
       ai_feature_category: 'async_queue',
@@ -1687,6 +1689,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
           is_active: app.is_active,
           system_prompt: app.system_prompt,
           prompt_template: app.prompt_template,
+          retry_config: (app as any).retry_config ?? undefined,
           ai_feature_category: (app as any).ai_feature_category ?? null,
           metadata: (app as any).metadata ?? undefined,
         },
@@ -1703,7 +1706,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'received_document_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1877,7 +1880,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'received_document_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

@@ -1,0 +1,97 @@
+<app-modal [(isOpen)]="isOpen" [title]="isReview ? 'Revisar documento recibido' : 'Capturar documento recibido'" [subtitle]="'Guardar revisión no equivale a aceptar ni contabilizar.'" [size]="'xl'" [fullScreenOnMobile]="true" [dialog]="true" [canClose]="canClose" (closed)="onClosed()">
+  <form [formGroup]="form" (ngSubmit)="submit()" class="space-y-5 pb-2">
+    @if (noteOnly) {
+      <div class="rounded-lg border border-info/30 bg-info-light p-3 text-sm text-text-primary">El archivo fiscal original es inmutable. Puedes agregar una nota de revisión; sus datos no se modifican.</div>
+    }
+    @for (message of overflow(); track message) { <div class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">{{ message }} La evidencia original no se modifica; no se guardará con datos ocultos.</div> }
+    <fieldset [disabled]="noteOnly || busy() || conflict()" class="space-y-5">
+      <section class="space-y-3">
+        <h3 class="font-semibold text-text-primary">Identificación y partes</h3>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label class="field">Tipo de documento<select formControlName="document_type"><option value="invoice">Factura</option><option value="credit_note">Nota crédito</option><option value="debit_note">Nota débito</option><option value="non_electronic">Documento no electrónico</option></select></label>
+          <label class="field">Número de factura<input formControlName="invoice_number" autocomplete="off"></label>
+          <label class="field">Clave del documento<input formControlName="document_key" autocomplete="off"></label>
+          <label class="field">Clave documento de referencia<input formControlName="reference_key" autocomplete="off"></label>
+          <label class="field">Número de referencia<input formControlName="reference_number" autocomplete="off"></label>
+          <label class="field">Fecha de emisión<input type="date" formControlName="issue_date"></label>
+          <label class="field">Fecha de vencimiento<input type="date" formControlName="due_date"></label>
+          <label class="field">Moneda (código ISO 4217)<input formControlName="currency" placeholder="Ej. COP; no se completa automáticamente"></label>
+          <label class="field">NIT del proveedor<input formControlName="issuer_tax_id" autocomplete="off"></label>
+          <label class="field">Nombre del proveedor<input formControlName="issuer_name" autocomplete="organization"></label>
+          <label class="field">NIT del receptor<input formControlName="receiver_tax_id" autocomplete="off"></label>
+          <label class="field">Nombre del receptor<input formControlName="receiver_name" autocomplete="organization"></label>
+        </div>
+      </section>
+      <section class="space-y-3">
+        <h3 class="font-semibold text-text-primary">Totales declarados por el proveedor</h3>
+        <p class="text-xs text-text-secondary">Ingresa los valores fuente; no se calculan ni se completan automáticamente.</p>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          @for (field of headerAmounts; track field.key) { <label class="field">{{ field.label }}<input type="text" inputmode="decimal" [formControlName]="field.key" placeholder="Sin valor informado"></label> }
+        </div>
+      </section>
+      <section class="space-y-3">
+        <div class="flex items-center justify-between gap-3"><h3 class="font-semibold text-text-primary">Impuestos de cabecera</h3><button class="min-h-11 rounded-lg border border-border px-3 text-sm" type="button" [disabled]="headerTaxes.length >= 100" (click)="addHeaderTax()">Agregar impuesto</button></div>
+        <ng-container formArrayName="taxes">
+          @for (tax of headerTaxes.controls; track $index; let i = $index) {
+            <div [formGroupName]="i" class="rounded-lg border border-border p-3">
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label class="field">Familia<select formControlName="tax_type">@for (type of taxTypes; track type) { <option [value]="type">{{ taxLabel(type) }}</option> }</select></label>
+                <label class="field">Nombre del impuesto<input formControlName="tax_name"></label>
+                <label class="field">Código de esquema<input formControlName="scheme_code"></label>
+                <label class="field">Base declarada<input type="text" inputmode="decimal" formControlName="base_amount"></label>
+                <label class="field">Importe declarado<input type="text" inputmode="decimal" formControlName="amount"></label>
+                <label class="field">Tasa (%)<input type="text" inputmode="decimal" formControlName="rate" placeholder="No aplica a impuesto nominal"></label>
+                <label class="field">Base fiscal<select formControlName="tax_basis_type"><option value="">Sin especificar</option><option value="monetary">Monetaria</option><option value="unit">Nominal por unidad</option></select></label>
+                <label class="field">Cantidad base<input type="text" inputmode="decimal" formControlName="base_quantity"></label>
+                <label class="field">Unidad base<input formControlName="base_unit_code"></label>
+                <label class="field">Valor por unidad<input type="text" inputmode="decimal" formControlName="per_unit_amount"></label>
+              </div>
+              @if (submitAttempted() && tax.invalid) { <p class="mt-2 text-xs text-error">Revisa el importe y el nombre. Base monetaria requiere base declarada; impuesto nominal requiere cantidad, unidad y valor por unidad.</p> }
+              <button type="button" class="mt-3 min-h-11 rounded-lg border border-border px-3 text-sm" (click)="removeHeaderTax(i)">Quitar impuesto</button>
+            </div>
+          }
+        </ng-container>
+      </section>
+      <section class="space-y-3">
+        <div class="flex items-center justify-between gap-3"><h3 class="font-semibold text-text-primary">Líneas</h3><button class="min-h-11 rounded-lg border border-border px-3 text-sm" type="button" [disabled]="items.length >= 500" (click)="addItem()">Agregar línea</button></div>
+        <ng-container formArrayName="items">
+          @for (item of items.controls; track $index; let i = $index) {
+            <div [formGroupName]="i" class="space-y-3 rounded-lg border border-border p-3">
+              <div class="flex items-center justify-between"><h4 class="font-medium">Línea {{ i + 1 }}</h4><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" (click)="removeItem(i)">Quitar</button></div>
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label class="field">Código proveedor<input formControlName="external_code"></label><label class="field sm:col-span-2">Descripción<input formControlName="description"></label>
+                <label class="field">Cantidad<input type="text" inputmode="decimal" formControlName="quantity"></label><label class="field">Unidad<input formControlName="unit_code"></label>
+                <label class="field">Precio unitario<input type="text" inputmode="decimal" formControlName="unit_price"></label><label class="field">Descuento<input type="text" inputmode="decimal" formControlName="discount_amount"></label>
+                <label class="field">Neto declarado<input type="text" inputmode="decimal" formControlName="net_amount"></label><label class="field">Total declarado<input type="text" inputmode="decimal" formControlName="total_amount"></label>
+              </div>
+              <div formArrayName="taxes" class="space-y-2 border-t border-border pt-3">
+                <div class="flex items-center justify-between"><span class="text-sm font-medium">Impuestos de la línea</span><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" [disabled]="itemTaxes(i).length >= 20" (click)="addItemTax(i)">Agregar impuesto</button></div>
+                @for (tax of itemTaxes(i).controls; track $index; let t = $index) {
+                  <div [formGroupName]="t" class="grid grid-cols-1 gap-2 rounded border border-border p-2 sm:grid-cols-2 lg:grid-cols-4">
+                    <label class="field">Familia<select formControlName="tax_type">@for (type of taxTypes; track type) { <option [value]="type">{{ taxLabel(type) }}</option> }</select></label>
+                    <label class="field">Nombre<input formControlName="tax_name"></label><label class="field">Base<input type="text" inputmode="decimal" formControlName="base_amount"></label>
+                    <label class="field">Importe<input type="text" inputmode="decimal" formControlName="amount"></label><label class="field">Tasa (%)<input type="text" inputmode="decimal" formControlName="rate"></label>
+                    <label class="field">Base fiscal<select formControlName="tax_basis_type"><option value="">Sin especificar</option><option value="monetary">Monetaria</option><option value="unit">Nominal por unidad</option></select></label>
+                    <label class="field">Cantidad base<input type="text" inputmode="decimal" formControlName="base_quantity"></label><label class="field">Unidad base<input formControlName="base_unit_code"></label>
+                    <label class="field">Valor por unidad<input type="text" inputmode="decimal" formControlName="per_unit_amount"></label><label class="field">Código esquema<input formControlName="scheme_code"></label>
+                    <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm" (click)="removeItemTax(i,t)">Quitar impuesto</button>
+                  </div>
+                  @if (submitAttempted() && tax.invalid) { <p class="text-xs text-error">Revisa el importe y el nombre. Base monetaria requiere base declarada; impuesto nominal requiere cantidad, unidad y valor por unidad.</p> }
+                }
+              </div>
+            </div>
+          }
+        </ng-container>
+      </section>
+    </fieldset>
+    <label class="field">Nota de revisión<textarea formControlName="reviewer_note" rows="3" maxlength="1000" placeholder="Observación interna; no acepta ni contabiliza"></textarea></label>
+    @if (submitAttempted() && form.invalid) { <div class="rounded-lg border border-warning/30 bg-warning-light p-3 text-sm text-text-primary" role="alert">Completa los campos obligatorios y revisa los formatos: moneda ISO 4217 en mayúsculas, una o más líneas y valores decimales dentro de su precisión. No se calculan totales automáticamente.</div> }
+    @if (items.invalid && submitAttempted()) { <p class="text-sm text-error">Agrega al menos una línea con descripción, cantidad, precio unitario, descuento, neto y total declarados.</p> }
+    @if (form.controls.currency.invalid && submitAttempted()) { <p class="text-sm text-error">Ingresa el código de moneda ISO 4217 de tres letras en mayúsculas. No se completa COP automáticamente.</p> }
+    @if (error()) { <div class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">{{ error() }} @if (conflict()) { <button type="button" class="ml-2 underline" (click)="reloadConflict()">Recargar detalle</button> }</div> }
+    <div class="flex flex-col-reverse justify-end gap-2 border-t border-border pt-3 sm:flex-row">
+      <button type="button" class="min-h-11 rounded-lg border border-border px-4 text-sm" [disabled]="busy()" (click)="isOpen.set(false)">Cancelar</button>
+      <button type="submit" class="min-h-11 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50" [disabled]="busy() || conflict() || overflow().length > 0">{{ busy() ? 'Guardando…' : isReview ? 'Guardar revisión' : 'Guardar documento' }}</button>
+    </div>
+  </form>
+</app-modal>

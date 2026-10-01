@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Working with AI embeddings or RAG"
@@ -26,6 +26,7 @@ metadata:
 - Processor: `apps/backend/src/ai-engine/queue/processors/ai-embedding.processor.ts`
 - Batch sync: `apps/backend/src/jobs/embedding-sync.job.ts`
 - Migration: `apps/backend/prisma/migrations/20260326030000_add_ai_embeddings/migration.sql`
+- Agent tool: `apps/backend/src/ai-engine/tools/domains/search.tools.ts` (`semantic_search`, wired to `searchByText`)
 
 ## pgvector Facts
 
@@ -71,11 +72,19 @@ To add an entity type, add event listeners, content-building logic, and ensure s
 
 Current caveat: batch sync uses global raw SQL and joins embeddings by `store_id`, `entity_type`, and `entity_id`; it does not include `organization_id` in the join. Verify before changing multi-tenant embedding logic.
 
+## `semantic_search` Tool (wired)
+
+The agent tool `semantic_search` (`apps/backend/src/ai-engine/tools/domains/search.tools.ts`, domain `search`, `readOnly`) is live on embeddings — not a placeholder. It takes `{ query, entity_types?, limit? }` (default limit 5, entity filter from `EMBEDDABLE_ENTITY_TYPES`) and calls `EmbeddingService.searchByText(context.store_id, query, entityTypes, limit)`.
+
+Two honest fallbacks, both returned as RESULTS (never thrown, so the loop stays alive and retries by name with `find_product`/`find_customer`):
+
+- No store in context → `{ error }` (semantic search is store-scoped).
+- Embeddings unavailable in the environment, or zero matches → `{ query, results: [], note }` with the concrete retry instruction (zero matches also warns that indexing is incremental).
+
 ## Anti-Patterns
 
 - Do not omit explicit `store_id` filter in raw vector searches.
 - Do not block HTTP requests with synchronous embedding generation; enqueue jobs.
-- Do not claim semantic search tool is wired to embeddings; current AI tool `semantic_search` is placeholder.
 - Do not assume RAG uses AI Applications/app keys; current RAG calls direct chat.
 
 ## Related Skills

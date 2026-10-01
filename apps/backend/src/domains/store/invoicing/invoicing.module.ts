@@ -44,6 +44,9 @@ import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
 import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
+import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
+import { StoreReceivedDocumentsController } from '../../received-documents/store-received-documents.controller';
+import { StoreDocumentReceptionConnectionsController } from '../../received-documents/store-document-reception-connections.controller';
 
 @Module({
   imports: [
@@ -61,6 +64,7 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     // Proveedores de los perfiles de facturación. Su CONTROLLER va en el array
     // de abajo, no acá: ver la nota de `profiles.module.ts`.
     ProfilesModule,
+    SharedReceivedDocumentsModule,
     // E.6 — reenvío de facturas a otro correo. A diferencia de `ProfilesModule`,
     // SÍ declara su propio controller (ver `invoice-delivery.controller.ts`):
     // su ruta de 4 segmentos no colisiona con el `:id` de `InvoicingController`.
@@ -81,6 +85,12 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     // cadena «profiles». Express resuelve por orden de registro y el orden es la
     // posición en ESTE array. No lo muevas debajo.
     ProfilesController,
+    // Keep the more-specific received-document prefix ahead of InvoicingController
+    // (`GET :id`), which otherwise captures `received-documents` as an invoice id.
+    // The nested `connections` collection must precede the parent
+    // `received-documents/:id` route for the same Express registration-order reason.
+    StoreDocumentReceptionConnectionsController,
+    StoreReceivedDocumentsController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva
     // `@RequireModuleFlow('invoicing')`, porque el indicador del cajero tiene

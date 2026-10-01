@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { PlatformOrgService } from '../../../common/services/platform-org.service';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 
 import { ChartOfAccountsController } from './chart-of-accounts/chart-of-accounts.controller';
 import { ChartOfAccountsService } from './chart-of-accounts/chart-of-accounts.service';
@@ -35,7 +34,6 @@ import { ReportsService } from './reports/reports.service';
     JournalEntriesService,
     ReportsService,
     PlatformOrgService,
-    GlobalPrismaService,
   ],
   exports: [
     ChartOfAccountsService,

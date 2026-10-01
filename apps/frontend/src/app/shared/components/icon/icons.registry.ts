@@ -340,6 +340,8 @@ import {
   PanelLeftOpen,
   PanelLeftClose,
   SquarePen,
+  PanelRightClose,
+  PanelRightOpen,
   // Modo voz de Vexi. Estaba en uso en `vexi-panel.component.ts` SIN estar
   // registrado, así que `<app-icon name="mic">` caía al glifo de reemplazo: el
   // botón de "mantén presionado para hablar" mostraba un signo de pregunta.
@@ -780,6 +782,8 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'panel-left-open': PanelLeftOpen,
   'panel-left-close': PanelLeftClose,
   'square-pen': SquarePen,
+  'panel-right-close': PanelRightClose,
+  'panel-right-open': PanelRightOpen,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

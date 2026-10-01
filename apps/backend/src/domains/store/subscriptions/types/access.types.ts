@@ -12,7 +12,8 @@ export type AIFeatureKey =
   | 'tool_agents'
   | 'rag_embeddings'
   | 'async_queue'
-  | 'realtime_voice';
+  | 'realtime_voice'
+  | 'vex_agent';
 
 export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
   'text_generation',
@@ -22,6 +23,7 @@ export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
   'rag_embeddings',
   'async_queue',
   'realtime_voice',
+  'vex_agent',
 ] as const;
 
 export function isAIFeatureKey(value: unknown): value is AIFeatureKey {
@@ -42,9 +44,9 @@ export interface FeatureConfig {
   monthly_jobs_cap?: number;
   /**
    * F3 — presupuesto mensual de ejecuciones de tools del agente
-   * (`tool_agents`). Se consume 1 unidad por `tool_result` exitoso desde el
-   * loop del agente, nunca pre-consumo. Vive en el JSON `ai_feature_flags`,
-   * no requiere migración.
+   * (`tool_agents`, `vex_agent`). Se consume 1 unidad por `tool_result`
+   * exitoso desde el loop del agente, nunca pre-consumo. Vive en el JSON
+   * `ai_feature_flags`, no requiere migración.
    */
   monthly_tool_calls_cap?: number;
   /**
@@ -117,4 +119,9 @@ export const FEATURE_QUOTA_CONFIG: Record<
     capField: 'monthly_voice_seconds_cap',
     period: 'monthly',
   },
+  // Vex bills like an agent, not like a chat: a turn runs dozens of tool
+  // executions against a ~265-tool catalog, so its quota is the monthly tool
+  // budget (`monthly_tool_calls_cap`, consumed 1 unit per successful
+  // `tool_result`), never the per-message counter. Mirrors `tool_agents`.
+  vex_agent: { capField: 'monthly_tool_calls_cap', period: 'monthly' },
 };

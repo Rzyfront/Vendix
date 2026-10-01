@@ -1,4 +1,5 @@
 import { AIChatService } from './ai-chat.service';
+import { Prisma } from '@prisma/client';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiController } from '../vexi/vexi.controller';
 import { renderPlanForModel } from '../vexi/vexi-plan-state.service';
@@ -50,16 +51,48 @@ function build(opts: {
   paused?: AgentPlan | null;
   run?: jest.Mock;
   messages?: any[];
+  conversation?: Record<string, unknown>;
+  agentRow?: Record<string, unknown> | null;
+  vexEnabled?: boolean;
+  access?: Record<string, unknown>;
+  enforce?: boolean;
 }) {
   const prisma: any = {
     ai_conversations: {
-      findFirst: jest.fn().mockResolvedValue(conversation(opts.messages)),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ ...conversation(opts.messages), ...opts.conversation }),
       update: jest.fn().mockResolvedValue({}),
+      create: jest
+        .fn()
+        .mockImplementation(async ({ data }: any) => ({ id: 11, ...data })),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
     },
     ai_messages: { create: jest.fn().mockResolvedValue({ id: 1 }) },
   };
   const run = opts.run ?? agentGen([{ type: 'done' }], EMPTY_RESULT);
-  const aiAgent = { runAgentStream: run };
+  const runSync = jest.fn().mockResolvedValue({ content: 'ok', total_tokens: 1 });
+  const aiAgent = { runAgentStream: run, runAgent: runSync };
+  const findAgent = jest.fn().mockResolvedValue(opts.agentRow ?? null);
+  const findVexSettings = jest.fn().mockResolvedValue(
+    opts.vexEnabled === true
+      ? { settings: { vex: { enabled: true } } }
+      : { settings: { vex: { enabled: false } } },
+  );
+  const canUseAIFeature = jest.fn().mockResolvedValue({
+    allowed: true,
+    mode: 'allow',
+    severity: 'info',
+    subscription_state: 'active',
+    plan_id: 1,
+    has_record: true,
+    ...opts.access,
+  });
+  const gateConfig = {
+    isEnforce: jest.fn().mockReturnValue(opts.enforce ?? true),
+  };
+  const buildSnapshot = jest.fn().mockResolvedValue({});
   const planState: any = {
     getActive: jest.fn().mockResolvedValue(opts.plan ?? null),
     get: jest.fn().mockResolvedValue(opts.paused ?? opts.plan ?? null),
@@ -73,7 +106,10 @@ function build(opts: {
   };
   const service = new AIChatService(
     prisma,
-    { ai_agents: { findUnique: jest.fn() } } as any,
+    {
+      ai_agents: { findUnique: findAgent },
+      store_settings: { findUnique: findVexSettings },
+    } as any,
     {
       getApplication: jest
         .fn()
@@ -83,13 +119,26 @@ function build(opts: {
     aiAgent as any,
     {} as any,
     { emit: jest.fn() } as any,
-    { buildSnapshot: jest.fn().mockResolvedValue({}) } as any,
+    { buildSnapshot } as any,
     streamIntents,
     { registerTurn: jest.fn(), releaseTurn: jest.fn() } as any,
     {} as any,
     planState,
+    { canUseAIFeature } as any,
+    gateConfig as any,
   );
-  return { service, prisma, run, planState, streamIntents };
+  return {
+    service,
+    prisma,
+    run,
+    runSync,
+    findAgent,
+    planState,
+    streamIntents,
+    findVexSettings,
+    canUseAIFeature,
+    buildSnapshot,
+  };
 }
 
 async function collect(service: AIChatService, intent: any) {
@@ -263,6 +312,109 @@ describe('AIChatService — plan interno de Vexi', () => {
   });
 });
 
+describe('AIChatService — agente configurable del chat por defecto', () => {
+  const vexi = {
+    key: 'vexi',
+    app_key: 'chat_assistant',
+    system_prompt: null,
+    allowed_tools: ['list_orders', 'ui_navigate'],
+    max_iterations: 9,
+    is_active: true,
+  };
+
+  beforeEach(() => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([null, 'chat_assistant'])(
+    'usa la fila vexi en un hilo sin agente y app_key=%s, en sync y SSE',
+    async (appKey) => {
+      const b = build({ agentRow: vexi, conversation: { app_key: appKey } });
+      await b.service.sendMessage(7, { content: 'últimas órdenes' });
+      expect(b.runSync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          app_key: 'chat_assistant',
+          tools: ['list_orders', 'ui_navigate'],
+          max_iterations: 9,
+        }),
+      );
+      b.streamIntents.consume.mockResolvedValue({
+        conversation_id: 7,
+        user_id: 9,
+        content: 'llévame',
+      });
+      await collect(b.service, null);
+      expect(b.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          app_key: 'chat_assistant',
+          tools: ['list_orders', 'ui_navigate'],
+          max_iterations: 9,
+        }),
+      );
+      expect(b.findAgent).toHaveBeenCalledWith({ where: { key: 'vexi' } });
+    },
+  );
+
+  it('respeta el agente explícito del hilo y el override sync', async () => {
+    const b = build({
+      agentRow: { ...vexi, key: 'soporte', allowed_tools: ['list_products'] },
+      conversation: { metadata: { agent_key: 'soporte' } },
+    });
+    await b.service.sendMessage(7, { content: 'hola', agent_key: 'otro' });
+    expect(b.findAgent).toHaveBeenLastCalledWith({ where: { key: 'otro' } });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    expect(b.findAgent).toHaveBeenLastCalledWith({ where: { key: 'soporte' } });
+    expect(b.run.mock.calls[0][0].tools).toEqual(['list_products']);
+  });
+
+  it('no usa vexi para una app distinta sin agente explícito', async () => {
+    const b = build({ conversation: { app_key: 'otra_app' } });
+    await b.service.sendMessage(7, { content: 'hola' });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    expect(b.findAgent).not.toHaveBeenCalled();
+    expect(b.runSync.mock.calls[0][0]).toMatchObject({ app_key: 'otra_app' });
+    expect(b.run.mock.calls[0][0]).toMatchObject({ app_key: 'otra_app' });
+    expect(b.run.mock.calls[0][0]).not.toHaveProperty('tools');
+  });
+
+  it.each([null, { ...vexi, is_active: false }])(
+    'fila vexi ausente o inactiva conserva el fallback del chat',
+    async (agentRow) => {
+      const b = build({ agentRow });
+      await b.service.sendMessage(7, { content: 'hola' });
+      expect(b.runSync.mock.calls[0][0]).toMatchObject({
+        app_key: 'chat_assistant',
+      });
+      expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('tools');
+      expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('max_iterations');
+      b.streamIntents.consume.mockResolvedValue({
+        conversation_id: 7,
+        user_id: 9,
+        content: 'hola',
+      });
+      await collect(b.service, null);
+      expect(b.run.mock.calls[0][0]).toMatchObject({
+        app_key: 'chat_assistant',
+      });
+      expect(b.run.mock.calls[0][0]).not.toHaveProperty('tools');
+      expect(b.run.mock.calls[0][0]).not.toHaveProperty('max_iterations');
+    },
+  );
+});
+
 describe('VexiStreamIntentService — claim de turno', () => {
   it('isCurrentTurn compara y tolera errores de Redis (nunca aborta)', async () => {
     const redis: any = { set: jest.fn(), get: jest.fn() };
@@ -329,5 +481,229 @@ describe('VexiController.applyConfirmation — plan', () => {
     const res: any = await make(mark).applyConfirmation(dto);
     expect(res.tool).toBe('write_endpoint');
     expect(res.summary).toBe('Precio subido');
+  });
+});
+
+describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
+  const vexRow = {
+    key: 'vex',
+    app_key: 'vex_assistant',
+    system_prompt: null,
+    allowed_tools: [],
+    max_iterations: 40,
+    is_active: true,
+  };
+  const vexThread = { metadata: { agent_key: 'vex' } };
+
+  const asOwner = () =>
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      user_id: 9,
+      organization_id: 1,
+      store_id: 1,
+      roles: ['owner'],
+    } as any);
+  const asCashier = () =>
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      user_id: 9,
+      organization_id: 1,
+      store_id: 1,
+      roles: ['employee'],
+    } as any);
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('cajero creando hilo vex → 403 y no persiste la conversación', async () => {
+    asCashier();
+    const b = build({ agentRow: vexRow, vexEnabled: true });
+    await expect(
+      b.service.createConversation({ agent_key: 'vex', title: 't' }),
+    ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+    expect(b.prisma.ai_conversations.create).not.toHaveBeenCalled();
+  });
+
+  it('owner con vex apagado → AI_AGENT_004 con mensaje accionable', async () => {
+    asOwner();
+    const b = build({ agentRow: vexRow, vexEnabled: false });
+    const err: any = await b.service
+      .createConversation({ agent_key: 'vex' })
+      .catch((e) => e);
+    expect(err.errorCode).toBe('AI_AGENT_004');
+    expect(String(err.message)).toContain('Agentes IA');
+    expect(b.canUseAIFeature).not.toHaveBeenCalled();
+  });
+
+  it('owner con vex prendido pero plan bloqueado → reason del plan, preguntando vex_agent', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      vexEnabled: true,
+      access: {
+        allowed: false,
+        mode: 'block',
+        reason: 'SUBSCRIPTION_005',
+        subscription_state: 'expired',
+      },
+    });
+    await expect(
+      b.service.createConversation({ agent_key: 'vex' }),
+    ).rejects.toMatchObject({ errorCode: 'SUBSCRIPTION_005' });
+    expect(b.canUseAIFeature).toHaveBeenCalledWith(1, 'vex_agent');
+  });
+
+  it('log-only: plan bloqueado observa y deja crear', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      vexEnabled: true,
+      enforce: false,
+      access: { allowed: false, mode: 'block', reason: 'SUBSCRIPTION_005' },
+    });
+    const created: any = await b.service.createConversation({
+      agent_key: 'vex',
+    });
+    expect(created.metadata).toEqual({ agent_key: 'vex' });
+  });
+
+  it('owner + toggle + plan → crea el hilo con metadata.agent_key=vex', async () => {
+    asOwner();
+    const b = build({ agentRow: vexRow, vexEnabled: true });
+    const created: any = await b.service.createConversation({
+      agent_key: 'vex',
+      title: 't',
+    });
+    expect(created.metadata).toEqual({ agent_key: 'vex' });
+    expect(b.canUseAIFeature).toHaveBeenCalledWith(1, 'vex_agent');
+  });
+
+  it('turno sync vex denegado no deja fila de usuario huérfana', async () => {
+    asCashier();
+    const b = build({ agentRow: vexRow, conversation: vexThread });
+    await expect(
+      b.service.sendMessage(7, { content: 'hola' }),
+    ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+    expect(b.prisma.ai_messages.create).not.toHaveBeenCalled();
+    expect(b.runSync).not.toHaveBeenCalled();
+  });
+
+  it('override agent_key=vex por mensaje en hilo vexi también se gatea', async () => {
+    asCashier();
+    const b = build({ agentRow: vexRow });
+    await expect(
+      b.service.sendMessage(7, { content: 'hola', agent_key: 'vex' }),
+    ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+    expect(b.runSync).not.toHaveBeenCalled();
+  });
+
+  it('hilo legacy sin roles sigue contestando: el gate es no-op fuera de vex', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const b = build({});
+    await b.service.sendMessage(7, { content: 'hola' });
+    expect(b.runSync).toHaveBeenCalled();
+    expect(b.canUseAIFeature).not.toHaveBeenCalled();
+    expect(b.findVexSettings).not.toHaveBeenCalled();
+  });
+
+  it('turno SSE de Vex arma snapshot sin ui_context', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+      ui_context: { module: 'pos' },
+      attachment_ids: ['a1'],
+    });
+    await collect(b.service, null);
+    expect(b.run).toHaveBeenCalled();
+    expect(b.buildSnapshot).toHaveBeenCalledWith({ attachmentIds: ['a1'] });
+  });
+
+  it('turno SSE de Vexi conserva ui_context en el snapshot', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const b = build({});
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+      ui_context: { module: 'pos' },
+      attachment_ids: undefined,
+    });
+    await collect(b.service, null);
+    expect(b.buildSnapshot).toHaveBeenCalledWith({
+      uiContext: { module: 'pos' },
+      attachmentIds: undefined,
+    });
+  });
+
+  it('turno de Vex usa ventana de 20 mensajes', async () => {
+    asOwner();
+    const messages = Array.from({ length: 25 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `m${i}`,
+    }));
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      messages,
+      vexEnabled: true,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    const params = b.run.mock.calls[0][0];
+    expect(params.messages).toHaveLength(20);
+    expect(params.messages[0]).toEqual({ role: 'assistant', content: 'm5' });
+  });
+
+  it('listado agent_key=vex filtra por path y conserva el scope', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const b = build({});
+    await b.service.listConversations({ agent_key: 'vex' } as any);
+    const where = b.prisma.ai_conversations.findMany.mock.calls[0][0].where;
+    expect(where.user_id).toBe(9);
+    expect(where.metadata).toEqual({ path: ['agent_key'], equals: 'vex' });
+    expect(b.prisma.ai_conversations.count.mock.calls[0][0]).toEqual({
+      where,
+    });
+  });
+
+  it('listado agent_key=vexi incluye hilos legacy sin agent_key', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const b = build({});
+    await b.service.listConversations({ agent_key: 'vexi' } as any);
+    const where = b.prisma.ai_conversations.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual([
+      { metadata: { path: ['agent_key'], equals: 'vexi' } },
+      { metadata: { equals: Prisma.AnyNull } },
+    ]);
+  });
+
+  it('listado sin filtro excluye vex pero conserva legacy y otras keys', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const b = build({});
+    await b.service.listConversations({} as any);
+    const where = b.prisma.ai_conversations.findMany.mock.calls[0][0].where;
+    expect(where.user_id).toBe(9);
+    expect(where.OR).toEqual([
+      { metadata: { equals: Prisma.AnyNull } },
+      { NOT: { metadata: { path: ['agent_key'], equals: 'vex' } } },
+    ]);
   });
 });

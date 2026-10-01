@@ -100,6 +100,7 @@ Para lo demás de Zoneless y señales: `vendix-zoneless-signals`.
 | El build y los tests pasan pero la app no arranca | El **grafo de dependencias de Nest solo se valida al arrancar**. |
 | Arranca limpio y revienta en la primera petición | **Export ausente bajo SWC**: no se detecta en compilación. |
 | Un job de BullMQ reintenta más de lo configurado | **`stalled` no pasa por `attempts`**; `maxStalledCount` es otro contador. |
+| `FATAL ERROR: Reached heap limit` o heap al 90 % plano desde el arranque parece una fuga | **No es fuga: es baseline.** Un módulo re-declaró `Global/Organization/Store/EcommercePrismaService` en su `providers:` (cada copia = `PrismaClient` + `pg.Pool`, ~68 MB de heap). Esos servicios son singletons de `PrismaModule` (`@Global()`); grep en `*.module.ts` y ver `vendix-prisma-scopes` (Singleton Rule). Muestrear `heapUsed` varias veces antes de cazar fugas. |
 
 ## Prisma, base de datos y SQL
 

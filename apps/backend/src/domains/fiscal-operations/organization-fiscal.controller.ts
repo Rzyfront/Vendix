@@ -45,6 +45,7 @@ import {
   ReopenFiscalCloseDto,
   VoidTaxDeclarationDto,
 } from './dto/fiscal-operations.dto';
+import { FiscalTaxPositionQueryDto } from './dto/fiscal-tax-position.dto';
 import {
   FISCAL_RESPONSIBILITIES_CATALOG,
   FISCAL_RESPONSIBILITIES_CATALOG_VERSION,
@@ -95,6 +96,18 @@ export class OrganizationFiscalController {
   async overview(@Query() query: FiscalListQueryDto) {
     const contexts = await this.readContexts(query);
     return this.response.success(await this.obligations.getOverview(contexts));
+  }
+
+  @Get('tax-position')
+  @Permissions('organization:fiscal:dashboard:read')
+  async getTaxPosition(@Query() query: FiscalTaxPositionQueryDto) {
+    const context = await this.contextResolver.resolveForOrganization({
+      store_id: query.store_id,
+      require_single_entity: true,
+    });
+    return this.response.success(
+      await this.declarations.preview(context, query),
+    );
   }
 
   @Get('flow-state')

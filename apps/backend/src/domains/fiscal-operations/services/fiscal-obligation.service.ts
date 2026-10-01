@@ -16,10 +16,9 @@ import { FiscalStatusResolverService } from '@common/services/fiscal-status-reso
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
 import {
   buildDateRangeFilter,
-  defaultAnnualDueDate,
-  defaultMonthlyDueDate,
   resolveFiscalPeriodRange,
 } from './fiscal-period.util';
+import { FiscalTaxCalendarService } from './fiscal-tax-calendar.service';
 import {
   ChangeFiscalObligationStatusDto,
   FiscalListQueryDto,
@@ -34,6 +33,8 @@ import {
   isIncResponsible,
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
+import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
+import { normalizeFiscalResponsibilityCode } from '@common/constants/fiscal-responsibilities';
 
 /** Meses en los que vence cada periodicidad de IVA (art. 600 ET). */
 const VAT_BIMONTHLY_MONTHS = [2, 4, 6, 8, 10, 12];
@@ -42,7 +43,10 @@ const VAT_FOUR_MONTHLY_MONTHS = [4, 8, 12];
 interface ContextFiscalData {
   tax_responsibilities?: unknown;
   vat_periodicity?: unknown;
+  tax_regime?: unknown;
 }
+
+const CALENDAR_BLOCK_PREFIX = '[CALENDAR_UNVERIFIED]';
 
 const FINAL_STATUSES: fiscal_obligation_status_enum[] = [
   'approved',
@@ -90,6 +94,7 @@ export class FiscalObligationService {
     private readonly fiscalStatus: FiscalStatusResolverService,
     private readonly eventEmitter: EventEmitter2,
     private readonly audit: FiscalAuditService,
+    private readonly taxCalendar: FiscalTaxCalendarService,
   ) {}
 
   async getOverview(contexts: FiscalOperationsContext[]) {
@@ -109,12 +114,15 @@ export class FiscalObligationService {
           ...where,
           status: { in: ['pending', 'in_progress', 'ready'] },
           due_date: { gte: new Date(), lte: this.daysFromNow(30) },
+          due_date_verified: true,
         } as Prisma.fiscal_obligationsWhereInput,
       }),
       this.prisma.fiscal_obligations.count({
         where: {
           ...where,
           status: 'overdue',
+          due_date: { not: null },
+          due_date_verified: true,
         } as Prisma.fiscal_obligationsWhereInput,
       }),
       this.prisma.tax_declaration_drafts.count({
@@ -192,6 +200,9 @@ export class FiscalObligationService {
       ...(query.accounting_entity_id
         ? { accounting_entity_id: query.accounting_entity_id }
         : {}),
+      ...(query.status === 'overdue'
+        ? { due_date: { not: null }, due_date_verified: true }
+        : {}),
     };
 
     if (query.date_from || query.date_to) {
@@ -240,25 +251,33 @@ export class FiscalObligationService {
     context: FiscalOperationsContext,
     dto: GenerateFiscalObligationsDto,
   ) {
-    const period = resolveFiscalPeriodRange(dto);
+    let period: ReturnType<typeof resolveFiscalPeriodRange>;
+    try {
+      period = resolveFiscalPeriodRange(dto);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
     const types = dto.types?.length
       ? dto.types
       : await this.defaultTypesForContext(context, period);
     const created_or_updated: any[] = [];
 
     for (const type of types) {
-      const due_date = this.resolveDueDate(
-        type,
-        period.period_end,
-        period.period_year,
-      );
+      const calendar = await this.resolveDeadline(context, type, period, dto.periodicity ?? null);
+      const blockingReason = calendar.due_date_verified
+        ? null
+        : `${CALENDAR_BLOCK_PREFIX} ${calendar.warning ?? 'A verified fiscal deadline is not configured.'}`;
       const existing = await this.prisma.fiscal_obligations.findFirst({
         where: {
+          organization_id: context.organization_id,
           accounting_entity_id: context.accounting_entity_id,
           type,
-          period_year: period.period_year,
-          period_month: period.period_month,
-          period_quarter: period.period_quarter,
+          period_start: period.period_start,
+          period_end: period.period_end,
+          jurisdiction_key: 'CO-DIAN',
         },
       });
 
@@ -269,7 +288,19 @@ export class FiscalObligationService {
             data: {
               period_start: period.period_start,
               period_end: period.period_end,
-              due_date,
+              periodicity: dto.periodicity ?? null,
+              jurisdiction_key: 'CO-DIAN',
+              due_date: calendar.due_date,
+              due_date_verified: calendar.due_date_verified,
+              due_date_source: calendar.due_date_source,
+              ...(calendar.due_date_verified &&
+              existing.status === 'blocked' &&
+              existing.blocking_reason?.startsWith(CALENDAR_BLOCK_PREFIX)
+                ? { status: 'pending', blocking_reason: null }
+                : !calendar.due_date_verified &&
+                    ['pending', 'in_progress', 'ready'].includes(existing.status)
+                  ? { status: 'blocked', blocking_reason: blockingReason }
+                  : {}),
               source: 'generated',
             },
           });
@@ -284,6 +315,10 @@ export class FiscalObligationService {
               period_year: period.period_year,
               period_month: period.period_month,
               period_quarter: period.period_quarter,
+              periodicity: dto.periodicity ?? null,
+              due_date_verified: calendar.due_date_verified,
+              due_date_source: calendar.due_date_source,
+              calendar_warning: calendar.warning,
               force_refresh: dto.force_refresh ?? false,
             },
           });
@@ -305,7 +340,13 @@ export class FiscalObligationService {
           period_quarter: period.period_quarter,
           period_start: period.period_start,
           period_end: period.period_end,
-          due_date,
+          periodicity: dto.periodicity ?? null,
+          jurisdiction_key: 'CO-DIAN',
+          due_date: calendar.due_date,
+          due_date_verified: calendar.due_date_verified,
+          due_date_source: calendar.due_date_source,
+          status: calendar.due_date_verified ? 'pending' : 'blocked',
+          blocking_reason: blockingReason,
           source: 'generated',
           created_by_user_id: RequestContextService.getUserId(),
         },
@@ -320,6 +361,10 @@ export class FiscalObligationService {
           period_year: period.period_year,
           period_month: period.period_month,
           period_quarter: period.period_quarter,
+          periodicity: dto.periodicity ?? null,
+          due_date_verified: calendar.due_date_verified,
+          due_date_source: calendar.due_date_source,
+          calendar_warning: calendar.warning,
         },
       });
       created_or_updated.push(created);
@@ -394,6 +439,7 @@ export class FiscalObligationService {
       where: {
         status: { in: ['pending', 'in_progress', 'blocked', 'ready'] },
         due_date: { lt: new Date() },
+        due_date_verified: true,
       },
       select: {
         id: true,
@@ -543,9 +589,13 @@ export class FiscalObligationService {
             })
           : null;
 
-    const settings = (settingsRow?.settings as any) || {};
-    return settings.fiscal_data && typeof settings.fiscal_data === 'object'
-      ? (settings.fiscal_data as ContextFiscalData)
+    const settings = settingsRow?.settings;
+    const fiscalData =
+      settings && typeof settings === 'object' && 'fiscal_data' in settings
+        ? settings.fiscal_data
+        : null;
+    return fiscalData && typeof fiscalData === 'object'
+      ? (fiscalData as ContextFiscalData)
       : null;
   }
 
@@ -609,16 +659,43 @@ export class FiscalObligationService {
     return { typed, hasUntypedLegacy };
   }
 
-  private resolveDueDate(
+  private async resolveDeadline(
+    context: FiscalOperationsContext,
     type: fiscal_obligation_type_enum,
-    periodEnd: Date,
-    year: number,
-  ): Date {
-    if (type === 'exogenous_report') return defaultAnnualDueDate(year, 4, 30);
-    if (type === 'income_tax_precierre')
-      return defaultAnnualDueDate(year, 3, 31);
-    if (type === 'annual_close') return defaultAnnualDueDate(year, 4, 30);
-    return defaultMonthlyDueDate(periodEnd);
+    period: ReturnType<typeof resolveFiscalPeriodRange>,
+    periodicity: GenerateFiscalObligationsDto['periodicity'] | null,
+  ) {
+    const fiscalData = await this.fiscalDataForContext(context);
+    const identity = tryResolveTenantFiscalIdentity({
+      nit: context.accounting_entity?.tax_id ?? '',
+      fiscal_data: fiscalData as Record<string, unknown> | null,
+      entity: context.accounting_entity,
+    }).identity;
+    const responsibilities = Array.isArray(identity.tax_responsibilities)
+      ? identity.tax_responsibilities.map(normalizeFiscalResponsibilityCode)
+      : [];
+    const taxpayer_regime = responsibilities.includes('O-47')
+      ? 'SIMPLE'
+      : identity.tax_regime ?? null;
+
+    if (!identity.nit) {
+      return {
+        due_date: null,
+        due_date_verified: false,
+        due_date_source: null,
+        warning: 'Tenant NIT is missing from fiscal_data and accounting_entity.tax_id.',
+      };
+    }
+
+    return this.taxCalendar.resolve({
+      type,
+      period_year: period.period_year,
+      period_month: period.period_month,
+      periodicity: periodicity ?? null,
+      nit: identity.nit,
+      jurisdiction_key: 'CO-DIAN',
+      taxpayer_regime,
+    });
   }
 
   private whereForContexts(

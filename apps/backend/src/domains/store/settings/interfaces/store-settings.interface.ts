@@ -587,6 +587,9 @@ export interface StoreSettings {
   // Vexi - the AI assistant's master switch
   vexi?: VexiSettings;
 
+  // Vex - the whole-business agent's master switch, independent from Vexi's
+  vex?: VexSettings;
+
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & display settings
   promotions?: PromotionsSettings;
 
@@ -631,6 +634,19 @@ export interface VexiSettings {
    * the panel toggles chat ⇄ voice at runtime regardless of which engine answers.
    */
   voice_engine?: 'realtime' | 'pipeline';
+}
+
+/**
+ * Master switch for the Vex agent.
+ *
+ * Same fail-closed contract as `VexiSettings`, different agent: Vex burns far
+ * more budget per turn (longer iterations, bigger catalog), so a store that
+ * only opted into the Vexi dock must not inherit Vex. Defaults to `false`;
+ * only an explicit `true` — persisted in this block — enables it. Absent
+ * block, absent settings row and explicit `false` all read as off.
+ */
+export interface VexSettings {
+  enabled: boolean;
 }
 
 export interface GeneralSettings {

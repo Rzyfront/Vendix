@@ -3,6 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { InvoiceEmitReadinessFinding } from '../../invoicing/services/invoice-emit-readiness.service';
 
 /**
  * Los cinco desenlaces que el cajero necesita distinguir. Espejo exacto de
@@ -48,6 +49,11 @@ export interface PosFiscalStatus {
   } | null;
   contingency_deadline: string | null;
   invoice_data_token: string | null;
+  /**
+   * Lo que falta para emitir (sólo blockers), con `target`/`cta` para llevar al
+   * usuario a corregirlo. Opcional: un backend anterior no lo envía.
+   */
+  requirements?: InvoiceEmitReadinessFinding[];
 }
 
 /**

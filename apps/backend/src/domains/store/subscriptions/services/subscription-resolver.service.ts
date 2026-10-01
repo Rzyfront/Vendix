@@ -49,6 +49,29 @@ function assertValidStoreId(storeId: number): asserts storeId is number {
   }
 }
 
+/** `*` is the unrestricted tool scope; an absent list is unrestricted too. */
+function intersectToolScopes(
+  base?: string[],
+  restriction?: string[],
+): string[] | undefined {
+  if (!base) return restriction ? [...restriction] : undefined;
+  if (!restriction) return [...base];
+  if (base.includes('*')) return [...restriction];
+  if (restriction.includes('*')) return [...base];
+  const restricted = new Set(restriction);
+  return base.filter((name) => restricted.has(name));
+}
+
+/** Promotional scope is a union, so either unrestricted side wins. */
+function unionToolScopes(
+  base?: string[],
+  overlay?: string[],
+): string[] | undefined {
+  if (!base || !overlay) return undefined;
+  if (base.includes('*') || overlay.includes('*')) return ['*'];
+  return [...new Set([...base, ...overlay])];
+}
+
 /**
  * Materializes the effective AI feature flags for a store's subscription.
  *
@@ -336,12 +359,16 @@ export class SubscriptionResolverService {
       };
 
       // Numeric caps: take min of defined values (partner can only LOWER).
+      // `monthly_tool_calls_cap` budgets the agent features (`tool_agents`,
+      // `vex_agent`): without it in this list a partner override touching the
+      // feature would silently drop the cap while keeping `enabled`.
       const capFields: Array<keyof FeatureConfig> = [
         'monthly_tokens_cap',
         'daily_messages_cap',
         'retention_days',
         'indexed_docs_cap',
         'monthly_jobs_cap',
+        'monthly_tool_calls_cap',
       ];
       for (const f of capFields) {
         const bv = b[f];
@@ -354,13 +381,13 @@ export class SubscriptionResolverService {
         // If partner sets a cap where base had none, IGNORE (can't raise).
       }
 
-      // tools_allowed: intersection if both defined.
-      if (Array.isArray(b.tools_allowed) && Array.isArray(o.tools_allowed)) {
-        const oSet = new Set(o.tools_allowed);
-        merged.tools_allowed = b.tools_allowed.filter((t) => oSet.has(t));
-      } else if (Array.isArray(b.tools_allowed)) {
-        merged.tools_allowed = b.tools_allowed;
-      }
+      // An absent list and '*' both mean all tools. The partner may restrict
+      // either one, but must never turn a declared empty list into full access.
+      const restrictedTools = intersectToolScopes(
+        b.tools_allowed,
+        o.tools_allowed,
+      );
+      if (restrictedTools) merged.tools_allowed = restrictedTools;
 
       if (b.period) merged.period = b.period;
 
@@ -405,12 +432,15 @@ export class SubscriptionResolverService {
         degradation: b!.degradation ?? o!.degradation,
       };
 
+      // Same list as the partner path plus union semantics: the promo keeps
+      // the higher agent budget instead of dropping the cap it did not set.
       const capFields: Array<keyof FeatureConfig> = [
         'monthly_tokens_cap',
         'daily_messages_cap',
         'retention_days',
         'indexed_docs_cap',
         'monthly_jobs_cap',
+        'monthly_tool_calls_cap',
       ];
       for (const f of capFields) {
         const bv = b![f];
@@ -424,11 +454,11 @@ export class SubscriptionResolverService {
         }
       }
 
-      const bTools = Array.isArray(b!.tools_allowed) ? b!.tools_allowed : [];
-      const oTools = Array.isArray(o!.tools_allowed) ? o!.tools_allowed : [];
-      if (bTools.length || oTools.length) {
-        merged.tools_allowed = Array.from(new Set([...bTools, ...oTools]));
-      }
+      // Disabled features contribute no tools to the promotional union.
+      const bTools = b!.enabled ? b!.tools_allowed : [];
+      const oTools = o!.enabled ? o!.tools_allowed : [];
+      const combinedTools = unionToolScopes(bTools, oTools);
+      if (combinedTools) merged.tools_allowed = combinedTools;
 
       if (b!.period || o!.period) merged.period = b!.period ?? o!.period;
 

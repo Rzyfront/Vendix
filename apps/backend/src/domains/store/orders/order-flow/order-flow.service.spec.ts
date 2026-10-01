@@ -7376,6 +7376,75 @@ describe('OrderFlowService.confirmPayment — rechaza al personal sobre pago man
     expect(flip).toBeDefined();
     expect(flip[0].where).toMatchObject({ id: 5010, state: 'pending' });
   });
+
+  // Incidente orden 9117: pending_payment, 0 pagos, "Confirmar Pago" la movía a
+  // processing sin asentar dinero.
+  const unpaidOrder = (overrides: Record<string, unknown> = {}) => {
+    const grandTotal = new Prisma.Decimal('66000');
+    return buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      total_paid: new Prisma.Decimal('0'),
+      remaining_balance: grandTotal,
+      payments: [],
+      ...overrides,
+    });
+  };
+
+  it('personal + sin pago pending y saldo abierto → 409 ORD_CONFIRM_PAYMENT_NO_PAYMENT_001, sin escribir', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder());
+
+    const error: any = await service.confirmPayment(ORDER_ID).catch((failure: any) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_CONFIRM_PAYMENT_NO_PAYMENT_001');
+    expect(error.getStatus()).toBe(409);
+    expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('personal + pago succeeded parcial y sin pending → mismo 409', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder({
+      payments: [buildPayment({ id: 5011, state: 'succeeded', amount: new Prisma.Decimal('1000') })],
+    }));
+
+    const error: any = await service.confirmPayment(ORDER_ID).catch((failure: any) => failure);
+
+    expect(error.errorCode).toBe('ORD_CONFIRM_PAYMENT_NO_PAYMENT_001');
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('personal + orden ya saldada (succeeded = total) → confirma y pasa a processing', async () => {
+    const paid = unpaidOrder({
+      payments: [buildPayment({ id: 5012, state: 'succeeded', amount: new Prisma.Decimal('66000') })],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(paid);
+
+    const result: any = await service.confirmPayment(ORDER_ID);
+
+    expect(result.payment_confirmation_applied).toBe(true);
+    const claim = prismaMock.orders.updateMany.mock.calls.find(
+      (call: any[]) => call[0]?.data?.state === 'processing',
+    );
+    expect(claim).toBeDefined();
+  });
+
+  it('personal + venta a crédito (payment_form 2) sin pagos → no se bloquea', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder({ payment_form: '2' }));
+
+    const result: any = await service.confirmPayment(ORDER_ID);
+
+    expect(result.payment_confirmation_applied).toBe(true);
+  });
+
+  it('webhook + sin pago pending → no aplica la puerta de pago', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder());
+
+    const result: any = await service.confirmPayment(ORDER_ID, { source: 'webhook' });
+
+    expect(result.payment_confirmation_applied).toBe(true);
+  });
 });
 
 /**

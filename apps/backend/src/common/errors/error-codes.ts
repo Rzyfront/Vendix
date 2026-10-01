@@ -1565,6 +1565,14 @@ export const ErrorCodes = {
     devMessage:
       'El pago pendiente es de confirmación manual: regístralo por flow/pay con el monto y método recibidos; solo el webhook puede confirmarlo.',
   },
+  // Confirmar pago sin pago registrado: la orden no tiene un pago `pending` y
+  // aún debe saldo; el personal debe registrar el cobro por `flow/pay`. 409.
+  ORD_CONFIRM_PAYMENT_NO_PAYMENT_001: {
+    code: 'ORD_CONFIRM_PAYMENT_NO_PAYMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden no tiene un pago registrado. Usa Registrar pago con el monto y método recibidos.',
+  },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
   // Actualizar) antes de cobrar.
@@ -2244,6 +2252,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage:
       'Nominative acquirer (has document number and name) without a declared document type',
+  },
+  INVOICING_ORDER_UNPAID_001: {
+    code: 'INVOICING_ORDER_UNPAID_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden tiene saldo pendiente; registra el pago antes de emitir la factura, o márcala como venta a crédito.',
   },
   INVOICING_STATUS_001: {
     code: 'INVOICING_STATUS_001',

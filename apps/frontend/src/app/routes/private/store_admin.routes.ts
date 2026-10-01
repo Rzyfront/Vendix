@@ -6,7 +6,8 @@ import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard
 import { onboardingGuard } from '../../core/guards/onboarding.guard';
 import { subscriptionManagementGuard } from '../../core/guards/subscription-management.guard';
 import { manageUsersGuard } from '../../core/guards/manage-users.guard';
-import { vexiSettingsGuard } from '../../core/guards/vexi-settings.guard';
+import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
+import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
 import {
   panelUiGuard,
@@ -22,6 +23,17 @@ import { layawayReducer } from '../../private/modules/store/layaway/state/reduce
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
 
 export const storeAdminRoutes: Routes = [
+  // Agente Vex — vista a pantalla completa, fuera del layout admin.
+  // `vexAccessGuard` exige owner/admin + `vex.enabled`; el gate del plan
+  // (`vex_agent`) lo aplica el backend y no se duplica aquí.
+  {
+    path: 'admin/vex',
+    canActivate: [AuthGuard, onboardingGuard, vexAccessGuard],
+    loadComponent: () =>
+      import('../../private/modules/store/vex/vex-page.component').then(
+        (c) => c.VexPageComponent,
+      ),
+  },
   {
     path: 'admin',
     loadComponent: () =>
@@ -670,12 +682,21 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
-            path: 'vexi',
-            canActivate: [vexiSettingsGuard],
+            // "Agentes IA": contenedor con pestañas Vexi y Vex.
+            path: 'ai-agents',
+            canActivate: [aiAgentsSettingsGuard],
             loadComponent: () =>
-              import('../../private/modules/store/settings/vexi/vexi-settings.component').then(
-                (c) => c.VexiSettingsComponent,
+              import('../../private/modules/store/settings/ai-agents/ai-agents-settings.component').then(
+                (c) => c.AiAgentsSettingsComponent,
               ),
+          },
+          {
+            // Ruta vieja de la config de Vexi. Redirige sin pestaña, así que
+            // el contenedor abre la de Vexi por defecto y ningún enlace
+            // entrante se rompe.
+            path: 'vexi',
+            pathMatch: 'full',
+            redirectTo: 'ai-agents',
           },
           {
             path: 'domains/:id/setup',
