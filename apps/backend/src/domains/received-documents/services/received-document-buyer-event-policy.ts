@@ -50,6 +50,8 @@ export function evaluateBuyerEventReadiness(input: BuyerEventReadinessInput): Bu
       break;
     case '031':
       if (!input.claim_reason?.trim()) blockers.push('claim_reason_required');
+      if (!input.has_prior_acknowledgement) blockers.push('prior_acknowledgement_required');
+      if (!input.has_prior_goods_receipt) blockers.push('prior_goods_receipt_required');
       if (input.has_prior_acceptance) blockers.push('acceptance_already_recorded');
       break;
     case '032':

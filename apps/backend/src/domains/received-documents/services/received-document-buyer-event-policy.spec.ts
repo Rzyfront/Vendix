@@ -21,7 +21,11 @@ const validInput = (event_code: string): BuyerEventReadinessInput => ({
 describe('evaluateBuyerEventReadiness', () => {
   it.each(['030', '031', '032', '033'])('permits eligible event %s', (event_code) => {
     const input = validInput(event_code);
-    if (event_code === '031') input.claim_reason = 'Invoice amount differs';
+    if (event_code === '031') {
+      input.claim_reason = 'Invoice amount differs';
+      input.has_prior_acknowledgement = true;
+      input.has_prior_goods_receipt = true;
+    }
     if (event_code === '033') {
       input.has_prior_acknowledgement = true;
       input.has_prior_goods_receipt = true;
@@ -78,6 +82,18 @@ describe('evaluateBuyerEventReadiness', () => {
     input.has_prior_goods_receipt = true;
     input.has_prior_claim = true;
     expect(evaluateBuyerEventReadiness(input).blockers).toContain('claim_already_recorded');
+  });
+
+  it('blocks event 031 unless both acknowledgement and goods receipt occurred first', () => {
+    const missingAcknowledgement = validInput('031');
+    missingAcknowledgement.claim_reason = 'Invoice amount differs';
+    missingAcknowledgement.has_prior_goods_receipt = true;
+    expect(evaluateBuyerEventReadiness(missingAcknowledgement).blockers).toContain('prior_acknowledgement_required');
+
+    const missingGoodsReceipt = validInput('031');
+    missingGoodsReceipt.claim_reason = 'Invoice amount differs';
+    missingGoodsReceipt.has_prior_acknowledgement = true;
+    expect(evaluateBuyerEventReadiness(missingGoodsReceipt).blockers).toContain('prior_goods_receipt_required');
   });
 
   it('requires exact normalized receiver/tenant NIT equality', () => {
