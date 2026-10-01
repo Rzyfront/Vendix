@@ -91,7 +91,7 @@ const CATEGORY_TINT: Record<VexLogCategory, string> = {
           </button>
         </div>
 
-        <div class="flex gap-2 overflow-x-auto px-3 pb-2 shrink-0">
+        <div class="flex gap-2 overflow-x-auto scrollbar-none px-3 pb-2 shrink-0">
           <button
             type="button"
             class="shrink-0 min-h-10 px-3 rounded-full text-sm border"
