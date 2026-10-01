@@ -71,13 +71,18 @@ export class VexController {
   /**
    * Approves a whole plan with one click and mints its single-use token.
    *
-   * The approved steps must match the conversation's active plan id; each
-   * step is classified so the card labels which steps the token covers and
-   * which always re-confirm. Deliberately NOT behind `AiAccessGuard`: the
-   * token was proposed inside an already-gated turn, no provider call happens
-   * here, and re-asking the plan question could strand an approval the person
-   * already reviewed. Terminal-state subscriptions are still enforced on this
-   * POST by the global `StoreOperationsGuard`.
+   * The approved plan must match the conversation's active plan id; the rest
+   * is owned by `PlanApprovalService.approvePlan`, which verifies the caller
+   * owns the thread (403 otherwise) and each client step against the hashes
+   * the proposing turn persisted server-side — the body only SELECTS the
+   * subset, it never declares the approved content. The step hashes are
+   * written by the loop at proposal time, deliberately NOT here: persisting
+   * client steps at approve time would let altered arguments bind their own
+   * token. Deliberately NOT behind `AiAccessGuard`: the token was proposed
+   * inside an already-gated turn, no provider call happens here, and re-asking
+   * the plan question could strand an approval the person already reviewed.
+   * Terminal-state subscriptions are still enforced on this POST by the global
+   * `StoreOperationsGuard`.
    */
   @Post('plans/:id/approve')
   async approvePlan(
@@ -92,27 +97,28 @@ export class VexController {
       );
     }
 
-    const steps = dto.steps.map((s) => ({
-      order: s.order,
-      tool: s.tool,
-      args: s.arguments as Record<string, any>,
-    }));
-    const { covered, reconfirm } = this.planApproval.classifySteps(steps);
     const userId = RequestContextService.getContext()?.user_id;
-    // Persisted next to the plan so a later turn can prove the approved
-    // arguments did not drift; the token itself carries the same hashes.
-    await this.planState.setStepHashes(dto.conversation_id, steps);
-    const token = await this.planApproval.issuePlanToken(planId, userId, steps);
+    const approved = await this.planApproval.approvePlan({
+      planId,
+      conversationId: dto.conversation_id,
+      userId,
+      clientSteps: dto.steps.map((s) => ({
+        order: s.order,
+        tool: s.tool,
+        args: s.arguments as Record<string, any>,
+      })),
+    });
 
     return this.responseService.success(
       {
         plan_id: planId,
-        plan_token: token,
+        plan_token: approved.plan_token,
         expires_in_seconds: PLAN_TOKEN_TTL_SECONDS,
-        covered_steps: covered.map((s) => s.order),
-        reconfirm_steps: reconfirm.map((s) => s.order),
+        covered_steps: approved.covered_steps,
+        reconfirm_steps: approved.reconfirm_steps,
+        ignored_steps: approved.ignored_steps,
       },
-      reconfirm.length > 0
+      approved.reconfirm_steps.length > 0
         ? 'Plan aprobado. Los pasos irreversibles pedirán su propia confirmación.'
         : 'Plan aprobado.',
     );

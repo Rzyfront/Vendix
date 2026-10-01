@@ -4,6 +4,9 @@ import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../../../../ai-engine/tools/bridge/capability-registry.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { VexiPlanStateService } from '../../vexi/vexi-plan-state.service';
+import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 /** One approval covers the whole plan; 15 minutes to run it before re-asking. */
 export const PLAN_TOKEN_TTL_SECONDS = 900;
@@ -25,6 +28,26 @@ export interface PlanApprovalStep {
 export interface ClassifiedPlanSteps {
   covered: PlanApprovalStep[];
   reconfirm: PlanApprovalStep[];
+}
+
+export interface ApprovePlanInput {
+  planId: string;
+  conversationId: number;
+  userId: number | undefined;
+  /**
+   * Client-declared steps (the card's selection). Used ONLY as a subset
+   * selector: each entry's content is verified against the server hashes the
+   * proposing turn persisted, and anything unverifiable is ignored.
+   */
+  clientSteps: PlanApprovalStep[];
+}
+
+export interface ApprovePlanResult {
+  plan_token: string;
+  covered_steps: number[];
+  reconfirm_steps: number[];
+  /** Client orders that matched no server hash (altered, invented, or stale). */
+  ignored_steps: number[];
 }
 
 /**
@@ -100,7 +123,80 @@ export class PlanApprovalService {
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly toolRegistry: AIToolRegistry,
+    private readonly planState: VexiPlanStateService,
+    private readonly prisma: StorePrismaService,
   ) {}
+
+  /**
+   * Approves a whole plan with one click and mints its single-use token.
+   *
+   * Three gates, in order:
+   *
+   * 1. Ownership — the approver must own the thread. A foreign id answers 403
+   *    even when the row exists, and a missing row answers the same, so a
+   *    cross-store id reveals nothing.
+   * 2. Server verification — each client step is checked against the hashes
+   *    the proposing turn persisted (`VexiPlanStateService`, written by the
+   *    loop, never by the client). The client steps only SELECT the subset
+   *    (unchecking a step is allowed); their content is proved, not trusted —
+   *    altered, invented or stale entries land in `ignored_steps` and never
+   *    reach the token. Nothing verifiable → 409: re-ask Vex to propose.
+   * 3. Classification — the VERIFIED subset splits into covered (reversibles,
+   *    which later execute with no further confirmation) vs reconfirm
+   *    (irreversibles, which always get their own confirmation card).
+   *
+   * The token binds (user, plan, ORDERED verified hashes) with a 15-minute
+   * TTL; each step redeems independently through `redeemPlanStep`.
+   */
+  async approvePlan(input: ApprovePlanInput): Promise<ApprovePlanResult> {
+    const { planId, conversationId, userId, clientSteps } = input;
+
+    const conversation = await this.prisma.ai_conversations.findFirst({
+      where: { id: conversationId },
+      select: { user_id: true },
+    });
+    if (!conversation || conversation.user_id !== userId) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_PERM_001,
+        'Este plan pertenece a otra conversación.',
+      );
+    }
+
+    const server = await this.planState.getStepHashes(conversationId);
+    const byOrder = new Map(server.map((h) => [h.order, h]));
+    const verified: PlanApprovalStep[] = [];
+    const ignored: number[] = [];
+    for (const step of clientSteps) {
+      const hash = byOrder.get(step.order);
+      if (
+        hash &&
+        hash.tool === step.tool &&
+        hash.args_hash === this.stepHash(step.tool, step.args)
+      ) {
+        verified.push(step);
+      } else {
+        ignored.push(step.order);
+      }
+    }
+    if (verified.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        server.length === 0
+          ? 'Este plan venció o se propuso antes de poder verificarse. Vuelve a pedirle a Vex que lo proponga.'
+          : 'Los pasos del plan cambiaron después de la propuesta. Vuelve a pedirle a Vex que lo proponga.',
+        { ignored_steps: ignored },
+      );
+    }
+
+    const { covered, reconfirm } = this.classifySteps(verified);
+    const token = await this.issuePlanToken(planId, userId, verified);
+    return {
+      plan_token: token,
+      covered_steps: covered.map((s) => s.order),
+      reconfirm_steps: reconfirm.map((s) => s.order),
+      ignored_steps: ignored,
+    };
+  }
 
   /**
    * Splits the approved steps into those the plan token covers and those that

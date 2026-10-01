@@ -10,6 +10,10 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
+import type {
+  AgentBlockSink,
+  AgentPlanApprovalHook,
+} from '../../../ai-engine/ai-agent.service';
 import { RAGService } from '../../../ai-engine/embeddings/rag.service';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
@@ -30,6 +34,8 @@ import { UserRole } from '../../auth/enums/user-role.enum';
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { SubscriptionGateConfig } from '../subscriptions/config/subscription-gate.config';
 import { VexBlockService } from '../vex/services/vex-block.service';
+import { PlanApprovalService } from '../vex/services/plan-approval.service';
+import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
@@ -171,6 +177,14 @@ export class AIChatService {
     // the gate above: same positional-construction rule, and a Vex turn
     // without it simply sees no selection instead of failing.
     @Optional() private readonly vexBlocks?: VexBlockService,
+    // Whole-plan approval hook + block sink (Vex only). Optional-trailing for
+    // the same rule: in production they resolve (`VexModule` exports the
+    // approval service; the confirmations live in the global `AIEngineModule`
+    // next to the plan state already injected above). A Vex turn without them
+    // still runs — the loop accumulates and classifies locally — but its plan
+    // cannot persist hashes, so approve will ask to re-propose.
+    @Optional() private readonly planApproval?: PlanApprovalService,
+    @Optional() private readonly confirmations?: VexiConfirmationService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -1194,6 +1208,8 @@ export class AIChatService {
    *   con presupuesto por defecto en vez del suyo).
    * - `conversation_id`: el loop lo usa como default de las `vex_*` que
    *   guardan bloques, para que el modelo no tenga que adivinarlo.
+   * - `plan_approval` + `block_sink`: SOLO cuando el agente es `vex`. Vexi y
+   *   los demás agentes reciben exactamente lo de antes, sin esas llaves.
    */
   private resolveAgentLoopArgs(
     agent: ResolvedChatAgent | null,
@@ -1207,6 +1223,8 @@ export class AIChatService {
     agent_allowed_tools?: string[];
     agent_denied_tools?: string[];
     conversation_id?: number;
+    plan_approval?: AgentPlanApprovalHook;
+    block_sink?: AgentBlockSink;
   } {
     const appKey = agent?.app_key || conversation.app_key || 'chat_assistant';
     if (!agent) {
@@ -1223,15 +1241,115 @@ export class AIChatService {
         agent.denied_tools.length > 0 ? agent.denied_tools : undefined,
       conversation_id: conversation.id,
     };
+    // Solo Vex propone planes completos y compacta a bloques: el cableado viaja
+    // únicamente en sus turnos, y ausente (no `undefined`) en los demás para
+    // que su forma siga byte-idéntica a la de antes.
+    const vexWiring =
+      agent.key === VEX_AGENT_KEY ? this.vexLoopWiring(conversation) : {};
     if (!agent.app_key && !conversation.app_key && agent.system_prompt) {
       return {
         system_prompt: agent.system_prompt,
         tools,
         max_iterations,
         ...scope,
+        ...vexWiring,
       };
     }
-    return { app_key: appKey, tools, max_iterations, ...scope };
+    return { app_key: appKey, tools, max_iterations, ...scope, ...vexWiring };
+  }
+
+  /**
+   * Cableado Vex del loop: hook de aprobación de plan + sink de bloques.
+   *
+   * Cada pata se omite (no se pasa a medias) cuando su servicio no resolvió:
+   * un hook sin clasificador o sin persistencia de hashes propondría un plan
+   * que approve rechazaría entero, y un sink sin servicio es indistinguible de
+   * no compactar. El turno sigue corriendo en ambos casos.
+   */
+  private vexLoopWiring(conversation: ConversationWithMessages): {
+    plan_approval?: AgentPlanApprovalHook;
+    block_sink?: AgentBlockSink;
+  } {
+    const wiring: {
+      plan_approval?: AgentPlanApprovalHook;
+      block_sink?: AgentBlockSink;
+    } = {};
+    const hook = this.planApprovalHookFor(conversation);
+    if (hook) {
+      wiring.plan_approval = hook;
+    } else {
+      this.logger.warn(
+        `Vex turn on conversation ${conversation.id} runs without the plan-approval hook (PlanApprovalService/VexiConfirmationService unresolved) — its plan cannot persist step hashes.`,
+      );
+    }
+    const sink = this.blockSinkFor(conversation);
+    if (sink) {
+      wiring.block_sink = sink;
+    } else {
+      this.logger.warn(
+        `Vex turn on conversation ${conversation.id} runs without the block sink (VexBlockService unresolved) — oversized results compact without a block_id.`,
+      );
+    }
+    return wiring;
+  }
+
+  /**
+   * Hook de aprobación que el loop usa en DOS fases: en la propuesta acumula
+   * (clasifica + persiste hashes vía `PlanApprovalService` +
+   * `VexiPlanStateService`); en la ejecución redime contra el token.
+   *
+   * Sin token en un turno que propone: el token lo acuña approve y vuelve con
+   * la continuación de aprobación, así que hasta entonces todo redeem responde
+   * `missing` y cada paso cae a su propia tarjeta — la dirección segura.
+   */
+  private planApprovalHookFor(
+    conversation: ConversationWithMessages,
+  ): AgentPlanApprovalHook | undefined {
+    if (!this.planApproval || !this.confirmations) return undefined;
+    const planApproval = this.planApproval;
+    const confirmations = this.confirmations;
+    const conversationId = conversation.id;
+    return {
+      redeem: async () => 'missing' as const,
+      issueSingleUse: (tool, args) =>
+        confirmations.issue(
+          tool,
+          args,
+          RequestContextService.getContext()?.user_id,
+        ),
+      classifyProposedSteps: (steps) => planApproval.classifySteps(steps),
+      saveProposedSteps: async (steps) => {
+        await this.planState.setStepHashes(conversationId, steps);
+      },
+    };
+  }
+
+  /**
+   * Dónde el loop deja los payloads que no caben en la ventana (>6000
+   * caracteres): bloques `markdown` bajo esta conversación, vía
+   * `VexBlockService` tal cual (sin tocarlo).
+   *
+   * Sin `message_id`: la fila del asistente se crea cuando el stream cierra,
+   * después del turno — el bloque nace huérfano de mensaje y el paso 6
+   * (persistencia `metadata.blocks`) lo enlaza.
+   */
+  private blockSinkFor(
+    conversation: ConversationWithMessages,
+  ): AgentBlockSink | undefined {
+    if (!this.vexBlocks) return undefined;
+    const blocks = this.vexBlocks;
+    const conversationId = conversation.id;
+    return {
+      save: async ({ conversation_id, kind, spec, data }) => {
+        const row = await blocks.create({
+          conversation_id: conversation_id ?? conversationId,
+          kind,
+          spec,
+          data: data as Record<string, any>,
+        });
+        return row.id;
+      },
+    };
   }
 
   /**

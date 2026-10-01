@@ -56,6 +56,8 @@ function build(opts: {
   vexEnabled?: boolean;
   access?: Record<string, unknown>;
   enforce?: boolean;
+  /** Resolves the Vex-only services (blocks, plan approval, confirmations). */
+  wireVex?: boolean;
 }) {
   const prisma: any = {
     ai_conversations: {
@@ -98,12 +100,30 @@ function build(opts: {
     get: jest.fn().mockResolvedValue(opts.paused ?? opts.plan ?? null),
     markCurrentChangeStep: jest.fn().mockResolvedValue(null),
     createHook: jest.fn().mockReturnValue({ hook: true }),
+    setStepHashes: jest.fn().mockResolvedValue([]),
   };
   const streamIntents: any = {
     consume: jest.fn(),
     claimTurn: jest.fn().mockResolvedValue(undefined),
     isCurrentTurn: jest.fn().mockResolvedValue(true),
   };
+  const vexBlocks: any = opts.wireVex
+    ? {
+        recentSelections: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({ id: 'block-1' }),
+      }
+    : undefined;
+  const planApproval: any = opts.wireVex
+    ? {
+        classifySteps: jest.fn((steps: any[]) => ({
+          covered: steps,
+          reconfirm: [],
+        })),
+      }
+    : undefined;
+  const confirmations: any = opts.wireVex
+    ? { issue: jest.fn().mockResolvedValue('su-1') }
+    : undefined;
   const service = new AIChatService(
     prisma,
     {
@@ -126,6 +146,9 @@ function build(opts: {
     planState,
     { canUseAIFeature } as any,
     gateConfig as any,
+    vexBlocks,
+    planApproval,
+    confirmations,
   );
   return {
     service,
@@ -138,6 +161,9 @@ function build(opts: {
     findVexSettings,
     canUseAIFeature,
     buildSnapshot,
+    vexBlocks,
+    planApproval,
+    confirmations,
   };
 }
 
@@ -705,5 +731,138 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
       { metadata: { equals: Prisma.AnyNull } },
       { NOT: { metadata: { path: ['agent_key'], equals: 'vex' } } },
     ]);
+  });
+});
+
+describe('AIChatService — cableado de plan Vex (rx3)', () => {
+  const vexRow = {
+    key: 'vex',
+    app_key: 'vex_assistant',
+    system_prompt: null,
+    allowed_tools: [],
+    max_iterations: 40,
+    is_active: true,
+  };
+  const vexThread = { metadata: { agent_key: 'vex' } };
+  const vexiRow = {
+    key: 'vexi',
+    app_key: 'chat_assistant',
+    system_prompt: null,
+    allowed_tools: ['list_orders'],
+    max_iterations: 9,
+    is_active: true,
+  };
+
+  const asOwner = () =>
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      user_id: 9,
+      organization_id: 1,
+      store_id: 1,
+      roles: ['owner'],
+    } as any);
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('turno SSE vex recibe plan_approval y block_sink definidos y cableados', async () => {
+    asOwner();
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+
+    const params = b.run.mock.calls[0][0];
+    expect(params.agent_key).toBe('vex');
+    expect(params.plan_approval).toBeDefined();
+    expect(params.block_sink).toBeDefined();
+
+    // El hook respalda: classify → PlanApprovalService, save → setStepHashes.
+    params.plan_approval.classifyProposedSteps([
+      { order: 1, tool: 'create_customer', args: {} },
+    ]);
+    expect(b.planApproval.classifySteps).toHaveBeenCalledWith([
+      { order: 1, tool: 'create_customer', args: {} },
+    ]);
+    await params.plan_approval.saveProposedSteps([
+      { order: 1, tool: 'create_customer', args: {} },
+    ]);
+    expect(b.planState.setStepHashes).toHaveBeenCalledWith(7, [
+      { order: 1, tool: 'create_customer', args: {} },
+    ]);
+    // Proposing turn (sin token): todo redeem responde missing.
+    await expect(
+      params.plan_approval.redeem('create_customer', {}),
+    ).resolves.toBe('missing');
+
+    // El sink persiste bajo la conversación vía VexBlockService.
+    const id = await params.block_sink.save({
+      kind: 'markdown',
+      data: { text: 'x'.repeat(7000) },
+    });
+    expect(id).toBe('block-1');
+    expect(b.vexBlocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation_id: 7, kind: 'markdown' }),
+    );
+  });
+
+  it('turno sync vex también recibe hook y sink', async () => {
+    asOwner();
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    await b.service.sendMessage(7, { content: 'hola' });
+    const params = b.runSync.mock.calls[0][0];
+    expect(params.agent_key).toBe('vex');
+    expect(params.plan_approval).toBeDefined();
+    expect(params.block_sink).toBeDefined();
+  });
+
+  it('turno vexi no recibe ni hook ni sink (sync y SSE)', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const b = build({ wireVex: true, agentRow: vexiRow });
+    await b.service.sendMessage(7, { content: 'hola' });
+    expect(b.runSync.mock.calls[0][0].agent_key).toBe('vexi');
+    expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('plan_approval');
+    expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('block_sink');
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    expect(b.run.mock.calls[0][0]).not.toHaveProperty('plan_approval');
+    expect(b.run.mock.calls[0][0]).not.toHaveProperty('block_sink');
+  });
+
+  it('turno vex sin servicios resueltos corre sin hook ni sink (degradado, no roto)', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    const params = b.run.mock.calls[0][0];
+    expect(params.agent_key).toBe('vex');
+    expect(b.run).toHaveBeenCalled();
+    expect(params).not.toHaveProperty('plan_approval');
+    expect(params).not.toHaveProperty('block_sink');
   });
 });

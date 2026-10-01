@@ -88,15 +88,43 @@ function makeRegistry() {
   return { get: jest.fn((name: string) => tools.get(name)) };
 }
 
+function makePlanState(
+  hashes: Array<{ order: number; tool: string; args_hash: string }> = [],
+) {
+  return {
+    getStepHashes: jest.fn(async () => hashes),
+    setStepHashes: jest.fn(async () => hashes),
+  };
+}
+
+function makePrisma(userId: number | null = 11) {
+  return {
+    ai_conversations: {
+      findFirst: jest.fn(async () =>
+        userId === null ? null : { user_id: userId },
+      ),
+    },
+  };
+}
+
 describe('PlanApprovalService', () => {
   let redis: ReturnType<typeof makeRedis>;
   let registry: ReturnType<typeof makeRegistry>;
+  let planState: ReturnType<typeof makePlanState>;
+  let prisma: ReturnType<typeof makePrisma>;
   let service: PlanApprovalService;
 
   beforeEach(() => {
     redis = makeRedis();
     registry = makeRegistry();
-    service = new PlanApprovalService(redis as any, registry as any);
+    planState = makePlanState();
+    prisma = makePrisma();
+    service = new PlanApprovalService(
+      redis as any,
+      registry as any,
+      planState as any,
+      prisma as any,
+    );
   });
 
   it('approves three reversible writes once and runs each exactly once', async () => {
@@ -351,6 +379,141 @@ describe('PlanApprovalService', () => {
         price: 1,
       }),
     ).resolves.toBe('unknown_step');
+  });
+
+  it('(rx3-f) approve de otro usuario → 403 y no acuña token', async () => {
+    const input = {
+      planId: 'plan-x',
+      conversationId: 7,
+      userId: 99,
+      clientSteps: [{ order: 1, tool: 'create_customer', args: { name: 'Acme' } }],
+    };
+    await expect(service.approvePlan(input)).rejects.toMatchObject({
+      errorCode: 'AUTH_PERM_001',
+    });
+    expect(redis.hset).not.toHaveBeenCalled();
+
+    // Fila inexistente (p. ej. otra tienda): el mismo 403, sin revelar nada.
+    prisma.ai_conversations.findFirst.mockResolvedValue(null);
+    await expect(
+      service.approvePlan({ ...input, userId: 11 }),
+    ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+    expect(redis.hset).not.toHaveBeenCalled();
+  });
+
+  it('(rx3-g) approve clasifica: reversibles cubiertos, irreversibles a reconfirmar', async () => {
+    const steps = [
+      { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
+      { order: 2, tool: 'send_invoice_dian', args: { order_id: 1046 } },
+    ];
+    planState.getStepHashes.mockResolvedValue(
+      steps.map((s) => ({
+        order: s.order,
+        tool: s.tool,
+        args_hash: stepHash(s.tool, s.args),
+      })),
+    );
+
+    const out = await service.approvePlan({
+      planId: 'plan-mix',
+      conversationId: 7,
+      userId: 11,
+      clientSteps: steps,
+    });
+
+    expect(out.covered_steps).toEqual([1]);
+    expect(out.reconfirm_steps).toEqual([2]);
+    expect(out.ignored_steps).toEqual([]);
+    expect(out.plan_token).toBeTruthy();
+    expect(redis.expire).toHaveBeenCalledWith(expect.any(String), 900);
+    // Círculo completo: el reversible ejecuta sin reconfirmar, el irreversible
+    // queda pendiente de su propia tarjeta.
+    await expect(
+      service.redeemPlanStep(out.plan_token, 'plan-mix', 11, 'create_customer', {
+        name: 'Acme',
+      }),
+    ).resolves.toBe('ok');
+    await expect(
+      service.redeemPlanStep(
+        out.plan_token,
+        'plan-mix',
+        11,
+        'send_invoice_dian',
+        { order_id: 1046 },
+      ),
+    ).resolves.toBe('irreversible');
+  });
+
+  it('(rx3-h) steps del cliente alterados se ignoran: el token solo cubre lo verificado', async () => {
+    const server = [
+      { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
+      { order: 2, tool: 'adjust_stock', args: { id: 7, qty: 2 } },
+    ];
+    planState.getStepHashes.mockResolvedValue(
+      server.map((s) => ({
+        order: s.order,
+        tool: s.tool,
+        args_hash: stepHash(s.tool, s.args),
+      })),
+    );
+
+    const out = await service.approvePlan({
+      planId: 'plan-alt',
+      conversationId: 7,
+      userId: 11,
+      clientSteps: [
+        { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
+        { order: 2, tool: 'adjust_stock', args: { id: 7, qty: 999 } },
+        { order: 3, tool: 'create_customer', args: { name: 'Inventado' } },
+      ],
+    });
+
+    expect(out.covered_steps).toEqual([1]);
+    expect(out.reconfirm_steps).toEqual([]);
+    expect(out.ignored_steps).toEqual([2, 3]);
+    await expect(
+      service.redeemPlanStep(out.plan_token, 'plan-alt', 11, 'create_customer', {
+        name: 'Acme',
+      }),
+    ).resolves.toBe('ok');
+    await expect(
+      service.redeemPlanStep(out.plan_token, 'plan-alt', 11, 'adjust_stock', {
+        id: 7,
+        qty: 999,
+      }),
+    ).resolves.toBe('unknown_step');
+  });
+
+  it('(rx3-i) sin hashes de servidor o nada verificable → 409 sin token', async () => {
+    await expect(
+      service.approvePlan({
+        planId: 'plan-stale',
+        conversationId: 7,
+        userId: 11,
+        clientSteps: [
+          { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
+        ],
+      }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+
+    planState.getStepHashes.mockResolvedValue([
+      {
+        order: 1,
+        tool: 'create_customer',
+        args_hash: stepHash('create_customer', { name: 'Acme' }),
+      },
+    ]);
+    await expect(
+      service.approvePlan({
+        planId: 'plan-tampered',
+        conversationId: 7,
+        userId: 11,
+        clientSteps: [
+          { order: 1, tool: 'create_customer', args: { name: 'Otro' } },
+        ],
+      }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+    expect(redis.hset).not.toHaveBeenCalled();
   });
 
   it('stores fields the Lua script expects', async () => {

@@ -501,7 +501,7 @@ describe('AIAgentService.runAgentStream', () => {
     expect(chat).toHaveBeenCalledTimes(11);
   });
 
-  it('(vex-iii) results over 6000 chars compact to summary+block_id+rows', async () => {
+  it('(vex-iii) vex results over 6000 chars compact to summary+block_id+rows', async () => {
     const rows = Array.from({ length: 50 }, (_, i) => ({
       id: i,
       name: `producto-${i}`,
@@ -512,7 +512,7 @@ describe('AIAgentService.runAgentStream', () => {
       .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_things')] }))
       .mockResolvedValueOnce(ok({ content: 'listo' }));
 
-    const { result } = await drain({});
+    const { result } = await drain({ agent_key: 'vex' });
 
     const stored = JSON.parse(result.tools_used[0].result);
     expect(stored.truncated).toBe(true);
@@ -530,6 +530,7 @@ describe('AIAgentService.runAgentStream', () => {
       .mockResolvedValueOnce(ok({ content: 'listo' }));
 
     const { result } = await drain({
+      agent_key: 'vex',
       block_sink: { save },
       conversation_id: 7,
     });
@@ -848,4 +849,199 @@ describe('AIAgentService.runAgentStream', () => {
     expect(executeTool).not.toHaveBeenCalled();
     expect(consumeAIQuota).not.toHaveBeenCalled();
   });
+
+  it('(rx3-a) vex proposing turn accumulates 3 writes into ONE plan_approval frame', async () => {
+    const proposal = (tool: string, args: any, token: string, preview: any) =>
+      new VendixHttpException(
+        ErrorCodes.AI_AGENT_005,
+        'requiere confirmación',
+        { tool, arguments: args, preview, confirmation_token: token } as any,
+      );
+    executeTool
+      .mockRejectedValueOnce(
+        proposal('create_expense', { total: 5 }, 'tok-1', {
+          target: 'gasto 5',
+        }),
+      )
+      .mockRejectedValueOnce(
+        proposal('create_expense', { total: 9 }, 'tok-2', {
+          target: 'gasto 9',
+        }),
+      )
+      .mockRejectedValueOnce(
+        proposal('send_invoice_dian', { id: 1 }, 'tok-3', {
+          target: 'factura 1',
+        }),
+      );
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'create_expense', { total: 5 }),
+            call('c2', 'create_expense', { total: 9 }),
+            call('c3', 'send_invoice_dian', { id: 1 }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo, tres pasos' }));
+
+    const classifyProposedSteps = jest.fn((steps: any[]) => ({
+      covered: steps.filter((s) => s.tool !== 'send_invoice_dian'),
+      reconfirm: steps.filter((s) => s.tool === 'send_invoice_dian'),
+    }));
+    const saveProposedSteps = jest.fn().mockResolvedValue(undefined);
+    const plan: AgentPlanHook = {
+      execute: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue(makePlan({ id: 'plan-9' })),
+    };
+
+    const { chunks, result } = await drain({
+      agent_key: 'vex',
+      plan,
+      plan_approval: {
+        redeem: jest.fn(),
+        issueSingleUse: jest.fn(),
+        classifyProposedSteps,
+        saveProposedSteps,
+      },
+    });
+
+    // Exactly ONE plan frame for the three writes — never one card per write.
+    const approvals = chunks.filter((c) => c.type === 'plan_approval');
+    expect(approvals).toHaveLength(1);
+    const frame = approvals[0].plan_approval!;
+    expect(frame.plan_id).toBe('plan-9');
+    expect(frame.steps).toHaveLength(3);
+    expect(frame.steps!.map((s) => [s.step_id, s.tool, s.irreversible])).toEqual(
+      [
+        ['s1', 'create_expense', false],
+        ['s2', 'create_expense', false],
+        ['s3', 'send_invoice_dian', true],
+      ],
+    );
+    expect(frame.steps![0].arguments).toEqual({ total: 5 });
+    expect(frame.covered_steps).toEqual([1, 2]);
+    expect(frame.reconfirm_steps).toEqual([3]);
+    // Server hashes persisted for approve-time verification (never the
+    // client's re-declaration).
+    expect(saveProposedSteps).toHaveBeenCalledWith([
+      { order: 1, tool: 'create_expense', args: { total: 5 } },
+      { order: 2, tool: 'create_expense', args: { total: 9 } },
+      { order: 3, tool: 'send_invoice_dian', args: { id: 1 } },
+    ]);
+    expect(classifyProposedSteps).toHaveBeenCalled();
+    // The turn closes with the plan receipt — no single-step card.
+    expect(result.pending_plan?.plan_id).toBe('plan-9');
+    expect(result.pending_plan?.steps).toHaveLength(3);
+    expect(result.pending_confirmation).toBeUndefined();
+    expect(chunks.map((c) => c.type)).toEqual([
+      'tool_call',
+      'tool_result',
+      'tool_call',
+      'tool_result',
+      'tool_call',
+      'tool_result',
+      'plan_approval',
+      'text',
+      'done',
+    ]);
+  });
+
+  it('(rx3-a2) vex accumulation classifies locally without hook methods', async () => {
+    executeTool
+      .mockRejectedValueOnce(
+        new VendixHttpException(
+          ErrorCodes.AI_AGENT_005,
+          'requiere confirmación',
+          {
+            tool: 'create_expense',
+            arguments: { total: 5 },
+            preview: { target: 'gasto' },
+            confirmation_token: 'tok-1',
+          } as any,
+        ),
+      )
+      .mockRejectedValueOnce(
+        new VendixHttpException(
+          ErrorCodes.AI_AGENT_005,
+          'requiere confirmación',
+          {
+            tool: 'send_invoice_dian',
+            arguments: { id: 1 },
+            preview: { target: 'factura' },
+            confirmation_token: 'tok-2',
+          } as any,
+        ),
+      );
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'create_expense', { total: 5 }),
+            call('c2', 'send_invoice_dian', { id: 1 }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+    const plan: AgentPlanHook = {
+      execute: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue(makePlan({ id: 'p-local' })),
+    };
+
+    // No plan_approval hook at all: the domain net still flags DIAN.
+    const { chunks, result } = await drain({ agent_key: 'vex', plan });
+
+    const approvals = chunks.filter((c) => c.type === 'plan_approval');
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0].plan_approval!.plan_id).toBe('p-local');
+    expect(
+      approvals[0].plan_approval!.steps!.map((s) => s.irreversible),
+    ).toEqual([false, true]);
+    expect(result.pending_plan?.steps).toHaveLength(2);
+    expect(result.pending_confirmation).toBeUndefined();
+  });
+
+  it('(rx3-b) 9000-char vex result keeps a real block_id', async () => {
+    const save = jest.fn().mockResolvedValue('block-7');
+    const raw = 'z'.repeat(9000);
+    executeTool.mockResolvedValueOnce(raw);
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_things')] }))
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { result } = await drain({
+      agent_key: 'vex',
+      block_sink: { save },
+      conversation_id: 7,
+    });
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation_id: 7, kind: 'markdown' }),
+    );
+    const stored = JSON.parse(result.tools_used[0].result);
+    expect(stored.truncated).toBe(true);
+    expect(stored.block_id).toBe('block-7');
+  });
+
+  it.each([[undefined], ['vexi']])(
+    '(rx3-c) non-vex turns never compact (agent_key=%s)',
+    async (agentKey) => {
+      const save = jest.fn().mockResolvedValue('block-x');
+      const raw = 'z'.repeat(9000);
+      executeTool.mockResolvedValueOnce(raw);
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_things')] }))
+        .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+      const { result } = await drain({
+        ...(agentKey ? { agent_key: agentKey } : {}),
+        block_sink: { save },
+        conversation_id: 7,
+      });
+
+      expect(result.tools_used[0].result).toBe(raw);
+      expect(result.tools_used[0].result).toHaveLength(9000);
+      expect(save).not.toHaveBeenCalled();
+    },
+  );
 });
