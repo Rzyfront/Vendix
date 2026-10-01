@@ -71,6 +71,14 @@ export const storeAdminRoutes: Routes = [
       // Owner onboarding host — gated by `onboardingGuard` on the `admin`
       // root. Only an OWNER with `organizations.onboarding !== true` ever
       // resolves here; everyone else is bounced to the dashboard.
+      // Agente Vex — vista base; se abre desde el botón del header.
+      {
+        path: 'vex',
+        loadComponent: () =>
+          import('../../private/modules/store/vex/vex-page.component').then(
+            (c) => c.VexPageComponent,
+          ),
+      },
       {
         path: 'onboarding',
         loadComponent: () =>

@@ -283,6 +283,20 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
             }
           }
           <app-help-search-overlay></app-help-search-overlay>
+          @if (show_vex_button()) {
+            <a
+              routerLink="/admin/vex"
+              class="inline-flex items-center justify-center h-11 w-11 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10"
+              aria-label="Abrir agente Vex"
+              title="Vex"
+            >
+              <img
+                src="assets/vex/vexicon.png"
+                alt=""
+                class="w-6 h-6 object-contain"
+              />
+            </a>
+          }
           <app-notifications-dropdown></app-notifications-dropdown>
           <app-user-dropdown
             (closeDropdown)="onDropdownClose()"
@@ -458,6 +472,13 @@ export class HeaderComponent {
    */
   readonly show_scope_chip = computed(
     () => this.authFacade.isAuthenticated() && this.is_org_admin(),
+  );
+
+  /** Botón del agente Vex: solo en STORE_ADMIN, donde vive `/admin/vex`. */
+  readonly show_vex_button = computed(
+    () =>
+      this.authFacade.isAuthenticated() &&
+      this.authFacade.selectedAppType() === 'STORE_ADMIN',
   );
 
   onDropdownClose(): void {
