@@ -368,3 +368,118 @@ describe('InvoiceDataRequestsService (paso 3: summary guest)', () => {
     expect(kitchenStatusFor(null)).toBeNull();
   });
 });
+
+describe('InvoiceDataRequestsService (guest store identity: logo + branding)', () => {
+  const RAW_LOGO_KEY = 'stores/2/logo/logo.png';
+  const SIGNED_LOGO_URL = 'https://s3.signed/stores/2/logo/logo.png?x=1';
+  const BRANDING = {
+    primary_color: '#ea4dff',
+    secondary_color: '#a310b7',
+    accent_color: '#672361',
+    background_color: '#F4F4F4',
+    surface_color: '#FFFFFF',
+    text_color: '#222222',
+    text_secondary_color: '#666666',
+    text_muted_color: '#999999',
+  };
+
+  const summaryRequest = (
+    logoUrl: string | null,
+    branding: Record<string, string> | null,
+  ) => ({
+    token: 'tok-brand',
+    status: 'pending',
+    expires_at: new Date(),
+    first_name: 'Ana',
+    last_name: 'Diaz',
+    document_type: 'CC',
+    document_number: '123',
+    email: 'ana@example.com',
+    phone: null,
+    store: {
+      id: 2,
+      name: 'Tienda',
+      logo_url: logoUrl,
+      store_settings: branding ? { settings: { branding } } : null,
+      organizations: null,
+    },
+    order: {
+      id: 30,
+      order_number: '1',
+      state: 'created',
+      channel: 'ecommerce',
+      subtotal_amount: 0,
+      discount_amount: 0,
+      tax_amount: 0,
+      shipping_cost: 0,
+      grand_total: 0,
+      currency: 'COP',
+      created_at: new Date(),
+      placed_at: null,
+      estimated_ready_at: null,
+      estimated_delivered_at: null,
+      delivery_type: null,
+      shipping_address_snapshot: null,
+      order_items: [],
+      order_promotions: [],
+      coupon_uses: [],
+      payments: [],
+      invoices: [],
+    },
+  });
+
+  const createSummaryService = (
+    logoUrl: string | null,
+    branding: Record<string, string> | null,
+    signUrlImpl: jest.Mock,
+  ) => {
+    const prisma = {
+      invoice_data_requests: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue(summaryRequest(logoUrl, branding)),
+      },
+    };
+    return new InvoiceDataRequestsService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { signUrl: signUrlImpl } as any,
+      {} as any,
+    );
+  };
+
+  it('firma el logo y proyecta store_settings.branding', async () => {
+    const signUrl = jest.fn().mockResolvedValue(SIGNED_LOGO_URL);
+    const service = createSummaryService(RAW_LOGO_KEY, BRANDING, signUrl);
+
+    const result = await service.getOrderSummaryByToken('tok-brand');
+
+    expect(signUrl).toHaveBeenCalledWith(RAW_LOGO_KEY);
+    expect(result.store.logo_url).toBe(SIGNED_LOGO_URL);
+    expect(result.store.branding).toEqual(BRANDING);
+  });
+
+  it('si S3 falla, logo null y el summary igual se genera', async () => {
+    const signUrl = jest.fn().mockRejectedValue(new Error('S3 down'));
+    const service = createSummaryService(RAW_LOGO_KEY, BRANDING, signUrl);
+
+    const result = await service.getOrderSummaryByToken('tok-brand');
+
+    expect(result.store.logo_url).toBeNull();
+    expect(result.store.branding).toEqual(BRANDING);
+    expect(result.order.order_number).toBe('1');
+  });
+
+  it('sin colores configurados, branding null', async () => {
+    const signUrl = jest.fn().mockResolvedValue(undefined);
+    const service = createSummaryService(null, null, signUrl);
+
+    const result = await service.getOrderSummaryByToken('tok-brand');
+
+    expect(result.store.logo_url).toBeNull();
+    expect(result.store.branding).toBeNull();
+  });
+});

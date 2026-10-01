@@ -487,6 +487,34 @@ export class InvoiceDataRequestsService {
       request.store,
     );
 
+    // Guest store identity — logo firmado + paleta de configuración
+    // general (`store_settings.branding`, fuente de verdad según
+    // vendix-settings-system; `app` es espejo legacy). La tienda viaja
+    // cargada para C.7: sin query extra. Defensivo: si S3 falla o no hay
+    // marca, `null` y la vista conserva el preset — el guest nunca pierde
+    // el soporte de su compra.
+    let storeLogoUrl: string | null = null;
+    try {
+      storeLogoUrl =
+        (await this.s3Service.signUrl(request.store?.logo_url)) ?? null;
+    } catch {
+      storeLogoUrl = null;
+    }
+    const storeBrand = (request.store?.store_settings?.settings as any)
+      ?.branding;
+    const storeBranding = storeBrand
+      ? {
+          primary_color: storeBrand.primary_color ?? null,
+          secondary_color: storeBrand.secondary_color ?? null,
+          accent_color: storeBrand.accent_color ?? null,
+          background_color: storeBrand.background_color ?? null,
+          surface_color: storeBrand.surface_color ?? null,
+          text_color: storeBrand.text_color ?? null,
+          text_secondary_color: storeBrand.text_secondary_color ?? null,
+          text_muted_color: storeBrand.text_muted_color ?? null,
+        }
+      : null;
+
     return {
       token: request.token,
       invoice_data_status: request.status,
@@ -503,7 +531,8 @@ export class InvoiceDataRequestsService {
       store: {
         id: request.store.id,
         name: request.store.name,
-        logo_url: request.store.logo_url,
+        logo_url: storeLogoUrl,
+        branding: storeBranding,
       },
       order: {
         id: request.order.id,

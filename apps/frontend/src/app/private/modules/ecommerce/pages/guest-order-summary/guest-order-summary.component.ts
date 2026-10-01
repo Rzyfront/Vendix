@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   DestroyRef,
   effect,
   inject,
@@ -32,6 +33,7 @@ import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { OrderTrackingProgressComponent } from '../../../../../shared/components/order-tracking-progress/order-tracking-progress.component';
 import { GuestOrderPrintService } from '../../services/guest-order-print.service';
+import { ThemeService } from '../../../../../core/services/theme.service';
 
 // ============================================================================
 // PAYLOAD CONTRACT — enriched guest order summary endpoint
@@ -139,10 +141,22 @@ interface GuestOrderCustomer {
   phone?: string;
 }
 
+interface GuestStoreBranding {
+  primary_color?: string | null;
+  secondary_color?: string | null;
+  accent_color?: string | null;
+  background_color?: string | null;
+  surface_color?: string | null;
+  text_color?: string | null;
+  text_secondary_color?: string | null;
+  text_muted_color?: string | null;
+}
+
 interface GuestOrderStore {
   id?: number;
   name?: string;
   logo_url?: string;
+  branding?: GuestStoreBranding | null;
 }
 
 /**
@@ -209,40 +223,65 @@ interface GuestOrderSummary {
           [attr.data-currency]="currencyCode()"
           [class.card-enter]="justPurchased()"
         >
-          <!-- HERO HEADER (mirror del checkout, estado completado) -->
-          <div class="order-header-hero is-complete" [style.--fill]="'100%'">
-            <span class="hero-badge">
-              <app-icon [name]="getStateIcon(data.order.state)" [size]="20" />
-            </span>
-            <span class="hero-text">
-              <span class="hero-eyebrow">
-                <app-icon name="check" [size]="11" />
-                {{ justPurchased() ? '¡Pedido confirmado!' : 'Resumen de compra' }}
-              </span>
-              <h1 class="hero-title">Orden #{{ data.order.order_number }}</h1>
-              <span class="hero-store">{{ data.store?.name || 'Tienda' }}</span>
-            </span>
-            <app-badge
-              [variant]="getStateVariant(data.order.state)"
-              size="sm"
-              badgeStyle="outline"
-              >{{ getStateLabel(data.order.state) }}</app-badge
-            >
-          </div>
-
-          <!-- SUCCESS BANNER -->
-          @if (justPurchased()) {
-            <div class="success-banner">
-              <app-icon name="check-circle" [size]="20" />
-              <span
-                >¡Gracias por tu compra! Registramos tu pedido con éxito.</span
+          <!-- HEADER CARD (orden + tienda + acciones) -->
+          <header class="order-card order-head-card">
+            <div class="order-head-store">
+              @if (storeLogo(); as logoUrl) {
+                <img
+                  class="order-head-logo"
+                  [src]="logoUrl"
+                  [alt]="data.store?.name || 'Logo de la tienda'"
+                  (error)="storeLogoFailed.set(true)"
+                />
+              } @else {
+                <span class="order-head-logo-fallback">
+                  <app-icon name="store" [size]="20" />
+                </span>
+              }
+              <span class="order-head-store-name">{{
+                data.store?.name || 'Tienda'
+              }}</span>
+              @if (sseLiveVisible()) {
+                <span
+                  class="live-pill"
+                  [class.live-pill--reduced]="sse.prefersReducedMotion()"
+                  [attr.data-state]="sse.connectionState()"
+                >
+                  <span
+                    class="live-dot"
+                    [class.is-open]="sse.connectionState() === 'open'"
+                  ></span>
+                  {{ sseLiveLabel() }}
+                </span>
+              }
+            </div>
+            <div class="order-title-row">
+              <h1 class="order-title">Orden #{{ data.order.order_number }}</h1>
+              <app-badge [variant]="getStateVariant(data.order.state)" size="sm"
+                ><app-icon
+                  [name]="getStateIcon(data.order.state)"
+                  [size]="14"
+                />{{ getStateLabel(data.order.state) }}</app-badge
               >
             </div>
-          }
-
-          <!-- TOOLBAR: acciones a la izquierda, estado del stream a la derecha -->
-          <div class="order-toolbar">
-            <div class="actions no-print">
+            <p class="order-meta-line">
+              <span>{{
+                data.order.created_at | date: 'dd/MM/yyyy HH:mm'
+              }}</span>
+              <span class="meta-sep" aria-hidden="true">·</span>
+              <span
+                >{{ data.order.items.length }} producto{{
+                  data.order.items.length === 1 ? '' : 's'
+                }}</span
+              >
+              @if (worstPaymentState(data.order.payments); as payState) {
+                <span class="meta-sep" aria-hidden="true">·</span>
+                <span class="meta-pay-state">{{
+                  getPaymentStateLabel(payState)
+                }}</span>
+              }
+            </p>
+            <div class="order-head-actions no-print">
               <app-button variant="outline" (clicked)="print()">
                 <app-icon name="printer" [size]="16" slot="icon" />
                 Imprimir
@@ -254,53 +293,17 @@ interface GuestOrderSummary {
                 </app-button>
               }
             </div>
-            @if (sseLiveVisible()) {
-              <div
-                class="live-pill"
-                [class.live-pill--reduced]="sse.prefersReducedMotion()"
-                [attr.data-state]="sse.connectionState()"
-              >
-                <span
-                  class="live-dot"
-                  [class.is-open]="sse.connectionState() === 'open'"
-                ></span>
-                {{ sseLiveLabel() }}
-              </div>
-            }
-          </div>
+          </header>
 
-          <!-- META GRID -->
-          <div class="meta-grid">
-            <div class="meta-cell">
-              <span class="meta-label">Fecha</span>
-              <strong class="meta-value">{{
-                data.order.created_at | date: 'dd/MM/yyyy HH:mm'
-              }}</strong>
+          <!-- SUCCESS BANNER -->
+          @if (justPurchased()) {
+            <div class="success-banner">
+              <app-icon name="check-circle" [size]="20" />
+              <span
+                >¡Gracias por tu compra! Registramos tu pedido con éxito.</span
+              >
             </div>
-            <div class="meta-cell">
-              <span class="meta-label">Canal</span>
-              <strong class="meta-value">{{
-                data.order.channel === 'whatsapp' ? 'WhatsApp' : 'E-commerce'
-              }}</strong>
-            </div>
-            @if (worstPaymentState(data.order.payments); as payState) {
-              <div class="meta-cell">
-                <span class="meta-label">Estado de pago</span>
-                <app-badge
-                  [variant]="getPaymentStateVariant(payState)"
-                  size="xs"
-                  badgeStyle="outline"
-                  >{{ getPaymentStateLabel(payState) }}</app-badge
-                >
-              </div>
-            }
-            <div class="meta-cell">
-              <span class="meta-label">Total</span>
-              <strong class="meta-value accent">{{
-                data.order.grand_total | currency
-              }}</strong>
-            </div>
-          </div>
+          }
 
           <!-- ETA DE PREPARACIÓN (paso 8: tras hide_prep_eta) -->
           @if (etaVisible()) {
@@ -320,59 +323,33 @@ interface GuestOrderSummary {
 
           <!-- SEGUIMIENTO (paso 10: tras hide_tracking_progress) -->
           @if (trackingShown()) {
-            <!-- CP-853-fix (paso 4) + regresión (paso 2): el ritmo lo da el
-                 backend (prep_minutes_max); el guest no inventa un 15.
-                 baseMinutes acepta number o null y, sin fuente de ETA,
-                 el componente NO simula avance (ver su propio doc). -->
-            <app-order-tracking-progress
-              [orderState]="data.order.state"
-              [hasShippingAddress]="data.order.shipping_address != null"
-              [animateFromZero]="justPurchased()"
-              [baseMinutes]="etaMinutes(data.order)"
-              [reducedMotion]="sse.prefersReducedMotion()"
-            />
-          }
-
-          <!-- ENTREGA -->
-          @if (data.order.shipping_address; as addr) {
-            <section class="order-section">
+            <section class="order-card" aria-label="Seguimiento del pedido">
               <div class="section-header">
-                <app-icon name="map-pin" [size]="18" />
-                <h2>Entrega</h2>
+                <app-icon name="timer" [size]="18" />
+                <h2>Seguimiento del pedido</h2>
               </div>
-              <div class="address-block">
-                @if (addr.address_line1) {
-                  <p class="addr-line strong">{{ addr.address_line1 }}</p>
-                }
-                @if (addr.address_line2) {
-                  <p class="addr-line">{{ addr.address_line2 }}</p>
-                }
-                <p class="addr-line muted">
-                  {{ addr.city
-                  }}@if (addr.state_province) {, {{ addr.state_province }}}@if (
-                    addr.country_code
-                  ) {
-                    · {{ addr.country_code }}}
-                </p>
-                @if (addr.postal_code) {
-                  <p class="addr-line muted">C.P. {{ addr.postal_code }}</p>
-                }
-                @if (addr.phone_number) {
-                  <p class="addr-line muted phone">
-                    <app-icon name="phone" [size]="13" />{{
-                      addr.phone_number
-                    }}
-                  </p>
-                }
-              </div>
+              <!-- CP-853-fix (paso 4) + regresión (paso 2): el ritmo lo da el
+                   backend (prep_minutes_max); el guest no inventa un 15.
+                   baseMinutes acepta number o null y, sin fuente de ETA,
+                   el componente NO simula avance (ver su propio doc). -->
+              <app-order-tracking-progress
+                [orderState]="data.order.state"
+                [hasShippingAddress]="data.order.shipping_address != null"
+                [animateFromZero]="justPurchased()"
+                [baseMinutes]="etaMinutes(data.order)"
+                [reducedMotion]="sse.prefersReducedMotion()"
+              />
             </section>
           }
 
+          <!-- GRID (contenido + resumen lateral) -->
+          <div class="order-grid">
+            <div class="order-main">
           <!-- PRODUCTOS -->
-          <section class="order-section">
+          <section class="order-section order-card" aria-label="Productos pedidos">
             <div class="section-header">
               <app-icon name="shopping-bag" [size]="18" />
-              <h2>Productos</h2>
+              <h2>Productos ({{ data.order.items.length }})</h2>
             </div>
             <div class="items">
               @for (
@@ -470,10 +447,10 @@ interface GuestOrderSummary {
           <!-- MÉTODO DE PAGO (multipago ordenado peor-primero) -->
           @if (paymentsWorstFirst(data.order.payments); as payments) {
             @if (payments.length) {
-              <section class="order-section">
+              <section class="order-section order-card" aria-label="Métodos de pago">
                 <div class="section-header">
                   <app-icon name="credit-card" [size]="18" />
-                  <h2>Método de pago</h2>
+                  <h2>Métodos de pago</h2>
                 </div>
                 <div class="payment-list">
                   @for (p of payments; track p.payment_id ?? p.method ?? $index) {
@@ -482,12 +459,19 @@ interface GuestOrderSummary {
                         <span class="payment-method">{{
                           p.method || 'Pago'
                         }}</span>
-                        <app-badge
-                          [variant]="getPaymentStateVariant(p.state)"
-                          size="sm"
-                          badgeStyle="outline"
-                          >{{ getPaymentStateLabel(p.state) }}</app-badge
-                        >
+                        <span class="payment-head-right">
+                          @if (p.amount != null) {
+                            <strong class="payment-amount">{{
+                              p.amount | currency
+                            }}</strong>
+                          }
+                          <app-badge
+                            [variant]="getPaymentStateVariant(p.state)"
+                            size="sm"
+                            badgeStyle="outline"
+                            >{{ getPaymentStateLabel(p.state) }}</app-badge
+                          >
+                        </span>
                       </div>
                       <!-- COMPROBANTE (paso 9): ver si has_receipt, cargar si falta -->
                       @if (p.payment_id != null) {
@@ -545,12 +529,18 @@ interface GuestOrderSummary {
             }
           }
 
+            </div><!-- /.order-main -->
+            <aside class="order-side">
           <!-- TOTALES -->
           <!-- C.7 (§5.3, base taxable): sin impuesto, Subtotal solo alcanza.
                Con impuesto, Subtotal e Impuestos van JUNTOS o NINGUNO —
                nunca un Subtotal huérfano sin su fila de IVA al lado — y el
                gate lo trae ahora prints_vat_breakdown (backend, C.7). -->
-          <section class="order-section totals-panel">
+          <section class="order-section order-card totals-card" aria-label="Resumen de cuenta">
+            <div class="section-header">
+              <app-icon name="receipt" [size]="18" />
+              <h2>Resumen de cuenta</h2>
+            </div>
             @if ((data.order.tax_amount || 0) === 0) {
               <div class="total-row">
                 <span>Subtotal</span>
@@ -621,6 +611,61 @@ interface GuestOrderSummary {
             </div>
           </section>
 
+          <!-- ENTREGA -->
+          @if (data.order.shipping_address; as addr) {
+            <section class="order-section order-card" aria-label="Datos de entrega">
+              <div class="section-header">
+                <app-icon name="map-pin" [size]="18" />
+                <h2>Datos de entrega</h2>
+              </div>
+              @if (data.customer; as customer) {
+                @if (customer.first_name || customer.last_name || customer.phone) {
+                  <div class="delivery-customer">
+                    <app-icon name="user" [size]="16" />
+                    <div class="delivery-customer-text">
+                      @if (customer.first_name || customer.last_name) {
+                        <strong
+                          >{{ customer.first_name }}
+                          {{ customer.last_name }}</strong
+                        >
+                      }
+                      @if (customer.phone) {
+                        <span class="muted">{{ customer.phone }}</span>
+                      }
+                    </div>
+                  </div>
+                }
+              }
+              <div class="address-block">
+                @if (addr.address_line1) {
+                  <p class="addr-line strong">{{ addr.address_line1 }}</p>
+                }
+                @if (addr.address_line2) {
+                  <p class="addr-line">{{ addr.address_line2 }}</p>
+                }
+                <p class="addr-line muted">
+                  {{ addr.city
+                  }}@if (addr.state_province) {, {{ addr.state_province }}}@if (
+                    addr.country_code
+                  ) {
+                    · {{ addr.country_code }}}
+                </p>
+                @if (addr.postal_code) {
+                  <p class="addr-line muted">C.P. {{ addr.postal_code }}</p>
+                }
+                @if (addr.phone_number) {
+                  <p class="addr-line muted phone">
+                    <app-icon name="phone" [size]="13" />{{
+                      addr.phone_number
+                    }}
+                  </p>
+                }
+              </div>
+            </section>
+          }
+            </aside>
+          </div><!-- /.order-grid -->
+
         </div>
 
         <!-- VISOR DE COMPROBANTE (paso 9, patrón admin order-details) -->
@@ -673,12 +718,41 @@ interface GuestOrderSummary {
       }
 
       .guest-order-card {
-        width: min(760px, 100%);
+        width: min(1080px, 100%);
+        background: transparent;
+        border: 0;
+        padding: 0;
+        box-shadow: none;
+      }
+
+      /* ---- Card system (Stitch: tarjetas planas sobre fondo) ---- */
+      .order-card {
         background: var(--color-surface);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
-        padding: clamp(1rem, 3vw, 2rem);
+        padding: clamp(1rem, 3vw, 1.5rem);
         box-shadow: var(--shadow-sm);
+      }
+
+      .order-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.25rem;
+        align-items: start;
+      }
+
+      .order-main,
+      .order-side {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        min-width: 0;
+      }
+
+      @media (min-width: 960px) {
+        .order-grid {
+          grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
+        }
       }
 
       .printable-order {
@@ -694,6 +768,15 @@ interface GuestOrderSummary {
         align-items: center;
         gap: 0.75rem;
         text-align: center;
+      }
+
+      .guest-order-card.state-card {
+        width: min(560px, 100%);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: clamp(1.5rem, 4vw, 2.5rem);
+        box-shadow: var(--shadow-sm);
       }
 
       .state-icon {
@@ -722,113 +805,114 @@ interface GuestOrderSummary {
         font-size: var(--fs-sm);
       }
 
-      /* ---- Hero header (mirror del checkout) ---- */
-      .order-header-hero {
-        position: relative;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-        gap: 0.875rem;
-        padding: 0.75rem 1rem;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        background: var(--color-surface);
-        transition: border-color 0.4s ease;
-      }
-
-      .order-header-hero::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        width: var(--fill, 0%);
-        background: linear-gradient(
-          90deg,
-          rgba(var(--color-success-rgb), 0.06),
-          rgba(var(--color-success-rgb), 0.2)
-        );
-        transition:
-          width 0.6s cubic-bezier(0.22, 1, 0.36, 1),
-          background 0.4s ease;
-        pointer-events: none;
-        z-index: 0;
-      }
-
-      .order-header-hero > * {
-        position: relative;
-        z-index: 1;
-      }
-
-      .order-header-hero.is-complete {
-        border-color: rgba(var(--color-success-rgb), 0.5);
-      }
-
-      .order-header-hero.is-complete::before {
-        width: 100%;
-        background: linear-gradient(
-          90deg,
-          rgba(var(--color-success-rgb), 0.16),
-          rgba(var(--color-success-rgb), 0.3)
-        );
-      }
-
-      .hero-badge {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        width: 44px;
-        height: 44px;
-        border-radius: var(--radius-md);
-        color: var(--color-primary);
-        background: var(--color-primary-light);
-        transition:
-          color 0.4s ease,
-          background 0.4s ease;
-      }
-
-      .is-complete .hero-badge {
-        color: var(--color-success);
-        background: var(--color-success-light);
-      }
-
-      .hero-text {
+      /* ---- Header card (orden + tienda + acciones) ---- */
+      .order-head-card {
         display: flex;
         flex-direction: column;
-        gap: 0.15rem;
+        gap: 0.875rem;
+        border-top: 3px solid var(--color-primary);
+      }
+
+      .order-head-store {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
         min-width: 0;
       }
 
-      .hero-eyebrow {
+      .order-head-logo {
+        width: 40px;
+        height: 40px;
+        border-radius: var(--radius-md);
+        object-fit: cover;
+        border: 1px solid var(--color-border);
+        background: var(--color-background);
+        flex-shrink: 0;
+      }
+
+      .order-head-logo-fallback {
         display: inline-flex;
         align-items: center;
-        gap: 0.3rem;
-        font-size: 10px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--color-text-secondary);
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: var(--radius-md);
+        color: var(--color-primary);
+        background: var(--color-primary-light);
+        flex-shrink: 0;
       }
 
-      .is-complete .hero-eyebrow {
-        color: var(--color-success);
+      .order-head-store-name {
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
-      .hero-title {
+      .order-head-store .live-pill {
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+
+      .order-title-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .order-title {
         margin: 0;
         font-size: var(--fs-xl);
         font-weight: var(--fw-bold);
-        line-height: 1.1;
+        line-height: 1.15;
         color: var(--color-text-primary);
       }
 
-      .hero-store {
+      .order-meta-line {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.35rem 0.6rem;
+        margin: 0;
         font-size: var(--fs-sm);
         color: var(--color-text-secondary);
       }
 
-      .order-header-hero app-badge {
-        margin-left: auto;
-        flex-shrink: 0;
+      .meta-sep {
+        font-weight: var(--fw-bold);
+        color: var(--color-text-muted);
+      }
+
+      .meta-pay-state {
+        font-weight: var(--fw-semibold);
+        color: var(--color-success);
+      }
+
+      .order-head-actions {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      @media (min-width: 720px) {
+        .order-head-card {
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .order-head-store,
+        .order-title-row,
+        .order-meta-line {
+          flex: 1 1 100%;
+        }
+
+        .order-head-actions {
+          margin-left: auto;
+        }
       }
 
       /* ---- Success banner ---- */
@@ -847,41 +931,6 @@ interface GuestOrderSummary {
       .success-banner app-icon {
         color: var(--color-success);
         flex-shrink: 0;
-      }
-
-      /* ---- Meta grid (recessed) ---- */
-      .meta-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 1rem;
-        padding: 1rem 1.25rem;
-        border-radius: var(--radius-lg);
-        background: var(--color-background);
-      }
-
-      .meta-cell {
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-        align-items: flex-start;
-      }
-
-      .meta-label {
-        font-size: var(--fs-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-text-muted);
-      }
-
-      .meta-value {
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-semibold);
-        color: var(--color-text-primary);
-      }
-
-      .meta-value.accent {
-        color: var(--color-primary);
-        font-size: var(--fs-lg);
       }
 
       /* ---- Section header ---- */
@@ -925,6 +974,28 @@ interface GuestOrderSummary {
         display: inline-flex;
         align-items: center;
         gap: 0.35rem;
+      }
+
+      .delivery-customer {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.6rem;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px dashed var(--color-border);
+        color: var(--color-text-secondary);
+      }
+
+      .delivery-customer-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        font-size: var(--fs-sm);
+        color: var(--color-text-primary);
+      }
+
+      .delivery-customer-text .muted {
+        font-size: var(--fs-sm);
       }
 
       /* ---- Items ---- */
@@ -1081,6 +1152,19 @@ interface GuestOrderSummary {
         color: var(--color-text-primary);
       }
 
+      .payment-head-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-shrink: 0;
+      }
+
+      .payment-amount {
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        white-space: nowrap;
+      }
+
       .payment-list {
         display: flex;
         flex-direction: column;
@@ -1209,12 +1293,6 @@ interface GuestOrderSummary {
       }
 
       /* ---- Totals ---- */
-      .totals-panel {
-        padding: 1.25rem;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        background: var(--color-background);
-      }
 
       .total-row {
         display: flex;
@@ -1237,9 +1315,10 @@ interface GuestOrderSummary {
       }
 
       .total-row.grand {
-        margin-top: 0.4rem;
-        padding-top: 0.85rem;
-        border-top: 1px solid var(--color-border);
+        margin-top: 0.6rem;
+        padding: 0.85rem 1rem;
+        border-radius: var(--radius-md);
+        background: var(--color-background);
         font-size: var(--fs-xl);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
@@ -1247,32 +1326,6 @@ interface GuestOrderSummary {
 
       .total-row.grand span:last-child {
         color: var(--color-primary);
-      }
-
-      /* ---- Actions ---- */
-      .actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 0.75rem;
-      }
-
-      /* ---- Toolbar superior: acciones a la izquierda, pill en vivo a la derecha ---- */
-      .order-toolbar {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-      }
-
-      .order-toolbar .actions {
-        flex: 1;
-        justify-content: flex-start;
-        flex-wrap: wrap;
-      }
-
-      .order-toolbar .live-pill {
-        align-self: center;
-        margin-left: auto;
-        flex-shrink: 0;
       }
 
       /* ---- Spinner ---- */
@@ -1323,30 +1376,13 @@ interface GuestOrderSummary {
 
       /* ---- Responsive ---- */
       @media (max-width: 720px) {
-        .meta-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .actions {
-          flex-direction: column;
-        }
-
-        .order-toolbar {
+        .order-head-actions {
           flex-direction: column;
           align-items: stretch;
         }
 
-        .order-toolbar .live-pill {
-          align-self: flex-start;
-          margin-left: 0;
-        }
-
-        .order-header-hero {
+        .payment-head {
           flex-wrap: wrap;
-        }
-
-        .order-header-hero app-badge {
-          margin-left: 0;
         }
       }
 
@@ -1358,9 +1394,12 @@ interface GuestOrderSummary {
         .guest-order-page {
           padding: 0;
         }
-        .guest-order-card {
+        .order-grid {
+          grid-template-columns: 1fr;
+        }
+        .order-card {
           box-shadow: none;
-          border: 0;
+          break-inside: avoid;
         }
       }
     `,
@@ -1375,6 +1414,7 @@ export class GuestOrderSummaryComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly voucherPrint = inject(GuestOrderPrintService);
+  private readonly themeService = inject(ThemeService);
   private readonly sanitizer = inject(DomSanitizer);
   /** Público: el template lee `connectionState()` / `prefersReducedMotion()`. */
   readonly sse = inject(GuestOrderSseService);
@@ -1383,6 +1423,13 @@ export class GuestOrderSummaryComponent implements OnInit {
   readonly error = signal(false);
   readonly summary = signal<GuestOrderSummary | null>(null);
   readonly justPurchased = signal(false);
+  // Header: si el logo no carga, se muestra el fallback de la tienda.
+  readonly storeLogoFailed = signal(false);
+  /** Logo firmado o null (fallback). Señal para que el @if estreche el tipo. */
+  readonly storeLogo = computed(
+    () =>
+      !this.storeLogoFailed() ? (this.summary()?.store?.logo_url ?? null) : null,
+  );
 
   // Paso 9 — visor de comprobante (patrón admin order-details).
   readonly receiptPreview = signal<GuestReceiptPreview | null>(null);
@@ -1457,6 +1504,11 @@ export class GuestOrderSummaryComponent implements OnInit {
       .subscribe({
         next: (response) => {
           this.summary.set(response.data);
+          // Marca del comercio: el guest nunca pasa por login/restore, así
+          // que el efecto de branding no lo alcanza — se aplica aquí desde
+          // el payload (precedente: store-landing, sin restore al salir
+          // porque toda la vitrina del comercio viste estos colores).
+          this.applyStoreBranding(response.data?.store);
           // El snapshot SSE pudo llegar ANTES que el REST: la fusión del
           // effect ya se saltó ese caso (summary null), así que se re-aplica
           // explícitamente sobre el summary recién llegado.
@@ -1485,6 +1537,23 @@ export class GuestOrderSummaryComponent implements OnInit {
       hidePrepEta: orders?.hide_prep_eta === true,
       hideTracking: orders?.hide_tracking_progress === true,
     });
+  }
+
+  /**
+   * Viste la ruta guest con la marca del comercio. Sin marca configurada
+   * no toca nada (el preset sigue mandando). Usa el transform central del
+   * ThemeService — nada de mapeo ad-hoc en el componente.
+   */
+  private applyStoreBranding(store?: GuestOrderStore | null): void {
+    const branding = store?.branding;
+    if (!branding) return;
+    void this.themeService.applyBranding(
+      this.themeService.transformBrandingFromApi({
+        ...branding,
+        logo_url: store?.logo_url,
+        name: store?.name,
+      }),
+    );
   }
 
   whatsappEnabled(): boolean {
