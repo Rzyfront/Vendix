@@ -548,6 +548,9 @@ export class InventoryAnalyticsService {
       where: {
         state: 'active',
         track_inventory: true,
+        ...(query.category_id !== undefined && {
+          product_categories: { some: { category_id: query.category_id } },
+        }),
       },
       select: {
         id: true,
@@ -555,6 +558,10 @@ export class InventoryAnalyticsService {
         sku: true,
         product_images: {
           select: { image_url: true },
+          take: 1,
+        },
+        product_categories: {
+          select: { categories: { select: { id: true, name: true } } },
           take: 1,
         },
         stock_quantity: true,
@@ -567,7 +574,17 @@ export class InventoryAnalyticsService {
       },
     });
 
-    const results = products
+    const sortDir = query.sort_direction ?? 'asc';
+    const sorted =
+      query.sort_by === 'name'
+        ? [...products].sort((a, b) =>
+            sortDir === 'asc'
+              ? a.name.localeCompare(b.name, 'es')
+              : b.name.localeCompare(a.name, 'es'),
+          )
+        : products;
+
+    const results = sorted
       .filter((p) => {
         const qty = Number(p.stock_quantity || 0);
         const reorderPoint = resolveProductLowStockThreshold(settings, p);
@@ -583,6 +600,17 @@ export class InventoryAnalyticsService {
           sku: product.sku,
           image_url: product.product_images?.[0]?.image_url || null,
           quantity_available: qty,
+          // Campos que consume el reporte "Stock Bajo" del registry
+          // (Reportes > Inventario): sin ellos la tabla pinta 0 aunque haya
+          // stock (p. ej. VALVULAS CT100 con 88 unidades). Misma forma que
+          // getLowStockForExport (pantalla == archivo).
+          stock_quantity: qty,
+          min_stock_level: Number(product.min_stock_level ?? 0),
+          stock_value_at_risk:
+            Math.round(qty * Number(product.cost_price ?? 0) * 100) / 100,
+          category_id: product.product_categories?.[0]?.categories?.id ?? null,
+          category_name:
+            product.product_categories?.[0]?.categories?.name ?? null,
           reorder_point: reorderPoint,
           days_of_stock: null, // TODO: Calculate from sales velocity
           status: qty === 0 ? 'out_of_stock' : 'low_stock',

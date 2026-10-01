@@ -14,6 +14,8 @@ import {
 // Services
 import { InventoryService, PurchaseOrdersService, SuppliersService } from './services';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
+import { ToastService } from '../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 // Interfaces
 import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
@@ -145,6 +147,7 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
 export class InventoryDashboardComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private currencyService = inject(CurrencyFormatService);
+  private toastService = inject(ToastService);
   // Stats
   stats: InventoryStats = {
     total_products: 0,
@@ -220,7 +223,10 @@ export class InventoryDashboardComponent implements OnInit {
         }
         this.is_loading_stats = false;
       },
-      error: () => {
+      error: (error) => {
+        this.toastService.error(
+          extractApiErrorMessage(error) || 'No se pudo cargar el resumen de inventario',
+        );
         this.is_loading_stats = false;
       },
     });

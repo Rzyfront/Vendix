@@ -149,4 +149,12 @@ export class InventoryAnalyticsQueryDto extends AnalyticsQueryDto {
   @IsOptional()
   @IsIn(['ingredient', 'dish'])
   group_by?: 'ingredient' | 'dish' = 'ingredient';
+
+  @IsOptional()
+  @IsIn(['name', 'stock'])
+  sort_by?: 'name' | 'stock';
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sort_direction?: 'asc' | 'desc';
 }

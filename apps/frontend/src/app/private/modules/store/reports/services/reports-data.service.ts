@@ -71,6 +71,7 @@ export class ReportsDataService {
       fiscalPeriodId?: number | null;
       page?: number;
       limit?: number;
+      extraParams?: Record<string, string>;
     },
   ): Observable<ReportAdaptedData> {
     const url = `${environment.apiUrl}/${dataEndpoint}`;
@@ -94,6 +95,10 @@ export class ReportsDataService {
     }
     if (options?.limit) {
       params = params.set('limit', String(options.limit));
+    }
+
+    for (const [k, v] of Object.entries(options?.extraParams ?? {})) {
+      if (v != null && v !== '') params = params.set(k, v);
     }
 
     // Invalidate previous cache entries for this report ONLY when the date range or fiscal period changes.

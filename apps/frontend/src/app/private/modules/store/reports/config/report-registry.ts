@@ -676,17 +676,31 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       'Productos activos con stock_quantity ≤ reorder_point, incluyendo el valor en riesgo (stock_actual × costo) para priorizar la reposición.',
     icon: 'alert-triangle',
     route: '/admin/reports/inventory/inventory-low-stock',
-    requiresDateRange: false,
+    requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
     trackKey: 'product_id',
+    dataFilters: [
+      { key: 'order', label: 'Orden' },
+      { key: 'category_id', label: 'Categoría', placeholder: 'Todas', optionsSource: 'categories' },
+    ],
     columns: [
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'category_name', header: 'Categoría', type: 'text' },
       { key: 'stock_quantity', header: 'Stock Actual', type: 'number', footer: 'sum' },
       { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
       { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
-      { key: 'status', header: 'Estado', type: 'text' },
+      {
+        key: 'status',
+        header: 'Estado',
+        type: 'text',
+        transform: (value: any) => {
+          if (value === 'out_of_stock') return 'Agotado';
+          if (value === 'low_stock') return 'Stock bajo';
+          return value ?? '—';
+        },
+      },
       { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency', footer: 'sum' },
     ],
     exportFilename: 'stock_bajo',
@@ -725,7 +739,16 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'supplier_name', header: 'Proveedor', type: 'text' },
       { key: 'current_stock', header: 'Stock Actual', type: 'number' },
       { key: 'min_threshold', header: 'Stock Mínimo', type: 'number' },
-      { key: 'status', header: 'Estado', type: 'text' },
+      {
+        key: 'status',
+        header: 'Estado',
+        type: 'text',
+        transform: (value: any) => {
+          if (value === 'out_of_stock') return 'Agotado';
+          if (value === 'low_stock') return 'Stock bajo';
+          return value ?? '—';
+        },
+      },
       { key: 'last_purchase_date', header: 'Última Compra', type: 'date-only' },
       { key: 'days_without_sale', header: 'Días Sin Venta', type: 'number' },
     ],
