@@ -14,15 +14,22 @@ import {
   VexUiBlock,
 } from '../../models/vex.models';
 
+/**
+ * SSR/no-DOM fallback. Mirrors the `:root` defaults in `styles.scss`
+ * (`--color-primary`, `--color-accent`, `--color-success`, `--color-info`,
+ * `--color-warning`, `--color-error`, `--color-secondary`, `--color-gaming`)
+ * as `rgb()` strings — echarts accepts any CSS color, and hex literals stay
+ * out of Vex components per the no-fixed-colors rule.
+ */
 const FALLBACK_PALETTE = [
-  '#2ecc71',
-  '#3498db',
-  '#f39c12',
-  '#9b59b6',
-  '#e74c3c',
-  '#1abc9c',
-  '#e67e22',
-  '#34495e',
+  'rgb(46, 204, 113)',
+  'rgb(161, 244, 217)',
+  'rgb(34, 197, 94)',
+  'rgb(59, 130, 246)',
+  'rgb(251, 146, 60)',
+  'rgb(239, 68, 68)',
+  'rgb(22, 43, 33)',
+  'rgb(139, 92, 246)',
 ];
 
 /**
@@ -94,9 +101,13 @@ function readPalette(): string[] {
     };
     return [
       pick('--color-primary', FALLBACK_PALETTE[0]),
-      pick('--color-secondary', FALLBACK_PALETTE[1]),
-      pick('--color-accent', FALLBACK_PALETTE[2]),
-      ...FALLBACK_PALETTE.slice(3),
+      pick('--color-accent', FALLBACK_PALETTE[1]),
+      pick('--color-success', FALLBACK_PALETTE[2]),
+      pick('--color-info', FALLBACK_PALETTE[3]),
+      pick('--color-warning', FALLBACK_PALETTE[4]),
+      pick('--color-error', FALLBACK_PALETTE[5]),
+      pick('--color-secondary', FALLBACK_PALETTE[6]),
+      pick('--color-gaming', FALLBACK_PALETTE[7]),
     ];
   } catch {
     return FALLBACK_PALETTE;

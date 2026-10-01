@@ -116,7 +116,7 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                 }
                 @if (message.error) {
                   <p
-                    class="rounded-xl border border-[var(--color-error,#dc2626)] bg-[rgba(220,38,38,0.07)] px-3 py-2 text-sm text-[var(--color-error,#dc2626)]"
+                    class="rounded-xl border border-[var(--color-error)] bg-[rgba(var(--color-error-rgb),0.07)] px-3 py-2 text-sm text-[var(--color-error)]"
                     role="alert"
                   >
                     {{ message.error }}

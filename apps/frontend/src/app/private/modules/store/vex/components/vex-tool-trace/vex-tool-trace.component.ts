@@ -48,8 +48,8 @@ import { VexToolStep } from '../../models/vex.models';
                 <span
                   class="mt-0.5 shrink-0"
                   [class.text-[var(--color-primary)]]="step.status === 'running'"
-                  [class.text-[var(--color-success,#16a34a)]]="step.status === 'done'"
-                  [class.text-[var(--color-error,#dc2626)]]="step.status === 'failed'"
+                  [class.text-[var(--color-success)]]="step.status === 'done'"
+                  [class.text-[var(--color-error)]]="step.status === 'failed'"
                   aria-hidden="true"
                 >
                   @switch (step.status) {

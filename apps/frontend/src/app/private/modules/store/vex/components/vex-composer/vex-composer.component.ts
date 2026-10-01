@@ -39,8 +39,8 @@ interface StagedFile {
               class="inline-flex items-center gap-2 max-w-full pl-3 pr-1.5 py-1.5 rounded-xl border text-xs"
               [class.border-[var(--color-border)]]="file.status !== 'error'"
               [class.bg-[var(--color-surface)]]="file.status !== 'error'"
-              [class.border-[var(--color-error,#dc2626)]]="file.status === 'error'"
-              [class.bg-[rgba(220,38,38,0.07)]]="file.status === 'error'"
+              [class.border-[var(--color-error)]]="file.status === 'error'"
+              [class.bg-[rgba(var(--color-error-rgb),0.07)]]="file.status === 'error'"
             >
               @if (file.status === 'uploading') {
                 <app-icon name="loader-2" [size]="14" [spin]="true"></app-icon>

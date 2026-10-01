@@ -39,7 +39,7 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
           target="_blank"
           rel="noopener"
           download
-          class="shrink-0 min-h-10 inline-flex items-center gap-2 px-4 rounded-xl bg-[var(--color-primary)] text-white text-sm font-medium hover:opacity-90"
+          class="shrink-0 min-h-10 inline-flex items-center gap-2 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-medium hover:opacity-90"
         >
           <app-icon name="download" [size]="16"></app-icon>
           Descargar

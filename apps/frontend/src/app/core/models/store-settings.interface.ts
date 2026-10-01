@@ -68,6 +68,16 @@ export interface StoreSettings {
   vexi?: VexiSettings;
 
   /**
+   * Master switch for the Vex agent. Mirrors backend `VexSettings`.
+   *
+   * Optional because a store only carries this block once somebody turned Vex
+   * on: the agent ships off and is enabled per store. Absent means
+   * disabled — read it through `StoreSettingsFacade.vexEnabled()`, never as
+   * `settings.vex!.enabled`.
+   */
+  vex?: VexSettings;
+
+  /**
    * Parámetros de emisión fiscal que la ley deja al contribuyente. Espejo de
    * `InvoicingSettingsDto` en
    * `apps/backend/src/domains/store/settings/dto/settings-schemas.dto.ts`.
@@ -122,6 +132,21 @@ export interface VexiSettings {
    * único que pasa por la tarjeta de aprobación del panel.
    */
   voice_engine?: 'realtime' | 'pipeline';
+}
+
+/**
+ * Master switch for the Vex agent. Mirrors backend `VexSettings` in
+ * `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`.
+ */
+export interface VexSettings {
+  /**
+   * Opcional, igual que `VexiSettings.enabled`: `Partial<StoreSettings>` es
+   * superficial, así que un PATCH que sólo mueve este switch no debe estar
+   * obligado a reenviar el resto de la sección. Ausente significa apagado —
+   * leer siempre por `StoreSettingsFacade.vexEnabled()`, que compara contra
+   * `=== true`.
+   */
+  enabled?: boolean;
 }
 
 /**
