@@ -310,7 +310,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
                       <span> {{ req.reason }}</span>
                       @if (req.action?.kind === 'navigate') {
                         <app-button variant="ghost" size="sm" (clicked)="onRequirementAction(req)">
-                          {{ req.action.label }}
+                          {{ req.action?.label }}
                         </app-button>
                       }
                     </li>
