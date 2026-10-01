@@ -919,4 +919,133 @@ describe('InventoryAnalyticsService', () => {
       expect(result.detailRows).toHaveLength(3);
     });
   });
+
+  // ==================== STOCK BAJO / REGISTRY FIELDS ====================
+  // El reporte "Stock Bajo" (Reportes > Inventario) pide stock_quantity,
+  // min_stock_level y stock_value_at_risk. Si la fila no los trae, la tabla
+  // pinta 0 aunque el producto tenga stock.
+
+  describe('getLowStockAlerts (reporte Stock Bajo)', () => {
+    function lowStockProducts() {
+      return [
+        {
+          id: 612,
+          name: 'VALVULAS CT100 TVR',
+          sku: 'V-612',
+          product_images: [],
+          stock_quantity: 88,
+          cost_price: 10000,
+          min_stock_level: 90,
+          reorder_point: 0,
+        },
+        {
+          id: 41,
+          name: 'MOTUL 3000',
+          sku: '107306',
+          product_images: [],
+          stock_quantity: 0,
+          cost_price: 50000,
+          min_stock_level: 0,
+          reorder_point: 0,
+        },
+        {
+          id: 700,
+          name: 'CON STOCK AMPLIO',
+          sku: 'OK-1',
+          product_images: [],
+          stock_quantity: 500,
+          cost_price: 1000,
+          min_stock_level: 0,
+          reorder_point: 0,
+        },
+      ];
+    }
+
+    it('emite stock_quantity, min_stock_level y stock_value_at_risk por fila', async () => {
+      prisma.products.findMany.mockResolvedValue(lowStockProducts());
+
+      const result = (await service.getLowStockAlerts({} as any)) as any;
+      const rows = (
+        Array.isArray(result) ? result : result.data
+      ) as any[];
+
+      const valvulas = rows.find((r) => r.product_id === 612);
+      expect(valvulas).toBeDefined();
+      expect(valvulas.stock_quantity).toBe(88);
+      expect(valvulas.min_stock_level).toBe(90);
+      expect(valvulas.stock_value_at_risk).toBe(880000);
+      expect(valvulas.status).toBe('low_stock');
+
+      const agotado = rows.find((r) => r.product_id === 41);
+      expect(agotado.stock_quantity).toBe(0);
+      expect(agotado.stock_value_at_risk).toBe(0);
+      expect(agotado.status).toBe('out_of_stock');
+
+      // Con stock amplio no entra al reporte.
+      expect(rows.find((r) => r.product_id === 700)).toBeUndefined();
+    });
+
+    it('ordena por nombre A-Z y Z-A cuando sort_by=name', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        {
+          id: 2, name: 'Zebra', sku: 'Z', product_images: [],
+          stock_quantity: 1, cost_price: 10, min_stock_level: 5, reorder_point: 0,
+        },
+        {
+          id: 1, name: 'Alpha', sku: 'A', product_images: [],
+          stock_quantity: 2, cost_price: 10, min_stock_level: 5, reorder_point: 0,
+        },
+      ]);
+
+      const asc = (await service.getLowStockAlerts({
+        sort_by: 'name', sort_direction: 'asc',
+      } as any)) as any[];
+      expect(asc.map((r) => r.product_id)).toEqual([1, 2]);
+
+      const desc = (await service.getLowStockAlerts({
+        sort_by: 'name', sort_direction: 'desc',
+      } as any)) as any[];
+      expect(desc.map((r) => r.product_id)).toEqual([2, 1]);
+    });
+
+    it('filtra por category_id y expone category_name', async () => {
+      prisma.products.findMany.mockImplementation((args: any) => {
+        const all = [
+          {
+            id: 1, name: 'Bebida Baja', sku: 'B', product_images: [],
+            product_categories: [{ categories: { id: 7, name: 'Bebidas' } }],
+            stock_quantity: 1, cost_price: 10, min_stock_level: 5, reorder_point: 0,
+          },
+          {
+            id: 2, name: 'Otra Baja', sku: 'O', product_images: [],
+            product_categories: [],
+            stock_quantity: 1, cost_price: 10, min_stock_level: 5, reorder_point: 0,
+          },
+        ];
+        const wanted = args?.where?.product_categories?.some?.category_id;
+        return Promise.resolve(
+          wanted !== undefined
+            ? all.filter((p) =>
+                p.product_categories.some((c) => c.categories.id === wanted),
+              )
+            : all,
+        );
+      });
+
+      const rows = (await service.getLowStockAlerts({
+        category_id: 7,
+      } as any)) as any[];
+
+      expect(prisma.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            product_categories: { some: { category_id: 7 } },
+          }),
+        }),
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].category_id).toBe(7);
+      expect(rows[0].category_name).toBe('Bebidas');
+    });
+  });
 });

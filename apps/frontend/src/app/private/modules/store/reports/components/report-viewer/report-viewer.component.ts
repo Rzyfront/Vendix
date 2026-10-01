@@ -11,6 +11,8 @@ import {
   FilterConfig,
   FilterValues,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { buildAlphabeticalOrderFilter } from '../../../../../../shared/components/options-dropdown/order-filter.preset';
+import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { DateRangeFilter } from '../../../../../../shared/interfaces/date-range-filter.interface';
 import {
   ResponsiveDataViewComponent,
@@ -306,6 +308,20 @@ export class ReportViewerComponent {
   readonly exportClick = output<void>();
   readonly refreshClick = output<void>();
   /**
+   * Filtros de datos declarados por el reporte (`ReportDefinition.dataFilters`:
+   * orden, categoría...). Se resuelven en servidor vía NgRx; el padre los
+   * escucha y recarga. Solo viajan las keys declaradas por el reporte actual.
+   */
+  readonly dataFiltersChange = output<Record<string, string | null>>();
+  /** Opciones del select de categorías (las carga la página cuando el reporte las declara). */
+  readonly categoryOptions = input<SelectorOption[]>([]);
+  /**
+   * Filtros vigentes en el store (la página los pasa). Si el viewer nace o
+   * vuelve con valores distintos a los locales (recreación, navegación),
+   * se adoptan SIN re-emitir: el store ya los tiene.
+   */
+  readonly activeDataFilters = input<Record<string, string | null> | null>(null);
+  /**
    * Muestra la acción "Actualizar" solo en consumidores que la conectan
    * (`(refreshClick)`). Evita un botón muerto en vistas que no la manejan.
    */
@@ -315,19 +331,39 @@ export class ReportViewerComponent {
   readonly dateRange = input<any>(undefined);
 
   /**
-   * Filtros del dropdown. Hoy sólo el período, y sólo si el reporte lo pide:
-   * un reporte sin `requiresDateRange` no muestra el trigger "Filtros".
+   * Filtros del dropdown: el período (sólo si el reporte lo pide) más los
+   * filtros de datos que el reporte declara (`dataFilters`: orden, categoría...).
+   * `key: 'order'` usa el preset alfabético compartido para que todas las
+   * vistas con este componente ofrezcan A→Z/Z→A con la misma etiqueta.
    */
   readonly filterConfigs = computed<FilterConfig[]>(() => {
-    if (!this.report()?.requiresDateRange) return [];
-    return [
-      {
+    const report = this.report();
+    const configs: FilterConfig[] = [];
+    if (report?.requiresDateRange) {
+      configs.push({
         key: 'date_range',
         label: 'Período',
         type: 'date-range',
-      },
-    ];
+      });
+    }
+    for (const f of report?.dataFilters ?? []) {
+      if (f.key === 'order') {
+        configs.push(buildAlphabeticalOrderFilter(f.key, f.label));
+      } else if (f.optionsSource === 'categories') {
+        configs.push({
+          key: f.key,
+          label: f.label,
+          type: 'select',
+          placeholder: f.placeholder ?? 'Todas',
+          options: this.categoryOptions(),
+        });
+      }
+    }
+    return configs;
   });
+
+  /** Valores actuales de los filtros de datos (orden, categoría...). */
+  private readonly dataFilterValues = signal<Record<string, string | null>>({});
 
   /**
    * Espejo local del `dateRange` de entrada, aplanado a las tres keys que el
@@ -336,9 +372,31 @@ export class ReportViewerComponent {
    */
   private readonly localFilterValues = signal<FilterValues>({});
 
-  readonly dropdownFilterValues = computed<FilterValues>(() =>
-    this.localFilterValues(),
-  );
+  readonly dropdownFilterValues = computed<FilterValues>(() => ({
+    ...this.localFilterValues(),
+    ...this.dataFilterValues(),
+  }));
+
+  /**
+   * El store es la fuente de la verdad de los filtros (los recuerda por
+   * reporte). Si lo vigente difiere de lo local (recreación, navegación de
+   * vuelta), se adopta sin re-emitir para no recargar en bucle.
+   */
+  private readonly syncDataFiltersFromStore = effect(() => {
+    const active = this.activeDataFilters() ?? {};
+    const local = this.dataFilterValues();
+    const keys = new Set([...Object.keys(active), ...Object.keys(local)]);
+    let differs = false;
+    for (const k of keys) {
+      if ((active[k] ?? null) !== (local[k] ?? null)) {
+        differs = true;
+        break;
+      }
+    }
+    if (differs) {
+      this.dataFilterValues.set({ ...active });
+    }
+  });
 
   constructor() {
     effect(() => {
@@ -361,6 +419,27 @@ export class ReportViewerComponent {
   }
 
   onFiltersDropdownChange(values: FilterValues): void {
+    // Filtros de datos del reporte (orden, categoría...): se quedan en el
+    // viewer y se emiten al padre, que recarga en servidor. No dependen del
+    // período, así que se procesan antes del early-return del rango.
+    const dataKeys = (this.report()?.dataFilters ?? []).map((f) => f.key);
+    if (dataKeys.length > 0) {
+      const next: Record<string, string | null> = {};
+      let changed = false;
+      for (const k of dataKeys) {
+        const raw = values[k];
+        const norm =
+          typeof raw === 'string' && raw ? raw : raw != null ? String(raw) : null;
+        const normalized = norm || null;
+        if ((this.dataFilterValues()[k] ?? null) !== normalized) changed = true;
+        next[k] = normalized;
+      }
+      if (changed) {
+        this.dataFilterValues.set(next);
+        this.dataFiltersChange.emit(next);
+      }
+    }
+
     const start = values['date_range_start'];
     const end = values['date_range_end'];
     const preset = values['date_range_preset'];
@@ -397,6 +476,12 @@ export class ReportViewerComponent {
     const current = this.dateRange() as DateRangeFilter | undefined;
     if (current?.start_date && current?.end_date) {
       this.dateRangeChange.emit({ ...current, preset: 'thisMonth' });
+    }
+    if (Object.keys(this.dataFilterValues()).length > 0) {
+      // Se limpia el espejo local ANTES de emitir: si no, el input que baja
+      // al dropdown seguiría mostrando la selección anterior y la restauraría.
+      this.dataFilterValues.set({});
+      this.dataFiltersChange.emit({});
     }
   }
 

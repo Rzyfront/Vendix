@@ -13,6 +13,7 @@ import {
   selectReportMeta,
   selectReportData,
   selectTotalItems,
+  selectDataFilters,
 } from './reports.selectors';
 import { ReportsDataService } from '../services/reports-data.service';
 import { ReportExportService } from '../services/report-export.service';
@@ -80,12 +81,25 @@ export class ReportsEffects {
         this.store.select(selectFiscalPeriodId),
         this.store.select(selectCurrentPage),
         this.store.select(selectItemsPerPage),
+        this.store.select(selectDataFilters),
       ),
-      mergeMap(([, report, dateRange, fiscalPeriodId, currentPage, itemsPerPage]) => {
+      mergeMap(([, report, dateRange, fiscalPeriodId, currentPage, itemsPerPage, dataFilters]) => {
         if (!report) {
           // No report selected yet — shell may have set date range before child
           // dispatched selectReport. Silently skip, selectReportAndLoad$ will retry.
           return EMPTY;
+        }
+
+        // `order` (preset alfabético compartido) se traduce a sort del backend;
+        // el resto de filtros viaja tal cual como query params.
+        const { order, ...rest } = dataFilters ?? {};
+        const extraParams: Record<string, string> = {};
+        for (const [k, v] of Object.entries(rest)) {
+          if (v != null && v !== '') extraParams[k] = v;
+        }
+        if (order === 'asc' || order === 'desc') {
+          extraParams['sort_by'] = 'name';
+          extraParams['sort_direction'] = order;
         }
 
         return this.reportsDataService
@@ -94,6 +108,7 @@ export class ReportsEffects {
             fiscalPeriodId: report.requiresFiscalPeriod ? fiscalPeriodId : undefined,
             page: currentPage,
             limit: itemsPerPage,
+            extraParams,
           })
           .pipe(
             map((adapted) => ReportsActions.loadReportDataSuccess({

@@ -20,6 +20,9 @@ export const reportsReducer = createReducer(
     isSummary: false,
     summaryData: null,
     currentPage: 1,
+    // Restaura los filtros que ese reporte ya tenía (no se pierden al
+    // navegar o recrear la vista).
+    dataFilters: state.dataFiltersByReport[reportId] ?? {},
   })),
 
   on(ReportsActions.clearReport, (state) => ({
@@ -41,6 +44,20 @@ export const reportsReducer = createReducer(
   on(ReportsActions.setFiscalPeriod, (state, { fiscalPeriodId }) => ({
     ...state,
     fiscalPeriodId,
+  })),
+
+  on(ReportsActions.setDataFilters, (state, { filters }) => ({
+    ...state,
+    dataFilters: filters,
+    currentPage: 1,
+    ...(state.selectedReportId
+      ? {
+          dataFiltersByReport: {
+            ...state.dataFiltersByReport,
+            [state.selectedReportId]: filters,
+          },
+        }
+      : null),
   })),
 
   on(ReportsActions.loadReportData, (state) => ({
