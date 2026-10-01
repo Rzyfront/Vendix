@@ -282,7 +282,6 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
               </button>
             }
           }
-          <app-help-search-overlay></app-help-search-overlay>
           @if (show_vex_button()) {
             <a
               routerLink="/admin/vex"
@@ -293,10 +292,11 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
               <img
                 src="assets/vex/vexicon-96.webp"
                 alt=""
-                class="w-6 h-6 object-contain"
+                class="w-[31px] h-[31px] object-contain"
               />
             </a>
           }
+          <app-help-search-overlay></app-help-search-overlay>
           <app-notifications-dropdown></app-notifications-dropdown>
           <app-user-dropdown
             (closeDropdown)="onDropdownClose()"
