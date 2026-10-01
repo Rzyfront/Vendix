@@ -867,8 +867,8 @@ export class AIChatService {
    * resiliencia gana sobre el fallo rápido porque el turno ya existe y el
    * usuario está esperando respuesta (en `createConversation` sí se falla
    * rápido, porque ahí todavía no hay nada que romper). Un agente borrado o
-   * desactivado a mitad de una conversación larga vuelve a ser Vexi en vez de
-   * dejar el hilo muerto.
+   * desactivado a mitad de una conversación larga vuelve al comportamiento
+   * anterior de la app en vez de dejar el hilo muerto.
    */
   private async resolveChatAgent(
     agentKey: string | null,

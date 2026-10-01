@@ -357,6 +357,17 @@ describe('AIChatService — agente configurable del chat por defecto', () => {
       });
       expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('tools');
       expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('max_iterations');
+      b.streamIntents.consume.mockResolvedValue({
+        conversation_id: 7,
+        user_id: 9,
+        content: 'hola',
+      });
+      await collect(b.service, null);
+      expect(b.run.mock.calls[0][0]).toMatchObject({
+        app_key: 'chat_assistant',
+      });
+      expect(b.run.mock.calls[0][0]).not.toHaveProperty('tools');
+      expect(b.run.mock.calls[0][0]).not.toHaveProperty('max_iterations');
     },
   );
 });

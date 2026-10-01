@@ -175,7 +175,8 @@ export class AIAgentService {
    * - Gate bloqueado (feature deshabilitada → `SUBSCRIPTION_005`, cuota
    *   agotada → `SUBSCRIPTION_006`, estado terminal) → set vacío: el turno
    *   sigue sin tools en lugar de ofrecer el catálogo completo.
-   * - Gate permitido + `tools_allowed` declarado → intersección exacta.
+   * - Gate permitido + `tools_allowed` declarado → `*` habilita el catálogo
+   *   permitido, un dominio habilita sus tools y un nombre solo esa tool.
    * - Gate permitido + sin lista declarada → `null` (el plan no acota).
    * - Fallo del gate → `null` + warn: no se rompe el turno por un fallo de
    *   infraestructura de metering; cada iteración sigue pasando por el gate
@@ -416,11 +417,16 @@ export class AIAgentService {
     // vacío) = alcance aplicado.
     const planAllowed = await this.resolvePlanToolAllowlist(context?.store_id);
     const toolDefinitions =
-      planAllowed === null
+      planAllowed === null || planAllowed.has('*')
         ? permissionTools
-        : permissionTools.filter((t) =>
-            planAllowed.has(this.toolRegistry.canonicalName(t.function.name)),
-          );
+        : permissionTools.filter((tool) => {
+            const name = this.toolRegistry.canonicalName(tool.function.name);
+            const domain = this.toolRegistry.get(name)?.domain;
+            return (
+              planAllowed.has(name) ||
+              (domain !== undefined && planAllowed.has(domain))
+            );
+          });
 
     // Filter tools if specific ones requested
     const filteredTools = params.tools?.length
