@@ -5584,6 +5584,11 @@ model ai_engine_applications {
 /// admite listas opcionales; el loop (`AIAgentService.runAgentStream`) trata
 /// un filtro vacío como ausente, así que `[]` y "sin filtro" coinciden.)
 ///
+/// `denied_tools` resta herramientas del catálogo del turno DESPUÉS de todos
+/// los filtros (permisos ∩ plan ∩ `allowed_tools`): lo que está acá nunca se
+/// ofrece, aunque el resto lo permita. Vex (`key = 'vex'`) lo usa para
+/// excluir las `ui_*` (no navega pantallas); vacío = sin exclusiones.
+///
 /// `requires_confirmation_default` queda almacenado y documentado pero sin
 /// enforcement en F4: el circuito de confirmación sigue siendo por
 /// herramienta (`requiresConfirmation` del registry).
@@ -5595,6 +5600,7 @@ model ai_agents {
   app_key                       String?   @db.VarChar(100)
   system_prompt                 String?   @db.Text
   allowed_tools                 String[]                  @default([])
+  denied_tools                  String[]                  @default([])
   max_iterations                Int?
   requires_confirmation_default Boolean   @default(false)
   is_active                     Boolean   @default(true)
@@ -5691,6 +5697,37 @@ model ai_messages {
 
   @@index([conversation_id])
   @@index([conversation_id, created_at])
+}
+
+/// Bloque UI manipulable emitido por un agente (Vex).
+///
+/// Guarda server-side los datos que el modelo mostró con `vex_render_*`
+/// (`kind` ∈ table/chart/kpi/image/file/markdown) para que el siguiente turno
+/// pueda releerlos y transformarlos (`vex_block_read` / `vex_block_transform`)
+/// sin re-ejecutar las consultas. `spec` describe cómo pintar; `data` lleva el
+/// contenido (máx. 5000 filas); `version` crece con cada transformación.
+/// Imágenes y archivos guardan la CLAVE S3, nunca una URL firmada.
+///
+/// `message_id` es nulo cuando el bloque se emite durante el streaming, antes
+/// de que el turno persista el mensaje asistente que lo contiene.
+///
+/// Sin relaciones Prisma a propósito: como `ai_attachments`, los bloques se
+/// resuelven por (`store_id`, `conversation_id`) desde el servicio con scope
+/// de tienda, sin FKs que encadenen borrados.
+model ai_ui_blocks {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id        Int
+  conversation_id Int
+  message_id      Int?
+  kind            String   @db.VarChar(20)
+  spec            Json?
+  data            Json?
+  version         Int      @default(1)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([store_id])
+  @@index([conversation_id])
+  @@index([store_id, conversation_id])
 }
 
 /// Documento que el usuario le pasa a Vexi en una conversación.
