@@ -127,7 +127,10 @@ describe('AIAgentService.runAgentStream', () => {
     return { chunks, result: next.value };
   }
 
-  function configureStorePlan(toolsAllowed: string[], permissions = ['store:orders:read']) {
+  function configureStorePlan(
+    toolsAllowed: string[],
+    permissions = ['store:orders:read'],
+  ) {
     jest.mocked(RequestContextService.getContext).mockReturnValue({
       store_id: 42,
       permissions,
@@ -165,8 +168,16 @@ describe('AIAgentService.runAgentStream', () => {
     expect(offeredToolNames()).not.toContain('ui_navigate');
   });
 
-  it('accepts an exact tool name and preserves a narrower agent filter', async () => {
-    configureStorePlan(['list_orders', 'ui']);
+  it('offers only an exact tool name from the plan', async () => {
+    configureStorePlan(['list_orders']);
+
+    await drain({});
+
+    expect(offeredToolNames()).toEqual(['list_orders']);
+  });
+
+  it('preserves a narrower agent filter after applying the plan', async () => {
+    configureStorePlan(['*']);
 
     await drain({ tools: ['list_orders'] });
 
