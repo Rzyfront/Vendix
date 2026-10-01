@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DomainsModule } from './domains/domains.module';
 import { OrganizationsModule } from './organizations/organizations.module';
@@ -64,7 +63,5 @@ import { VideoLibraryAdminModule } from './video-library/video-library-admin.mod
     SuperadminInvoicingModule,
     SuperadminTenantConfigModule,
   ],
-  providers: [GlobalPrismaService],
-  exports: [GlobalPrismaService],
 })
 export class SuperadminDomainModule {}

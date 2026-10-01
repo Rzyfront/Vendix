@@ -23,7 +23,6 @@ import { SellableStockAllocator } from './shared/services/sellable-stock-allocat
 import { InventoryBatchesService } from './batches/inventory-batches.service';
 import { InventorySerialNumbersModule } from './serial-numbers/inventory-serial-numbers.module';
 import { InventoryTransactionsService } from './transactions/inventory-transactions.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
@@ -43,7 +42,6 @@ import { PrismaModule } from '../../../prisma/prisma.module';
   ],
   controllers: [InventoryController],
   providers: [
-    StorePrismaService,
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,

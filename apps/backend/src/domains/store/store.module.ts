@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
@@ -149,7 +148,6 @@ import { CrmModule } from './crm/crm.module';
     PrintFormatsModule,
     CrmModule,
   ],
-  providers: [StorePrismaService],
-  exports: [StorePrismaService, PrintFormatsModule],
+  exports: [PrintFormatsModule],
 })
 export class StoreDomainModule {}
