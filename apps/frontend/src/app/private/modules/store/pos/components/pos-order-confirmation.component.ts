@@ -10,6 +10,7 @@ import {
   viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 import { firstValueFrom, switchMap } from 'rxjs';
 
 
@@ -35,6 +36,13 @@ import {
 import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invoicing-not-configured/invoicing-not-configured.component';
 import { PosFiscalStatusComponent } from './pos-fiscal-status.component';
 import { PosFiscalStatus } from '../services/pos-fiscal.service';
+import { SaveRequirementsModalComponent } from '../../../../../shared/components/save-requirements-modal/save-requirements-modal.component';
+import { SaveRequirement } from '../../../../../shared/components/save-requirements-modal/save-requirements.interface';
+import { toEmitRequirements } from '../../invoicing/utils/invoice-emit-requirements';
+import {
+  EmitReadinessVerdict,
+  InvoiceEmitReadinessFinding,
+} from '../../invoicing/services/invoice-emit-readiness.service';
 import { DispatchTicketPrintService } from '../../dispatch-ticket/services/dispatch-ticket-print.service';
 import {
   shouldAutoPrintDispatchTicket,
@@ -66,6 +74,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
     IconComponent,
     InvoicingNotConfiguredComponent,
     PosFiscalStatusComponent,
+    SaveRequirementsModalComponent,
     DispatchMethodSelectorModalComponent,
     CourierNameModalComponent,
     GenerateDispatchWizardComponent,
@@ -287,7 +296,42 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
           [orderId]="isOpen() && orderId ? +orderId : null"
           (statusChanged)="onFiscalStatus($event)"
         ></app-pos-fiscal-status>
+
+        @if (fiscalRequirements().length > 0) {
+          <div class="confirm-contingency" role="alert" data-testid="fiscal-requirements">
+            <div class="confirm-contingency-body">
+              <app-icon name="alert-triangle" [size]="16" class="confirm-contingency-icon"></app-icon>
+              <div>
+                <span class="confirm-contingency-title">Para emitir la factura falta:</span>
+                <ul>
+                  @for (req of fiscalRequirements(); track req.id) {
+                    <li>
+                      <strong>{{ req.label }}</strong>
+                      <span> {{ req.reason }}</span>
+                      @if (req.action?.kind === 'navigate') {
+                        <app-button variant="ghost" size="sm" (clicked)="onRequirementAction(req)">
+                          {{ req.action.label }}
+                        </app-button>
+                      }
+                    </li>
+                  }
+                </ul>
+                <app-button variant="outline" size="sm" (clicked)="showRequirementsModal.set(true)">
+                  Ver qué falta
+                </app-button>
+              </div>
+            </div>
+          </div>
+        }
       </div>
+
+      @if (showRequirementsModal()) {
+        <app-save-requirements-modal
+          [(isOpen)]="showRequirementsModal"
+          [requirements]="fiscalRequirements()"
+          (action)="onRequirementAction($event)"
+        ></app-save-requirements-modal>
+      }
 
       <div slot="footer" class="confirm-footer">
         <!-- CTA Primario: full-width, prominente -->
@@ -394,8 +438,9 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
       ></app-shipping-address-modal>
     }
 
-    <!-- Aquí NO hay modal de requisitos fiscales, y es deliberado.
-         Ver la nota "SIN MODAL DE REQUISITOS FISCALES" en la clase. -->
+    <!-- Aquí NO hay modal de requisitos fiscales ligado al singleton, y es
+         deliberado. El modal local de «Ver qué falta» sólo se monta a pedido
+         del cajero (showRequirementsModal). Ver la nota "SIN MODAL DE REQUISITOS FISCALES" en la clase. -->
     `,
   styles: [
     `
@@ -738,6 +783,8 @@ export class PosOrderConfirmationComponent {
   readonly orderData = input<any>(null);
   readonly closed = output<void>();
   readonly newSale = output<void>();
+  private readonly router = inject(Router);
+  readonly showRequirementsModal = signal(false);
   readonly viewDetail = output<string>();
 
   printing = false;
@@ -1944,6 +1991,60 @@ private authFacade = inject(AuthFacade);
         this.toastService.info(
           'El documento electrónico va en camino. La venta ya está registrada.',
         );
+    }
+  }
+
+  /** Lo que falta para emitir, ya traducido a filas accionables. */
+  readonly fiscalRequirements = computed<SaveRequirement[]>(() => {
+    const status = this.fiscalStatus();
+    if (!status || status.state === 'issued' || status.state === 'not_applicable') {
+      return [];
+    }
+    const findings = status.requirements ?? [];
+    if (findings.length === 0) return [];
+    const isCustomer = (f: InvoiceEmitReadinessFinding) =>
+      /^(customer[_.]|acquirer)/.test(f.field ?? '');
+    const blockers = findings.filter((f) => f.severity === 'blocker');
+    const identity = blockers.filter(isCustomer);
+    const document = blockers.filter((f) => !isCustomer(f));
+    const verdict = {
+      emittable: false,
+      findings: blockers,
+      blockers,
+      warnings: [],
+      has_items: true,
+      identity: {
+        emittable: identity.length === 0,
+        mode: 'nominative',
+        findings: identity,
+        blockers: identity,
+        warnings: [],
+        normalized: null,
+      },
+      fiscal_document: {
+        emittable: document.length === 0,
+        document_type: '',
+        findings: document,
+        blockers: document,
+        warnings: [],
+        computed: {},
+      },
+    } as unknown as EmitReadinessVerdict;
+    return toEmitRequirements(verdict);
+  });
+
+  /**
+   * Acción de una fila de requisito. En el POS sólo se navega: la venta ya está
+   * cobrada y no hay formulario de factura donde hacer foco; los datos del
+   * cliente con ficha llegan como `target: 'config'` + `cta` a esa ficha.
+   */
+  onRequirementAction(req: SaveRequirement): void {
+    const action = req.action;
+    if (!action) return;
+    this.showRequirementsModal.set(false);
+    if (action.kind === 'navigate' && action.target) {
+      this.onModalClosed();
+      void this.router.navigateByUrl(action.target);
     }
   }
 
