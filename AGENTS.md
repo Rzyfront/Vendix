@@ -226,6 +226,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging an invoice that declares an obligation the merchant does not have | `vendix-dian-issuer-identity` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
+| Debugging high backend heap or Reached heap limit | `vendix-prisma-scopes` |
 | Debugging inaccurate or inconsistent distance-based shipping cost | `vendix-shipping-distance-pricing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
 | Debugging over-quota bypass or double-count on provider retries | `vendix-redis-quota` |
@@ -238,6 +239,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Deciding which order or expense states count for a period | `vendix-analytics-metrics` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
+| Declaring or providing a scoped Prisma service in a module | `vendix-prisma-scopes` |
 | Depurando un rate limit que bloquea a todos los usuarios a la vez | `vendix-trust-proxy-chain` |
 | Depurando un rate limit que no frena a un atacante | `vendix-trust-proxy-chain` |
 | Depurar un error cuyo síntoma no señala su causa | `vendix-known-errors` |

@@ -38,6 +38,7 @@
     "format": "npm run format -ws",
     "zoneless:audit": "bash apps/frontend/scripts/zoneless-audit.sh",
     "tz:audit": "bash scripts/tz-audit.sh",
+    "prisma-singleton:audit": "bash scripts/prisma-singleton-audit.sh",
     "state-refresh:audit": "bash scripts/state-refresh-audit.sh",
     "industries:audit": "bash scripts/industry-parity-audit.sh",
     "symbols:audit": "node scripts/assert-imported-symbols.js",
