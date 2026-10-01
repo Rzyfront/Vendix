@@ -3,6 +3,7 @@ import { Subscription, firstValueFrom } from 'rxjs';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
+  VEX_SINGLE_PLAN_PREFIX,
   VexApiService,
   VexBackendConversation,
   VexBackendMessage,
@@ -12,6 +13,7 @@ import {
   VexConversation,
   VexMessage,
   VexPlanProposal,
+  VexPlanStep,
   VexUiBlock,
 } from '../models/vex.models';
 
@@ -189,9 +191,24 @@ export class VexChatStore {
     if (!conversation_id || this._busy_plan_id()) return;
     const numeric = Number(conversation_id);
     if (!Number.isFinite(numeric)) return;
+    const plan = this.findPlan(conversation_id, message_id, plan_id);
+    if (!plan || plan.status !== 'proposed') return;
+    // Client-side plans (the turn wrote without `propose_plan`, so the
+    // backend issued single-use tokens and no plan token) apply step by
+    // step through the shared single-use circuit: one click still runs
+    // every proposed write. Server plans approve as a bundle.
+    if (plan.plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
+      void this.applySinglePlan(conversation_id, message_id, numeric, plan);
+      return;
+    }
     this._busy_plan_id.set(plan_id);
     this.patchPlan(conversation_id, message_id, { status: 'approved' });
-    void firstValueFrom(this.api.approvePlan(plan_id, numeric))
+    const steps = plan.steps.map((s, i) => ({
+      order: i + 1,
+      tool: s.tool,
+      arguments: s.arguments ?? {},
+    }));
+    void firstValueFrom(this.api.approvePlan(plan_id, numeric, steps))
       .then(() => {
         // Execution resumes on the same stream that emitted the proposal.
         // When that socket is already gone, reopen the turn as approved.
@@ -208,6 +225,67 @@ export class VexChatStore {
         this.toast.error(extractApiErrorMessage(error), 'No se pudo aprobar');
       })
       .finally(() => this._busy_plan_id.set(null));
+  }
+
+  /**
+   * Applies every step of a client-side plan through its own single-use
+   * token, in order. Stops at the first failure so the person sees exactly
+   * what landed and what did not; the approved turn reopens so Vex narrates
+   * the outcome instead of leaving the thread on a dead proposal.
+   */
+  private async applySinglePlan(
+    conversation_id: string,
+    message_id: string,
+    numeric: number,
+    plan: VexPlanProposal,
+  ): Promise<void> {
+    this._busy_plan_id.set(plan.plan_id);
+    this.patchPlan(conversation_id, message_id, { status: 'approved' });
+    try {
+      for (const step of plan.steps) {
+        if (!step.confirmation_token) continue;
+        this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
+          status: 'running',
+        });
+        await firstValueFrom(
+          this.api.applyStepConfirmation(
+            step.tool,
+            step.arguments ?? {},
+            step.confirmation_token,
+            numeric,
+          ),
+        );
+        this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
+          status: 'done',
+        });
+      }
+      this.patchPlan(conversation_id, message_id, { status: 'done' });
+      if (!this.stream_sub || this.stream_sub.closed) {
+        this.openStream(numeric, conversation_id, message_id, {
+          continuation: 'approved',
+          skipUserMessage: true,
+        });
+      }
+    } catch (error) {
+      this.patchPlan(conversation_id, message_id, { status: 'proposed' });
+      this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
+    } finally {
+      this._busy_plan_id.set(null);
+    }
+  }
+
+  private findPlan(
+    conversation_id: string,
+    message_id: string,
+    plan_id: string,
+  ): VexPlanProposal | null {
+    const conversation = this._conversations().find(
+      (c) => c.id === conversation_id,
+    );
+    const plan = conversation?.messages.find(
+      (m) => m.id === message_id,
+    )?.plan;
+    return plan && plan.plan_id === plan_id ? plan : null;
   }
 
   cancelPlan(message_id: string, plan_id: string): void {
@@ -565,7 +643,7 @@ export class VexChatStore {
       }
       case 'plan_approval': {
         if (!chunk.plan) return;
-        this.patchMessage(conversation_id, message_id, { plan: chunk.plan });
+        this.mergeProposal(conversation_id, message_id, chunk.plan);
         return;
       }
       case 'done': {
@@ -620,6 +698,61 @@ export class VexChatStore {
             }
           : c,
       ),
+    );
+  }
+
+  /**
+   * Folds an incoming proposal into the message's plan. The backend emits
+   * one frame per proposed write, so a turn with N writes arrives as N
+   * frames: while the card is still open they merge into a single plan the
+   * person approves once. A same-tool frame replaces its step (the new
+   * token supersedes the old one); anything else appends. A settled card
+   * (approved/rejected/done/…) never absorbs a new turn's proposal.
+   */
+  private mergeProposal(
+    conversation_id: string,
+    message_id: string,
+    incoming: VexPlanProposal,
+  ): void {
+    this._conversations.update((list) =>
+      list.map((c) => {
+        if (c.id !== conversation_id) return c;
+        return {
+          ...c,
+          messages: c.messages.map((m) => {
+            if (m.id !== message_id) return m;
+            const current = m.plan;
+            const bothSingle =
+              (current?.plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX) ?? false) &&
+              incoming.plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX);
+            if (
+              !current ||
+              current.status !== 'proposed' ||
+              (!bothSingle && current.plan_id !== incoming.plan_id)
+            ) {
+              return { ...m, plan: incoming };
+            }
+            const merged = new Map<string, VexPlanStep>();
+            for (const step of current.steps) merged.set(step.tool, step);
+            for (const step of incoming.steps) merged.set(step.tool, step);
+            const steps = [...merged.values()].map((s, i) => ({
+              ...s,
+              step_id: `s${i + 1}-${s.tool}`,
+            }));
+            return {
+              ...m,
+              plan: {
+                ...current,
+                title:
+                  steps.length > 1
+                    ? `Vex propone un plan (${steps.length} pasos)`
+                    : incoming.title,
+                steps,
+              },
+            };
+          }),
+        };
+      }),
     );
   }
 
