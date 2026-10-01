@@ -15,6 +15,9 @@ import { ReceivedDocumentsContextService } from './services/received-documents-c
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
+import { StoreReceivedDocumentAccountingController } from './store-received-document-accounting.controller';
+import { OrganizationReceivedDocumentAccountingController } from './organization-received-document-accounting.controller';
+import { ReceivedDocumentAccountingEvidenceService } from './services/received-document-accounting-evidence.service';
 
 describe('ReceivedDocumentsModule pipeline wiring', () => {
   const imports: any[] = Reflect.getMetadata('imports', ReceivedDocumentsModule) ?? [];
@@ -33,6 +36,12 @@ describe('ReceivedDocumentsModule pipeline wiring', () => {
 
   it('registers exactly one public webhook controller in the shared module', () => {
     expect(controllers.filter((controller) => controller === PublicDocumentReceptionWebhookController)).toHaveLength(1);
+    expect(controllers).toEqual(expect.arrayContaining([
+      StoreReceivedDocumentAccountingController,
+      OrganizationReceivedDocumentAccountingController,
+    ]));
+    expect(providers).toContain(ReceivedDocumentAccountingEvidenceService);
+    expect(exports).toContain(ReceivedDocumentAccountingEvidenceService);
   });
 
   it('provides every durable sync pipeline component without duplicate provider tokens', () => {

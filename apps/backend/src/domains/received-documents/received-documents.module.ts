@@ -29,8 +29,11 @@ import { DocumentReceptionSyncSchedulerService } from './services/document-recep
 import { DocumentReceptionManualSyncService } from './services/document-reception-manual-sync.service';
 import { DocumentReceptionRunResolutionService } from './services/document-reception-run-resolution.service';
 import { PublicDocumentReceptionWebhookController } from './public-document-reception-webhook.controller';
+import { StoreReceivedDocumentAccountingController } from './store-received-document-accounting.controller';
+import { OrganizationReceivedDocumentAccountingController } from './organization-received-document-accounting.controller';
+import { ReceivedDocumentAccountingEvidenceService } from './services/received-document-accounting-evidence.service';
 
-/** Shared reception pipeline; tenant-facing controllers live in each invoicing module. */
+/** Shared reception pipeline; this module also owns narrow read-only evidence routes. */
 @Module({
   imports: [
     PrismaModule,
@@ -39,10 +42,11 @@ import { PublicDocumentReceptionWebhookController } from './public-document-rece
     BullModule.registerQueue({ name: 'received-document-scan' }),
     BullModule.registerQueue({ name: 'document-reception-sync' }),
   ],
-  controllers: [PublicDocumentReceptionWebhookController],
+  controllers: [PublicDocumentReceptionWebhookController, StoreReceivedDocumentAccountingController, OrganizationReceivedDocumentAccountingController],
   providers: [
     FiscalContextResolverService,
     ReceivedDocumentsContextService,
+    ReceivedDocumentAccountingEvidenceService,
     ReceivedDocumentsService,
     ReceivedDocumentParserService,
     ReceivedDocumentStorageService,
@@ -68,6 +72,7 @@ import { PublicDocumentReceptionWebhookController } from './public-document-rece
   ],
   exports: [
     ReceivedDocumentsContextService,
+    ReceivedDocumentAccountingEvidenceService,
     ReceivedDocumentsService,
     ReceivedDocumentScanQueueService,
     ReceivedDocumentMatchCandidatesService,
