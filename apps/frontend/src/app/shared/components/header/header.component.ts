@@ -291,7 +291,7 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
               title="Vex"
             >
               <img
-                src="assets/vex/vexicon.png"
+                src="assets/vex/vexicon-96.webp"
                 alt=""
                 class="w-6 h-6 object-contain"
               />

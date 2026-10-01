@@ -22,6 +22,15 @@ import { layawayReducer } from '../../private/modules/store/layaway/state/reduce
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
 
 export const storeAdminRoutes: Routes = [
+  // Agente Vex — vista a pantalla completa, fuera del layout admin.
+  {
+    path: 'admin/vex',
+    canActivate: [AuthGuard, onboardingGuard],
+    loadComponent: () =>
+      import('../../private/modules/store/vex/vex-page.component').then(
+        (c) => c.VexPageComponent,
+      ),
+  },
   {
     path: 'admin',
     loadComponent: () =>
@@ -71,14 +80,6 @@ export const storeAdminRoutes: Routes = [
       // Owner onboarding host — gated by `onboardingGuard` on the `admin`
       // root. Only an OWNER with `organizations.onboarding !== true` ever
       // resolves here; everyone else is bounced to the dashboard.
-      // Agente Vex — vista base; se abre desde el botón del header.
-      {
-        path: 'vex',
-        loadComponent: () =>
-          import('../../private/modules/store/vex/vex-page.component').then(
-            (c) => c.VexPageComponent,
-          ),
-      },
       {
         path: 'onboarding',
         loadComponent: () =>
