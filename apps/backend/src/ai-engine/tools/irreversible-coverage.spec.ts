@@ -7,8 +7,11 @@ import { createInvoicingTools } from './domains/invoicing.tools';
 import { createOrdersTools } from './domains/orders.tools';
 import { createPaymentTools } from './domains/payments.tools';
 import { createPayrollTools } from './domains/payroll.tools';
+import { createProductTools } from './domains/products.tools';
 import { createReceivablesPayablesTools } from './domains/receivables-payables.tools';
 import { createReturnTools } from './domains/returns.tools';
+import { createSubscriptionTools } from './domains/subscriptions.tools';
+import { createVariantTools } from './domains/variants.tools';
 import { createWithholdingTools } from './domains/withholding.tools';
 
 /**
@@ -24,9 +27,10 @@ import { createWithholdingTools } from './domains/withholding.tools';
  * Solo barren writes (`requiresConfirmation`): los reads (`readOnly`) y las
  * herramientas de UI (`clientSide`) nunca llevan la marca aunque su nombre
  * la mencione (`preview_refund`, `list_close_sessions`). Alcance
- * deliberado: solo las fábricas del Paso 1; otros dominios con nombres
- * irreversibles (`archive_product`, `cancel_subscription`, `delete_variant`)
- * son de sus pasos dueños, no de este.
+ * deliberado: solo las fábricas del Paso 1; los dominios diferidos
+ * (`archive_product`, `cancel_subscription`, `delete_variant`,
+ * `pay_subscription_due`) tienen su propio bloque abajo (E2E remediación
+ * Vex), con pines directos en vez de red por dominio.
  */
 const IRREVERSIBLE_NAME_PATTERN =
   /send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_/;
@@ -128,5 +132,52 @@ describe('irreversible-coverage · Paso 1 remediación Vex', () => {
       .filter((t) => !IRREVERSIBLE_DOMAIN_SEGMENTS.has(t.domain))
       .map((t) => `${t.domain}/${t.name}`);
     expect(outside).toEqual([]);
+  });
+});
+
+describe('irreversible-coverage · dominios diferidos (E2E remediación Vex)', () => {
+  // El Paso 1 barrió solo sus 10 fábricas y dejó estos nombres a "sus pasos
+  // dueños" — pero ningún paso del plan era dueño de products/subscriptions/
+  // variants, así que `archive_product` (DELETE definitivo) llegaba al plan
+  // como reversible y un clic lo ejecutaba sin confirmación propia.
+  // Hallazgo live E2E-1 (2026-10-01): pines directos, sin red de seguridad
+  // por dominio — `products` y `subscriptions` enteros NO son irreversibles
+  // (create_product es reversible), así que la marca explícita es la única
+  // defensa y este spec es su ancla.
+  function buildDeferredRegistry(): AIToolRegistry {
+    const deps = {} as any;
+    const registry = new AIToolRegistry(deps);
+    registry.registerMany(createProductTools(deps));
+    registry.registerMany(createSubscriptionTools(deps));
+    registry.registerMany(createVariantTools(deps));
+    return registry;
+  }
+
+  it.each([
+    ['archive_product', 'products'],
+    ['delete_variant', 'products'],
+    ['cancel_subscription', 'subscriptions'],
+    ['pay_subscription_due', 'subscriptions'],
+  ])('%s porta irreversible: true', (name) => {
+    expect(buildDeferredRegistry().get(name)?.irreversible).toBe(true);
+  });
+
+  it('ningún write diferido con nombre irreversible queda sin marca', () => {
+    const violators = buildDeferredRegistry()
+      .getAll()
+      .filter(
+        (t) =>
+          t.requiresConfirmation === true &&
+          t.readOnly !== true &&
+          t.clientSide !== true,
+      )
+      .filter(
+        (t) =>
+          IRREVERSIBLE_NAME_PATTERN.test(t.name) ||
+          IRREVERSIBLE_NAME_PATTERN.test(t.domain ?? ''),
+      )
+      .filter((t) => t.irreversible !== true)
+      .map((t) => `${t.domain}/${t.name}`);
+    expect(violators).toEqual([]);
   });
 });

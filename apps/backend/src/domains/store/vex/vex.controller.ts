@@ -12,6 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -66,31 +67,37 @@ export class VexController {
     private readonly blocks: VexBlockService,
     private readonly feed: VexActivityFeedService,
     private readonly attachments: VexiAttachmentsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
    * Approves a whole plan with one click and mints its single-use token.
    *
-   * The approved plan must match the conversation's active plan id; the rest
-   * is owned by `PlanApprovalService.approvePlan`, which verifies the caller
-   * owns the thread (403 otherwise) and each client step against the hashes
-   * the proposing turn persisted server-side — the body only SELECTS the
-   * subset, it never declares the approved content. The step hashes are
-   * written by the loop at proposal time, deliberately NOT here: persisting
-   * client steps at approve time would let altered arguments bind their own
-   * token. Deliberately NOT behind `AiAccessGuard`: the token was proposed
-   * inside an already-gated turn, no provider call happens here, and re-asking
-   * the plan question could strand an approval the person already reviewed.
-   * Terminal-state subscriptions are still enforced on this POST by the global
-   * `StoreOperationsGuard`.
+   * The pre-check only proves the thread holds a proposed write plan (server
+   * step hashes exist); the rest is owned by `PlanApprovalService.approvePlan`,
+   * which verifies the caller owns the thread (403 otherwise) and each client
+   * step against the hashes the proposing turn persisted server-side — the
+   * body only SELECTS the subset, it never declares the approved content. The
+   * step hashes are written by the loop at proposal time, deliberately NOT
+   * here: persisting client steps at approve time would let altered arguments
+   * bind their own token. Deliberately NOT behind `AiAccessGuard`: the token
+   * was proposed inside an already-gated turn, no provider call happens here,
+   * and re-asking the plan question could strand an approval the person
+   * already reviewed. Terminal-state subscriptions are still enforced on this
+   * POST by the global `StoreOperationsGuard`.
+   *
+   * NOT gated on `agent_plan`: the internal task list and the write plan are
+   * different systems — a Vex turn proposes writes without one (the loop does
+   * not even receive `params.plan`), so requiring it 404s every approval.
+   * Hallazgo live E2E-1 (2026-10-01).
    */
   @Post('plans/:id/approve')
   async approvePlan(
     @Param('id', ParseUUIDPipe) planId: string,
     @Body() dto: ApprovePlanDto,
   ) {
-    const plan = await this.planState.get(dto.conversation_id);
-    if (!plan || plan.id !== planId || plan.status !== 'active') {
+    const hashes = await this.planState.getStepHashes(dto.conversation_id);
+    if (hashes.length === 0) {
       throw new VendixHttpException(
         ErrorCodes.SYS_NOT_FOUND_001,
         'Ese plan ya no está activo en esta conversación.',
@@ -107,6 +114,16 @@ export class VexController {
         tool: s.tool,
         args: s.arguments as Record<string, any>,
       })),
+    });
+
+    // Evento y no llamada directa: `AIChatModule` importa `VexModule`, así
+    // que importar al revés sería circular. `AIChatService` mueve
+    // `metadata.plan.status` a `approved` para que recargar muestre la
+    // tarjeta con su estado (remediación paso 6, cableado E2E-1).
+    this.eventEmitter.emit('ai.vex.plan_approved', {
+      conversation_id: dto.conversation_id,
+      plan_id: planId,
+      user_id: userId,
     });
 
     return this.responseService.success(
@@ -140,16 +157,26 @@ export class VexController {
    * the step's own card and the person confirms it individually, through the
    * Vexi apply endpoint. Same `AiAccessGuard` omission rationale as the
    * approve handler above.
+   *
+   * `plan_id` comes from the caller (the approve URL it just called), NOT
+   * re-resolved from the thread: the internal task plan and the write plan
+   * are different systems. Hallazgo live E2E-1 (2026-10-01).
    */
   @Post('confirmations/apply')
   async applyPlanStep(@Body() dto: ApplyConfirmationDto) {
     const userId = RequestContextService.getContext()?.user_id;
     const args = dto.arguments as Record<string, any>;
-    const planId = await this.activePlanId(dto.conversation_id);
+    if (!dto.plan_id) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_005,
+        'Esta aplicación necesita el plan aprobado.',
+        { reason: 'missing' } as any,
+      );
+    }
 
     const outcome = await this.planApproval.redeemPlanStep(
       dto.confirmation_token,
-      planId,
+      dto.plan_id,
       userId,
       dto.tool,
       args,
@@ -269,30 +296,6 @@ export class VexController {
   }
 
   // ── internals ─────────────────────────────────────────────────────────
-
-  /**
-   * The active plan of the conversation, so a plan token minted for another
-   * thread cannot authorize steps here. The fingerprint already binds the
-   * plan id; this resolves WHICH plan id the token must name.
-   */
-  private async activePlanId(conversationId?: number): Promise<string> {
-    if (!conversationId) {
-      throw new VendixHttpException(
-        ErrorCodes.AI_AGENT_005,
-        'Esta aprobación necesita la conversación del plan.',
-        { reason: 'missing' } as any,
-      );
-    }
-    const plan = await this.planState.get(conversationId);
-    if (!plan || plan.status !== 'active') {
-      throw new VendixHttpException(
-        ErrorCodes.AI_AGENT_005,
-        'Ese plan ya no está activo en esta conversación.',
-        { reason: 'missing' } as any,
-      );
-    }
-    return plan.id;
-  }
 
   /**
    * Every non-ok plan outcome becomes the step's own confirmation proposal,

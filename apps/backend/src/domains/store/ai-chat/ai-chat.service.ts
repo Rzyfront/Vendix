@@ -4,7 +4,7 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
@@ -1075,6 +1075,31 @@ export class AIChatService {
       data: { metadata: metadata as Prisma.InputJsonValue },
     });
     return count > 0;
+  }
+
+  /**
+   * El approve (`VexController`) avisa por evento —llamada directa sería un
+   * import circular (`AIChatModule` → `VexModule`)— y acá se mueve la tarjeta
+   * a `approved` para que recargar muestre su estado. Contabilidad de
+   * vitrina: si falla, se registra y la aprobación (ya acuñada) sigue válida.
+   * Cableado E2E-1 del paso 6 de la remediación.
+   */
+  @OnEvent('ai.vex.plan_approved')
+  async onVexPlanApproved(payload: {
+    conversation_id: number;
+    plan_id: string;
+  }): Promise<void> {
+    try {
+      await this.updateVexPlanStatus(
+        payload.conversation_id,
+        payload.plan_id,
+        'approved',
+      );
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo marcar el plan ${payload.plan_id} como approved (conversación ${payload.conversation_id}): ${(err as Error).message}`,
+      );
+    }
   }
 
   /**

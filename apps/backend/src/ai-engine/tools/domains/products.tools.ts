@@ -2195,6 +2195,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       version: '1',
       domain: 'products',
       requiresConfirmation: true,
+      irreversible: true,
       description:
         'Archiva un producto DEFINITIVAMENTE (DELETE irreversible, da de baja sus existencias con un ajuste de tipo pérdida y deja auditoría). EXIGE haber llamado preview_archive_product primero: pasa sus confirmed_total_units y confirmed_total_value tal cual y el handler los re-verifica contra el plan vigente (si se movió, te pide repetir el preview). Se bloquea con reservas activas o con existencias fuera de la tienda. Requiere product_id: obtenlo con find_product.',
       parameters: {

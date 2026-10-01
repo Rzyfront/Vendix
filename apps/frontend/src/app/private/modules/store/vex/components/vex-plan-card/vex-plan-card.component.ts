@@ -54,7 +54,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
         </div>
         @if (irreversible_count() > 0) {
           <span
-            class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-[rgba(220,38,38,0.1)] text-[var(--color-error,#dc2626)]"
+            class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
           >
             <app-icon name="alert-triangle" [size]="14"></app-icon>
             {{ irreversible_count() }} irreversible(s)
@@ -77,7 +77,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
               </span>
               @if (step.irreversible) {
                 <span
-                  class="shrink-0 px-2 py-0.5 rounded-lg font-medium bg-[rgba(220,38,38,0.1)] text-[var(--color-error,#dc2626)]"
+                  class="shrink-0 px-2 py-0.5 rounded-lg font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
                 >
                   Irreversible
                 </span>
@@ -117,7 +117,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
         <footer class="flex gap-2">
           <button
             type="button"
-            class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error,#dc2626)] text-[var(--color-error,#dc2626)] text-sm font-semibold disabled:opacity-50"
+            class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error)] text-[var(--color-error)] text-sm font-semibold disabled:opacity-50"
             [disabled]="busy()"
             (click)="cancel.emit()"
           >
@@ -125,7 +125,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
           </button>
           <button
             type="button"
-            class="flex-1 min-h-11 px-4 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+            class="flex-1 min-h-11 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
             [disabled]="busy()"
             (click)="approve.emit()"
           >

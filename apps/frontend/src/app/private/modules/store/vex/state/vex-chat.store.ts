@@ -497,6 +497,7 @@ export class VexChatStore {
               step.arguments ?? {},
               approved.plan_token,
               numeric,
+              plan.plan_id,
             ),
           );
           this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
@@ -557,6 +558,7 @@ export class VexChatStore {
           step.arguments ?? {},
           plan_token,
           numeric,
+          plan_id,
         ),
       );
       // Classification drifted between approve and redeem and the server ran
@@ -702,6 +704,7 @@ export class VexChatStore {
           step.arguments ?? {},
           plan_token,
           numeric,
+          plan_id,
         ),
       );
       this.patchPlanStep(conversation_id, message_id, plan_id, step.step_id, {

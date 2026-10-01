@@ -1170,4 +1170,56 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
     expect(b.prisma.ai_messages.updateMany).not.toHaveBeenCalled();
   });
+
+  it('onVexPlanApproved mueve la tarjeta a approved (E2E-1)', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 10,
+          role: 'assistant',
+          content: 'plan',
+          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+        },
+      ],
+    });
+    await expect(
+      b.service.onVexPlanApproved({ conversation_id: 7, plan_id: 'p1' }),
+    ).resolves.toBeUndefined();
+    expect(b.prisma.ai_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, conversation_id: 7 },
+      data: {
+        metadata: {
+          plan: { plan_id: 'p1', steps: STEPS, status: 'approved' },
+        },
+      },
+    });
+  });
+
+  it('onVexPlanApproved no tumba el approve si el update falla (E2E-1)', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 10,
+          role: 'assistant',
+          content: 'plan',
+          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+        },
+      ],
+    });
+    b.prisma.ai_messages.updateMany.mockRejectedValueOnce(
+      new Error('db caída'),
+    );
+    await expect(
+      b.service.onVexPlanApproved({ conversation_id: 7, plan_id: 'p1' }),
+    ).resolves.toBeUndefined();
+    expect(b.prisma.ai_messages.updateMany).toHaveBeenCalledTimes(1);
+  });
 });

@@ -464,7 +464,10 @@ export class VexApiService {
   /**
    * Applies one step of an approved plan. `planToken` is the token approve
    * minted — NOT a single-use token. Each step redeems independently: a
-   * retry of step 2 never re-runs step 1.
+   * retry of step 2 never re-runs step 1. `planId` is the id approve bound
+   * into the token's fingerprint; the server re-resolves nothing from the
+   * thread (E2E-1: the internal task plan and the write plan are different
+   * systems).
    *
    * Any non-`ok` outcome answers `AI_AGENT_005` carrying a FRESH single-use
    * token in `details` (same shape the registry uses): the step needs its
@@ -475,6 +478,7 @@ export class VexApiService {
     args: Record<string, unknown>,
     planToken: string,
     conversationId: number,
+    planId: string,
   ): Observable<{ tool: string; output: string; summary?: string | null }> {
     return this.http
       .post<{ data: { tool: string; output: string; summary?: string | null } }>(
@@ -484,6 +488,7 @@ export class VexApiService {
           arguments: args,
           confirmation_token: planToken,
           conversation_id: conversationId,
+          plan_id: planId,
         },
       )
       .pipe(map((res) => res.data));

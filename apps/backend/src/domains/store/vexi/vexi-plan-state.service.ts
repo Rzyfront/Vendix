@@ -164,8 +164,11 @@ export class VexiPlanStateService {
    * after approval and the step re-confirms alone.
    */
   async getStepHashes(conversationId: number): Promise<PlanStepHash[]> {
-    const { metadata, plan } = await this.load(conversationId);
-    if (!plan) return [];
+    // Sin gate de `agent_plan` a propósito: el plan interno de tareas y el
+    // plan de escritura de Vex son sistemas distintos — un turno Vex propone
+    // escrituras sin lista interna (el loop ni siquiera recibe `params.plan`)
+    // y sus hashes deben leerse igual. Hallazgo live E2E-1 (2026-10-01).
+    const { metadata } = await this.load(conversationId);
     const raw = (metadata as Record<string, any>).agent_plan_step_hashes;
     if (!Array.isArray(raw)) return [];
     return raw.filter(
@@ -181,8 +184,8 @@ export class VexiPlanStateService {
     conversationId: number,
     steps: Array<{ order: number; tool: string; args: Record<string, any> }>,
   ): Promise<PlanStepHash[]> {
-    const { plan, metadata } = await this.load(conversationId);
-    if (!plan) return [];
+    // Sin gate de `agent_plan`: ver `getStepHashes`.
+    const { metadata } = await this.load(conversationId);
     const hashes: PlanStepHash[] = [...steps]
       .sort((a, b) => a.order - b.order)
       .map((s) => ({
