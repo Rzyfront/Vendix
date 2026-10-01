@@ -1,3 +1,5 @@
+import { normalizeNit } from '../../../common/utils/nit.util';
+
 export interface BuyerEventReadinessInput {
   event_code: string;
   document_type: string | null | undefined;
@@ -21,10 +23,6 @@ export interface BuyerEventReadiness {
   blockers: readonly string[];
 }
 
-function normalizeTaxId(value: string | null | undefined): string {
-  return (value ?? '').replace(/[^\d]/g, '');
-}
-
 /** Conservative local preflight only; it neither validates legal entitlement nor sends a DIAN event. */
 export function evaluateBuyerEventReadiness(input: BuyerEventReadinessInput): BuyerEventReadiness {
   const blockers: string[] = [];
@@ -33,12 +31,15 @@ export function evaluateBuyerEventReadiness(input: BuyerEventReadinessInput): Bu
   if (!supportedEvent) blockers.push('unsupported_event_code');
   if (input.document_type?.toLowerCase() !== 'invoice') blockers.push('invoice_document_required');
   if (!input.document_key?.trim()) blockers.push('document_key_required');
-  if (!normalizeTaxId(input.issuer_tax_id)) blockers.push('issuer_tax_id_required');
-  if (!normalizeTaxId(input.receiver_tax_id)) blockers.push('receiver_tax_id_required');
-  const receiver = normalizeTaxId(input.receiver_tax_id);
-  const tenant = normalizeTaxId(input.tenant_tax_id);
-  if (!tenant) blockers.push('tenant_tax_id_required');
-  else if (receiver && receiver !== tenant) blockers.push('receiver_tenant_tax_id_mismatch');
+  const issuer = normalizeNit(input.issuer_tax_id);
+  const receiver = normalizeNit(input.receiver_tax_id);
+  const tenant = normalizeNit(input.tenant_tax_id);
+  if (!issuer.number) blockers.push('issuer_tax_id_required');
+  if (!receiver.number) blockers.push('receiver_tax_id_required');
+  if (receiver.dv_mismatch) blockers.push('invalid_receiver_dv');
+  if (!tenant.number) blockers.push('tenant_tax_id_required');
+  else if (tenant.dv_mismatch) blockers.push('invalid_tenant_dv');
+  if (tenant.number && receiver.number && receiver.number !== tenant.number) blockers.push('receiver_tenant_tax_id_mismatch');
   if (!Number.isInteger(input.actor_id) || (input.actor_id ?? 0) <= 0) blockers.push('actor_required');
   if (input.validation_status !== 'valid') blockers.push('validation_incomplete');
   if (input.review_status !== 'reviewed') blockers.push('review_incomplete');

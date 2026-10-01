@@ -4,9 +4,9 @@ const validInput = (event_code: string): BuyerEventReadinessInput => ({
   event_code,
   document_type: 'invoice',
   issuer_tax_id: '900123456',
-  receiver_tax_id: '800123456-7',
+  receiver_tax_id: '900123456-8',
   document_key: 'CUFE-123',
-  tenant_tax_id: '800.123.456-7',
+  tenant_tax_id: '900123456',
   validation_status: 'valid',
   review_status: 'reviewed',
   actor_id: 42,
@@ -82,8 +82,24 @@ describe('evaluateBuyerEventReadiness', () => {
 
   it('requires exact normalized receiver/tenant NIT equality', () => {
     const input = validInput('030');
-    input.receiver_tax_id = '18001234567';
+    input.receiver_tax_id = '900123457';
     expect(evaluateBuyerEventReadiness(input).blockers).toContain('receiver_tenant_tax_id_mismatch');
+  });
+
+  it('accepts the same NIT number with or without a valid DV', () => {
+    const input = validInput('030');
+    input.receiver_tax_id = '900123456-8';
+    input.tenant_tax_id = '900123456';
+    expect(evaluateBuyerEventReadiness(input)).toEqual({ ready: true, blockers: [] });
+  });
+
+  it.each([
+    ['receiver_tax_id', '900123456-7', 'invalid_receiver_dv'],
+    ['tenant_tax_id', '900123456-7', 'invalid_tenant_dv'],
+  ] as const)('rejects an explicit invalid DV on %s', (field, value, blocker) => {
+    const input = validInput('030');
+    input[field] = value;
+    expect(evaluateBuyerEventReadiness(input).blockers).toContain(blocker);
   });
 
   it('does not mutate its input', () => {
