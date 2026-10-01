@@ -14,6 +14,7 @@ import { BreadcrumbItem } from '../../../core/services/breadcrumb.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { ConfigFacade } from '../../../core/store/config';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 
 @Component({
   selector: 'app-header',
@@ -382,6 +383,7 @@ export class HeaderComponent {
   private readonly globalFacade = inject(GlobalFacade);
   private readonly configFacade = inject(ConfigFacade);
   private readonly authFacade = inject(AuthFacade);
+  private readonly storeSettingsFacade = inject(StoreSettingsFacade);
 
   // --- Observables (async pipe compatible con Zoneless) ---
   readonly breadcrumb$: Observable<{
@@ -474,11 +476,18 @@ export class HeaderComponent {
     () => this.authFacade.isAuthenticated() && this.is_org_admin(),
   );
 
-  /** Botón del agente Vex: solo en STORE_ADMIN, donde vive `/admin/vex`. */
+  /**
+   * Botón del agente Vex: solo en STORE_ADMIN (donde vive `/admin/vex`),
+   * solo para owner/admin y solo con `vex.enabled`. Espeja `vexAccessGuard`:
+   * un botón visible contra una ruta que lo devuelve se lee como avería, no
+   * como ajuste.
+   */
   readonly show_vex_button = computed(
     () =>
       this.authFacade.isAuthenticated() &&
-      this.authFacade.selectedAppType() === 'STORE_ADMIN',
+      this.authFacade.selectedAppType() === 'STORE_ADMIN' &&
+      (this.authFacade.isOwner() || this.authFacade.isAdmin()) &&
+      this.storeSettingsFacade.vexEnabled(),
   );
 
   onDropdownClose(): void {

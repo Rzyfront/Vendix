@@ -31,6 +31,13 @@ type ExtendedStoreSettings = StoreSettings & {
   publication?: Record<string, any> | null;
   ecommerce?: Record<string, any> | null;
   module_flows?: Record<string, any> | null;
+  /**
+   * Master switch for the Vex agent. Declared here — not in
+   * `StoreSettings` — until the backend `vex` settings block (wave 2) lands
+   * with its typed frontend mirror; then this moves to the interface next to
+   * `VexiSettings` and this line goes away.
+   */
+  vex?: { enabled?: boolean } | null;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -147,5 +154,25 @@ export class StoreSettingsFacade {
    */
   readonly vexiVoiceEngine = computed<'realtime' | 'pipeline'>(() =>
     this.settings()?.vexi?.voice_engine === 'realtime' ? 'realtime' : 'pipeline',
+  );
+
+  /** Raw Vex block. `null` when the store never persisted the switch. */
+  readonly vex = computed<{ enabled?: boolean } | null>(
+    () => this.settings()?.vex ?? null,
+  );
+
+  /**
+   * Whether this store switched the Vex agent on.
+   *
+   * Same fail-closed rule as `vexiEnabled`: absent block means disabled, only
+   * an explicit `true` mounts the entry points (`/admin/vex`, header button).
+   * The two switches are independent — enabling Vexi never enables Vex.
+   *
+   * Must apply the same rule as `VexEnabledGuard` on the backend. If this side
+   * is the more permissive of the two, the Vex view renders against endpoints
+   * that refuse it and the agent reads as broken rather than off.
+   */
+  readonly vexEnabled = computed<boolean>(
+    () => this.settings()?.vex?.enabled === true,
   );
 }
