@@ -17,7 +17,7 @@ import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
 import { ReceivedDocumentsContext } from './received-documents.service';
-import { ReceivedBuyerEventRequestDto } from './dto/received-buyer-event-request.dto';
+import { ReceivedBuyerEventOptionsQueryDto, ReceivedBuyerEventRequestDto } from './dto/received-buyer-event-request.dto';
 
 const STORE_CONTEXT: ReceivedDocumentsContext = {
   organization_id: 3,
@@ -62,6 +62,7 @@ function dependencies() {
     getStatus: jest.fn().mockResolvedValue({ status: 'not_started', version: 0, event_codes: [] }),
     getReadiness: jest.fn().mockResolvedValue({ status: 'not_started', ready: false, blockers: [], event_codes: [] }),
     requestVerification: jest.fn().mockResolvedValue({ status: 'testing', version: 1, event_codes: [] }),
+    listOptions: jest.fn().mockResolvedValue({ dian_configurations: [], evidence: [], total: 0, page: 1, limit: 25 }),
   };
   const contexts = {
     resolveStore: jest.fn().mockResolvedValue(STORE_CONTEXT),
@@ -484,5 +485,26 @@ describe('received-document route controllers', () => {
     expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual([
       'organization:invoicing:received:events:configure',
     ]);
+  });
+
+  it('validates strict options paging despite global implicit conversion and protects tenant selection', async () => {
+    const validationOptions = { whitelist: true, forbidNonWhitelisted: true };
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, {}, { enableImplicitConversion: true }), validationOptions)).toHaveLength(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { page: '2', limit: '100' }, { enableImplicitConversion: true }), validationOptions)).toHaveLength(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { page: '2.1' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { limit: '101' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { page: 'true' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
+    const deps = dependencies();
+    const store = new StoreReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never);
+    await store.getBuyerEventOptions({ page: 2, limit: 10 });
+    expect(deps.buyerEvents.listOptions).toHaveBeenCalledWith(STORE_CONTEXT, { page: 2, limit: 10 });
+    await expect(store.getBuyerEventOptions({ store_id: 99 })).rejects.toThrow(BadRequestException);
+    const org = new OrganizationReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never);
+    await org.getBuyerEventOptions({ store_id: 21, page: 1 });
+    expect(deps.contexts.resolveOrganization).toHaveBeenCalledWith(21);
+    expect(deps.buyerEvents.listOptions).toHaveBeenCalledWith(ORG_CONTEXT, { page: 1 });
+    expect(Reflect.getMetadata(PATH_METADATA, StoreReceivedDocumentsController.prototype.getBuyerEventOptions)).toBe('buyer-event-enablement/options');
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, StoreReceivedDocumentsController.prototype.getBuyerEventOptions)).toEqual(['invoicing:received:events:configure']);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, OrganizationReceivedDocumentsController.prototype.getBuyerEventOptions)).toEqual(['organization:invoicing:received:events:configure']);
   });
 });

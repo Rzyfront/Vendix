@@ -1,10 +1,11 @@
 import { Transform } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsIn, IsInt, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export const RECEIVED_BUYER_EVENT_CODES = ['030', '031', '032', '033'] as const;
 
-function transformStrictInteger({ obj, key }: { obj: Record<string, unknown>; key: string }): number {
+function transformStrictInteger({ obj, key }: { obj: Record<string, unknown>; key: string }): number | undefined {
   const raw = obj[key];
+  if (raw === undefined || raw === null) return undefined;
   if (typeof raw === 'number') return Number.isInteger(raw) ? raw : Number.NaN;
   if (typeof raw === 'string' && /^\d+$/.test(raw)) return Number(raw);
   return Number.NaN;
@@ -37,4 +38,25 @@ export class ReceivedBuyerEventRequestDto {
   @ArrayUnique()
   @IsIn(RECEIVED_BUYER_EVENT_CODES, { each: true })
   event_codes!: Array<(typeof RECEIVED_BUYER_EVENT_CODES)[number]>;
+}
+
+export class ReceivedBuyerEventOptionsQueryDto {
+  @Transform(transformStrictInteger)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @Transform(transformStrictInteger)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @Transform(transformStrictInteger)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  store_id?: number;
 }

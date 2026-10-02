@@ -29,6 +29,41 @@ describe('ReceivedBuyerEventEnablementService', () => {
     );
   });
 
+  describe('listOptions', () => {
+    it('scopes both eligible lists to the context and returns only safe projections with bounded pagination', async () => {
+      const configs = { findMany: jest.fn().mockResolvedValue([{ id: 2, name: 'DIAN', environment: 'test', enablement_status: 'testing', certificate_s3_key: 'secret-cert', certificate_password_encrypted: 'secret-password', software_id: 'secret-software' }]) };
+      const fiscal = { findMany: jest.fn().mockResolvedValue([{ id: 3, evidence_type: 'test_set', created_at: new Date(), storage_key: 'secret-key', content_hash: null }]), count: jest.fn().mockResolvedValue(1) };
+      const scopedDb = { dian_configurations: configs, fiscal_evidences: fiscal };
+      const scopedService = new ReceivedBuyerEventEnablementService({ withoutScope: jest.fn().mockReturnValue(scopedDb) } as unknown as GlobalPrismaService, { assertContext } as unknown as ReceivedDocumentsService);
+      const result = await scopedService.listOptions(context, { page: 2, limit: 10 });
+      expect(configs.findMany.mock.calls[0][0].where).toEqual({ organization_id: 5, accounting_entity_id: 7, configuration_type: 'invoicing', operation_mode: 'own_software', environment: { in: ['test', 'production'] } });
+      expect(fiscal.findMany.mock.calls[0][0]).toMatchObject({ where: { organization_id: 5, accounting_entity_id: 7, evidence_type: { in: ['test_set', 'dian_response', 'manual_support', 'approval_record'] } }, skip: 10, take: 10, orderBy: [{ created_at: 'desc' }, { id: 'desc' }] });
+      expect(configs.findMany.mock.calls[0][0].take).toBe(101);
+      expect(result).toMatchObject({ dian_configurations: [{ id: 2, name: 'DIAN', environment: 'test', enablement_status: 'testing', has_certificate: true, has_software_id: true }], configurations_truncated: false, evidence: [{ id: 3, evidence_type: 'test_set', has_artifact: true }], total: 1, page: 2, limit: 10 });
+      expect(JSON.stringify(result)).not.toMatch(/secret-cert|secret-password|secret-software|secret-key|content_hash|storage_key/i);
+    });
+    it('defaults pagination and rejects out-of-bound paging before database reads', async () => {
+      const configs = { findMany: jest.fn().mockResolvedValue([]) };
+      const fiscal = { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) };
+      const scopedService = new ReceivedBuyerEventEnablementService({ withoutScope: jest.fn().mockReturnValue({ dian_configurations: configs, fiscal_evidences: fiscal }) } as unknown as GlobalPrismaService, { assertContext } as unknown as ReceivedDocumentsService);
+      await expect(scopedService.listOptions(context)).resolves.toMatchObject({ total: 0, page: 1, limit: 25 });
+      await expect(scopedService.listOptions(context, { limit: 101 })).rejects.toBeInstanceOf(BadRequestException);
+    });
+    it('caps the configuration list at 100, signals truncation and requires both certificate credentials', async () => {
+      const rows = Array.from({ length: 101 }, (_, index) => ({ id: index + 1, name: `DIAN ${index + 1}`, environment: 'production', enablement_status: 'enabled', certificate_s3_key: 'secret-key', certificate_password_encrypted: index === 0 ? null : 'secret-password', software_id: 'secret-software' }));
+      const configs = { findMany: jest.fn().mockResolvedValue(rows) };
+      const fiscal = { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) };
+      const scopedService = new ReceivedBuyerEventEnablementService({ withoutScope: jest.fn().mockReturnValue({ dian_configurations: configs, fiscal_evidences: fiscal }) } as unknown as GlobalPrismaService, { assertContext } as unknown as ReceivedDocumentsService);
+      const result = await scopedService.listOptions(context);
+      expect(configs.findMany.mock.calls[0][0].take).toBe(101);
+      expect(result.dian_configurations).toHaveLength(100);
+      expect(result.configurations_truncated).toBe(true);
+      expect(result.dian_configurations[0].has_certificate).toBe(false);
+      expect(result.dian_configurations[1].has_certificate).toBe(true);
+      expect(JSON.stringify(result)).not.toMatch(/secret-key|secret-password|secret-software|certificate_password_encrypted/i);
+    });
+  });
+
   it('fails closed for missing activation without writes', async () => {
     findEnablement.mockResolvedValue(null);
     expect(await service.getReadiness(context, '030')).toEqual({ status: 'not_started', ready: false, blockers: ['not_configured'], event_codes: [] });

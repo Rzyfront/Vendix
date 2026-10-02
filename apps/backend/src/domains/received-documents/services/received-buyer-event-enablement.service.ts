@@ -52,12 +52,50 @@ export interface ReceivedBuyerEventReadiness {
   event_codes: string[];
 }
 
+export interface ReceivedBuyerEventOptionsInput { page?: number; limit?: number }
+export interface ReceivedBuyerEventOptionsView {
+  dian_configurations: Array<{ id: number; name: string; environment: string; enablement_status: string; has_certificate: boolean; has_software_id: boolean }>;
+  configurations_truncated: boolean;
+  evidence: Array<{ id: number; evidence_type: string; created_at: Date | null; has_artifact: boolean }>;
+  total: number;
+  page: number;
+  limit: number;
+}
+
 @Injectable()
 export class ReceivedBuyerEventEnablementService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly receivedDocuments: ReceivedDocumentsService,
   ) {}
+
+  async listOptions(ctx: ReceivedDocumentsContext, input: ReceivedBuyerEventOptionsInput = {}): Promise<ReceivedBuyerEventOptionsView> {
+    await this.receivedDocuments.assertContext(ctx);
+    const page = input.page ?? 1;
+    const limit = input.limit ?? 25;
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new BadRequestException('La paginación no es válida.');
+    const where = { organization_id: ctx.organization_id, accounting_entity_id: ctx.accounting_entity_id };
+    const db = this.prisma.withoutScope();
+    const [configs, evidence, total] = await Promise.all([
+      db.dian_configurations.findMany({
+        where: { ...where, configuration_type: 'invoicing', operation_mode: 'own_software', environment: { in: ['test', 'production'] } },
+        select: { id: true, name: true, environment: true, enablement_status: true, certificate_s3_key: true, certificate_password_encrypted: true, software_id: true },
+        orderBy: [{ id: 'asc' }], take: 101,
+      }),
+      db.fiscal_evidences.findMany({
+        where: { ...where, evidence_type: { in: ['test_set', 'dian_response', 'manual_support', 'approval_record'] } },
+        select: { id: true, evidence_type: true, created_at: true, storage_key: true, content_hash: true },
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }], skip: (page - 1) * limit, take: limit,
+      }),
+      db.fiscal_evidences.count({ where: { ...where, evidence_type: { in: ['test_set', 'dian_response', 'manual_support', 'approval_record'] } } }),
+    ]);
+    return {
+      dian_configurations: configs.slice(0, 100).map(({ certificate_s3_key, certificate_password_encrypted, software_id, ...config }) => ({ ...config, has_certificate: Boolean(certificate_s3_key && certificate_password_encrypted), has_software_id: Boolean(software_id) })),
+      configurations_truncated: configs.length > 100,
+      evidence: evidence.map(({ storage_key, content_hash, ...item }) => ({ ...item, has_artifact: Boolean(storage_key || content_hash) })),
+      total, page, limit,
+    };
+  }
 
   async getReadiness(ctx: ReceivedDocumentsContext, eventCode: ReceivedBuyerEventCode): Promise<ReceivedBuyerEventReadiness> {
     await this.receivedDocuments.assertContext(ctx);

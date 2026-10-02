@@ -38,7 +38,7 @@ import {
 } from './dto/received-document-match.dto';
 import { ReceivedDocumentMatchExpensesQueryDto } from './dto/received-document-match-expenses.dto';
 import { ReceivedDocumentContextQueryDto } from './dto/received-document-context.dto';
-import { ReceivedBuyerEventReadinessParamsDto, ReceivedBuyerEventRequestDto } from './dto/received-buyer-event-request.dto';
+import { ReceivedBuyerEventOptionsQueryDto, ReceivedBuyerEventReadinessParamsDto, ReceivedBuyerEventRequestDto } from './dto/received-buyer-event-request.dto';
 import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -72,6 +72,15 @@ export class StoreReceivedDocumentsController {
     this.rejectStoreOverride(scope.store_id);
     const context = await this.contexts.resolveStore();
     return this.responses.success(await this.buyerEvents.getStatus(context));
+  }
+
+  @Get('buyer-event-enablement/options')
+  @Permissions('invoicing:received:events:configure')
+  async getBuyerEventOptions(@Query() query: ReceivedBuyerEventOptionsQueryDto) {
+    this.rejectStoreOverride(query.store_id);
+    const context = await this.contexts.resolveStore();
+    const { store_id: _storeId, ...paging } = query;
+    return this.responses.success(await this.buyerEvents.listOptions(context, paging));
   }
 
   @Get('buyer-event-enablement/readiness/:eventCode')
