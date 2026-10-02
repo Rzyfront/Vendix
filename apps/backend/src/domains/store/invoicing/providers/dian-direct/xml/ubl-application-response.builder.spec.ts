@@ -85,6 +85,66 @@ describe('UblApplicationResponseBuilder', () => {
     expect(xml).toContain('<cbc:ResponseCode>030</cbc:ResponseCode>');
   });
 
+  it('emits the reception person under IssuerParty and fixes 030 description', () => {
+    const xml = build(DIAN_EVENT_CODES.ACKNOWLEDGEMENT, {
+      description: 'caller-controlled text',
+      details: {
+        receipt_person: {
+          document_type: '31', document_number: '900123456', document_dv: '8',
+          first_name: 'Ana', family_name: 'Pérez', job_title: 'Bodega',
+          organization_department: 'Recepción',
+        },
+      },
+    });
+    expect(xml).toContain('<cbc:Description>Acuse de recibo de Factura Electrónica de Venta</cbc:Description>');
+    expect(xml).toContain('<cac:IssuerParty>');
+    expect(xml).toContain('<cac:Person>');
+    expect(xml).toContain('<cbc:ID schemeName="31" schemeID="8">900123456</cbc:ID>');
+    expect(xml).toContain('<cbc:FirstName>Ana</cbc:FirstName>');
+    expect(xml).toContain('<cbc:FamilyName>Pérez</cbc:FamilyName>');
+    expect(xml).toContain('<cbc:JobTitle>Bodega</cbc:JobTitle>');
+    expect(xml).toContain('<cbc:OrganizationDepartment>Recepción</cbc:OrganizationDepartment>');
+    expect(xml.indexOf('<cac:DocumentReference>')).toBeLessThan(xml.indexOf('<cac:IssuerParty>'));
+    expect(xml).not.toContain('caller-controlled text');
+  });
+
+  it('adds canonical claim concept code and description for 031', () => {
+    const xml = build('031', {
+      description: 'caller-controlled text',
+      details: { claim_concept_code: '03' },
+    });
+    expect(xml).toContain('<cbc:ResponseCode listID="03" name="Mercancía no entregada parcialmente">031</cbc:ResponseCode>');
+    expect(xml).toContain('<cbc:Description>Reclamo de la Factura Electrónica de Venta</cbc:Description>');
+    expect(xml).not.toContain('caller-controlled text');
+  });
+
+  it('uses the official 032 receipt description with a person and 033 acceptance literal without one', () => {
+    const person = {
+      document_type: '13', document_number: '2589846132',
+      first_name: 'Ana', family_name: 'Pérez',
+    };
+    const receipt_xml = build('032', { description: 'wrong label', details: { receipt_person: person } });
+    expect(receipt_xml).toContain('<cbc:Description>Recibo del bien y/o prestación del servicio</cbc:Description>');
+    expect(receipt_xml).toContain('<cbc:FamilyName>Pérez</cbc:FamilyName>');
+    const acceptance_xml = build(DIAN_EVENT_CODES.EXPRESS_ACCEPTANCE, { description: 'wrong label' });
+    expect(acceptance_xml).toContain('<cbc:Description>Aceptación expresa</cbc:Description>');
+    expect(acceptance_xml).not.toContain('<cac:Person>');
+  });
+
+  it('rejects mutually exclusive receipt person and negotiable issuer party', () => {
+    expect(() => build(DIAN_EVENT_CODES.ENDORSEMENT_OWNERSHIP, {
+      details: {
+        receipt_person: { document_type: '13', document_number: '1', first_name: 'A', family_name: 'B' },
+        issuer_party: endorsee,
+      },
+    })).toThrow('cannot contain both receipt_person and issuer_party');
+  });
+
+  it('keeps caller descriptions for negotiable events', () => {
+    const xml = build(DIAN_EVENT_CODES.ENDORSEMENT_OWNERSHIP, { description: 'Endoso autorizado' });
+    expect(xml).toContain('<cbc:Description>Endoso autorizado</cbc:Description>');
+  });
+
   /**
    * The distinction that separates 035–051 from the reception family:
    * `CustomizationID` says WHICH variant of the act it is, while `ResponseCode`

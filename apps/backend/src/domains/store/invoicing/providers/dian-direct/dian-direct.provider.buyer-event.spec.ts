@@ -11,6 +11,12 @@ const base = {
   event_code: '030' as const, event_number: 'EV-1', generated_by: 'customer' as const,
   referenced_document_number: 'FE-1', referenced_document_key: 'cufe', referenced_document_date: '2026-01-01',
   customer: { ...issuer, document_number: '900.123.456-8' }, issue_date: '2026-01-02',
+  details: {
+    receipt_person: {
+      document_type: '13', document_number: '2589846132',
+      first_name: 'Ana', family_name: 'Pérez',
+    },
+  },
   referenced_issuer: supplier,
 };
 const exact_config = { configuration_id: 4, accounting_entity_id: 9, store_id: null };
@@ -219,6 +225,52 @@ describe('DianDirectProvider buyer event transport', () => {
   it('rejects 034 for a received invoice before signing', async () => {
     const { provider, soap } = buildProvider();
     await expectHttpStatus(provider.prepareDocumentEvent({ ...base, event_code: '034' as any }, exact_config), 400);
+    expect((provider as any).signXml).not.toHaveBeenCalled();
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it('requires receipt-person identity for buyer receipt events before signing or SOAP', async () => {
+    const { provider, soap } = buildProvider();
+    const event = { ...base, details: { ...base.details, receipt_person: undefined } };
+    await expectHttpStatus(provider.prepareDocumentEvent(event, exact_config), 422);
+    expect((provider as any).signXml).not.toHaveBeenCalled();
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns a validation error for malformed runtime receipt-person fields', async () => {
+    const { provider, soap } = buildProvider();
+    const malformed_event = {
+      ...base,
+      details: { receipt_person: { document_type: '13', document_number: undefined, first_name: undefined, family_name: undefined } },
+    } as any;
+    await expectHttpStatus(provider.prepareDocumentEvent(malformed_event, exact_config), 422);
+    expect((provider as any).signXml).not.toHaveBeenCalled();
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it('requires a DIAN claim concept for buyer event 031 before signing or SOAP', async () => {
+    const { provider, soap } = buildProvider();
+    await expectHttpStatus(provider.prepareDocumentEvent({ ...base, event_code: '031' }, exact_config), 422);
+    expect((provider as any).signXml).not.toHaveBeenCalled();
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid 031 claim concept and passes it to the exact builder response code', async () => {
+    const { provider } = buildProvider();
+    const builder = jest.spyOn(UblApplicationResponseBuilder, 'build');
+    await provider.prepareDocumentEvent({
+      ...base, event_code: '031', details: { claim_concept_code: '02' },
+    }, exact_config);
+    expect(builder.mock.calls[0][0].details).toMatchObject({ claim_concept_code: '02' });
+    builder.mockRestore();
+  });
+
+  it.each([
+    ['030 with claim concept', { ...base, details: { ...base.details, claim_concept_code: '01' } }],
+    ['033 with receipt person', { ...base, event_code: '033', details: base.details }],
+  ])('rejects buyer-only detail mismatch: %s before signing or SOAP', async (_label, event) => {
+    const { provider, soap } = buildProvider();
+    await expectHttpStatus(provider.prepareDocumentEvent(event as any, exact_config), 422);
     expect((provider as any).signXml).not.toHaveBeenCalled();
     expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
   });

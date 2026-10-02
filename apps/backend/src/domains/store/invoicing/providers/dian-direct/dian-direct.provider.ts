@@ -1534,6 +1534,39 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           'La identificación NIT/DV del proveedor referenciado es inválida.',
         );
       }
+      if (['030', '032'].includes(event.event_code)) {
+        const person = event.details?.receipt_person;
+        const person_type = typeof person?.document_type === 'string' ? person.document_type.trim() : '';
+        const person_number = typeof person?.document_number === 'string' ? person.document_number.trim() : '';
+        const first_name = typeof person?.first_name === 'string' ? person.first_name.trim() : '';
+        const family_name = typeof person?.family_name === 'string' ? person.family_name.trim() : '';
+        const person_dv = typeof person?.document_dv === 'string' ? person.document_dv.trim() : '';
+        const person_type_is_valid = Object.values(DIAN_ID_TYPES).includes(person_type);
+        const nit = person_type === DIAN_ID_TYPES.NIT && person_number
+          ? normalizeNit(`${person_number}-${person_dv}`)
+          : undefined;
+        if (
+          !person || !person_type_is_valid || !person_number || !first_name || !family_name ||
+          (person.document_dv !== undefined && typeof person.document_dv !== 'string') ||
+          (person_type === DIAN_ID_TYPES.NIT &&
+            (!/^\d$/.test(person_dv) || !nit?.number || nit.dv_mismatch || nit.provided_dv !== nit.dv))
+        ) {
+          throw new UnprocessableEntityException(
+            'El acuse de recibo requiere identificación y nombre de la persona que recibió el bien o servicio.',
+          );
+        }
+      }
+      if (event.event_code === '031' && !['01', '02', '03', '04'].includes(event.details?.claim_concept_code ?? '')) {
+        throw new UnprocessableEntityException('El reclamo requiere un concepto DIAN válido (01–04).');
+      }
+      if (
+        (event.event_code !== '031' && event.details?.claim_concept_code !== undefined) ||
+        (['031', '033'].includes(event.event_code) && event.details?.receipt_person !== undefined) ||
+        event.details?.issuer_party !== undefined ||
+        event.details?.endorsement_list_id !== undefined
+      ) {
+        throw new UnprocessableEntityException('Los detalles enviados no corresponden al tipo de evento de comprador.');
+      }
     }
 
     const issuer_party: DianEventParty = {
