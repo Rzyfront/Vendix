@@ -101,9 +101,9 @@ const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
  */
 const CONTINUATION_GOALS = {
   approved:
-    '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado. Continúa con lo que sigue sin avisarle que retomas.',
+    '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado. Continúa con lo que falte de la tarea original: más consultas sin pedir permiso y, si queda otra escritura, propón SOLO esa (una por vez) y espera su aprobación; no anuncies que retomas ni enumeres un plan. Solo cuando no quede nada pendiente, responde en 1 o 2 frases qué se hizo (resultado concreto, montos e ids clave), sin tablas y sin repetir el detalle, y ofrece brevemente ayuda con algo adicional. Mismo idioma y tono de la persona (español neutro, sin voseo).',
   rejected:
-    '(interno) La persona rechazó el cambio propuesto; no se aplicó. Decide si lo demás sigue teniendo sentido: si sí, continúa; si no, pregúntale con naturalidad.',
+    '(interno) La persona rechazó el cambio propuesto; no se aplicó. Responde en 1 frase: no hiciste ese cambio (y qué pasos ya estaban aplicados, si hay) y pregunta si quiere seguir con el resto u otra cosa. No propongas otra escritura sin que lo pida. Mismo idioma y tono de la persona (español neutro, sin voseo), sin tablas.',
   resume: '(interno) Continúa donde ibas.',
 } as const;
 
@@ -637,6 +637,15 @@ export class AIChatService {
       }
     }
 
+    // Contrato con el frontend: la salida de una continuación es una fila
+    // `assistant` NUEVA (nunca se concatena a la que propuso el plan) enlazada a
+    // la propuesta con `metadata.continuation_of`. La propuesta es el último
+    // `assistant` que lleva plan o confirmación pendiente; sin marca, el último
+    // `assistant` del hilo (escrituras directas de Vex sin plan).
+    const continuationOf: number | null = intent.continuation
+      ? this.findContinuationSourceMessageId(conversation.messages)
+      : null;
+
     // Opened — and the filler emitted — before the turn is persisted, because
     // this is the frame the person is waiting on. The writes below cost a few
     // milliseconds each, but they are milliseconds spent in the only window
@@ -849,7 +858,12 @@ export class AIChatService {
       // `plan_continue`: el turno terminó a propósito sin texto (el cliente
       // encadena otro); `aborted`: otro turno lo reemplazó. En ambos casos el
       // silencio es correcto y el fallback sería ruido.
-      if (!fullContent && !result.plan_continue && !result.aborted) {
+      if (
+        !fullContent &&
+        !result.plan_continue &&
+        !result.aborted &&
+        !result.degenerate
+      ) {
         // A turn can end without a single text chunk — the model spends its
         // last iteration on a tool that fails and then says nothing. The user
         // is left staring at an empty bubble with no idea whether Vexi is
@@ -934,10 +948,6 @@ export class AIChatService {
       for (const frame of voice.timings()) yield frame;
     }
 
-    if (doneChunk) {
-      yield doneChunk;
-    }
-
     // Save assistant response after stream completes.
     //
     // También cuando el turno Vex no produjo texto pero sí plan o bloques: la
@@ -953,6 +963,7 @@ export class AIChatService {
       vexBlockRefs,
       vexPlan ?? vexTurn?.plan ?? null,
     );
+    let assistantMessage: { id: number } | null = null;
     if (fullContent || vexMetadata) {
       // La propuesta no entra en `tool_calls`: la rama de confirmación del
       // bucle sale por `continue` sin registrarla como herramienta usada.
@@ -963,8 +974,16 @@ export class AIChatService {
       const metadata = {
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
+        ...(intent.continuation
+          ? {
+              continuation: intent.continuation,
+              ...(continuationOf !== null
+                ? { continuation_of: continuationOf }
+                : {}),
+            }
+          : {}),
       };
-      const assistantMessage = await this.prisma.ai_messages.create({
+      const created = await this.prisma.ai_messages.create({
         data: {
           conversation_id: conversationId,
           role: 'assistant',
@@ -985,12 +1004,22 @@ export class AIChatService {
             : {}),
         },
       });
-      await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
+      assistantMessage = created;
+      await this.attachVexTurnBlocks(vexBlockRefs, created.id);
 
       await this.prisma.ai_conversations.update({
         where: { id: conversationId },
         data: { updated_at: new Date() },
       });
+    }
+
+    // `done` sale DESPUÉS de persistir: lleva `message_id` de la fila nueva para
+    // que el frontend enlace la continuación (el cliente cierra el SSE al
+    // recibirlo, así que nada que viaje después se vería).
+    if (doneChunk) {
+      yield assistantMessage
+        ? { ...doneChunk, message_id: assistantMessage.id }
+        : doneChunk;
     }
 
     // Auto-generate title if first message
@@ -1899,6 +1928,21 @@ export class AIChatService {
    * empuja el resultado a la conversación del modelo y sale por `continue` sin
    * tocar `toolsUsed`. Buscarla ahí no encontraba nada nunca.
    */
+  private findContinuationSourceMessageId(
+    messages: ConversationWithMessages['messages'],
+  ): number | null {
+    let lastAssistant: number | null = null;
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (message.role !== 'assistant') continue;
+      lastAssistant ??= message.id;
+      const meta = message.metadata as Record<string, any> | null;
+      if (meta?.continuation) continue;
+      if (meta?.plan || meta?.pending_confirmation) return message.id;
+    }
+    return lastAssistant;
+  }
+
   private findPendingProposal(
     messages: ConversationWithMessages['messages'],
   ): string | null {

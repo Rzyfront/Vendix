@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
+
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import {
@@ -34,6 +36,12 @@ import { VatResponsibilityService } from '@common/helpers/vat-responsibility.hel
  *      updateStock is still called and falls back to the receipt unit cost
  *      both for `unit_cost` and `movement_unit_cost`.
  */
+
+const purchaseVatContributionProvider = () => ({
+  provide: PurchaseVatContributionService,
+  useValue: { reserve: jest.fn().mockResolvedValue({ id: 1 }) },
+});
+
 describe('PurchaseOrdersService.receive()', () => {
   let service: PurchaseOrdersService;
   let prismaService: jest.Mocked<StorePrismaService>;
@@ -208,6 +216,7 @@ describe('PurchaseOrdersService.receive()', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
         { provide: CostingService, useValue: mockCostingService },
@@ -863,6 +872,7 @@ describe('PurchaseOrdersService.receive()', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           PurchaseOrdersService,
+        purchaseVatContributionProvider(),
           { provide: StorePrismaService, useValue: mockPrismaService },
           { provide: StockLevelManager, useValue: mockStockLevelManager },
           { provide: CostingService, useValue: mockCostingService },
@@ -1295,6 +1305,7 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: mockCostingService },
@@ -1916,6 +1927,7 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           PurchaseOrdersService,
+        purchaseVatContributionProvider(),
           { provide: StorePrismaService, useValue: mockPrismaService },
           { provide: StockLevelManager, useValue: {} as any },
           {
@@ -2212,6 +2224,7 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2440,6 +2453,7 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2717,6 +2731,7 @@ describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un s
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2848,6 +2863,7 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: {} as any },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -3065,146 +3081,6 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
 
     expect(groups).toEqual([
       { tax_rate: 5, tax_type: 'iva', taxable_amount: 3000, tax_amount: 150 },
-    ]);
-  });
-});
-
-/**
- * F-214 — `materializeVatDocument()` debe escribir UNA fila de
- * `invoice_taxes` por grupo de `tax_groups`, nunca una única fila con una
- * tarifa derivada de `iva_amount / net_amount` de cabecera.
- */
-describe('PurchaseOrdersService.materializeVatDocument() — F-214', () => {
-  let service: PurchaseOrdersService;
-  let prismaService: any;
-
-  beforeEach(async () => {
-    prismaService = {
-      invoices: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 900 }),
-      },
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        PurchaseOrdersService,
-        { provide: StorePrismaService, useValue: prismaService },
-        { provide: StockLevelManager, useValue: {} as any },
-        { provide: CostingService, useValue: {} as any },
-        { provide: CostingMethodResolverService, useValue: {} as any },
-        { provide: InventorySerialNumbersService, useValue: {} as any },
-        { provide: SerialNumberEnforcementService, useValue: {} as any },
-        { provide: AuditService, useValue: {} as any },
-        { provide: S3Service, useValue: {} as any },
-        { provide: SettingsService, useValue: {} as any },
-        { provide: FiscalScopeService, useValue: {} as any },
-        { provide: EventEmitter2, useValue: {} as any },
-        { provide: AccountsPayableService, useValue: {} as any },
-        { provide: VatResponsibilityService, useValue: {} as any },
-      ],
-    }).compile();
-
-    service = module.get(PurchaseOrdersService);
-  });
-
-  it('escribe una fila de invoice_taxes por cada grupo, con la tarifa del catálogo (no derivada)', async () => {
-    const tax_groups = [
-      // QUI-INC — el grupo declara su propio `tax_type`; el escritor ya no
-      // lo inventa. Lo produce `buildPurchaseTaxGroups` leyendo
-      // `purchase_order_items.tax_type`.
-      {
-        tax_rate: 19,
-        tax_type: 'iva',
-        taxable_amount: 3985813.08,
-        tax_amount: 757304.49,
-      },
-      { tax_rate: 0, tax_type: 'iva', taxable_amount: 240720, tax_amount: 0 },
-    ];
-
-    await (service as any).materializeVatDocument({
-      purchase_order_id: 641,
-      order_number: 'PO-20260820-241',
-      supplier_invoice_number: null,
-      supplier_invoice_date: null,
-      supplier: { id: 5, name: 'Proveedor Test', tax_id: '900123456' },
-      organization_id: 1,
-      store_id: 66,
-      accounting_entity_id: 77,
-      net_amount: 4226533.08,
-      iva_amount: 757304.49,
-      tax_groups,
-      user_id: 9,
-    });
-
-    expect(prismaService.invoices.create).toHaveBeenCalledTimes(1);
-    const createArgs = prismaService.invoices.create.mock.calls[0][0];
-
-    // Cabecera: sigue siendo el neto/iva TOTAL del documento (sin cambios).
-    expect(createArgs.data.subtotal_amount).toBe(4226533.08);
-    expect(createArgs.data.tax_amount).toBe(757304.49);
-    expect(createArgs.data.total_amount).toBe(4983837.57);
-
-    // Desglose: una fila por grupo, con la tarifa TAL CUAL viene del catálogo.
-    expect(createArgs.data.invoice_taxes.create).toEqual([
-      {
-        tax_name: 'IVA',
-        tax_rate: 19,
-        taxable_amount: 3985813.08,
-        tax_amount: 757304.49,
-        tax_type: 'iva',
-      },
-      {
-        tax_name: 'IVA',
-        tax_rate: 0,
-        taxable_amount: 240720,
-        tax_amount: 0,
-        tax_type: 'iva',
-      },
-    ]);
-
-    // Ninguna fila lleva la tarifa inventada que el cociente producía en prod.
-    const writtenRates = createArgs.data.invoice_taxes.create.map(
-      (row: { tax_rate: number }) => row.tax_rate,
-    );
-    expect(writtenRates).not.toContain(17.92);
-  });
-
-  /**
-   * QUI-INC — `tax_name` y `tax_type` salen del GRUPO, no de dos literales
-   * escritos en el `create`. Se ejercita el escritor con un grupo que no es
-   * IVA —composición que la guarda de `buildPurchaseTaxGroups` no deja llegar
-   * hoy— justamente porque es la única forma de distinguir «deriva» de
-   * «escribe siempre IVA y coincide»: con el literal anterior esta prueba
-   * fallaba, con la derivación pasa.
-   */
-  it('QUI-INC: deriva tax_name y tax_type del grupo en vez de escribir IVA literal', async () => {
-    await (service as any).materializeVatDocument({
-      purchase_order_id: 642,
-      order_number: 'PO-20260820-242',
-      supplier_invoice_number: null,
-      supplier_invoice_date: null,
-      supplier: { id: 5, name: 'Proveedor Test', tax_id: '900123456' },
-      organization_id: 1,
-      store_id: 66,
-      accounting_entity_id: 77,
-      net_amount: 1000,
-      iva_amount: 80,
-      tax_groups: [
-        { tax_rate: 8, tax_type: 'inc', taxable_amount: 1000, tax_amount: 80 },
-      ],
-      user_id: 9,
-    });
-
-    const createArgs = prismaService.invoices.create.mock.calls[0][0];
-    expect(createArgs.data.invoice_taxes.create).toEqual([
-      {
-        tax_name: 'INC',
-        tax_rate: 8,
-        taxable_amount: 1000,
-        tax_amount: 80,
-        tax_type: 'inc',
-      },
     ]);
   });
 });

@@ -899,16 +899,14 @@ export class AccountingEventsListener {
 
   /**
    * F2 IVA lifecycle — VAT-only recognition of a POP purchase's deductible VAT.
-   * The purchase-orders service already materialized the fiscal document
-   * (`invoices` row that feeds calculateVat) and emitted this event carrying
-   * its `invoice_id`. Here we only post the ledger complement DR 240804 / CR
-   * 2205 (see AutoEntryService.onPurchaseVatRecognized). Gated by the same
-   * `purchases` subflow as purchase_order.received. Accounting failures are
-   * logged and never roll back the already-completed reception.
+   * Contribution-keyed events post by `contribution_id` without requiring an
+   * invoice projection; legacy invoice-keyed events continue through
+   * `onPurchaseVatRecognized`. Both paths are gated by the same `purchases`
+   * subflow as purchase_order.received. Accounting failures are logged and
+   * never roll back the already-completed reception.
    */
   @OnEvent('purchase.vat_recognized')
   async handlePurchaseVatRecognized(event: {
-    invoice_id: number;
     purchase_order_id: number;
     reception_id: number;
     organization_id: number;
@@ -917,8 +915,58 @@ export class AccountingEventsListener {
     iva_amount: number;
     supplier?: { id: number; name?: string; tax_id?: string };
     user_id?: number;
-  }) {
+  } & (
+    | { contribution_id: number; invoice_id?: never }
+    | { contribution_id?: never; invoice_id: number }
+  )) {
+    const hasContributionId = Object.prototype.hasOwnProperty.call(
+      event,
+      'contribution_id',
+    );
     try {
+      const validPositiveId = (value: unknown): value is number =>
+        Number.isSafeInteger(value) && (value as number) > 0;
+      if (hasContributionId) {
+        const contributionId = event.contribution_id;
+        if (!validPositiveId(contributionId)) {
+          throw new Error('Invalid purchase VAT contribution_id; legacy fallback is prohibited');
+        }
+        if (
+          !validPositiveId(event.organization_id) ||
+          !validPositiveId(event.accounting_entity_id) ||
+          !validPositiveId(event.store_id)
+        ) {
+          throw new Error('Missing or invalid fiscal scope for purchase VAT contribution; legacy fallback is prohibited');
+        }
+        if (
+          !(await this.requireFlow('purchases', {
+            organization_id: event.organization_id,
+            store_id: event.store_id,
+            source_type: 'purchase_vat_contribution',
+            source_id: contributionId,
+            event,
+          }))
+        ) {
+          return;
+        }
+        const entry = await this.auto_entry_service.onPurchaseVatContributionRecognized({
+          contribution_id: contributionId,
+          organization_id: event.organization_id,
+          accounting_entity_id: event.accounting_entity_id,
+          store_id: event.store_id,
+          user_id: event.user_id,
+        });
+        if (entry) {
+          this.logger.log(
+            `Auto-entry created for purchase VAT contribution #${contributionId} (PO #${event.purchase_order_id})`,
+          );
+        }
+        return;
+      }
+
+      if (!validPositiveId(event.invoice_id)) {
+        throw new Error('Invalid purchase VAT invoice_id');
+      }
       if (
         !(await this.requireFlow('purchases', {
           organization_id: event.organization_id,
@@ -946,8 +994,11 @@ export class AccountingEventsListener {
         );
       }
     } catch (error) {
+      const eventKey = hasContributionId
+        ? `contribution #${String(event.contribution_id)}`
+        : `invoice #${String(event.invoice_id)}`;
       this.logger.error(
-        `Failed to create auto-entry for purchase.vat_recognized invoice #${event.invoice_id} (PO #${event.purchase_order_id}): ${error.message}`,
+        `Failed to create auto-entry for purchase.vat_recognized ${eventKey} (PO #${event.purchase_order_id}): ${error.message}`,
         error.stack,
       );
     }

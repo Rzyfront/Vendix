@@ -1617,13 +1617,13 @@ export class AnalyticsController {
       { key: 'tax_name', header: 'Impuesto', type: 'text' },
       { key: 'tax_type', header: 'Tipo fiscal', type: 'text' },
       { key: 'tax_rate', header: 'Tasa', type: 'percent' },
-      { key: 'taxable_amount', header: 'Base gravable', type: 'currency' },
-      { key: 'tax_collected', header: 'Recaudado', type: 'currency' },
+      { key: 'taxable_amount', header: 'Base registrada', type: 'currency' },
+      { key: 'tax_collected', header: 'Impuesto registrado', type: 'currency' },
       { key: 'is_compound', header: 'Compuesto', type: 'text' },
     ];
 
-    await this.emitReport(res, 'impuestos', tz, [
-      this.toSheet('Impuestos', columns, rows, tz),
+    await this.emitReport(res, 'impuestos_operativos', tz, [
+      this.toSheet('Impuestos operativos', columns, rows, tz),
     ]);
   }
 

@@ -576,7 +576,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       domain: 'payroll',
       readOnly: true,
       description:
-        'Estado DIAN (DSPNE) de una nómina enviada: consulta con el CUNE almacenado y devuelve el estado actual más la respuesta del proveedor. Solo lectura desde Vexi (misma lectura que GET :id/dian-status; si la DIAN ya respondió, el service dueño sincroniza sent→accepted/rejected como en el HTTP). Habilita send_payroll_dian junto con F-51.',
+        'Estado DIAN (DSPNE) de una nómina enviada: consulta con el CUNE almacenado y devuelve el estado actual más la respuesta del proveedor. Solo lectura (misma lectura que GET :id/dian-status; si la DIAN ya respondió, el service dueño sincroniza sent→accepted/rejected como en el HTTP). Habilita send_payroll_dian junto con F-51.',
       parameters: {
         type: 'object',
         properties: {
@@ -1261,7 +1261,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       domain: 'payroll',
       readOnly: true,
       description:
-        'Perfil fiscal del empleado (art. 387 ET): dependientes, deducciones mensuales (vivienda, medicina prepagada, pensión voluntaria, AFC) y procedimiento de retención. Solo lectura desde Vexi (misma lectura que GET :id/fiscal-profile; si no existe, el service dueño crea el perfil vacío por defecto como en el HTTP).',
+        'Perfil fiscal del empleado (art. 387 ET): dependientes, deducciones mensuales (vivienda, medicina prepagada, pensión voluntaria, AFC) y procedimiento de retención. Solo lectura (misma lectura que GET :id/fiscal-profile; si no existe, el service dueño crea el perfil vacío por defecto como en el HTTP).',
       parameters: {
         type: 'object',
         properties: {
@@ -2174,7 +2174,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       domain: 'payroll',
       readOnly: true,
       description:
-        'Archivo plano PILA del período (Res. 2388/2016): devuelve filename, contenido de ancho fijo y n.º de cotizantes. Solo lectura desde Vexi (misma generación que GET flat-file; el service dueño registra la exportación en pila_submissions como en el HTTP). Advierte que el layout no está validado contra un operador certificado.',
+        'Archivo plano PILA del período (Res. 2388/2016): devuelve filename, contenido de ancho fijo y n.º de cotizantes. Solo lectura (misma generación que GET flat-file; el service dueño registra la exportación en pila_submissions como en el HTTP). Advierte que el layout no está validado contra un operador certificado.',
       parameters: {
         type: 'object',
         properties: {

@@ -21,7 +21,6 @@ import { isSafeS3Key } from '@common/helpers/s3-url.helper';
 import {
   purchase_order_status_enum,
   tax_type_enum,
-  invoice_type_enum,
   Prisma,
 } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -78,6 +77,7 @@ import {
   VatTreatmentExplanation,
   vatTreatmentFromResult,
 } from '@common/helpers/vat-responsibility.helper';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
 
 /**
  * QUI-647 — marcador del pago real de un abono registrado al crear la OC.
@@ -163,6 +163,7 @@ export class PurchaseOrdersService {
     // (antes replicado localmente aquí y en InvoiceScannerService). Cambia el
     // default pre-F4 es Paso 0.1 — fuera de P0.1.
     private vatService: VatResponsibilityService,
+    private purchaseVatContributionService: PurchaseVatContributionService,
   ) {}
 
   /**
@@ -4611,11 +4612,9 @@ export class PurchaseOrdersService {
     // receptions), and only when there is IVA to recognize. O-49 never reaches
     // here — its VAT is already capitalized into inventory cost by F1.
     //
-    // We materialize a purchase fiscal document (`invoices` row) that feeds the
-    // VAT declaration (calculateVat), and emit `purchase.vat_recognized` so the
-    // ledger complement DR 240804 / CR 2205 (iva) is posted. The document is
-    // created WITHOUT going through invoice-flow send()/accept(), so it never
-    // fires `support_document.accepted` (which would post 5195 + full 2205).
+    // Reserve the deductible VAT contribution as operational/GL provenance.
+    // It is not fiscal declaration authority: declaration eligibility and
+    // effects are determined by the received-tax fiscal authority.
     try {
       if (result.vat_responsible && result.all_items_received && store_id != null) {
         // F-214 — el desglose por tarifa sale del catálogo de cada línea
@@ -4631,36 +4630,39 @@ export class PurchaseOrdersService {
         const net_amount = Number(result.order_subtotal || 0);
 
         if (iva_amount > 0 && accounting_entity_id != null) {
-          const invoice = await this.materializeVatDocument({
+          if (!result.updated_po.suppliers?.id || store_id == null) {
+            throw new Error('F2: supplier and store are required to reserve deductible VAT');
+          }
+          const contribution = await this.purchaseVatContributionService.reserve({
+            organization_id: result.updated_po.organization_id,
+            accounting_entity_id,
+            store_id,
             purchase_order_id: result.updated_po.id,
-            order_number: result.updated_po.order_number,
-            supplier_invoice_number:
-              result.updated_po.supplier_invoice_number ?? null,
-            supplier_invoice_date:
-              result.updated_po.supplier_invoice_date ?? null,
-            supplier,
+            reception_id: result.reception_id,
+            supplier_id: result.updated_po.suppliers.id,
+            supplier_tax_id_snapshot: result.updated_po.suppliers.tax_id ?? null,
+            invoice_number_snapshot: result.updated_po.supplier_invoice_number ?? null,
+            invoice_issue_date_snapshot: result.updated_po.supplier_invoice_date ?? null,
+            currency: 'COP',
+            // Preserve the exact cent precision of the recognized contribution.
+            net_amount: Math.round(net_amount * 100) / 100,
+            iva_amount,
+            tax_groups,
+          });
+          if (!contribution?.id) {
+            throw new Error('F2: VAT contribution reservation did not return an id');
+          }
+          this.eventEmitter.emit('purchase.vat_recognized', {
+            purchase_order_id: result.updated_po.id,
+            reception_id: result.reception_id,
             organization_id: result.updated_po.organization_id,
             store_id,
             accounting_entity_id,
-            net_amount,
             iva_amount,
-            tax_groups,
+            contribution_id: contribution.id,
+            supplier,
             user_id: RequestContextService.getUserId(),
           });
-
-          if (invoice) {
-            this.eventEmitter.emit('purchase.vat_recognized', {
-              invoice_id: invoice.id,
-              purchase_order_id: result.updated_po.id,
-              reception_id: result.reception_id,
-              organization_id: result.updated_po.organization_id,
-              store_id,
-              accounting_entity_id,
-              iva_amount,
-              supplier,
-              user_id: RequestContextService.getUserId(),
-            });
-          }
         }
       }
     } catch (error: any) {
@@ -4673,158 +4675,10 @@ export class PurchaseOrdersService {
   }
 
   /**
-   * F2 IVA lifecycle — materialize (idempotently) the purchase fiscal document
-   * that carries the deductible VAT of a POP purchase into the VAT declaration.
-   *
-   * Design decisions (documented on purpose):
-   * - `invoice_type`: defaults to `support_document`. There is no supplier
-   *   "electronic-invoicer" flag in the schema; when one is added, switch to
-   *   `purchase_invoice` for e-invoicing suppliers. Both types are classified
-   *   as DEDUCTIBLE (not a sale) by `calculateVat`.
-   * - `dian_status = not_applicable`: this is an internally-generated purchase
-   *   support document, so `calculateVat.isAcceptedForTax` counts it without a
-   *   DIAN round-trip.
-   * - Created via a direct scoped Prisma insert (NOT `InvoicingService.create`)
-   *   to avoid consuming our own DIAN numbering resolution — the invoice_number
-   *   is the SUPPLIER's number (or the PO `order_number` as a traceable
-   *   fallback), never one of our sequence.
-   * - Traceability PO↔invoice (no FK column exists on `invoices`): the
-   *   `invoice_number` carries the supplier/PO reference and `supplier_id`
-   *   links the counterparty; `notes` records the PO id + order_number.
-   * - Idempotency: guarded by the `invoices` unique
-   *   (accounting_entity_id, invoice_type, invoice_number). A pre-check
-   *   `findFirst` reuses an existing row; a concurrent unique violation (P2002)
-   *   is caught and the winning row is returned — so there is never more than
-   *   one document per purchase.
-   * - F-214: `invoice_taxes` gets ONE row per `tax_groups` entry (one per
-   *   tarifa real del catálogo de línea), never a single row with a rate
-   *   derived from `iva_amount / net_amount` — ese cociente diluye la tarifa
-   *   apenas hay una línea exenta, tarifas mixtas o IVA capitalizado.
-   */
-  private async materializeVatDocument(params: {
-    purchase_order_id: number;
-    order_number: string;
-    supplier_invoice_number: string | null;
-    supplier_invoice_date: Date | null;
-    supplier?: { id: number; name?: string; tax_id?: string };
-    organization_id: number;
-    store_id: number;
-    accounting_entity_id: number;
-    net_amount: number;
-    iva_amount: number;
-    /**
-     * F-214 — desglose por tarifa real, una fila de `invoice_taxes` por grupo.
-     *
-     * QUI-INC — `tax_type` viaja en el grupo y es OBLIGATORIO: sale de
-     * `purchase_order_items.tax_type` (la fila fuente, ver
-     * `buildPurchaseTaxGroups`) y no de un literal en el punto de escritura.
-     */
-    tax_groups: Array<{
-      tax_rate: number;
-      tax_type: tax_type_enum;
-      taxable_amount: number;
-      tax_amount: number;
-    }>;
-    user_id?: number;
-  }): Promise<{ id: number } | null> {
-    const invoice_type = invoice_type_enum.support_document;
-    const invoice_number =
-      params.supplier_invoice_number?.trim() || params.order_number;
-    const issue_date = params.supplier_invoice_date ?? new Date();
-
-    // Idempotency pre-check: reuse an existing document for this purchase.
-    const existing = await this.prisma.invoices.findFirst({
-      where: {
-        accounting_entity_id: params.accounting_entity_id,
-        invoice_type,
-        invoice_number,
-      },
-      select: { id: true },
-    });
-    if (existing) {
-      this.logger.log(
-        `F2: reusing existing VAT document invoice #${existing.id} for PO #${params.purchase_order_id}`,
-      );
-      return existing;
-    }
-
-    const net = Math.round(params.net_amount * 100) / 100;
-    const iva = Math.round(params.iva_amount * 100) / 100;
-    const total = Math.round((net + iva) * 100) / 100;
-
-    try {
-      const invoice = await this.prisma.invoices.create({
-        data: {
-          organization_id: params.organization_id,
-          // store_id is injected by StorePrismaService from the request context.
-          accounting_entity_id: params.accounting_entity_id,
-          fiscal_document_type: 'support_document',
-          invoice_number,
-          invoice_type,
-          status: 'validated',
-          dian_status: 'not_applicable',
-          supplier_id: params.supplier?.id,
-          customer_name: params.supplier?.name,
-          customer_tax_id: params.supplier?.tax_id,
-          subtotal_amount: net,
-          discount_amount: 0,
-          tax_amount: iva,
-          withholding_amount: 0,
-          total_amount: total,
-          currency: 'COP',
-          issue_date,
-          created_by_user_id: params.user_id,
-          notes: `F2: reconocimiento IVA descontable — PO #${params.purchase_order_id} (${params.order_number})`,
-          // F-214 — una fila por tarifa real (`tax_groups`), NUNCA una tarifa
-          // efectiva derivada de iva/neto: ver `buildPurchaseTaxGroups`.
-          invoice_taxes: {
-            create: params.tax_groups.map((group) => ({
-              // QUI-INC — los CUATRO campos fiscales de la fila salen del MISMO
-              // grupo, y el grupo salió de las líneas de la orden de compra.
-              // Antes `tax_name` y `tax_type` eran literales `'IVA'` / `iva`
-              // escritos AQUÍ: una línea tipada INC en
-              // `purchase_order_items.tax_type` se persistía como IVA en un
-              // documento soporte `validated` que alimenta la declaración de
-              // IVA. El nombre se DERIVA del tipo (iva→IVA, inc→INC,
-              // ica→ICA) para que etiqueta y clasificación no puedan
-              // contradecirse entre sí.
-              tax_name: group.tax_type.toUpperCase(),
-              tax_rate: group.tax_rate,
-              taxable_amount: group.taxable_amount,
-              tax_amount: group.tax_amount,
-              tax_type: group.tax_type,
-            })),
-          },
-        },
-        select: { id: true },
-      });
-      this.logger.log(
-        `F2: materialized VAT document invoice #${invoice.id} (${invoice_type} ${invoice_number}) for PO #${params.purchase_order_id}`,
-      );
-      return invoice;
-    } catch (error: any) {
-      // Concurrent creation lost the race on the unique constraint — reuse the
-      // winning row so recognition stays idempotent.
-      if (error?.code === 'P2002') {
-        const winner = await this.prisma.invoices.findFirst({
-          where: {
-            accounting_entity_id: params.accounting_entity_id,
-            invoice_type,
-            invoice_number,
-          },
-          select: { id: true },
-        });
-        if (winner) return winner;
-      }
-      throw error;
-    }
-  }
-
-  /**
    * F-214 — agrupa las líneas de la orden por su tarifa de catálogo
-   * (`purchase_order_items.tax_rate`) para que `materializeVatDocument` emita
-   * UNA fila de `invoice_taxes` por tarifa real, en vez de derivar una tarifa
-   * efectiva del cociente `iva_amount / net_amount` de cabecera. Ese cociente
+   * (`purchase_order_items.tax_rate`) para conservar el desglose real en el
+   * snapshot de la contribución, en vez de derivar una tarifa efectiva del
+   * cociente `iva_amount / net_amount` de cabecera. Ese cociente
    * es el defecto medido en producción: una línea exenta infla el
    * denominador sin aportar al numerador y el resultado (17,92 %, 0,04 %) no
    * existe en ningún catálogo tributario colombiano (evidencia F-214).
@@ -4842,16 +4696,14 @@ export class PurchaseOrdersService {
    * exenta (0 %), grava a alguna tarifa vigente, o simplemente nunca se
    * configuró — inferir 0 % en silencio sería inventar una clasificación
    * fiscal igual que el defecto que este método reemplaza. Por eso se falla
-   * cerrado: se aborta TODA la materialización del documento soporte (el
-   * `catch` del llamador lo registra y no bloquea la recepción) en vez de
-   * escribir un desglose con una tarifa adivinada. Un documento soporte no
-   * materializado es recuperable; uno materializado con una tarifa
-   * inexistente y ya `validated` ante la DIAN, no.
+   * cerrado: se aborta la reserva del desglose de contribución (el `catch` del
+   * llamador lo registra y no bloquea la recepción) en vez de persistir una
+   * tarifa adivinada como provenance operativa.
    *
    * QUI-INC — el grupo lleva TAMBIÉN el `tax_type` de la línea
-   * (`purchase_order_items.tax_type`), porque `materializeVatDocument` lo
-   * escribía como literal `iva` en el punto de escritura. Este documento
-   * reconoce IVA descontable y nada más. QUI-855 (multi-impuesto): una línea
+   * (`purchase_order_items.tax_type`) para preservar la clasificación en el
+   * snapshot de contribución. La contribución soporta provenance operativa y
+   * GL; no define autoridad fiscal declarativa. QUI-855 (multi-impuesto): una línea
    * INC/ICUI/IBUA sin porción deducible (siempre capitalizada) se SALTA en vez
    * de abortar; sólo una línea no-IVA con monto deducible > 0 —estado
    * imposible tras receive()— sigue lanzando (ver la guarda).
@@ -4886,8 +4738,8 @@ export class PurchaseOrdersService {
 
     for (const item of items) {
       // QUI-855 — INC/ICUI/IBUA nunca son IVA descontable: una línea no-IVA
-      // sin porción deducible no aporta a este documento y se SALTA (antes
-      // abortaba toda la materialización). Con O-48 y filas hijas, su
+      // sin porción deducible no aporta a este snapshot y se SALTA (antes
+      // abortaba toda la reserva). Con O-48 y filas hijas, su
       // impuesto quedó sellado como capitalizado, no deducible.
       const lineType = item.tax_type ?? tax_type_enum.iva;
       if (
@@ -4907,8 +4759,7 @@ export class PurchaseOrdersService {
 
       // QUI-INC — el tipo fiscal se resuelve AQUÍ, contra la fila fuente
       // (`purchase_order_items.tax_type`, que es la MISMA que aporta tarifa y
-      // base), y no en `materializeVatDocument`, donde era el literal
-      // `tax_type_enum.iva`. El `?? iva` es el default canónico de una fila
+      // base). El `?? iva` es el default canónico de una fila
       // sin tipar (regla «sin tipar significa IVA» de `vendix-tax-typing`) y
       // acá sí puede aplicarse: se ve la columna, así que «ausente» no se
       // confunde con «tipada y no propagada».
