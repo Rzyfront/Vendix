@@ -30,16 +30,64 @@ describe('buildReceivedTaxBasis', () => {
       row({ id: 3, tax_type: 'iva', scheme_code: '01', rate: '19', amount: '19', base_amount: '100' }),
       row({ id: 4, tax_type: 'iva', scheme_code: '01', rate: '5', amount: '5', base_amount: '100' }),
       row({ id: 5, tax_type: 'inc', scheme_code: '04', rate: '8', amount: '8', base_amount: '100' }),
-      row({ id: 6, tax_type: 'ibua', scheme_code: '34', rate: null, amount: '1', base_amount: '0', metadata: { tax_basis_type: 'unit', base_unit_code: 'ML', per_unit_amount: '0.10' } }),
+      row({ id: 6, tax_type: 'ibua', scheme_code: '34', rate: '0', amount: '1', base_amount: '0', metadata: { tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10' } }),
       row({ id: 7, tax_type: 'withholding', scheme_code: '06', rate: '2.5', amount: '2', base_amount: '80' }),
     ] }));
     expect(basis.groups.map((group) => group.tax_type)).toEqual(['ibua', 'inc', 'iva', 'iva', 'withholding']);
     expect(basis.groups.find((group) => group.tax_type === 'ibua')).toMatchObject({
-      rate: null,
+      rate: '0',
       basis_qualifier: { tax_basis_type: 'unit', base_unit_code: 'ML', per_unit_amount: '0.10' },
+      base_quantity: '1000.00',
     });
     // Only non-withholding rows reconcile to document tax_amount; tax family identity remains explicit.
     expect(blockerCodes(basis)).toEqual([]);
+  });
+
+  it('validates and preserves nominal IBUA quantity as hashed tax-basis evidence', () => {
+    const nominal = (quantity: string) => row({
+      id: 20, tax_type: 'ibua', scheme_code: '34', rate: '0', base_amount: '0.00', amount: '1.00',
+      metadata: { tax_basis_type: 'unit', base_quantity: quantity, base_unit_code: 'ML', per_unit_amount: '0.10' },
+    });
+    const basis = buildReceivedTaxBasis(input({ tax_amount: '1.00', tax_rows: [nominal('1000.00')] }));
+    const quantityDrift = buildReceivedTaxBasis(input({ tax_amount: '1.00', tax_rows: [nominal('1000.01')] }));
+    expect(basis.groups[0]).toMatchObject({ base_quantity: '1000.00', tax_amount: '1.00' });
+    expect(blockerCodes(basis)).toEqual([]);
+    expect(quantityDrift.groups[0].base_quantity).toBe('1000.01');
+    expect(quantityDrift.facts_hash).not.toBe(basis.facts_hash);
+
+    const withinNominalTolerance = buildReceivedTaxBasis(input({ tax_amount: '1.01', tax_rows: [
+      { ...nominal('1000.00'), amount: '1.01' },
+    ] }));
+    const beyondNominalTolerance = buildReceivedTaxBasis(input({ tax_amount: '1.02', tax_rows: [
+      { ...nominal('1000.00'), amount: '1.02' },
+    ] }));
+    expect(blockerCodes(withinNominalTolerance)).not.toContain('INVALID_UNIT_TAX_BASIS');
+    expect(blockerCodes(beyondNominalTolerance)).toContain('INVALID_UNIT_TAX_BASIS');
+
+    const compared = buildReceivedTaxBasis(input({ tax_amount: '1.00', tax_rows: [
+      nominal('1000.00'), { ...nominal('1000.02'), id: 21, item_id: 101 },
+    ] }));
+    expect(blockerCodes(compared)).toContain('HEADER_ITEM_UNIT_BASIS_MISMATCH');
+  });
+
+  it('blocks incomplete or malformed nominal bases and nominal fields on monetary rows', () => {
+    const basis = buildReceivedTaxBasis(input({ tax_amount: '3.00', tax_rows: [
+      row({ id: 30, tax_type: 'ibua', scheme_code: '34', rate: '0', amount: '1', metadata: { tax_basis_type: 'unit', base_unit_code: 'ML', per_unit_amount: '0.10' } }),
+      row({ id: 31, tax_type: 'inc', scheme_code: '04', rate: '8', amount: '1', metadata: { tax_basis_type: 'unit', base_quantity: '1000', base_unit_code: 'ML', per_unit_amount: '0.10' } }),
+      row({ id: 32, tax_type: 'ibua', scheme_code: '34', rate: '1', amount: '1', metadata: { tax_basis_type: 'unit', base_quantity: '1000', base_unit_code: 'ML', per_unit_amount: '0.10' } }),
+      row({ id: 33, tax_type: 'iva', scheme_code: '01', rate: '19', amount: '0.5', metadata: { tax_basis_type: 'monetary', base_quantity: '2' } }),
+    ] }));
+    expect(basis.blockers.find((blocker) => blocker.code === 'INVALID_UNIT_TAX_BASIS')?.evidence_tax_ids).toEqual([30, 31, 32, 33]);
+  });
+
+  it('blocks positive IVA facts missing rate or scheme code and validates runtime document type', () => {
+    const basis = buildReceivedTaxBasis(input({
+      document_type: 'unsupported' as any,
+      tax_rows: [row({ id: 40, scheme_code: null, rate: null })],
+    }));
+    expect(basis.document_type).toBe('unsupported');
+    expect(blockerCodes(basis)).toEqual(expect.arrayContaining(['INVALID_DOCUMENT_TYPE', 'MISSING_IVA_RATE', 'MISSING_IVA_SCHEME_CODE']));
+    expect(basis.blockers.find((blocker) => blocker.code === 'MISSING_IVA_RATE')?.evidence_tax_ids).toEqual([40]);
   });
 
   it('supports header-only and item-only representations', () => {
