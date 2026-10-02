@@ -147,6 +147,7 @@ export class FiscalCloseService {
 
   async runChecks(contexts: FiscalOperationsContext[], sessionId: number) {
     const session = await this.findOne(contexts, sessionId);
+    if (session.status === 'closed' || session.status === 'cancelled') throw new BadRequestException('Closed or cancelled fiscal close sessions cannot be rechecked');
     const results = await this.evaluateChecks(session);
     const existingChecks = await this.prisma.fiscal_close_checks.findMany({
       where: { close_session_id: session.id },
