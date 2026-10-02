@@ -10,6 +10,7 @@ import { StandardPrintDataModel } from '../interfaces/standard-print-data.model'
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
   FISCAL_DOCUMENT_PRINT_INCLUDE,
+  formatFiscalMoney,
   mapFiscalDocumentToPrintData,
   resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
@@ -108,6 +109,18 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
         }
         if (order.table_sessions && order.table_sessions.length > 0 && order.table_sessions[0].table) {
           printData.document.table_number = order.table_sessions[0].table.name;
+        }
+        // La propina no entra en `invoices.total_amount`: va debajo del TOTAL
+        // fiscal, con el total pagado. No se toca grand_total ni en letras.
+        const tip = Number((order as any).tip_amount || 0);
+        if (tip > 0) {
+          const fiscalTotal = Number(printData.totals.grand_total || 0);
+          const totalPaid = (Math.round(fiscalTotal * 100) + Math.round(tip * 100)) / 100;
+          printData.totals.tip_amount = tip;
+          printData.totals.tip_amount_formatted = formatFiscalMoney(tip);
+          printData.totals.tip_outside_total = true;
+          printData.totals.total_paid = totalPaid;
+          printData.totals.total_paid_formatted = formatFiscalMoney(totalPaid);
         }
       }
     }

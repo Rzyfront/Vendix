@@ -327,3 +327,39 @@ describe('PrintLayoutComposerService — etiquetas de tributo (QUI-890)', () => 
     expect(svc.resolveTaxCode('')).toBe('IVA');
   });
 });
+
+describe('PrintLayoutComposerService — propina fuera del TOTAL (tip_outside_total)', () => {
+  const service = new PrintLayoutComposerService({
+    escapeHtml: (v: any) => String(v ?? ''),
+  } as any);
+  const base = {
+    subtotal: 5000, discount_total: 0, tax_total: 0, shipping_total: 0,
+    grand_total: 5000, grand_total_formatted: '$5.000,00',
+    grand_total_in_words: 'cinco mil pesos',
+    tip_amount: 5000, tip_amount_formatted: '$5.000,00',
+  };
+  const render = (totals: any, mode: 'dummy' | 'tokenized' = 'dummy'): string =>
+    (service as any).renderTotalsSection({ id: 'sec_totals' }, { totals, document: {} }, mode);
+
+  it('con tip_outside_total pinta Propina voluntaria y Total pagado tras TOTAL y antes de letras', () => {
+    const html = render({ ...base, tip_outside_total: true, total_paid: 10000, total_paid_formatted: '$10.000,00' });
+    const iTot = html.indexOf('data-element-id="f_tot"');
+    const iTip = html.indexOf('data-element-id="f_tip"');
+    const iPaid = html.indexOf('data-element-id="f_total_paid"');
+    const iWords = html.indexOf('data-element-id="f_words"');
+    expect(iTot).toBeGreaterThan(-1);
+    expect(iTip).toBeGreaterThan(iTot);
+    expect(iPaid).toBeGreaterThan(iTip);
+    expect(iWords).toBeGreaterThan(iPaid);
+    expect(html).toContain('Propina voluntaria:');
+    expect(html).toContain('$10.000,00');
+    expect(html).toContain('total-paid-row');
+  });
+
+  it('sin tip_outside_total la propina va antes del TOTAL (comportamiento actual)', () => {
+    const html = render(base);
+    expect(html).toContain('Propina:');
+    expect(html.indexOf('data-element-id="f_tip"')).toBeLessThan(html.indexOf('data-element-id="f_tot"'));
+    expect(html).not.toContain('f_total_paid');
+  });
+});
