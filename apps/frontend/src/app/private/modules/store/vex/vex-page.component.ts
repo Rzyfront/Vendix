@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { VexChatsSidebarComponent } from './components/vex-chats-sidebar/vex-chats-sidebar.component';
@@ -84,7 +84,22 @@ function writeFlag(key: string, value: boolean): void {
         />
       </div>
 
-      <main class="relative flex-1 min-w-0 flex flex-col">
+      <main
+        class="relative flex-1 min-w-0 flex flex-col"
+        (dragenter)="onDragEnter($event)"
+        (dragover)="onDragOver($event)"
+        (dragleave)="onDragLeave($event)"
+        (drop)="onDrop($event)"
+      >
+        @if (dragging()) {
+          <div
+            class="absolute inset-3 z-30 rounded-3xl border-2 border-dashed border-[var(--color-primary)] bg-[rgba(var(--color-primary-rgb),0.1)] flex flex-col items-center justify-center gap-2 pointer-events-none text-[var(--color-primary)]"
+            role="status"
+          >
+            <app-icon name="upload" [size]="32"></app-icon>
+            <span class="text-sm font-semibold">Suelta para adjuntar</span>
+          </div>
+        }
         <div
           class="absolute inset-0 pointer-events-none"
           style="background: radial-gradient(ellipse 60% 50% at 50% 45%, rgba(var(--color-primary-rgb),0.18), transparent 70%), radial-gradient(ellipse 40% 35% at 60% 60%, rgba(var(--color-accent-rgb),0.12), transparent 70%)"
@@ -159,6 +174,10 @@ export class VexPageComponent {
   readonly chats_collapsed = signal<boolean>(readFlag(CHATS_KEY));
   readonly log_collapsed = signal<boolean>(readFlag(LOG_KEY));
 
+  private readonly composer = viewChild(VexComposerComponent);
+  readonly dragging = signal(false);
+  private drag_depth = 0;
+
   readonly conversation_title = computed(
     () => this.store.active_conversation()?.title ?? '',
   );
@@ -166,6 +185,45 @@ export class VexPageComponent {
   constructor() {
     effect(() => writeFlag(CHATS_KEY, this.chats_collapsed()));
     effect(() => writeFlag(LOG_KEY, this.log_collapsed()));
+  }
+
+  private hasFiles(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+  }
+
+  private canDrop(): boolean {
+    return this.composer()?.can_attach() ?? false;
+  }
+
+  onDragEnter(event: DragEvent): void {
+    if (!this.hasFiles(event)) return;
+    event.preventDefault();
+    this.drag_depth++;
+    if (this.canDrop()) this.dragging.set(true);
+  }
+
+  onDragOver(event: DragEvent): void {
+    if (!this.hasFiles(event)) return;
+    // Required for the drop event to fire.
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = this.canDrop() ? 'copy' : 'none';
+    }
+  }
+
+  onDragLeave(event: DragEvent): void {
+    if (!this.hasFiles(event)) return;
+    this.drag_depth = Math.max(0, this.drag_depth - 1);
+    if (this.drag_depth === 0) this.dragging.set(false);
+  }
+
+  onDrop(event: DragEvent): void {
+    if (!this.hasFiles(event)) return;
+    event.preventDefault();
+    this.drag_depth = 0;
+    this.dragging.set(false);
+    if (!this.canDrop()) return;
+    this.composer()?.addFiles(Array.from(event.dataTransfer?.files ?? []));
   }
 
   openChats(): void {
