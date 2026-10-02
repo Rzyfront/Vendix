@@ -465,7 +465,7 @@ function isMultiTokenQuery(query: string): boolean {
                 <div class="flex-1 min-w-0 pr-1 leading-tight">
                   <div class="flex items-center gap-1.5">
                     <h3
-                      class="text-xs font-bold text-slate-800 line-clamp-2 group-hover:text-primary transition-colors"
+                      class="text-xs font-bold text-slate-800 min-w-0 group-hover:text-primary transition-colors"
                       [title]="product.name"
                     >
                       {{ product.name }}
@@ -755,11 +755,11 @@ function isMultiTokenQuery(query: string): boolean {
                 </div>
                 <!-- Product Info -->
                 <div class="p-3 flex flex-col justify-between flex-1">
-                  <!-- Name & Description/SKU slot: 2-line name + desc line
-                       (h-10 clipped long names, QUI-908). -->
-                  <div class="h-[3.5rem] overflow-hidden flex flex-col justify-start">
+                  <!-- Name & Description/SKU slot: flexible height so
+                       long names wrap fully (QUI-908). -->
+                  <div class="min-h-[3.5rem] flex flex-col justify-start">
                     <h3
-                      class="font-bold text-xs sm:text-sm text-slate-800 group-hover:text-primary transition-colors line-clamp-2 leading-tight"
+                      class="font-bold text-xs sm:text-sm text-slate-800 group-hover:text-primary transition-colors leading-tight"
                       [title]="product.name"
                     >
                       {{ product.name }}
