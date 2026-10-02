@@ -51,6 +51,8 @@ describe('AIAgentService.runAgentStream', () => {
   let canUseAIFeature: jest.Mock;
   let getAIFeatureConfig: jest.Mock;
   let consumeAIQuota: jest.Mock;
+  let checkExtraQuota: jest.Mock;
+  let consumeExtraQuota: jest.Mock;
   let service: AIAgentService;
 
   beforeEach(() => {
@@ -109,6 +111,14 @@ describe('AIAgentService.runAgentStream', () => {
     canUseAIFeature = jest.fn();
     getAIFeatureConfig = jest.fn();
     consumeAIQuota = jest.fn().mockResolvedValue(undefined);
+    // Caps de vex_agent (R3-A): por defecto abiertos.
+    checkExtraQuota = jest.fn().mockResolvedValue({
+      exceeded: false,
+      cap: null,
+      used: 0,
+      degradation: 'block',
+    });
+    consumeExtraQuota = jest.fn().mockResolvedValue(undefined);
     service = new AIAgentService(
       { chat, run: jest.fn(), chatWith: jest.fn() } as any,
       {} as any,
@@ -119,6 +129,8 @@ describe('AIAgentService.runAgentStream', () => {
         canUseAIFeature,
         getAIFeatureConfig,
         consumeAIQuota,
+        checkExtraQuota,
+        consumeExtraQuota,
       } as any,
     );
   });
@@ -713,13 +725,15 @@ describe('AIAgentService.runAgentStream', () => {
     expect(awaitResult).not.toHaveBeenCalled();
     expect(consumeAIQuota).not.toHaveBeenCalled();
     expect(result.tools_used).toEqual([]);
-    expect(chunks.map((c) => c.type)).toEqual([
-      'tool_call',
-      'tool_result',
-      'text',
-      'done',
-    ]);
-    const toolResult = chunks[1] as any;
+    // La guarda corre ANTES del frame `tool_call` (Vexi lo ejecutaría en el
+    // navegador) y antes de `ai.agent.tool_executed`.
+    expect(chunks.map((c) => c.type)).toEqual(['tool_result', 'text', 'done']);
+    expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
+    expect(emit).not.toHaveBeenCalledWith(
+      'ai.agent.tool_executed',
+      expect.anything(),
+    );
+    const toolResult = chunks[0] as any;
     expect(toolResult.tool.failed).toBe(true);
     expect(toolResult.tool.summary).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
     // The rejection goes back as a tool message so the model self-corrects.
@@ -741,13 +755,13 @@ describe('AIAgentService.runAgentStream', () => {
 
     expect(executeTool).not.toHaveBeenCalled();
     expect(result.tools_used).toEqual([]);
-    expect(chunks.map((c) => c.type)).toEqual([
-      'tool_call',
-      'tool_result',
-      'text',
-      'done',
-    ]);
-    expect((chunks[1] as any).tool.summary).toContain(
+    expect(chunks.map((c) => c.type)).toEqual(['tool_result', 'text', 'done']);
+    expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
+    expect(emit).not.toHaveBeenCalledWith(
+      'ai.agent.tool_executed',
+      expect.anything(),
+    );
+    expect((chunks[0] as any).tool.summary).toContain(
       'AI_AGENT_TOOL_NOT_ALLOWED',
     );
   });
@@ -848,6 +862,49 @@ describe('AIAgentService.runAgentStream', () => {
     expect(offeredToolNames()).toEqual([]);
     expect(executeTool).not.toHaveBeenCalled();
     expect(consumeAIQuota).not.toHaveBeenCalled();
+  });
+
+  it('(rx2-e) vex daily_messages cap exhausted with degradation block stops the turn before the provider', async () => {
+    configureStorePlan(['*']);
+    checkExtraQuota.mockImplementation(async (_s: number, _f: string, c: string) =>
+      c === 'daily_messages'
+        ? { exceeded: true, cap: 5, used: 5, degradation: 'block' }
+        : { exceeded: false, cap: null, used: 0, degradation: 'block' },
+    );
+
+    await expect(drain({ agent_key: 'vex' })).rejects.toMatchObject({
+      errorCode: 'SUBSCRIPTION_006',
+    });
+    expect(chat).not.toHaveBeenCalled();
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(consumeExtraQuota).not.toHaveBeenCalled();
+  });
+
+  it('(rx2-f) vex turn consumes one daily message and the turn tokens; vexi does not touch vex caps', async () => {
+    configureStorePlan(['*']);
+    chat.mockResolvedValueOnce(ok({ content: 'listo' }));
+    await drain({ agent_key: 'vex' });
+    expect(consumeExtraQuota).toHaveBeenCalledWith(
+      42,
+      'vex_agent',
+      'daily_messages',
+      1,
+      expect.any(String),
+    );
+    expect(consumeExtraQuota).toHaveBeenCalledWith(
+      42,
+      'vex_agent',
+      'monthly_tokens',
+      expect.any(Number),
+      expect.any(String),
+    );
+
+    checkExtraQuota.mockClear();
+    consumeExtraQuota.mockClear();
+    chat.mockResolvedValueOnce(ok({ content: 'listo' }));
+    await drain({});
+    expect(checkExtraQuota).not.toHaveBeenCalled();
+    expect(consumeExtraQuota).not.toHaveBeenCalled();
   });
 
   it('(rx3-a) vex proposing turn accumulates 3 writes into ONE plan_approval frame', async () => {

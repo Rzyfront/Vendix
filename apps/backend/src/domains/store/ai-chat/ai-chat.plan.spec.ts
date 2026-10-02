@@ -818,9 +818,13 @@ describe('AIChatService — cableado de plan Vex (rx3)', () => {
     await params.plan_approval.saveProposedSteps([
       { order: 1, tool: 'create_customer', args: {} },
     ]);
-    expect(b.planState.setStepHashes).toHaveBeenCalledWith(7, [
-      { order: 1, tool: 'create_customer', args: {} },
-    ]);
+    // Tercer argumento: plan_id del turno (los hashes quedan ligados al plan).
+    expect(b.planState.setStepHashes).toHaveBeenCalledWith(
+      7,
+      [{ order: 1, tool: 'create_customer', args: {} }],
+      params.plan_approval.plan_id,
+    );
+    expect(typeof params.plan_approval.plan_id).toBe('string');
     // Proposing turn (sin token): todo redeem responde missing.
     await expect(
       params.plan_approval.redeem('create_customer', {}),
@@ -918,6 +922,8 @@ describe('AIChatService — persistencia vex (rx6)', () => {
       irreversible: true,
     },
   ];
+  // Contrato R3: al persistir, cada paso nace con status 'pending'.
+  const PENDING_STEPS = STEPS.map((s) => ({ ...s, status: 'pending' }));
 
   const asOwner = () =>
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
@@ -971,9 +977,24 @@ describe('AIChatService — persistencia vex (rx6)', () => {
       vexEnabled: true,
       run,
     });
-    // Huérfano de un turno anterior: el barrido lo recoge y también se enlaza.
+    // Barrido: solo adopta huérfanos nacidos durante ESTE turno. Uno de un
+    // turno anterior (b-old) NO se enlaza al mensaje equivocado; uno nuevo
+    // sin mensaje (b-new) sí.
     b.vexBlocks.listByConversation.mockResolvedValue([
-      { id: 'b-old', kind: 'markdown', version: 1, message_id: null },
+      {
+        id: 'b-old',
+        kind: 'markdown',
+        version: 1,
+        message_id: null,
+        created_at: new Date(Date.now() - 60 * 60 * 1000),
+      },
+      {
+        id: 'b-new',
+        kind: 'markdown',
+        version: 1,
+        message_id: null,
+        created_at: new Date(Date.now() + 60 * 1000),
+      },
       { id: 'b-linked', kind: 'table', version: 1, message_id: 41 },
     ]);
     b.streamIntents.consume.mockResolvedValue({
@@ -988,12 +1009,12 @@ describe('AIChatService — persistencia vex (rx6)', () => {
       blocks: [
         { block_id: 'b-table', kind: 'table', version: 2 },
         { block_id: 'b-chart', kind: 'chart', version: 1 },
-        { block_id: 'b-old', kind: 'markdown', version: 1 },
+        { block_id: 'b-new', kind: 'markdown', version: 1 },
       ],
-      plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' },
+      plan: { plan_id: 'p1', steps: PENDING_STEPS, status: 'proposed' },
     });
     expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(
-      ['b-table', 'b-chart', 'b-old'],
+      ['b-table', 'b-chart', 'b-new'],
       1,
     );
   });
@@ -1069,7 +1090,7 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     const data = assistantCreate(b);
     expect(data.metadata).toEqual({
       blocks: [{ block_id: 'b-sync', kind: 'table', version: 1 }],
-      plan: { plan_id: 'p9', steps: STEPS, status: 'proposed' },
+      plan: { plan_id: 'p9', steps: PENDING_STEPS, status: 'proposed' },
     });
     expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(['b-sync'], 1);
     expect(b.buildVexSnapshot).toHaveBeenCalled();
