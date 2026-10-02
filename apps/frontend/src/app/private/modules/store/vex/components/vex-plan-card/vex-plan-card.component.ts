@@ -86,6 +86,11 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
                 {{ step_status_label(step.status) }}
               </span>
             </div>
+            @if (step.status === 'failed' && step.error) {
+              <p class="text-xs text-[var(--color-error)] m-0" role="alert">
+                {{ step.error }}
+              </p>
+            }
             @if (show_own_card(step)) {
               <app-vexi-confirmation-card
                 [proposal]="toProposal(step)"
@@ -170,6 +175,8 @@ export class VexPlanCardComponent {
         return 'ejecutándose';
       case 'done':
         return 'completado';
+      case 'partially_applied':
+        return 'aplicado parcialmente';
       case 'failed':
         return 'falló en un paso';
       case 'rejected':
@@ -179,17 +186,53 @@ export class VexPlanCardComponent {
     }
   });
 
+  private readonly done_count = computed(
+    () => this.plan().steps.filter((s) => s.status === 'done').length,
+  );
+  private readonly cancelled_count = computed(
+    () => this.plan().steps.filter((s) => s.status === 'cancelled').length,
+  );
+  private readonly pending_count = computed(
+    () =>
+      this.plan().steps.filter(
+        (s) => s.status === 'pending' || s.status === 'running',
+      ).length,
+  );
+
+  /**
+   * Closing note per plan state. A cancelled plan says what the cancel really
+   * did: pending steps cancelled, steps already applied untouched.
+   */
   readonly closed_note = computed(() => {
+    const applied = this.done_count();
     switch (this.plan().status) {
-      case 'approved':
       case 'executing':
         return 'Plan aprobado. Vex está ejecutando los pasos.';
+      case 'approved': {
+        const pending = this.pending_count();
+        return pending > 0
+          ? `Plan aprobado. ${steps_label(pending)} por confirmar o aplicar.`
+          : 'Plan aprobado.';
+      }
       case 'done':
         return 'Plan completado.';
+      case 'partially_applied': {
+        const failed = this.plan().steps.filter(
+          (s) => s.status === 'failed',
+        ).length;
+        return `Plan aplicado parcialmente: ${applied} ${applied === 1 ? 'paso aplicado' : 'pasos aplicados'}${
+          failed > 0 ? `, ${failed} con error` : ''
+        }. Revisa la conversación.`;
+      }
       case 'failed':
         return 'El plan se detuvo en un paso. Revisa la conversación.';
-      case 'rejected':
+      case 'rejected': {
+        const cancelled = this.cancelled_count();
+        if (applied > 0) {
+          return `Plan cancelado. Se cancelaron ${steps_label(cancelled)}; ${steps_label(applied)} ya ${applied === 1 ? 'estaba aplicado' : 'estaban aplicados'}.`;
+        }
         return 'Plan cancelado. No se aplicó ningún cambio.';
+      }
       default:
         return '';
     }
@@ -209,6 +252,8 @@ export class VexPlanCardComponent {
         return 'falló';
       case 'skipped':
         return 'omitido';
+      case 'cancelled':
+        return 'cancelado';
       default:
         return status;
     }
@@ -254,4 +299,8 @@ export class VexPlanCardComponent {
       confirmation_token: step.confirmation_token ?? '',
     });
   }
+}
+
+function steps_label(count: number): string {
+  return `${count} ${count === 1 ? 'paso' : 'pasos'}`;
 }

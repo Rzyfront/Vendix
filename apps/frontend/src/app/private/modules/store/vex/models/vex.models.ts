@@ -114,7 +114,9 @@ export type VexPlanStepStatus =
   | 'running'
   | 'done'
   | 'failed'
-  | 'skipped';
+  | 'skipped'
+  /** Server-side: the plan was cancelled before this step ran. */
+  | 'cancelled';
 
 export interface VexPlanStepChange {
   field: string;
@@ -141,6 +143,8 @@ export interface VexPlanStep {
   /** Single-use token for the step's own confirmation, when the backend issued one. */
   confirmation_token?: string;
   status: VexPlanStepStatus;
+  /** Server message when the step failed (`metadata.plan.steps[].error`). */
+  error?: string;
 }
 
 export type VexPlanStatus =
@@ -149,6 +153,8 @@ export type VexPlanStatus =
   | 'rejected'
   | 'executing'
   | 'done'
+  /** Some steps applied, others failed or were left unapplied. */
+  | 'partially_applied'
   | 'failed';
 
 export interface VexPlanProposal {

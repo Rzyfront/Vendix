@@ -234,6 +234,37 @@ export interface VexApprovePlanResult {
   ignored_steps: number[];
 }
 
+/** `POST /store/vex/plans/:id/steps/:step_id/confirmation` response. */
+export interface VexStepConfirmation {
+  confirmation_token: string;
+  /** Seconds the single-use token stays valid. */
+  expires_in: number;
+}
+
+/** Persisted step state as the server reports it (`metadata.plan.steps[].status`). */
+export type VexServerStepStatus =
+  | 'pending'
+  | 'applied'
+  | 'failed'
+  | 'cancelled';
+
+/** Persisted plan state as the server reports it (`metadata.plan.status`). */
+export type VexServerPlanStatus =
+  | 'proposed'
+  | 'approved'
+  | 'rejected'
+  | 'applied'
+  | 'partially_applied';
+
+/** `POST /store/vex/confirmations/apply` response (per-step path). */
+export interface VexApplyStepResult {
+  tool: string;
+  output: string;
+  summary?: string | null;
+  step_status: VexServerStepStatus;
+  plan_status: VexServerPlanStatus;
+}
+
 export interface VexConversationsPage {
   data: VexBackendConversation[];
   meta: { total: number; page: number; limit: number; totalPages: number };
@@ -462,46 +493,85 @@ export class VexApiService {
   }
 
   /**
-   * Applies one step of an approved plan. `planToken` is the token approve
-   * minted — NOT a single-use token. Each step redeems independently: a
-   * retry of step 2 never re-runs step 1. `planId` is the id approve bound
-   * into the token's fingerprint; the server re-resolves nothing from the
-   * thread (E2E-1: the internal task plan and the write plan are different
-   * systems).
-   *
-   * Any non-`ok` outcome answers `AI_AGENT_005` carrying a FRESH single-use
-   * token in `details` (same shape the registry uses): the step needs its
-   * own card, confirmed individually through `applyStepConfirmation`.
+   * Cancels a plan on the server (`POST plans/:id/reject`): pending steps
+   * become `cancelled`, the plan `rejected`, and its hashes are dropped so it
+   * can never be approved again. 409 when it already ended (`applied`,
+   * `partially_applied`, `rejected`); steps already applied keep their state.
    */
-  applyPlanStep(
-    tool: string,
-    args: Record<string, unknown>,
-    planToken: string,
-    conversationId: number,
+  rejectPlan(
     planId: string,
-  ): Observable<{ tool: string; output: string; summary?: string | null }> {
+    conversationId: number,
+  ): Observable<{ plan_id: string; status: 'rejected' }> {
     return this.http
-      .post<{ data: { tool: string; output: string; summary?: string | null } }>(
+      .post<{ data: { plan_id: string; status: 'rejected' } }>(
+        `${this.vexBase}/plans/${encodeURIComponent(planId)}/reject`,
+        { conversation_id: conversationId },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Mints the single-use confirmation token of ONE irreversible step of an
+   * approved plan (`POST plans/:id/steps/:step_id/confirmation`). What a
+   * reloaded page needs: in-memory tokens do not survive it. The server mints
+   * it over the tool+arguments it persisted, only for an `approved` plan and a
+   * `pending` irreversible step.
+   */
+  requestStepConfirmation(
+    planId: string,
+    stepId: string,
+    conversationId: number,
+  ): Observable<VexStepConfirmation> {
+    return this.http
+      .post<{ data: VexStepConfirmation }>(
+        `${this.vexBase}/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}/confirmation`,
+        { conversation_id: conversationId },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Applies one step of an approved plan (`POST confirmations/apply`, per-step
+   * path): the server takes tool and arguments from the plan it persisted, and
+   * EXACTLY ONE of `plan_token` (the token approve minted, reversible steps)
+   * or `confirmation_token` (single-use, from `requestStepConfirmation` or a
+   * `AI_AGENT_005` answer) authorizes it. Answers the tool result plus the
+   * persisted `{step_status, plan_status}`.
+   *
+   * A non-`ok` plan-token outcome answers `AI_AGENT_005` carrying a FRESH
+   * single-use token in `details`: the step needs its own card.
+   */
+  applyConfirmation(input: {
+    conversationId: number;
+    planId: string;
+    stepId: string;
+    planToken?: string;
+    confirmationToken?: string;
+  }): Observable<VexApplyStepResult> {
+    return this.http
+      .post<{ data: VexApplyStepResult }>(
         `${this.vexBase}/confirmations/apply`,
         {
-          tool,
-          arguments: args,
-          confirmation_token: planToken,
-          conversation_id: conversationId,
-          plan_id: planId,
+          conversation_id: input.conversationId,
+          plan_id: input.planId,
+          step_id: input.stepId,
+          ...(input.planToken ? { plan_token: input.planToken } : {}),
+          ...(input.confirmationToken
+            ? { confirmation_token: input.confirmationToken }
+            : {}),
         },
       )
       .pipe(map((res) => res.data));
   }
 
   /**
-   * Applies one step through its own single-use token.
+   * Applies a single-step fallback proposal (no server plan, so no `plan_id`)
+   * through its own single-use token.
    *
-   * This goes to the SHARED single-use circuit (`/store/vexi/…`), not to
-   * `/store/vex/confirmations/apply`: that endpoint redeems PLAN tokens and
-   * answers `AI_AGENT_005` for anything else, while this token was minted by
-   * the registry for exactly this tool+args. Permissions are re-checked on
-   * the way through either way.
+   * This goes to the SHARED single-use circuit (`/store/vexi/…`): the token
+   * was minted by the registry for exactly this tool+args, and there is no
+   * persisted plan state for `confirmations/apply` to resolve. Permissions are
+   * re-checked on the way through either way.
    */
   applyStepConfirmation(
     tool: string,
