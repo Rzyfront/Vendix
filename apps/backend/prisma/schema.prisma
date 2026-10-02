@@ -671,6 +671,7 @@ model organizations {
   fiscal_operation_events       fiscal_operation_events[]
   received_documents            received_documents[]
   received_tax_qualifications   received_tax_qualifications[]
+  received_tax_effects          received_tax_effects[] @relation("received_tax_effects_organization")
   received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
@@ -946,6 +947,7 @@ model stores {
   fiscal_operation_events     fiscal_operation_events[]
   received_documents          received_documents[]
   received_tax_qualifications received_tax_qualifications[]
+  received_tax_effects        received_tax_effects[]
   received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits           fiscal_tax_credits[]
@@ -6675,6 +6677,7 @@ model accounting_entities {
   fiscal_operation_events       fiscal_operation_events[]
   received_documents            received_documents[]
   received_tax_qualifications   received_tax_qualifications[]
+  received_tax_effects          received_tax_effects[]
   received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
@@ -12284,12 +12287,49 @@ model received_tax_qualifications {
   qualified_by_user users               @relation("received_tax_qualifications_qualified_by", fields: [qualified_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_user_fkey")
   supersedes        received_tax_qualifications?  @relation("received_tax_qualifications_revision", fields: [supersedes_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_supersedes_fkey")
   successors        received_tax_qualifications[] @relation("received_tax_qualifications_revision")
+  tax_effects       received_tax_effects[]
 
   @@unique([organization_id, accounting_entity_id, idempotency_key], map: "received_tax_qualifications_scope_idempotency_key")
   @@unique([organization_id, accounting_entity_id, document_id, tax_type, jurisdiction_key, revision], map: "received_tax_qualifications_revision_key")
   @@index([organization_id, accounting_entity_id, document_id, tax_type, jurisdiction_key], map: "received_tax_qualifications_document_idx")
   @@index([organization_id, accounting_entity_id, tax_type, jurisdiction_key, outcome, qualified_at], map: "received_tax_qualifications_fiscal_read_idx")
   @@index([evidence_id], map: "received_tax_qualifications_evidence_idx")
+}
+
+/// Append-only, qualified IVA recognition/adjustment/reversal effects for
+/// received fiscal documents. Period readers consume these signed rows.
+model received_tax_effects {
+  id                    Int           @id @default(autoincrement())
+  organization_id       Int?
+  accounting_entity_id  Int?
+  store_id              Int?
+  qualification_id      Int
+  tax_type              tax_type_enum
+  jurisdiction_key      String        @db.VarChar(100)
+  effect_key            String        @db.VarChar(160)
+  group_key             String        @db.VarChar(64)
+  effect_kind           String        @db.VarChar(20)
+  effective_date        DateTime      @db.Date
+  currency              String        @db.VarChar(3)
+  signed_base_amount    Decimal       @db.Decimal(15, 2)
+  signed_tax_amount     Decimal       @db.Decimal(15, 2)
+  adjusts_effect_id     Int?
+  reversal_of_id        Int?
+  payload_hash          String        @db.VarChar(64)
+  created_at            DateTime      @default(now()) @db.Timestamptz(6)
+
+  organization      organizations?              @relation("received_tax_effects_organization", fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_org_fkey")
+  accounting_entity accounting_entities?        @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_entity_fkey")
+  store             stores?                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_store_fkey")
+  qualification     received_tax_qualifications @relation(fields: [qualification_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_qualification_fkey")
+  adjusts_effect    received_tax_effects?       @relation("received_tax_effects_adjustment", fields: [adjusts_effect_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_adjusts_fkey")
+  adjustments       received_tax_effects[]      @relation("received_tax_effects_adjustment")
+  reversal_of       received_tax_effects?       @relation("received_tax_effects_reversal", fields: [reversal_of_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_reversal_fkey")
+  reversed_by       received_tax_effects[]      @relation("received_tax_effects_reversal")
+
+  @@unique([organization_id, accounting_entity_id, effect_key], map: "received_tax_effects_scope_effect_key")
+  @@index([organization_id, accounting_entity_id, tax_type, jurisdiction_key, effective_date], map: "received_tax_effects_period_idx")
+  @@index([qualification_id], map: "received_tax_effects_qualification_idx")
 }
 
 model document_reception_connections {

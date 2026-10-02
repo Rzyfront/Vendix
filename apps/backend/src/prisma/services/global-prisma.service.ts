@@ -756,6 +756,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.received_tax_qualifications;
   }
 
+  get received_tax_effects() {
+    return this.baseClient.received_tax_effects;
+  }
+
   get received_document_files() {
     return this.baseClient.received_document_files;
   }
