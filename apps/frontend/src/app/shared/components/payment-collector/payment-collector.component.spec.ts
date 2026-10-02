@@ -694,10 +694,18 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
 
   afterEach(() => fixture.destroy());
 
+  function renderTipLayout(layout: 'flat' | 'stepped'): void {
+    fixture.componentRef.setInput('layout', layout);
+    fixture.detectChanges();
+    if (layout === 'stepped') {
+      component.goToSubStep(component.montoIndex());
+      fixture.detectChanges();
+    }
+  }
+
   for (const layout of ['flat', 'stepped'] as const) {
     it(`starts collapsed, preserves the tip submission, and resets closed in ${layout} layout`, () => {
-      fixture.componentRef.setInput('layout', layout);
-      fixture.detectChanges();
+      renderTipLayout(layout);
 
       let toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
         '.pc-tip-toggle',
@@ -753,6 +761,7 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
 
       fixture.componentRef.setInput('paymentResetKey', 1);
       fixture.detectChanges();
+      renderTipLayout(layout);
       toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
         '.pc-tip-toggle',
       );
@@ -762,7 +771,7 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
     });
 
     it(`does not render the tip section when allowTip is false in ${layout} layout`, () => {
-      fixture.componentRef.setInput('layout', layout);
+      renderTipLayout(layout);
       fixture.componentRef.setInput('allowTip', false);
       fixture.detectChanges();
 
@@ -774,12 +783,22 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
     });
 
     it(`expands the tip section when validation feedback targets it in ${layout} layout`, () => {
-      fixture.componentRef.setInput('layout', layout);
+      renderTipLayout(layout);
+      const toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
+      expect(toggle).toBeTruthy();
+      toggle?.click();
+      fixture.detectChanges();
       component.tipType.set('percentage');
       component.tipControl.setValue(101);
       fixture.detectChanges();
+      toggle?.click();
+      fixture.detectChanges();
 
       expect(component.tipExpanded()).toBeFalse();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
       component.flashValidation();
       fixture.detectChanges();
 
