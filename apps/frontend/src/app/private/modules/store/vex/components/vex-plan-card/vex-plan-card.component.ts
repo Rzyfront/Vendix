@@ -88,7 +88,11 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
             </button>
             <button
               type="button"
-              class="flex-1 min-h-11 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              class="flex-1 min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              [class.bg-[var(--color-primary)]]="!step.irreversible"
+              [class.text-[var(--color-text-on-primary)]]="!step.irreversible"
+              [class.bg-[var(--color-error)]]="step.irreversible"
+              [class.text-white]="step.irreversible"
               [disabled]="busy() || step.preview?.status === 'error'"
               (click)="is_open() ? approve.emit() : onStepApprove(step)"
             >
@@ -97,10 +101,15 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
                 Aplicando…
               } @else {
                 <app-icon name="check" [size]="16"></app-icon>
-                Aprobar
+                {{ step.irreversible ? 'Confirmar (irreversible)' : 'Aprobar' }}
               }
             </button>
           </footer>
+          @if (step.irreversible) {
+            <p class="text-xs text-[var(--color-error)] m-0 text-center" role="note">
+              Esta acción no se puede deshacer
+            </p>
+          }
         }
       </section>
     } @else {
@@ -329,9 +338,7 @@ export class VexPlanCardComponent {
       return 'Aplicando…';
     }
     if (this.plan().status === 'approved') {
-      return step.irreversible
-        ? 'Aprobado · falta tu confirmación final'
-        : 'Aprobado';
+      return 'Aprobado';
     }
     return 'Esperando tu aprobación';
   }

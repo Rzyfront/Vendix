@@ -464,7 +464,70 @@ export class VexChatStore {
       }
       return;
     }
+    // One irreversible step: the card IS that step's confirmation, so one
+    // click chains approve -> request confirmation -> apply.
+    if (plan.steps.length === 1 && plan.steps[0].irreversible) {
+      void this.runSingleIrreversibleChain(conversation_id, message_id, numeric, plan);
+      return;
+    }
     void this.runPlanApproval(conversation_id, message_id, numeric, plan);
+  }
+
+  /**
+   * Approve + confirm + apply for a one-step irreversible plan. Any failure
+   * leaves plan and step `failed` with the error message; nothing retries on
+   * its own and the persisted state is not re-read over it.
+   */
+  private async runSingleIrreversibleChain(
+    conversation_id: string,
+    message_id: string,
+    numeric: number,
+    plan: VexPlanProposal,
+  ): Promise<void> {
+    const step = plan.steps[0];
+    this._busy_plan_id.set(plan.plan_id);
+    this.patchPlan(conversation_id, message_id, { status: 'executing' });
+    this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
+      status: 'running',
+    });
+    try {
+      const approved = await firstValueFrom(
+        this.api.approvePlan(plan.plan_id, numeric, [
+          { order: 1, tool: step.tool, arguments: step.arguments ?? {} },
+        ]),
+      );
+      this.plan_tokens.set(plan.plan_id, approved.plan_token);
+      const confirmation = await firstValueFrom(
+        this.api.requestStepConfirmation(plan.plan_id, step.step_id, numeric),
+      );
+      const result = await firstValueFrom(
+        this.api.applyConfirmation({
+          conversationId: numeric,
+          planId: plan.plan_id,
+          stepId: step.step_id,
+          confirmationToken: confirmation.confirmation_token,
+        }),
+      );
+      this.finishStepApply(
+        conversation_id,
+        message_id,
+        numeric,
+        plan.plan_id,
+        step.step_id,
+        result,
+      );
+    } catch (error) {
+      const message = extractApiErrorMessage(error);
+      this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
+        status: 'failed',
+        error: message,
+        confirmation_token: undefined,
+      });
+      this.patchPlan(conversation_id, message_id, { status: 'failed' });
+      this.toast.error(message, 'No se pudo aplicar');
+    } finally {
+      this._busy_plan_id.set(null);
+    }
   }
 
   /**
