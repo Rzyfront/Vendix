@@ -53,6 +53,14 @@ export interface DianDocumentEventRequest {
   description?: string;
 }
 
+/** Exact fiscal DIAN configuration selected by the caller for a buyer event. */
+export interface DianEventConfigurationSelection {
+  configuration_id: number;
+  accounting_entity_id: number;
+  /** Validated operational store for organization-scope received-document flows. */
+  store_id?: number | null;
+}
+
 export interface DianDocumentEventResult {
   success: boolean;
   event_code: DianEventCode;
@@ -82,6 +90,8 @@ export interface DianPreparedDocumentEvent {
   event_number: string;
   dian_configuration_id: number;
   accounting_entity_id: number;
+  /** Store used to resolve an organization-scoped fiscal entity, when applicable. */
+  store_id?: number | null;
   environment: 'test' | 'production';
   cude: string;
   signed_xml: string;

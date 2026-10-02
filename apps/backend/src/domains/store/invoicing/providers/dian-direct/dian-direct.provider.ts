@@ -101,6 +101,7 @@ import {
   DianDocumentEventResult,
   DianPreparedDocumentEvent,
   DianPreparedEventTransmissionResult,
+  DianEventConfigurationSelection,
 } from './interfaces/dian-event.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -1403,8 +1404,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
-  private async buildDocumentEventPayload(event: DianDocumentEventRequest) {
-    const config = await this.loadConfig();
+  private async buildDocumentEventPayload(
+    event: DianDocumentEventRequest,
+    selection?: DianEventConfigurationSelection,
+  ) {
+    const config = await this.loadConfig('invoicing', selection);
 
     this.validateCertificateExpiry(config);
 
@@ -1561,15 +1565,20 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   /** Prepare and sign an event without contacting DIAN or writing an audit row. */
   async prepareDocumentEvent(
     event: DianDocumentEventRequest,
+    selection?: DianEventConfigurationSelection,
   ): Promise<DianPreparedDocumentEvent> {
+    if (event.referenced_issuer && !selection) {
+      throw new BadRequestException('Buyer events require an exact DIAN configuration selection');
+    }
     const { config, cude, xml, xml_filename, zip_filename } =
-      await this.buildDocumentEventPayload(event);
+      await this.buildDocumentEventPayload(event, selection);
     const signed_xml = await this.signXml(xml, config);
     return {
       event_code: event.event_code,
       event_number: event.event_number,
       dian_configuration_id: config.id,
       accounting_entity_id: config.accounting_entity_id,
+      store_id: selection?.store_id ?? RequestContextService.getContext()?.store_id ?? null,
       environment: config.environment,
       cude,
       signed_xml,
@@ -1622,7 +1631,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     } catch {
       throw new BadRequestException('Prepared event metadata does not match valid signed XML');
     }
-    const config = await this.loadConfig();
+    const config = await this.loadConfig('invoicing', {
+      configuration_id: prepared.dian_configuration_id,
+      accounting_entity_id: prepared.accounting_entity_id,
+      store_id: prepared.store_id,
+    });
     if (
       config.id !== prepared.dian_configuration_id ||
       config.accounting_entity_id !== prepared.accounting_entity_id ||
@@ -1869,20 +1882,35 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    */
   private async loadConfig(
     configuration_type: DianConfigurationType = 'invoicing',
+    selection?: DianEventConfigurationSelection,
   ): Promise<DianConfigDecrypted> {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new Error('Organization context required for DIAN operations');
     }
+    if (selection && context.store_id != null && selection.store_id !== undefined &&
+      selection.store_id !== context.store_id) {
+      throw new BadRequestException('DIAN configuration selection does not match the authenticated store');
+    }
     const accounting_entity =
       await this.fiscalScope.resolveAccountingEntityForFiscal({
         organization_id: context.organization_id,
-        store_id: context.store_id ?? null,
+        store_id: selection?.store_id ?? context.store_id ?? null,
       });
+
+    if (selection && (
+      !Number.isSafeInteger(selection.configuration_id) || selection.configuration_id <= 0 ||
+      !Number.isSafeInteger(selection.accounting_entity_id) || selection.accounting_entity_id <= 0 ||
+      (selection.store_id != null && (!Number.isSafeInteger(selection.store_id) || selection.store_id <= 0)) ||
+      selection.accounting_entity_id !== accounting_entity.id
+    )) {
+      throw new BadRequestException('DIAN configuration selection does not match the authenticated fiscal entity');
+    }
 
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
         accounting_entity_id: accounting_entity.id,
+        ...(selection && { id: selection.configuration_id }),
         configuration_type,
         operation_mode: 'own_software',
         enablement_status: { in: ['testing', 'test_set_passed', 'enabled'] },
