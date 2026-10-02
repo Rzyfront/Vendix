@@ -163,4 +163,97 @@ describe('ReceivedBuyerEventEnablementService', () => {
       expect(tx.audit_logs.create).not.toHaveBeenCalled();
     });
   });
+
+  describe('verifyAsPlatformReviewer', () => {
+    const verifyInput = { expected_version: 3, verification_source: 'test_set' as const, review_note: 'Revisé respuesta DIAN y set de pruebas.' };
+    const makeReviewTx = () => {
+      const pending = { id: 4, organization_id: 5, accounting_entity_id: 7, status: 'testing', version: 3, event_codes: ['030', '031'], dian_configuration_id: 20, evidence_id: 30, verification_source: null, verified_by_user_id: null, verified_at: null, software_id_snapshot: null, certificate_fingerprint_snapshot: null };
+      const verifiedAt = new Date();
+      const fresh = { ...pending, status: 'verified', version: 4, verification_source: 'test_set', verified_by_user_id: 9, verified_at: verifiedAt, software_id_snapshot: 'secret-software', certificate_fingerprint_snapshot: 'secret-fingerprint' };
+      const tx: any = {
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 7 }]),
+        accounting_entities: { findFirst: jest.fn().mockResolvedValue({ id: 7, tax_id: '900123456-8' }) },
+        received_buyer_event_enablements: { findFirst: jest.fn().mockResolvedValueOnce(pending).mockResolvedValueOnce(fresh), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        dian_configurations: { findFirst: jest.fn().mockResolvedValue({ id: 20, organization_id: 5, accounting_entity_id: 7, configuration_type: 'invoicing', operation_mode: 'own_software', environment: 'production', enablement_status: 'enabled', software_id: 'secret-software', certificate_fingerprint: 'secret-fingerprint', certificate_s3_key: 'secret-cert-key', certificate_password_encrypted: 'secret-password', certificate_expiry: new Date(Date.now() + 86400000), nit: '900123456-8', nit_dv: '8' }) },
+        fiscal_evidences: { findFirst: jest.fn().mockResolvedValue({ id: 30, organization_id: 5, accounting_entity_id: 7, evidence_type: 'test_set', storage_key: 'secret-evidence-key', content_hash: null }) },
+        audit_logs: { create: jest.fn().mockResolvedValue({}) },
+      };
+      return { tx, pending, fresh };
+    };
+    const useTx = (tx: any) => {
+      (service as any).prisma.$transaction = jest.fn((cb: (inner: any) => unknown) => cb(tx));
+      (service as any).prisma.withoutScope = jest.fn().mockReturnValue((service as any).prisma);
+    };
+    const perform = (tx: any, input = verifyInput) => {
+      useTx(tx);
+      return service.verifyAsPlatformReviewer(5, 7, 9, input);
+    };
+
+    it('verifies transactionally with entity lock, scoped mutation, safe audit and safe view', async () => {
+      const { tx } = makeReviewTx();
+      const result = await perform(tx);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.accounting_entities.findFirst).toHaveBeenCalledWith({ where: { id: 7, organization_id: 5, is_active: true }, select: { id: true, tax_id: true } });
+      expect(tx.dian_configurations.findFirst.mock.calls[0][0].where).toEqual({ id: 20, organization_id: 5, accounting_entity_id: 7 });
+      expect(tx.fiscal_evidences.findFirst.mock.calls[0][0].where).toEqual({ id: 30, organization_id: 5, accounting_entity_id: 7 });
+      expect(tx.received_buyer_event_enablements.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 4, organization_id: 5, accounting_entity_id: 7, version: 3, status: 'testing' }, data: expect.objectContaining({ status: 'verified', verification_source: 'test_set', verified_by_user_id: 9, software_id_snapshot: 'secret-software', certificate_fingerprint_snapshot: 'secret-fingerprint', version: { increment: 1 } }) }));
+      expect(result).toEqual({ status: 'verified', version: 4, event_codes: ['030', '031'], dian_configuration_id: 20, evidence_id: 30, verified_at: expect.any(Date) });
+      const audit = tx.audit_logs.create.mock.calls[0][0].data;
+      expect(audit.metadata.review_note).toBe(verifyInput.review_note);
+      expect(audit.new_values).toEqual(expect.objectContaining({ status: 'verified', version: 4, has_software_id_snapshot: true, has_certificate_fingerprint_snapshot: true }));
+      expect(JSON.stringify([result, audit])).not.toMatch(/secret-software|secret-fingerprint|secret-cert-key|secret-password|secret-evidence-key/);
+    });
+
+    it('rejects missing/short reviewer attestation before opening the transaction', async () => {
+      const { tx } = makeReviewTx(); useTx(tx);
+      await expect(service.verifyAsPlatformReviewer(5, 7, 9, { ...verifyInput, review_note: 'too short' })).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['wrong status', { status: 'verified', version: 3 }],
+      ['stale version', { status: 'testing', version: 2 }],
+    ])('rejects %s', async (_label, patch) => {
+      const { tx, pending } = makeReviewTx(); tx.received_buyer_event_enablements.findFirst.mockReset().mockResolvedValue({ ...pending, ...patch });
+      await expect(perform(tx)).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.received_buyer_event_enablements.updateMany).not.toHaveBeenCalled();
+    });
+    it('rejects cross-tenant configuration/evidence, missing or expired certificates, and NIT mismatch', async () => {
+      const invalidConfig = makeReviewTx(); invalidConfig.tx.dian_configurations.findFirst.mockResolvedValue(null);
+      await expect(perform(invalidConfig.tx)).rejects.toBeInstanceOf(ConflictException);
+      const invalidEvidence = makeReviewTx(); invalidEvidence.tx.fiscal_evidences.findFirst.mockResolvedValue(null);
+      await expect(perform(invalidEvidence.tx)).rejects.toBeInstanceOf(ConflictException);
+      const missingCert = makeReviewTx(); missingCert.tx.dian_configurations.findFirst.mockResolvedValue({ ...await missingCert.tx.dian_configurations.findFirst(), certificate_s3_key: null });
+      await expect(perform(missingCert.tx)).rejects.toBeInstanceOf(ConflictException);
+      const expired = makeReviewTx(); expired.tx.dian_configurations.findFirst.mockResolvedValue({ ...await expired.tx.dian_configurations.findFirst(), certificate_expiry: new Date(Date.now() - 1) });
+      await expect(perform(expired.tx)).rejects.toBeInstanceOf(ConflictException);
+      const wrongNit = makeReviewTx(); wrongNit.tx.dian_configurations.findFirst.mockResolvedValue({ ...await wrongNit.tx.dian_configurations.findFirst(), nit: '800987654-3' });
+      await expect(perform(wrongNit.tx)).rejects.toBeInstanceOf(ConflictException);
+    });
+    it('fails closed on audit failure and gates readiness from the verified row actually returned by the transaction', async () => {
+      const failure = makeReviewTx(); failure.tx.audit_logs.create.mockRejectedValue(new Error('sensitive db error'));
+      await expect(perform(failure.tx)).rejects.toBeInstanceOf(ServiceUnavailableException);
+      const success = makeReviewTx();
+      await perform(success.tx);
+      const readRow = {
+        ...success.fresh,
+        dian_configuration: { organization_id: 5, accounting_entity_id: 7, configuration_type: 'invoicing', operation_mode: 'own_software', environment: 'production', enablement_status: 'enabled', software_id: success.fresh.software_id_snapshot, certificate_fingerprint: success.fresh.certificate_fingerprint_snapshot, certificate_s3_key: 'secret-cert-key', certificate_password_encrypted: 'secret-password', certificate_kms_key_id: null, certificate_expiry: new Date(Date.now() + 86400000), nit: '900123456-8', nit_dv: '8' },
+        evidence: { organization_id: 5, accounting_entity_id: 7, evidence_type: 'test_set', storage_key: 'secret-evidence-key', content_hash: null },
+      };
+      const readEnablement = jest.fn().mockResolvedValue(readRow);
+      (service as any).prisma.withoutScope.mockReturnValue({ received_buyer_event_enablements: { findFirst: readEnablement }, accounting_entities: { findFirst: jest.fn().mockResolvedValue({ tax_id: '900123456-8' }) } });
+      expect((await service.getReadiness(context, '030')).ready).toBe(true);
+      const unapproved = await service.getReadiness(context, '032');
+      expect(unapproved.ready).toBe(false);
+      expect(unapproved.blockers).toContain('event_code_not_approved');
+      expect(readEnablement).toHaveBeenCalledTimes(2);
+    });
+    it('rejects invalid organization, entity, reviewer IDs and versions', async () => {
+      const { tx } = makeReviewTx(); useTx(tx);
+      await expect(service.verifyAsPlatformReviewer(0, 7, 9, verifyInput)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.verifyAsPlatformReviewer(5, 0, 9, verifyInput)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.verifyAsPlatformReviewer(5, 7, -1, verifyInput)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.verifyAsPlatformReviewer(5, 7, 9, { ...verifyInput, expected_version: 0 })).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    });
+  });
 });

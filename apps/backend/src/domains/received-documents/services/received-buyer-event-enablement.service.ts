@@ -19,6 +19,20 @@ export interface ReceivedBuyerEventVerificationRequestView {
   dian_configuration_id: number;
   evidence_id: number;
 }
+export type ReceivedBuyerEventVerificationSource = 'test_set' | 'convalidated' | 'dian_portal';
+export interface VerifyReceivedBuyerEventInput {
+  expected_version: number;
+  verification_source: ReceivedBuyerEventVerificationSource;
+  review_note: string;
+}
+export interface ReceivedBuyerEventVerifiedView {
+  status: 'verified';
+  version: number;
+  event_codes: ReceivedBuyerEventCode[];
+  dian_configuration_id: number;
+  evidence_id: number;
+  verified_at: Date;
+}
 export type ReceivedBuyerEventReadinessStatus = 'not_started' | 'testing' | 'verified' | 'suspended';
 
 export interface ReceivedBuyerEventReadiness {
@@ -174,6 +188,68 @@ export class ReceivedBuyerEventEnablementService {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
         throw new ConflictException('La configuración o evidencia ya está asociada a otra activación.');
       }
+      throw error;
+    });
+  }
+
+  async verifyAsPlatformReviewer(
+    organizationId: number,
+    accountingEntityId: number,
+    reviewerUserId: number,
+    input: VerifyReceivedBuyerEventInput,
+  ): Promise<ReceivedBuyerEventVerifiedView> {
+    this.assertPositive(organizationId, 'organization');
+    this.assertPositive(accountingEntityId, 'accounting entity');
+    this.assertPositive(reviewerUserId, 'reviewer');
+    if (!Number.isSafeInteger(input?.expected_version) || input.expected_version < 1) throw new BadRequestException('La versión esperada no es válida.');
+    if (!['test_set', 'convalidated', 'dian_portal'].includes(input?.verification_source)) throw new BadRequestException('La fuente de verificación no es válida.');
+    if (typeof input?.review_note !== 'string' || input.review_note.trim().length < 20 || input.review_note.trim().length > 500) throw new BadRequestException('La nota de revisión debe tener entre 20 y 500 caracteres.');
+
+    const db = this.prisma.withoutScope();
+    return db.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "accounting_entities" WHERE "id" = ${accountingEntityId} AND "organization_id" = ${organizationId} AND "is_active" = true FOR UPDATE`);
+      const where = { organization_id: organizationId, accounting_entity_id: accountingEntityId };
+      const entity = await tx.accounting_entities.findFirst({ where: { id: accountingEntityId, organization_id: organizationId, is_active: true }, select: { id: true, tax_id: true } });
+      if (!entity) throw new ConflictException('La entidad fiscal no está activa o no existe.');
+      const existing = await tx.received_buyer_event_enablements.findFirst({ where });
+      if (!existing) throw new ConflictException('No existe una solicitud de verificación pendiente.');
+      if (existing.status !== 'testing' || existing.version !== input.expected_version) throw new ConflictException('La solicitud cambió o ya no está pendiente de verificación.');
+      if (!Array.isArray(existing.event_codes) || existing.event_codes.length === 0 || new Set(existing.event_codes).size !== existing.event_codes.length || existing.event_codes.some((code: string) => !['030', '031', '032', '033'].includes(code))) {
+        throw new ConflictException('La solicitud no contiene códigos de evento válidos.');
+      }
+      if (!existing.dian_configuration_id || !existing.evidence_id) throw new ConflictException('La solicitud no tiene configuración y evidencia asociadas.');
+      const config = await tx.dian_configurations.findFirst({
+        where: { id: existing.dian_configuration_id, ...where },
+        select: { id: true, configuration_type: true, operation_mode: true, environment: true, enablement_status: true, software_id: true, certificate_fingerprint: true, certificate_s3_key: true, certificate_password_encrypted: true, certificate_expiry: true, nit: true, nit_dv: true },
+      });
+      if (!config || config.configuration_type !== 'invoicing' || config.operation_mode !== 'own_software' || config.environment !== 'production' || config.enablement_status !== 'enabled') throw new ConflictException('La configuración DIAN no cumple los requisitos de producción.');
+      if (!config.software_id || !config.certificate_fingerprint || !config.certificate_s3_key || !config.certificate_password_encrypted || !config.certificate_expiry || config.certificate_expiry.getTime() <= Date.now()) throw new ConflictException('La configuración DIAN no tiene un certificado de producción vigente.');
+      const configNit = normalizeNit(config.nit);
+      const entityNit = normalizeNit(entity.tax_id);
+      const configDvMismatch = configNit.dv_mismatch || (config.nit_dv != null && configNit.dv !== config.nit_dv);
+      if (!configNit.number || configNit.number !== entityNit.number || configDvMismatch || entityNit.dv_mismatch) throw new ConflictException('La identificación tributaria de la configuración no coincide con la entidad fiscal.');
+      const evidence = await tx.fiscal_evidences.findFirst({ where: { id: existing.evidence_id, ...where }, select: { id: true, evidence_type: true, storage_key: true, content_hash: true } });
+      if (!evidence || !['test_set', 'dian_response', 'manual_support', 'approval_record'].includes(evidence.evidence_type) || (!evidence.storage_key && !evidence.content_hash)) throw new ConflictException('La evidencia asociada no es válida.');
+
+      const verifiedAt = new Date();
+      const changed = await tx.received_buyer_event_enablements.updateMany({
+        where: { id: existing.id, ...where, version: input.expected_version, status: 'testing' },
+        data: { status: 'verified', verification_source: input.verification_source, verified_at: verifiedAt, verified_by_user_id: reviewerUserId, software_id_snapshot: config.software_id, certificate_fingerprint_snapshot: config.certificate_fingerprint, version: { increment: 1 } },
+      });
+      if (changed.count !== 1) throw new ConflictException('La solicitud cambió durante la verificación.');
+      const fresh = await tx.received_buyer_event_enablements.findFirst({ where: { id: existing.id, ...where } });
+      if (!fresh) throw new ConflictException('La solicitud cambió durante la verificación.');
+      const auditValues = (value: typeof fresh) => ({ organization_id: organizationId, accounting_entity_id: accountingEntityId, status: value.status, version: value.version, dian_configuration_id: value.dian_configuration_id, evidence_id: value.evidence_id, event_codes: value.event_codes, verification_source: value.verification_source, verified_by_user_id: value.verified_by_user_id, verified_at: value.verified_at, has_software_id_snapshot: !!value.software_id_snapshot, has_certificate_fingerprint_snapshot: !!value.certificate_fingerprint_snapshot });
+      const requestId = RequestContextService.asyncLocalStorage.getStore()?.request_id;
+      try {
+        await tx.audit_logs.create({ data: { user_id: reviewerUserId, action: 'UPDATE', resource: 'received_buyer_event_enablements', resource_id: fresh.id, old_values: auditValues(existing), new_values: auditValues(fresh), metadata: { organization_id: organizationId, accounting_entity_id: accountingEntityId, review_note: input.review_note.trim() }, request_id: typeof requestId === 'string' && requestId.length >= 1 && requestId.length <= 100 ? requestId : null } });
+      } catch {
+        throw new ServiceUnavailableException('No fue posible registrar de forma segura la verificación.');
+      }
+      return { status: 'verified' as const, version: fresh.version, event_codes: fresh.event_codes as ReceivedBuyerEventCode[], dian_configuration_id: fresh.dian_configuration_id!, evidence_id: fresh.evidence_id!, verified_at: fresh.verified_at! };
+    }).catch((error: unknown) => {
+      if (error instanceof ServiceUnavailableException) throw error;
+      if (error && typeof error === 'object' && 'code' in error && ['P2002', 'P2004'].includes(String(error.code))) throw new ConflictException('La solicitud de verificación ya cambió o viola una restricción.');
       throw error;
     });
   }
