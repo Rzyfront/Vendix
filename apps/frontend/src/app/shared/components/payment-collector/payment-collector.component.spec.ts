@@ -699,7 +699,9 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
       fixture.componentRef.setInput('layout', layout);
       fixture.detectChanges();
 
-      let toggle = fixture.nativeElement.querySelector<HTMLButtonElement>('.pc-tip-toggle');
+      let toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
       expect(toggle).toBeTruthy();
       expect(toggle?.textContent).toContain('Agregar propina');
       expect(toggle?.getAttribute('aria-expanded')).toBe('false');
@@ -712,7 +714,9 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
 
       toggle?.click();
       fixture.detectChanges();
-      toggle = fixture.nativeElement.querySelector<HTMLButtonElement>('.pc-tip-toggle');
+      toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
       expect(toggle?.textContent).toContain('Propina (opcional)');
       expect(toggle?.getAttribute('aria-expanded')).toBe('true');
       expect(toggle?.classList.contains('pc-tip-toggle--collapsed')).toBeFalse();
@@ -749,7 +753,9 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
 
       fixture.componentRef.setInput('paymentResetKey', 1);
       fixture.detectChanges();
-      toggle = fixture.nativeElement.querySelector<HTMLButtonElement>('.pc-tip-toggle');
+      toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
       expect(component.tipExpanded()).toBeFalse();
       expect(component.tipControl.value).toBe(0);
       expect(toggle?.textContent).toContain('Agregar propina');
