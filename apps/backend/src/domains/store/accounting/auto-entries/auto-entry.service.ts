@@ -5514,27 +5514,12 @@ export class AutoEntryService {
   }
 
   /**
-   * F2 IVA lifecycle — recognize the DEDUCTIBLE VAT (IVA descontable) of a POP
-   * purchase from a VAT-responsible commerce (O-48), via a "VAT-only" journal
-   * entry:
-   *
-   *   DR 240804  IVA descontable en compras (iva)
-   *   CR 2205    Proveedores                (iva)
-   *
-   * This is the complement to `purchase_order.received` (which already posts
-   * DR 1435 net / CR 2205 net). Together the combined economic entry is:
-   *
-   *   DR 1435   Inventario        (neto)
-   *   DR 240804 IVA descontable   (iva)
-   *   CR 2205   Proveedores       (bruto = neto + iva)
-   *
-   * It deliberately does NOT reuse `onSupportDocumentAccepted` (which also
-   * debits 5195 expense + credits the FULL 2205), because that would duplicate
-   * the payable and contabilize expense over inventoried merchandise.
-   *
-   * Idempotent by (organization_id, source_type='purchase_vat',
-   * source_id=invoice_id, accounting_entity_id). O-49 (non-responsible) never
-   * reaches here — its VAT is already capitalized into inventory cost by F1.
+   * Recognizes the persisted deductible IVA contribution as a VAT-only journal
+   * entry. It reads the immutable contribution snapshot and links the posted
+   * journal back to that row after the auto-entry path returns successfully.
+   * The link update is deliberately after journal creation: if it fails, the
+   * contribution remains pending and retry can reuse the journal through the
+   * source-key idempotency in `createAutoEntry`.
    */
   async onPurchaseVatContributionRecognized(data: {
     contribution_id: number;
@@ -5543,7 +5528,8 @@ export class AutoEntryService {
     store_id: number;
     user_id?: number;
   }) {
-    const contribution = await this.prisma.withoutScope().purchase_vat_contributions.findFirst({
+    const db = this.prisma.withoutScope();
+    const contribution = await db.purchase_vat_contributions.findFirst({
       where: {
         id: data.contribution_id,
         organization_id: data.organization_id,
@@ -5552,6 +5538,8 @@ export class AutoEntryService {
       },
       select: {
         id: true,
+        ledger_status: true,
+        accounting_entry_id: true,
         iva_amount: true,
         supplier_id: true,
         supplier_tax_id_snapshot: true,
@@ -5604,7 +5592,7 @@ export class AutoEntryService {
       ),
     ]);
 
-    return this.createAutoEntry({
+    const entry = await this.createAutoEntry({
       source_type: 'purchase_vat_contribution',
       source_id: contribution.id,
       organization_id: data.organization_id,
@@ -5614,8 +5602,39 @@ export class AutoEntryService {
       lines,
       user_id: data.user_id,
     });
+    if (entry == null) return null;
+    if (entry.status !== 'posted' || !Number.isSafeInteger(entry.id) || entry.id <= 0) {
+      throw new Error(`Auto-entry for purchase VAT contribution #${contribution.id} did not return a valid posted journal`);
+    }
+    if (contribution.ledger_status === 'posted' && contribution.accounting_entry_id !== entry.id) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+    }
+
+    const linked = await db.purchase_vat_contributions.updateMany({
+      where: {
+        id: contribution.id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+        OR: [
+          { ledger_status: { in: ['pending', 'failed', 'skipped'] } },
+          { ledger_status: 'posted', accounting_entry_id: entry.id },
+        ],
+      },
+      data: { ledger_status: 'posted', accounting_entry_id: entry.id },
+    });
+    if (linked.count !== 1) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+    }
+    return entry;
   }
 
+  /**
+   * Legacy invoice-keyed VAT-only journal complement: DR IVA descontable / CR
+   * Proveedores. Kept for the existing invoice source path; the contribution
+   * handler above posts from a persisted row. Idempotent by organization,
+   * accounting entity, source_type='purchase_vat', and invoice_id.
+   */
   async onPurchaseVatRecognized(data: {
     invoice_id: number;
     purchase_order_id: number;
