@@ -4088,7 +4088,12 @@ export class OrderDetailsPageComponent {
   async printDispatchTicket(): Promise<void> {
     const order = this.order();
     if (!order) return;
-    if (!this.canPrintDispatchTicketExplicit()) return;
+    if (!this.canPrintDispatchTicketExplicit()) {
+      this.toastService.info(
+        'La impresión de despacho está desactivada para este tipo de entrega. Actívala en la configuración de Recibos (Habilitar tiquete de despacho).',
+      );
+      return;
+    }
 
     try {
       await this.dispatchTicketPrint.printDispatchTicket(
@@ -4198,9 +4203,24 @@ export class OrderDetailsPageComponent {
       dispatchedQty: Number(item.quantity || 0),
     }));
 
-    const address: Address | null =
-      order.addresses_orders_shipping_address_idToaddresses ||
-      null;
+    const relationAddress = order.addresses_orders_shipping_address_idToaddresses;
+    let address: Address | null = null;
+    if (relationAddress?.address_line1?.toString().trim()) {
+      address = relationAddress;
+    } else {
+      // Órdenes ecommerce de invitado: solo existe el snapshot (string JSON u objeto).
+      let snapshot: unknown = (order as any).shipping_address_snapshot;
+      if (typeof snapshot === 'string' && snapshot.trim()) {
+        try {
+          snapshot = JSON.parse(snapshot);
+        } catch {
+          snapshot = { address_line1: snapshot };
+        }
+      }
+      if (snapshot && typeof snapshot === 'object') {
+        address = snapshot as Address;
+      }
+    }
     const storeName = order.stores?.name || 'Vendix';
 
     // Paso 3 (extiende Carril B - B1): alias > legal_name > first+last > CF.
