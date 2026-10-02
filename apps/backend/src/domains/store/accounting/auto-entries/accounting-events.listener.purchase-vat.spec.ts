@@ -13,6 +13,9 @@ describe('AccountingEventsListener purchase VAT contribution routing', () => {
     user_id: 12,
     supplier: { id: 55, tax_id: '900111222' },
   };
+  // El tipo del evento exige contribution_id XOR invoice_id.
+  const { invoice_id: _invoiceId, ...contributionEvent } = baseEvent;
+  void _invoiceId;
 
   const build = (options: {
     enabled?: boolean;
@@ -48,7 +51,7 @@ describe('AccountingEventsListener purchase VAT contribution routing', () => {
   it('posts only through the contribution handler for a valid contribution event', async () => {
     const { listener, auto_entry_service, entry_failure_service } = build();
 
-    await listener.handlePurchaseVatRecognized(baseEvent);
+    await listener.handlePurchaseVatRecognized(contributionEvent);
 
     expect(auto_entry_service.onPurchaseVatContributionRecognized).toHaveBeenCalledWith({
       contribution_id: 901,
@@ -86,7 +89,7 @@ describe('AccountingEventsListener purchase VAT contribution routing', () => {
   it('records disabled purchases flow against the contribution key and posts neither handler', async () => {
     const { listener, auto_entry_service, entry_failure_service } = build({ enabled: false });
 
-    await listener.handlePurchaseVatRecognized(baseEvent);
+    await listener.handlePurchaseVatRecognized(contributionEvent);
 
     expect(entry_failure_service.recordSkip).toHaveBeenCalledWith(expect.objectContaining({
       organization_id: 7,
@@ -121,7 +124,7 @@ describe('AccountingEventsListener purchase VAT contribution routing', () => {
       contributionError: new Error('contribution posting failed'),
     });
 
-    await listener.handlePurchaseVatRecognized(baseEvent);
+    await listener.handlePurchaseVatRecognized(contributionEvent);
 
     expect(auto_entry_service.onPurchaseVatContributionRecognized).toHaveBeenCalledTimes(1);
     expect(auto_entry_service.onPurchaseVatRecognized).not.toHaveBeenCalled();
