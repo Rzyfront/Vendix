@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { DianDirectProvider } from './dian-direct.provider';
 import { UblApplicationResponseBuilder } from './xml/ubl-application-response.builder';
 import { CufeCalculator } from '../../utils/cufe-calculator';
@@ -17,7 +18,7 @@ function buildProvider() {
   const parser = { parseApplicationResponse: jest.fn().mockReturnValue({ is_valid: true, errors: [], document_key: 'track' }) };
   const provider = new DianDirectProvider({} as any, {} as any, {} as any, soap as any, {} as any, parser as any, {} as any, {} as any);
   Object.assign(provider as any, {
-    loadConfig: jest.fn().mockResolvedValue({ id: 4, software_pin: 'pin', environment: 'test' }),
+    loadConfig: jest.fn().mockResolvedValue({ id: 4, accounting_entity_id: 9, software_id: 'software', certificate_s3_key: 'cert.p12', certificate_kms_key_id: 'kms-key', software_pin: 'pin', environment: 'test' }),
     loadIssuerData: jest.fn().mockResolvedValue(issuer),
     signXml: jest.fn().mockImplementation((xml: string) => Promise.resolve(xml)),
     compressToZipBase64: jest.fn().mockResolvedValue('zip'),
@@ -46,6 +47,32 @@ describe('DianDirectProvider buyer event transport', () => {
     expect(cude).toHaveBeenCalledWith(expect.objectContaining({ issuer_nit: '900123456', customer_nit: '800214345' }));
     expect(soap.sendEventUpdateStatus).toHaveBeenCalledTimes(1);
     cude.mockRestore(); build.mockRestore();
+  });
+
+  it('prepares a signed 030 snapshot and never calls SOAP or audits success', async () => {
+    const { provider, soap } = buildProvider();
+    const cude = jest.spyOn(CufeCalculator, 'generateEventCude').mockReturnValue('cude');
+    const prepared = await provider.prepareDocumentEvent(base);
+    expect(prepared).toMatchObject({
+      event_code: '030', event_number: 'EV-1', dian_configuration_id: 4,
+      accounting_entity_id: 9, environment: 'test', cude: 'cude',
+      signed_xml: expect.stringContaining('ApplicationResponse'),
+      xml_filename: 'event.xml', zip_filename: 'event.zip', software_id: 'software',
+      certificate_s3_key: 'cert.p12', certificate_kms_key_id: 'kms-key',
+    });
+    expect(prepared.signed_xml_sha256).toBe(
+      createHash('sha256').update(prepared.signed_xml, 'utf8').digest('hex'),
+    );
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+    expect((provider as any).createAuditLog).not.toHaveBeenCalled();
+    cude.mockRestore();
+  });
+
+  it('rejects 034 for a received invoice before signing', async () => {
+    const { provider, soap } = buildProvider();
+    await expectHttpStatus(provider.prepareDocumentEvent({ ...base, event_code: '034' as any }), 400);
+    expect((provider as any).signXml).not.toHaveBeenCalled();
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
   });
 
   it('blocks a buyer identity mismatch before SOAP', async () => {

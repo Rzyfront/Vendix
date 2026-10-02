@@ -5,6 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import * as zlib from 'zlib';
+import { createHash } from 'crypto';
 import { DOMParser } from '@xmldom/xmldom';
 import {
   InvoiceProviderAdapter,
@@ -97,6 +98,7 @@ import {
 import {
   DianDocumentEventRequest,
   DianDocumentEventResult,
+  DianPreparedDocumentEvent,
 } from './interfaces/dian-event.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -1399,22 +1401,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
-  /**
-   * Registers a RADIAN document event (`ApplicationResponse`) against an
-   * already-accepted document.
-   *
-   * Differences from a document transmission that are easy to get wrong:
-   * - The key is a CUDE derived from the EVENT fields, not from amounts
-   *   (`CufeCalculator.generateEventCude`).
-   * - The SOAP operation is `SendEventUpdateStatus`, not `SendBillSync`.
-   * - There is no contingency scheme: Anexo §12 covers documents, not events, so
-   *   a DIAN outage means "retry later", never "declare contingency".
-   * - No numbering resolution applies, so `sts:InvoiceControl` is omitted.
-   */
-  async sendDocumentEvent(
-    event: DianDocumentEventRequest,
-  ): Promise<DianDocumentEventResult> {
-    const start_time = Date.now();
+  private async buildDocumentEventPayload(event: DianDocumentEventRequest) {
     const config = await this.loadConfig();
 
     this.validateCertificateExpiry(config);
@@ -1560,6 +1547,60 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       config,
       String(event.event_number),
     );
+    return {
+      config,
+      cude,
+      xml,
+      xml_filename: file_names.xml,
+      zip_filename: file_names.zip,
+    };
+  }
+
+  /** Prepare and sign an event without contacting DIAN or writing an audit row. */
+  async prepareDocumentEvent(
+    event: DianDocumentEventRequest,
+  ): Promise<DianPreparedDocumentEvent> {
+    const { config, cude, xml, xml_filename, zip_filename } =
+      await this.buildDocumentEventPayload(event);
+    const signed_xml = await this.signXml(xml, config);
+    return {
+      event_code: event.event_code,
+      event_number: event.event_number,
+      dian_configuration_id: config.id,
+      accounting_entity_id: config.accounting_entity_id,
+      environment: config.environment,
+      cude,
+      signed_xml,
+      signed_xml_sha256: createHash('sha256')
+        .update(signed_xml, 'utf8')
+        .digest('hex'),
+      xml_filename,
+      zip_filename,
+      software_id: config.software_id,
+      certificate_s3_key: config.certificate_s3_key,
+      certificate_kms_key_id: config.certificate_kms_key_id,
+    };
+  }
+
+  /**
+   * Registers a RADIAN document event (`ApplicationResponse`) against an
+   * already-accepted document.
+   *
+   * Differences from a document transmission that are easy to get wrong:
+   * - The key is a CUDE derived from the EVENT fields, not from amounts
+   *   (`CufeCalculator.generateEventCude`).
+   * - The SOAP operation is `SendEventUpdateStatus`, not `SendBillSync`.
+   * - There is no contingency scheme: Anexo §12 covers documents, not events, so
+   *   a DIAN outage means "retry later", never "declare contingency".
+   * - No numbering resolution applies, so `sts:InvoiceControl` is omitted.
+   */
+  async sendDocumentEvent(
+    event: DianDocumentEventRequest,
+  ): Promise<DianDocumentEventResult> {
+    const start_time = Date.now();
+    const payload = await this.buildDocumentEventPayload(event);
+    const { config, cude, xml } = payload;
+    const file_names = { xml: payload.xml_filename, zip: payload.zip_filename };
     let signed_xml = xml;
 
     try {

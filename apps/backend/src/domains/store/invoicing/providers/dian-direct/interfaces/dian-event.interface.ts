@@ -71,3 +71,24 @@ export interface DianDocumentEventResult {
   response_xml?: string;
   errors: { code?: string; message: string }[];
 }
+
+/**
+ * Backend-internal JSON-safe snapshot of a signed event, before any DIAN network
+ * call. Callers preparing received-document events must restrict them to buyer
+ * event codes and roles.
+ */
+export interface DianPreparedDocumentEvent {
+  event_code: DianEventCode;
+  event_number: string;
+  dian_configuration_id: number;
+  accounting_entity_id: number;
+  environment: 'test' | 'production';
+  cude: string;
+  signed_xml: string;
+  signed_xml_sha256: string;
+  xml_filename: string;
+  zip_filename: string;
+  software_id: string;
+  certificate_s3_key: string | null;
+  certificate_kms_key_id: string | null;
+}
