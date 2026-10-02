@@ -31,8 +31,8 @@ def login(email, password, org_slug):
     return d["data"]["access_token"]
 
 def cmd_login():
-    owner = login("owner@roku.vendix.com", "1125634q", "roku")
-    admin = login("admin@roku-demo.vendix.local", "1125634q", "roku")
+    owner = login("owner@roku.vendix.com", os.environ["VEX_E2E_PASSWORD"], "roku")
+    admin = login("admin@roku-demo.vendix.local", os.environ["VEX_E2E_PASSWORD"], "roku")
     open(f"{W}/owner.tok", "w").write(owner)
     open(f"{W}/admin.tok", "w").write(admin)
     print(f"owner={len(owner)} admin={len(admin)}")
