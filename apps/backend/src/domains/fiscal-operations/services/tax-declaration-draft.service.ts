@@ -745,6 +745,43 @@ export class TaxDeclarationDraftService {
     context: FiscalOperationsContext,
     period: ReturnType<typeof resolveFiscalPeriodRange>,
   ): Promise<DeclarationCalculation> {
+    // Received supplier documents are deliberately coverage-only until their
+    // fiscal eligibility is immutable and formally qualified. They must never
+    // be added to the legacy invoice-derived VAT totals below.
+    const receivedDocuments = await this.prisma.received_documents.findMany({
+      where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        issue_date: buildDateRangeFilter(
+          period.period_start,
+          period.period_end,
+        ),
+      },
+      select: {
+        id: true,
+        version: true,
+        source_hash: true,
+        document_type: true,
+        processing_status: true,
+        validation_status: true,
+        review_status: true,
+        fiscal_status: true,
+        issue_date: true,
+        tax_amount: true,
+        taxes: {
+          select: { id: true, tax_type: true, amount: true, treatment: true },
+        },
+      },
+      orderBy: { issue_date: 'asc' },
+    });
+    const undatedReceivedDocumentCount = await this.prisma.received_documents.count({
+      where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        issue_date: null,
+      },
+    });
+
     const invoices = await this.prisma.invoices.findMany({
       where: {
         organization_id: context.organization_id,
@@ -770,6 +807,49 @@ export class TaxDeclarationDraftService {
     let taxableBase = new Prisma.Decimal(0);
     const lines: Prisma.tax_declaration_linesCreateManyInput[] = [];
     const validationErrors: Prisma.InputJsonObject[] = [];
+    const receivedQualificationPendingTaxIds = new Set<number>();
+    const receivedQualificationPendingDocuments: Prisma.InputJsonObject[] = [];
+    for (const document of receivedDocuments) {
+      const positiveUnqualifiedTaxes = document.taxes.filter((tax) => {
+        const amount = this.parseFiniteMoney(tax.amount);
+        const taxType = tax.tax_type as string | null;
+        const isUnclassified = taxType == null || taxType === 'unclassified';
+        if (!amount || amount.lte(0) || (taxType !== 'iva' && !isUnclassified)) {
+          return false;
+        }
+        // `treatment` is mutable workflow state, not an immutable fiscal
+        // qualification, so no received tax is currently safely countable.
+        receivedQualificationPendingTaxIds.add(tax.id);
+        return true;
+      });
+      const invalidOrNegativeVatTaxes = document.taxes.filter((tax) => {
+        const taxType = tax.tax_type as string | null;
+        if (taxType !== 'iva' && taxType !== null && taxType !== 'unclassified') {
+          return false;
+        }
+        const amount = this.parseFiniteMoney(tax.amount);
+        return !amount || amount.lt(0);
+      });
+      const headerTaxAmount = this.parseFiniteMoney(document.tax_amount);
+      const hasUnrepresentedPositiveHeaderTax =
+        document.taxes.length === 0 && !!headerTaxAmount && headerTaxAmount.gt(0);
+      if (
+        positiveUnqualifiedTaxes.length > 0 ||
+        invalidOrNegativeVatTaxes.length > 0 ||
+        hasUnrepresentedPositiveHeaderTax
+      ) {
+        receivedQualificationPendingDocuments.push({
+          code: 'RECEIVED_VAT_QUALIFICATION_PENDING',
+          received_document_id: document.id,
+          received_tax_ids: [...new Set([
+            ...positiveUnqualifiedTaxes.map((tax) => tax.id),
+            ...invalidOrNegativeVatTaxes.map((tax) => tax.id),
+          ])],
+          has_unrepresented_positive_header_tax: hasUnrepresentedPositiveHeaderTax,
+          message: 'Received supplier taxes require immutable fiscal qualification before VAT inclusion.',
+        });
+      }
+    }
     const skippedTaxIds = new Set<number>();
     const skippedInvoiceIds = new Set<number>();
     const requiresDianAcceptance = (invoiceType: string) =>
@@ -940,6 +1020,23 @@ export class TaxDeclarationDraftService {
         period.period_year,
       ),
       source_snapshot: {
+        received_vat_coverage: {
+          version: 1,
+          state: 'unknown',
+          definitive_payable: null,
+          counted_received_tax_ids: [],
+          in_period_received_document_ids: receivedDocuments.map((document) => document.id),
+          in_period_received_sources: receivedDocuments.map((document) => ({
+            id: document.id,
+            version: document.version,
+            source_hash: document.source_hash,
+            document_type: document.document_type,
+            validation_status: document.validation_status,
+            fiscal_status: document.fiscal_status,
+          })),
+          undated_received_document_count: undatedReceivedDocumentCount,
+          pending_or_unclassified_positive_tax_ids: [...receivedQualificationPendingTaxIds],
+        },
         invoice_count: invoices.length,
         counted_invoice_ids: lines
           .map((line) => line.source_id)
@@ -953,14 +1050,20 @@ export class TaxDeclarationDraftService {
         skipped_tax_ids: [...skippedTaxIds],
       },
       validation_summary: {
-        warnings: nonAccepted.map((invoice) => ({
-          code: 'DIAN_NOT_ACCEPTED',
-          invoice_id: invoice.id,
-          invoice_number: invoice.invoice_number,
-          invoice_type: invoice.invoice_type,
-          dian_status: invoice.dian_status,
-        })),
-        errors: validationErrors,
+        warnings: [
+          ...nonAccepted.map((invoice) => ({
+            code: 'DIAN_NOT_ACCEPTED',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            invoice_type: invoice.invoice_type,
+            dian_status: invoice.dian_status,
+          })),
+          { code: 'SOURCE_COVERAGE_UNKNOWN' },
+          ...(undatedReceivedDocumentCount > 0
+            ? [{ code: 'SOURCE_COVERAGE_UNDATED', undated_received_document_count: undatedReceivedDocumentCount }]
+            : []),
+        ],
+        errors: [...validationErrors, ...receivedQualificationPendingDocuments],
       },
     };
   }
