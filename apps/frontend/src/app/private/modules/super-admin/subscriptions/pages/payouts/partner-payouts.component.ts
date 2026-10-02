@@ -349,14 +349,14 @@ export class PartnerPayoutsComponent {
       const meta = p.metadata ?? {};
       const processor = meta['provider'] ?? meta['processor'];
       return {
-      ...p,
-      store_name: sub?.store?.name ?? '—',
-      organization_name: sub?.store?.organizations?.name ?? '—',
-      plan_name: sub?.plan?.name ?? '—',
-      provider: (typeof processor === 'string' && processor) || p.payment_method || '—',
-      provider_reference: p.gateway_reference || (typeof meta['reference'] === 'string' ? meta['reference'] : null) || '—',
-      invoice_number: p.invoice?.invoice_number ?? `#${p.invoice_id}`,
-      payment_date: p.paid_at || p.created_at,
+        ...p,
+        store_name: sub?.store?.name ?? '—',
+        organization_name: sub?.store?.organizations?.name ?? '—',
+        plan_name: sub?.plan?.name ?? '—',
+        provider: (typeof processor === 'string' && processor) || p.payment_method || '—',
+        provider_reference: p.gateway_reference || (typeof meta['reference'] === 'string' ? meta['reference'] : null) || '—',
+        invoice_number: p.invoice?.invoice_number ?? `#${p.invoice_id}`,
+        payment_date: p.paid_at || p.created_at,
       };
     });
   });
