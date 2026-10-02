@@ -969,6 +969,7 @@ export class PosShippingStepComponent {
     this.shippingService.calculateShipping(items, {
       country_code: a.country_code || 'CO', city: a.city,
       state_province: a.state_province || undefined,
+      municipality_code: a.municipality_code || undefined,
       address_line1: a.address_line1 || undefined,
       postal_code: a.postal_code || undefined,
       ...(a.latitude != null && a.longitude != null &&

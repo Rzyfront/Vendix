@@ -41,8 +41,51 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   const firstMethod: PosShippingMethod = { id: 1, name: 'Mensajero', type: 'own_fleet', is_active: true };
   const originalAddress = {
     address_line1: 'Calle bodega 42', address_line2: 'Piso 2', city: 'Cali',
-    state_province: 'Valle', country_code: 'CO', postal_code: '760001',
+    state_province: 'Valle del Cauca', country_code: 'CO', postal_code: '760001',
     phone_number: '3001234567', latitude: 3.45, longitude: -76.5, municipality_code: '76001',
+  };
+  const dianDepartments = [
+    { code: '11', name: 'Bogotá' },
+    { code: '44', name: 'La Guajira' },
+    { code: '76', name: 'Valle del Cauca' },
+  ];
+  const dianMunicipalities = [
+    {
+      code: '11001', name: 'Bogotá, D.c.', department_code: '11',
+      department_name: 'Bogotá', postal_code: '110111',
+    },
+    {
+      code: '44001', name: 'Riohacha', department_code: '44',
+      department_name: 'La Guajira', postal_code: '440001',
+    },
+    {
+      code: '76001', name: 'Cali', department_code: '76',
+      department_name: 'Valle del Cauca', postal_code: '760001',
+    },
+  ];
+  const municipalityLookup = {
+    listDepartments: () => of(dianDepartments),
+    listByDepartment: (code: string) =>
+      of(dianMunicipalities.filter((municipality) => municipality.department_code === code)),
+    resolveByCode: (code: string | null | undefined) =>
+      of(dianMunicipalities.find((municipality) => municipality.code === code) ?? null),
+    resolveByName: (city: string | null | undefined, department: string | null | undefined) => {
+      const normalize = (value: string) => value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+      const departmentText = normalize(department ?? '');
+      const cityText = normalize(city ?? '');
+      if (!departmentText || !cityText) return of(null);
+      return of(dianMunicipalities.find((municipality) =>
+        (normalize(municipality.department_name) === departmentText ||
+          (municipality.department_code === '11' && departmentText === 'bogota d c')) &&
+        (normalize(municipality.name) === cityText || normalize(municipality.name).startsWith(cityText)),
+      ) ?? null);
+    },
+    setBaseUrl: () => {},
   };
   const cart = (): CartState => ({
     items: [{ product: { id: '7' }, itemType: 'product', quantity: 1, totalPrice: 1000 }],
@@ -70,6 +113,14 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     fixture.detectChanges();
     methods.next([firstMethod, originalMethod]);
     fixture.detectChanges();
+  };
+  const selectMunicipality = (
+    form: AddressFormFieldsComponent,
+    departmentCode: string,
+    municipalityCode: string,
+  ) => {
+    form.onDepartmentChange(departmentCode);
+    form.onCityChange(municipalityCode);
   };
 
   beforeEach(async () => {
@@ -101,7 +152,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         { provide: ToastService, useValue: { show: () => {} } },
         { provide: CurrencyFormatService, useValue: { currencySymbol: signal('$'), loadCurrency: () => {}, format: (v: number) => `$${v}` } },
         { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]), getDefaultCountry: () => ({ code: 'CO' }) } },
-        { provide: DianMunicipalityLookupService, useValue: { resolveByName: () => of(null), setBaseUrl: () => {} } },
+        { provide: DianMunicipalityLookupService, useValue: municipalityLookup },
         { provide: GeocodingService, useValue: { forward: () => of(null), reverse: () => of(null) } },
       ],
     });
@@ -138,8 +189,6 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent)).componentInstance as AddressFormFieldsComponent;
     expect(form.form.pristine).toBeTrue();
     expect(form.form.get('address_line1')?.value).toBe(originalAddress.address_line1);
-    form.form.get('country_code')!.setValue('CO');
-    form.form.get('municipality_code')!.setValue('76001');
     fixture.detectChanges();
     component.goToShipSubStep(2);
     component.attemptPrevSubStep();
@@ -319,11 +368,18 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.buildShippingContext()?.shippingAddressId).toBeUndefined();
   });
 
-  it('H6 — dirección guardada sin state_province muestra el formulario precargado y al completarla addressValid true', () => {
+  it('H6 — dirección guardada sin state_province muestra el formulario y al elegir ubicación DANE queda válida', () => {
     // `state_province` es nullable en Prisma; `phone_number` se rellena aparte
-    // desde `customer.phone` en `toAddressPayload` (comportamiento ya
-    // existente), así que solo el departamento queda ausente aquí.
-    const incompleteSaved = { ...originalAddress, id: 55, type: 'shipping', is_primary: true, state_province: null as any };
+    // desde `customer.phone` en `toAddressPayload`. Se omite también el código
+    // DANE para probar que el cajero puede completar la ubicación desde el form.
+    const incompleteSaved = {
+      ...originalAddress,
+      id: 55,
+      type: 'shipping',
+      is_primary: true,
+      state_province: null as any,
+      municipality_code: null,
+    };
     const state = cart();
     state.shippingContext = undefined;
     state.linkedOrderId = null;
@@ -343,9 +399,11 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     }));
     expect(component.missingAddressFieldsLabel()).toBe('el departamento');
 
-    // El cajero completa solo el campo faltante en el formulario precargado.
-    component.onAddressChange({ ...component.address()!, state_province: 'Valle' }, true);
-    component.onAddressValidChange(true);
+    // El cajero completa el departamento y municipio como una ubicación DANE coherente.
+    const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
+      .componentInstance as AddressFormFieldsComponent;
+    selectMunicipality(form, '76', '76001');
+    fixture.detectChanges();
 
     expect(component.addressValid()).toBeTrue();
     expect(component.addressId()).toBe(55); // sigue siendo UPDATE sobre el mismo id, no uno nuevo
@@ -457,7 +515,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     manualQuote.and.returnValue(pendingQuote.asObservable());
 
     component.onShippingCostChange(18000);
-    component.onAddressChange({ ...originalAddress, city: 'Riohacha' }, true);
+    component.onAddressChange({
+      ...originalAddress,
+      city: 'Riohacha',
+      state_province: 'La Guajira',
+      municipality_code: '44001',
+      postal_code: '440001',
+    }, true);
     pendingQuote.next({
       shipping_rate_id: 93,
       manual_shipping_price: 18000,
@@ -488,7 +552,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     fixture.detectChanges();
 
     expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
-      country_code: 'CO', city: 'Cali', state_province: 'Valle',
+      country_code: 'CO', city: 'Cali', state_province: 'Valle del Cauca',
       postal_code: '760001', latitude: 3.45, longitude: -76.5,
     }));
   });
@@ -782,10 +846,10 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   // Zoneless: sin zone.js/testing, `fakeAsync` no existe en este arnés (ver
   // pos-order-confirmation.component.spec.ts). Se usa `jasmine.clock()` para
   // controlar el debounce de 500ms del forward-geocode del formulario real.
-  it('after geocode emits coords, /shipping/calculate payload includes latitude/longitude', async () => {
+  it('after selecting Riohacha and geocoding, /shipping/calculate receives coordinates and DANE code', async () => {
     const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
     geocoding.forward = jasmine.createSpy('forward').and.returnValue(
-      of({ lat: 4.6097, lng: -74.0817, precision: 'exact' }),
+      of({ lat: 11.5444, lng: -72.907, precision: 'exact' }),
     );
     const state = cart();
     state.shippingContext = undefined;
@@ -801,20 +865,9 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     // called. `mockDate()` freezes/advances `Date` in lockstep with `tick()`
     // so the operator's own time check agrees with the fake clock.
     //
-    // Installed BEFORE the render that constructs `AddressFormFieldsComponent`
-    // (not just around the real edits below): its constructor's
-    // `initialAddress` prefill effect ALSO fires `municipality_code` through
-    // the same debounced `merge(...)` on first render (emitEvent:true, to
-    // bridge country/municipality into their signals — see that effect's own
-    // comment). `debounceTime` keeps a single shared "pending task" slot per
-    // subscription; if that first, harmless emission schedules its wait on the
-    // REAL scheduler (clock installed later), it silently claims that slot and
-    // every later value (ours) just updates the pending value/time without
-    // scheduling a NEW fake timer — so a `tick()` from an installed-afterward
-    // clock flushes nothing, ever. Ticking once right after that first render
-    // flushes the harmless cycle (address_line1 is still empty, so
-    // `forwardGeocodeFromForm` no-ops on its own length guard) and frees the
-    // slot for the real edits' own debounce below.
+    // Installed before rendering so the form's catalog-backed geographic
+    // selection and address edit share the same fake scheduler. Tick once after
+    // mount to flush any harmless initialization emission before editing.
     jasmine.clock().install();
     jasmine.clock().mockDate();
     try {
@@ -827,8 +880,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         .componentInstance as AddressFormFieldsComponent;
       form.form.markAsDirty();
       form.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
-      form.form.get('city')!.setValue('Bogotá');
-      form.form.get('state_province')!.setValue('Bogotá D.C.');
+      selectMunicipality(form, '44', '44001');
       jasmine.clock().tick(600); // flush the shared component's 500ms forward-geocode debounce
       await fixture.whenStable();
     } finally {
@@ -838,11 +890,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
 
     expect(geocoding.forward).toHaveBeenCalled();
     expect(component.address()).toEqual(jasmine.objectContaining({
-      latitude: 4.6097, longitude: -74.0817,
+      city: 'Riohacha', state_province: 'La Guajira', municipality_code: '44001',
+      latitude: 11.5444, longitude: -72.907,
     }));
     expect(component.addressGeocodePrecision()).toBe('exact');
     expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
-      latitude: 4.6097, longitude: -74.0817,
+      city: 'Riohacha', state_province: 'La Guajira', municipality_code: '44001',
+      latitude: 11.5444, longitude: -72.907,
     }));
   });
 
@@ -873,8 +927,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         .componentInstance as AddressFormFieldsComponent;
       form.form.markAsDirty();
       form.form.get('address_line1')!.setValue('Vereda Xyzqwerty Km 99 Via Inexistente');
-      form.form.get('city')!.setValue('Riohacha');
-      form.form.get('state_province')!.setValue('La Guajira');
+      selectMunicipality(form, '44', '44001');
       jasmine.clock().tick(600);
       await fixture.whenStable();
     } finally {

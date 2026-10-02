@@ -43,6 +43,7 @@ export class PosShippingService {
       country_code: string;
       state_province?: string;
       city?: string;
+      municipality_code?: string;
       address_line1?: string;
       postal_code?: string;
       latitude?: number;
