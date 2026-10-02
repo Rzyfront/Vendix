@@ -84,7 +84,7 @@ export class ReceivedBuyerEventReservationService {
             id: true, document_type: true, document_key: true, invoice_number: true,
             issue_date: true, issuer_tax_id: true, issuer_name: true,
             receiver_tax_id: true, receiver_name: true, validation_status: true,
-            review_status: true,
+            review_status: true, version: true,
           },
         });
         if (!document) throw new ConflictException('Documento recibido no encontrado en el contexto fiscal actual.');
@@ -158,6 +158,9 @@ export class ReceivedBuyerEventReservationService {
         if (!CUFE_PATTERN.test(document.document_key ?? '')) {
           throw new UnprocessableEntityException('El documento recibido no tiene un CUFE de 96 caracteres hexadecimales.');
         }
+        if (!Number.isSafeInteger(document.version) || document.version < 1) {
+          throw new UnprocessableEntityException('La versión del documento recibido no es válida.');
+        }
         if (!document.invoice_number?.trim() || !document.issue_date || !document.issuer_name?.trim() || !document.receiver_name?.trim()) {
           throw new UnprocessableEntityException('Faltan datos obligatorios del documento para construir el evento DIAN.');
         }
@@ -211,6 +214,8 @@ export class ReceivedBuyerEventReservationService {
             result: {
               description: input.description?.trim() ?? null,
               claim_concept_code: input.claim_concept_code ?? null,
+              document_version: document.version,
+              referenced_cufe: document.document_key,
               activation_version: activation.version,
               dian_configuration_id: activation.dian_configuration_id,
             },

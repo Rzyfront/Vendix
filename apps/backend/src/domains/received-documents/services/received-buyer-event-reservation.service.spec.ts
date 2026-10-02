@@ -17,6 +17,7 @@ const validDocument = {
   receiver_name: 'Buyer SAS',
   validation_status: 'valid',
   review_status: 'reviewed',
+  version: 6,
 };
 
 function harness(options: {
@@ -64,7 +65,8 @@ describe('ReceivedBuyerEventReservationService', () => {
     expect(h.tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(h.enablement.getStatus).not.toHaveBeenCalled();
     expect(h.tx.received_document_events.create.mock.calls[0][0].data.result).toEqual({
-      description: null, claim_concept_code: null, activation_version: 4, dian_configuration_id: 21,
+      description: null, claim_concept_code: null, document_version: 6,
+      referenced_cufe: 'a'.repeat(96), activation_version: 4, dian_configuration_id: 21,
     });
     expect(h.tx.received_document_events.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -156,6 +158,7 @@ describe('ReceivedBuyerEventReservationService', () => {
     })).resolves.toMatchObject({ duplicate: false, event_number: 'RD77' });
     expect(valid.tx.received_document_events.create.mock.calls[0][0].data.result).toEqual({
       description: 'Internal note: quantity differs', claim_concept_code: '02',
+      document_version: 6, referenced_cufe: 'a'.repeat(96),
       activation_version: 4, dian_configuration_id: 21,
     });
   });
