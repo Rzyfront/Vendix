@@ -249,33 +249,38 @@ export interface StoreSubscription {
 export interface SubscriptionPaymentRow {
   id: number;
   invoice_id: number;
-  amount: number;
+  amount: number | string;
   currency: string;
-  state: 'pending' | 'succeeded' | 'failed' | 'refunded';
-  provider: string;
-  provider_reference: string | null;
-  payment_method_type: string | null;
+  state: 'pending' | 'succeeded' | 'failed' | 'refunded' | 'partial_refund';
+  /** wompi | manual | zero (written by backend subscription payment services) */
+  payment_method: string | null;
+  /** Gateway transaction id / bank reference; null while the payment is pending */
+  gateway_reference: string | null;
+  metadata?: Record<string, any> | null;
   paid_at: string | null;
   created_at: string;
   invoice?: {
     id: number;
     invoice_number: string;
-    total: number;
-    currency: string;
+    total: number | string;
     state: string;
-    store?: {
+    due_at?: string | null;
+    store_subscription?: {
       id: number;
-      name: string;
-    };
-    organization?: {
-      id: number;
-      name: string;
-    };
-    plan?: {
-      id: number;
-      name: string;
-      code: string;
-    };
+      store_id: number;
+      plan?: {
+        id: number;
+        name: string;
+        code: string;
+        billing_cycle: string;
+      } | null;
+      store?: {
+        id: number;
+        name: string;
+        organization_id: number;
+        organizations?: { id: number; name: string } | null;
+      } | null;
+    } | null;
   };
 }
 
