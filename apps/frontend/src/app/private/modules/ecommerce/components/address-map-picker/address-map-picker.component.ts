@@ -72,8 +72,11 @@ export class RecenterControl {
       '<svg class="amp-recenter-icon" viewBox="0 0 24 24" fill="none"',
       ' stroke="currentColor" stroke-width="2" stroke-linecap="round"',
       ' stroke-linejoin="round" aria-hidden="true">',
-      '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/>',
-      '<circle cx="12" cy="12" r="2"/></svg>',
+      '<circle cx="12" cy="12" r="9"/>',
+      '<line x1="22" x2="18" y1="12" y2="12"/>',
+      '<line x1="6" x2="2" y1="12" y2="12"/>',
+      '<line x1="12" x2="12" y1="6" y2="2"/>',
+      '<line x1="12" x2="12" y1="22" y2="18"/></svg>',
     ].join('');
     this.button.addEventListener('click', this.handleClick);
     this.container.appendChild(this.button);
@@ -270,13 +273,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       );
       // Address recenter sits between navigation and fullscreen; unlike the
       // locate control below, it never requests or reads device geolocation.
-      this.recenterControl = new RecenterControl(() => {
-        if (this.marker) {
-          const point = this.marker.getLngLat();
-          return { lat: point.lat, lng: point.lng };
-        }
-        return this.center();
-      });
+      this.recenterControl = this.createRecenterControl();
       this.map.addControl(this.recenterControl, 'top-right');
       // Fullscreen: lets the customer expand the map to place the pin precisely.
       this.map.addControl(new this.maplibregl.FullscreenControl(), 'top-right');
@@ -396,6 +393,17 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       ?.querySelector('.maplibregl-ctrl-attrib');
     attrib?.classList.remove('maplibregl-compact-show');
     attrib?.removeAttribute('open');
+  }
+
+  /** Build the address-only control, preferring the marker's latest position. */
+  private createRecenterControl(): RecenterControl {
+    return new RecenterControl(() => {
+      if (this.marker) {
+        const point = this.marker.getLngLat();
+        return { lat: point.lat, lng: point.lng };
+      }
+      return this.center();
+    });
   }
 
   /** Lazily creates the draggable marker on first point, or moves the existing one. */
