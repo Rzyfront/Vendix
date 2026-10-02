@@ -209,6 +209,23 @@ describe('SubscriptionResolverService', () => {
     }
   });
 
+  it('wildcard base with wildcard partner override stays wildcard', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(['*'], {
+        partner_override: {
+          organization_id: 42,
+          updated_at: new Date(),
+          feature_overrides: {
+            tool_agents: { enabled: true, tools_allowed: ['*'] },
+          },
+          base_plan: {},
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['*']);
+  });
+
   it('partner can restrict a base plan with no declared tool list', async () => {
     prismaMock.store_subscriptions.findUnique.mockResolvedValue(
       makeSubscriptionWithTools(undefined, {

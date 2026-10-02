@@ -13,11 +13,12 @@ import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentFormComponent } from './received-document-form.component';
 import { ReceivedDocumentMatchingComponent } from './received-document-matching.component';
 import { ReceivedDocumentAccountingEvidenceComponent } from './received-document-accounting-evidence.component';
+import { ReceivedBuyerEventCommandComponent } from './received-buyer-event-command.component';
 
 @Component({
   selector: 'app-received-document-detail',
   standalone: true,
-  imports: [CardComponent, StickyHeaderComponent, ReceivedDocumentFormComponent, ReceivedDocumentMatchingComponent, ReceivedDocumentAccountingEvidenceComponent],
+  imports: [CardComponent, StickyHeaderComponent, ReceivedDocumentFormComponent, ReceivedDocumentMatchingComponent, ReceivedDocumentAccountingEvidenceComponent, ReceivedBuyerEventCommandComponent],
   template: `
     <div class="w-full space-y-4">
       <app-sticky-header title="Detalle del documento recibido" subtitle="Revisión de evidencia del proveedor" icon="file-text" [showBackButton]="true" backRoute="/admin/invoicing/received-documents" [backQueryParams]="backQueryParams()" />
@@ -103,11 +104,12 @@ import { ReceivedDocumentAccountingEvidenceComponent } from './received-document
             <h2 id="timeline-title" class="mb-3 text-lg font-semibold">Actividad y procedencia</h2>
             <p class="mb-3 text-sm text-text-secondary">Origen: {{ label(doc.source_channel) }} · Registrado: {{ dateTime(doc.created_at) }} · Versión {{ doc.version }}</p>
             @if (!doc.events?.length) { <p class="text-sm text-text-secondary">Sin eventos adicionales.</p> }
-            <ol class="space-y-2">@for (event of doc.events ?? []; track event.id) { <li class="border-l-2 border-border pl-3"><p class="font-medium">{{ label(event.event_type) }} · {{ label(event.status) }}</p><time class="text-xs text-text-secondary">{{ dateTime(event.created_at) }}</time></li> }</ol>
+            <ol class="space-y-2">@for (event of doc.events ?? []; track event.id) { <li class="border-l-2 border-border pl-3"><p class="font-medium">{{ label(event.event_type) }} · {{ label(event.status) }}</p>@if (event.event_type === 'BUYER_DIAN_EVENT') { <p class="break-all text-xs text-text-secondary">Código {{ event.event_code || '—' }} · Número {{ event.event_number || '—' }} · CUDE {{ event.cude || '—' }}</p> }<time class="text-xs text-text-secondary">{{ dateTime(event.confirmed_at || event.event_date || event.created_at) }}</time></li> }</ol>
             <details class="mt-4"><summary class="cursor-pointer text-sm font-medium">Ver metadatos de procedencia</summary><pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-3 text-xs">{{ provenance(doc) }}</pre></details>
           </section>
         </app-card>
-        <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary">El estado validado no equivale a aceptación por la DIAN. Reconocimiento fiscal, coincidencia con recepción/compra y contabilización son procesos separados; aquí no se confirma ninguno.</p>
+        <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary">El estado validado no equivale a aceptación por la DIAN. Los eventos del adquirente requieren una acción expresa y una respuesta de la DIAN; reconocimiento fiscal, coincidencia con recepción/compra y contabilización son procesos separados.</p>
+        <app-received-buyer-event-command [document]="doc" [scope]="scope" [storeId]="storeId() ?? null" (changed)="load()" />
         @if (canReview()) {
           <div class="flex justify-end"><button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white" (click)="reviewFormOpen.set(true)">Revisar datos</button></div>
         }

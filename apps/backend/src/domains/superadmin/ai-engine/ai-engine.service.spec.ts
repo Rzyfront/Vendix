@@ -326,6 +326,7 @@ describe('AIEngineConfigService', () => {
           description: 'Ajusta stock',
           requiredPermissions: ['inventory.write'],
           requiresConfirmation: true,
+          irreversible: true,
         },
         {
           name: 'ui_navigate',
@@ -341,10 +342,12 @@ describe('AIEngineConfigService', () => {
           domain: 'products',
           category: 'read',
           requiredPermissions: ['products.read'],
+          irreversible: false,
         }),
         expect.objectContaining({
           name: 'create_stock_adjustment',
           category: 'write',
+          irreversible: true,
         }),
         expect.objectContaining({
           name: 'ui_navigate',

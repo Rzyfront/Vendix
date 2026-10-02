@@ -120,7 +120,7 @@ export class ReceivedDocumentsService {
         taxes: { where: { item_id: null } },
         links: true,
         events: {
-          select: { id: true, event_type: true, idempotency_key: true, status: true, result: true, actor_id: true, created_at: true },
+          select: { id: true, event_type: true, event_code: true, event_number: true, cude: true, event_date: true, confirmed_at: true, idempotency_key: true, status: true, result: true, actor_id: true, created_at: true },
           orderBy: { created_at: 'asc' },
         },
       },

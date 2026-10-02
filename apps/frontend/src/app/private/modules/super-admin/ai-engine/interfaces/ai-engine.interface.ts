@@ -355,6 +355,8 @@ export interface AIToolCatalogEntry {
   readOnly: boolean;
   clientSide: boolean;
   requiresConfirmation: boolean;
+  /** Optional: sent by the backend catalog once the tool is marked irreversible. */
+  irreversible?: boolean;
 }
 
 // --- AI Queues / Jobs (F5: tab Jobs) ---

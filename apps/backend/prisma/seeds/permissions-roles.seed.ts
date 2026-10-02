@@ -2308,6 +2308,12 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'invoicing:received:events:emit',
+      description: 'Emitir eventos DIAN de comprador para documentos recibidos por la tienda',
+      path: '/api/store/invoicing/received-documents/:id/buyer-events',
+      method: 'POST',
+    },
+    {
       name: 'invoicing:received:connections:configure',
       description: 'Configurar conexiones de recepción de documentos para la tienda',
       path: '/api/store/invoicing/received-documents/connections',
@@ -3989,6 +3995,12 @@ export async function seedPermissionsAndRoles(
       name: 'organization:invoicing:received:events:configure',
       description: 'Solicitar la habilitación de eventos DIAN de comprador para la organización',
       path: '/api/organization/invoicing/received-documents/buyer-event-enablement/request',
+      method: 'POST',
+    },
+    {
+      name: 'organization:invoicing:received:events:emit',
+      description: 'Emitir eventos DIAN de comprador para documentos recibidos de la organización',
+      path: '/api/organization/invoicing/received-documents/:id/buyer-events',
       method: 'POST',
     },
     {

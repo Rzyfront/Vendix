@@ -127,6 +127,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     const file = {
       originalname: 'invoice.pdf',
@@ -173,6 +174,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
 
     await expect(controller.enqueueScan(undefined as never)).rejects.toThrow(
@@ -193,6 +195,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     const file = {
       originalname: 'invoice.pdf',
@@ -228,6 +231,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
 
     await expect(controller.getScanStatus('scan-job-1', { store_id: 21 })).resolves.toEqual({
@@ -255,6 +259,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     const query = { page: 1, limit: 25 } as ReceivedDocumentQueryDto;
 
@@ -281,6 +286,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
 
     await expect(controller.list({ store_id: 99 } as ReceivedDocumentQueryDto)).rejects.toThrow(BadRequestException);
@@ -299,6 +305,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     const query = { page: 2, limit: 10, store_id: 21 } as ReceivedDocumentQueryDto;
 
@@ -322,6 +329,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     const org = new OrganizationReceivedDocumentsController(
       deps.documents as unknown as ReceivedDocumentsService,
@@ -332,6 +340,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
 
     await store.createManual({} as ManualReceivedDocumentDto);
@@ -363,6 +372,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
 
     await expect(controller.importXml(undefined as never, {})).rejects.toThrow(BadRequestException);
@@ -381,6 +391,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     deps.documents.findOne.mockResolvedValue({
       id: 1,
@@ -411,6 +422,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     deps.documents.findOne.mockResolvedValue({ id: 1, files: [] });
 
@@ -451,6 +463,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     await controller.getBuyerEventEnablement({});
     await controller.getBuyerEventReadiness({ eventCode: '030' }, {});
@@ -475,6 +488,7 @@ describe('received-document route controllers', () => {
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
     );
     const dto = { expected_version: 0, dian_configuration_id: 2, evidence_id: 4, event_codes: ['030'] as any };
     await controller.requestBuyerEventVerification(dto, { store_id: 21 });
@@ -495,11 +509,11 @@ describe('received-document route controllers', () => {
     expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { limit: '101' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
     expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { page: 'true' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
     const deps = dependencies();
-    const store = new StoreReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never);
+    const store = new StoreReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never, {} as never);
     await store.getBuyerEventOptions({ page: 2, limit: 10 });
     expect(deps.buyerEvents.listOptions).toHaveBeenCalledWith(STORE_CONTEXT, { page: 2, limit: 10 });
     await expect(store.getBuyerEventOptions({ store_id: 99 })).rejects.toThrow(BadRequestException);
-    const org = new OrganizationReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never);
+    const org = new OrganizationReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never, {} as never);
     await org.getBuyerEventOptions({ store_id: 21, page: 1 });
     expect(deps.contexts.resolveOrganization).toHaveBeenCalledWith(21);
     expect(deps.buyerEvents.listOptions).toHaveBeenCalledWith(ORG_CONTEXT, { page: 1 });

@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -16,6 +16,8 @@ import {
 
 @Injectable()
 export class PlansService {
+  private readonly logger = new Logger(PlansService.name);
+
   /**
    * F6 — `toolRegistry` es opcional a propósito: `AIEngineModule` es `@Global()`
    * y en producción siempre resuelve, pero los specs unitarios históricos
@@ -42,15 +44,26 @@ export class PlansService {
    *     existir como `key` en `ai_agents`.
    *  3. Cada entrada de `tools_allowed` debe existir en el `AIToolRegistry`
    *     (resolución por nombre canónico, igual que el filtro F3 del turno).
-   *     Sin excepciones para `'*'`: el runtime F3 hace intersección exacta,
-   *     así que `'*'` hoy no habilita nada — guardarlo sería fosilizar una
-   *     referencia que no resuelve.
+   *     Excepción: `['*']` como ÚNICO valor = todas las tools del registro,
+   *     incluidas las futuras (el runtime F3 y el resolver lo soportan).
+   *     `'*'` mezclado con otros nombres es ambiguo → 400. `[]` sigue
+   *     significando ninguna tool.
+   *
+   * En update, las tools/agents desconocidas que YA estaban guardadas en el
+   * mismo punto (`persistedFlags`, por feature) se toleran con warn: las
+   * persistió una versión anterior del catálogo/frontend y el form las
+   * reenvía; solo se rechaza lo desconocido que se AÑADE. En create
+   * (`persistedFlags` ausente) el rechazo es total.
    *
    * Los refs se validen estén o no habilitadas las features: un typo con el
    * switch apagado rompería igual al encenderlo. Sin tablas nuevas: solo
    * lecturas a `ai_agents` + registry en memoria.
    */
-  private async assertAIFlagsLinked(flags: unknown): Promise<void> {
+  private async assertAIFlagsLinked(
+    flags: unknown,
+    persistedFlags?: unknown,
+    planId?: number,
+  ): Promise<void> {
     if (flags === undefined || flags === null) return;
     if (typeof flags !== 'object' || Array.isArray(flags)) {
       throw new VendixHttpException(
@@ -81,6 +94,42 @@ export class PlansService {
 
     const agentKeys = new Set<string>();
     const toolNames = new Set<string>();
+    // Valor ya guardado por ubicación (`path` + campo) para tolerar heredados.
+    const persistedByLocation = new Map<string, Set<string>>();
+    const locationsByItem = new Map<string, Set<string>>();
+    const readPersisted = (holder: unknown, path: string) => {
+      if (holder === null || typeof holder !== 'object' || Array.isArray(holder)) {
+        return;
+      }
+      for (const field of allowlistFields) {
+        const value = (holder as Record<string, unknown>)[field];
+        if (!Array.isArray(value)) continue;
+        persistedByLocation.set(
+          `${path}|${field}`,
+          new Set(value.filter((i): i is string => typeof i === 'string')),
+        );
+      }
+    };
+    if (
+      persistedFlags !== undefined &&
+      persistedFlags !== null &&
+      typeof persistedFlags === 'object' &&
+      !Array.isArray(persistedFlags)
+    ) {
+      const persistedRaw = persistedFlags as Record<string, unknown>;
+      readPersisted(persistedRaw, '');
+      for (const key of Object.keys(persistedRaw)) {
+        if (isAIFeatureKey(key)) readPersisted(persistedRaw[key], key);
+      }
+    }
+    const isInherited = (field: string, item: string) => {
+      const locations = locationsByItem.get(`${field}|${item}`);
+      if (!locations || locations.size === 0) return false;
+      // Heredada solo si en CADA ubicación donde se declara ya estaba guardada.
+      return [...locations].every((loc) =>
+        persistedByLocation.get(`${loc}|${field}`)?.has(item),
+      );
+    };
 
     const collectAllowlist = (holder: Record<string, unknown>, path: string) => {
       for (const field of allowlistFields) {
@@ -97,8 +146,22 @@ export class PlansService {
             { field: location },
           );
         }
+        if (field === 'tools_allowed' && (value as string[]).includes('*')) {
+          if ((value as string[]).length > 1) {
+            throw new VendixHttpException(
+              ErrorCodes.SUBSCRIPTION_VALIDATION,
+              `Plan declares '${location}' mixing the '*' wildcard with other tools: use ['*'] alone to allow every tool, or list tools explicitly`,
+              { field: location },
+            );
+          }
+          continue;
+        }
         for (const item of value as string[]) {
           (field === 'agents_allowed' ? agentKeys : toolNames).add(item);
+          const mapKey = `${field}|${item}`;
+          const locs = locationsByItem.get(mapKey) ?? new Set<string>();
+          locs.add(path);
+          locationsByItem.set(mapKey, locs);
         }
       }
     };
@@ -132,7 +195,21 @@ export class PlansService {
           })
         : [];
       const existing = new Set(rows.map((row) => row.key));
-      const missing = wanted.filter((key) => !existing.has(key));
+      const allMissing = wanted.filter((key) => !existing.has(key));
+      const inheritedMissing = allMissing.filter((key) =>
+        isInherited('agents_allowed', key),
+      );
+      const missing = allMissing.filter((key) => !inheritedMissing.includes(key));
+      if (inheritedMissing.length > 0) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'PLAN_INHERITED_UNKNOWN_AI_REFS',
+            plan_id: planId,
+            feature: 'agents_allowed',
+            unknown_agents: inheritedMissing,
+          }),
+        );
+      }
       if (missing.length > 0) {
         throw new VendixHttpException(
           ErrorCodes.SUBSCRIPTION_VALIDATION,
@@ -144,10 +221,24 @@ export class PlansService {
 
     if (toolNames.size > 0) {
       const wanted = [...toolNames];
-      const missing = wanted.filter((name) => {
+      const allMissing = wanted.filter((name) => {
         if (!this.toolRegistry) return true;
         return !this.toolRegistry.get(this.toolRegistry.canonicalName(name));
       });
+      const inheritedMissing = allMissing.filter((name) =>
+        isInherited('tools_allowed', name),
+      );
+      const missing = allMissing.filter((name) => !inheritedMissing.includes(name));
+      if (inheritedMissing.length > 0) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'PLAN_INHERITED_UNKNOWN_AI_REFS',
+            plan_id: planId,
+            feature: 'tools_allowed',
+            unknown_tools: inheritedMissing,
+          }),
+        );
+      }
       if (missing.length > 0) {
         throw new VendixHttpException(
           ErrorCodes.SUBSCRIPTION_VALIDATION,
@@ -588,7 +679,11 @@ export class PlansService {
     // F6 — solo se valida lo que el caller envía: si no toca flags, las filas
     // legadas con refs viejas siguen editables en el resto de campos.
     if (dto.ai_feature_flags !== undefined) {
-      await this.assertAIFlagsLinked(dto.ai_feature_flags);
+      await this.assertAIFlagsLinked(
+        dto.ai_feature_flags,
+        (existing as { ai_feature_flags?: unknown }).ai_feature_flags ?? {},
+        id,
+      );
     }
 
     if (dto.code && dto.code !== existing.code) {

@@ -30,12 +30,47 @@ import { describeApiFailure } from '../utils/invoicing-errors.util';
               }
             </ul>
           }
+          <section class="mt-4" aria-labelledby="payable-evidence-title">
+            <h3 id="payable-evidence-title" class="mb-2 text-base font-semibold text-text-primary">Cuentas por pagar por recepción</h3>
+            @if (result.payable_evidence.length) {
+              <ul class="space-y-2">
+                @for (item of result.payable_evidence; track item.reception_id) {
+                  <li class="rounded-lg border border-border p-3 text-sm">
+                    <p class="font-medium">Recepción {{ item.reception_id }} · {{ payableStatusLabel(item.status) }}</p>
+                    <p class="text-text-secondary">Orden de compra: {{ item.purchase_order_id ?? 'No identificada' }}</p>
+                    @if (item.accounts_payable_id !== undefined) { <p class="text-text-secondary">Cuenta por pagar identificada: {{ item.accounts_payable_id }}</p> }
+                    @if (item.ap_reception_link_id !== undefined) { <p class="text-text-secondary">Vínculo de recepción identificado: {{ item.ap_reception_link_id }}</p> }
+                    @if (item.gross_amount !== undefined) { <p class="text-text-secondary">Monto bruto ({{ item.currency ?? 'moneda no informada' }}): {{ item.gross_amount }}</p> }
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="text-sm text-text-secondary">No hay recepciones de compra con evidencia de CxP para mostrar.</p>
+            }
+            @if (result.payable_evidence_complete === null) {
+              <p class="mt-2 text-sm text-text-secondary">No aplica a coincidencias sin recepción de compra.</p>
+            } @else if (!result.payable_evidence_complete) {
+              <p class="mt-2 rounded-lg border border-warning/30 bg-warning-light p-3 text-sm" role="status">Evidencia de CxP incompleta: hay recepciones sin vínculo de cuenta por pagar verificado.</p>
+            } @else {
+              <p class="mt-2 text-sm text-text-secondary">Vínculos de CxP verificados para las recepciones encontradas; esto no confirma pago ni elegibilidad fiscal.</p>
+            }
+          </section>
+          @if (result.unresolved_tax_purchase_order_ids.length) {
+            <div class="mt-3 rounded-lg border border-warning/30 bg-warning-light p-3 text-sm" role="alert">
+              <p class="font-medium">Impuestos de compra sin trazabilidad financiera completa</p>
+              <p>Órdenes con impuesto cuyo documento fiscal o asiento complementario no puede verificarse: {{ result.unresolved_tax_purchase_order_ids.join(', ') }}.</p>
+              @if (result.unresolved_vat_purchase_order_ids.length) {
+                <p class="mt-1">IVA descontable dentro de estos casos: {{ result.unresolved_vat_purchase_order_ids.join(', ') }}.</p>
+              }
+            </div>
+          }
           @if (result.unresolved_allocation_ids.length) {
             <div class="mt-3 rounded-lg border border-warning/30 bg-warning-light p-3 text-sm" role="note">
               <p class="font-medium">Asignaciones sin recepción o gasto verificable</p>
               <p>Identificadores: {{ result.unresolved_allocation_ids.join(', ') }}</p>
             </div>
           }
+          <p class="mt-3 text-sm text-text-secondary">Cobertura de vínculos financieros: {{ result.financial_evidence_complete ? 'identificados' : 'pendientes' }}. No valida montos ni balance contable y no determina elegibilidad fiscal.</p>
           <p class="mt-3 text-xs text-text-secondary">Elegibilidad fiscal: pendiente. Esta evidencia es informativa y no constituye reconocimiento fiscal.</p>
         }
       </section>
@@ -88,6 +123,15 @@ export class ReceivedDocumentAccountingEvidenceComponent {
       case 'purchase_order.received': return 'Compra recibida';
       case 'expense.approved': return 'Gasto aprobado';
       default: return 'Origen contable no reconocido';
+    }
+  }
+
+  payableStatusLabel(status: 'linked' | 'missing' | 'invalid_source' | 'foreign_scope'): string {
+    switch (status) {
+      case 'linked': return 'Vínculo CxP identificado';
+      case 'missing': return 'Sin vínculo CxP verificado';
+      case 'invalid_source': return 'Origen de CxP no válido';
+      case 'foreign_scope': return 'CxP fuera del alcance de esta tienda u organización';
     }
   }
 }
