@@ -1,8 +1,11 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
+  PayloadTooLargeException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -14,10 +17,28 @@ import {
 import * as bcrypt from 'bcrypt';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { resolvePrintsVatBreakdownForPrint } from '../../store/print-formats/services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class AccountService {
+  private readonly logger = new Logger(AccountService.name);
+  // `S3PathHelper` es stateless (sin constructor): se instancia directo.
+  private readonly receiptPaths = new S3PathHelper();
+
+  /**
+   * Contrato de comprobante (espejo guest/checkout): MIME imagen/PDF,
+   * 5 MB, URL firmada TTL 5 min para el visor.
+   */
+  private static readonly RECEIPT_ALLOWED_MIME_TYPES: readonly string[] = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+  private static readonly RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
+  private static readonly RECEIPT_URL_TTL_SECONDS = 300;
+
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly s3Service: S3Service,
@@ -466,13 +487,25 @@ export class AccountService {
             null,
         })),
       ),
-      payments: order.payments.map((p) => ({
-        id: p.id,
-        amount: p.amount,
-        state: p.state,
-        method: p.store_payment_method?.system_payment_method?.display_name,
-        paid_at: p.paid_at,
-      })),
+      // Comprobante por pago (paridad guest): presencia + content-type
+      // del HEAD (el visor distingue PDF/imagen con él). Sin key no hay HEAD.
+      payments: await Promise.all(
+        order.payments.map(async (p) => {
+          const hasReceipt = !!p.receipt_s3_key;
+          const head = hasReceipt
+            ? await this.s3Service.headObject(p.receipt_s3_key)
+            : null;
+          return {
+            id: p.id,
+            amount: p.amount,
+            state: p.state,
+            method: p.store_payment_method?.system_payment_method?.display_name,
+            paid_at: p.paid_at,
+            has_receipt: hasReceipt,
+            receipt_content_type: head?.contentType ?? null,
+          };
+        }),
+      ),
       bookings:
         order.bookings?.map((b: any) => ({
           id: b.id,
@@ -507,6 +540,220 @@ export class AccountService {
         used_at: cu.used_at,
       })),
     };
+  }
+
+  /**
+   * Binding server-side customer→orden→pago para los endpoints de
+   * comprobante (espejo de `resolveGuestPayment` con JWT en vez de token).
+   * UNA sola lectura relacional; el vínculo pago↔orden lo impone la
+   * propia relación, no un parámetro del cliente.
+   *
+   * 404 ciego: pago ajeno/inexistente y contexto sin usuario/tienda
+   * responden el mismo shape de "no existe" sin distinguirlos.
+   */
+  private async resolveAccountPayment(paymentId: number) {
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+    const store_id = context?.store_id;
+
+    const payment = await this.prisma.payments.findFirst({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        order_id: true,
+        state: true,
+        receipt_s3_key: true,
+        receipt_uploaded_at: true,
+        store_payment_method: {
+          select: {
+            system_payment_method: { select: { type: true } },
+          },
+        },
+        orders: {
+          select: { id: true, state: true, store_id: true, customer_id: true },
+        },
+      },
+    });
+
+    if (!payment || !user_id || !store_id) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+    const order = payment.orders;
+    if (
+      !order ||
+      order.store_id !== store_id ||
+      order.customer_id !== user_id
+    ) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    return { payment, order };
+  }
+
+  /**
+   * Espejo de cuenta de `getGuestPaymentReceiptUrl`: URL firmada TTL 5 min
+   * + HEAD de content-type. La autorización es el binding de arriba.
+   */
+  async getPaymentReceiptUrl(
+    paymentId: number,
+  ): Promise<{ url: string; expires_at: string; content_type: string | null }> {
+    const { payment } = await this.resolveAccountPayment(paymentId);
+
+    if (!payment.receipt_s3_key) {
+      throw new VendixHttpException(ErrorCodes.PAY_RECEIPT_NOT_FOUND_001);
+    }
+
+    const TTL_SECONDS = AccountService.RECEIPT_URL_TTL_SECONDS;
+    const [url, head] = await Promise.all([
+      this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
+      this.s3Service.headObject(payment.receipt_s3_key),
+    ]);
+    const expires_at = new Date(
+      Date.now() + TTL_SECONDS * 1000,
+    ).toISOString();
+
+    return { url, expires_at, content_type: head?.contentType ?? null };
+  }
+
+  /**
+   * Subida tardía del comprobante desde el detalle logueado. Mismo
+   * contrato que el guest: solo `bank_transfer`/`voucher`, MIME
+   * imagen/PDF, 5MB, sin terminales. Re-subir REEMPLAZA la key.
+   */
+  async uploadPaymentReceipt(
+    paymentId: number,
+    file: Express.Multer.File | undefined,
+  ): Promise<{
+    payment_id: number;
+    has_receipt: boolean;
+    receipt_content_type: string | null;
+    receipt_uploaded_at: Date;
+  }> {
+    const { payment, order } = await this.resolveAccountPayment(paymentId);
+
+    const TERMINAL_ORDER_STATES = ['cancelled', 'refunded', 'finished', 'delivered'];
+    const TERMINAL_PAYMENT_STATES = ['succeeded', 'captured', 'refunded', 'cancelled'];
+    if (TERMINAL_ORDER_STATES.includes(order.state as string)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Esta orden ya está cerrada y no recibe más comprobantes.',
+      );
+    }
+    if (TERMINAL_PAYMENT_STATES.includes(payment.state as string)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Este pago ya quedó resuelto y no necesita comprobante.',
+      );
+    }
+
+    const methodType =
+      payment.store_payment_method?.system_payment_method?.type ?? null;
+    if (methodType !== 'bank_transfer' && methodType !== 'voucher') {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Este medio de pago no recibe comprobante. Solo transferencia y datáfono lo permiten.',
+      );
+    }
+
+    if (!file || !file.buffer?.length) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Adjunta el comprobante de tu transferencia (imagen o PDF, máximo 5 MB).',
+      );
+    }
+
+    if (
+      !file.mimetype ||
+      !AccountService.RECEIPT_ALLOWED_MIME_TYPES.includes(file.mimetype)
+    ) {
+      throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+    }
+
+    if (file.size > AccountService.RECEIPT_MAX_BYTES) {
+      throw new PayloadTooLargeException(
+        'El comprobante supera los 5 MB. Comprime la imagen o el PDF e inténtalo de nuevo.',
+      );
+    }
+
+    const key = await this.uploadAccountReceipt(file, order.store_id);
+    const receipt_uploaded_at = new Date();
+    const persisted = await this.prisma.payments.updateMany({
+      where: { id: payment.id, order_id: order.id },
+      data: { receipt_s3_key: key, receipt_uploaded_at },
+    });
+
+    // R8-F4 (espejo guest): `count === 0` no es éxito — se purga el
+    // objeto recién subido y se responde el 404 ciego del binding.
+    if (persisted.count === 0) {
+      try {
+        await this.s3Service.deleteFile(key);
+      } catch (cleanupError) {
+        this.logger.warn(
+          `Orphan receipt cleanup failed for key ${key}: ${(cleanupError as Error)?.message}`,
+        );
+      }
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    return {
+      payment_id: payment.id,
+      has_receipt: true,
+      receipt_content_type: file.mimetype,
+      receipt_uploaded_at,
+    };
+  }
+
+  /**
+   * Espejo de `uploadGuestReceipt` con la tienda del binding (orden del
+   * customer). Misma key `.../receipts/{YYYY}/{MM}/{uuid}-{sanitized}`.
+   */
+  private async uploadAccountReceipt(
+    file: Express.Multer.File,
+    storeId: number,
+  ): Promise<string> {
+    // `organizations` no existe como delegate en el prisma scopeado:
+    // se lee por relación desde la tienda (mismo shape que el guest).
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: {
+        id: true,
+        slug: true,
+        organization_id: true,
+        organizations: { select: { id: true, slug: true } },
+      },
+    });
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const organization = store.organizations;
+    if (!organization) {
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    }
+
+    const basePath = this.receiptPaths.buildReceiptPath(
+      { id: organization.id, slug: organization.slug },
+      { id: store.id, slug: store.slug },
+    );
+
+    const now = new Date();
+    const year = String(now.getUTCFullYear());
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+
+    const safeFilename = this.sanitizeReceiptFilename(file.originalname);
+    const key = `${basePath}/${year}/${month}/${crypto.randomUUID()}-${safeFilename}`;
+
+    await this.s3Service.uploadFile(file.buffer, key, file.mimetype);
+    return key;
+  }
+
+  /**
+   * Solo `[a-zA-Z0-9._-]`, resto a `_`; vacío ⇒ `receipt`.
+   */
+  private sanitizeReceiptFilename(name: string | undefined | null): string {
+    const base = (name ?? '').split(/[\\/]/).pop() ?? '';
+    const sanitized = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return sanitized.length > 0 ? sanitized : 'receipt';
   }
 
   async getAddresses() {

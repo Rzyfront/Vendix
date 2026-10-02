@@ -32,6 +32,7 @@
     <app-guest-order-summary
       [embedded]="true"
       [summaryInput]="guestSummary()"
+      (receiptUploaded)="loadOrder(order.id)"
     />
 
     <!-- Extras propios de cuenta (reservas, envío, factura). -->
@@ -148,9 +149,9 @@
                     <span class="extra-row-sub">{{ block.note }}</span>
                   }
                 </div>
-                @if (block.cost > 0) {
+                @if ((block.cost ?? 0) > 0) {
                   <strong class="extra-row-amount">
-                    {{ block.cost | currency }}
+                    {{ (block.cost ?? 0) | currency }}
                   </strong>
                 }
               </div>

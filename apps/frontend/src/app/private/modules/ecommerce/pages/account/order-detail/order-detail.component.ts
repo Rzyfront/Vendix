@@ -67,8 +67,8 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   /**
    * Adaptador cuenta → guest. El payload de cuenta ya trae la misma
    * información (backend enriquecido en paridad); aquí solo se reordena a
-   * la forma `GuestOrderSummary`. Sin `payment_id`: los comprobantes usan
-   * endpoints guest con token y quedan ocultos en modo embebido.
+   * la forma `GuestOrderSummary`. Con `payment_id`: los comprobantes usan
+   * los endpoints de cuenta (ver + subir) en modo embebido.
    */
   readonly guestSummary = computed((): GuestOrderSummary | null => {
     const o = this.order();
@@ -151,10 +151,13 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
             }
           : null,
         payments: (o.payments ?? []).map((p) => ({
+          payment_id: p.id,
           state: p.state,
           amount: Number(p.amount ?? 0),
           paid_at: p.paid_at ?? null,
           method: p.method ?? null,
+          has_receipt: p.has_receipt ?? false,
+          receipt_content_type: p.receipt_content_type ?? null,
         })),
       },
     };

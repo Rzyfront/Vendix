@@ -147,6 +147,9 @@ export interface OrderDetail extends Order {
     method: string | null;
     paid_at: string | null;
     reference: string | null;
+    /** Presencia de comprobante (visor) + content-type del HEAD. */
+    has_receipt?: boolean;
+    receipt_content_type?: string | null;
   }[];
   bookings: {
     id: number;
@@ -161,6 +164,21 @@ export interface OrderDetail extends Order {
   // Persisted discount snapshots — read-only, never recalculated client-side.
   applied_promotions?: OrderAppliedPromotion[];
   applied_coupons?: OrderAppliedCoupon[];
+}
+
+/** Espejo de cuenta de `GuestPaymentReceiptUrl` (mismo contrato). */
+export interface AccountPaymentReceiptUrl {
+  url: string;
+  expires_at: string;
+  content_type: string | null;
+}
+
+/** Espejo de cuenta de `GuestReceiptUploadResult` (mismo contrato). */
+export interface AccountReceiptUploadResult {
+  payment_id: number;
+  has_receipt: boolean;
+  receipt_content_type: string | null;
+  receipt_uploaded_at: string;
 }
 
 @Injectable({
@@ -231,6 +249,36 @@ export class AccountService {
       `${this.api_url}/orders/${order_id}`,
       { headers: this.getHeaders() },
     );
+  }
+
+  getPaymentReceiptUrl(
+    paymentId: number,
+  ): Observable<{ success: boolean; data: AccountPaymentReceiptUrl }> {
+    return this.http.get<{
+      success: boolean;
+      data: AccountPaymentReceiptUrl;
+    }>(`${this.api_url}/payments/${paymentId}/receipt-url`, {
+      headers: this.getHeaders(),
+    });
+  }
+
+  uploadPaymentReceipt(
+    paymentId: number,
+    file: File,
+  ): Observable<{
+    success: boolean;
+    data: AccountReceiptUploadResult;
+    message?: string;
+  }> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return this.http.post<{
+      success: boolean;
+      data: AccountReceiptUploadResult;
+      message?: string;
+    }>(`${this.api_url}/payments/${paymentId}/receipt`, form, {
+      headers: this.getHeaders(),
+    });
   }
 
   getAddresses(): Observable<{ success: boolean; data: Address[] }> {

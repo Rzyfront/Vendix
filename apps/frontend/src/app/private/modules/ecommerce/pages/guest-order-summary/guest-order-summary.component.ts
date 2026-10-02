@@ -7,6 +7,7 @@ import {
   inject,
   input,
   OnInit,
+  output,
   signal,
   untracked,
 } from '@angular/core';
@@ -16,6 +17,7 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { CheckoutService } from '../../services/checkout.service';
+import { AccountService } from '../../services/account.service';
 import { GuestOrderSseService } from '../../services/guest-order-sse.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
@@ -1439,6 +1441,7 @@ export interface GuestOrderSummary {
 export class GuestOrderSummaryComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly checkoutService = inject(CheckoutService);
+  private readonly accountService = inject(AccountService);
   private readonly tenantFacade = inject(TenantFacade);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
@@ -1458,6 +1461,12 @@ export class GuestOrderSummaryComponent implements OnInit {
    */
   readonly embedded = input(false);
   readonly summaryInput = input<GuestOrderSummary | null>(null);
+  /**
+   * En embebido el padre es dueño de los datos: tras subir un
+   * comprobante se emite para que recargue la orden (en guest
+   * standalone se actualiza in-place sin refetch).
+   */
+  readonly receiptUploaded = output<number>();
   private readonly fetchedSummary = signal<GuestOrderSummary | null>(null);
   readonly summary = computed(
     () => this.summaryInput() ?? this.fetchedSummary(),
@@ -2071,12 +2080,18 @@ export class GuestOrderSummaryComponent implements OnInit {
    */
   async viewReceipt(payment: GuestOrderPayment): Promise<void> {
     const paymentId = payment.payment_id;
-    if (paymentId == null || !this.token) return;
+    if (paymentId == null) return;
+    if (!this.embedded() && !this.token) return;
 
     this.loadingReceiptId.set(paymentId);
     try {
       const res = await firstValueFrom(
-        this.checkoutService.getGuestPaymentReceiptUrl(this.token, paymentId),
+        this.embedded()
+          ? this.accountService.getPaymentReceiptUrl(paymentId)
+          : this.checkoutService.getGuestPaymentReceiptUrl(
+              this.token,
+              paymentId,
+            ),
       );
       this.receiptPreview.set({
         url: res.data.url,
@@ -2122,8 +2137,7 @@ export class GuestOrderSummaryComponent implements OnInit {
     orderState: string,
     payment: GuestOrderPayment,
   ): boolean {
-    // Embebido: la subida usa endpoints guest con token — siempre oculta.
-    if (this.embedded()) return false;
+    // Misma regla en guest y embebido (la cuenta tiene sus endpoints).
     const terminalOrder = ['cancelled', 'refunded', 'finished', 'delivered'];
     const terminalPayment = ['succeeded', 'captured', 'refunded', 'cancelled'];
     if (terminalOrder.includes(orderState)) return false;
@@ -2142,7 +2156,8 @@ export class GuestOrderSummaryComponent implements OnInit {
     file: File,
   ): Promise<void> {
     const paymentId = payment.payment_id;
-    if (paymentId == null || !this.token) return;
+    if (paymentId == null) return;
+    if (!this.embedded() && !this.token) return;
 
     if (file.size > this.RECEIPT_MAX_SIZE) {
       this.toast.error('El archivo supera los 5 MB permitidos.', 'Error');
@@ -2159,20 +2174,26 @@ export class GuestOrderSummaryComponent implements OnInit {
     this.uploadingReceiptId.set(paymentId);
     try {
       const res = await firstValueFrom(
-        this.checkoutService.uploadGuestPaymentReceipt(
-          this.token,
+        this.embedded()
+          ? this.accountService.uploadPaymentReceipt(paymentId, file)
+          : this.checkoutService.uploadGuestPaymentReceipt(
+              this.token,
+              paymentId,
+              file,
+            ),
+      );
+      if (this.embedded()) {
+        this.receiptUploaded.emit(paymentId);
+      } else {
+        this.refreshPaymentReceipt(
           paymentId,
-          file,
-        ),
-      );
-      this.refreshPaymentReceipt(
-        paymentId,
-        res.data.has_receipt,
-        res.data.receipt_content_type,
-      );
-      // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
-      // refleja también en el estado vivo para que la fusión no la revierta.
-      this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
+          res.data.has_receipt,
+          res.data.receipt_content_type,
+        );
+        // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
+        // refleja también en el estado vivo para que la fusión no la revierta.
+        this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
+      }
       this.toast.success(
         res.message ??
           'Comprobante recibido. La tienda lo revisará para confirmar tu pago.',
