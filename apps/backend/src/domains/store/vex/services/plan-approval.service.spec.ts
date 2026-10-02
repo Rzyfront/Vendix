@@ -3,6 +3,20 @@ import { PlanApprovalService } from './plan-approval.service';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../../../../ai-engine/tools/bridge/capability-registry.service';
 
 /** Mirrors the service's canonical JSON so the spec hashes identically. */
+// VendixHttpException guarda `details` dentro de getResponse(), no como propiedad.
+function conflictWithReason(reason: string) {
+  return {
+    asymmetricMatch(e: any): boolean {
+      const body = e?.getResponse?.();
+      return (
+        e?.errorCode === 'SYS_CONFLICT_001' && body?.details?.reason === reason
+      );
+    },
+    toString: () => `conflict(${reason})`,
+    toAsymmetricMatcher: () => `conflict(${reason})`,
+  };
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value ?? null);
@@ -653,10 +667,7 @@ describe('PlanApprovalService', () => {
           userId: 11,
           clientSteps: steps,
         }),
-      ).rejects.toMatchObject({
-        errorCode: 'SYS_CONFLICT_001',
-        details: expect.objectContaining({ reason: 'plan_not_proposed' }),
-      });
+      ).rejects.toEqual(conflictWithReason('plan_not_proposed'));
       expect(redis.hset).not.toHaveBeenCalled();
       // Y no se rechaza dos veces.
       await expect(
@@ -692,10 +703,7 @@ describe('PlanApprovalService', () => {
           userId: 11,
           clientSteps: steps,
         }),
-      ).rejects.toMatchObject({
-        errorCode: 'SYS_CONFLICT_001',
-        details: expect.objectContaining({ reason: 'plan_mismatch' }),
-      });
+      ).rejects.toEqual(conflictWithReason('plan_mismatch'));
       expect(redis.hset).not.toHaveBeenCalled();
     });
 
@@ -713,10 +721,7 @@ describe('PlanApprovalService', () => {
           userId: 11,
           clientSteps: steps,
         }),
-      ).rejects.toMatchObject({
-        errorCode: 'SYS_CONFLICT_001',
-        details: expect.objectContaining({ reason: 'plan_expired' }),
-      });
+      ).rejects.toEqual(conflictWithReason('plan_expired'));
     });
 
     it('hashes antiguos (sin plan_id) no se aprueban', async () => {
@@ -745,10 +750,7 @@ describe('PlanApprovalService', () => {
       // Plan aún proposed → 409.
       await expect(
         service.resolveStepForConfirmation(input),
-      ).rejects.toMatchObject({
-        errorCode: 'SYS_CONFLICT_001',
-        details: expect.objectContaining({ reason: 'plan_not_approved' }),
-      });
+      ).rejects.toEqual(conflictWithReason('plan_not_approved'));
 
       await service.approvePlan({
         planId: PLAN,
@@ -759,9 +761,7 @@ describe('PlanApprovalService', () => {
       // Reversible → no necesita confirmación aparte.
       await expect(
         service.resolveStepForConfirmation({ ...input, stepId: 's1' }),
-      ).rejects.toMatchObject({
-        details: expect.objectContaining({ reason: 'step_not_irreversible' }),
-      });
+      ).rejects.toEqual(conflictWithReason('step_not_irreversible'));
       // Otro usuario → 403.
       await expect(
         service.resolveStepForConfirmation({ ...input, userId: 99 }),

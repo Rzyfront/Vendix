@@ -215,7 +215,10 @@ describe('VexiPlanStateService', () => {
       { order: 2, tool: 'archive_product', args: { product_id: 2510 } },
     ]);
     expect(written).toHaveLength(2);
-    expect(row.metadata.agent_plan_step_hashes).toHaveLength(2);
+    // Contrato R3: se guarda `{plan_id, created_at, steps}`, no un arreglo plano.
+    expect(row.metadata.agent_plan_step_hashes.steps).toHaveLength(2);
+    expect(row.metadata.agent_plan_step_hashes).toHaveProperty('plan_id');
+    expect(typeof row.metadata.agent_plan_step_hashes.created_at).toBe('string');
     const read = await svc.getStepHashes(1);
     expect(read).toEqual(written);
     expect(read[0]).toMatchObject({ order: 1, tool: 'create_product' });
