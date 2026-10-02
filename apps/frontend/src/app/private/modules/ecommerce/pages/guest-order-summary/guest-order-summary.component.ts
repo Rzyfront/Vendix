@@ -343,17 +343,51 @@ export interface GuestOrderSummary {
                 <h2>Entrega</h2>
               </div>
               <div class="address-block">
-                <!-- Dirección fluida a lo ancho: calle fuerte + resto tenue
-                     en una sola línea que ocupa la sección (sin hueco der.) -->
-                <p class="addr-line">
-                  <span class="addr-line strong">{{ addressStreet(addr) }}</span>@if (addressStreet(addr) && addressLocality(addr)) {<span class="addr-line muted">, </span>}<span class="addr-line muted">{{ addressLocality(addr) }}</span>
-                </p>
-                @if (addr.phone_number) {
-                  <p class="addr-line muted phone">
-                    <app-icon name="phone" [size]="13" />{{
-                      addr.phone_number
-                    }}
-                  </p>
+                <!-- Tarjeta estilo método de pago: cada parte separada -->
+                @if (hasAddressContent(addr)) {
+                  <div class="address-card">
+                    @if (addressStreet(addr)) {
+                      <div class="address-row">
+                        <span class="address-label">Dirección</span>
+                        <span class="address-value strong">{{
+                          addressStreet(addr)
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.city || addr.state_province) {
+                      <div class="address-row">
+                        <span class="address-label">Ciudad</span>
+                        <span class="address-value">{{
+                          addressCity(addr)
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.country_code) {
+                      <div class="address-row">
+                        <span class="address-label">País</span>
+                        <span class="address-value">{{
+                          addr.country_code
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.postal_code) {
+                      <div class="address-row">
+                        <span class="address-label">C.P.</span>
+                        <span class="address-value">{{
+                          addr.postal_code
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.phone_number) {
+                      <div class="address-row">
+                        <span class="address-label">Teléfono</span>
+                        <span class="address-value phone">
+                          <app-icon name="phone" [size]="13" />
+                          {{ addr.phone_number }}
+                        </span>
+                      </div>
+                    }
+                  </div>
                 }
               </div>
             </section>
@@ -896,6 +930,50 @@ export interface GuestOrderSummary {
         display: flex;
         flex-direction: column;
         gap: 0.2rem;
+      }
+
+      /* Tarjeta de dirección (mismo lenguaje que payment-block). */
+      .address-card {
+        display: flex;
+        flex-direction: column;
+        padding: 0.375rem 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-background);
+      }
+
+      .address-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.5rem 0;
+        font-size: var(--fs-sm);
+      }
+
+      .address-row + .address-row {
+        border-top: 1px solid var(--color-border);
+      }
+
+      .address-label {
+        flex-shrink: 0;
+        color: var(--color-text-secondary);
+      }
+
+      .address-value {
+        min-width: 0;
+        text-align: right;
+        color: var(--color-text-primary);
+      }
+
+      .address-value.strong {
+        font-weight: var(--fw-semibold);
+      }
+
+      .address-value.phone {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
       }
 
       .addr-line {
@@ -1688,17 +1766,25 @@ export class GuestOrderSummaryComponent implements OnInit {
   }
 
   /**
-   * Localidad de la dirección fluida: ciudad, dpto · país · C.P.
-   * (el teléfono va en su propia fila con icono, como antes).
+   * Ciudad de la tarjeta de dirección: ciudad + dpto unidos por coma.
    */
-  addressLocality(addr: GuestOrderAddress): string {
-    const locality = [addr.city, addr.state_province]
+  addressCity(addr: GuestOrderAddress): string {
+    return [addr.city, addr.state_province]
       .filter((p) => !!p)
       .join(', ');
-    const parts = [locality];
-    if (addr.country_code) parts.push(addr.country_code);
-    if (addr.postal_code) parts.push(`C.P. ${addr.postal_code}`);
-    return parts.filter((p) => !!p).join(' · ');
+  }
+
+  /** La tarjeta solo se pinta si hay al menos un dato de dirección. */
+  hasAddressContent(addr: GuestOrderAddress): boolean {
+    return !!(
+      addr.address_line1 ||
+      addr.address_line2 ||
+      addr.city ||
+      addr.state_province ||
+      addr.country_code ||
+      addr.postal_code ||
+      addr.phone_number
+    );
   }
 
   etaVisible(): boolean {
