@@ -408,6 +408,9 @@ export class TaxDeclarationDraftService {
         'Draft has blocking fiscal validation errors and cannot be approved',
       );
     }
+    if (draft.declaration_type === 'vat') {
+      await this.assertReceivedVatCoverageCurrent(draft);
+    }
     this.assertStatusTransition(draft.status, 'approved');
     if (draft.status !== 'ready' && draft.status !== 'needs_review') {
       throw new BadRequestException('Only ready drafts can be approved');
@@ -444,6 +447,80 @@ export class TaxDeclarationDraftService {
       );
     }
     return approved;
+  }
+
+  private async assertReceivedVatCoverageCurrent(draft: {
+    organization_id: number;
+    accounting_entity_id: number;
+    period_start: Date;
+    period_end: Date;
+    source_snapshot: Prisma.JsonValue;
+  }): Promise<void> {
+    const recalculateMessage =
+      'Received supplier documents changed or the VAT source snapshot is missing; recalculate the draft before approval';
+    const snapshot = draft.source_snapshot;
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      throw new BadRequestException(recalculateMessage);
+    }
+    const coverage = (snapshot as Record<string, unknown>)['received_vat_coverage'];
+    if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) {
+      throw new BadRequestException(recalculateMessage);
+    }
+    const coverageRecord = coverage as Record<string, unknown>;
+    const sources = coverageRecord['in_period_received_sources'];
+    const undatedCount = coverageRecord['undated_received_document_count'];
+    if (
+      coverageRecord['version'] !== 1 ||
+      !Array.isArray(sources) ||
+      !Number.isInteger(undatedCount) ||
+      (undatedCount as number) < 0 ||
+      !sources.every((source) => {
+        if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
+        const item = source as Record<string, unknown>;
+        return (
+          Number.isInteger(item['id']) &&
+          Number.isInteger(item['version']) &&
+          (item['source_hash'] === null || typeof item['source_hash'] === 'string')
+        );
+      })
+    ) {
+      throw new BadRequestException(recalculateMessage);
+    }
+
+    const [currentSources, currentUndatedCount] = await Promise.all([
+      this.prisma.received_documents.findMany({
+        where: {
+          organization_id: draft.organization_id,
+          accounting_entity_id: draft.accounting_entity_id,
+          issue_date: buildDateRangeFilter(draft.period_start, draft.period_end),
+        },
+        select: { id: true, version: true, source_hash: true },
+      }),
+      this.prisma.received_documents.count({
+        where: {
+          organization_id: draft.organization_id,
+          accounting_entity_id: draft.accounting_entity_id,
+          issue_date: null,
+        },
+      }),
+    ]);
+    const sortSources = (
+      values: Array<{ id: number; version: number; source_hash: string | null }>,
+    ) => values
+      .map(({ id, version, source_hash }) => ({ id, version, source_hash }))
+      .sort((left, right) => left.id - right.id);
+    const frozenSources = sortSources(sources as Array<{
+      id: number;
+      version: number;
+      source_hash: string | null;
+    }>);
+    const current = sortSources(currentSources);
+    if (
+      currentUndatedCount !== undatedCount ||
+      JSON.stringify(current) !== JSON.stringify(frozenSources)
+    ) {
+      throw new BadRequestException(recalculateMessage);
+    }
   }
 
   async voidDraft(
