@@ -339,6 +339,106 @@ describe('PlansService', () => {
     });
   });
 
+  describe('AI tools allowlist (legacy-tolerant update)', () => {
+    const KNOWN = new Set(['list_products']);
+    const registry: any = {
+      canonicalName: (n: string) => n,
+      get: (n: string) => (KNOWN.has(n) ? { name: n } : undefined),
+    };
+    let warnSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      service = new PlansService(prisma, registry);
+      warnSpy = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+    });
+
+    it('update: tolerates unknown tools already persisted and warns', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(
+        planFixture({ ai_feature_flags: { tools_allowed: ['products.search'] } }),
+      );
+
+      await service.update(1, {
+        ai_feature_flags: { tools_allowed: ['products.search', 'list_products'] },
+      } as any);
+
+      expect(tx.subscription_plans.updateMany).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const logged = JSON.parse(warnSpy.mock.calls[0][0]);
+      expect(logged.plan_id).toBe(1);
+      expect(logged.feature).toBe('tools_allowed');
+      expect(logged.unknown_tools).toEqual(['products.search']);
+    });
+
+    it('update: rejects a newly added unknown tool, listing only the new one', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(
+        planFixture({ ai_feature_flags: { tools_allowed: ['products.search'] } }),
+      );
+
+      let error: any;
+      try {
+        await service.update(1, {
+          ai_feature_flags: { tools_allowed: ['products.search', 'brand.new'] },
+        } as any);
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getResponse().error_code).toBe(
+        ErrorCodes.SUBSCRIPTION_VALIDATION.code,
+      );
+      expect(error.getResponse().details.unknown_tools).toEqual(['brand.new']);
+      expect(tx.subscription_plans.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("update: accepts ['*'] as the sole tools_allowed value", async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+      await service.update(1, {
+        ai_feature_flags: { tool_agents: { enabled: true, tools_allowed: ['*'] } },
+      } as any);
+      expect(tx.subscription_plans.updateMany).toHaveBeenCalled();
+    });
+
+    it("update: rejects '*' mixed with other tools", async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+      let error: any;
+      try {
+        await service.update(1, {
+          ai_feature_flags: {
+            tool_agents: { enabled: true, tools_allowed: ['*', 'list_products'] },
+          },
+        } as any);
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getResponse().error_code).toBe(
+        ErrorCodes.SUBSCRIPTION_VALIDATION.code,
+      );
+      expect(error.getResponse().message).toContain("'*'");
+      expect(tx.subscription_plans.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('create: rejects any unknown tool', async () => {
+      let error: any;
+      try {
+        await service.create({
+          code: 'x',
+          name: 'X',
+          ai_feature_flags: { tools_allowed: ['products.search'] },
+        } as any);
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getResponse().details.unknown_tools).toEqual([
+        'products.search',
+      ]);
+      expect(prisma.subscription_plans.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('update', () => {
     it('propagates shared fields to the whole group via updateMany', async () => {
       prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
