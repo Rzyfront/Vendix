@@ -671,3 +671,110 @@ describe('PaymentCollectorComponent — restaurant tip amount', () => {
     expect(component.isMultiValid()).toBeTrue();
   });
 });
+
+describe('PaymentCollectorComponent — collapsed optional tip section', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        provideHttpClient(),
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 100000);
+    fixture.componentRef.setInput('allowTip', true);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => fixture.destroy());
+
+  for (const layout of ['flat', 'stepped'] as const) {
+    it(`starts collapsed, preserves the tip submission, and resets closed in ${layout} layout`, () => {
+      fixture.componentRef.setInput('layout', layout);
+      fixture.detectChanges();
+
+      let toggle = fixture.nativeElement.querySelector<HTMLButtonElement>('.pc-tip-toggle');
+      expect(toggle).toBeTruthy();
+      expect(toggle?.textContent).toContain('Agregar propina');
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
+      expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
+        .toBeNull();
+
+      toggle?.click();
+      fixture.detectChanges();
+      toggle = fixture.nativeElement.querySelector<HTMLButtonElement>('.pc-tip-toggle');
+      expect(toggle?.textContent).toContain('Propina (opcional)');
+      expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeTruthy();
+      expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
+        .toBeTruthy();
+
+      component.tipControl.setValue(5000);
+      component.selectMethod(multiCashMethod, { advance: false });
+      fixture.detectChanges();
+      expect(component.effectiveTotal()).toBe(105000);
+
+      const submitted = jasmine.createSpy('submitted');
+      component.submit.subscribe(submitted);
+      component.triggerSubmit();
+      expect(submitted).toHaveBeenCalledWith(jasmine.objectContaining({
+        tip: 5000,
+        tipType: 'fixed',
+        tipValue: 5000,
+      }));
+
+      toggle?.click();
+      fixture.detectChanges();
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle?.textContent).toContain('Propina');
+      expect(toggle?.textContent).toContain('5.000');
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
+
+      fixture.componentRef.setInput('paymentResetKey', 1);
+      fixture.detectChanges();
+      toggle = fixture.nativeElement.querySelector<HTMLButtonElement>('.pc-tip-toggle');
+      expect(component.tipExpanded()).toBeFalse();
+      expect(component.tipControl.value).toBe(0);
+      expect(toggle?.textContent).toContain('Agregar propina');
+    });
+
+    it(`does not render the tip section when allowTip is false in ${layout} layout`, () => {
+      fixture.componentRef.setInput('layout', layout);
+      fixture.componentRef.setInput('allowTip', false);
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.pc-tip-toggle')).toBeNull();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
+      expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
+        .toBeNull();
+    });
+
+    it(`expands the tip section when validation feedback targets it in ${layout} layout`, () => {
+      fixture.componentRef.setInput('layout', layout);
+      component.tipType.set('percentage');
+      component.tipControl.setValue(101);
+      fixture.detectChanges();
+
+      expect(component.tipExpanded()).toBeFalse();
+      component.flashValidation();
+      fixture.detectChanges();
+
+      expect(component.flashSection()).toBe('tip');
+      expect(component.tipExpanded()).toBeTrue();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeTruthy();
+      expect(fixture.nativeElement.textContent).toContain('El porcentaje de propina debe estar entre 0 y 100.');
+    });
+  }
+});

@@ -39,6 +39,27 @@
   margin: 0;
 }
 
+.pc-tip-toggle {
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+
+  .section-title {
+    flex: 1 1 auto;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 3px;
+    border-radius: var(--radius-md, 8px);
+  }
+}
+
 /* Prominent total */
 .total-label {
   font-size: 10px;
@@ -1053,4 +1074,3 @@
     flex-wrap: nowrap;
   }
 }
-
