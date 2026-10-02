@@ -12300,8 +12300,8 @@ model received_tax_qualifications {
 /// received fiscal documents. Period readers consume these signed rows.
 model received_tax_effects {
   id                    Int           @id @default(autoincrement())
-  organization_id       Int?
-  accounting_entity_id  Int?
+  organization_id       Int
+  accounting_entity_id  Int
   store_id              Int?
   qualification_id      Int
   tax_type              tax_type_enum
@@ -12318,8 +12318,8 @@ model received_tax_effects {
   payload_hash          String        @db.VarChar(64)
   created_at            DateTime      @default(now()) @db.Timestamptz(6)
 
-  organization      organizations?              @relation("received_tax_effects_organization", fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_org_fkey")
-  accounting_entity accounting_entities?        @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_entity_fkey")
+  organization      organizations               @relation("received_tax_effects_organization", fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_org_fkey")
+  accounting_entity accounting_entities         @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_entity_fkey")
   store             stores?                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_store_fkey")
   qualification     received_tax_qualifications @relation(fields: [qualification_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_qualification_fkey")
   adjusts_effect    received_tax_effects?       @relation("received_tax_effects_adjustment", fields: [adjusts_effect_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_effects_adjusts_fkey")

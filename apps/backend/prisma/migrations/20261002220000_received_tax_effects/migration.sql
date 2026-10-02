@@ -8,8 +8,8 @@
 
 CREATE TABLE IF NOT EXISTS "received_tax_effects" (
     "id" SERIAL NOT NULL,
-    "organization_id" INTEGER,
-    "accounting_entity_id" INTEGER,
+    "organization_id" INTEGER NOT NULL,
+    "accounting_entity_id" INTEGER NOT NULL,
     "store_id" INTEGER,
     "qualification_id" INTEGER NOT NULL,
     "tax_type" "tax_type_enum" NOT NULL,
