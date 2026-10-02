@@ -147,6 +147,7 @@ DECLARE
     previous_jurisdiction_key VARCHAR(100);
     previous_canonical_identity_key VARCHAR(64);
     previous_revision INTEGER;
+    conflicting_document_id INTEGER;
 BEGIN
     SELECT "organization_id" INTO entity_org_id
       FROM "accounting_entities" WHERE "id" = NEW."accounting_entity_id";
@@ -205,9 +206,29 @@ BEGIN
            OR previous_document_id IS DISTINCT FROM NEW."document_id"
            OR previous_tax_type IS DISTINCT FROM NEW."tax_type"
            OR previous_jurisdiction_key IS DISTINCT FROM NEW."jurisdiction_key"
-           OR previous_canonical_identity_key IS DISTINCT FROM NEW."canonical_identity_key"
+           OR (previous_canonical_identity_key IS NOT NULL AND previous_canonical_identity_key IS DISTINCT FROM NEW."canonical_identity_key")
            OR NEW."revision" IS DISTINCT FROM previous_revision + 1 THEN
             RAISE EXCEPTION 'received tax qualification successor must be the next revision in the same document scope';
+        END IF;
+    END IF;
+
+    IF NEW."canonical_identity_key" IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            jsonb_build_array(NEW."organization_id", NEW."accounting_entity_id", NEW."tax_type"::TEXT,
+                              NEW."jurisdiction_key", NEW."canonical_identity_key")::TEXT,
+            0
+        ));
+        SELECT "document_id" INTO conflicting_document_id
+          FROM "received_tax_qualifications"
+         WHERE "organization_id" = NEW."organization_id"
+           AND "accounting_entity_id" = NEW."accounting_entity_id"
+           AND "tax_type" = NEW."tax_type"
+           AND "jurisdiction_key" = NEW."jurisdiction_key"
+           AND "canonical_identity_key" = NEW."canonical_identity_key"
+           AND "document_id" <> NEW."document_id"
+         LIMIT 1;
+        IF FOUND THEN
+            RAISE EXCEPTION 'canonical received tax identity is already assigned to another document';
         END IF;
     END IF;
 
