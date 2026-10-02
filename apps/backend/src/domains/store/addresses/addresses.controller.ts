@@ -55,6 +55,7 @@ export class AddressesController {
     const result = this.dianMunicipalitiesService.search(
       query.search,
       query.limit,
+      query.department_code,
     );
     return this.responseService.paginated(
       result.items,
