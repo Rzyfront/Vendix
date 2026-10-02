@@ -555,16 +555,16 @@
               }
               @if (hasInvoice()) {
                 <a
-                  class="action-link"
+                  class="action-btn action-btn--secondary"
                   [href]="getInvoiceUrl()"
                   target="_blank"
                 >
-                  <app-icon name="download" [size]="14"></app-icon>
+                  <app-icon name="download" [size]="18"></app-icon>
                   Descargar factura
                 </a>
               }
-              <a routerLink="/" class="action-link">
-                <app-icon name="refresh-cw" [size]="14"></app-icon>
+              <a routerLink="/" class="action-btn action-btn--secondary">
+                <app-icon name="refresh-cw" [size]="18"></app-icon>
                 Volver a comprar
               </a>
             </div>
