@@ -19,6 +19,7 @@ import { StoreReceivedDocumentAccountingController } from './store-received-docu
 import { OrganizationReceivedDocumentAccountingController } from './organization-received-document-accounting.controller';
 import { ReceivedDocumentAccountingEvidenceService } from './services/received-document-accounting-evidence.service';
 import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
+import { SuperAdminReceivedBuyerEventsController } from './super-admin-received-buyer-events.controller';
 
 describe('ReceivedDocumentsModule pipeline wiring', () => {
   const imports: any[] = Reflect.getMetadata('imports', ReceivedDocumentsModule) ?? [];
@@ -40,7 +41,9 @@ describe('ReceivedDocumentsModule pipeline wiring', () => {
     expect(controllers).toEqual(expect.arrayContaining([
       StoreReceivedDocumentAccountingController,
       OrganizationReceivedDocumentAccountingController,
+      SuperAdminReceivedBuyerEventsController,
     ]));
+    expect(controllers.filter((controller) => controller === SuperAdminReceivedBuyerEventsController)).toHaveLength(1);
     expect(providers).toContain(ReceivedDocumentAccountingEvidenceService);
     expect(providers).toContain(ReceivedBuyerEventEnablementService);
     expect(exports).toContain(ReceivedBuyerEventEnablementService);

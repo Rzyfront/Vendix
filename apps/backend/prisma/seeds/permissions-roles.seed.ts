@@ -2302,6 +2302,12 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
+      name: 'invoicing:received:events:configure',
+      description: 'Solicitar la habilitación de eventos DIAN de comprador para la tienda',
+      path: '/api/store/invoicing/received-documents/buyer-event-enablement/request',
+      method: 'POST',
+    },
+    {
       name: 'invoicing:received:connections:configure',
       description: 'Configurar conexiones de recepción de documentos para la tienda',
       path: '/api/store/invoicing/received-documents/connections',
@@ -3758,6 +3764,18 @@ export async function seedPermissionsAndRoles(
       path: '/api/super-admin/fiscal/invoicing/*',
       method: 'GET',
     },
+    {
+      name: 'superadmin:invoicing:received:events:verify',
+      description: 'Verificar como plataforma la habilitación de eventos DIAN de comprador',
+      path: '/api/super-admin/fiscal/invoicing/received-documents/buyer-event-enablement/:organizationId/:accountingEntityId/verify',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:invoicing:received:events:suspend',
+      description: 'Suspender como plataforma la habilitación de eventos DIAN de comprador',
+      path: '/api/super-admin/fiscal/invoicing/received-documents/buyer-event-enablement/:organizationId/:accountingEntityId/suspend',
+      method: 'POST',
+    },
     // ── Perfiles de facturación de la PLATAFORMA (CP-platform-invoicing-parity B.2)
     //
     // Mismo espejo que los `invoicing:profiles:*` del riel tienda, pero con el
@@ -3960,6 +3978,12 @@ export async function seedPermissionsAndRoles(
       description: 'Revisar datos fiscales de documentos recibidos a nivel organización',
       path: '/api/organization/invoicing/received-documents/:id/review',
       method: 'PATCH',
+    },
+    {
+      name: 'organization:invoicing:received:events:configure',
+      description: 'Solicitar la habilitación de eventos DIAN de comprador para la organización',
+      path: '/api/organization/invoicing/received-documents/buyer-event-enablement/request',
+      method: 'POST',
     },
     {
       name: 'organization:invoicing:received:connections:configure',
@@ -4809,6 +4833,7 @@ export async function seedPermissionsAndRoles(
       !p.name.startsWith('organization:invoicing:received:') &&
       !p.name.startsWith('invoicing:received:connections:') &&
       !p.name.startsWith('organization:invoicing:received:connections:') &&
+      !p.name.startsWith('invoicing:received:events:') &&
       // Las asignaciones modifican historial comercial; quedan solo para owner/admin.
       !p.name.startsWith('invoicing:received:match:') &&
       !p.name.startsWith('organization:invoicing:received:match:') &&

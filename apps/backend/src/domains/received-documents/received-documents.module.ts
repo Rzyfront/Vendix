@@ -33,6 +33,7 @@ import { StoreReceivedDocumentAccountingController } from './store-received-docu
 import { OrganizationReceivedDocumentAccountingController } from './organization-received-document-accounting.controller';
 import { ReceivedDocumentAccountingEvidenceService } from './services/received-document-accounting-evidence.service';
 import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
+import { SuperAdminReceivedBuyerEventsController } from './super-admin-received-buyer-events.controller';
 
 /** Shared reception pipeline; this module also owns narrow read-only evidence routes. */
 @Module({
@@ -43,7 +44,7 @@ import { ReceivedBuyerEventEnablementService } from './services/received-buyer-e
     BullModule.registerQueue({ name: 'received-document-scan' }),
     BullModule.registerQueue({ name: 'document-reception-sync' }),
   ],
-  controllers: [PublicDocumentReceptionWebhookController, StoreReceivedDocumentAccountingController, OrganizationReceivedDocumentAccountingController],
+  controllers: [PublicDocumentReceptionWebhookController, StoreReceivedDocumentAccountingController, OrganizationReceivedDocumentAccountingController, SuperAdminReceivedBuyerEventsController],
   providers: [
     FiscalContextResolverService,
     ReceivedDocumentsContextService,
