@@ -119,6 +119,20 @@ describe('DianDirectProvider buyer event transport', () => {
     cude.mockRestore();
   });
 
+  it('preserves explicit organization-level null store selection through preparation and exact send', async () => {
+    const { provider, soap } = buildProvider();
+    const ambient = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ organization_id: 10, store_id: 77 } as any);
+    const cude = jest.spyOn(CufeCalculator, 'generateEventCude').mockReturnValue('cude');
+    const prepared = await provider.prepareDocumentEvent(base, exact_config);
+    expect(prepared.store_id).toBeNull();
+    respondWithEventKey(soap, prepared);
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect((provider as any).loadConfig).toHaveBeenLastCalledWith('invoicing', exact_config);
+    expect(result.delivery_status).toBe('accepted');
+    expect(soap.sendEventUpdateStatus).toHaveBeenCalledTimes(1);
+    ambient.mockRestore(); cude.mockRestore();
+  });
+
   it('fails closed when preparing a buyer event without a selected configuration', async () => {
     const { provider } = buildProvider();
     await expectHttpStatus(provider.prepareDocumentEvent(base), 400);

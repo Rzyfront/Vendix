@@ -1680,7 +1680,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       event_number: event.event_number,
       dian_configuration_id: config.id,
       accounting_entity_id: config.accounting_entity_id,
-      store_id: selection?.store_id ?? RequestContextService.getContext()?.store_id ?? null,
+      store_id: selection !== undefined
+        ? selection.store_id ?? null
+        : RequestContextService.getContext()?.store_id ?? null,
       environment: config.environment,
       cude,
       signed_xml,
