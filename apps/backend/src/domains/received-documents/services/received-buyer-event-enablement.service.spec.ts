@@ -131,7 +131,7 @@ describe('ReceivedBuyerEventEnablementService', () => {
       const result = await service.requestVerification({ ...context, actor_id: 9 }, input);
       expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
       expect(tx.received_buyer_event_enablements.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ organization_id: 5, accounting_entity_id: 7, status: 'testing', version: 1 }) }));
-      expect(tx.audit_logs.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ user_id: 9, resource: 'received_buyer_event_enablements', new_values: { organization_id: 5, accounting_entity_id: 7, status: 'testing', version: 1, dian_configuration_id: 20, evidence_id: 30, event_codes: input.event_codes } }) }));
+      expect(tx.audit_logs.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ user_id: 9, organization_id: 5, store_id: 11, resource: 'received_buyer_event_enablements', new_values: { organization_id: 5, accounting_entity_id: 7, status: 'testing', version: 1, dian_configuration_id: 20, evidence_id: 30, event_codes: input.event_codes } }) }));
       expect(result).toEqual({ status: 'testing', version: 1, event_codes: input.event_codes, dian_configuration_id: 20, evidence_id: 30 });
       expect(JSON.stringify([result, tx.audit_logs.create.mock.calls[0][0]])).not.toMatch(/secret-key|password|certificate|software_id/i);
       expect(created.status).toBe('testing');
@@ -141,6 +141,11 @@ describe('ReceivedBuyerEventEnablementService', () => {
       const { tx } = makeTx(); request(tx);
       await expect(service.requestVerification(context, input)).rejects.toBeInstanceOf(BadRequestException);
       expect(tx.$queryRaw).not.toHaveBeenCalled();
+    });
+    it('writes first-class organization and null store for organization-scoped tenant requests', async () => {
+      const { tx } = makeTx(); request(tx);
+      await service.requestVerification({ ...context, store_id: null, is_organization: true, actor_id: 9 }, input);
+      expect(tx.audit_logs.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ organization_id: 5, store_id: null }) }));
     });
     it('rejects invalid codes', async () => {
       const { tx } = makeTx(); request(tx);
@@ -214,6 +219,7 @@ describe('ReceivedBuyerEventEnablementService', () => {
       expect(tx.received_buyer_event_enablements.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 4, organization_id: 5, accounting_entity_id: 7, version: 3, status: 'testing' }, data: expect.objectContaining({ status: 'verified', verification_source: 'test_set', verified_by_user_id: 9, software_id_snapshot: 'secret-software', certificate_fingerprint_snapshot: 'secret-fingerprint', version: { increment: 1 } }) }));
       expect(result).toEqual({ status: 'verified', version: 4, event_codes: ['030', '031'], dian_configuration_id: 20, evidence_id: 30, verified_at: expect.any(Date) });
       const audit = tx.audit_logs.create.mock.calls[0][0].data;
+      expect(audit).toEqual(expect.objectContaining({ organization_id: 5, store_id: null }));
       expect(audit.metadata.review_note).toBe(verifyInput.review_note);
       expect(audit.new_values).toEqual(expect.objectContaining({ status: 'verified', version: 4, has_software_id_snapshot: true, has_certificate_fingerprint_snapshot: true }));
       expect(JSON.stringify([result, audit])).not.toMatch(/secret-software|secret-fingerprint|secret-cert-key|secret-password|secret-evidence-key/);
@@ -282,7 +288,7 @@ describe('ReceivedBuyerEventEnablementService', () => {
       expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
       expect(tx.received_buyer_event_enablements.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 4, organization_id: 5, accounting_entity_id: 7, version: 6, status: currentStatus }, data: { status: 'suspended', version: { increment: 1 } } }));
       expect(result).toEqual({ status: 'suspended', version: 7, event_codes: ['030', '031'] });
-      expect(tx.audit_logs.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ old_values: expect.objectContaining({ status: currentStatus }), new_values: expect.objectContaining({ status: 'suspended', version: 7 }), metadata: expect.objectContaining({ reason: input.reason }) }) }));
+      expect(tx.audit_logs.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ organization_id: 5, store_id: null, old_values: expect.objectContaining({ status: currentStatus }), new_values: expect.objectContaining({ status: 'suspended', version: 7 }), metadata: expect.objectContaining({ reason: input.reason }) }) }));
       expect(JSON.stringify([result, tx.audit_logs.create.mock.calls[0][0]])).not.toMatch(/secret-software|secret-fingerprint/);
       // The readiness read consumes the exact post-mutation row (with only the related records needed by its query).
       const statusReadRow = { ...after, verification_source: before.verification_source, verified_by_user_id: before.verified_by_user_id, verified_at: before.verified_at, software_id_snapshot: before.software_id_snapshot, certificate_fingerprint_snapshot: before.certificate_fingerprint_snapshot,
