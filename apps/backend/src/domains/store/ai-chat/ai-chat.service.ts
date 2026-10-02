@@ -101,9 +101,9 @@ const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
  */
 const CONTINUATION_GOALS = {
   approved:
-    '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado. Confirma en 1 o 2 frases qué se hizo (resultado concreto, montos e ids clave), sin tablas y sin repetir el detalle del plan, y ofrece brevemente ayuda con algo adicional. Mismo idioma y tono de la persona (español neutro, sin voseo). Si todavía queda un paso pendiente del plan, continúa con él sin avisarle que retomas.',
+    '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado. Continúa con lo que falte de la tarea original: más consultas sin pedir permiso y, si queda otra escritura, propón SOLO esa (una por vez) y espera su aprobación; no anuncies que retomas ni enumeres un plan. Solo cuando no quede nada pendiente, responde en 1 o 2 frases qué se hizo (resultado concreto, montos e ids clave), sin tablas y sin repetir el detalle, y ofrece brevemente ayuda con algo adicional. Mismo idioma y tono de la persona (español neutro, sin voseo).',
   rejected:
-    '(interno) La persona rechazó el cambio propuesto; no se aplicó. Responde en 1 frase confirmando que no se hizo nada (o qué pasos ya estaban aplicados) y ofrece una alternativa. Mismo idioma y tono de la persona (español neutro, sin voseo), sin tablas. Si lo demás del plan sigue teniendo sentido, continúa; si no, pregúntale con naturalidad.',
+    '(interno) La persona rechazó el cambio propuesto; no se aplicó. Responde en 1 frase: no hiciste ese cambio (y qué pasos ya estaban aplicados, si hay) y pregunta si quiere seguir con el resto u otra cosa. No propongas otra escritura sin que lo pida. Mismo idioma y tono de la persona (español neutro, sin voseo), sin tablas.',
   resume: '(interno) Continúa donde ibas.',
 } as const;
 
@@ -983,7 +983,7 @@ export class AIChatService {
             }
           : {}),
       };
-      assistantMessage = await this.prisma.ai_messages.create({
+      const created = await this.prisma.ai_messages.create({
         data: {
           conversation_id: conversationId,
           role: 'assistant',
@@ -1004,7 +1004,8 @@ export class AIChatService {
             : {}),
         },
       });
-      await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
+      assistantMessage = created;
+      await this.attachVexTurnBlocks(vexBlockRefs, created.id);
 
       await this.prisma.ai_conversations.update({
         where: { id: conversationId },

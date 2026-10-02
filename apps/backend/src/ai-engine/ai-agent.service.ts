@@ -678,10 +678,14 @@ export class AIAgentService {
           : null;
       return target ?? tool;
     };
-    const head =
-      steps.length === 1
-        ? 'Tengo listo un plan con 1 paso'
-        : `Tengo listo un plan con ${steps.length} pasos`;
+    if (steps.length === 1) {
+      // Vex planifica por dentro: la persona ve UNA acción a aprobar, no un plan.
+      const [only] = steps;
+      return `Necesito tu aprobación para ${labelOf(only.tool, only.preview)}.${
+        only.irreversible ? ' Es irreversible.' : ''
+      } Todavía no apliqué nada.`;
+    }
+    const head = `Tengo listo un plan con ${steps.length} pasos`;
     const list = steps
       .map((s) => `${s.order}. ${labelOf(s.tool, s.preview)}`)
       .join('; ');
@@ -1815,6 +1819,30 @@ export class AIAgentService {
               // through to the single card below — re-planning them would orphan
               // the approval they run under.
               if (isVex && !params.plan_approval?.token) {
+                // Una escritura por turno: la PRIMERA se propone (plan de 1
+                // paso) y el turno se pausa tras el for. Las demás escrituras de
+                // la misma iteración NO se registran ni se ejecutan: el modelo
+                // las re-propone en la continuación, después de la aprobación.
+                if (vexProposals.length >= 1) {
+                  messages.push({
+                    role: 'tool',
+                    content: JSON.stringify({
+                      deferred: true,
+                      message:
+                        'Pendiente: esta escritura se propondrá tras la aprobación de la anterior. No se ejecutó; vuelve a proponerla en el siguiente turno.',
+                    }),
+                    tool_call_id: toolCall.id,
+                  });
+                  yield {
+                    type: 'tool_result',
+                    tool: {
+                      id: toolCall.id,
+                      name: toolName,
+                      summary: 'Pendiente de la aprobación anterior.',
+                    },
+                  };
+                  continue;
+                }
                 const order = vexProposals.length + 1;
                 vexProposals.push({
                   order,
@@ -1831,7 +1859,7 @@ export class AIAgentService {
                     step_order: order,
                     preview: details?.preview,
                     next_step:
-                      'Esta escritura quedó registrada como un paso del plan del turno. NO la repitas ni pidas aprobación en palabras: si faltan más pasos, propón el siguiente; si terminaste, cierra con un resumen corto y el plan se pedirá aprobar de una vez.',
+                      'Esta escritura quedó propuesta y espera la aprobación de la persona. NO la repitas ni pidas aprobación en palabras; el turno se pausa aquí y continuarás con lo que falte cuando la apruebe.',
                   }),
                   tool_call_id: toolCall.id,
                 });
@@ -1906,6 +1934,19 @@ export class AIAgentService {
               },
             };
           }
+        }
+
+        // Vex: la escritura propuesta (una por turno) cierra el turno con su
+        // frame `plan_approval` de 1 paso. Lecturas de la misma iteración ya
+        // corrieron arriba; la continuación aprobada retoma lo que falte.
+        if (isVex && vexProposals.length > 0) {
+          return yield* this.finalizeVexPlan({
+            proposals: vexProposals,
+            params,
+            totalTokens,
+            iteration,
+            toolsUsed,
+          });
         }
 
         // Un turno que propone un cambio TERMINA ahí.
