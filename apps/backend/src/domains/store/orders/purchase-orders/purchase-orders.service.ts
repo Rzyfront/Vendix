@@ -4612,8 +4612,9 @@ export class PurchaseOrdersService {
     // receptions), and only when there is IVA to recognize. O-49 never reaches
     // here — its VAT is already capitalized into inventory cost by F1.
     //
-    // Reserve the deductible VAT contribution as the source for both fiscal
-    // declarations and its contribution-keyed GL recognition event.
+    // Reserve the deductible VAT contribution as operational/GL provenance.
+    // It is not fiscal declaration authority: declaration eligibility and
+    // effects are determined by the received-tax fiscal authority.
     try {
       if (result.vat_responsible && result.all_items_received && store_id != null) {
         // F-214 — el desglose por tarifa sale del catálogo de cada línea
@@ -4675,9 +4676,9 @@ export class PurchaseOrdersService {
 
   /**
    * F-214 — agrupa las líneas de la orden por su tarifa de catálogo
-   * (`purchase_order_items.tax_rate`) para que `materializeVatDocument` emita
-   * UNA fila de `invoice_taxes` por tarifa real, en vez de derivar una tarifa
-   * efectiva del cociente `iva_amount / net_amount` de cabecera. Ese cociente
+   * (`purchase_order_items.tax_rate`) para conservar el desglose real en el
+   * snapshot de la contribución, en vez de derivar una tarifa efectiva del
+   * cociente `iva_amount / net_amount` de cabecera. Ese cociente
    * es el defecto medido en producción: una línea exenta infla el
    * denominador sin aportar al numerador y el resultado (17,92 %, 0,04 %) no
    * existe en ningún catálogo tributario colombiano (evidencia F-214).
@@ -4695,16 +4696,14 @@ export class PurchaseOrdersService {
    * exenta (0 %), grava a alguna tarifa vigente, o simplemente nunca se
    * configuró — inferir 0 % en silencio sería inventar una clasificación
    * fiscal igual que el defecto que este método reemplaza. Por eso se falla
-   * cerrado: se aborta TODA la materialización del documento soporte (el
-   * `catch` del llamador lo registra y no bloquea la recepción) en vez de
-   * escribir un desglose con una tarifa adivinada. Un documento soporte no
-   * materializado es recuperable; uno materializado con una tarifa
-   * inexistente y ya `validated` ante la DIAN, no.
+   * cerrado: se aborta la reserva del desglose de contribución (el `catch` del
+   * llamador lo registra y no bloquea la recepción) en vez de persistir una
+   * tarifa adivinada como provenance operativa.
    *
    * QUI-INC — el grupo lleva TAMBIÉN el `tax_type` de la línea
-   * (`purchase_order_items.tax_type`), porque `materializeVatDocument` lo
-   * escribía como literal `iva` en el punto de escritura. Este documento
-   * reconoce IVA descontable y nada más. QUI-855 (multi-impuesto): una línea
+   * (`purchase_order_items.tax_type`) para preservar la clasificación en el
+   * snapshot de contribución. La contribución soporta provenance operativa y
+   * GL; no define autoridad fiscal declarativa. QUI-855 (multi-impuesto): una línea
    * INC/ICUI/IBUA sin porción deducible (siempre capitalizada) se SALTA en vez
    * de abortar; sólo una línea no-IVA con monto deducible > 0 —estado
    * imposible tras receive()— sigue lanzando (ver la guarda).
@@ -4739,8 +4738,8 @@ export class PurchaseOrdersService {
 
     for (const item of items) {
       // QUI-855 — INC/ICUI/IBUA nunca son IVA descontable: una línea no-IVA
-      // sin porción deducible no aporta a este documento y se SALTA (antes
-      // abortaba toda la materialización). Con O-48 y filas hijas, su
+      // sin porción deducible no aporta a este snapshot y se SALTA (antes
+      // abortaba toda la reserva). Con O-48 y filas hijas, su
       // impuesto quedó sellado como capitalizado, no deducible.
       const lineType = item.tax_type ?? tax_type_enum.iva;
       if (
@@ -4760,8 +4759,7 @@ export class PurchaseOrdersService {
 
       // QUI-INC — el tipo fiscal se resuelve AQUÍ, contra la fila fuente
       // (`purchase_order_items.tax_type`, que es la MISMA que aporta tarifa y
-      // base), y no en `materializeVatDocument`, donde era el literal
-      // `tax_type_enum.iva`. El `?? iva` es el default canónico de una fila
+      // base). El `?? iva` es el default canónico de una fila
       // sin tipar (regla «sin tipar significa IVA» de `vendix-tax-typing`) y
       // acá sí puede aplicarse: se ve la columna, así que «ausente» no se
       // confunde con «tipada y no propagada».
