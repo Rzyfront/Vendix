@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { normalizeNit } from '../../../common/utils/nit.util';
@@ -62,12 +62,86 @@ export interface ReceivedBuyerEventOptionsView {
   limit: number;
 }
 
+export interface PlatformReceivedBuyerEventQueueInput { page?: number; limit?: number; status?: 'testing' | 'verified' | 'suspended'; search?: string }
+export interface PlatformReceivedBuyerEventQueueItem {
+  id: number; organization_id: number; accounting_entity_id: number; status: string; version: number; event_codes: string[];
+  dian_configuration_id: number | null; evidence_id: number | null; verified_at: Date | null; created_at: Date; updated_at: Date;
+  organization: { name: string; slug: string };
+  accounting_entity: { name: string; legal_name: string | null; tax_id: string | null; is_active: boolean; fiscal_scope: string; store_id: number | null };
+  dian_configuration: { name: string; configuration_type: string; operation_mode: string; environment: string; enablement_status: string; certificate_expiry: Date | null; has_certificate: boolean; has_software_id: boolean } | null;
+  evidence: { evidence_type: string; created_at: Date | null; has_artifact: boolean } | null;
+}
+export interface PlatformReceivedBuyerEventQueueView { items: PlatformReceivedBuyerEventQueueItem[]; total: number; page: number; limit: number }
+
+const PLATFORM_BUYER_EVENT_QUEUE_SELECT = {
+  id: true, organization_id: true, accounting_entity_id: true, status: true, version: true, event_codes: true,
+  dian_configuration_id: true, evidence_id: true, verified_at: true, created_at: true, updated_at: true,
+  organization: { select: { name: true, slug: true } },
+  accounting_entity: { select: { name: true, legal_name: true, tax_id: true, is_active: true, fiscal_scope: true, store_id: true } },
+  dian_configuration: { select: { name: true, configuration_type: true, operation_mode: true, environment: true, enablement_status: true, certificate_expiry: true, certificate_s3_key: true, certificate_password_encrypted: true, software_id: true } },
+  evidence: { select: { evidence_type: true, created_at: true, storage_key: true, content_hash: true } },
+} satisfies Prisma.received_buyer_event_enablementsSelect;
+type PlatformReceivedBuyerEventQueueRecord = Prisma.received_buyer_event_enablementsGetPayload<{ select: typeof PLATFORM_BUYER_EVENT_QUEUE_SELECT }>;
+
 @Injectable()
 export class ReceivedBuyerEventEnablementService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly receivedDocuments: ReceivedDocumentsService,
   ) {}
+
+  /** Platform-only cross-tenant read. Callers must be super-admin authorized; this deliberately bypasses tenant scope. */
+  async listForPlatform(input: PlatformReceivedBuyerEventQueueInput = {}): Promise<PlatformReceivedBuyerEventQueueView> {
+    const page = input.page ?? 1;
+    const limit = input.limit ?? 25;
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new BadRequestException('La paginación no es válida.');
+    const status = input.status ?? 'testing';
+    if (!['testing', 'verified', 'suspended'].includes(status)) throw new BadRequestException('El estado no es válido.');
+    if (input.search !== undefined && typeof input.search !== 'string') throw new BadRequestException('La búsqueda no es válida.');
+    const search = input.search?.trim();
+    if (search !== undefined && search.length > 100) throw new BadRequestException('La búsqueda no es válida.');
+    const where: Prisma.received_buyer_event_enablementsWhereInput = {
+      status,
+      ...(search ? { OR: [
+        { organization: { is: { name: { contains: search, mode: 'insensitive' } } } },
+        { organization: { is: { slug: { contains: search, mode: 'insensitive' } } } },
+        { accounting_entity: { is: { tax_id: { contains: search, mode: 'insensitive' } } } },
+      ] } : {}),
+    };
+    // Global Prisma is intentional here: this queue is exclusively exposed to super-admin platform reviewers.
+    const db = this.prisma.withoutScope();
+    const [rows, total] = await Promise.all([
+      db.received_buyer_event_enablements.findMany({ where, select: PLATFORM_BUYER_EVENT_QUEUE_SELECT, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], skip: (page - 1) * limit, take: limit }),
+      db.received_buyer_event_enablements.count({ where }),
+    ]);
+    return { items: rows.map((row) => this.toPlatformQueueItem(row)), total, page, limit };
+  }
+
+  /** Platform-only exact tenant/entity detail; intentionally bypasses scope after super-admin authorization. */
+  async getPlatformDetail(organizationId: number, accountingEntityId: number): Promise<PlatformReceivedBuyerEventQueueItem> {
+    this.assertPositive(organizationId, 'organization');
+    this.assertPositive(accountingEntityId, 'accounting entity');
+    const db = this.prisma.withoutScope();
+    const row = await db.received_buyer_event_enablements.findFirst({
+      where: { organization_id: organizationId, accounting_entity_id: accountingEntityId },
+      select: PLATFORM_BUYER_EVENT_QUEUE_SELECT,
+    });
+    if (!row) throw new NotFoundException('No existe la activación de eventos de comprador.');
+    return this.toPlatformQueueItem(row);
+  }
+
+  private toPlatformQueueItem(row: PlatformReceivedBuyerEventQueueRecord): PlatformReceivedBuyerEventQueueItem {
+    const { dian_configuration, evidence, ...safe } = row;
+    return {
+      ...safe,
+      dian_configuration: dian_configuration ? {
+        name: dian_configuration.name, configuration_type: dian_configuration.configuration_type, operation_mode: dian_configuration.operation_mode,
+        environment: dian_configuration.environment, enablement_status: dian_configuration.enablement_status, certificate_expiry: dian_configuration.certificate_expiry,
+        has_certificate: Boolean(dian_configuration.certificate_s3_key && dian_configuration.certificate_password_encrypted), has_software_id: Boolean(dian_configuration.software_id),
+      } : null,
+      evidence: evidence ? { evidence_type: evidence.evidence_type, created_at: evidence.created_at, has_artifact: Boolean(evidence.storage_key || evidence.content_hash) } : null,
+    };
+  }
 
   async listOptions(ctx: ReceivedDocumentsContext, input: ReceivedBuyerEventOptionsInput = {}): Promise<ReceivedBuyerEventOptionsView> {
     await this.receivedDocuments.assertContext(ctx);

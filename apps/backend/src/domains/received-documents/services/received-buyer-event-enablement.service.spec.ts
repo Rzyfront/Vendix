@@ -64,6 +64,53 @@ describe('ReceivedBuyerEventEnablementService', () => {
     });
   });
 
+  describe('platform queue', () => {
+    const platformRow = () => ({ id: 8, organization_id: 5, accounting_entity_id: 7, status: 'testing', version: 2, event_codes: ['030'], dian_configuration_id: 20, evidence_id: 30, verified_at: null, created_at: new Date(), updated_at: new Date(), organization: { name: 'Acme', slug: 'acme' }, accounting_entity: { name: 'Acme fiscal', legal_name: null, tax_id: '900123456-8', is_active: true, fiscal_scope: 'STORE', store_id: 11 }, dian_configuration: { name: 'DIAN', configuration_type: 'invoicing', operation_mode: 'own_software', environment: 'production', enablement_status: 'enabled', certificate_expiry: null, certificate_s3_key: 'secret-cert-key', certificate_password_encrypted: 'secret-password', software_id: 'secret-software' }, evidence: { evidence_type: 'test_set', created_at: new Date(), storage_key: 'secret-evidence-key', content_hash: 'secret-hash' } });
+
+    it('filters, counts, paginates, orders and returns only a safe cross-tenant projection', async () => {
+      const findMany = jest.fn().mockResolvedValue([platformRow()]);
+      const count = jest.fn().mockResolvedValue(11);
+      const platformService = new ReceivedBuyerEventEnablementService({ withoutScope: jest.fn().mockReturnValue({ received_buyer_event_enablements: { findMany, count } }) } as unknown as GlobalPrismaService, { assertContext } as unknown as ReceivedDocumentsService);
+      const result = await platformService.listForPlatform({ page: 2, limit: 5, search: ' acme ', status: 'testing' });
+      const query = findMany.mock.calls[0][0];
+      expect(query.where).toEqual({ status: 'testing', OR: [
+        { organization: { is: { name: { contains: 'acme', mode: 'insensitive' } } } },
+        { organization: { is: { slug: { contains: 'acme', mode: 'insensitive' } } } },
+        { accounting_entity: { is: { tax_id: { contains: 'acme', mode: 'insensitive' } } } },
+      ] });
+      expect(count).toHaveBeenCalledWith({ where: query.where });
+      expect(query).toMatchObject({ skip: 5, take: 5, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }] });
+      expect(query.select).toMatchObject({ organization: { select: { name: true, slug: true } }, accounting_entity: { select: { tax_id: true } } });
+      expect(query.select.dian_configuration).toMatchObject({ select: { certificate_s3_key: true, certificate_password_encrypted: true, software_id: true } });
+      expect(query.select.evidence).toMatchObject({ select: { storage_key: true, content_hash: true } });
+      expect(JSON.stringify(query.select)).not.toMatch(/software_id_snapshot|certificate_fingerprint|verified_by_user_id|certificate_fingerprint|certificate_kms_key_id/);
+      expect(result).toMatchObject({ page: 2, limit: 5, total: 11, items: [{ id: 8, organization: { slug: 'acme' }, dian_configuration: { has_certificate: true, has_software_id: true }, evidence: { has_artifact: true } }] });
+      expect(JSON.stringify(result)).not.toMatch(/secret-cert-key|secret-password|secret-software|secret-evidence-key|secret-hash|certificate_fingerprint/);
+    });
+
+    it('defaults to testing and rejects invalid platform pagination/search/status', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      const count = jest.fn().mockResolvedValue(0);
+      const platformService = new ReceivedBuyerEventEnablementService({ withoutScope: jest.fn().mockReturnValue({ received_buyer_event_enablements: { findMany, count } }) } as unknown as GlobalPrismaService, { assertContext } as unknown as ReceivedDocumentsService);
+      await expect(platformService.listForPlatform()).resolves.toMatchObject({ page: 1, limit: 25, total: 0 });
+      expect(findMany.mock.calls[0][0].where).toEqual({ status: 'testing' });
+      await expect(platformService.listForPlatform({ page: 0 })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(platformService.listForPlatform({ limit: 101 })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(platformService.listForPlatform({ status: 'not_started' as any })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(platformService.listForPlatform({ search: 'x'.repeat(101) })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(platformService.listForPlatform({ search: 42 as never })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('scopes detail by both tenant IDs and returns 404 when the pair is absent', async () => {
+      const findFirst = jest.fn().mockResolvedValue(platformRow());
+      const platformService = new ReceivedBuyerEventEnablementService({ withoutScope: jest.fn().mockReturnValue({ received_buyer_event_enablements: { findFirst } }) } as unknown as GlobalPrismaService, { assertContext } as unknown as ReceivedDocumentsService);
+      await platformService.getPlatformDetail(5, 7);
+      expect(findFirst.mock.calls[0][0].where).toEqual({ organization_id: 5, accounting_entity_id: 7 });
+      findFirst.mockResolvedValue(null);
+      await expect(platformService.getPlatformDetail(5, 8)).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
   it('fails closed for missing activation without writes', async () => {
     findEnablement.mockResolvedValue(null);
     expect(await service.getReadiness(context, '030')).toEqual({ status: 'not_started', ready: false, blockers: ['not_configured'], event_codes: [] });

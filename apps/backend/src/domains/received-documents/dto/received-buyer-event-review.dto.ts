@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsIn, IsInt, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 const versionValue = ({ obj, key }: { obj: Record<string, unknown>; key: string }) => {
   const raw = obj[key];
@@ -37,4 +37,29 @@ export class ReceivedBuyerEventSuspensionDto {
   @MinLength(20)
   @MaxLength(500)
   reason!: string;
+}
+
+export class PlatformReceivedBuyerEventQueueQueryDto {
+  @IsOptional()
+  @Transform(versionValue)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Transform(versionValue)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @IsOptional()
+  @IsIn(['testing', 'verified', 'suspended'])
+  status?: 'testing' | 'verified' | 'suspended';
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }

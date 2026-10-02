@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, ParseIntPipe, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Post, Query, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { ResponseService } from '../../common/responses/response.service';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -6,7 +6,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/enums/user-role.enum';
-import { ReceivedBuyerEventReviewDto, ReceivedBuyerEventSuspensionDto } from './dto/received-buyer-event-review.dto';
+import { PlatformReceivedBuyerEventQueueQueryDto, ReceivedBuyerEventReviewDto, ReceivedBuyerEventSuspensionDto } from './dto/received-buyer-event-review.dto';
 import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
 
 @Controller('super-admin/fiscal/invoicing/received-documents/buyer-event-enablement')
@@ -17,6 +17,22 @@ export class SuperAdminReceivedBuyerEventsController {
     private readonly enablement: ReceivedBuyerEventEnablementService,
     private readonly responses: ResponseService,
   ) {}
+
+  @Get()
+  @Permissions('superadmin:invoicing:received:events:read')
+  async list(@Query() query: PlatformReceivedBuyerEventQueueQueryDto) {
+    const result = await this.enablement.listForPlatform(query);
+    return this.responses.paginated(result.items, result.total, result.page, result.limit, 'Cola de habilitación de eventos obtenida');
+  }
+
+  @Get(':organizationId/:accountingEntityId')
+  @Permissions('superadmin:invoicing:received:events:read')
+  async detail(
+    @Param('organizationId', ParseIntPipe) organizationId: number,
+    @Param('accountingEntityId', ParseIntPipe) accountingEntityId: number,
+  ) {
+    return this.responses.success(await this.enablement.getPlatformDetail(organizationId, accountingEntityId), 'Detalle de habilitación obtenido');
+  }
 
   @Post(':organizationId/:accountingEntityId/verify')
   @HttpCode(HttpStatus.OK)

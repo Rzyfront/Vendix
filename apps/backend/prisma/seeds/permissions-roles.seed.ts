@@ -3765,6 +3765,12 @@ export async function seedPermissionsAndRoles(
       method: 'GET',
     },
     {
+      name: 'superadmin:invoicing:received:events:read',
+      description: 'Consultar la cola y el detalle de habilitación DIAN de eventos de comprador entre organizaciones',
+      path: '/api/super-admin/fiscal/invoicing/received-documents/buyer-event-enablement',
+      method: 'GET',
+    },
+    {
       name: 'superadmin:invoicing:received:events:verify',
       description: 'Verificar como plataforma la habilitación de eventos DIAN de comprador',
       path: '/api/super-admin/fiscal/invoicing/received-documents/buyer-event-enablement/:organizationId/:accountingEntityId/verify',
