@@ -392,15 +392,17 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
       expect(received![1].gross_reception_share).toBe(6350);
     });
 
-    it('reserves deductible VAT before legacy document projection and event emission', async () => {
+    it('reserves the contribution before emitting VAT recognition without a synthetic invoice', async () => {
       const sealed = { itemUpdates: [] as any[] };
       const tx = mockReceiveTx(sealed);
+      const supplierInvoiceDate = new Date('2026-08-15T00:00:00.000Z');
+      const supplierInvoiceNumber = 'SUP-' + 'X'.repeat(76);
       tx.purchase_orders.update.mockResolvedValue({
         ...purchaseOrder,
         status: 'received',
         supplier_id: SUPPLIER_ID,
-        supplier_invoice_number: null,
-        supplier_invoice_date: null,
+        supplier_invoice_number: supplierInvoiceNumber,
+        supplier_invoice_date: supplierInvoiceDate,
         suppliers: { id: SUPPLIER_ID, name: 'Supplier 77', tax_id: '900111222' },
         purchase_order_items: [{
           ...orderItem,
@@ -422,22 +424,14 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
           reception_id: 1,
           supplier_id: SUPPLIER_ID,
           supplier_tax_id_snapshot: '900111222',
-          invoice_number_snapshot: null,
-          invoice_issue_date_snapshot: null,
+          invoice_number_snapshot: supplierInvoiceNumber,
+          invoice_issue_date_snapshot: supplierInvoiceDate,
           currency: 'COP',
           net_amount: 5000,
           iva_amount: 950,
           tax_groups: [{ tax_rate: 19, tax_type: 'iva', taxable_amount: 5000, tax_amount: 950 }],
         });
         return { id: 880 };
-      });
-      prismaService.invoices.findFirst.mockImplementation(async () => {
-        order.push('projection-check');
-        return null;
-      });
-      prismaService.invoices.create.mockImplementation(async () => {
-        order.push('projection');
-        return { id: 881 };
       });
       eventEmitter.emit.mockImplementation((eventName) => {
         if (eventName === 'purchase.vat_recognized') order.push('vat-event');
@@ -447,11 +441,65 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
         items: [{ id: PO_ITEM_ID, quantity_received: 5 }],
       } as any);
 
-      expect(order).toEqual(['reserve', 'projection-check', 'projection', 'vat-event']);
+      expect(order).toEqual(['reserve', 'vat-event']);
+      expect(prismaService.invoices.findFirst).not.toHaveBeenCalled();
+      expect(prismaService.invoices.create).not.toHaveBeenCalled();
       expect(eventEmitter.emit).toHaveBeenCalledWith('purchase.vat_recognized', expect.objectContaining({
-        invoice_id: 881,
         contribution_id: 880,
+        organization_id: ORG_ID,
+        accounting_entity_id: 1,
+        store_id: STORE_ID,
+        purchase_order_id: PO_ID,
+        reception_id: 1,
+        iva_amount: 950,
+        supplier: expect.objectContaining({ id: SUPPLIER_ID }),
       }));
+      const vatEvent = eventEmitter.emit.mock.calls.find((call) => call[0] === 'purchase.vat_recognized')![1];
+      expect(vatEvent).not.toHaveProperty('invoice_id');
+      expect(eventEmitter.emit).toHaveBeenCalledWith('purchase_order.received', expect.anything());
+    });
+
+    it('keeps equal supplier invoice numbers on separate POs keyed by distinct contributions', async () => {
+      const supplierInvoiceNumber = 'SUPPLIER-INV-REUSED';
+      const contributionIds = [901, 902];
+      const receivedPoIds = [PO_ID, PO_ID + 1];
+      purchaseVatContribution.reserve.mockImplementation(async () => ({ id: contributionIds.shift() }));
+      const tx = mockReceiveTx({ itemUpdates: [] as any[] });
+      tx.purchase_orders.update.mockImplementation(async ({ where }: any) => ({
+        ...purchaseOrder,
+        id: where.id,
+        status: 'received',
+        supplier_id: SUPPLIER_ID,
+        supplier_invoice_number: supplierInvoiceNumber,
+        suppliers: { id: SUPPLIER_ID, name: 'Supplier 77', tax_id: '900111222' },
+        purchase_order_items: [{
+          ...orderItem,
+          deductible_tax_amount: 950,
+          capitalized_tax_amount: 400,
+          products: null,
+          product_variants: null,
+        }],
+      }));
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      for (const id of receivedPoIds) {
+        await service.receive(id, { items: [{ id: PO_ITEM_ID, quantity_received: 5 }] } as any);
+      }
+
+      expect(purchaseVatContribution.reserve).toHaveBeenCalledTimes(2);
+      expect(purchaseVatContribution.reserve.mock.calls.map((call) => call[0])).toEqual([
+        expect.objectContaining({ purchase_order_id: PO_ID, invoice_number_snapshot: supplierInvoiceNumber }),
+        expect.objectContaining({ purchase_order_id: PO_ID + 1, invoice_number_snapshot: supplierInvoiceNumber }),
+      ]);
+      const vatEvents = eventEmitter.emit.mock.calls
+        .filter((call) => call[0] === 'purchase.vat_recognized')
+        .map((call) => call[1]);
+      expect(vatEvents.map((event) => [event.purchase_order_id, event.contribution_id])).toEqual([
+        [PO_ID, 901],
+        [PO_ID + 1, 902],
+      ]);
+      expect(prismaService.invoices.findFirst).not.toHaveBeenCalled();
+      expect(prismaService.invoices.create).not.toHaveBeenCalled();
     });
 
     it('does not project or emit recognized VAT when reservation fails', async () => {
