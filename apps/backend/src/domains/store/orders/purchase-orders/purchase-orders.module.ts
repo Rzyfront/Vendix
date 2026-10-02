@@ -4,6 +4,7 @@ import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { createPurchasingTools } from '../../../../ai-engine/tools/domains/purchasing.tools';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
 import { SuppliersService } from '../../inventory/suppliers/suppliers.service';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { PaymentReceiptScanProcessor } from './payment-receipt-scan.processor';
@@ -37,6 +38,7 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
   controllers: [PurchaseOrdersController],
   providers: [
     PurchaseOrdersService,
+    PurchaseVatContributionService,
     InvoiceScannerService,
     PaymentReceiptScanProcessor,
     InvoiceRevalidateProcessor,
