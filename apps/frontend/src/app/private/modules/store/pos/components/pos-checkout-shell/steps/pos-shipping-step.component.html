@@ -291,17 +291,20 @@
             eye lands on "go mark the map" instead of a $0/blank cost row
             that reads as if envío were free or already handled.
           -->
-          @if (requiresAddress() && !shippingRateId() && !isCalculatingShipping()) {
+          @if ((requiresAddress() && !shippingRateId() && !isCalculatingShipping()) ||
+              (isPickupMethod() && !!quoteError())) {
             <div class="no-methods-alert" role="alert">
               <app-icon name="map-pin" [size]="18" class="no-methods-icon"></app-icon>
               <div class="no-methods-body">
                 <span class="no-methods-title">
-                  {{ hasResolvedLocation()
+                  {{ isPickupMethod() ? quoteError() : (hasResolvedLocation()
                     ? 'No hay tarifa de envío para esta ubicación'
-                    : 'Marca la ubicación en el mapa para calcular el envío' }}
+                    : 'Marca la ubicación en el mapa para calcular el envío') }}
                 </span>
                 <span class="no-methods-desc">
-                  No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.
+                  {{ isPickupMethod()
+                    ? 'No se puede confirmar la recogida sin una tarifa activa configurada.'
+                    : 'No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.' }}
                 </span>
               </div>
             </div>
@@ -312,7 +315,7 @@
               <span class="cost-row-label"
                 >Costo de envío
                 @if (isPickupMethod()) {
-                  (sin costo)
+                  (según tarifa configurada)
                 } @else {
                   {{ manualCostOverride() ? '(manual)' : '(automático)' }}
                 }</span
@@ -341,7 +344,7 @@
               </div>
             }
 
-            @if (!isPickupMethod() && !manualCostOverride() && rateOptions().length > 1) {
+            @if (!manualCostOverride() && rateOptions().length > 1) {
               <div class="cost-divider"></div>
               <div class="rate-select" aria-label="Tarifas disponibles para este método">
                 <app-selector

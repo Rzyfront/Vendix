@@ -42,7 +42,9 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   let component: PosShippingStepComponent;
   let methods: Subject<PosShippingMethod[]>;
   let quotes: Subject<PosShippingOption[]>[];
+  let pickupQuotes: Subject<PosShippingOption[]>[];
   let calculate: jasmine.Spy;
+  let quotePickup: jasmine.Spy;
   let manualQuote: jasmine.Spy;
   let customers: jasmine.SpyObj<CustomersService>;
   const originalMethod: PosShippingMethod = { id: 7, name: 'Transportadora', type: 'carrier', is_active: true };
@@ -116,10 +118,10 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     id, method_id: methodId, method_name: 'Método', method_type: 'carrier', cost, currency: 'COP',
   });
   const latestQuote = () => quotes[quotes.length - 1];
-  const mount = (state = cart()) => {
+  const mount = (state = cart(), availableMethods = [firstMethod, originalMethod]) => {
     fixture.componentRef.setInput('cartState', state);
     fixture.detectChanges();
-    methods.next([firstMethod, originalMethod]);
+    methods.next(availableMethods);
     fixture.detectChanges();
   };
   const selectMunicipality = (
@@ -134,9 +136,15 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   beforeEach(async () => {
     methods = new Subject();
     quotes = [];
+    pickupQuotes = [];
     calculate = jasmine.createSpy('calculateShipping').and.callFake(() => {
       const response = new Subject<PosShippingOption[]>();
       quotes.push(response);
+      return response.asObservable();
+    });
+    quotePickup = jasmine.createSpy('quotePickupShipping').and.callFake(() => {
+      const response = new Subject<PosShippingOption[]>();
+      pickupQuotes.push(response);
       return response.asObservable();
     });
     manualQuote = jasmine.createSpy('quoteManualShipping').and.callFake(
@@ -155,7 +163,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       providers: [
         { provide: Router, useValue: { navigate: () => {} } },
         { provide: PosPaymentService, useValue: {} },
-        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quoteManualShipping: manualQuote } },
+        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quotePickupShipping: quotePickup, quoteManualShipping: manualQuote } },
         { provide: CustomersService, useValue: customers },
         { provide: ToastService, useValue: { show: () => {} } },
         { provide: CurrencyFormatService, useValue: { currencySymbol: signal('$'), loadCurrency: () => {}, format: (v: number) => `$${v}` } },
@@ -502,8 +510,105 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     fixture.detectChanges();
 
     expect(component.missingShippingMethodReason()).toBeNull();
+    expect(quotePickup).toHaveBeenCalledWith(9);
+    expect(calculate).not.toHaveBeenCalled();
+    expect(component.canConfirm()).toBeFalse(); // still waiting for a real configured rate
+    pickupQuotes[0].next([{
+      ...quote(9, 8500, 109), method_type: 'pickup', method_name: 'Recoger en tienda',
+    }]);
+    fixture.detectChanges();
+
+    expect(component.shippingRateId()).toBe(109);
+    expect(component.shippingCost()).toBe(8500);
+    expect(component.totalWithShipping()).toBe(9500);
     expect(component.canConfirm()).toBeTrue();
     expect(component.buildShippingContext()?.deliveryType).toBe('pickup');
+    expect(component.buildShippingContext()?.shippingAddress).not.toEqual(jasmine.objectContaining({ latitude: jasmine.any(Number), longitude: jasmine.any(Number) }));
+  });
+
+  it('muestra pickup activo en métodos nuevos y oculta los inactivos', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    const inactivePickup: PosShippingMethod = { id: 10, name: 'Pickup inactivo', type: 'pickup', is_active: false };
+    mount(state, [firstMethod, pickup, inactivePickup]);
+
+    expect(component.activeShippingMethods().map((method) => method.id)).toEqual([1, 9]);
+    const cards = fixture.debugElement.queryAll(By.css('.method-card'));
+    expect(cards.some((card) => card.nativeElement.textContent.includes('Recoger en tienda'))).toBeTrue();
+    expect(cards.some((card) => card.nativeElement.textContent.includes('Pickup inactivo'))).toBeFalse();
+  });
+
+  it('acepta $0 solo cuando viene de una tarifa pickup real', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup]);
+    component.selectShippingMethod(pickup);
+    pickupQuotes[0].next([{ ...quote(9, 0, 90), method_type: 'pickup' }]);
+    fixture.detectChanges();
+
+    expect(component.shippingCost()).toBe(0);
+    expect(component.shippingRateId()).toBe(90);
+    expect(component.canConfirm()).toBeTrue();
+  });
+
+  it('bloquea pickup si el backend no devuelve tarifas activas', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup]);
+    component.selectShippingMethod(pickup);
+    pickupQuotes[0].next([]);
+    fixture.detectChanges();
+
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBe('No hay tarifa activa para recoger en tienda');
+    expect(component.canConfirm()).toBeFalse();
+  });
+
+  it('descarta pickup quote tardía al cambiar a un método de domicilio', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup, originalMethod]);
+    component.selectShippingMethod(pickup);
+    const stalePickup = pickupQuotes[0];
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    stalePickup.next([{ ...quote(9, 30000, 901), method_type: 'pickup' }]);
+    latestQuote().next([quote(1, 7000, 201)]);
+    fixture.detectChanges();
+
+    expect(component.selectedShippingMethod()?.id).toBe(1);
+    expect(component.shippingRateId()).toBe(201);
+    expect(component.shippingCost()).toBe(7000);
+  });
+
+  it('preserva snapshot pickup histórico intacto sin recotizar aunque no tenga rate id', () => {
+    const state = cart();
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    state.shippingContext = {
+      ...state.shippingContext!, deliveryType: 'pickup', shippingMethodId: 9,
+      shippingMethod: pickup, shippingAddressId: null, shippingAddress: null,
+      shippingRateId: null, shippingCost: 6400,
+    };
+    mount(state, [firstMethod, pickup, originalMethod]);
+
+    expect(component.selectedShippingMethod()?.id).toBe(9);
+    expect(component.shippingCost()).toBe(6400);
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.hasShippingChanges()).toBeFalse();
+    expect(component.canConfirm()).toBeTrue();
+    expect(quotePickup).not.toHaveBeenCalled();
+    expect(calculate).not.toHaveBeenCalled();
   });
 
   it('rate-sourced cost: the context carries the rate and the payload keeps shipping_rate_id', () => {

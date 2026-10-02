@@ -13,6 +13,7 @@ import {
   TemplateRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 import {
   FormControl,
   ReactiveFormsModule,
@@ -338,10 +339,7 @@ export class PosShippingStepComponent {
    * históricos (un original inactivo intacto sigue guardable).
    */
   readonly activeShippingMethods = computed<PosShippingMethod[]>(() =>
-    this.shippingMethods().filter((m) =>
-      m.is_active !== false &&
-      (m.type !== 'pickup' || !!this.originalShipping()),
-    ),
+    this.shippingMethods().filter((m) => m.is_active !== false),
   );
   readonly selectedShippingMethod = signal<PosShippingMethod | null>(null);
   readonly shippingCost = signal<number>(0);
@@ -442,9 +440,9 @@ export class PosShippingStepComponent {
 
   /**
    * Paso 15b — desglose visible al cajero (base + impuesto del envío). Solo
-   * cuando la cotización trae impuesto > 0 para el método actual: en pickup
-   * (costo 0), con costo manual (viaja sin tarifa y el backend lo registra
-   * sin impuesto) o sin respaldo fiscal no hay filas.
+   * cuando la cotización trae impuesto > 0 para el método actual: pickup no
+   * muestra desglose en esta superficie, y costo manual o sin respaldo fiscal
+   * tampoco produce filas.
    */
   readonly shippingTaxBreakdown = computed<QuotedShippingTax | null>(() => {
     if (this.isPickupMethod()) return null;
@@ -616,7 +614,8 @@ export class PosShippingStepComponent {
         this.shippingRateId.set(original.shippingRateId);
       } else if (method.type === 'pickup') {
         this.shippingCost.set(0);
-        this.calculatedShippingCost.set(0);
+        this.calculatedShippingCost.set(null);
+        this.isCalculatingShipping.set(true);
       } else {
         this.isCalculatingShipping.set(true);
       }
@@ -942,41 +941,40 @@ export class PosShippingStepComponent {
     this.invalidateQuote();
     const generation = this.quoteGeneration;
     const method = this.selectedShippingMethod();
-    if (!method || !this.cartState()?.items?.length || method.type === 'pickup') return;
-    const a = this.address();
-    if (!a?.city) return;
-    // Requirement 3 (coordinator, 2026-09): a delivery method must NEVER
-    // quote/auto-select a default rate for an address with no resolved
-    // point. Skip the network call entirely rather than let the backend
-    // return a flat/zone rate that ignores the missing coordinate —
-    // `getFirstValidationError` blocks the confirm gate on
-    // `!hasResolvedLocation()` regardless, but not calling here also means
-    // no rate is ever auto-selected/shown while the location is unresolved.
-    if (!this.hasResolvedLocation()) {
-      this.calculatedShippingCost.set(null);
-      this.shippingRateId.set(null);
-      // Never leave a stale amount (from a previous method/address) sitting
-      // in the totals while the location is unresolved — the confirm gate
-      // already blocks on this, but the displayed total must not lie either.
-      if (!this.manualCostOverride()) this.shippingCost.set(0);
-      return;
+    if (!method || !this.cartState()?.items?.length) return;
+
+    let quote$: Observable<PosShippingOption[]>;
+    if (method.type === 'pickup') {
+      quote$ = this.shippingService.quotePickupShipping(method.id);
+    } else {
+      const a = this.address();
+      if (!a?.city) return;
+      // A delivery method must never quote/default a rate without coordinates.
+      if (!this.hasResolvedLocation()) {
+        this.calculatedShippingCost.set(null);
+        this.shippingRateId.set(null);
+        if (!this.manualCostOverride()) this.shippingCost.set(0);
+        return;
+      }
+      const items = this.cartState()!.items.filter((item) => item.itemType !== 'custom')
+        .map((item) => ({
+          product_id: parseInt(item.product.id), quantity: item.quantity, price: item.totalPrice,
+        }));
+      quote$ = this.shippingService.calculateShipping(items, {
+        country_code: a.country_code || 'CO', city: a.city,
+        state_province: a.state_province || undefined,
+        municipality_code: a.municipality_code || undefined,
+        address_line1: a.address_line1 || undefined,
+        postal_code: a.postal_code || undefined,
+        ...(a.latitude != null && a.longitude != null &&
+          Number.isFinite(a.latitude) && Number.isFinite(a.longitude)
+          ? { latitude: a.latitude, longitude: a.longitude }
+          : {}),
+      });
     }
+
     this.isCalculatingShipping.set(true);
-    const items = this.cartState()!.items.filter((item) => item.itemType !== 'custom')
-      .map((item) => ({
-        product_id: parseInt(item.product.id), quantity: item.quantity, price: item.totalPrice,
-      }));
-    this.shippingService.calculateShipping(items, {
-      country_code: a.country_code || 'CO', city: a.city,
-      state_province: a.state_province || undefined,
-      municipality_code: a.municipality_code || undefined,
-      address_line1: a.address_line1 || undefined,
-      postal_code: a.postal_code || undefined,
-      ...(a.latitude != null && a.longitude != null &&
-        Number.isFinite(a.latitude) && Number.isFinite(a.longitude)
-        ? { latitude: a.latitude, longitude: a.longitude }
-        : {}),
-    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    quote$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (options) => {
         if (generation !== this.quoteGeneration) return;
         this.isCalculatingShipping.set(false);
@@ -996,7 +994,10 @@ export class PosShippingStepComponent {
         } else {
           this.calculatedShippingCost.set(null);
           this.shippingRateId.set(null);
-          this.quoteError.set('No hay tarifa de envío para esta ubicación');
+          if (method.type === 'pickup' && !this.manualCostOverride()) this.shippingCost.set(0);
+          this.quoteError.set(method.type === 'pickup'
+            ? 'No hay tarifa activa para recoger en tienda'
+            : 'No hay tarifa de envío para esta ubicación');
         }
       },
       error: (error) => {
@@ -1004,8 +1005,9 @@ export class PosShippingStepComponent {
         this.isCalculatingShipping.set(false);
         this.calculatedShippingCost.set(null);
         this.shippingRateId.set(null);
-        this.quoteError.set(parseApiError(error).userMessage ||
-          'No se pudo calcular el envío. Verifica la dirección y vuelve a intentarlo.');
+        this.quoteError.set(parseApiError(error).userMessage || (method.type === 'pickup'
+          ? 'No se pudo cotizar la tarifa de recogida en tienda.'
+          : 'No se pudo calcular el envío. Verifica la dirección y vuelve a intentarlo.'));
       },
     });
   }
@@ -1103,6 +1105,13 @@ export class PosShippingStepComponent {
     }
     if (this.quoteError()) {
       return { section: 'shipping-method', message: this.quoteError()! };
+    }
+    const original = this.originalShipping();
+    const untouchedPickupSnapshot = this.isPickupMethod() && !!original &&
+      (original.deliveryType === 'pickup' || original.shippingMethod?.type === 'pickup') &&
+      original.shippingMethodId === method.id && !this.hasShippingChanges();
+    if (this.isPickupMethod() && !this.shippingRateId() && !untouchedPickupSnapshot) {
+      return { section: 'shipping-method', message: 'Selecciona una tarifa activa para recoger en tienda' };
     }
     // Requirement 3 (coordinator, 2026-09): hard gate, no manual-cost escape
     // hatch — a delivery method must never confirm/charge a default rate for
