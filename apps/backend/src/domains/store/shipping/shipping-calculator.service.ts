@@ -1,6 +1,11 @@
 import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { address_type_enum, shipping_rate_type_enum } from '@prisma/client';
+import type {
+  shipping_methods,
+  shipping_rates,
+  shipping_zones,
+} from '@prisma/client';
 import { SettingsService } from '../settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -82,6 +87,17 @@ export interface ShippingOption {
    */
   postal_code_match?: boolean;
 }
+
+type PickupRate = Pick<
+  shipping_rates,
+  'id' | 'shipping_method_id' | 'shipping_zone_id' | 'name' | 'type' | 'base_cost'
+> & {
+  shipping_method: Pick<
+    shipping_methods,
+    'name' | 'type' | 'min_days' | 'max_days'
+  >;
+  shipping_zone?: Pick<shipping_zones, 'name' | 'display_name'> | null;
+};
 
 @Injectable()
 export class ShippingCalculatorService {
@@ -739,7 +755,7 @@ export class ShippingCalculatorService {
   /** Applies the pickup fallback's configured-price and shipping-tax rule. */
   private async mapPickupRateOptions(
     storeId: number,
-    pickupRates: Array<any>,
+    pickupRates: PickupRate[],
     dedupeMethods: boolean,
     isFallback: boolean,
   ): Promise<ShippingOption[]> {
