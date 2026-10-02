@@ -587,6 +587,84 @@ describe('AutoEntryService purchase_order.received — flete asumido (C.6)', () 
   });
 });
 
+describe('AutoEntryService.onPurchaseVatContributionRecognized', () => {
+  const data = { contribution_id: 88, organization_id: 6, accounting_entity_id: 25, store_id: 10, user_id: 9 };
+  const contribution = {
+    id: 88,
+    iva_amount: '125.75',
+    supplier_id: 77,
+    supplier_tax_id_snapshot: '900123456',
+    supplier: { name: 'Proveedor persistido' },
+  };
+  const build = (persisted: any = contribution) => {
+    const findFirst = jest.fn().mockResolvedValue(persisted);
+    const prisma = { withoutScope: jest.fn(() => ({ purchase_vat_contributions: { findFirst } })) };
+    const getMapping = jest.fn();
+    const recordSkip = jest.fn().mockResolvedValue(undefined);
+    const service = new AutoEntryService(
+      prisma as any, { getMapping } as any, {} as any, {} as any,
+      { recordFailure: jest.fn(), recordSkip } as any,
+    );
+    const resolve = jest.spyOn(service as any, 'resolveAccountLine').mockImplementation(
+      async (_org: number, key: string, description: string, debit: number, credit: number, _store: number, thirdParty?: any) => ({
+        account_code: key.endsWith('iva_deductible') ? '240804' : '2205',
+        description, debit_amount: debit, credit_amount: credit, ...(thirdParty ? { third_party: thirdParty } : {}),
+      }),
+    );
+    const create = jest.spyOn(service, 'createAutoEntry').mockResolvedValue({ id: 501 } as any);
+    return { service, prisma, findFirst, getMapping, recordSkip, resolve, create };
+  };
+
+  it('uses persisted contribution amount and supplier identity for a balanced IVA-only entry', async () => {
+    const { service, findFirst, resolve, create } = build();
+    await service.onPurchaseVatContributionRecognized(data);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 88, organization_id: 6, accounting_entity_id: 25, store_id: 10 },
+      select: { id: true, iva_amount: true, supplier_id: true, supplier_tax_id_snapshot: true, supplier: { select: { name: true } } },
+    });
+    expect(resolve.mock.calls.map((call) => call[1])).toEqual([
+      'purchase.vat_recognized.iva_deductible', 'purchase.vat_recognized.accounts_payable',
+    ]);
+    const entry = create.mock.calls[0][0];
+    expect(entry).toMatchObject({ source_type: 'purchase_vat_contribution', source_id: 88, organization_id: 6, accounting_entity_id: 25 });
+    expect(entry.lines).toEqual([
+      expect.objectContaining({ account_code: '240804', debit_amount: 125.75, credit_amount: 0 }),
+      expect.objectContaining({ account_code: '2205', debit_amount: 0, credit_amount: 125.75,
+        third_party: { id: 77, type: 'supplier', name: 'Proveedor persistido', tax_id: '900123456' } }),
+    ]);
+    expect(entry.lines.reduce((sum: number, line: any) => sum + line.debit_amount - line.credit_amount, 0)).toBe(0);
+  });
+
+  it('rejects missing or foreign contribution before resolving mappings or creating a JE', async () => {
+    const { service, getMapping, resolve, create, findFirst } = build(null);
+    await expect(service.onPurchaseVatContributionRecognized(data)).rejects.toThrow(/not found/);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 88, organization_id: 6, accounting_entity_id: 25, store_id: 10 } }));
+    expect(getMapping).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('records SKIPPED_ZERO_AMOUNT under contribution source and creates no JE', async () => {
+    const { service, recordSkip, create, resolve } = build({ ...contribution, iva_amount: '0' });
+    await expect(service.onPurchaseVatContributionRecognized(data)).resolves.toBeNull();
+    expect(recordSkip).toHaveBeenCalledWith(expect.objectContaining({
+      source_type: 'purchase_vat_contribution', source_id: 88, organization_id: 6, cause: 'SKIPPED_ZERO_AMOUNT',
+    }));
+    expect(resolve).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('leaves legacy invoice-keyed purchase VAT recognition unchanged', async () => {
+    const { service, resolve, create } = build();
+    await service.onPurchaseVatRecognized({
+      invoice_id: 77, purchase_order_id: 500, reception_id: 900, organization_id: 6,
+      store_id: 10, accounting_entity_id: 25, iva_amount: 50,
+    });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'purchase_vat', source_id: 77 }));
+    expect(resolve.mock.calls[0][3]).toBe(50);
+  });
+});
+
 /**
  * CP-PURCHASE-TRANSPARENCY C.9 — `postAutoEntry` devolvía `null` por dos
  * caminos sin dejar rastro. Ahora cada uno escribe su fila con la causa.

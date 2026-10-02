@@ -1247,6 +1247,7 @@ export class AutoEntryService {
       'purchase_order.advance_payment': 'auto_purchase',
       'purchase_order.advance_reclass': 'adjustment',
       purchase_vat: 'auto_purchase',
+      purchase_vat_contribution: 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
       installment_payment: 'auto_installment_payment',
@@ -5535,6 +5536,86 @@ export class AutoEntryService {
    * source_id=invoice_id, accounting_entity_id). O-49 (non-responsible) never
    * reaches here — its VAT is already capitalized into inventory cost by F1.
    */
+  async onPurchaseVatContributionRecognized(data: {
+    contribution_id: number;
+    organization_id: number;
+    accounting_entity_id: number;
+    store_id: number;
+    user_id?: number;
+  }) {
+    const contribution = await this.prisma.withoutScope().purchase_vat_contributions.findFirst({
+      where: {
+        id: data.contribution_id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+      },
+      select: {
+        id: true,
+        iva_amount: true,
+        supplier_id: true,
+        supplier_tax_id_snapshot: true,
+        supplier: { select: { name: true } },
+      },
+    });
+    if (!contribution) {
+      throw new Error(
+        `Purchase VAT contribution #${data.contribution_id} not found for the supplied organization/entity/store`,
+      );
+    }
+
+    const iva = Number(contribution.iva_amount || 0);
+    if (!(iva > 0)) {
+      await this.entry_failure_service.recordSkip({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        source_type: 'purchase_vat_contribution',
+        source_id: contribution.id,
+        cause: 'SKIPPED_ZERO_AMOUNT',
+        detail: `IVA descontable no positivo (${iva}) en la contribución de IVA de compra #${contribution.id}. No hay IVA que asentar.`,
+        event_payload: { ...data, iva_amount: iva },
+      });
+      return null;
+    }
+
+    const supplier_third_party: AutoEntryThirdParty = {
+      id: contribution.supplier_id,
+      type: 'supplier',
+      name: contribution.supplier?.name,
+      tax_id: contribution.supplier_tax_id_snapshot ?? undefined,
+    };
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.iva_deductible',
+        'IVA Descontable en Compras',
+        iva,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.accounts_payable',
+        'Proveedores (complemento IVA)',
+        0,
+        iva,
+        data.store_id,
+        supplier_third_party,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_vat_contribution',
+      source_id: contribution.id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `IVA descontable compra — contribución #${contribution.id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
   async onPurchaseVatRecognized(data: {
     invoice_id: number;
     purchase_order_id: number;
