@@ -1,5 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+} from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
 
 /**
@@ -53,7 +61,19 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
   `,
 })
 export class VexBlockFileComponent {
+  private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly currencyFormat = inject(CurrencyFormatService);
+
   readonly block = input.required<VexUiBlock>();
+
+  /** Store-driven `Intl` locale, same rule as the KPI/table blocks. */
+  private readonly number_locale = computed(() =>
+    storeNumberLocale(
+      this.settingsFacade.settings()?.general?.language,
+      this.currencyFormat.currencyFormatStyle(),
+      this.currencyFormat.resolution() === 'resolved',
+    ),
+  );
 
   readonly spec = computed(() => this.block().spec as VexFileSpec);
 
@@ -74,7 +94,7 @@ export class VexBlockFileComponent {
     const mime = this.spec().mime_type ?? this.block().data['mime_type'];
     if (typeof mime === 'string' && mime) parts.push(mime);
     const size = this.block().data['size_bytes'];
-    if (typeof size === 'number' && size > 0) parts.push(formatBytes(size));
+    if (typeof size === 'number' && size > 0) parts.push(formatBytes(size, this.number_locale()));
     return parts.join(' · ');
   });
 
@@ -90,9 +110,36 @@ export class VexBlockFileComponent {
     if (mime.startsWith('image/')) return 'image';
     return 'file';
   });
+
+  constructor() {
+    void this.currencyFormat.loadCurrency();
+  }
 }
 
-function formatBytes(bytes: number): string {
+/**
+ * Store-driven `Intl` locale for plain numbers. Mirrors the KPI/table blocks:
+ * the resolved currency format style wins; before it resolves, the store
+ * language decides.
+ */
+function storeNumberLocale(
+  language: string | undefined,
+  format_style: string,
+  resolved: boolean,
+): string {
+  if (resolved) {
+    switch (format_style) {
+      case 'dot_comma':
+        return 'de-DE';
+      case 'space_comma':
+        return 'fr-FR';
+      default:
+        return 'en-US';
+    }
+  }
+  return language === 'en' ? 'en-US' : 'es-CO';
+}
+
+function formatBytes(bytes: number, locale: string): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB'];
   let value = bytes / 1024;
@@ -101,5 +148,5 @@ function formatBytes(bytes: number): string {
     value /= 1024;
     unit += 1;
   }
-  return `${value.toLocaleString('es-CO', { maximumFractionDigits: 1 })} ${units[unit]}`;
+  return `${value.toLocaleString(locale, { maximumFractionDigits: 1 })} ${units[unit]}`;
 }

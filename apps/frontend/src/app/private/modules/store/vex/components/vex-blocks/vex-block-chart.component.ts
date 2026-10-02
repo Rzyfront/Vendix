@@ -1,10 +1,15 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  PLATFORM_ID,
   computed,
+  inject,
   input,
   output,
+  signal,
 } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import type { EChartsOption } from 'echarts';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import {
@@ -81,8 +86,38 @@ export class VexBlockChartComponent {
 
   readonly has_rows = computed(() => this.rows().length > 0);
 
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+
+  /**
+   * Palette read from the live CSS variables. `ThemeService` writes mode and
+   * preset colors straight onto `<html>` (inline style + `data-theme`) and
+   * exposes no signal for those axes (`currentTheme` is only set by the
+   * deprecated `applyTheme`), so the DOM is the source of truth: an observer
+   * on those attributes re-reads the palette, and the signal only changes
+   * when the colors really did — an unrelated style write is a no-op.
+   */
+  private readonly palette = signal<string[]>(readPalette());
+
+  constructor() {
+    if (this.isBrowser && typeof MutationObserver !== 'undefined') {
+      const observer = new MutationObserver(() => {
+        const next = readPalette();
+        const previous = this.palette();
+        if (next.some((color, i) => color !== previous[i])) {
+          this.palette.set(next);
+        }
+      });
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['style', 'class', 'data-theme'],
+      });
+      this.destroyRef.onDestroy(() => observer.disconnect());
+    }
+  }
+
   readonly options = computed<EChartsOption>(() =>
-    buildOption(this.spec(), this.rows(), readPalette()),
+    buildOption(this.spec(), this.rows(), this.palette()),
   );
 
   onChartClick(event: unknown): void {

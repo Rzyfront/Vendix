@@ -121,13 +121,15 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
         </div>
       </div>
 
-      <!-- Uso del mes. getAiUsage nunca lanza: ante error retorna un objeto
+      <!-- Uso del periodo (día o mes). getAiUsage nunca lanza: ante error retorna un objeto
            vacio, asi que un snapshot ausente se lee como "sin datos", no
            como cero. -->
       <div class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-6 mt-6">
         <div class="flex items-start justify-between gap-4 mb-2">
           <div>
-            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">Uso del mes</h2>
+            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
+              {{ usageTitle() }}
+            </h2>
             <p class="text-sm text-[var(--color-text-secondary)]">
               Consumo de Vex en el periodo vigente.
             </p>
@@ -219,6 +221,11 @@ export class VexSettingsComponent {
     if (!usage || usage.cap === null || usage.cap <= 0) return 0;
     return Math.min(100, Math.round((usage.used / usage.cap) * 100));
   });
+
+  /** "Uso del día" for a daily counter, "Uso del mes" for a monthly one. */
+  readonly usageTitle = computed(() =>
+    this.vexUsage()?.period === 'daily' ? 'Uso del día' : 'Uso del mes',
+  );
 
   /**
    * Concrete quota period behind "Uso del mes" (`octubre de 2026` for a

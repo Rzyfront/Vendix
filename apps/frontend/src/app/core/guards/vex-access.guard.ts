@@ -52,14 +52,20 @@ export const vexAccessGuard: CanActivateFn = async () => {
     return false;
   }
 
-  // Cold load: landing directly on /admin/vex before NgRx holds
-  // store_settings must not read as "Vex off". Await one hydrated fetch —
-  // getSettings() publishes into the store, is request-shared, and serves
-  // cache when fresh — then decide on the real value. A fetch failure falls
-  // through to the closed check below (redirect), never to access.
-  if (settingsFacade.settings() === null) {
+  // Cold load, or a snapshot that predates the `vex` block: landing directly
+  // on /admin/vex before NgRx holds store_settings — or holding a stale
+  // snapshot/cache without `settings.vex` — must not read as "Vex off". Await
+  // one hydrated, cache-bypassing fetch (getSettings() publishes into the
+  // store and is request-shared), then decide on the real value. A store that
+  // really never set `vex` still answers undefined after the refetch and stays
+  // closed. A fetch failure falls through to the closed check below
+  // (redirect), never to access.
+  const current = settingsFacade.settings();
+  if (current === null || current.vex === undefined) {
     try {
-      await firstValueFrom(settingsService.getSettings());
+      await firstValueFrom(
+        settingsService.getSettings({ forceRefresh: true }),
+      );
     } catch {
       // Fail closed below.
     }
