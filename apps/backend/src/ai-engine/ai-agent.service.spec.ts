@@ -179,6 +179,30 @@ describe('AIAgentService.runAgentStream', () => {
     expect(canUseAIFeature).toHaveBeenCalledWith(42, 'tool_agents');
   });
 
+  it('cuts a degenerate completion: error frame, no text, flagged result', async () => {
+    configureStorePlan(['*']);
+    chat.mockResolvedValue(ok({ content: 'ells'.repeat(1000), model: 'free-x' }));
+    const errorLog = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    const { chunks, result } = await drain({});
+
+    expect(chunks.map((c) => c.type)).toEqual(['error']);
+    expect(chunks[0].error).toBe(
+      'El modelo generó una respuesta inválida y se detuvo. Intenta de nuevo.',
+    );
+    expect(result.degenerate).toBe(true);
+    expect(result.content).toBe('');
+    const logged = JSON.parse(errorLog.mock.calls[0][0] as string);
+    expect(logged).toMatchObject({
+      event: 'VEX_DEGENERATE_OUTPUT',
+      storeId: 42,
+      model: 'free-x',
+      chars: 4000,
+    });
+  });
+
   it('offers only tools in the allowed domain', async () => {
     configureStorePlan(['orders'], ['store:orders:read', 'store:customers:read']);
 

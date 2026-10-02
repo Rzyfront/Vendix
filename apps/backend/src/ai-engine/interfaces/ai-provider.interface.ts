@@ -113,6 +113,12 @@ export interface AIStreamChunk {
     | 'ui_block'
     | 'plan_approval';
   content?: string;
+  /**
+   * Present on the chat `done` frame when the turn persisted an assistant row:
+   * its `ai_messages.id`. For continuation turns the frontend links the new
+   * message through it (`metadata.continuation_of` points back at the proposal).
+   */
+  message_id?: number;
   /** Present on `ui_block`: the rendered block reference and payload. */
   ui_block?: {
     block_id: string;

@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
+import {
+  DEGENERATE_OUTPUT_MESSAGE,
+  detectDegenerateRepetition,
+} from './degenerate-output.util';
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
@@ -264,6 +268,12 @@ export interface AgentResult {
   error?: string;
   /** The turn was superseded by a newer one (`shouldAbort`); nothing was emitted. */
   aborted?: boolean;
+  /**
+   * The model produced degenerate repetition (`VEX_DEGENERATE_OUTPUT`): the
+   * text was discarded and an `error` frame was emitted. Callers must not
+   * replace the silence with a fallback answer nor persist anything.
+   */
+  degenerate?: boolean;
   /**
    * The budget ran out with the plan still open: the client must fire another
    * turn to continue. `content` is empty on purpose.
@@ -1267,6 +1277,34 @@ export class AIAgentService {
         }
 
         totalTokens += response.usage?.totalTokens || 0;
+
+        // Degenerate output ("ellsellsells…" up to the token cap). `run()` hands
+        // back the finished completion, so there is no provider call left to
+        // abort here; what can still be avoided is painting and persisting it.
+        const degeneration = detectDegenerateRepetition(response.content ?? '');
+        if (degeneration.degenerate) {
+          this.logger.error(
+            JSON.stringify({
+              event: 'VEX_DEGENERATE_OUTPUT',
+              storeId: context?.store_id,
+              model: response.model,
+              chars: (response.content ?? '').length,
+              cut_at: degeneration.cutAt,
+              agent_key: params.agent_key,
+              iteration,
+            }),
+          );
+          yield { type: 'error', error: DEGENERATE_OUTPUT_MESSAGE };
+          return {
+            content: '',
+            iterations: iteration,
+            tools_used: toolsUsed,
+            total_tokens: totalTokens,
+            success: false,
+            error: DEGENERATE_OUTPUT_MESSAGE,
+            degenerate: true,
+          };
+        }
 
         // If finish_reason is 'length', the response was truncated
         if (response.finish_reason === 'length') {

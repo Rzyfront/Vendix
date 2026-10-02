@@ -216,9 +216,10 @@ describe('AIChatService — plan interno de Vexi', () => {
       'rejected',
     );
     const params = b.run.mock.calls[0][0];
-    expect(params.goal).toBe(
-      '(interno) La persona rechazó el cambio propuesto; no se aplicó. Decide si lo demás sigue teniendo sentido: si sí, continúa; si no, pregúntale con naturalidad.',
+    expect(params.goal).toContain(
+      '(interno) La persona rechazó el cambio propuesto; no se aplicó.',
     );
+    expect(params.goal).toContain('1 frase');
     expect(
       b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data.role),
     ).not.toContain('user');
@@ -233,15 +234,52 @@ describe('AIChatService — plan interno de Vexi', () => {
       b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data.role),
     ).not.toContain('user');
     const params = b.run.mock.calls[0][0];
-    expect(params.goal).toBe(
-      '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado. Continúa con lo que sigue sin avisarle que retomas.',
+    expect(params.goal).toContain(
+      '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado.',
     );
+    expect(params.goal).toContain('1 o 2 frases');
+    expect(params.goal).toContain('sin tablas');
     expect(params.messages).toEqual([
       { role: 'system', content: renderPlanForModel(PLAN) },
     ]);
     expect(params.plan).toEqual({ hook: true });
     expect(b.planState.createHook).toHaveBeenCalledWith(7);
     expect(b.streamIntents.claimTurn).toHaveBeenCalledWith(7, 's1');
+  });
+
+  it('continuación approved: fila assistant NUEVA con continuation_of y done con message_id', async () => {
+    const run = agentGen(
+      [{ type: 'text', content: 'Listo, reembolso aplicado.' }, { type: 'done' }],
+      { tools_used: [], content: 'Listo, reembolso aplicado.' },
+    );
+    const b = build({
+      plan: PLAN,
+      run,
+      messages: [
+        { id: 3, role: 'user', content: 'reembolsa', metadata: null, created_at: new Date() },
+        {
+          id: 5,
+          role: 'assistant',
+          content: 'Propuesta',
+          metadata: { plan: { plan_id: 'p1', steps: [], status: 'proposed' } },
+          created_at: new Date(),
+        },
+      ],
+    });
+    b.prisma.ai_messages.create.mockResolvedValue({ id: 99 });
+    withIntent(b, { continuation: 'approved' });
+    const frames = await collect(b.service, null);
+    const created = b.prisma.ai_messages.create.mock.calls.map(
+      (c: any) => c[0].data,
+    );
+    expect(created).toHaveLength(1);
+    expect(created[0].role).toBe('assistant');
+    expect(created[0].content).toBe('Listo, reembolso aplicado.');
+    expect(created[0].metadata).toMatchObject({
+      continuation: 'approved',
+      continuation_of: 5,
+    });
+    expect(frames[frames.length - 1]).toEqual({ type: 'done', message_id: 99 });
   });
 
   it('resume usa su goal', async () => {
