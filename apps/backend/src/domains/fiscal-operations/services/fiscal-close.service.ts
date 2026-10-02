@@ -377,6 +377,7 @@ export class FiscalCloseService {
 
   async approveClose(contexts: FiscalOperationsContext[], sessionId: number) {
     const session = await this.findOne(contexts, sessionId);
+    if (session.status === 'closed' || session.status === 'cancelled') throw new BadRequestException('Closed or cancelled fiscal close sessions cannot be approved');
     const blockingFailures = session.checks.filter(
       (check) => check.blocking && check.status === 'failed',
     );
