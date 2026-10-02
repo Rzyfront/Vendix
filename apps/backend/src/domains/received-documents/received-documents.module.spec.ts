@@ -18,6 +18,7 @@ import { DocumentReceptionConnectionsService } from './services/document-recepti
 import { StoreReceivedDocumentAccountingController } from './store-received-document-accounting.controller';
 import { OrganizationReceivedDocumentAccountingController } from './organization-received-document-accounting.controller';
 import { ReceivedDocumentAccountingEvidenceService } from './services/received-document-accounting-evidence.service';
+import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
 
 describe('ReceivedDocumentsModule pipeline wiring', () => {
   const imports: any[] = Reflect.getMetadata('imports', ReceivedDocumentsModule) ?? [];
@@ -41,6 +42,8 @@ describe('ReceivedDocumentsModule pipeline wiring', () => {
       OrganizationReceivedDocumentAccountingController,
     ]));
     expect(providers).toContain(ReceivedDocumentAccountingEvidenceService);
+    expect(providers).toContain(ReceivedBuyerEventEnablementService);
+    expect(exports).toContain(ReceivedBuyerEventEnablementService);
     expect(exports).toContain(ReceivedDocumentAccountingEvidenceService);
   });
 
