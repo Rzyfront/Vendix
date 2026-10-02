@@ -1247,19 +1247,48 @@ export class VexChatStore {
     );
   }
 
+  /**
+   * Reopens the turn after a plan decision. The narration is a NEW assistant
+   * message inserted right after `anchor_message_id` (the one holding the
+   * plan card): the proposal message keeps its text and card untouched and
+   * the stream never appends to it. The backend persists the continuation
+   * as its own `ai_messages` row (`metadata.continuation_of`), so a reload
+   * shows the same order.
+   */
   private openStream(
     numeric: number,
     conversation_id: string,
-    message_id: string,
+    anchor_message_id: string,
     options: { continuation: 'approved' | 'rejected' | 'resume'; skipUserMessage?: boolean },
   ): void {
     this._is_agent_typing.set(true);
-    this.patchMessage(conversation_id, message_id, { streaming: true, error: null });
+    const continuation_message: VexMessage = {
+      ...buildMessage('agent', '', new Date()),
+      blocks: [],
+      tool_steps: [],
+      streaming: true,
+    };
+    const message_id = continuation_message.id;
+    this._conversations.update((list) =>
+      list.map((c) => {
+        if (c.id !== conversation_id) return c;
+        const index = c.messages.findIndex((m) => m.id === anchor_message_id);
+        const messages =
+          index < 0
+            ? [...c.messages, continuation_message]
+            : [
+                ...c.messages.slice(0, index + 1),
+                continuation_message,
+                ...c.messages.slice(index + 1),
+              ];
+        return { ...c, messages };
+      }),
+    );
     firstValueFrom(
       this.api.createStreamIntent(numeric, '', options),
     )
       .then((stream_id) => {
-        this.subscribeStream(numeric, conversation_id, message_id, stream_id);
+        this.subscribeStream(numeric, conversation_id, message_id, stream_id, true);
       })
       .catch((error) => {
         this.failMessage(conversation_id, message_id, extractApiErrorMessage(error));
@@ -1271,14 +1300,27 @@ export class VexChatStore {
     conversation_id: string,
     message_id: string,
     stream_id: string,
+    adopt_server_id = false,
   ): void {
     this.closeStream();
+    // Continuations adopt the server id of the new row (frame `message_id`)
+    // when the backend reports it; otherwise the local id stays.
+    let target = message_id;
     this.stream_sub = this.api.streamConversation(numeric, stream_id).subscribe({
-      next: (chunk) => this.applyChunk(conversation_id, message_id, chunk),
+      next: (chunk) => {
+        if (adopt_server_id && chunk.message_id !== undefined && chunk.message_id !== null) {
+          const server_id = String(chunk.message_id);
+          if (server_id && server_id !== target) {
+            this.renameMessage(conversation_id, target, server_id);
+            target = server_id;
+          }
+        }
+        this.applyChunk(conversation_id, target, chunk);
+      },
       error: (error: unknown) => {
         this.failMessage(
           conversation_id,
-          message_id,
+          target,
           error instanceof Error ? error.message : 'Se perdió la conexión con Vex.',
         );
       },
@@ -1286,6 +1328,16 @@ export class VexChatStore {
         this.stream_sub = undefined;
       },
     });
+  }
+
+  private renameMessage(conversation_id: string, from: string, to: string): void {
+    this._conversations.update((list) =>
+      list.map((c) =>
+        c.id === conversation_id && !c.messages.some((m) => m.id === to)
+          ? { ...c, messages: c.messages.map((m) => (m.id === from ? { ...m, id: to } : m)) }
+          : c,
+      ),
+    );
   }
 
   private applyChunk(

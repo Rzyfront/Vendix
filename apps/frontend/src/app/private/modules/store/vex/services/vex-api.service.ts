@@ -196,6 +196,8 @@ export interface VexStreamChunk {
     | 'done'
     | 'error';
   content?: string;
+  /** Id of the persisted assistant row, when the backend reports it (`done`/first frame). */
+  message_id?: string | number;
   tool?: {
     id: string;
     name: string;

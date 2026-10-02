@@ -32,6 +32,78 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
   imports: [IconComponent, VexiConfirmationCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    @if (single_step(); as step) {
+      <section
+        class="rounded-2xl border border-[var(--color-primary)] bg-[var(--color-surface)] p-3 flex flex-col gap-3"
+        role="group"
+        aria-label="Acción propuesta por Vex"
+      >
+        <header class="flex items-start gap-2">
+          <span
+            class="w-8 h-8 shrink-0 rounded-lg grid place-items-center bg-[rgba(var(--color-primary-rgb,46,204,113),0.14)] text-[var(--color-primary)]"
+            aria-hidden="true"
+          >
+            <app-icon name="sparkles" [size]="18"></app-icon>
+          </span>
+          <div class="min-w-0 flex-1">
+            <h4 class="text-sm font-semibold text-[var(--color-text-primary)] m-0">
+              Vex quiere: {{ step.summary || step.preview?.target || step.tool }}
+            </h4>
+            <p class="text-xs text-[var(--color-text-secondary)] m-0" role="status">
+              {{ single_status_label(step) }}
+            </p>
+          </div>
+          @if (step.irreversible) {
+            <span
+              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+            >
+              <app-icon name="alert-triangle" [size]="14"></app-icon>
+              Irreversible
+            </span>
+          }
+        </header>
+
+        <app-vexi-confirmation-card
+          [proposal]="toProposal(step)"
+          [hideFooter]="true"
+          [embedded]="true"
+          agentLabel="Vex"
+        ></app-vexi-confirmation-card>
+
+        @if (step.status === 'failed' && step.error) {
+          <p class="text-xs text-[var(--color-error)] m-0" role="alert">
+            {{ step.error }}
+          </p>
+        }
+
+        @if (is_open() || show_own_card(step)) {
+          <footer class="flex gap-2">
+            <button
+              type="button"
+              class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error)] text-[var(--color-error)] text-sm font-semibold disabled:opacity-50"
+              [disabled]="busy()"
+              (click)="cancel.emit()"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              class="flex-1 min-h-11 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              [disabled]="busy() || step.preview?.status === 'error'"
+              (click)="is_open() ? approve.emit() : onStepApprove(step)"
+            >
+              @if (busy()) {
+                <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
+                Aplicando…
+              } @else {
+                <app-icon name="check" [size]="16"></app-icon>
+                Aprobar
+              }
+            </button>
+          </footer>
+        }
+      </section>
+    } @else {
     <section
       class="rounded-2xl border border-[var(--color-primary)] bg-[var(--color-surface)] p-3 flex flex-col gap-3"
       role="group"
@@ -96,11 +168,13 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
                 [proposal]="toProposal(step)"
                 (approve)="onStepApprove(step)"
                 (reject)="cancel.emit()"
+                agentLabel="Vex"
               ></app-vexi-confirmation-card>
             } @else {
               <app-vexi-confirmation-card
                 [proposal]="toProposal(step)"
                 [hideFooter]="true"
+                agentLabel="Vex"
               ></app-vexi-confirmation-card>
               @if (step.irreversible && is_open()) {
                 <p class="text-xs text-[var(--color-text-secondary)] m-0">
@@ -149,6 +223,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
         </p>
       }
     </section>
+    }
   `,
 })
 export class VexPlanCardComponent {
@@ -162,6 +237,12 @@ export class VexPlanCardComponent {
   readonly irreversible_count = computed(
     () => this.plan().steps.filter((s) => s.irreversible).length,
   );
+
+  /** A one-step plan renders as a simple action confirmation, not as a plan. */
+  readonly single_step = computed<VexPlanStep | null>(() => {
+    const steps = this.plan().steps;
+    return steps.length === 1 ? steps[0] : null;
+  });
 
   readonly is_open = computed(() => this.plan().status === 'proposed');
 
@@ -237,6 +318,23 @@ export class VexPlanCardComponent {
         return '';
     }
   });
+
+  single_status_label(step: VexPlanStep): string {
+    if (step.status === 'done') return 'Hecho';
+    if (step.status === 'failed') return 'Falló';
+    if (step.status === 'cancelled' || this.plan().status === 'rejected') {
+      return 'Cancelado';
+    }
+    if (step.status === 'running' || this.plan().status === 'executing') {
+      return 'Aplicando…';
+    }
+    if (this.plan().status === 'approved') {
+      return step.irreversible
+        ? 'Aprobado · falta tu confirmación final'
+        : 'Aprobado';
+    }
+    return 'Esperando tu aprobación';
+  }
 
   step_status_label(status: VexPlanStep['status']): string {
     switch (status) {
