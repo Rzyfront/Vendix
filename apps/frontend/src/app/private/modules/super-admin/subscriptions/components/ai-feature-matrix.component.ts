@@ -16,6 +16,10 @@ import {
   MultiSelectorComponent,
   SelectorComponent,
 } from '../../../../../shared/components';
+import {
+  AiToolPickerComponent,
+  AiToolPickerEntry,
+} from '../../ai-engine/components/ai-tool-picker/ai-tool-picker.component';
 
 interface CapDefinition {
   field: keyof AIFeatureConfig;
@@ -37,7 +41,7 @@ interface FeatureDefinition {
 @Component({
   selector: 'app-ai-feature-matrix',
   standalone: true,
-  imports: [FormsModule, ToggleComponent, InputComponent, MultiSelectorComponent, SelectorComponent],
+  imports: [FormsModule, ToggleComponent, InputComponent, MultiSelectorComponent, SelectorComponent, AiToolPickerComponent],
   template: `
     <div class="space-y-5">
       <div class="rounded-lg border border-border bg-background p-4 space-y-2">
@@ -125,14 +129,15 @@ interface FeatureDefinition {
 
             @if (feature.key === 'tool_agents') {
               @if (toolOptions().length > 0) {
-                <app-multi-selector
+                <app-ai-tool-picker
                   label="Herramientas permitidas"
-                  [options]="toolOptions()"
+                  mode="allow"
+                  allValue="wildcard"
+                  [tools]="toolOptions()"
                   [ngModel]="config('tool_agents').tools_allowed ?? []"
                   (ngModelChange)="updateFeature('tool_agents', { tools_allowed: toStringArray($event) })"
-                  placeholder="Seleccionar herramientas"
-                  helpText="Nombres vivos del AIToolRegistry. Si el feature esta apagado, estas herramientas no se habilitan aunque esten listadas."
-                ></app-multi-selector>
+                  helpText="Nombres vivos del AIToolRegistry. Todas guarda un comodín que incluye las herramientas futuras; una lista vacía deja al agente del plan sin herramientas. Si el feature esta apagado, estas herramientas no se habilitan aunque esten listadas."
+                ></app-ai-tool-picker>
               } @else {
                 <p class="text-xs text-text-secondary">
                   Catálogo de herramientas sin cargar: abre el plan con el Engine
@@ -179,7 +184,7 @@ export class AiFeatureMatrixComponent {
    * existe en el `AIToolRegistry` real y el backend ahora rechaza esas refs
    * con 400, así que mostrarlas sería ofrecer un guardado imposible.
    */
-  readonly availableTools = input<{ value: string; label: string; description?: string }[]>([]);
+  readonly availableTools = input<AiToolPickerEntry[]>([]);
   readonly availableAgents = input<{ value: string; label: string; description?: string }[]>([]);
   readonly appsByCategory = input<Partial<Record<AIFeatureKey, EngineAppLineage[]>>>({});
   readonly valueChange = output<AIFeatureFlags>();

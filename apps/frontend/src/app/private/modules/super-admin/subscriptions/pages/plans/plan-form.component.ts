@@ -300,7 +300,7 @@ interface PlanFormControls {
             <app-ai-feature-matrix
               [initialValue]="aiFeatures()"
               [systemModels]="systemAiModels()"
-              [availableTools]="catalogToolOptions()"
+              [availableTools]="engineTools()"
               [availableAgents]="catalogAgentOptions()"
               [appsByCategory]="catalogAppsByCategory()"
               (valueChange)="onAIFeaturesChange($event)"
@@ -447,14 +447,6 @@ export class PlanFormComponent {
   readonly engineApps = signal<AIEngineApp[]>([]);
   readonly engineAgents = signal<AIAgent[]>([]);
   readonly engineTools = signal<AIToolCatalogEntry[]>([]);
-
-  readonly catalogToolOptions = computed(() =>
-    this.engineTools().map((tool) => ({
-      value: tool.name,
-      label: tool.name,
-      description: tool.description || tool.domain,
-    })),
-  );
 
   readonly catalogAgentOptions = computed(() =>
     this.engineAgents().map((agent) => ({
