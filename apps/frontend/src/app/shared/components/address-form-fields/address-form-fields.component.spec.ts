@@ -8,6 +8,12 @@ import { DianMunicipalityLookupService } from '../../services/dian-municipality-
 import { GeocodingService } from '../../../private/modules/ecommerce/services/geocoding.service';
 import { CurrencyFormatService } from '../../pipes/currency/currency.pipe';
 
+const ADDRESS_TEST_DEPARTMENTS = [{ code: '44', name: 'La Guajira' }];
+const ADDRESS_TEST_RIOHACHA = {
+  code: '44001', name: 'Riohacha', department_code: '44',
+  department_name: 'La Guajira', postal_code: '440001',
+};
+
 /** Regression coverage for the DANE department → municipality form flow. */
 describe('AddressFormFieldsComponent — selectores DANE', () => {
   let fixture: ComponentFixture<AddressFormFieldsComponent>;
@@ -251,9 +257,11 @@ describe('AddressFormFieldsComponent — geocode precisión "area" no es una ubi
   const editAddressAndFlushDebounce = async () => {
     component.form.markAsDirty();
     component.form.get('address_line1')!.setValue('Vereda Xyzqwerty Km 99 Via Inexistente');
-    component.form.get('city')!.setValue('Riohacha');
-    component.form.get('state_province')!.setValue('La Guajira');
-    jasmine.clock().tick(600);
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+    jasmine.clock().tick(500);
+    await fixture.whenStable();
+    jasmine.clock().tick(500);
     await fixture.whenStable();
   };
 
@@ -265,7 +273,8 @@ describe('AddressFormFieldsComponent — geocode precisión "area" no es una ubi
         {
           provide: DianMunicipalityLookupService,
           useValue: {
-            listDepartments: () => of([]), listByDepartment: () => of([]),
+            listDepartments: () => of(ADDRESS_TEST_DEPARTMENTS),
+            listByDepartment: () => of([ADDRESS_TEST_RIOHACHA]),
             resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {},
           },
         },
@@ -363,9 +372,11 @@ describe('AddressFormFieldsComponent — chip de carga sobre el mapa', () => {
   const editAddressAndFlushDebounce = async () => {
     component.form.markAsDirty();
     component.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
-    component.form.get('city')!.setValue('Bogotá');
-    component.form.get('state_province')!.setValue('Cundinamarca');
-    jasmine.clock().tick(600);
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+    jasmine.clock().tick(500);
+    await fixture.whenStable();
+    jasmine.clock().tick(500);
     await fixture.whenStable();
   };
 
@@ -378,7 +389,8 @@ describe('AddressFormFieldsComponent — chip de carga sobre el mapa', () => {
         {
           provide: DianMunicipalityLookupService,
           useValue: {
-            listDepartments: () => of([]), listByDepartment: () => of([]),
+            listDepartments: () => of(ADDRESS_TEST_DEPARTMENTS),
+            listByDepartment: () => of([ADDRESS_TEST_RIOHACHA]),
             resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {},
           },
         },
