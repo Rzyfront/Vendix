@@ -48,7 +48,9 @@ export class DianGeographyController {
       result.items,
       result.total,
       1,
-      query.limit ?? 20,
+      query.department_code !== undefined
+        ? Math.max(result.items.length, 1)
+        : query.limit ?? 20,
       'Municipios DANE obtenidos exitosamente',
     );
   }
