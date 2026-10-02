@@ -136,6 +136,12 @@ export class VexBlockService {
 
   async create(input: CreateVexBlockInput): Promise<VexBlockRow> {
     const storeId = this.storeIdOrThrow();
+    // Fail-closed: `where: { user_id: undefined }` hace que Prisma ignore el
+    // predicado y la búsqueda degrada a "cualquier conversación de la tienda".
+    const userId = RequestContextService.getContext()?.user_id;
+    if (userId === undefined || userId === null) {
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
+    }
     if (!VEX_BLOCK_KINDS.includes(input.kind)) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
@@ -158,7 +164,7 @@ export class VexBlockService {
     const conversation = await this.prisma.ai_conversations.findFirst({
       where: {
         id: input.conversation_id,
-        user_id: RequestContextService.getContext()?.user_id,
+        user_id: userId,
       },
     });
     if (!conversation) {
@@ -187,15 +193,34 @@ export class VexBlockService {
    * "no such block" indistinguishable.
    */
   async getById(id: string): Promise<VexBlockRow & { signed_url?: string }> {
+    const row = await this.findOwnedBlock(id);
+    return this.withSignedUrl(row);
+  }
+
+  /**
+   * El bloque solo existe para quien posee su conversación: filtra por tienda
+   * Y exige que la conversación del bloque sea del usuario del contexto. Tienda
+   * ajena, bloque inexistente y conversación de otro usuario responden el mismo
+   * 404 — la existencia no se confirma. Sin `user_id` en el contexto falla
+   * cerrado (Prisma ignoraría un `user_id: undefined`).
+   */
+  private async findOwnedBlock(id: string): Promise<VexBlockRow> {
     const storeId = this.storeIdOrThrow();
-    const row = await this.blocks.findFirst({ where: { id, store_id: storeId } });
-    if (!row) {
-      throw new VendixHttpException(
+    const userId = RequestContextService.getContext()?.user_id;
+    const notFound = () =>
+      new VendixHttpException(
         ErrorCodes.SYS_NOT_FOUND_001,
         'Bloque no encontrado.',
       );
-    }
-    return this.withSignedUrl(row);
+    if (userId === undefined || userId === null) throw notFound();
+    const row = await this.blocks.findFirst({ where: { id, store_id: storeId } });
+    if (!row) throw notFound();
+    const conversation = await this.prisma.ai_conversations.findFirst({
+      where: { id: row.conversation_id, user_id: userId },
+      select: { id: true },
+    });
+    if (!conversation) throw notFound();
+    return row;
   }
 
   async listByConversation(
@@ -409,13 +434,7 @@ export class VexBlockService {
    */
   async transform(id: string, ops: VexBlockTransform): Promise<VexBlockRow> {
     const storeId = this.storeIdOrThrow();
-    const row = await this.blocks.findFirst({ where: { id, store_id: storeId } });
-    if (!row) {
-      throw new VendixHttpException(
-        ErrorCodes.SYS_NOT_FOUND_001,
-        'Bloque no encontrado.',
-      );
-    }
+    const row = await this.findOwnedBlock(id);
     if (row.kind !== 'table') {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
@@ -453,13 +472,7 @@ export class VexBlockService {
     interaction: VexBlockInteraction,
   ): Promise<VexBlockRow> {
     const storeId = this.storeIdOrThrow();
-    const row = await this.blocks.findFirst({ where: { id, store_id: storeId } });
-    if (!row) {
-      throw new VendixHttpException(
-        ErrorCodes.SYS_NOT_FOUND_001,
-        'Bloque no encontrado.',
-      );
-    }
+    const row = await this.findOwnedBlock(id);
     const spec = {
       ...row.spec,
       last_interaction: {

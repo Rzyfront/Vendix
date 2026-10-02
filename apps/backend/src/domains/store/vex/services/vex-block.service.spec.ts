@@ -332,4 +332,39 @@ describe('VexBlockService', () => {
     expect((await service.getById(linked.id)).message_id).toBe(41);
     expect(await service.attachToMessage([], 77)).toBe(0);
   });
+  it('otro usuario no lee, transforma ni interactúa con un bloque ajeno (404)', async () => {
+    const block = await service.create({
+      conversation_id: 1,
+      kind: 'table',
+      spec: {},
+      data: { columns: [{ key: 'a', label: 'A' }], rows: [{ a: 1 }] },
+    });
+    getContext.mockReturnValue({ user_id: 10, store_id: 7 } as any);
+    await expect(service.getById(block.id)).rejects.toMatchObject({
+      errorCode: 'SYS_NOT_FOUND_001',
+    });
+    await expect(service.getUiBlock(block.id)).rejects.toMatchObject({
+      errorCode: 'SYS_NOT_FOUND_001',
+    });
+    await expect(
+      service.recordInteraction(block.id, { type: 'row_select', payload: {} }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
+    await expect(service.transform(block.id, {} as any)).rejects.toMatchObject({
+      errorCode: 'SYS_NOT_FOUND_001',
+    });
+  });
+
+  it('create sin user_id en el contexto falla cerrado y no persiste', async () => {
+    getContext.mockReturnValue({ store_id: 7 } as any);
+    await expect(
+      service.create({
+        conversation_id: 1,
+        kind: 'table',
+        spec: {},
+        data: { columns: [{ key: 'a', label: 'A' }], rows: [] },
+      }),
+    ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+    expect(delegate.rows).toHaveLength(0);
+    expect(findConversation).not.toHaveBeenCalled();
+  });
 });
