@@ -134,7 +134,7 @@ interface FeatureDefinition {
                   mode="allow"
                   allValue="wildcard"
                   [tools]="toolOptions()"
-                  [ngModel]="config('tool_agents').tools_allowed ?? []"
+                  [ngModel]="config('tool_agents').tools_allowed ?? ['*']"
                   (ngModelChange)="updateFeature('tool_agents', { tools_allowed: toStringArray($event) })"
                   helpText="Nombres vivos del AIToolRegistry. Todas guarda un comodín que incluye las herramientas futuras; una lista vacía deja al agente del plan sin herramientas. Si el feature esta apagado, estas herramientas no se habilitan aunque esten listadas."
                 ></app-ai-tool-picker>
