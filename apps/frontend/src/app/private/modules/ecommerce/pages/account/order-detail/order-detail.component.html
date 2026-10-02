@@ -36,7 +36,7 @@
       >
     </div>
   } @else if (order(); as order) {
-    <div class="guest-order-card" [class.card-enter]="is_new_order()">
+    <div class="guest-order-card printable-order" [class.card-enter]="is_new_order()">
       <!-- SUCCESS BANNER (variante rica de cuenta) -->
       @if (is_new_order()) {
         <div class="success-banner">
