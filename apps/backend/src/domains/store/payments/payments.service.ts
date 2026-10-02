@@ -5168,7 +5168,13 @@ export class PaymentsService {
           OR: [{ store_id }, { is_system: true, store_id: null }],
         },
       },
-      select: { id: true, shipping_method_id: true, type: true, base_cost: true },
+      select: {
+        id: true,
+        shipping_method_id: true,
+        type: true,
+        base_cost: true,
+        shipping_method: { select: { type: true } },
+      },
     });
     if (!rate || !dto.shipping_method_id) {
       throw new VendixHttpException(
@@ -5179,6 +5185,76 @@ export class PaymentsService {
           shipping_method_id: dto.shipping_method_id ?? null,
         },
       );
+    }
+
+    // Pickup is selected from the merchant's configured pickup rates and does
+    // not require a buyer address. Trust the persisted method type—not the
+    // client delivery_type—then validate the selected rate against the same
+    // server quote used to display pickup prices.
+    if (rate.shipping_method?.type === 'pickup') {
+      if (dto.manual_shipping_price != null) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'El retiro en tienda debe usar el costo de una tarifa configurada',
+        );
+      }
+
+      if (
+        !this.shippingCalculatorService ||
+        typeof this.shippingCalculatorService.quotePickupRates !== 'function'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'No se pudo validar la tarifa de retiro en tienda',
+        );
+      }
+      const pickupOptions = await this.shippingCalculatorService.quotePickupRates(
+        store_id,
+        rate.shipping_method_id,
+      );
+      const pickupQuote = pickupOptions.find((option) => option.id === rate.id);
+      if (
+        !pickupQuote ||
+        !Number.isFinite(pickupQuote.cost) ||
+        pickupQuote.cost < 0
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+          'La tarifa de retiro en tienda no está activa o ya no está disponible',
+          { shipping_rate_id: rate.id, shipping_method_id: rate.shipping_method_id },
+        );
+      }
+      if (differsByAtLeastCents(shipping_cost, pickupQuote.cost, 1)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'El total del retiro en tienda cambió. Revisa el costo antes de cobrar.',
+          { expected_shipping_cost: pickupQuote.cost, client_shipping_cost: shipping_cost },
+        );
+      }
+      if (
+        !this.shippingTaxService ||
+        typeof this.shippingTaxService.snapshotForRate !== 'function'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'No se pudo copiar el impuesto de la tarifa de retiro en tienda',
+        );
+      }
+      const snapshot = await this.shippingTaxService.snapshotForRate(
+        tx,
+        rate.id,
+        pickupQuote.cost,
+        { store_id },
+      );
+      return {
+        snapshot,
+        rate_id: rate.id,
+        is_inclusive:
+          snapshot.shipping_tax_amount > 0
+            ? pickupQuote.tax_is_inclusive ?? null
+            : null,
+        gross_cost: pickupQuote.cost,
+      };
     }
 
     if (dto.manual_shipping_price != null) {

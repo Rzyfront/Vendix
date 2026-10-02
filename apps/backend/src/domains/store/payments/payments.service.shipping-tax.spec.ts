@@ -50,6 +50,13 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     order_item_taxes: { update: jest.fn() },
     shipping_rates: { findFirst: jest.fn().mockResolvedValue(rate) },
   });
+  const pickupRate = (methodType = 'pickup') => ({
+    id: 9,
+    shipping_method_id: 5,
+    type: 'flat',
+    base_cost: 15000,
+    shipping_method: { type: methodType },
+  });
 
   beforeEach(() => {
     snapshotForRate = jest.fn().mockResolvedValue({ ...INC_SNAPSHOT });
@@ -107,6 +114,132 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
       shipping_cost: 12000,
       grand_total: 22000,
     }));
+  });
+
+  describe('tarifas de retiro en tienda', () => {
+    it('acepta el precio bruto cotizado sin dirección y copia su snapshot fiscal', async () => {
+      const client = tx(pickupRate());
+      const quotePickupRates = jest.fn().mockResolvedValue([{
+        id: 9, cost: 11900, tax_is_inclusive: false,
+      }]);
+      service.shippingCalculatorService = { quotePickupRates };
+
+      await service.createOrUpdateOrderFromPos(client, dto({
+        delivery_type: 'home_delivery', // la relación persistida determina que es pickup
+        shipping_rate_id: 9,
+        shipping_cost: 11900,
+      }), user);
+
+      expect(quotePickupRates).toHaveBeenCalledWith(1, 5);
+      expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 11900, { store_id: 1 });
+      expect(client.orders.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+        ...INC_SNAPSHOT,
+        shipping_rate_id: 9,
+        shipping_cost: 11900,
+        shipping_tax_is_inclusive: false,
+        grand_total: 21900,
+      }));
+    });
+
+    it.each([10000, 19900])('rechaza costo cliente manipulado (%s) antes de escribir', async (cost) => {
+      const client = tx(pickupRate());
+      service.shippingCalculatorService = {
+        quotePickupRates: jest.fn().mockResolvedValue([{ id: 9, cost: 11900 }]),
+      };
+
+      await expect(service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: 9,
+        shipping_cost: cost,
+      }), user)).rejects.toMatchObject({
+        errorCode: ErrorCodes.PAY_VALIDATE_001.code,
+      });
+
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      expect(client.orders.update).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('retira gratis: costo 0 conserva snapshot vacío y modo fiscal null', async () => {
+      const client = tx(pickupRate());
+      snapshotForRate.mockResolvedValue({ ...EMPTY_SHIPPING_TAX });
+      service.shippingCalculatorService = {
+        quotePickupRates: jest.fn().mockResolvedValue([{
+          id: 9, cost: 0, tax_is_inclusive: false,
+        }]),
+      };
+
+      await service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: 9,
+        shipping_cost: 0,
+      }), user);
+
+      expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 0, { store_id: 1 });
+      expect(client.orders.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+        ...EMPTY_SHIPPING_TAX,
+        shipping_rate_id: 9,
+        shipping_cost: 0,
+        shipping_tax_is_inclusive: null,
+        grand_total: 10000,
+      }));
+    });
+
+    it('rechaza tarifa inexistente en la cotización o retiro manual sin escribir', async () => {
+      const quotePickupRates = jest.fn().mockResolvedValue([]);
+      service.shippingCalculatorService = { quotePickupRates };
+      const missingRateTx = tx(pickupRate());
+      await expect(service.createOrUpdateOrderFromPos(missingRateTx, dto({
+        shipping_rate_id: 9,
+      }), user)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_SHIP_RATE_MISMATCH_001.code,
+      });
+      expect(missingRateTx.orders.update).not.toHaveBeenCalled();
+
+      const manualTx = tx(pickupRate());
+      await expect(service.createOrUpdateOrderFromPos(manualTx, dto({
+        shipping_rate_id: 9,
+        manual_shipping_price: 10000,
+        shipping_cost: 11900,
+      }), user)).rejects.toMatchObject({
+        errorCode: ErrorCodes.PAY_VALIDATE_001.code,
+      });
+      expect(quotePickupRates).toHaveBeenCalledTimes(1);
+      expect(manualTx.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('falla de forma protegida si el calculador no implementa quotePickupRates', async () => {
+      const client = tx(pickupRate());
+      service.shippingCalculatorService = { quoteRateGross: jest.fn() };
+
+      await expect(service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: 9,
+        shipping_cost: 15000,
+      }), user)).rejects.toMatchObject({
+        errorCode: ErrorCodes.PAY_VALIDATE_001.code,
+      });
+
+      expect(client.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('no clasifica como retiro una tarifa own_fleet aunque DTO diga pickup', async () => {
+      const client = tx(pickupRate('own_fleet'));
+      const quotePickupRates = jest.fn();
+      service.shippingCalculatorService = {
+        quoteRateGross: jest.fn().mockResolvedValue(15000),
+        quotePickupRates,
+      };
+
+      await service.createOrUpdateOrderFromPos(client, dto({
+        delivery_type: 'pickup',
+        shipping_rate_id: 9,
+        shipping_cost: 15000,
+      }), user);
+
+      expect(quotePickupRates).not.toHaveBeenCalled();
+      expect(client.orders.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+        shipping_rate_id: 9,
+        shipping_cost: 15000,
+      }));
+    });
   });
 
   it('tarifa fija con costo digitado distinto (costo manual): copia vacía, liga la tarifa', async () => {
