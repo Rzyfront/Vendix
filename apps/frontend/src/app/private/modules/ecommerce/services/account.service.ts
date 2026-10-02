@@ -76,6 +76,31 @@ export interface OrderAppliedCoupon {
   used_at: string | null;
 }
 
+export interface OrderStoreBranding {
+  primary_color?: string | null;
+  secondary_color?: string | null;
+  accent_color?: string | null;
+  background_color?: string | null;
+  surface_color?: string | null;
+  text_color?: string | null;
+  text_secondary_color?: string | null;
+  text_muted_color?: string | null;
+}
+
+export interface OrderStore {
+  id: number;
+  name: string;
+  logo_url?: string | null;
+  branding?: OrderStoreBranding | null;
+}
+
+export interface OrderInvoice {
+  id: number;
+  invoice_number: string;
+  status: string;
+  pdf_url?: string | null;
+}
+
 export interface OrderDetail extends Order {
   subtotal_amount: number;
   discount_amount: number;
@@ -83,6 +108,16 @@ export interface OrderDetail extends Order {
   shipping_cost: number;
   shipping_address: any;
   invoice_url: string | null;
+  /** Tienda + marca (paridad guest order-summary). */
+  store?: OrderStore | null;
+  /** ETA persistido + MAX en vivo (paridad guest order-summary). */
+  estimated_ready_at?: string | null;
+  estimated_delivered_at?: string | null;
+  prep_minutes_max?: number | null;
+  /** Gate fiscal Subtotal/Impuestos (paridad guest, fail-closed). */
+  prints_vat_breakdown?: boolean;
+  /** Última factura emitida (paridad guest `invoice`). */
+  invoice?: OrderInvoice | null;
   /**
    * How the order reaches the customer. `pickup` means the customer comes to
    * the store — the order-detail page reads it to decide whether a service was
@@ -99,6 +134,9 @@ export interface OrderDetail extends Order {
     quantity: number;
     unit_price: number;
     total_price: number;
+    /** Cocina en vivo + prep (paridad guest order-summary). */
+    kitchen_status?: string | null;
+    preparation_time_minutes?: number | null;
     /**
      * Precio final con impuesto por línea (contrato feat/global-final-prices).
      * Opcional hasta que el backend lo publique; la vista usa `??` fallback.

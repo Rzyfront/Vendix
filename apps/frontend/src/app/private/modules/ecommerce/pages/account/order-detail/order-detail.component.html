@@ -1,4 +1,7 @@
-<div class="order-detail-page">
+<!-- Paridad visual con guest-order-summary: mismas clases (el .scss arranca
+     como copia de sus `styles`) + secciones propias de cuenta (reservas,
+     envío, acciones, wompi). -->
+<div class="guest-order-page">
   <a routerLink="/account/orders" class="back-link">
     <app-icon name="arrow-left" [size]="16"></app-icon>
     Mis pedidos
@@ -17,469 +20,558 @@
   }
 
   @if (is_loading()) {
-    <div class="loading">
+    <div class="guest-order-card state-card">
       <div class="spinner"></div>
+      <p class="muted">Cargando tu pedido...</p>
+    </div>
+  } @else if (load_failed() || !order()) {
+    <div class="guest-order-card state-card">
+      <span class="state-icon error">
+        <app-icon name="circle-alert" [size]="30" />
+      </span>
+      <h1 class="state-title">No encontramos tu pedido</h1>
+      <p class="muted">Verifica el enlace o vuelve a tus pedidos.</p>
+      <app-button routerLink="/account/orders" variant="primary"
+        >Volver a mis pedidos</app-button
+      >
     </div>
   } @else if (order(); as order) {
-    <!-- Success Banner -->
-    @if (is_new_order()) {
-      <div class="success-banner">
-        <div class="success-icon-wrap">
-          <app-icon name="check" [size]="28"></app-icon>
+    <div class="guest-order-card" [class.card-enter]="is_new_order()">
+      <!-- SUCCESS BANNER (variante rica de cuenta) -->
+      @if (is_new_order()) {
+        <div class="success-banner">
+          <div class="success-icon-wrap">
+            <app-icon name="check" [size]="28"></app-icon>
+          </div>
+          <div class="success-text">
+            <h2>¡Pedido confirmado!</h2>
+            <p class="success-order-number">Pedido #{{ order.order_number }}</p>
+            <p class="success-description">{{ postPurchaseMessage() }}</p>
+          </div>
+          <app-icon
+            name="package"
+            [size]="24"
+            class="success-package-icon"
+          ></app-icon>
         </div>
-        <div class="success-text">
-          <h2>¡Pedido confirmado!</h2>
-          <p class="success-order-number">Pedido #{{ order.order_number }}</p>
-          <p class="success-description">{{ postPurchaseMessage() }}</p>
-        </div>
-        <app-icon
-          name="package"
-          [size]="24"
-          class="success-package-icon"
-        ></app-icon>
-      </div>
-    }
+      }
 
-    <!-- Order Header Card (non-new orders) -->
-    @if (!is_new_order()) {
-      <div class="order-header-card">
-        <div class="order-header-top">
-          <h1>Pedido #{{ order.order_number }}</h1>
-          <span class="status-badge" [class]="getStateClass(order.state)">
-            <app-icon [name]="getStateIcon(order.state)" [size]="14"></app-icon>
-            {{ getStateLabel(order.state) }}
-          </span>
+      <!-- HEADER CARD (orden + tienda + acciones) -->
+      <header class="order-card order-head-card">
+        <div class="order-head-store">
+          @if (storeLogo(); as logoUrl) {
+            <img
+              class="order-head-logo"
+              [src]="logoUrl"
+              [alt]="order.store?.name || 'Logo de la tienda'"
+              (error)="storeLogoFailed.set(true)"
+            />
+          } @else {
+            <span class="order-head-logo-fallback">
+              <app-icon name="store" [size]="20" />
+            </span>
+          }
+          <span class="order-head-store-name">{{
+            order.store?.name || 'Tienda'
+          }}</span>
         </div>
-        <div class="order-meta">
-          <span class="meta-item">
-            <app-icon name="calendar" [size]="14"></app-icon>
-            {{ order.created_at | date: "dd MMM yyyy, HH:mm" }}
-          </span>
-          <span class="meta-item">
-            <app-icon name="package" [size]="14"></app-icon>
-            {{ itemsSummary() }}
-          </span>
-          <span class="meta-item total-highlight">
-            <app-icon name="receipt" [size]="14"></app-icon>
-            {{ order.grand_total | currency }}
-          </span>
+        <div class="order-title-row">
+          <h1 class="order-title">Orden #{{ order.order_number }}</h1>
+          <app-badge [variant]="getStateVariant(order.state)" size="sm"
+            ><app-icon
+              [name]="getStateIcon(order.state)"
+              [size]="14"
+            />{{ getStateLabel(order.state) }}</app-badge
+          >
         </div>
-      </div>
-    }
+        <p class="order-meta-line">
+          <span>{{ order.created_at | date: 'dd/MM/yyyy HH:mm' }}</span>
+          <span class="meta-sep" aria-hidden="true">·</span>
+          <span>{{ itemsSummary() }}</span>
+          @if (worstPaymentState(order.payments); as payState) {
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span class="meta-pay-state">{{
+              getPaymentStateLabel(payState)
+            }}</span>
+          }
+        </p>
+        @if (whatsappEnabled()) {
+          <div class="order-head-actions no-print">
+            <app-button variant="primary" (clicked)="sendToWhatsApp(order)">
+              <app-icon name="message-circle" [size]="16" slot="icon" />
+              Preguntar por mi pedido
+            </app-button>
+          </div>
+        }
+      </header>
 
-    <!-- Main Content -->
-    <div class="order-body">
-      <!-- Products Section -->
-      <section class="card-section">
-        <div class="section-header">
-          <app-icon name="shopping-bag" [size]="18"></app-icon>
-          <h3>{{ itemsSectionTitle() }}</h3>
+      <!-- ETA DE PREPARACIÓN -->
+      @if (etaVisible()) {
+        <div class="eta-banner">
+          <app-icon name="timer" [size]="20" />
+          <div class="eta-text">
+            <strong class="eta-line">{{ etaLabel(order) }}</strong>
+            @if (isPaymentPending(order)) {
+              <span class="eta-note">{{
+                paymentPendingNote(order)
+              }}</span>
+            }
+          </div>
         </div>
-        <div class="section-divider"></div>
-        <div class="items-list">
-          @for (item of order.items; track item.id) {
-            <!--
-              E2 — el item cancelado se queda en su posicion original
-              (Nancy: "el cliente necesita ver que cancelo en el sitio donde
-              lo pidio"). Precio y total OCULTOS: un numero tachado sigue
-              siendo un numero que el ojo suma. El nombre va tachado pero
-              legible (sin bajar el contraste al maximo). El motivo solo se
-              pinta si aporta — vacio o prefijo 'legacy:' de la ruta vieja
-              de compatibilidad, oculto.
-            -->
-            <div
-              class="item-row"
-              [class.item-row--cancelled]="isItemCancelled(item)"
-            >
-              <div class="item-thumb">
-                @if (item.variant_image_url || item.image_url) {
-                  <img [src]="item.variant_image_url || item.image_url" [alt]="item.product_name" />
-                } @else {
-                  <div class="thumb-placeholder">
-                    <app-icon name="image" [size]="18"></app-icon>
+      }
+
+      <!-- SEGUIMIENTO (mismo componente que guest; solo con físicos) -->
+      @if (hasPhysicalItems()) {
+        <section class="order-card" aria-label="Seguimiento del pedido">
+          <div class="section-header">
+            <app-icon name="timer" [size]="18" />
+            <h2>Seguimiento del pedido</h2>
+          </div>
+          <app-order-tracking-progress
+            [orderState]="order.state"
+            [hasShippingAddress]="order.shipping_address != null"
+            [animateFromZero]="is_new_order()"
+            [baseMinutes]="etaMinutes(order)"
+            [reducedMotion]="prefersReducedMotion()"
+            [hasPreparedItems]="orderHasPreparedItems(order)"
+          />
+        </section>
+      }
+
+      <!-- GRID (contenido + resumen lateral) -->
+      <div class="order-grid">
+        <div class="order-main">
+          <!-- PRODUCTOS / SERVICIOS -->
+          <section
+            class="order-section order-card"
+            [attr.aria-label]="itemsSectionTitle()"
+          >
+            <div class="section-header">
+              <app-icon name="shopping-bag" [size]="18" />
+              <h2>{{ itemsSectionTitle() }}</h2>
+            </div>
+            <div class="items">
+              @for (item of order.items; track item.id) {
+                <!--
+                  E2 — el item cancelado se queda en su posicion original.
+                  Precio y total OCULTOS: un numero tachado sigue siendo un
+                  numero que el ojo suma. El motivo solo se pinta si aporta.
+                -->
+                <div
+                  class="item-row"
+                  [class.item-row--cancelled]="isItemCancelled(item)"
+                >
+                  <div class="item-thumb">
+                    @if (item.variant_image_url || item.image_url) {
+                      <img
+                        [src]="item.variant_image_url || item.image_url"
+                        [alt]="item.product_name"
+                      />
+                    } @else {
+                      <div class="thumb-placeholder">
+                        <app-icon name="image" [size]="18" />
+                      </div>
+                    }
+                  </div>
+                  <div class="item-info">
+                    <div class="item-name-row">
+                      <span class="item-name">{{ item.product_name }}</span>
+                      @if (isItemCancelled(item)) {
+                        <app-badge variant="warning" size="sm">
+                          <app-icon name="x-circle" [size]="11" />
+                          Cancelado
+                        </app-badge>
+                      } @else if (isServiceItem(item)) {
+                        <app-badge variant="service" size="sm">
+                          Servicio
+                        </app-badge>
+                      }
+                    </div>
+                    @if (getVariantLabel(item)) {
+                      <span class="item-variant">{{
+                        getVariantLabel(item)
+                      }}</span>
+                    }
+                    @if (!isItemCancelled(item)) {
+                      <span class="item-qty"
+                        >{{ item.quantity }} ×
+                        {{
+                          (item.final_unit_price ?? item.unit_price) | currency
+                        }}</span
+                      >
+                    }
+                    @if (
+                      isItemCancelled(item) &&
+                      hasVisibleCancellationReason(item)
+                    ) {
+                      <span class="item-cancellation-reason">
+                        {{ item.cancellation_reason }}
+                      </span>
+                    }
+                    @if (kitchenStateFor(item); as ks) {
+                      <span class="kitchen-line">
+                        <app-badge
+                          [variant]="kitchenBadgeVariant(ks)"
+                          size="xs"
+                        >
+                          <app-icon name="flame" [size]="10" />
+                          {{ kitchenPrepLine(ks) }}
+                        </app-badge>
+                      </span>
+                    }
+                  </div>
+                  @if (!isItemCancelled(item)) {
+                    <strong class="item-total">{{
+                      (item.final_total_price ?? item.total_price) | currency
+                    }}</strong>
+                  }
+                </div>
+              }
+            </div>
+          </section>
+
+          <!-- MÉTODO DE PAGO (multipago ordenado peor-primero) -->
+          @if (paymentsWorstFirst(order.payments); as payments) {
+            @if (payments.length) {
+              <section
+                class="order-section order-card"
+                aria-label="Métodos de pago"
+              >
+                <div class="section-header">
+                  <app-icon name="credit-card" [size]="18" />
+                  <h2>Métodos de pago</h2>
+                </div>
+                <div class="payment-list">
+                  @for (p of payments; track p.id) {
+                    <div class="payment-block">
+                      <div class="payment-head">
+                        <span class="payment-method">{{
+                          p.method || 'Pago'
+                        }}</span>
+                        <span class="payment-head-right">
+                          @if (p.amount != null) {
+                            <strong class="payment-amount">{{
+                              p.amount | currency
+                            }}</strong>
+                          }
+                          <app-badge
+                            [variant]="getPaymentStateVariant(p.state)"
+                            size="sm"
+                            badgeStyle="outline"
+                            >{{ getPaymentStateLabel(p.state) }}</app-badge
+                          >
+                        </span>
+                      </div>
+                    </div>
+                  }
+                </div>
+              </section>
+            }
+          }
+
+          <!-- RESERVAS -->
+          @if (order.bookings.length) {
+            <section class="order-section order-card" aria-label="Reservas">
+              <div class="section-header">
+                <app-icon name="calendar-check" [size]="18" />
+                <h2>
+                  {{ order.bookings.length === 1 ? 'Reserva' : 'Reservas' }}
+                </h2>
+              </div>
+              <div class="booking-list">
+                @for (b of order.bookings; track b.id) {
+                  <div class="booking-row">
+                    <div class="booking-head">
+                      <span class="booking-service">{{
+                        b.product_name
+                      }}</span>
+                      <app-badge
+                        [variant]="getBookingBadgeVariant(b.status)"
+                        size="sm"
+                        >{{ getBookingStatusLabel(b.status) }}</app-badge
+                      >
+                    </div>
+                    <span class="booking-code">#{{ b.booking_number }}</span>
+                    <span class="booking-when">
+                      <app-icon name="calendar" [size]="13" />
+                      {{ b.date | date: 'EEE d MMM' : 'UTC' }} ·
+                      {{ b.start_time }} - {{ b.end_time }}
+                    </span>
                   </div>
                 }
               </div>
-              <div class="item-details">
-                <div class="item-name-row">
-                  <span class="item-name">{{ item.product_name }}</span>
-                  @if (isItemCancelled(item)) {
-                    <app-badge variant="warning" size="sm">
-                      <app-icon name="x-circle" [size]="11" />
-                      Cancelado
-                    </app-badge>
-                  } @else if (item.product_type === "service") {
-                    <span class="item-type-badge item-type-badge--service"
-                      >Servicio</span
-                    >
-                  }
-                </div>
-                @if (getVariantLabel(item)) {
-                  <span class="item-variant">{{ getVariantLabel(item) }}</span>
-                }
-                @if (!isItemCancelled(item)) {
-                  <span class="item-meta"
-                    >{{ item.quantity }} × {{ item.final_unit_price ?? item.unit_price | currency }}</span
-                  >
-                }
-                @if (
-                  isItemCancelled(item) && hasVisibleCancellationReason(item)
-                ) {
-                  <span class="item-cancellation-reason">
-                    {{ item.cancellation_reason }}
-                  </span>
-                }
-              </div>
-              @if (!isItemCancelled(item)) {
-                <span class="item-total">{{ item.final_total_price ?? item.total_price | currency }}</span>
-              }
-            </div>
+            </section>
           }
-        </div>
-      </section>
 
-      <!-- Shipping Block -->
-      @if (shippingBlock(); as block) {
-        <section class="card-section card-section--shipping">
-          <div class="section-header">
-            @switch (block.type) {
-              @case ('pickup') {
-                <app-icon name="map-pin" [size]="18"></app-icon>
-              }
-              @case ('home_delivery') {
-                <app-icon name="truck" [size]="18"></app-icon>
-              }
-              @default {
-                <app-icon name="package" [size]="18"></app-icon>
-              }
-            }
-            <h3>{{ block.title }}</h3>
-          </div>
-          <div class="section-divider"></div>
-          <div class="shipping-block-content">
-            @if (block.type === 'pickup') {
-              <div class="shipping-detail">
-                <p class="shipping-method-name">{{ block.method }}</p>
-                <p class="shipping-info-text">Recoge tu pedido en {{ block.storeName }}</p>
+          <!-- ENVÍO -->
+          @if (shippingBlock(); as block) {
+            <section class="order-section order-card" aria-label="Envío">
+              <div class="section-header">
+                <app-icon
+                  [name]="
+                    block.type === 'pickup'
+                      ? 'map-pin'
+                      : block.type === 'home_delivery'
+                        ? 'truck'
+                        : 'package'
+                  "
+                  [size]="18"
+                />
+                <h2>{{ block.title }}</h2>
               </div>
-            }
-            @if (block.type === 'home_delivery') {
-              <div class="shipping-detail">
-                <p class="shipping-method-name">{{ block.method }}</p>
+              <div class="total-row">
+                <span>Método</span>
+                <span>{{ block.method }}</span>
+              </div>
+              @if (block.type === 'pickup') {
+                <div class="total-row">
+                  <span>Retiro</span>
+                  <span>Recoge tu pedido en {{ block.storeName }}</span>
+                </div>
+              }
+              @if (block.type === 'home_delivery') {
                 @if (block.carrier) {
-                  <p class="shipping-info-text">Transportista: {{ block.carrier }}</p>
+                  <div class="total-row">
+                    <span>Transportista</span>
+                    <span>{{ block.carrier }}</span>
+                  </div>
                 }
                 @if (block.tracking) {
-                  <div class="tracking-number-row">
-                    <span class="tracking-label">Rastreo:</span>
-                    <code class="tracking-code">{{ block.tracking }}</code>
+                  <div class="total-row">
+                    <span>Rastreo</span>
+                    <span
+                      ><code class="tracking-code">{{
+                        block.tracking
+                      }}</code></span
+                    >
                   </div>
                 }
                 @if (block.minDays && block.maxDays) {
-                  <p class="shipping-info-text">Entrega estimada: {{ block.minDays }}-{{ block.maxDays }} días hábiles</p>
+                  <div class="total-row">
+                    <span>Entrega estimada</span>
+                    <span
+                      >{{ block.minDays }}-{{ block.maxDays }} días
+                      hábiles</span
+                    >
+                  </div>
                 }
-                <p class="shipping-cost-text">Costo: {{ block.cost | currency }}</p>
-              </div>
-            }
-            @if (block.type === 'other') {
-              <div class="shipping-detail">
-                <p class="shipping-method-name">{{ block.method }}</p>
+                <div class="total-row">
+                  <span>Costo</span>
+                  <span>{{ block.cost | currency }}</span>
+                </div>
+              }
+              @if (block.type === 'other') {
                 @if (block.note) {
-                  <p class="shipping-info-text">{{ block.note }}</p>
+                  <div class="total-row">
+                    <span>Nota</span>
+                    <span>{{ block.note }}</span>
+                  </div>
                 }
                 @if (block.cost > 0) {
-                  <p class="shipping-cost-text">Costo: {{ block.cost | currency }}</p>
+                  <div class="total-row">
+                    <span>Costo</span>
+                    <span>{{ block.cost | currency }}</span>
+                  </div>
+                }
+              }
+            </section>
+          }
+
+          <!-- UBICACIÓN DEL SERVICIO -->
+          @if (serviceLocationBlock(); as block) {
+            <section
+              class="order-section order-card"
+              aria-label="Ubicación del servicio"
+            >
+              <div class="section-header">
+                <app-icon
+                  [name]="block.type === 'home' ? 'home' : 'store'"
+                  [size]="18"
+                />
+                <h2>{{ block.title }}</h2>
+              </div>
+              <div class="address-block">
+                <p class="addr-line strong">{{ block.addressLine1 }}</p>
+                @if (block.addressLine2) {
+                  <p class="addr-line">{{ block.addressLine2 }}</p>
                 }
               </div>
-            }
-          </div>
-        </section>
-      }
-
-      <!-- Service-Location Block: shows where the booked service will
-           be performed. The generic shippingBlock above is null for
-           service-only orders, so without this the customer loses
-           the "A domicilio / En el local" address after the booking. -->
-      @if (serviceLocationBlock(); as block) {
-        <section class="card-section card-section--service-location">
-          <div class="section-header">
-            <app-icon
-              [name]="block.type === 'home' ? 'home' : 'store'"
-              [size]="18"
-            ></app-icon>
-            <h3>{{ block.title }}</h3>
-          </div>
-          <div class="section-divider"></div>
-          <div class="shipping-block-content">
-            <div class="shipping-detail">
-              <p class="shipping-method-name">{{ block.addressLine1 }}</p>
-              @if (block.addressLine2) {
-                <p class="shipping-info-text">{{ block.addressLine2 }}</p>
-              }
+            </section>
+          }
+        </div>
+        <!-- /.order-main -->
+        <aside class="order-side">
+          <!-- TOTALES -->
+          <section
+            class="order-section order-card totals-card"
+            aria-label="Resumen de cuenta"
+          >
+            <div class="section-header">
+              <app-icon name="receipt" [size]="18" />
+              <h2>Resumen de cuenta</h2>
             </div>
-          </div>
-        </section>
-      }
-
-      <!-- Order Timeline — only for orders with physical items.
-           Service-only orders use the reservation card (with its own
-           status: PENDIENTE / CONFIRMADA / COMPLETADA) below, so the
-           shipping stepper "Pedido creado / Enviado / Entregado" is
-           misleading for them. -->
-      @if (hasPhysicalItems() && orderTimelineSteps().length > 0) {
-        <section class="card-section card-section--timeline">
-          <div class="section-header">
-            <app-icon name="activity" [size]="16"></app-icon>
-            <h3>Seguimiento</h3>
-          </div>
-          <div class="section-divider"></div>
-          <div class="order-timeline">
-            @for (step of orderTimelineSteps(); track step.key) {
-              <div class="timeline-step" [class]="step.status">
-                <div class="timeline-dot"></div>
-                <div class="timeline-content">
-                  <span class="timeline-label">{{ step.label }}</span>
-                </div>
+            <!-- Paridad guest C.7: sin impuesto, Subtotal solo alcanza.
+                 Con impuesto, Subtotal e Impuestos van JUNTOS o NINGUNO. -->
+            @if ((order.tax_amount || 0) === 0) {
+              <div class="total-row">
+                <span>Subtotal</span>
+                <span>{{ order.subtotal_amount | currency }}</span>
+              </div>
+            } @else if (order.prints_vat_breakdown) {
+              <div class="total-row">
+                <span>Subtotal</span>
+                <span>{{ order.subtotal_amount | currency }}</span>
+              </div>
+              <div class="total-row">
+                <span>Impuestos</span>
+                <span>{{ order.tax_amount | currency }}</span>
               </div>
             }
-          </div>
-        </section>
-      }
-
-      <!-- Info Grid: Shipping + Payment side by side -->
-      <div class="info-grid">
-        <!-- Shipping -->
-        @if (order.shipping_address) {
-          <section class="card-section card-section--info">
-            <div class="section-header">
-              <app-icon name="map-pin" [size]="16"></app-icon>
-              <h3>Envío</h3>
-            </div>
-            <div class="info-content">
-              <p class="info-address">
-                {{ order.shipping_address.address_line1 }}
-              </p>
-              @if (order.shipping_address.address_line2) {
-                <p class="info-address">
-                  {{ order.shipping_address.address_line2 }}
-                </p>
-              }
-              <p class="info-city">
-                {{ order.shipping_address.city }},
-                {{ order.shipping_address.state_province }}
-              </p>
-              @if (order.shipping_address.phone_number) {
-                <p class="info-muted">
-                  <app-icon name="phone" [size]="13"></app-icon>
-                  {{ order.shipping_address.phone_number }}
-                </p>
-              }
-            </div>
-          </section>
-        }
-
-        <!-- Payment -->
-        @if (order.payments.length > 0) {
-          <section class="card-section card-section--info">
-            <div class="section-header">
-              <app-icon name="credit-card" [size]="16"></app-icon>
-              <h3>Pago</h3>
-              @for (payment of order.payments; track payment.id) {
-                <span
-                  class="payment-badge"
-                  [class]="
-                    payment.state === 'completed' ||
-                    payment.state === 'paid' ||
-                    payment.state === 'succeeded'
-                      ? 'paid'
-                      : 'pending'
-                  "
-                >
-                  {{
-                    payment.state === "completed" ||
-                    payment.state === "paid" ||
-                    payment.state === "succeeded"
-                      ? "PAGADO"
-                      : "PENDIENTE"
-                  }}
-                </span>
-              }
-            </div>
-            <div class="payments-list">
-              @for (payment of order.payments; track payment.id) {
-                <div class="payment-detail">
-                  <div class="payment-method">
-                    <app-icon
-                      [name]="getPaymentIcon(payment.method)"
-                      [size]="16"
-                    ></app-icon>
-                    <span>{{ getPaymentMethodLabel(payment.method) }}</span>
-                  </div>
-                  <span class="payment-amount">{{
-                    payment.amount | currency
-                  }}</span>
-                  @if (payment.reference) {
-                    <span class="payment-ref"
-                      >Ref: {{ payment.reference }}</span
-                    >
-                  }
-                </div>
-              }
-            </div>
-          </section>
-        }
-
-        <!-- Bookings / Reservations -->
-        @if (order.bookings && order.bookings.length > 0) {
-          <section class="card-section card-section--info">
-            <div class="section-header">
-              <app-icon name="calendar-check" [size]="16"></app-icon>
-              <h3>{{ order.bookings.length === 1 ? 'Reserva' : 'Reservas' }}</h3>
-            </div>
-            <div class="bookings-list">
-              @for (booking of order.bookings; track booking.id) {
-                <div class="booking-item">
-                  <div class="booking-item-header">
-                    <span class="booking-service-name">{{ booking.product_name }}</span>
-                    <span class="booking-badge" [class]="getBookingStatusClass(booking.status)">
-                      {{ getBookingStatusLabel(booking.status) }}
-                    </span>
-                  </div>
-                  <p class="booking-number">#{{ booking.booking_number }}</p>
-                  <div class="booking-datetime">
-                    <span class="booking-dt-item">
-                      <app-icon name="calendar" [size]="13"></app-icon>
-                      {{ booking.date | date:'EEE d MMM' }}
-                    </span>
-                    <span class="booking-dt-item">
-                      <app-icon name="clock" [size]="13"></app-icon>
-                      {{ booking.start_time }} - {{ booking.end_time }}
-                    </span>
-                  </div>
-                </div>
-              }
-            </div>
-          </section>
-        }
-      </div>
-
-      <!-- Summary + Actions Row -->
-      <div class="summary-actions-grid">
-        <!-- Summary -->
-        <section class="card-section summary-section">
-          <div class="section-header">
-            <app-icon name="receipt" [size]="18"></app-icon>
-            <h3>Resumen del pedido</h3>
-          </div>
-          <div class="section-divider"></div>
-          <div class="summary-rows">
-            <div class="summary-row">
-              <span>Subtotal</span>
-              <span>{{ order.subtotal_amount | currency }}</span>
-            </div>
-
-            <!-- Applied promotions (persisted snapshot) -->
-            @for (promo of appliedPromotions(); track promo.id) {
-              <div class="summary-row discount">
+            @for (p of appliedPromotions(); track p.id) {
+              <div class="total-row discount">
                 <span class="discount-label">
-                  <app-icon name="tag" [size]="14"></app-icon>
+                  <app-icon name="tag" [size]="14" />
                   <span>
-                    {{ promo.name }}
-                    @if (promo.code) {
-                      <small>({{ promo.code }})</small>
+                    {{ p.name || p.code }}
+                    @if (p.code && p.name) {
+                      <small>({{ p.code }})</small>
                     }
                   </span>
                 </span>
-                <span>-{{ promo.discount_amount | currency }}</span>
+                <span>-{{ p.discount_amount | currency }}</span>
               </div>
             }
-
-            <!-- Applied coupons (persisted snapshot) -->
-            @for (cp of appliedCoupons(); track cp.id) {
-              <div class="summary-row discount">
+            @for (c of appliedCoupons(); track c.id) {
+              <div class="total-row discount">
                 <span class="discount-label">
-                  <app-icon name="ticket" [size]="14"></app-icon>
+                  <app-icon name="ticket" [size]="14" />
                   <span>
-                    Cupón <strong>{{ cp.code }}</strong>
-                    @if (cp.name) {
-                      <small>— {{ cp.name }}</small>
+                    Cupón <strong>{{ c.code }}</strong>
+                    @if (c.name) {
+                      <small>— {{ c.name }}</small>
                     }
                   </span>
                 </span>
-                <span>-{{ cp.discount_applied | currency }}</span>
+                <span>-{{ c.discount_applied | currency }}</span>
               </div>
             }
-
-            <!-- Total discount (legacy/fallback or aggregated) -->
-            @if (order.discount_amount > 0) {
-              <div class="summary-row discount">
-                <span>Descuento total</span>
+            @if (
+              order.discount_amount > 0 &&
+              !appliedPromotions().length &&
+              !appliedCoupons().length
+            ) {
+              <div class="total-row discount">
+                <span class="discount-label">
+                  <app-icon name="tag" [size]="14" />
+                  Descuento
+                </span>
                 <span>-{{ order.discount_amount | currency }}</span>
               </div>
             }
-            <div class="summary-row">
+            <div class="total-row">
               <span>Envío</span>
               <span>{{
-                order.shipping_cost > 0
-                  ? (order.shipping_cost | currency)
-                  : "Gratis"
+                order.shipping_cost === 0
+                  ? 'Gratis'
+                  : (order.shipping_cost | currency)
               }}</span>
             </div>
-            <div class="summary-row">
-              <span>Impuestos</span>
-              <span>{{ order.tax_amount | currency }}</span>
-            </div>
-            <div class="summary-divider"></div>
-            <div class="summary-row total">
+            <div class="total-row grand">
               <span>Total</span>
               <span>{{ order.grand_total | currency }}</span>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- Actions -->
-        <section class="card-section actions-section">
-          <h3 class="actions-title">Acciones</h3>
-          <div class="actions-list">
-            <a
-              routerLink="/account/orders"
-              class="action-btn action-btn--primary"
+          <!-- ENTREGA -->
+          @if (order.shipping_address; as addr) {
+            <section
+              class="order-section order-card"
+              aria-label="Datos de entrega"
             >
-              <app-icon name="eye" [size]="18"></app-icon>
-              Ver detalles del pedido
-            </a>
-            @if (hasPhysicalItems()) {
-              <button
-                class="action-btn action-btn--secondary"
-                (click)="loadOrder(order!.id)"
+              <div class="section-header">
+                <app-icon name="map-pin" [size]="18" />
+                <h2>Datos de entrega</h2>
+              </div>
+              <div class="address-block">
+                @if (addr.address_line1) {
+                  <p class="addr-line strong">{{ addr.address_line1 }}</p>
+                }
+                @if (addr.address_line2) {
+                  <p class="addr-line">{{ addr.address_line2 }}</p>
+                }
+                <p class="addr-line muted">
+                  {{ addr.city
+                  }}@if (addr.state_province) {, {{ addr.state_province }}}@if (
+                    addr.country_code
+                  ) {
+                    · {{ addr.country_code }}
+                  }
+                </p>
+                @if (addr.postal_code) {
+                  <p class="addr-line muted">C.P. {{ addr.postal_code }}</p>
+                }
+                @if (addr.phone_number) {
+                  <p class="addr-line muted phone">
+                    <app-icon name="phone" [size]="13" />{{
+                      addr.phone_number
+                    }}
+                  </p>
+                }
+              </div>
+            </section>
+          }
+
+          <!-- ACCIONES -->
+          <section class="order-section order-card" aria-label="Acciones">
+            <div class="section-header">
+              <app-icon name="settings" [size]="18" />
+              <h2>Acciones</h2>
+            </div>
+            <div class="actions-list">
+              <a
+                routerLink="/account/orders"
+                class="action-btn action-btn--primary"
               >
-                <app-icon name="truck" [size]="18"></app-icon>
-                Estado del envío
-              </button>
-            }
-            @if (hasServiceItems()) {
-              <button
-                class="action-btn action-btn--secondary"
-                (click)="openRescheduleModal()"
-              >
-                <app-icon name="calendar-clock" [size]="18"></app-icon>
-                Reagendar reserva
-              </button>
-            }
-            <div class="section-divider"></div>
-            @if (order.invoice_url) {
-              <a class="action-link" [href]="getInvoiceUrl()" target="_blank">
-                <app-icon name="download" [size]="14"></app-icon>
-                Descargar factura
+                <app-icon name="eye" [size]="18"></app-icon>
+                Ver detalles del pedido
               </a>
-            }
-            <a routerLink="/" class="action-link">
-              <app-icon name="refresh-cw" [size]="14"></app-icon>
-              Volver a comprar
-            </a>
-          </div>
-        </section>
+              @if (hasPhysicalItems()) {
+                <button
+                  class="action-btn action-btn--secondary"
+                  (click)="loadOrder(order.id)"
+                >
+                  <app-icon name="truck" [size]="18"></app-icon>
+                  Estado del envío
+                </button>
+              }
+              @if (hasServiceItems()) {
+                <button
+                  class="action-btn action-btn--secondary"
+                  (click)="openRescheduleModal()"
+                >
+                  <app-icon name="calendar-clock" [size]="18"></app-icon>
+                  Reagendar reserva
+                </button>
+              }
+              @if (hasInvoice()) {
+                <a
+                  class="action-link"
+                  [href]="getInvoiceUrl()"
+                  target="_blank"
+                >
+                  <app-icon name="download" [size]="14"></app-icon>
+                  Descargar factura
+                </a>
+              }
+              <a routerLink="/" class="action-link">
+                <app-icon name="refresh-cw" [size]="14"></app-icon>
+                Volver a comprar
+              </a>
+            </div>
+          </section>
+        </aside>
       </div>
+      <!-- /.order-grid -->
     </div>
   }
 </div>

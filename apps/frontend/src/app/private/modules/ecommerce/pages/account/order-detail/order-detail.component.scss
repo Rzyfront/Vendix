@@ -1,13 +1,685 @@
-.order-detail-page {
-  min-height: 50vh;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 1.5rem 1rem 2rem;
+// Paridad visual con guest-order-summary: este archivo arranca como
+// copia exacta de sus `styles` (mismas clases en el template) y suma
+// al final los bloques propios de cuenta (back-link, wompi, éxito,
+// acciones, reservas). Si cambia el guest, re-sincronizar.
 
-  @media (min-width: 768px) {
-    padding: 2rem 2rem 3rem;
+.guest-order-page {
+  min-height: 60vh;
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.guest-order-card {
+  width: min(1080px, 100%);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+/* ---- Card system (Stitch: tarjetas planas sobre fondo) ---- */
+.order-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: clamp(1rem, 3vw, 1.5rem);
+  box-shadow: var(--shadow-sm);
+}
+
+.order-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.order-main,
+.order-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+@media (min-width: 960px) {
+  .order-grid {
+    grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
   }
 }
+
+.printable-order {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* ---- Loading / Error states ---- */
+.state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.guest-order-card.state-card {
+  width: min(560px, 100%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  box-shadow: var(--shadow-sm);
+}
+
+.state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+}
+
+.state-icon.error {
+  color: var(--color-error);
+  background: var(--color-error-light);
+}
+
+.state-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  color: var(--color-text-primary);
+}
+
+.muted {
+  color: var(--color-text-secondary);
+  font-size: var(--fs-sm);
+}
+
+/* ---- Header card (orden + tienda + acciones) ---- */
+.order-head-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  border-top: 3px solid var(--color-primary);
+}
+
+.order-head-store {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.order-head-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  flex-shrink: 0;
+}
+
+.order-head-logo-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  flex-shrink: 0;
+}
+
+.order-head-store-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-head-store .live-pill {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.order-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.order-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  line-height: 1.15;
+  color: var(--color-text-primary);
+}
+
+.order-meta-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--color-text-secondary);
+}
+
+.meta-sep {
+  font-weight: var(--fw-bold);
+  color: var(--color-text-muted);
+}
+
+.meta-pay-state {
+  font-weight: var(--fw-semibold);
+  color: var(--color-success);
+}
+
+.order-head-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+@media (min-width: 720px) {
+  .order-head-card {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .order-head-store,
+  .order-title-row,
+  .order-meta-line {
+    flex: 1 1 100%;
+  }
+
+  .order-head-actions {
+    margin-left: auto;
+  }
+}
+
+/* ---- Success banner: se usa la variante rica de cuenta (ver final) ---- */
+
+/* ---- Section header ---- */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--color-primary);
+}
+
+.section-header h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-primary);
+}
+
+/* ---- Address ---- */
+.address-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.addr-line {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+}
+
+.addr-line.strong {
+  font-weight: var(--fw-semibold);
+}
+
+.addr-line.muted {
+  color: var(--color-text-secondary);
+}
+
+.addr-line.phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.delivery-customer {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px dashed var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.delivery-customer-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: var(--fs-sm);
+  color: var(--color-text-primary);
+}
+
+.delivery-customer-text .muted {
+  font-size: var(--fs-sm);
+}
+
+/* ---- Items ---- */
+.items {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.item-row {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.item-row:last-child {
+  border-bottom: 0;
+}
+
+// E2 — soft cancel: precio OCULTO (no tachado), nombre tachado pero
+// legible. Sin bajar el contraste al maximo para que el cliente pueda
+// seguir leyendo que ese es el plato que pidio.
+.item-row--cancelled .item-name {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--color-text-secondary) 70%,
+    transparent
+  );
+  text-decoration-thickness: 1.5px;
+}
+
+.item-cancellation-reason {
+  font-size: var(--fs-xs);
+  color: var(--color-text-secondary);
+  font-style: italic;
+  margin-top: 0.125rem;
+}
+
+.item-thumb {
+  flex-shrink: 0;
+  width: 60px;
+  height: 60px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+}
+
+.item-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-muted);
+}
+
+.item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.item-name {
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-primary);
+}
+
+.item-variant {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.item-qty {
+  font-size: var(--fs-sm);
+  color: var(--color-text-secondary);
+}
+
+.item-total {
+  flex-shrink: 0;
+  font-weight: var(--fw-bold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* ---- Live pill (paso 9: estado del stream SSE) ---- */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: flex-start;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-background);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-secondary);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+.live-dot.is-open {
+  background: var(--color-success);
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- Payment ---- */
+.payment-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+
+.payment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.payment-method {
+  font-weight: var(--fw-medium);
+  color: var(--color-text-primary);
+}
+
+.payment-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.payment-amount {
+  font-weight: var(--fw-bold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.payment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ---- Comprobante (paso 9) ---- */
+.payment-receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.receipt-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.receipt-upload-label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-secondary);
+}
+
+.receipt-uploading {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-primary);
+}
+
+.guest-receipt-preview-shell {
+  display: flex;
+  justify-content: center;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.guest-receipt-image {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+
+.guest-receipt-frame {
+  width: 100%;
+  min-height: 70vh;
+  border: 0;
+  border-radius: var(--radius-md);
+}
+
+.guest-receipt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 2rem 1rem;
+  color: var(--color-text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.guest-receipt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* ---- ETA banner (paso 8) ---- */
+.eta-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-light);
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+}
+
+.eta-banner app-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.eta-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.eta-line {
+  font-weight: var(--fw-semibold);
+}
+
+.eta-note {
+  font-size: var(--fs-xs);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Kitchen badge per dish (paso 8, paleta KDS vía app-badge) ---- */
+.kitchen-line {
+  display: flex;
+  margin-top: 0.2rem;
+}
+
+/* Paso 9: pulso breve cuando el SSE cambia el estado del plato. Se
+   apaga vía clase (signal prefersReducedMotion) y vía media query. */
+.kitchen-line--flash {
+  animation: kitchen-flash 2.4s ease-out 1;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes kitchen-flash {
+  0% {
+    background: rgba(var(--color-warning-rgb), 0.35);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ---- Totals ---- */
+
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  font-size: var(--fs-sm);
+  color: var(--color-text-secondary);
+}
+
+.total-row.discount {
+  color: var(--color-success);
+}
+
+.discount-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.total-row.grand {
+  margin-top: 0.6rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  color: var(--color-text-primary);
+}
+
+.total-row.grand span:last-child {
+  color: var(--color-primary);
+}
+
+/* ---- Spinner ---- */
+.spinner {
+  width: 42px;
+  height: 42px;
+  border: 4px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Paso 10: entrada de la tarjeta solo en compra recién
+   confirmada ('justPurchased'). Curva tw-card-in de
+   table-welcome-wizard, con keyframes propios porque los estilos de
+   aquel componente no cargan en esta ruta. */
+.card-enter {
+  animation: guest-card-in 0.35s ease-out;
+}
+
+@keyframes guest-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Paso 9: respeta prefers-reduced-motion en spinner y pulsos en
+   vivo (el flash de cocina además no se marca vía signal). */
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .live-dot,
+  .card-enter,
+  .kitchen-line--flash {
+    animation: none !important;
+  }
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 720px) {
+  .order-head-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .payment-head {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- Print ---- */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .guest-order-page {
+    padding: 0;
+  }
+  .order-grid {
+    grid-template-columns: 1fr;
+  }
+  .order-card {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}
+// ─── Cuenta: bloques propios (el sistema visual base es el del guest) ───
 
 .back-link {
   display: inline-flex;
@@ -25,7 +697,7 @@
   }
 }
 
-// ─── Wompi Verifying Banner ────────────────────
+
 .wompi-verifying-banner {
   display: flex;
   align-items: center;
@@ -67,13 +739,6 @@
   }
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-// ─── Success Banner ────────────────────────────
 .success-banner {
   display: flex;
   align-items: center;
@@ -151,465 +816,6 @@
   }
 }
 
-// ─── Loading ───────────────────────────────────
-.loading {
-  display: flex;
-  justify-content: center;
-  padding: 4rem;
-
-  .spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid var(--color-border);
-    border-top-color: var(--color-primary);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-}
-
-// ─── Order Header Card ─────────────────────────
-.order-header-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 1.25rem;
-  margin-bottom: 0.75rem;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.05);
-}
-
-.order-header-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.75rem;
-
-  h1 {
-    font-size: var(--fs-lg);
-    font-weight: var(--fw-bold);
-    color: var(--color-text-primary);
-    margin: 0;
-  }
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 0.625rem;
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-
-  &.success {
-    background: var(--color-success-light);
-    color: var(--color-success);
-  }
-
-  &.warning {
-    background: var(--color-warning-light);
-    color: var(--color-warning);
-  }
-
-  &.info {
-    background: var(--color-accent-light);
-    color: var(--color-accent);
-  }
-
-  &.error {
-    background: var(--color-error-light);
-    color: var(--color-error);
-  }
-}
-
-.order-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.25rem;
-}
-
-.meta-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: var(--fs-xs);
-  color: var(--color-text-muted);
-
-  &.total-highlight {
-    font-weight: var(--fw-semibold);
-    color: var(--color-text-primary);
-  }
-}
-
-// ─── Body ──────────────────────────────────────
-.order-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-
-  @media (min-width: 768px) {
-    gap: 1.25rem;
-  }
-}
-
-// ─── Card Section (shared) ─────────────────────
-.card-section {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 0.75rem 1rem;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.05);
-
-  @media (min-width: 768px) {
-    padding: 1.25rem 1.5rem;
-  }
-
-  &--info {
-    padding: 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-
-    @media (min-width: 768px) {
-      padding: 1.25rem;
-    }
-
-    .section-header {
-      margin-bottom: 0;
-    }
-  }
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--color-text-primary);
-
-  h3 {
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-semibold);
-    color: var(--color-text-primary);
-    margin: 0;
-    flex: 1;
-  }
-
-  @media (min-width: 768px) {
-    h3 {
-      font-size: var(--fs-base);
-    }
-  }
-}
-
-.section-divider {
-  height: 1px;
-  background: var(--color-neutral-200);
-  margin: 0.5rem 0;
-
-  @media (min-width: 768px) {
-    margin: 0.75rem 0;
-  }
-}
-
-// ─── Items ─────────────────────────────────────
-.items-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.item-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 0;
-
-  &:last-child {
-    padding-bottom: 0;
-  }
-
-  // E2 — soft cancel: precio OCULTO (no tachado), nombre tachado pero
-  // legible. Sin bajar el contraste al maximo para que el cliente pueda
-  // seguir leyendo que ese es el plato que pidio. Fondo tenue para que el
-  // ojo lo distinga del resto sin gritar.
-  &--cancelled {
-    .item-name {
-      text-decoration: line-through;
-      text-decoration-color: color-mix(
-        in srgb,
-        var(--color-text-secondary) 70%,
-        transparent
-      );
-      text-decoration-thickness: 1.5px;
-    }
-  }
-
-  .item-cancellation-reason {
-    font-size: var(--fs-xs);
-    color: var(--color-text-secondary);
-    font-style: italic;
-    margin-top: 0.125rem;
-  }
-}
-
-.item-thumb {
-  flex-shrink: 0;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--color-neutral-100);
-
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  @media (min-width: 768px) {
-    width: 72px;
-    height: 72px;
-    border-radius: 10px;
-  }
-}
-
-.thumb-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-}
-
-.item-details {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.item-name-row {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-}
-
-.item-name {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semibold);
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-
-  @media (min-width: 768px) {
-    font-size: var(--fs-base);
-  }
-}
-
-.item-type-badge {
-  flex-shrink: 0;
-  padding: 0.1rem 0.4rem;
-  border-radius: var(--radius-sm);
-  font-size: 10px;
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-
-  &--service {
-    background: rgba(139, 92, 246, 0.12);
-    color: rgb(109, 40, 217);
-  }
-}
-
-.item-variant {
-  font-size: var(--fs-xs);
-  color: var(--color-primary);
-  font-weight: var(--fw-medium);
-}
-
-.item-meta {
-  // F-137 (C.9, major — revisión 2026-09-14): `--color-text-secondary`
-  // (#94a3b8) rinde 2,56:1 sobre blanco, bajo el mínimo AA (4,5:1) que el
-  // repo se exige (skills/vendix-ui-ux/SKILL.md:51) para el precio unitario
-  // del comprador. `#5C6672` es el mismo tono que theme.service.ts:437 ya
-  // valida en ~4,6:1; `--fs-xs` ya cumple los 12px mínimos.
-  font-size: var(--fs-xs);
-  color: #5c6672;
-}
-
-.item-total {
-  flex-shrink: 0;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semibold);
-  color: var(--color-text-primary);
-
-  @media (min-width: 768px) {
-    font-size: 1.125rem;
-    font-weight: 700;
-  }
-}
-
-// ─── Info Grid ─────────────────────────────────
-.info-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.75rem;
-
-  @media (min-width: 768px) {
-    grid-template-columns: 1fr 1fr;
-    gap: 1.25rem;
-  }
-}
-
-// ─── Shipping Info ─────────────────────────────
-.info-content {
-  p {
-    font-size: var(--fs-xs);
-    color: var(--color-text-primary);
-    margin: 0 0 0.25rem;
-    line-height: 1.5;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-
-  @media (min-width: 768px) {
-    p {
-      font-size: var(--fs-sm);
-    }
-  }
-
-  .info-muted {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    color: var(--color-text-secondary);
-    margin-top: 0.25rem;
-  }
-}
-
-// ─── Payments ──────────────────────────────────
-.payments-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.payment-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.payment-method {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-
-.payment-amount {
-  font-size: var(--fs-base);
-  font-weight: 700;
-  color: var(--color-text-primary);
-}
-
-.payment-ref {
-  font-size: var(--fs-xs);
-  color: var(--color-text-secondary);
-}
-
-.payment-badge {
-  padding: 0.125rem 0.5rem;
-  border-radius: var(--radius-pill);
-  font-size: 0.65rem;
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
-
-  &.paid {
-    background: var(--color-success-light);
-    color: var(--color-success);
-  }
-
-  &.pending {
-    background: var(--color-warning-100, #fef3c7);
-    color: #92400e;
-  }
-}
-
-// ─── Summary + Actions Grid ────────────────────
-.summary-actions-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.75rem;
-
-  @media (min-width: 768px) {
-    grid-template-columns: 1fr 300px;
-    gap: 1.25rem;
-  }
-}
-
-// ─── Summary ───────────────────────────────────
-.summary-section {
-  background: var(--color-background);
-  border: 1px solid var(--color-border);
-}
-
-.summary-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-
-  @media (min-width: 768px) {
-    gap: 0.625rem;
-  }
-}
-
-.summary-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--fs-sm);
-  color: var(--color-text-secondary);
-
-  @media (min-width: 768px) {
-    font-size: var(--fs-base);
-  }
-
-  &.discount {
-    color: var(--color-success);
-  }
-
-  &.total {
-    font-size: var(--fs-base);
-    font-weight: var(--fw-bold);
-    color: var(--color-text-primary);
-    padding-top: 0.25rem;
-
-    span:last-child {
-      color: #059669;
-    }
-
-    @media (min-width: 768px) {
-      font-size: 1.125rem;
-    }
-  }
-}
-
-.summary-divider {
-  height: 1px;
-  background: var(--color-neutral-200);
-  margin: 0.25rem 0;
-}
-
-// ─── Actions Section ───────────────────────────
 .actions-section {
   display: flex;
   flex-direction: column;
@@ -680,228 +886,53 @@
   }
 }
 
-// ─── Bookings ─────────────────────────────────
-.bookings-list {
+// ─── Reservas (cuenta) ─────────────────────────
+.booking-list {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0.75rem;
 }
 
-.booking-item {
-  padding: 0.625rem;
-  background: var(--color-background);
+.booking-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem 0.875rem;
   border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
+  background: var(--color-background);
 }
 
-.booking-item-header {
+.booking-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.25rem;
 }
 
-.booking-service-name {
-  font-size: var(--fs-sm);
+.booking-service {
   font-weight: var(--fw-semibold);
   color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.booking-badge {
-  flex-shrink: 0;
-  padding: 0.125rem 0.5rem;
-  border-radius: var(--radius-pill);
-  font-size: 0.65rem;
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-
-  &.success {
-    background: var(--color-success-light);
-    color: var(--color-success);
-  }
-  &.warning {
-    background: var(--color-warning-100, #fef3c7);
-    color: #92400e;
-  }
-  &.info {
-    background: var(--color-accent-light);
-    color: var(--color-accent);
-  }
-  &.error {
-    background: var(--color-error-light);
-    color: var(--color-error);
-  }
-}
-
-.booking-number {
+.booking-code {
   font-size: var(--fs-xs);
   color: var(--color-text-muted);
-  margin: 0 0 0.25rem;
 }
 
-.booking-datetime {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.booking-dt-item {
+.booking-when {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: var(--fs-xs);
+  gap: 0.375rem;
+  font-size: var(--fs-sm);
   color: var(--color-text-secondary);
 }
 
-.card-section--shipping {
-  .section-header {
-    h3 { color: var(--primary, #3b82f6); }
-  }
-}
-
-.shipping-block-content {
-  padding: 0.5rem 0;
-}
-
-.shipping-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.shipping-method-name {
-  font-weight: 600;
-  font-size: 0.9375rem;
-  color: var(--text-primary, #111827);
-}
-
-.shipping-info-text {
-  font-size: 0.8125rem;
-  color: var(--text-secondary, #6b7280);
-}
-
-.shipping-cost-text {
-  font-size: 0.8125rem;
-  color: var(--text-secondary, #6b7280);
-  font-weight: 500;
-}
-
-.tracking-number-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-.tracking-label {
-  font-size: 0.75rem;
-  color: var(--text-secondary, #6b7280);
-  font-weight: 500;
-}
-
 .tracking-code {
-  font-size: 0.8125rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--surface, #f3f4f6);
-  padding: 0.125rem 0.5rem;
-  border-radius: 0.375rem;
-  color: var(--text-primary, #111827);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: var(--fs-xs);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.4rem;
 }
 
-.card-section--timeline {
-  .section-header {
-    h3 { color: var(--text-primary, #111827); }
-  }
-}
-
-.order-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 0.5rem 0;
-}
-
-.timeline-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding-bottom: 1rem;
-  position: relative;
-
-  &:last-child {
-    padding-bottom: 0;
-  }
-
-  &::before {
-    content: '';
-    position: absolute;
-    left: 7px;
-    top: 18px;
-    width: 2px;
-    height: calc(100% - 18px);
-    background: var(--color-neutral-200);
-  }
-
-  &:last-child::before {
-    display: none;
-  }
-
-  .timeline-dot {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    border: 2px solid #d1d5db;
-    background: var(--color-surface);
-  }
-
-  .timeline-label {
-    font-size: 0.8125rem;
-    color: var(--text-secondary, #6b7280);
-    line-height: 1.25rem;
-    padding-top: 0.0625rem;
-  }
-
-  &.completed {
-    .timeline-dot {
-      background: var(--primary, #3b82f6);
-      border-color: var(--primary, #3b82f6);
-    }
-
-    .timeline-label {
-      color: var(--text-primary, #111827);
-      font-weight: 500;
-    }
-  }
-
-  &.current {
-    .timeline-dot {
-      background: var(--primary, #3b82f6);
-      border-color: var(--primary, #3b82f6);
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-    }
-
-    .timeline-label {
-      color: var(--primary, #3b82f6);
-      font-weight: 600;
-    }
-  }
-
-  &.upcoming {
-    .timeline-dot {
-      background: var(--color-neutral-50);
-      border-color: #d1d5db;
-    }
-  }
-}
-
-@media (max-width: 640px) {
-  .shipping-method-name {
-    font-size: 0.875rem;
-  }
-}

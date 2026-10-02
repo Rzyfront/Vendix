@@ -13,10 +13,21 @@ import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { AccountService, OrderDetail } from '../../../services/account.service';
 import { EcommerceBookingService } from '../../../services/ecommerce-booking.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
-import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import {
+  BadgeComponent,
+  BadgeVariant,
+} from '../../../../../../shared/components/badge/badge.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../shared/pipes/currency';
+import { IconName } from '../../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { RescheduleModalComponent } from '../../../../store/reservations/components/reschedule-modal/reschedule-modal.component';
+import { OrderTrackingProgressComponent } from '../../../../../../shared/components/order-tracking-progress/order-tracking-progress.component';
+import { ThemeService } from '../../../../../../core/services/theme.service';
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 import { parseVariantAttributes } from '../../../../../../shared/utils';
 
 @Component({
@@ -27,16 +38,28 @@ import { parseVariantAttributes } from '../../../../../../shared/utils';
     RouterModule,
     IconComponent,
     BadgeComponent,
+    ButtonComponent,
     CurrencyPipe,
     RescheduleModalComponent,
+    OrderTrackingProgressComponent,
   ],
   templateUrl: './order-detail.component.html',
   styleUrls: ['./order-detail.component.scss'] })
 export class OrderDetailComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
+  private readonly tenantFacade = inject(TenantFacade);
+  private readonly currencyService = inject(CurrencyFormatService);
+  private readonly themeService = inject(ThemeService);
   readonly order = signal<OrderDetail | null>(null);
   readonly is_loading = signal(true);
   readonly is_new_order = signal(false);
+  readonly load_failed = signal(false);
+  // Header: si el logo no carga, se muestra el fallback de la tienda.
+  readonly storeLogoFailed = signal(false);
+  /** Logo firmado o null (fallback). Señal para que el @if estreche el tipo. */
+  readonly storeLogo = computed(() =>
+    !this.storeLogoFailed() ? (this.order()?.store?.logo_url ?? null) : null,
+  );
 
   // Wompi callback state
   readonly verifyingWompiPayment = signal(false);
@@ -242,38 +265,8 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
   );
 
-  readonly orderTimelineSteps = computed(() => {
-    const o = this.order();
-    if (!o) return [];
-
-    const deliveryType = (o as any).delivery_type || 'other';
-    const states = [
-      { key: 'created', label: 'Pedido creado' },
-      {
-        key: 'processing',
-        label: this.hasPreparedItems() ? 'En preparación' : 'Procesando',
-      },
-      { key: 'shipped', label: deliveryType === 'pickup' ? 'Listo para recoger' : 'Enviado' },
-      { key: 'delivered', label: deliveryType === 'pickup' ? 'Recogido' : 'Entregado' },
-    ];
-
-    const stateOrder = ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'];
-    const currentState = o.state || 'created';
-    const currentIndex = stateOrder.indexOf(currentState);
-
-    return states.map((step) => {
-      const stepIndex = stateOrder.indexOf(step.key);
-      let status: 'completed' | 'current' | 'upcoming' = 'upcoming';
-      if (currentIndex >= stepIndex) status = 'completed';
-      if (step.key === currentState || (step.key === 'shipped' && currentState === 'shipped')) {
-        if (status !== 'completed' || step.key === currentState) status = 'current';
-      }
-      if (status === 'completed' && step.key !== currentState && currentIndex === stepIndex) {
-        status = 'current';
-      }
-      return { ...step, status };
-    });
-  });
+  // Seguimiento: usa `app-order-tracking-progress` (mismo que guest),
+  // con `hasPreparedItems` para "En preparación" vs "Procesando".
 
   private wompiPollTimer: ReturnType<typeof setInterval> | null = null;
 private toast = inject(ToastService);
@@ -382,14 +375,19 @@ if (this.wompiPollTimer) {
 
   loadOrder(order_id: number): void {
     this.is_loading.set(true);
+    this.load_failed.set(false);
     this.account_service.getOrderDetail(order_id).subscribe({
       next: (response) => {
         if (response.success) {
           this.order.set(response.data);
+          this.applyStoreBranding(response.data.store);
+        } else {
+          this.load_failed.set(true);
         }
         this.is_loading.set(false);
       },
       error: () => {
+        this.load_failed.set(true);
         this.is_loading.set(false);
       } });
   }
@@ -617,71 +615,61 @@ if (this.wompiPollTimer) {
     return true;
   }
 
+  // STATE HELPERS — order_state_enum (9 estados, paridad guest).
+  // Antes solo mapeaba 7 claves legacy y estados reales como
+  // `pending_payment` se pintaban crudos en el badge.
+
   getStateLabel(state: string): string {
     const o = this.order();
     const deliveryType = o ? (o as any).delivery_type : null;
     const labels: Record<string, string> = {
-      pending: 'Pendiente',
-      confirmed: 'Confirmado',
+      draft: 'Borrador',
+      created: 'Creada',
+      pending_payment: 'Pendiente de pago',
       processing: 'En proceso',
-      shipped: deliveryType === 'pickup' ? 'Listo para recoger' : 'Enviado',
-      delivered: deliveryType === 'pickup' ? 'Recogido' : 'Entregado',
-      completed: 'Completado',
-      cancelled: 'Cancelado',
+      shipped:
+        deliveryType === 'pickup' ? 'Lista para recoger' : 'Enviada',
+      pending_delivery: 'Pendiente de entrega',
+      delivered: deliveryType === 'pickup' ? 'Recogida' : 'Entregada',
+      finished: 'Finalizada',
+      cancelled: 'Cancelada',
+      refunded: 'Reembolsada',
     };
     return labels[state] || state;
   }
 
-  getStateClass(state: string): string {
-    const classes: Record<string, string> = {
-      pending: 'warning',
-      confirmed: 'info',
-      processing: 'info',
-      shipped: 'info',
+  getStateVariant(state: string): BadgeVariant {
+    const variants: Record<string, BadgeVariant> = {
       delivered: 'success',
-      completed: 'success',
-      cancelled: 'error' };
-    return classes[state] || 'default';
+      finished: 'success',
+      processing: 'primary',
+      shipped: 'primary',
+      pending_delivery: 'primary',
+      pending_payment: 'warning',
+      created: 'warning',
+      draft: 'warning',
+      cancelled: 'error',
+      refunded: 'info',
+    };
+    return variants[state] || 'neutral';
   }
 
-  getStateIcon(state: string): string {
+  getStateIcon(state: string): IconName {
     const o = this.order();
     const deliveryType = o ? (o as any).delivery_type : null;
-    const icons: Record<string, string> = {
-      pending: 'clock',
-      confirmed: 'check-circle',
+    const icons: Record<string, IconName> = {
+      draft: 'clock',
+      created: 'clock',
+      pending_payment: 'clock',
       processing: 'loader-2',
       shipped: deliveryType === 'pickup' ? 'package-check' : 'truck',
-      delivered: 'package-check',
-      completed: 'check-circle',
+      pending_delivery: 'truck',
+      delivered: 'check-circle',
+      finished: 'check-circle',
       cancelled: 'circle-x',
+      refunded: 'coins',
     };
-    return icons[state] || 'circle';
-  }
-
-  getPaymentMethodLabel(method: string | null): string {
-    if (!method) return 'Método de pago';
-    const labels: Record<string, string> = {
-      cash: 'Efectivo',
-      card: 'Tarjeta',
-      transfer: 'Transferencia',
-      cash_on_delivery: 'Contra entrega' };
-    return labels[method] || method;
-  }
-
-  getPaymentIcon(method: string | null): string {
-    if (!method) return 'credit-card';
-    const icons: Record<string, string> = {
-      cash: 'banknote',
-      card: 'credit-card',
-      transfer: 'send',
-      cash_on_delivery: 'coins' };
-    return icons[method] || 'credit-card';
-  }
-
-  /** Returns the item type label for badge display */
-  getItemTypeLabel(item: any): string {
-    return item.product_type === 'service' ? 'Servicio' : 'Producto';
+    return icons[state] || 'clock';
   }
 
   /** Returns true if item is a service */
@@ -699,17 +687,301 @@ if (this.wompiPollTimer) {
     return labels[status] || status;
   }
 
-  getBookingStatusClass(status: string): string {
-    const classes: Record<string, string> = {
+  getBookingBadgeVariant(status: string): BadgeVariant {
+    const variants: Record<string, BadgeVariant> = {
       pending: 'warning',
       confirmed: 'info',
       completed: 'success',
       cancelled: 'error',
-      no_show: 'error' };
-    return classes[status] || 'default';
+      no_show: 'error',
+    };
+    return variants[status] || 'neutral';
   }
 
   getInvoiceUrl(): string {
-    return this.order()?.invoice_url || '#';
+    return (
+      this.order()?.invoice?.pdf_url || this.order()?.invoice_url || '#'
+    );
+  }
+
+  hasInvoice(): boolean {
+    return this.getInvoiceUrl() !== '#';
+  }
+
+  // ==========================================================================
+  // MARCA / WHATSAPP / ETA / PAGOS / COCINA — paridad guest-order-summary
+  // ==========================================================================
+
+  /**
+   * Viste la ruta con la marca del comercio. Sin marca configurada no
+   * toca nada (el preset sigue mandando). Usa el transform central del
+   * ThemeService — nada de mapeo ad-hoc en el componente.
+   */
+  private applyStoreBranding(store?: OrderDetail['store']): void {
+    const branding = store?.branding;
+    if (!branding) return;
+    void this.themeService.applyBranding(
+      this.themeService.transformBrandingFromApi({
+        ...branding,
+        logo_url: store?.logo_url,
+        name: store?.name,
+      }),
+    );
+  }
+
+  whatsappEnabled(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    return !!config?.customConfig?.ecommerce?.checkout?.whatsapp_checkout;
+  }
+
+  sendToWhatsApp(order: OrderDetail): void {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    const phone = (
+      config?.customConfig?.ecommerce?.checkout?.whatsapp_number || ''
+    ).replace(/\D/g, '');
+    if (!phone) {
+      this.toast.warning('La tienda no tiene un WhatsApp configurado');
+      return;
+    }
+
+    const storeName =
+      config?.store_name || order.store?.name || 'la tienda';
+    // Mensaje de CONSULTA con los datos de la orden para que la tienda
+    // la identifique sin repreguntar (paridad guest).
+    const itemLines = (order.items ?? [])
+      .map(
+        (i) =>
+          `  - ${i.product_name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity}`,
+      )
+      .join('\n');
+    const waItems = order.items ?? [];
+    const waItemsHeader =
+      waItems.length > 0 && waItems.every((i) => i.product_type === 'service')
+        ? 'Servicios'
+        : 'Productos';
+    const message = encodeURIComponent(
+      `¡Hola! 👋 Quisiera consultar el estado de mi pedido en ${storeName}.\n\n` +
+        `*Pedido:* #${order.order_number}\n` +
+        `*Estado:* ${this.getStateLabel(order.state)}\n` +
+        (itemLines ? `\n*${waItemsHeader}:*\n${itemLines}\n` : '') +
+        `\n*Total:* ${this.currencyService.format(Number(order.grand_total || 0))}\n\n¡Muchas gracias!`,
+    );
+    window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
+  }
+
+  // PAGO — mapa completo de estados + multipago peor-primero (paridad guest)
+
+  getPaymentStateLabel(state: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Pendiente de confirmación',
+      authorized: 'Autorizado',
+      succeeded: 'Pagado',
+      captured: 'Pagado',
+      paid: 'Pagado',
+      failed: 'Fallido',
+      partially_refunded: 'Reembolso parcial',
+      refunded: 'Reembolsado',
+      cancelled: 'Cancelado',
+      // Alias legacy: el enum anterior usaba `partial`.
+      partial: 'Parcial',
+    };
+    return labels[state] || state;
+  }
+
+  getPaymentStateVariant(state: string): BadgeVariant {
+    const variants: Record<string, BadgeVariant> = {
+      succeeded: 'success',
+      captured: 'success',
+      paid: 'success',
+      pending: 'warning',
+      authorized: 'primary',
+      partially_refunded: 'info',
+      refunded: 'info',
+      partial: 'info',
+      failed: 'error',
+      cancelled: 'neutral',
+    };
+    return variants[state] || 'neutral';
+  }
+
+  /** Severidad peor-primero para multipago (paridad guest). */
+  private paymentSeverity(state: string): number {
+    const order = [
+      'failed',
+      'pending',
+      'authorized',
+      'partially_refunded',
+      'cancelled',
+      'refunded',
+      'succeeded',
+    ];
+    const legacyAlias: Record<string, string> = {
+      captured: 'succeeded',
+      paid: 'succeeded',
+      partial: 'partially_refunded',
+    };
+    const idx = order.indexOf(legacyAlias[state] ?? state);
+    return idx === -1 ? order.length : idx;
+  }
+
+  /** Pagos ordenados peor-primero (copia; no muta la orden). */
+  paymentsWorstFirst(
+    payments?: OrderDetail['payments'] | null,
+  ): OrderDetail['payments'] {
+    return [...(payments ?? [])].sort(
+      (a, b) => this.paymentSeverity(a.state) - this.paymentSeverity(b.state),
+    );
+  }
+
+  /** Estado agregado del pago: el peor de todos (o null sin pagos). */
+  worstPaymentState(
+    payments?: OrderDetail['payments'] | null,
+  ): string | null {
+    const sorted = this.paymentsWorstFirst(payments);
+    return sorted.length ? sorted[0].state : null;
+  }
+
+  /** True si el pago sigue pendiente (dispara la nota del ETA). */
+  isPaymentPending(order: OrderDetail): boolean {
+    const worst = this.worstPaymentState(order.payments);
+    if (worst) return worst === 'pending';
+    return order.state === 'pending_payment';
+  }
+
+  // ETA — persistido o prep_minutes_max, tras hide_prep_eta (paridad guest)
+
+  /** `prefers-reduced-motion` para el tracking (sin SSE en cuenta). */
+  prefersReducedMotion(): boolean {
+    return (
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
+  }
+
+  etaVisible(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
+      return false;
+    }
+    const order = this.order();
+    if (!order) return false;
+    return order.estimated_ready_at != null || this.etaMinutes(order) != null;
+  }
+
+  etaMinutes(order: OrderDetail): number | null {
+    const m = order.prep_minutes_max;
+    return typeof m === 'number' && Number.isFinite(m) ? m : null;
+  }
+
+  /** "Tiempo estimado: ~X min" + hora persistida si existe. */
+  etaLabel(order: OrderDetail): string {
+    const parts: string[] = [];
+    const minutes = this.etaMinutes(order);
+    if (minutes != null) parts.push(`~${minutes} min`);
+    const readyAt = this.formatReadyTime(order.estimated_ready_at);
+    if (readyAt) parts.push(`listo aprox. ${readyAt}`);
+    return `Tiempo estimado: ${parts.join(' · ') || '—'}`;
+  }
+
+  /**
+   * `estimated_ready_at` es un instante: se muestra en la hora local del
+   * lector (quien consulta su pedido).
+   */
+  private formatReadyTime(iso?: string | null): string {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleTimeString('es-CO', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  }
+
+  /** Nota de pago pendiente sin palabra "preparación" si no hay cocina. */
+  paymentPendingNote(order: OrderDetail): string {
+    return this.orderHasPreparedItems(order)
+      ? 'Tu pago está pendiente de confirmación; la preparación inicia al confirmarse y el tiempo puede variar.'
+      : 'Tu pago está pendiente de confirmación; tu pedido se procesa al confirmarse y el tiempo puede variar.';
+  }
+
+  // COCINA — port del guest (kitchenStateFor/Label/Badge/PrepLine)
+
+  kitchenStateFor(
+    item: OrderDetail['items'][number],
+  ): string | null {
+    // Solo prepared muestra cocina; físico/servicio explícitos nunca
+    // (null = legacy: se respeta el ticket como hasta ahora).
+    if (item.product_type != null && item.product_type !== 'prepared') {
+      return null;
+    }
+    return item.kitchen_status ?? null;
+  }
+
+  /** 5 labels ES, idénticos al admin. */
+  kitchenStateLabel(status: string): string {
+    switch (status) {
+      case 'pending':
+        return 'Pendiente';
+      case 'in_preparation':
+        return 'En preparación';
+      case 'ready':
+        return 'Listo';
+      case 'delivered':
+        return 'Entregado';
+      case 'cancelled':
+        return 'Cancelado';
+      default:
+        return status;
+    }
+  }
+
+  /**
+   * El badge antepone "Preparación: " salvo en `in_preparation`, cuyo
+   * label ya dice lo mismo que el prefijo (paridad guest + voucher).
+   */
+  kitchenPrepLine(status: string): string {
+    const label = this.kitchenStateLabel(status);
+    return status === 'in_preparation' ? label : `Preparación: ${label}`;
+  }
+
+  /**
+   * Paleta KDS del admin mapeada a variantes de `app-badge`:
+   * pending→neutral, in_preparation→warning, ready→success,
+   * delivered→info, cancelled→error.
+   */
+  kitchenBadgeVariant(status: string): BadgeVariant {
+    switch (status) {
+      case 'pending':
+        return 'neutral';
+      case 'in_preparation':
+        return 'warning';
+      case 'ready':
+        return 'success';
+      case 'delivered':
+        return 'info';
+      case 'cancelled':
+        return 'error';
+      default:
+        return 'neutral';
+    }
+  }
+
+  // TIPOS — "En preparación" solo con cocina real (paridad guest)
+
+  /**
+   * La orden tiene cocina real: al menos un plato prepared (o líneas sin
+   * tipo, legacy: se preserva "En preparación" como hasta ahora). Solo
+   * cuando TODAS las líneas son físico/servicio conocido se apaga el
+   * lenguaje de cocina (tracking, ETA, badges).
+   */
+  orderHasPreparedItems(order: OrderDetail): boolean {
+    const items = order.items ?? [];
+    if (!items.length) return true;
+    return items.some(
+      (i) => i.product_type == null || i.product_type === 'prepared',
+    );
   }
 }

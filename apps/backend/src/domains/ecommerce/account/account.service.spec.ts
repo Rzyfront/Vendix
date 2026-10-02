@@ -73,3 +73,29 @@ describe('AccountService#deriveLineGross — fallback ADR-06', () => {
     expect(result.line_total_gross).toBe(50);
   });
 });
+
+describe('AccountService#kitchenStatusFor — paridad guest order-summary', () => {
+  const service = new AccountService({} as any, {} as any);
+  const kitchenStatusFor = (rows: { id: number; status: string }[] | null) =>
+    (service as any).kitchenStatusFor(rows);
+
+  it('prefiere la fila in-flight sobre la terminal más reciente', () => {
+    expect(
+      kitchenStatusFor([
+        { id: 9, status: 'delivered' },
+        { id: 8, status: 'in_preparation' },
+      ]),
+    ).toBe('in_preparation');
+  });
+
+  it('sin filas in-flight devuelve la más reciente (desc por id)', () => {
+    expect(kitchenStatusFor([{ id: 7, status: 'delivered' }])).toBe(
+      'delivered',
+    );
+  });
+
+  it('sin filas (nunca disparado) devuelve null', () => {
+    expect(kitchenStatusFor([])).toBeNull();
+    expect(kitchenStatusFor(null)).toBeNull();
+  });
+});
