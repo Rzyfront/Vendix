@@ -167,6 +167,15 @@ const AGENT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
               [disabled]="isSubmitting()"
               helpText="Entre 1 y 50. Vacio = default del loop"
             ></app-input>
+            <app-input
+              formControlName="timeout_seconds"
+              label="Timeout por turno (s)"
+              type="number"
+              placeholder="120"
+              [control]="timeoutSecondsControl"
+              [disabled]="isSubmitting()"
+              helpText="Entre 30 y 600. Vacio = default del loop"
+            ></app-input>
           </div>
           <p class="text-xs text-text-secondary">
             Esta selección solo restringe las herramientas disponibles por permisos y por el plan de la tienda; no concede acceso nuevo.
@@ -262,6 +271,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
     allowed_tools: [[] as string[], [Validators.maxLength(100)]],
     denied_tools: [[] as string[], [Validators.maxLength(100)]],
     max_iterations: [null as number | null, [Validators.min(1), Validators.max(50)]],
+    timeout_seconds: [null as number | null, [Validators.min(30), Validators.max(600)]],
     requires_confirmation_default: [false],
     is_active: [true],
   });
@@ -294,6 +304,10 @@ export class AIEngineAgentModalComponent implements OnChanges {
     return this.form.get('max_iterations') as FormControl<number | null>;
   }
 
+  get timeoutSecondsControl(): FormControl<number | null> {
+    return this.form.get('timeout_seconds') as FormControl<number | null>;
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['apps']) {
       this.appOptions = [
@@ -318,6 +332,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
         allowed_tools: [...(a.allowed_tools || [])],
         denied_tools: [...(a.denied_tools || [])],
         max_iterations: a.max_iterations ?? null,
+        timeout_seconds: a.timeout_seconds ?? null,
         requires_confirmation_default:
           a.requires_confirmation_default ?? false,
         is_active: a.is_active,
@@ -338,6 +353,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
     const allowedTools = (raw.allowed_tools as string[] | null) ?? [];
     const deniedTools = (raw.denied_tools as string[] | null) ?? [];
     const maxIterations = this.toFiniteInt(raw.max_iterations);
+    const timeoutSeconds = this.toFiniteInt(raw.timeout_seconds);
 
     const data: CreateAIAgentDto | UpdateAIAgentDto = {
       key: raw.key,
@@ -348,6 +364,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
       allowed_tools: allowedTools,
       denied_tools: deniedTools,
       max_iterations: maxIterations,
+      timeout_seconds: timeoutSeconds,
       requires_confirmation_default: !!raw.requires_confirmation_default,
       is_active: !!raw.is_active,
     };
@@ -377,6 +394,7 @@ export class AIEngineAgentModalComponent implements OnChanges {
       allowed_tools: [],
       denied_tools: [],
       max_iterations: null,
+      timeout_seconds: null,
       requires_confirmation_default: false,
       is_active: true,
     });
