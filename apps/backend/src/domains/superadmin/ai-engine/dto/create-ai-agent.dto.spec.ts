@@ -38,8 +38,8 @@ describe('CreateAIAgentDto (F4)', () => {
     }
   });
 
-  it('rejects max_iterations outside 1..50', async () => {
-    for (const max_iterations of [0, 51]) {
+  it('rejects max_iterations outside 1..60', async () => {
+    for (const max_iterations of [0, 61]) {
       const dto = buildDto();
       dto.max_iterations = max_iterations;
 
