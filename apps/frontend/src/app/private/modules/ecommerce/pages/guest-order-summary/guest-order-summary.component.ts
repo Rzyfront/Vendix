@@ -494,6 +494,13 @@ export interface GuestOrderSummary {
             </div>
           </section>
 
+          <!-- Slot embebido: la cuenta proyecta su tarjeta de envío
+               justo debajo de Productos. En guest standalone no se
+               proyecta nada (vista intacta). -->
+          @if (embedded()) {
+            <ng-content select="[data-slot=after-products]" />
+          }
+
           <!-- MÉTODO DE PAGO (multipago ordenado peor-primero) -->
           @if (paymentsWorstFirst(data.order.payments); as payments) {
             @if (payments.length) {

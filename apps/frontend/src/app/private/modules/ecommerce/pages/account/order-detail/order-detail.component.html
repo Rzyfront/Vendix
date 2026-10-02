@@ -33,7 +33,77 @@
       [embedded]="true"
       [summaryInput]="guestSummary()"
       (receiptUploaded)="loadOrder(order.id)"
-    />
+    >
+      <!-- Tarjeta de envío proyectada en el slot del guest: queda
+           debajo de Productos, al mismo ancho y ritmo. -->
+      @if (shippingBlock(); as block) {
+        <section
+          data-slot="after-products"
+          class="order-section"
+          aria-label="Método de envío"
+        >
+          <div class="section-header">
+            @switch (block.type) {
+              @case ('pickup') {
+                <app-icon name="map-pin" [size]="18" />
+              }
+              @case ('home_delivery') {
+                <app-icon name="truck" [size]="18" />
+              }
+              @default {
+                <app-icon name="package" [size]="18" />
+              }
+            }
+            <h2>{{ block.title }}</h2>
+          </div>
+          <div class="extras-list">
+            <div class="extra-row">
+              <div class="extra-row-main">
+                <span class="extra-row-title">{{ block.method }}</span>
+                @if (block.type === 'pickup') {
+                  <span class="extra-row-sub">
+                    Recoge tu pedido en {{ block.storeName }}
+                  </span>
+                }
+                @if (
+                  block.type === 'home_delivery' && block.carrier
+                ) {
+                  <span class="extra-row-sub">
+                    Transportista: {{ block.carrier }}
+                  </span>
+                }
+                @if (block.type === 'home_delivery' && block.tracking) {
+                  <span class="extra-row-sub">
+                    Rastreo:
+                    <code class="tracking-code">{{ block.tracking }}</code>
+                  </span>
+                }
+                @if (
+                  block.type === 'home_delivery' &&
+                  block.minDays &&
+                  block.maxDays
+                ) {
+                  <span class="extra-row-sub">
+                    Entrega estimada: {{ block.minDays }}-{{
+                      block.maxDays
+                    }}
+                    días hábiles
+                  </span>
+                }
+                @if (block.type === 'other' && block.note) {
+                  <span class="extra-row-sub">{{ block.note }}</span>
+                }
+              </div>
+              @if ((block.cost ?? 0) > 0) {
+                <strong class="extra-row-amount">
+                  {{ (block.cost ?? 0) | currency }}
+                </strong>
+              }
+            </div>
+          </div>
+        </section>
+      }
+    </app-guest-order-summary>
 
     <!-- Extras propios de cuenta (reservas, envío, factura). -->
     <div class="account-order-extras">
@@ -92,70 +162,6 @@
                 </app-button>
               </div>
             }
-          </section>
-        }
-
-        @if (shippingBlock(); as block) {
-          <section class="order-section" aria-label="Método de envío">
-            <div class="section-header">
-              @switch (block.type) {
-                @case ('pickup') {
-                  <app-icon name="map-pin" [size]="18" />
-                }
-                @case ('home_delivery') {
-                  <app-icon name="truck" [size]="18" />
-                }
-                @default {
-                  <app-icon name="package" [size]="18" />
-                }
-              }
-              <h2>{{ block.title }}</h2>
-            </div>
-            <div class="extras-list">
-              <div class="extra-row">
-                <div class="extra-row-main">
-                  <span class="extra-row-title">{{ block.method }}</span>
-                  @if (block.type === 'pickup') {
-                    <span class="extra-row-sub">
-                      Recoge tu pedido en {{ block.storeName }}
-                    </span>
-                  }
-                  @if (
-                    block.type === 'home_delivery' && block.carrier
-                  ) {
-                    <span class="extra-row-sub">
-                      Transportista: {{ block.carrier }}
-                    </span>
-                  }
-                  @if (block.type === 'home_delivery' && block.tracking) {
-                    <span class="extra-row-sub">
-                      Rastreo:
-                      <code class="tracking-code">{{ block.tracking }}</code>
-                    </span>
-                  }
-                  @if (
-                    block.type === 'home_delivery' &&
-                    block.minDays &&
-                    block.maxDays
-                  ) {
-                    <span class="extra-row-sub">
-                      Entrega estimada: {{ block.minDays }}-{{
-                        block.maxDays
-                      }}
-                      días hábiles
-                    </span>
-                  }
-                  @if (block.type === 'other' && block.note) {
-                    <span class="extra-row-sub">{{ block.note }}</span>
-                  }
-                </div>
-                @if ((block.cost ?? 0) > 0) {
-                  <strong class="extra-row-amount">
-                    {{ (block.cost ?? 0) | currency }}
-                  </strong>
-                }
-              </div>
-            </div>
           </section>
         }
 
