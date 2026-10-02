@@ -343,22 +343,11 @@ export interface GuestOrderSummary {
                 <h2>Entrega</h2>
               </div>
               <div class="address-block">
-                @if (addr.address_line1) {
-                  <p class="addr-line strong">{{ addr.address_line1 }}</p>
-                }
-                @if (addr.address_line2) {
-                  <p class="addr-line">{{ addr.address_line2 }}</p>
-                }
-                <p class="addr-line muted">
-                  {{ addr.city
-                  }}@if (addr.state_province) {, {{ addr.state_province }}}@if (
-                    addr.country_code
-                  ) {
-                    · {{ addr.country_code }}}
+                <!-- Dirección fluida a lo ancho: calle fuerte + resto tenue
+                     en una sola línea que ocupa la sección (sin hueco der.) -->
+                <p class="addr-line">
+                  <span class="addr-line strong">{{ addressStreet(addr) }}</span>@if (addressStreet(addr) && addressLocality(addr)) {<span class="addr-line muted">, </span>}<span class="addr-line muted">{{ addressLocality(addr) }}</span>
                 </p>
-                @if (addr.postal_code) {
-                  <p class="addr-line muted">C.P. {{ addr.postal_code }}</p>
-                }
                 @if (addr.phone_number) {
                   <p class="addr-line muted phone">
                     <app-icon name="phone" [size]="13" />{{
@@ -1688,6 +1677,30 @@ export class GuestOrderSummaryComponent implements OnInit {
    * Opt-out `ecommerce.orders.hide_prep_eta` (paso 7): ausente ⇒ visible,
    * se lee con `!== true`. Además exige al menos una fuente de ETA.
    */
+  /**
+   * Calle de la dirección fluida: línea1 + línea2 unidas por coma.
+   * Vacío si no hay ninguna (el template omite el separador).
+   */
+  addressStreet(addr: GuestOrderAddress): string {
+    return [addr.address_line1, addr.address_line2]
+      .filter((p) => !!p)
+      .join(', ');
+  }
+
+  /**
+   * Localidad de la dirección fluida: ciudad, dpto · país · C.P.
+   * (el teléfono va en su propia fila con icono, como antes).
+   */
+  addressLocality(addr: GuestOrderAddress): string {
+    const locality = [addr.city, addr.state_province]
+      .filter((p) => !!p)
+      .join(', ');
+    const parts = [locality];
+    if (addr.country_code) parts.push(addr.country_code);
+    if (addr.postal_code) parts.push(`C.P. ${addr.postal_code}`);
+    return parts.filter((p) => !!p).join(' · ');
+  }
+
   etaVisible(): boolean {
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
