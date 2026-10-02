@@ -548,6 +548,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
     mount(state, [firstMethod, pickup]);
     component.selectShippingMethod(pickup);
+    fixture.detectChanges();
     pickupQuotes[0].next([{ ...quote(9, 0, 90), method_type: 'pickup' }]);
     fixture.detectChanges();
 
@@ -564,6 +565,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
     mount(state, [firstMethod, pickup]);
     component.selectShippingMethod(pickup);
+    fixture.detectChanges();
     pickupQuotes[0].next([]);
     fixture.detectChanges();
 
@@ -580,6 +582,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
     mount(state, [firstMethod, pickup, originalMethod]);
     component.selectShippingMethod(pickup);
+    fixture.detectChanges();
     const stalePickup = pickupQuotes[0];
     component.selectShippingMethod(firstMethod);
     fixture.detectChanges();
