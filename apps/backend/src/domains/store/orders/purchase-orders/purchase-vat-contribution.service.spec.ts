@@ -22,9 +22,10 @@ describe('PurchaseVatContributionService.reserve', () => {
   const setup = () => {
     created = null;
     tx = {
-      purchase_orders: { findFirst: jest.fn().mockResolvedValue({ id: 42, organization_id: 1, supplier_id: 7, location: { store_id: 3 } }) },
+      stores: { findFirst: jest.fn().mockResolvedValue({ id: 3 }) },
+      purchase_orders: { findFirst: jest.fn().mockResolvedValue({ id: 42, organization_id: 1, supplier_id: 7, supplier_invoice_number: ' FC-1 ', supplier_invoice_date: new Date('2026-09-30T00:00:00.000Z'), location: { store_id: 3 } }) },
       purchase_order_receptions: { findFirst: jest.fn().mockResolvedValue({ id: 91 }) },
-      suppliers: { findFirst: jest.fn().mockResolvedValue({ id: 7 }) },
+      suppliers: { findFirst: jest.fn().mockResolvedValue({ id: 7, tax_id: ' 900123456 ' }) },
       accounting_entities: { findFirst: jest.fn().mockResolvedValue({ id: 2, fiscal_scope: 'STORE', store_id: 3 }) },
       purchase_vat_contributions: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -46,11 +47,13 @@ describe('PurchaseVatContributionService.reserve', () => {
   it('validates scoped source records and creates a pending immutable snapshot', async () => {
     const result = await service.reserve(input());
     expect(result).toBe(created);
+    expect(tx.stores.findFirst).toHaveBeenCalledWith({ where: { id: 3, organization_id: 1 }, select: { id: true } });
     expect(tx.purchase_orders.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 42, organization_id: 1, supplier_id: 7 },
+      select: expect.objectContaining({ supplier_invoice_number: true, supplier_invoice_date: true }),
     }));
     expect(tx.purchase_order_receptions.findFirst).toHaveBeenCalledWith({ where: { id: 91, purchase_order_id: 42 }, select: { id: true } });
-    expect(tx.suppliers.findFirst).toHaveBeenCalledWith({ where: { id: 7, organization_id: 1 }, select: { id: true } });
+    expect(tx.suppliers.findFirst).toHaveBeenCalledWith({ where: { id: 7, organization_id: 1 }, select: { id: true, tax_id: true } });
     expect(tx.accounting_entities.findFirst).toHaveBeenCalledWith({ where: { id: 2, organization_id: 1, is_active: true }, select: { id: true, fiscal_scope: true, store_id: true } });
     expect(created).toMatchObject({
       store_id: 3, source_effect_key: 'po:42:deductible-iva:v1',
@@ -73,12 +76,29 @@ describe('PurchaseVatContributionService.reserve', () => {
   it.each([
     ['changed cents', { iva_amount: '19.01', tax_groups: [{ tax_type: 'iva', tax_rate: 19, taxable_amount: '100', tax_amount: '19.01' }] }],
     ['changed date', { invoice_issue_date_snapshot: '2026-10-01' }],
-    ['changed tenant', { organization_id: 8 }],
   ])('rejects a changed source payload on replay (%s)', async (_label, patch) => {
     const { buildPurchaseVatContributionSnapshot } = await import('./purchase-vat-contribution-snapshot.util');
     tx.purchase_vat_contributions.findUnique.mockResolvedValue({ payload_hash: buildPurchaseVatContributionSnapshot(input()).payload_hash });
     await expect(service.reserve(input(patch as Partial<PurchaseVatContributionSnapshotInput>))).rejects.toBeInstanceOf(ConflictException);
     expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects foreign store and caller-supplied invoice/tax identity drift before writing', async () => {
+    tx.stores.findFirst.mockResolvedValue(null);
+    await expect(service.reserve(input({ organization_id: 8 }))).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
+
+    for (const [sourcePatch, inputPatch] of [
+      [{ supplier_invoice_number: 'OTHER' }, { invoice_number_snapshot: 'OTHER' }],
+      [{ supplier_invoice_date: new Date('2026-10-01T00:00:00.000Z') }, { invoice_issue_date_snapshot: '2026-10-01' }],
+      [{ supplier_tax_id: '999' }, { supplier_tax_id_snapshot: '999' }],
+    ] as const) {
+      setup();
+      tx.purchase_orders.findFirst.mockResolvedValue({ id: 42, organization_id: 1, supplier_id: 7, location: { store_id: 3 }, ...sourcePatch });
+      tx.suppliers.findFirst.mockResolvedValue({ id: 7, tax_id: '900123456', ...('supplier_tax_id' in sourcePatch ? { tax_id: sourcePatch.supplier_tax_id } : {}) });
+      await expect(service.reserve(input(inputPatch))).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
+    }
   });
 
   it('recovers a P2002 race by refetching and comparing the same scoped effect key', async () => {
@@ -111,7 +131,7 @@ describe('PurchaseVatContributionService.reserve', () => {
     expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
 
     setup();
-    tx.purchase_orders.findFirst.mockResolvedValue({ id: 42, organization_id: 1, supplier_id: 7, location: { store_id: 8 } });
+    tx.purchase_orders.findFirst.mockResolvedValue({ id: 42, organization_id: 1, supplier_id: 7, supplier_invoice_number: 'FC-1', supplier_invoice_date: new Date('2026-09-30T00:00:00.000Z'), location: { store_id: 8 } });
     await expect(service.reserve(input())).rejects.toBeInstanceOf(ConflictException);
     expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
   });

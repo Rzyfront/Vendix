@@ -6,6 +6,18 @@ import {
   PurchaseVatContributionSnapshotInput,
 } from './purchase-vat-contribution-snapshot.util';
 
+function normalizedText(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function dateOnly(value: Date | null): string | null {
+  if (value == null) return null;
+  if (Number.isNaN(value.getTime())) return null;
+  return value.toISOString().slice(0, 10);
+}
+
 @Injectable()
 export class PurchaseVatContributionService {
   constructor(private readonly prisma: GlobalPrismaService) {}
@@ -15,15 +27,25 @@ export class PurchaseVatContributionService {
 
     try {
       return await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const store = await tx.stores.findFirst({
+          where: { id: snapshot.store_id, organization_id: snapshot.organization_id },
+          select: { id: true },
+        });
+        if (!store) throw new ConflictException('Store does not belong to the snapshot organization');
+
         const po = await tx.purchase_orders.findFirst({
           where: {
             id: snapshot.purchase_order_id,
             organization_id: snapshot.organization_id,
             supplier_id: snapshot.supplier_id,
           },
-          select: { id: true, organization_id: true, supplier_id: true, location: { select: { store_id: true } } },
+          select: { id: true, organization_id: true, supplier_id: true, supplier_invoice_number: true, supplier_invoice_date: true, location: { select: { store_id: true } } },
         });
         if (!po) throw new ConflictException('Purchase order does not match the snapshot organization and supplier');
+        if (normalizedText(po.supplier_invoice_number) !== snapshot.invoice_number_snapshot ||
+          dateOnly(po.supplier_invoice_date) !== snapshot.invoice_issue_date_snapshot) {
+          throw new ConflictException('Invoice number or issue date does not match the purchase order source');
+        }
         if (po.location?.store_id != null && po.location.store_id !== snapshot.store_id) {
           throw new ConflictException('Purchase order location does not belong to the snapshot store');
         }
@@ -36,9 +58,12 @@ export class PurchaseVatContributionService {
 
         const supplier = await tx.suppliers.findFirst({
           where: { id: snapshot.supplier_id, organization_id: snapshot.organization_id },
-          select: { id: true },
+          select: { id: true, tax_id: true },
         });
         if (!supplier) throw new ConflictException('Supplier does not belong to the snapshot organization');
+        if (normalizedText(supplier.tax_id) !== snapshot.supplier_tax_id_snapshot) {
+          throw new ConflictException('Supplier tax ID does not match the snapshot source');
+        }
 
         const entity = await tx.accounting_entities.findFirst({
           where: { id: snapshot.accounting_entity_id, organization_id: snapshot.organization_id, is_active: true },
