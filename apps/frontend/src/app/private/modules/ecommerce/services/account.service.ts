@@ -76,6 +76,12 @@ export interface OrderAppliedCoupon {
   used_at: string | null;
 }
 
+export interface OrderDetailStore {
+  id: number;
+  name: string;
+  logo_url: string | null;
+}
+
 export interface OrderDetail extends Order {
   subtotal_amount: number;
   discount_amount: number;
@@ -83,6 +89,14 @@ export interface OrderDetail extends Order {
   shipping_cost: number;
   shipping_address: any;
   invoice_url: string | null;
+  /** Canal de la orden (`ecommerce`/`whatsapp`/…); el mapper lo normaliza. */
+  channel?: string | null;
+  /** ETA persistido + MAX agregado + gate fiscal + tienda (paridad guest). */
+  estimated_ready_at?: string | null;
+  estimated_delivered_at?: string | null;
+  prep_minutes_max?: number | null;
+  prints_vat_breakdown?: boolean;
+  store?: OrderDetailStore | null;
   /**
    * How the order reaches the customer. `pickup` means the customer comes to
    * the store — the order-detail page reads it to decide whether a service was
@@ -110,6 +124,13 @@ export interface OrderDetail extends Order {
     /** Mirrors `product_type_enum`; null when the product row was removed. */
     product_type?: 'physical' | 'service' | 'prepared' | null;
     /**
+     * Estado in-flight de cocina resuelto por el backend (`kitchenStatusFor`);
+     * null = la línea nunca se disparó. Paridad guest order-summary.
+     */
+    kitchen_status?: string | null;
+    /** Prep variante ?? producto (null si ninguno); el default solo va al MAX. */
+    preparation_time_minutes?: number | null;
+    /**
      * E2 (Carril B) — fecha de cancelación de la línea (soft cancel via D2).
      * Si llega no-null, el frontend pinta la línea tachada con distintivo
      * 'Cancelado' y oculta precio/impuestos. Nullable porque el grueso de
@@ -126,6 +147,9 @@ export interface OrderDetail extends Order {
     method: string | null;
     paid_at: string | null;
     reference: string | null;
+    /** Presencia de comprobante (visor) + content-type del HEAD. */
+    has_receipt?: boolean;
+    receipt_content_type?: string | null;
   }[];
   bookings: {
     id: number;
@@ -140,6 +164,21 @@ export interface OrderDetail extends Order {
   // Persisted discount snapshots — read-only, never recalculated client-side.
   applied_promotions?: OrderAppliedPromotion[];
   applied_coupons?: OrderAppliedCoupon[];
+}
+
+/** Espejo de cuenta de `GuestPaymentReceiptUrl` (mismo contrato). */
+export interface AccountPaymentReceiptUrl {
+  url: string;
+  expires_at: string;
+  content_type: string | null;
+}
+
+/** Espejo de cuenta de `GuestReceiptUploadResult` (mismo contrato). */
+export interface AccountReceiptUploadResult {
+  payment_id: number;
+  has_receipt: boolean;
+  receipt_content_type: string | null;
+  receipt_uploaded_at: string;
 }
 
 @Injectable({
@@ -210,6 +249,36 @@ export class AccountService {
       `${this.api_url}/orders/${order_id}`,
       { headers: this.getHeaders() },
     );
+  }
+
+  getPaymentReceiptUrl(
+    paymentId: number,
+  ): Observable<{ success: boolean; data: AccountPaymentReceiptUrl }> {
+    return this.http.get<{
+      success: boolean;
+      data: AccountPaymentReceiptUrl;
+    }>(`${this.api_url}/payments/${paymentId}/receipt-url`, {
+      headers: this.getHeaders(),
+    });
+  }
+
+  uploadPaymentReceipt(
+    paymentId: number,
+    file: File,
+  ): Observable<{
+    success: boolean;
+    data: AccountReceiptUploadResult;
+    message?: string;
+  }> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return this.http.post<{
+      success: boolean;
+      data: AccountReceiptUploadResult;
+      message?: string;
+    }>(`${this.api_url}/payments/${paymentId}/receipt`, form, {
+      headers: this.getHeaders(),
+    });
   }
 
   getAddresses(): Observable<{ success: boolean; data: Address[] }> {
