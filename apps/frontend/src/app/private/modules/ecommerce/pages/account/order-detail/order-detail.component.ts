@@ -1,24 +1,37 @@
-import {Component,
+import {
+  Component,
   OnInit,
   OnDestroy,
   inject,
   signal,
   computed,
-  DestroyRef} from '@angular/core';
+  DestroyRef,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
-
 
 import { AccountService, OrderDetail } from '../../../services/account.service';
 import { EcommerceBookingService } from '../../../services/ecommerce-booking.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { RescheduleModalComponent } from '../../../../store/reservations/components/reschedule-modal/reschedule-modal.component';
 import { parseVariantAttributes } from '../../../../../../shared/utils';
+import {
+  GuestOrderSummaryComponent,
+  GuestOrderSummary,
+} from '../../guest-order-summary/guest-order-summary.component';
 
+/**
+ * Detalle de orden logueado (`/account/orders/:id`). La vista es la MISMA
+ * del guest: se embebe `app-guest-order-summary` en modo embedded,
+ * alimentado por `guestSummary()` (mapper puro sobre el payload de cuenta).
+ * Solo viven aquí los extras propios de cuenta: reservas/reagendar, método
+ * de envío, ubicación del servicio, verificación Wompi y factura.
+ */
 @Component({
   selector: 'app-order-detail',
   standalone: true,
@@ -27,11 +40,14 @@ import { parseVariantAttributes } from '../../../../../../shared/utils';
     RouterModule,
     IconComponent,
     BadgeComponent,
+    ButtonComponent,
     CurrencyPipe,
     RescheduleModalComponent,
+    GuestOrderSummaryComponent,
   ],
   templateUrl: './order-detail.component.html',
-  styleUrls: ['./order-detail.component.scss'] })
+  styleUrls: ['./order-detail.component.scss'],
+})
 export class OrderDetailComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   readonly order = signal<OrderDetail | null>(null);
@@ -48,11 +64,116 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   readonly showRescheduleModal = signal(false);
   wompiPaymentVerified = false;
 
-  readonly totalItems = computed(() => {
+  /**
+   * Adaptador cuenta → guest. El payload de cuenta ya trae la misma
+   * información (backend enriquecido en paridad); aquí solo se reordena a
+   * la forma `GuestOrderSummary`. Sin `payment_id`: los comprobantes usan
+   * endpoints guest con token y quedan ocultos en modo embebido.
+   */
+  readonly guestSummary = computed((): GuestOrderSummary | null => {
     const o = this.order();
-    if (!o) return 0;
-    return o.items.reduce((sum, item) => sum + item.quantity, 0);
+    if (!o) return null;
+    const addr = (o.shipping_address ?? null) as {
+      address_line1?: string | null;
+      address_line2?: string | null;
+      city?: string | null;
+      state_province?: string | null;
+      country_code?: string | null;
+      postal_code?: string | null;
+      phone_number?: string | null;
+    } | null;
+    return {
+      token: '',
+      prints_vat_breakdown: o.prints_vat_breakdown ?? false,
+      store: o.store
+        ? {
+            id: o.store.id,
+            name: o.store.name,
+            logo_url: o.store.logo_url ?? undefined,
+          }
+        : undefined,
+      order: {
+        order_number: o.order_number,
+        state: o.state,
+        channel: o.channel ?? null,
+        created_at: o.created_at,
+        placed_at: o.placed_at,
+        currency: o.currency,
+        estimated_ready_at: o.estimated_ready_at ?? null,
+        estimated_delivered_at: o.estimated_delivered_at ?? null,
+        prep_minutes_max: o.prep_minutes_max ?? null,
+        delivery_type: o.delivery_type ?? null,
+        items: o.items.map((i) => ({
+          order_item_id: i.id,
+          product_name: i.product_name,
+          variant_sku: i.variant_sku ?? null,
+          variant_attributes: this.variantAttributesText(i.variant_attributes),
+          quantity: i.quantity,
+          unit_price: Number(i.unit_price ?? 0),
+          total_price: Number(i.total_price ?? 0),
+          kitchen_status: i.kitchen_status ?? null,
+          preparation_time_minutes: i.preparation_time_minutes ?? null,
+          cancelled_at: i.cancelled_at ?? null,
+          cancellation_reason: i.cancellation_reason ?? null,
+          image_url: i.image_url ?? null,
+          variant_image_url: i.variant_image_url ?? null,
+        })),
+        applied_promotions: (o.applied_promotions ?? []).map((p) => ({
+          name: p.name ?? null,
+          code: p.code ?? null,
+          type: p.type ?? null,
+          scope: p.scope ?? null,
+          value: p.value == null ? null : Number(p.value),
+          discount_amount: Number(p.discount_amount ?? 0),
+        })),
+        applied_coupons: (o.applied_coupons ?? []).map((c) => ({
+          code: c.code ?? '',
+          name: c.name ?? null,
+          discount_type: c.discount_type ?? null,
+          discount_value:
+            c.discount_value == null ? null : Number(c.discount_value),
+          discount_applied: Number(c.discount_applied ?? 0),
+        })),
+        discount_amount: Number(o.discount_amount ?? 0),
+        subtotal_amount: Number(o.subtotal_amount ?? 0),
+        tax_amount: Number(o.tax_amount ?? 0),
+        shipping_cost: Number(o.shipping_cost ?? 0),
+        grand_total: Number(o.grand_total ?? 0),
+        shipping_address: addr
+          ? {
+              address_line1: addr.address_line1 ?? null,
+              address_line2: addr.address_line2 ?? null,
+              city: addr.city ?? null,
+              state_province: addr.state_province ?? null,
+              country_code: addr.country_code ?? null,
+              postal_code: addr.postal_code ?? null,
+              phone_number: addr.phone_number ?? null,
+            }
+          : null,
+        payments: (o.payments ?? []).map((p) => ({
+          state: p.state,
+          amount: Number(p.amount ?? 0),
+          paid_at: p.paid_at ?? null,
+          method: p.method ?? null,
+        })),
+      },
+    };
   });
+
+  /**
+   * El guest pinta `variant_attributes` crudo (string). Si el backend manda
+   * objeto (falla vieja de normalización), se formatea como hacía el
+   * detalle viejo en vez de pintar `[object Object]`.
+   */
+  private variantAttributesText(variantAttributes: any): string | null {
+    if (typeof variantAttributes === 'string') return variantAttributes || null;
+    if (variantAttributes == null) return null;
+    const attrs = parseVariantAttributes(variantAttributes);
+    if (!attrs.length) return null;
+    return attrs
+      .map((a) => (a.name ? `${a.name}: ${a.value}` : a.value))
+      .join(' · ');
+  }
 
   readonly hasOnlyServices = computed(() => {
     const o = this.order();
@@ -102,9 +223,13 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     if (deliveryType === 'pickup') {
       return {
         type: 'pickup' as const,
-        title: o.state === 'shipped' ? '¡Tu pedido está listo para recoger!' : 'Retiro en tienda',
+        title:
+          o.state === 'shipped'
+            ? '¡Tu pedido está listo para recoger!'
+            : 'Retiro en tienda',
         method: method?.name || 'Retiro en tienda',
-        storeName: (o as any).store_name || 'Tienda',
+        storeName:
+          o.store?.name || (o as any).store_name || 'Tienda',
       };
     }
 
@@ -179,58 +304,8 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     };
   });
 
-  // ── Discount snapshots (read-only from order; never recalculated) ──
-  readonly appliedPromotions = computed(() =>
-    (this.order()?.applied_promotions ?? []).map((p) => ({
-      ...p,
-      discount_amount: Number(p.discount_amount || 0),
-    })),
-  );
-
-  readonly appliedCoupons = computed(() =>
-    (this.order()?.applied_coupons ?? []).map((c) => ({
-      ...c,
-      discount_applied: Number(c.discount_applied || 0),
-    })),
-  );
-
-  readonly hasDiscountSnapshot = computed(
-    () =>
-      this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
-  );
-
-  readonly orderTimelineSteps = computed(() => {
-    const o = this.order();
-    if (!o) return [];
-
-    const deliveryType = (o as any).delivery_type || 'other';
-    const states = [
-      { key: 'created', label: 'Pedido creado' },
-      { key: 'processing', label: 'En preparación' },
-      { key: 'shipped', label: deliveryType === 'pickup' ? 'Listo para recoger' : 'Enviado' },
-      { key: 'delivered', label: deliveryType === 'pickup' ? 'Recogido' : 'Entregado' },
-    ];
-
-    const stateOrder = ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'];
-    const currentState = o.state || 'created';
-    const currentIndex = stateOrder.indexOf(currentState);
-
-    return states.map((step) => {
-      const stepIndex = stateOrder.indexOf(step.key);
-      let status: 'completed' | 'current' | 'upcoming' = 'upcoming';
-      if (currentIndex >= stepIndex) status = 'completed';
-      if (step.key === currentState || (step.key === 'shipped' && currentState === 'shipped')) {
-        if (status !== 'completed' || step.key === currentState) status = 'current';
-      }
-      if (status === 'completed' && step.key !== currentState && currentIndex === stepIndex) {
-        status = 'current';
-      }
-      return { ...step, status };
-    });
-  });
-
   private wompiPollTimer: ReturnType<typeof setInterval> | null = null;
-private toast = inject(ToastService);
+  private toast = inject(ToastService);
 
   constructor(
     private account_service: AccountService,
@@ -257,8 +332,7 @@ private toast = inject(ToastService);
   }
 
   ngOnDestroy(): void {
-
-if (this.wompiPollTimer) {
+    if (this.wompiPollTimer) {
       clearInterval(this.wompiPollTimer);
     }
   }
@@ -330,7 +404,8 @@ if (this.wompiPollTimer) {
               this.wompiPollTimer = null;
             }
           }
-        } });
+        },
+      });
     }, 5000); // Poll every 5 seconds
   }
 
@@ -345,15 +420,10 @@ if (this.wompiPollTimer) {
       },
       error: () => {
         this.is_loading.set(false);
-      } });
+      },
+    });
   }
 
-  /**
-   * Show the "Reagendar" CTA only when the order contains a service
-   * booking whose status the customer can still change. A booking
-   * that is already in progress, completed, cancelled, or no_show can't
-   * be re-scheduled — only pending or confirmed can.
-   */
   /**
    * The booking the customer can reschedule. Prefers the real row
    * (the canonical source of date/time/address), but falls back to
@@ -538,132 +608,41 @@ if (this.wompiPollTimer) {
     }
   }
 
-  getVariantLabel(item: any): string {
-    const attrs = parseVariantAttributes(item?.variant_attributes);
-    if (attrs.length) {
-      return attrs.map(a => (a.name ? `${a.name}: ${a.value}` : a.value)).join(' · ');
-    }
-    return item?.variant_sku || '';
-  }
-
-  // === E2 — helpers de cancelación de línea =================================
-
-  /**
-   * True si el item fue cancelado (soft cancel vía D2). El backend persiste
-   * `cancelled_at` en order_items; el cliente ve el item en su posición
-   * original, tachado, con distintivo 'Cancelado'.
-   */
-  isItemCancelled(item: { cancelled_at?: string | null }): boolean {
-    return !!item?.cancelled_at;
-  }
-
-  /**
-   * El motivo se muestra al cliente SOLO si aporta. Filtra:
-   *  - Vacío / null / solo espacios.
-   *  - Marcador interno `legacy:` que dejó la ruta vieja de compatibilidad.
-   */
-  hasVisibleCancellationReason(item: {
-    cancellation_reason?: string | null;
-  }): boolean {
-    const reason = (item?.cancellation_reason ?? '').trim();
-    if (!reason) return false;
-    if (reason.startsWith('legacy:')) return false;
-    return true;
-  }
-
-  getStateLabel(state: string): string {
-    const o = this.order();
-    const deliveryType = o ? (o as any).delivery_type : null;
-    const labels: Record<string, string> = {
-      pending: 'Pendiente',
-      confirmed: 'Confirmado',
-      processing: 'En proceso',
-      shipped: deliveryType === 'pickup' ? 'Listo para recoger' : 'Enviado',
-      delivered: deliveryType === 'pickup' ? 'Recogido' : 'Entregado',
-      completed: 'Completado',
-      cancelled: 'Cancelado',
-    };
-    return labels[state] || state;
-  }
-
-  getStateClass(state: string): string {
-    const classes: Record<string, string> = {
-      pending: 'warning',
-      confirmed: 'info',
-      processing: 'info',
-      shipped: 'info',
-      delivered: 'success',
-      completed: 'success',
-      cancelled: 'error' };
-    return classes[state] || 'default';
-  }
-
-  getStateIcon(state: string): string {
-    const o = this.order();
-    const deliveryType = o ? (o as any).delivery_type : null;
-    const icons: Record<string, string> = {
-      pending: 'clock',
-      confirmed: 'check-circle',
-      processing: 'loader-2',
-      shipped: deliveryType === 'pickup' ? 'package-check' : 'truck',
-      delivered: 'package-check',
-      completed: 'check-circle',
-      cancelled: 'circle-x',
-    };
-    return icons[state] || 'circle';
-  }
-
-  getPaymentMethodLabel(method: string | null): string {
-    if (!method) return 'Método de pago';
-    const labels: Record<string, string> = {
-      cash: 'Efectivo',
-      card: 'Tarjeta',
-      transfer: 'Transferencia',
-      cash_on_delivery: 'Contra entrega' };
-    return labels[method] || method;
-  }
-
-  getPaymentIcon(method: string | null): string {
-    if (!method) return 'credit-card';
-    const icons: Record<string, string> = {
-      cash: 'banknote',
-      card: 'credit-card',
-      transfer: 'send',
-      cash_on_delivery: 'coins' };
-    return icons[method] || 'credit-card';
-  }
-
-  /** Returns the item type label for badge display */
-  getItemTypeLabel(item: any): string {
-    return item.product_type === 'service' ? 'Servicio' : 'Producto';
-  }
-
-  /** Returns true if item is a service */
-  isServiceItem(item: any): boolean {
-    return item.product_type === 'service';
-  }
-
   getBookingStatusLabel(status: string): string {
     const labels: Record<string, string> = {
       pending: 'Pendiente',
       confirmed: 'Confirmada',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      no_show: 'No asistió' };
+      no_show: 'No asistió',
+    };
     return labels[status] || status;
   }
 
-  getBookingStatusClass(status: string): string {
-    const classes: Record<string, string> = {
+  getBookingBadgeVariant(
+    status: string,
+  ): 'warning' | 'info' | 'success' | 'error' | 'neutral' {
+    const variants: Record<
+      string,
+      'warning' | 'info' | 'success' | 'error' | 'neutral'
+    > = {
       pending: 'warning',
       confirmed: 'info',
       completed: 'success',
       cancelled: 'error',
-      no_show: 'error' };
-    return classes[status] || 'default';
+      no_show: 'error',
+    };
+    return variants[status] || 'neutral';
   }
 
   getInvoiceUrl(): string {
     return this.order()?.invoice_url || '#';
+  }
+
+  openInvoice(): void {
+    const url = this.getInvoiceUrl();
+    if (url && url !== '#') {
+      window.open(url, '_blank', 'noopener');
+    }
   }
 }

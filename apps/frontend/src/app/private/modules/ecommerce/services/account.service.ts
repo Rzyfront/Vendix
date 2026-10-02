@@ -76,6 +76,12 @@ export interface OrderAppliedCoupon {
   used_at: string | null;
 }
 
+export interface OrderDetailStore {
+  id: number;
+  name: string;
+  logo_url: string | null;
+}
+
 export interface OrderDetail extends Order {
   subtotal_amount: number;
   discount_amount: number;
@@ -83,6 +89,14 @@ export interface OrderDetail extends Order {
   shipping_cost: number;
   shipping_address: any;
   invoice_url: string | null;
+  /** Canal de la orden (`ecommerce`/`whatsapp`/…); el mapper lo normaliza. */
+  channel?: string | null;
+  /** ETA persistido + MAX agregado + gate fiscal + tienda (paridad guest). */
+  estimated_ready_at?: string | null;
+  estimated_delivered_at?: string | null;
+  prep_minutes_max?: number | null;
+  prints_vat_breakdown?: boolean;
+  store?: OrderDetailStore | null;
   /**
    * How the order reaches the customer. `pickup` means the customer comes to
    * the store — the order-detail page reads it to decide whether a service was
@@ -109,6 +123,13 @@ export interface OrderDetail extends Order {
     variant_image_url?: string | null;
     /** Mirrors `product_type_enum`; null when the product row was removed. */
     product_type?: 'physical' | 'service' | 'prepared' | null;
+    /**
+     * Estado in-flight de cocina resuelto por el backend (`kitchenStatusFor`);
+     * null = la línea nunca se disparó. Paridad guest order-summary.
+     */
+    kitchen_status?: string | null;
+    /** Prep variante ?? producto (null si ninguno); el default solo va al MAX. */
+    preparation_time_minutes?: number | null;
     /**
      * E2 (Carril B) — fecha de cancelación de la línea (soft cancel via D2).
      * Si llega no-null, el frontend pinta la línea tachada con distintivo

@@ -1,9 +1,11 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   DestroyRef,
   effect,
   inject,
+  input,
   OnInit,
   signal,
   untracked,
@@ -37,7 +39,7 @@ import { GuestOrderPrintService } from '../../services/guest-order-print.service
 // PAYLOAD CONTRACT — enriched guest order summary endpoint
 // ============================================================================
 
-interface GuestOrderItem {
+export interface GuestOrderItem {
   // CP-853-fix (paso 5): clave por línea para la cocina en vivo (aditivo).
   order_item_id?: number | null;
   product_name: string;
@@ -60,7 +62,7 @@ interface GuestOrderItem {
   cancellation_reason?: string | null;
 }
 
-interface GuestOrderPromotion {
+export interface GuestOrderPromotion {
   name?: string | null;
   code?: string | null;
   type?: string | null;
@@ -69,7 +71,7 @@ interface GuestOrderPromotion {
   discount_amount: number;
 }
 
-interface GuestOrderCoupon {
+export interface GuestOrderCoupon {
   code: string;
   name?: string | null;
   discount_type?: string | null;
@@ -77,7 +79,7 @@ interface GuestOrderCoupon {
   discount_applied: number;
 }
 
-interface GuestOrderAddress {
+export interface GuestOrderAddress {
   address_line1?: string | null;
   address_line2?: string | null;
   city?: string | null;
@@ -87,7 +89,7 @@ interface GuestOrderAddress {
   phone_number?: string | null;
 }
 
-interface GuestOrderPayment {
+export interface GuestOrderPayment {
   // Paso 3 (roku-shop-checkout): `payment_id` identifica el pago para los
   // endpoints guest de comprobante (paso 9); `has_receipt` + content-type
   // alimentan el visor de comprobante.
@@ -100,12 +102,12 @@ interface GuestOrderPayment {
   receipt_content_type?: string | null;
 }
 
-interface GuestOrderInvoice {
+export interface GuestOrderInvoice {
   invoice_number: string;
   status: string;
 }
 
-interface GuestOrderData {
+export interface GuestOrderData {
   order_number: string | number;
   state: string;
   channel?: string | null;
@@ -130,7 +132,7 @@ interface GuestOrderData {
   invoice?: GuestOrderInvoice | null;
 }
 
-interface GuestOrderCustomer {
+export interface GuestOrderCustomer {
   first_name?: string;
   last_name?: string;
   document_type?: string;
@@ -139,7 +141,7 @@ interface GuestOrderCustomer {
   phone?: string;
 }
 
-interface GuestOrderStore {
+export interface GuestOrderStore {
   id?: number;
   name?: string;
   logo_url?: string;
@@ -156,7 +158,7 @@ interface GuestReceiptPreview {
   kind: 'image' | 'pdf';
 }
 
-interface GuestOrderSummary {
+export interface GuestOrderSummary {
   token: string;
   order: GuestOrderData;
   customer?: GuestOrderCustomer;
@@ -1381,7 +1383,18 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   readonly loading = signal(true);
   readonly error = signal(false);
-  readonly summary = signal<GuestOrderSummary | null>(null);
+  /**
+   * Modo embebido (detalle de cuenta): la orden ya viene cargada por el
+   * padre vía `summaryInput` — no hay token de ruta, fetch, SSE ni
+   * comprobantes (endpoints guest con token). En guest standalone ambos
+   * quedan en default y todo sigue igual.
+   */
+  readonly embedded = input(false);
+  readonly summaryInput = input<GuestOrderSummary | null>(null);
+  private readonly fetchedSummary = signal<GuestOrderSummary | null>(null);
+  readonly summary = computed(
+    () => this.summaryInput() ?? this.fetchedSummary(),
+  );
   readonly justPurchased = signal(false);
 
   // Paso 9 — visor de comprobante (patrón admin order-details).
@@ -1418,6 +1431,8 @@ export class GuestOrderSummaryComponent implements OnInit {
     // vivos del servicio; `summary` se lee/escribe vía `untracked` para no
     // crear un loop (escribir summary no re-dispara el effect).
     effect(() => {
+      // Embebido: sin stream — nada que fusionar.
+      if (this.embedded()) return;
       // Deps deliberadas: cualquier evento vivo re-ejecuta la fusión.
       this.sse.orderState();
       this.sse.deliveryType();
@@ -1433,6 +1448,12 @@ export class GuestOrderSummaryComponent implements OnInit {
     this.justPurchased.set(
       this.route.snapshot.queryParamMap.get('success') === 'true',
     );
+
+    // Embebido: sin token de ruta ni fetch — el padre alimenta `summaryInput`.
+    if (this.embedded()) {
+      this.loading.set(false);
+      return;
+    }
 
     const token = this.route.snapshot.paramMap.get('token') || '';
     if (!token) {
@@ -1456,7 +1477,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.summary.set(response.data);
+          this.fetchedSummary.set(response.data);
           // El snapshot SSE pudo llegar ANTES que el REST: la fusión del
           // effect ya se saltó ese caso (summary null), así que se re-aplica
           // explícitamente sobre el summary recién llegado.
@@ -1827,6 +1848,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   /** La pill solo existe mientras el stream está activo o reintentando. */
   sseLiveVisible(): boolean {
+    if (this.embedded()) return false;
     const state = this.sse.connectionState();
     return (
       state === 'open' ||
@@ -1918,7 +1940,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.markKitchenFlash(changed);
     }
 
-    this.summary.set({ ...current, order });
+    this.fetchedSummary.set({ ...current, order });
   }
 
   private markKitchenFlash(productNames: string[]): void {
@@ -2001,6 +2023,8 @@ export class GuestOrderSummaryComponent implements OnInit {
     orderState: string,
     payment: GuestOrderPayment,
   ): boolean {
+    // Embebido: la subida usa endpoints guest con token — siempre oculta.
+    if (this.embedded()) return false;
     const terminalOrder = ['cancelled', 'refunded', 'finished', 'delivered'];
     const terminalPayment = ['succeeded', 'captured', 'refunded', 'cancelled'];
     if (terminalOrder.includes(orderState)) return false;
@@ -2073,7 +2097,7 @@ export class GuestOrderSummaryComponent implements OnInit {
   ): void {
     const current = this.summary();
     if (!current) return;
-    this.summary.set({
+    this.fetchedSummary.set({
       ...current,
       order: {
         ...current.order,

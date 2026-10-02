@@ -14,6 +14,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { S3Service } from '@common/services/s3.service';
+import { resolvePrintsVatBreakdownForPrint } from '../../store/print-formats/services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class AccountService {
@@ -200,6 +201,25 @@ export class AccountService {
    * tercera convención de escala en un archivo que no importa
    * `price-unit.util.ts`.
    */
+  /**
+   * Cocina por línea (paridad guest order-summary): devuelve el estado
+   * in-flight (`pending`/`in_preparation`/`ready`) si hay alguno, si no el
+   * más reciente. Null = la línea nunca se disparó a cocina.
+   */
+  private kitchenStatusFor(
+    ticketItems: { id: number; status: string }[] | null | undefined,
+  ): string | null {
+    if (!ticketItems || ticketItems.length === 0) return null;
+    const inFlight = ticketItems.find(
+      (k) =>
+        k.status === 'pending' ||
+        k.status === 'in_preparation' ||
+        k.status === 'ready',
+    );
+    if (inFlight) return inFlight.status;
+    return ticketItems[0].status;
+  }
+
   private deriveLineGross(item: {
     unit_price: any;
     total_price: any;
@@ -240,6 +260,15 @@ export class AccountService {
                   take: 1,
                 },
               },
+            },
+            // Cocina en vivo + ETA variant-aware (paridad guest
+            // order-summary): solo estado e id del ticket-item.
+            kitchen_ticket_items: {
+              orderBy: { id: 'desc' },
+              select: { id: true, status: true },
+            },
+            product_variants: {
+              select: { preparation_time_minutes: true },
             },
           },
         },
@@ -296,12 +325,66 @@ export class AccountService {
           },
           orderBy: { used_at: 'asc' },
         },
+        // Identidad de la tienda + insumos del gate fiscal C.7 (paridad
+        // guest order-summary): nombre/logo del encabezado, settings para
+        // el default de ETA y el gate de IVA.
+        stores: {
+          select: {
+            id: true,
+            name: true,
+            logo_url: true,
+            store_settings: { select: { settings: true } },
+            organizations: {
+              select: {
+                fiscal_scope: true,
+                organization_settings: { select: { settings: true } },
+              },
+            },
+          },
+        },
       },
     });
 
     if (!order) {
       throw new NotFoundException('Order not found');
     }
+
+    // ETA default de la tienda (paridad guest): default de settings, 15 si ausente.
+    const defaultPrep =
+      (order.stores?.store_settings?.settings as any)?.operations
+        ?.default_preparation_time_minutes ?? 15;
+
+    // MAX por ítem ACTIVO con la regla exacta guest (variante ?? producto
+    // ?? default tienda). Las líneas canceladas se muestran pero no manejan ETA.
+    const activeItems = order.order_items.filter(
+      (i) => i.cancelled_at == null,
+    );
+    const prep_minutes_max = activeItems.length
+      ? Math.max(
+          ...activeItems.map(
+            (i) =>
+              i.product_variants?.preparation_time_minutes ??
+              i.products?.preparation_time_minutes ??
+              defaultPrep,
+          ),
+        )
+      : defaultPrep;
+
+    // Logo firmado defensivo: si S3 falla, null y la vista usa el fallback.
+    let storeLogoUrl: string | null = null;
+    try {
+      storeLogoUrl = order.stores?.logo_url
+        ? ((await this.s3Service.signUrl(order.stores.logo_url)) ?? null)
+        : null;
+    } catch {
+      storeLogoUrl = null;
+    }
+
+    // C.7 (paridad guest) — gate fiscal Subtotal/Impuestos, fail-closed.
+    const printsVatBreakdown = resolvePrintsVatBreakdownForPrint(
+      order.stores?.organizations,
+      order.stores,
+    );
 
     return {
       id: order.id,
@@ -316,9 +399,22 @@ export class AccountService {
       created_at: order.created_at,
       placed_at: order.placed_at,
       completed_at: order.completed_at,
+      channel: order.channel,
       // Drives the "home vs shop" reading of a service order on the detail
       // page: `pickup` means the customer goes to the store.
       delivery_type: order.delivery_type,
+      // ETA persistido + MAX + gate fiscal + tienda (paridad guest).
+      estimated_ready_at: order.estimated_ready_at,
+      estimated_delivered_at: order.estimated_delivered_at,
+      prep_minutes_max,
+      prints_vat_breakdown: printsVatBreakdown,
+      store: order.stores
+        ? {
+            id: order.stores.id,
+            name: order.stores.name,
+            logo_url: storeLogoUrl,
+          }
+        : null,
       shipping_address:
         order.shipping_address_snapshot ||
         order.addresses_orders_shipping_address_idToaddresses,
@@ -361,6 +457,13 @@ export class AccountService {
           // the shipping stepper for a service-only order and never surfaces
           // the reservation block or the "Reagendar" action.
           product_type: item.products?.product_type ?? null,
+          // Cocina/ETA por línea (paridad guest): estado in-flight del
+          // ticket + prep variante ?? producto (null si ninguno).
+          kitchen_status: this.kitchenStatusFor(item.kitchen_ticket_items),
+          preparation_time_minutes:
+            item.product_variants?.preparation_time_minutes ??
+            item.products?.preparation_time_minutes ??
+            null,
         })),
       ),
       payments: order.payments.map((p) => ({
