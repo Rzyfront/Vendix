@@ -467,7 +467,9 @@ el geocode.
   el método `prefillFromGeocode` que antes reverse-geocodificaba el punto y rellenaba
   `address_line1`/`city`/`state_province` fue **removido** por directiva del coordinador (2026-09):
   eso producía direcciones que parecían tecleadas por el cliente pero venían de un reverse-geocode
-  aproximado. El texto tecleado por el operador es la ÚNICA fuente de la dirección escrita.
+  aproximado. `address_line1`/`address_line2` tienen como fuente el texto del operador; `city` y
+  `state_province` vienen de los nombres oficiales elegidos en el catálogo DANE (ver Geografía DANE
+  abajo).
 - **Lock `pinConfirmed`**: mientras esté en `true`, un forward-geocode disparado por seguir
   tecleando NUNCA sobreescribe la coordenada (`forwardGeocodeFromForm`, l.738 — return inmediato).
   Se resetea a `false` en cuanto `address_line1` cambia de nuevo (l.542-547) — escribir la
