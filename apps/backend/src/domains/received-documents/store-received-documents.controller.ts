@@ -40,6 +40,8 @@ import { ReceivedDocumentMatchExpensesQueryDto } from './dto/received-document-m
 import { ReceivedDocumentContextQueryDto } from './dto/received-document-context.dto';
 import { ReceivedBuyerEventOptionsQueryDto, ReceivedBuyerEventReadinessParamsDto, ReceivedBuyerEventRequestDto } from './dto/received-buyer-event-request.dto';
 import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
+import { ReceivedBuyerEventDispatchService } from './services/received-buyer-event-dispatch.service';
+import { ReceivedBuyerEventCommandDto } from './dto/received-buyer-event-command.dto';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SAFE_FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
@@ -64,6 +66,7 @@ export class StoreReceivedDocumentsController {
     private readonly matchAllocations: ReceivedDocumentMatchAllocationsService,
     private readonly matchExpenses: ReceivedDocumentMatchExpensesService,
     private readonly buyerEvents: ReceivedBuyerEventEnablementService,
+    private readonly buyerEventDispatch: ReceivedBuyerEventDispatchService,
   ) {}
 
   @Get('buyer-event-enablement')
@@ -207,6 +210,19 @@ export class StoreReceivedDocumentsController {
     this.rejectStoreOverride(query.store_id);
     const context = await this.contexts.resolveStore();
     return this.responses.updated(await this.matchAllocations.revoke(context, id, allocationId, dto));
+  }
+
+  @Post(':id/buyer-events')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('invoicing:received:events:emit')
+  async emitBuyerEvent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReceivedBuyerEventCommandDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    this.rejectStoreOverride(scope.store_id);
+    const context = await this.contexts.resolveStore();
+    return this.responses.updated(await this.buyerEventDispatch.execute(context, id, dto));
   }
 
   @Get(':id')

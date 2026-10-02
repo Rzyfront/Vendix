@@ -34,6 +34,10 @@ import { OrganizationReceivedDocumentAccountingController } from './organization
 import { ReceivedDocumentAccountingEvidenceService } from './services/received-document-accounting-evidence.service';
 import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
 import { SuperAdminReceivedBuyerEventsController } from './super-admin-received-buyer-events.controller';
+import { DianDirectModule } from '../store/invoicing/providers/dian-direct/dian-direct.module';
+import { ReceivedBuyerEventReservationService } from './services/received-buyer-event-reservation.service';
+import { ReceivedBuyerEventPayloadService } from './services/received-buyer-event-payload.service';
+import { ReceivedBuyerEventDispatchService } from './services/received-buyer-event-dispatch.service';
 
 /** Shared reception pipeline; this module also owns narrow read-only evidence routes. */
 @Module({
@@ -41,6 +45,7 @@ import { SuperAdminReceivedBuyerEventsController } from './super-admin-received-
     PrismaModule,
     ResponseModule,
     S3Module,
+    DianDirectModule,
     BullModule.registerQueue({ name: 'received-document-scan' }),
     BullModule.registerQueue({ name: 'document-reception-sync' }),
   ],
@@ -50,6 +55,9 @@ import { SuperAdminReceivedBuyerEventsController } from './super-admin-received-
     ReceivedDocumentsContextService,
     ReceivedDocumentAccountingEvidenceService,
     ReceivedBuyerEventEnablementService,
+    ReceivedBuyerEventReservationService,
+    ReceivedBuyerEventPayloadService,
+    ReceivedBuyerEventDispatchService,
     ReceivedDocumentsService,
     ReceivedDocumentParserService,
     ReceivedDocumentStorageService,
@@ -77,6 +85,7 @@ import { SuperAdminReceivedBuyerEventsController } from './super-admin-received-
     ReceivedDocumentsContextService,
     ReceivedDocumentAccountingEvidenceService,
     ReceivedBuyerEventEnablementService,
+    ReceivedBuyerEventDispatchService,
     ReceivedDocumentsService,
     ReceivedDocumentScanQueueService,
     ReceivedDocumentMatchCandidatesService,
