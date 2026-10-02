@@ -11,6 +11,7 @@ export interface ReserveReceivedBuyerEventInput {
   event_code: ReceivedBuyerDianEventCode;
   idempotency_key: string;
   description?: string;
+  claim_concept_code?: '01' | '02' | '03' | '04';
 }
 
 export interface ReceivedBuyerEventReservation {
@@ -27,6 +28,7 @@ const UNCERTAIN_STATUSES = ['preparing', 'prepared', 'sending', 'unknown'];
 const CUFE_PATTERN = /^[a-fA-F0-9]{96}$/;
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9:_-]{1,120}$/;
 const MAX_DESCRIPTION_LENGTH = 1000;
+const CLAIM_CONCEPT_CODES: readonly string[] = ['01', '02', '03', '04'];
 
 @Injectable()
 export class ReceivedBuyerEventReservationService {
@@ -96,7 +98,8 @@ export class ReceivedBuyerEventReservationService {
           const result = this.resultRecord(existingKey.result);
           if (
             existingKey.event_code !== input.event_code ||
-            result.description !== (input.description?.trim() ?? null)
+            result.description !== (input.description?.trim() ?? null) ||
+            (result.claim_concept_code ?? null) !== (input.claim_concept_code ?? null)
           ) throw new ConflictException('La clave de idempotencia ya fue usada con una acción distinta.');
           const originalConfigurationId = result.dian_configuration_id;
           const originalActivationVersion = result.activation_version;
@@ -207,6 +210,7 @@ export class ReceivedBuyerEventReservationService {
             actor_id: ctx.actor_id,
             result: {
               description: input.description?.trim() ?? null,
+              claim_concept_code: input.claim_concept_code ?? null,
               activation_version: activation.version,
               dian_configuration_id: activation.dian_configuration_id,
             },
@@ -246,6 +250,12 @@ export class ReceivedBuyerEventReservationService {
     }
     const description = input.description?.trim();
     if (input.event_code === '031' && !description) throw new BadRequestException('El evento 031 requiere una justificación.');
+    if (input.event_code === '031' && !CLAIM_CONCEPT_CODES.includes(input.claim_concept_code ?? '')) {
+      throw new BadRequestException('El evento 031 requiere un concepto de reclamo válido (01, 02, 03 o 04).');
+    }
+    if (input.event_code !== '031' && input.claim_concept_code !== undefined) {
+      throw new BadRequestException('claim_concept_code sólo aplica al evento 031.');
+    }
   }
 
   private resultRecord(value: Prisma.JsonValue | null): Record<string, unknown> {

@@ -64,7 +64,7 @@ describe('ReceivedBuyerEventReservationService', () => {
     expect(h.tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(h.enablement.getStatus).not.toHaveBeenCalled();
     expect(h.tx.received_document_events.create.mock.calls[0][0].data.result).toEqual({
-      description: null, activation_version: 4, dian_configuration_id: 21,
+      description: null, claim_concept_code: null, activation_version: 4, dian_configuration_id: 21,
     });
     expect(h.tx.received_document_events.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -78,7 +78,7 @@ describe('ReceivedBuyerEventReservationService', () => {
   it('returns the existing reservation for the same idempotency key and action without creating or sending another event', async () => {
     const h = harness({ events: [{
       id: 77, event_code: '030', idempotency_key: 'buyer:mobile-req-1', status: 'unknown', event_number: 'RD77',
-      result: { description: null, dian_configuration_id: 19, activation_version: 2 },
+      result: { description: null, claim_concept_code: null, dian_configuration_id: 19, activation_version: 2 },
     }] });
 
     await expect(h.service.reserve(context, 42, { event_code: '030', idempotency_key: 'mobile-req-1' })).resolves.toEqual({
@@ -100,7 +100,7 @@ describe('ReceivedBuyerEventReservationService', () => {
   it('returns an existing unknown reservation after activation is suspended but blocks new reservations', async () => {
     const existing = {
       id: 77, event_code: '030', idempotency_key: 'buyer:mobile-req-1', status: 'unknown', event_number: 'RD77',
-      result: { description: null, dian_configuration_id: 19, activation_version: 2 },
+      result: { description: null, claim_concept_code: null, dian_configuration_id: 19, activation_version: 2 },
     };
     const replay = harness({ events: [existing] });
     replay.enablement.getReadiness.mockResolvedValue({ ready: false, blockers: ['suspended'] });
@@ -131,6 +131,46 @@ describe('ReceivedBuyerEventReservationService', () => {
     await expect(acknowledged.service.reserve(context, 42, { event_code: '032', idempotency_key: 'goods' })).resolves.toMatchObject({ duplicate: false, event_number: 'RD77' });
   });
 
+  it('requires and persists the 031 claim concept code after accepted 030 and 032', async () => {
+    const acceptedPredecessors = [
+      { id: 69, event_code: '030', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:ack', result: {} },
+      { id: 70, event_code: '032', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:goods', result: {} },
+    ];
+    const missingCode = harness({ events: acceptedPredecessors });
+    await expect(missingCode.service.reserve(context, 42, {
+      event_code: '031', idempotency_key: 'claim-missing', description: 'Quantity differs',
+    })).rejects.toThrow('concepto de reclamo válido');
+    expect(missingCode.prisma.$transaction).not.toHaveBeenCalled();
+
+    const invalidCode = harness({ events: acceptedPredecessors });
+    await expect(invalidCode.service.reserve(context, 42, {
+      event_code: '031', idempotency_key: 'claim-invalid', description: 'Quantity differs',
+      claim_concept_code: '05' as any,
+    })).rejects.toThrow('concepto de reclamo válido');
+    expect(invalidCode.prisma.$transaction).not.toHaveBeenCalled();
+
+    const valid = harness({ events: acceptedPredecessors });
+    await expect(valid.service.reserve(context, 42, {
+      event_code: '031', idempotency_key: 'claim-valid', description: 'Internal note: quantity differs',
+      claim_concept_code: '02',
+    })).resolves.toMatchObject({ duplicate: false, event_number: 'RD77' });
+    expect(valid.tx.received_document_events.create.mock.calls[0][0].data.result).toEqual({
+      description: 'Internal note: quantity differs', claim_concept_code: '02',
+      activation_version: 4, dian_configuration_id: 21,
+    });
+  });
+
+  it('rejects a same-key replay when the claim concept code changes', async () => {
+    const h = harness({ events: [{
+      id: 77, event_code: '031', idempotency_key: 'buyer:claim', status: 'unknown', event_number: 'RD77',
+      result: { description: 'Quantity differs', claim_concept_code: '01', dian_configuration_id: 19, activation_version: 2 },
+    }] });
+    await expect(h.service.reserve(context, 42, {
+      event_code: '031', idempotency_key: 'claim', description: 'Quantity differs', claim_concept_code: '02',
+    })).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.received_document_events.create).not.toHaveBeenCalled();
+  });
+
   it('fails closed on malformed CUFE and does not reserve a row', async () => {
     const h = harness({ document: { ...validDocument, document_key: 'not-a-cufe' } });
 
@@ -144,6 +184,8 @@ describe('ReceivedBuyerEventReservationService', () => {
     await expect(h.service.reserve(context, 0, { event_code: '030', idempotency_key: 'valid' })).rejects.toThrow();
     await expect(h.service.reserve(context, 42, { event_code: '030', idempotency_key: 'bad key' })).rejects.toThrow();
     await expect(h.service.reserve(context, 42, { event_code: '031', idempotency_key: 'valid' })).rejects.toThrow();
+    await expect(h.service.reserve(context, 42, { event_code: '031', idempotency_key: 'valid', description: 'Reason', claim_concept_code: '05' as any })).rejects.toThrow();
+    await expect(h.service.reserve(context, 42, { event_code: '030', idempotency_key: 'valid', claim_concept_code: '01' })).rejects.toThrow();
     expect(h.prisma.$transaction).not.toHaveBeenCalled();
   });
 });
