@@ -78,6 +78,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.purchase_orders;
   }
 
+  get purchase_vat_contributions() {
+    return this.baseClient.purchase_vat_contributions;
+  }
+
   get purchase_order_items() {
     return this.baseClient.purchase_order_items;
   }

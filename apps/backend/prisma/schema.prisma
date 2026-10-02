@@ -631,6 +631,7 @@ model organizations {
   organization_settings         organization_settings?
   organization_payment_policies organization_payment_policies?
   purchase_orders               purchase_orders[]
+  purchase_vat_contributions    purchase_vat_contributions[]
   return_orders                 return_orders[]
   sales_orders                  sales_orders[]
   stock_reservations            stock_reservations[]
@@ -927,6 +928,7 @@ model stores {
   invoice_resolutions         invoice_resolutions[]
   invoice_profiles            invoice_profiles[]
   accounting_entries          accounting_entries[]
+  purchase_vat_contributions purchase_vat_contributions[]
   accounting_entities         accounting_entities[]
   employee_stores             employee_stores[]
   payroll_runs                payroll_runs[]
@@ -2763,6 +2765,7 @@ model suppliers {
   created_at                          DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at                          DateTime?                  @default(now()) @db.Timestamp(6)
   purchase_orders                     purchase_orders[]
+  purchase_vat_contributions          purchase_vat_contributions[]
   supplier_products                   supplier_products[]
   dispatch_notes                      dispatch_notes[]           @relation("dispatch_notes_supplier")
   organizations                       organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
@@ -3002,6 +3005,7 @@ model purchase_orders {
   payments                purchase_order_payments[]
   payment_schedules       purchase_order_payment_schedules[]
   receptions              purchase_order_receptions[]
+  purchase_vat_contributions purchase_vat_contributions[]
   dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
   received_document_links received_document_links[]          @relation("received_document_link_purchase_order")
   received_document_match_allocations received_document_match_allocations[]
@@ -3176,6 +3180,7 @@ model purchase_order_receptions {
   ap_reception_link ap_reception_links?
   received_document_links received_document_links[] @relation("received_document_link_reception")
   received_document_match_allocations received_document_match_allocations[]
+  purchase_vat_contributions purchase_vat_contributions[]
 
   @@index([purchase_order_id])
 }
@@ -3194,6 +3199,51 @@ model purchase_order_reception_items {
 
   @@index([reception_id])
   @@index([purchase_order_item_id])
+}
+
+/// Immutable purchase-side VAT recognition snapshot; writers/posting are introduced separately.
+model purchase_vat_contributions {
+  id                              Int       @id @default(autoincrement())
+  organization_id                 Int
+  accounting_entity_id            Int
+  store_id                         Int?
+  purchase_order_id               Int
+  reception_id                    Int
+  supplier_id                     Int
+  supplier_tax_id_snapshot        String?   @db.VarChar(50)
+  invoice_number_snapshot         String?   @db.VarChar(100)
+  invoice_issue_date_snapshot     DateTime? @db.Date
+  received_document_id            Int?
+  fiscal_projection_invoice_id    Int?
+  accounting_entry_id             Int?      @unique(map: "purchase_vat_contributions_accounting_entry_id_key")
+  currency                         String    @db.VarChar(3)
+  net_amount                       Decimal   @db.Decimal(15, 2)
+  iva_amount                       Decimal   @db.Decimal(15, 2)
+  tax_groups_snapshot              Json
+  source_effect_key                String    @db.VarChar(160)
+  payload_hash                     String    @db.VarChar(64)
+  ledger_status                    String    @default("pending") @db.VarChar(24)
+  fiscal_status                    String    @default("awaiting_document") @db.VarChar(24)
+  attempt_count                    Int       @default(0)
+  last_attempt_at                  DateTime? @db.Timestamp(6)
+  created_at                       DateTime  @default(now()) @db.Timestamp(6)
+  updated_at                       DateTime  @updatedAt @db.Timestamp(6)
+
+  organization       organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_org_fkey")
+  accounting_entity  accounting_entities        @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_entity_fkey")
+  store              stores?                    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_store_fkey")
+  purchase_order     purchase_orders            @relation(fields: [purchase_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_po_fkey")
+  reception          purchase_order_receptions  @relation(fields: [reception_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_reception_fkey")
+  supplier           suppliers                  @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_supplier_fkey")
+  received_document  received_documents?        @relation(fields: [received_document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_document_fkey")
+  fiscal_projection  invoices?                  @relation(fields: [fiscal_projection_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_invoice_fkey")
+  accounting_entry   accounting_entries?        @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "purchase_vat_contributions_entry_fkey")
+
+  @@unique([organization_id, accounting_entity_id, source_effect_key], map: "purchase_vat_contributions_org_entity_effect_key")
+  @@index([organization_id, accounting_entity_id, ledger_status], map: "purchase_vat_contributions_org_entity_ledger_status_idx")
+  @@index([received_document_id, fiscal_status], map: "purchase_vat_contributions_document_fiscal_status_idx")
+  @@index([purchase_order_id, reception_id], map: "purchase_vat_contributions_po_reception_idx")
+  @@index([fiscal_projection_invoice_id], map: "purchase_vat_contributions_projection_invoice_idx")
 }
 
 model sales_orders {
@@ -6195,6 +6245,7 @@ model invoices {
   organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                    stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
   accounting_entity        accounting_entities        @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  purchase_vat_contributions purchase_vat_contributions[]
   customer                 users?                     @relation("invoices_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   supplier                 suppliers?                 @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                    orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -6605,6 +6656,7 @@ model accounting_entities {
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
   invoices                      invoices[]
+  purchase_vat_contributions    purchase_vat_contributions[]
   payroll_runs                  payroll_runs[]
   payroll_items                 payroll_items[]
   payroll_settlements           payroll_settlements[]
@@ -6712,6 +6764,7 @@ model fiscal_periods {
   @@index([accounting_entity_id])
 }
 
+/// The purchase VAT contribution source key is enforced by a partial unique index in migration 20261002170000_purchase_vat_contributions.
 model accounting_entries {
   id                         Int                          @id @default(autoincrement())
   organization_id            Int
@@ -6742,6 +6795,7 @@ model accounting_entries {
   posted_by_user              users?                        @relation("accounting_entries_posted_by", fields: [posted_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   accounting_entry_lines      accounting_entry_lines[]
   invoices                    invoices[]
+  purchase_vat_contributions purchase_vat_contributions[]
   payroll_runs                payroll_runs[]
   bank_reconciliation_matches bank_reconciliation_matches[]
   depreciation_entries        depreciation_entries[]        @relation("depreciation_accounting_entry")
@@ -11954,6 +12008,7 @@ model received_documents {
   links             received_document_links[]
   match_allocations received_document_match_allocations[]
   events            received_document_events[]
+  purchase_vat_contributions purchase_vat_contributions[]
 
   @@unique([accounting_entity_id, idempotency_key], map: "received_docs_entity_idempotency_key")
   @@index([organization_id, accounting_entity_id, issue_date], map: "received_docs_org_entity_date_idx")
