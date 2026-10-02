@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import * as zlib from 'zlib';
@@ -1384,6 +1385,74 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         timed_out: dian_response.timed_out,
       },
     };
+  }
+
+  /** Confirm DIAN acceptance of a referenced invoice before authorizing a buyer event. */
+  async assertReferencedInvoiceAccepted(
+    cufe: string,
+    selection: DianEventConfigurationSelection,
+  ): Promise<{ document_key: string; checked_at: string }> {
+    if (!/^[a-f\d]{96}$/i.test(cufe)) {
+      throw new BadRequestException('El CUFE de la factura referenciada no es válido.');
+    }
+    const config = await this.loadConfig('invoicing', selection);
+    if (config.environment !== 'production' || config.enablement_status !== 'enabled') {
+      throw new ConflictException('La configuración DIAN no está habilitada para verificar una factura legal.');
+    }
+    this.validateCertificateExpiry(config);
+
+    let raw_response: string;
+    try {
+      const credentials = await this.loadWsCredentials(config);
+      if (!credentials) throw new Error('DIAN WS-Security credentials unavailable');
+      const response = await this.soap_client.getStatus(cufe, config.environment, credentials);
+      if (response.timed_out || !response.success || !response.raw_response) {
+        throw new Error('DIAN status response unavailable');
+      }
+      raw_response = response.raw_response;
+    } catch {
+      throw new ServiceUnavailableException('No fue posible confirmar el estado de la factura en DIAN.');
+    }
+
+    let status: { document_key: string; is_valid: string; status_code: string };
+    try {
+      const document = new DOMParser({
+        errorHandler: {
+          warning: () => undefined,
+          error: () => { throw new Error('Invalid SOAP XML'); },
+          fatalError: () => { throw new Error('Invalid SOAP XML'); },
+        },
+      }).parseFromString(raw_response, 'application/xml');
+      const elements = Array.from(document.getElementsByTagName('*'));
+      const localName = (element: Element) => element.localName || element.nodeName.split(':').pop();
+      const results = elements.filter((element) => localName(element) === 'GetStatusResult');
+      if (elements.some((element) => localName(element) === 'Fault') || results.length !== 1) {
+        throw new Error('Ambiguous SOAP result');
+      }
+      const children = Array.from(results[0].childNodes).filter(
+        (node): node is Element => node.nodeType === 1,
+      );
+      const readOne = (name: string) => {
+        const matches = children.filter((element) => localName(element) === name);
+        if (matches.length !== 1) throw new Error('Missing or duplicate status field');
+        return matches[0].textContent?.trim() ?? '';
+      };
+      status = {
+        document_key: readOne('XmlDocumentKey'),
+        is_valid: readOne('IsValid'),
+        status_code: readOne('StatusCode'),
+      };
+    } catch {
+      throw new ServiceUnavailableException('DIAN devolvió una respuesta de estado ambigua.');
+    }
+
+    if (status.document_key.toLowerCase() !== cufe.toLowerCase()) {
+      throw new ConflictException('DIAN devolvió un CUFE distinto al de la factura referenciada.');
+    }
+    if (status.is_valid.toLowerCase() !== 'true' || !['0', '00'].includes(status.status_code)) {
+      throw new ConflictException('DIAN no confirma que la factura referenciada esté aceptada.');
+    }
+    return { document_key: status.document_key, checked_at: new Date().toISOString() };
   }
 
   async cancelInvoice(

@@ -14,9 +14,21 @@ const base = {
   referenced_issuer: supplier,
 };
 const exact_config = { configuration_id: 4, accounting_entity_id: 9, store_id: null };
+const referenced_cufe = 'a'.repeat(96);
+
+function getStatusResponse(cufe: string, statusCode = '0', isValid = 'true') {
+  return {
+    success: true,
+    timed_out: false,
+    raw_response: `<s:Envelope xmlns:s="urn:soap"><s:Body><GetStatusResponse><GetStatusResult><IsValid>${isValid}</IsValid><StatusCode>${statusCode}</StatusCode><XmlDocumentKey>${cufe}</XmlDocumentKey></GetStatusResult></GetStatusResponse></s:Body></s:Envelope>`,
+  };
+}
 
 function buildProvider() {
-  const soap = { sendEventUpdateStatus: jest.fn().mockResolvedValue({ raw_response: '<ok/>' }) };
+  const soap = {
+    sendEventUpdateStatus: jest.fn().mockResolvedValue({ raw_response: '<ok/>' }),
+    getStatus: jest.fn(),
+  };
   const parser = { parseApplicationResponse: jest.fn().mockReturnValue({ is_valid: true, errors: [], rule_messages: [], already_processed: false, document_key: 'track', status_code: '00', status_description: '' }) };
   const provider = new DianDirectProvider({} as any, {} as any, {} as any, soap as any, {} as any, parser as any, {} as any, {} as any);
   Object.assign(provider as any, {
@@ -24,9 +36,10 @@ function buildProvider() {
     loadIssuerData: jest.fn().mockResolvedValue(issuer),
     signXml: jest.fn().mockImplementation((xml: string) => Promise.resolve(xml)),
     compressToZipBase64: jest.fn().mockResolvedValue('zip'),
-    loadWsCredentials: jest.fn().mockResolvedValue(undefined),
     dianFileNames: jest.fn().mockReturnValue({ xml: 'event.xml', zip: 'event.zip' }),
     createAuditLog: jest.fn().mockResolvedValue(undefined),
+    validateCertificateExpiry: jest.fn(),
+    loadWsCredentials: jest.fn().mockResolvedValue({ signer: {}, certificate_der_base64: 'cert' }),
   });
   return { provider, soap };
 }
@@ -144,6 +157,63 @@ describe('DianDirectProvider buyer event transport', () => {
     }), 400);
     expect(findFirst).not.toHaveBeenCalled();
     context.mockRestore();
+  });
+
+  describe('referenced invoice acceptance check', () => {
+    it.each(['0', '00'])('accepts DIAN GetStatus StatusCode %s only for the exact CUFE', async (statusCode) => {
+      const { provider, soap } = buildProvider();
+      (provider as any).loadConfig.mockResolvedValue({
+        id: 42, accounting_entity_id: 9, environment: 'production', enablement_status: 'enabled',
+      });
+      soap.getStatus.mockResolvedValue(getStatusResponse(referenced_cufe.toUpperCase(), statusCode));
+      const proof = await provider.assertReferencedInvoiceAccepted(referenced_cufe, exact_config);
+      expect(soap.getStatus).toHaveBeenCalledWith(referenced_cufe, 'production', expect.any(Object));
+      expect(proof).toMatchObject({ document_key: referenced_cufe.toUpperCase() });
+      expect(Number.isNaN(Date.parse(proof.checked_at))).toBe(false);
+    });
+
+    it('rejects invalid CUFE before loading config or calling DIAN', async () => {
+      const { provider, soap } = buildProvider();
+      await expectHttpStatus(provider.assertReferencedInvoiceAccepted('not-a-cufe', exact_config), 400);
+      expect((provider as any).loadConfig).not.toHaveBeenCalled();
+      expect(soap.getStatus).not.toHaveBeenCalled();
+    });
+
+    it('fails closed without WS-Security credentials before calling DIAN', async () => {
+      const { provider, soap } = buildProvider();
+      (provider as any).loadConfig.mockResolvedValue({
+        id: 42, accounting_entity_id: 9, environment: 'production', enablement_status: 'enabled',
+      });
+      (provider as any).loadWsCredentials.mockResolvedValue(undefined);
+      await expectHttpStatus(provider.assertReferencedInvoiceAccepted(referenced_cufe, exact_config), 503);
+      expect(soap.getStatus).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['mismatched key', getStatusResponse('b'.repeat(96)), 409],
+      ['not valid', getStatusResponse(referenced_cufe, '0', 'false'), 409],
+      ['non-accepted status', getStatusResponse(referenced_cufe, '99'), 409],
+      ['missing result', { success: true, timed_out: false, raw_response: '<Envelope/>' }, 503],
+      ['SOAP fault', { success: true, timed_out: false, raw_response: '<Envelope><Fault/></Envelope>' }, 503],
+      ['timeout', { success: false, timed_out: true, raw_response: '' }, 503],
+    ])('fails closed on %s', async (_label, response, code) => {
+      const { provider, soap } = buildProvider();
+      (provider as any).loadConfig.mockResolvedValue({
+        id: 42, accounting_entity_id: 9, environment: 'production', enablement_status: 'enabled',
+      });
+      soap.getStatus.mockResolvedValue(response);
+      await expectHttpStatus(provider.assertReferencedInvoiceAccepted(referenced_cufe, exact_config), code as number);
+    });
+
+    it.each([
+      ['test', 'enabled'],
+      ['production', 'testing'],
+    ])('blocks unverified DIAN config environment=%s status=%s', async (environment, enablement_status) => {
+      const { provider, soap } = buildProvider();
+      (provider as any).loadConfig.mockResolvedValue({ id: 42, accounting_entity_id: 9, environment, enablement_status });
+      await expectHttpStatus(provider.assertReferencedInvoiceAccepted(referenced_cufe, exact_config), 409);
+      expect(soap.getStatus).not.toHaveBeenCalled();
+    });
   });
 
   it('rejects 034 for a received invoice before signing', async () => {
