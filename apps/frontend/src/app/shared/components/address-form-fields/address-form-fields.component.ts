@@ -20,7 +20,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { Observable, merge } from 'rxjs';
+import { Subject, merge } from 'rxjs';
 import { debounceTime, finalize, map, startWith } from 'rxjs/operators';
 
 import { AddressMapPickerComponent } from '../../../private/modules/ecommerce/components/address-map-picker/address-map-picker.component';
@@ -28,15 +28,14 @@ import {
   GeocodePrecision,
   GeocodingService,
 } from '../../../private/modules/ecommerce/services/geocoding.service';
-import { CountryService } from '../../../core/services/country.service';
 import { InputComponent } from '../input/input.component';
 import { IconComponent } from '../icon/icon.component';
 import {
   SelectorComponent,
   SelectorOption,
 } from '../selector/selector.component';
-import { DianMunicipalitySelectComponent } from '../dian-municipality-select/dian-municipality-select.component';
 import {
+  DianDepartmentOption,
   DianMunicipalityLookupService,
   DianMunicipalityOption,
 } from '../../services/dian-municipality-lookup.service';
@@ -70,14 +69,9 @@ export interface AddressPayload {
    * Código DANE (Divipola) del municipio → columna
    * `addresses.municipality_code`.
    *
-   * OPCIONAL en la interfaz a propósito, por dos razones distintas:
-   *
-   * 1. La captura general de direcciones no lo exige y las direcciones
-   *    históricas lo tienen en NULL — hacerlo obligatorio rompería toda alta de
-   *    dirección no fiscal. Quien lo exige es el camino de facturación, que ya
-   *    lanza `CITY_CODE_REQUIRED` cuando falta.
-   * 2. Marcarlo requerido obligaría a tocar todos los consumidores que
-   *    construyen un `AddressPayload` literal (despacho, rutas, checkout, POS).
+   * Opcional en el tipo público para conservar compatibilidad con consumidores
+   * que construyen `AddressPayload` literales; el formulario exige el código
+   * antes de ser válido y lo completa desde los selectores DANE.
    */
   municipality_code?: string | null;
   /**
@@ -136,7 +130,6 @@ const UNLOCATED_ADDRESS_WARNING =
     InputComponent,
     IconComponent,
     SelectorComponent,
-    DianMunicipalitySelectComponent,
   ],
   templateUrl: './address-form-fields.component.html',
   styleUrls: ['./address-form-fields.component.scss'],
@@ -161,7 +154,7 @@ export class AddressFormFieldsComponent {
   /** Optional map center coordinate (e.g. existing lat/lng or GPS fix). */
   readonly center = input<LatLng | null>(null);
   /**
-   * Base del endpoint DANE a usar para `resolveByName`. Default:
+   * Base del endpoint DANE para catálogos e hidratación. Default:
    * `/store/addresses/dian/municipalities` (gateado por `store:addresses:read`).
    * El super-admin org modal pasa `/superadmin/addresses/dian/municipalities`
    * porque su JWT no tiene el permiso de tienda.
@@ -308,7 +301,6 @@ export class AddressFormFieldsComponent {
   private readonly fb = inject(FormBuilder);
   private readonly geocoding = inject(GeocodingService);
   private readonly municipalities = inject(DianMunicipalityLookupService);
-  private readonly countryService = inject(CountryService);
   private readonly destroyRef = inject(DestroyRef);
   /** Host element — used to tell "the operator is still typing in THIS
    *  form" apart from focus elsewhere on the page (see
@@ -332,39 +324,33 @@ export class AddressFormFieldsComponent {
   /** A geocode miss whose warning waits for the first auto-focus to show. */
   private pendingAddressWarning = false;
 
-  /**
-   * Catálogo de países como opciones del selector: la etiqueta es el nombre y
-   * el valor es el código ISO — el mismo reparto etiqueta/valor que usan los
-   * demás formularios del repo (`address-modal`, `legal-data-form`).
-   *
-   * Esa separación es el punto: el cliente elige «Colombia» y el control
-   * `country_code` sigue guardando `CO`, que es lo que leen
-   * {@link showMunicipality} para decidir si ofrece el catálogo DANE y el
-   * backend para persistir la dirección. Un campo de texto libre dejaba al
-   * cliente viendo el código crudo y le permitía teclear cualquier cosa.
-   *
-   * OJO — en el repo conviven DOS `CountryService`:
-   *   - `core/services/country.service.ts` (el que se usa acá): ~67 países,
-   *     `getCountries(): Observable<Country[]>`.
-   *   - `services/country.service.ts`: ~13 países, `getCountries(): Country[]`
-   *     síncrono, y es el que importan los otros 12 consumidores.
-   * Se toma el de `core` a propósito: es un superconjunto, así que ningún
-   * cliente fuera de esos 13 países se queda sin poder elegir el suyo. Unificar
-   * los dos catálogos es un refactor aparte, pendiente.
-   *
-   * `getCountries()` devuelve un `of(...)` estático, así que el signal ya trae
-   * la lista en el primer render; el `initialValue` solo cubre ese instante.
-   */
-  readonly countryOptions = toSignal(
-    this.countryService.getCountries().pipe(
-      map((list): SelectorOption[] =>
-        list.map((c) => ({ value: c.code, label: c.name })),
-      ),
-    ),
-    { initialValue: [] as SelectorOption[] },
+  /** Colombia es el único país habilitado para captura de direcciones por ahora. */
+  readonly countryOptions = signal<SelectorOption[]>([
+    { value: COLOMBIA_COUNTRY_CODE, label: 'Colombia' },
+  ]);
+
+  readonly departments = signal<DianDepartmentOption[]>([]);
+  readonly municipalitiesForDepartment = signal<DianMunicipalityOption[]>([]);
+  readonly selectedDepartmentCode = signal<string | null>(null);
+  readonly selectedMunicipalityCode = signal<string | null>(null);
+  readonly departmentsLoading = signal(false);
+  readonly municipalitiesLoading = signal(false);
+  readonly departmentCatalogError = signal<string | null>(null);
+  readonly municipalityCatalogError = signal<string | null>(null);
+  readonly legacyAddressHint = signal<string | null>(null);
+  readonly departmentOptions = computed<SelectorOption[]>(() =>
+    this.departments().map((item) => ({ value: item.code, label: item.name })),
   );
-
-
+  readonly municipalityOptions = computed<SelectorOption[]>(() =>
+    this.municipalitiesForDepartment().map((item) => ({ value: item.code, label: item.name })),
+  );
+  readonly municipalitySelectorDisabled = computed(() =>
+    !this.selectedDepartmentCode() || this.municipalitiesLoading() || !!this.municipalityCatalogError(),
+  );
+  private readonly geographyChanges = new Subject<void>();
+  private departmentRequestGeneration = 0;
+  private municipalityRequestGeneration = 0;
+  private hydrationGeneration = 0;
 
   readonly form: FormGroup = this.fb.group({
     address_line1: [
@@ -376,11 +362,7 @@ export class AddressFormFieldsComponent {
     state_province: [null as string | null, [Validators.required]],
     country_code: ['CO' as string, [Validators.required]],
     postal_code: [null as string | null, [Validators.maxLength(20)]],
-    // Código DANE del municipio. SIN validadores: es opcional en la captura
-    // general (direcciones no fiscales e históricas viven sin él) y solo el
-    // camino de facturación lo exige. Ponerle `required` aquí bloquearía el
-    // guardado de toda dirección de envío del sistema.
-    municipality_code: [null as string | null],
+    municipality_code: [null as string | null, [Validators.required]],
     phone_number: [
       null as string | null,
       [Validators.pattern(/^[\d+#*\s()-]*$/)],
@@ -419,130 +401,21 @@ export class AddressFormFieldsComponent {
     return !!this.form.get('phone_number')?.invalid;
   });
 
-  /**
-   * País actual del formulario, como signal. Igual que `formStatus`, el valor
-   * de un FormControl es una propiedad plana: leerlo dentro de un `computed`
-   * nunca recalcularía, así que se puentea por `valueChanges`.
-   */
-  private readonly countryCode = toSignal(
-    this.form
-      .get('country_code')!
-      .valueChanges.pipe(
-        startWith(this.form.get('country_code')!.value),
-      ) as Observable<string | null>,
-    // `startWith` emite de forma síncrona al suscribirse, así que el valor real
-    // ('CO') llega de inmediato; este `initialValue` solo cubre ese instante.
-    { initialValue: null },
-  );
-
-  /** Código DANE actualmente puesto en el formulario, como signal. */
-  private readonly municipalityCode = toSignal(
-    this.form
-      .get('municipality_code')!
-      .valueChanges.pipe(
-        startWith(this.form.get('municipality_code')!.value),
-      ) as Observable<string | null>,
-    { initialValue: null },
-  );
-
-  /**
-   * El selector de municipio solo aparece para Colombia: la Divipola es un
-   * catálogo colombiano y ofrecerlo en una dirección extranjera sería ofrecer
-   * un dato que no existe.
-   */
-  readonly showMunicipality = computed<boolean>(
-    () => (this.countryCode() ?? '').trim().toUpperCase() === COLOMBIA_COUNTRY_CODE,
-  );
-
-  /**
-   * Ciudad y departamento pasan a solo-lectura en cuanto hay municipio DANE
-   * elegido.
-   *
-   * Es la garantía de coherencia: mientras el código está puesto, los dos
-   * textos los escribe el catálogo, así que no puede existir «Medellín /
-   * Cundinamarca». Al limpiar el municipio vuelven a ser editables, que es lo
-   * que necesitan las direcciones sin dato fiscal y las de otros países.
-   */
-  readonly cityLockedByMunicipality = computed<boolean>(
-    () => this.showMunicipality() && !!this.municipalityCode(),
-  );
-
-  /**
-   * H7 — visibilidad del selector DANE. Antes de este fix vivía SOLO detrás de
-   * `showAdvanced() && showMunicipality()`, y en modo `compact` (POS)
-   * `showAdvanced()` es `false` salvo que la dirección precargada ya trajera
-   * apto/postal/país≠CO. Resultado: una dirección nueva capturada desde el POS
-   * no tenía ningún control para elegir el municipio, y `resolveMunicipalityFromText`
-   * solo se disparaba desde el reverse-fill del mapa (también oculto en
-   * compact) — la dirección se guardaba sin `municipality_code`, que la
-   * factura electrónica usa como `city_code` del adquiriente.
-   *
-   * Fix mínimo: el selector se muestra igual que antes cuando `showAdvanced()`
-   * es true (0 cambios para los 6 consumidores no-compact ni para el POS con
-   * "Más detalles" expandido), Y ADEMÁS en `compact` cuando el auto-resolve
-   * (ver el `merge(...)` del constructor) no encontró código — así el cajero
-   * siempre tiene cómo elegirlo manualmente.
-   */
-  readonly municipalitySelectVisible = computed<boolean>(
-    () =>
-      this.showMunicipality() &&
-      (this.showAdvanced() || (this.compact() && !this.municipalityCode())),
-  );
-
   constructor() {
-    // Si el consumidor del form pasó un base DANE distinto (e.g. super-admin
-    // reusando este componente en el modal de orgs), reconfiguramos el servicio
-    // compartido antes de cualquier lookup. Sin esto, el `resolveByName` que
-    // dispara el reverse-geocode apuntaría al endpoint de tienda (403).
-    //
-    // `dianEndpointBase` es un `input()` (signal) — su valor puede NO estar
-    // disponible en el constructor (Angular setea los inputs DESPUÉS de la
-    // construcción), así que lo observamos con effect.
+    // Configura el espejo (si aplica) antes de cargar el catálogo. Inputs son
+    // señales y el effect corre una vez que Angular aplicó sus valores.
     effect(() => {
       const base = this.dianEndpointBase();
-      if (base) this.municipalities.setBaseUrl(base);
+      this.municipalities.setBaseUrl(base);
+      untracked(() => this.loadDepartments());
     });
 
-    // Prefill when `initialAddress` arrives (create → null, edit → snapshot).
+    // La geografía precargada nunca se muestra como texto libre: hasta resolver
+    // DANE los selectores quedan vacíos y el texto legado solo es una pista.
     effect(() => {
       const addr = this.initialAddress();
       if (!addr) return;
-      this.form.patchValue(
-        {
-          address_line1: addr.address_line1 ?? null,
-          address_line2: addr.address_line2 ?? null,
-          city: addr.city ?? null,
-          state_province: addr.state_province ?? null,
-          country_code: addr.country_code ?? 'CO',
-          postal_code: addr.postal_code ?? null,
-          phone_number: addr.phone_number ?? null,
-          latitude: addr.latitude ?? null,
-          longitude: addr.longitude ?? null,
-          municipality_code: addr.municipality_code ?? null,
-        },
-        // El patch va silencioso porque `address_line1` tiene un watcher que
-        // geocodifica lo que se teclea: emitir aquí dispararía una búsqueda
-        // sobre la dirección precargada y pisaría con una aproximación las
-        // coordenadas que vienen en el snapshot.
-        //
-        // El precio es que los dos controles puenteados a signal
-        // (`country_code` y `municipality_code`, ambos alimentados de
-        // `valueChanges`) no se enterarían de la precarga, así que se
-        // re-escriben explícitamente abajo. Sin eso, `showMunicipality()` se
-        // quedaría en el 'CO' inicial aunque llegara otro país, y
-        // `cityLockedByMunicipality()` dejaría ciudad y departamento editables
-        // sobre una dirección que sí trae código DANE.
-        { emitEvent: false },
-      );
-      this.form
-        .get('country_code')!
-        .setValue(addr.country_code ?? 'CO', { emitEvent: true });
-      this.form
-        .get('municipality_code')!
-        .setValue(addr.municipality_code ?? null, { emitEvent: true });
-      if (addr.latitude != null && addr.longitude != null) {
-        this.coordsSignal.set({ lat: addr.latitude, lng: addr.longitude });
-      }
+      untracked(() => this.hydrateAddress(addr));
     });
 
     // `coordsSignal` (map center) is now written directly, as a signal, at
@@ -597,39 +470,15 @@ export class AddressFormFieldsComponent {
         if (this.pinConfirmed()) this.pinConfirmed.set(false);
       });
 
-    // Re-geocode (debounced 500ms) on address_line1, city, state_province OR
-    // municipality_code changes — the #1 bug this component had: only
-    // address_line1 re-triggered a forward-geocode, so picking a different
-    // city/department on an address that already resolved coordinates left
-    // them silently stale.
-    //
-    // Gated on `form.dirty` so the silent `initialAddress` prefill (which
-    // sets `country_code`/`municipality_code` with `emitEvent:true` but never
-    // calls `markAsDirty`) does NOT fire a needless re-geocode on every
-    // modal open. `form.dirty` turns true on real typing, and is explicitly
-    // set by `onMunicipalitySelected` — exactly the user-driven changes that
-    // must re-trigger this (see vendix-known-errors: "setValue no marca dirty").
+    // Re-geocode debounced on street edits or a deliberate geography change.
     merge(
       this.form.get('address_line1')!.valueChanges,
-      this.form.get('city')!.valueChanges,
-      this.form.get('state_province')!.valueChanges,
-      this.form.get('municipality_code')!.valueChanges,
+      this.geographyChanges,
     )
       .pipe(debounceTime(500), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         if (!this.form.dirty) return;
         this.forwardGeocodeFromForm();
-        // H7 — solo en `compact` (POS): el selector DANE queda oculto detrás
-        // de `showAdvanced()` (ver `municipalitySelectVisible`), así que sin
-        // esto una dirección nueva tecleada desde el POS nunca obtenía
-        // `municipality_code` salvo que el cajero abriera "Más detalles" y el
-        // mapa. `resolveMunicipalityFromText` ya es idempotente (no pisa un
-        // código existente) y ya valida país CO — se reutiliza tal cual.
-        // Gateado a `compact()` para no alterar el comportamiento de los
-        // demás consumidores (customer-modal, dispatch-note editor, checkout
-        // suscripción, organization/store edit), donde el selector manual ya
-        // está siempre visible.
-        if (this.compact()) this.resolveMunicipalityFromText();
       });
 
     // Rule 2 of the auto-scroll gate (owner, 2026-09-27): cancel a pending
@@ -643,6 +492,7 @@ export class AddressFormFieldsComponent {
       this.form.get('city')!.valueChanges,
       this.form.get('state_province')!.valueChanges,
       this.form.get('municipality_code')!.valueChanges,
+      this.geographyChanges,
     )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.clearPendingAutoMapFocus());
@@ -673,30 +523,213 @@ export class AddressFormFieldsComponent {
     this.showMap.set(!this.showMap());
   }
 
-  /**
-   * El operador eligió (o quitó) un municipio DANE.
-   *
-   * Al elegir, el catálogo pasa a ser la fuente de verdad de `city` y
-   * `state_province`: se sobreescriben con el nombre oficial del municipio y de
-   * su departamento. Eso es lo que hace imposible una combinación inválida —
-   * los dos textos dejan de ser independientes del código.
-   *
-   * Al quitar, los textos se dejan como estaban (no se borra trabajo del
-   * usuario) y vuelven a ser editables.
-   */
-  onMunicipalitySelected(municipality: DianMunicipalityOption | null): void {
-    if (!municipality) {
-      this.emitAddressChange();
+  onDepartmentChange(value: string | number | null): void {
+    const code = value == null ? null : String(value);
+    const department = this.departments().find((item) => item.code === code) ?? null;
+    if ((department?.code ?? null) === this.selectedDepartmentCode()) return;
+
+    this.hydrationGeneration++;
+    this.municipalityRequestGeneration++;
+    this.selectedDepartmentCode.set(department?.code ?? null);
+    this.selectedMunicipalityCode.set(null);
+    this.municipalitiesForDepartment.set([]);
+    this.municipalitiesLoading.set(false);
+    this.municipalityCatalogError.set(null);
+    this.legacyAddressHint.set(null);
+    this.invalidateGeographyAndLocation();
+    this.form.patchValue(
+      {
+        city: null,
+        state_province: department?.name ?? null,
+        municipality_code: null,
+      },
+      { emitEvent: false },
+    );
+    this.form.markAsDirty();
+    this.form.updateValueAndValidity({ emitEvent: true });
+    this.geographyChanges.next();
+    if (department) this.loadMunicipalities(department.code);
+  }
+
+  onCityChange(value: string | number | null): void {
+    const code = value == null ? null : String(value);
+    if (code === this.selectedMunicipalityCode()) return;
+    if (code == null) {
+      this.hydrationGeneration++;
+      this.selectedMunicipalityCode.set(null);
+      this.legacyAddressHint.set(null);
+      this.invalidateGeographyAndLocation();
+      this.form.patchValue({ city: null, municipality_code: null }, { emitEvent: false });
+      this.form.markAsDirty();
+      this.form.updateValueAndValidity({ emitEvent: true });
+      this.geographyChanges.next();
       return;
     }
-    this.form
-      .get('city')
-      ?.setValue(municipality.name, { emitEvent: false });
-    this.form
-      .get('state_province')
-      ?.setValue(municipality.department_name, { emitEvent: false });
+    const municipality = this.municipalitiesForDepartment().find((item) => item.code === code);
+    if (!municipality || municipality.department_code !== this.selectedDepartmentCode()) return;
+
+    this.hydrationGeneration++;
+    this.selectedMunicipalityCode.set(municipality.code);
+    this.legacyAddressHint.set(null);
+    this.invalidateGeographyAndLocation();
+    this.form.patchValue(
+      {
+        city: municipality.name,
+        state_province: municipality.department_name,
+        municipality_code: municipality.code,
+      },
+      { emitEvent: false },
+    );
     this.form.markAsDirty();
-    this.emitAddressChange();
+    this.form.updateValueAndValidity({ emitEvent: true });
+    this.geographyChanges.next();
+  }
+
+  retryDepartments(): void {
+    this.loadDepartments();
+  }
+
+  retryMunicipalities(): void {
+    const departmentCode = this.selectedDepartmentCode();
+    if (departmentCode) this.loadMunicipalities(departmentCode);
+  }
+
+  private loadDepartments(): void {
+    const generation = ++this.departmentRequestGeneration;
+    this.departmentsLoading.set(true);
+    this.departmentCatalogError.set(null);
+    this.municipalities
+      .listDepartments()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (departments) => {
+          if (generation !== this.departmentRequestGeneration) return;
+          this.departments.set(departments);
+          this.departmentsLoading.set(false);
+        },
+        error: () => {
+          if (generation !== this.departmentRequestGeneration) return;
+          this.departmentsLoading.set(false);
+          this.departmentCatalogError.set('No pudimos cargar los departamentos DANE. Intenta de nuevo.');
+        },
+      });
+  }
+
+  private loadMunicipalities(departmentCode: string): void {
+    const generation = ++this.municipalityRequestGeneration;
+    this.municipalitiesLoading.set(true);
+    this.municipalityCatalogError.set(null);
+    this.municipalitiesForDepartment.set([]);
+    this.municipalities
+      .listByDepartment(departmentCode)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (municipalities) => {
+          if (generation !== this.municipalityRequestGeneration ||
+              departmentCode !== this.selectedDepartmentCode()) return;
+          this.municipalitiesForDepartment.set(municipalities);
+          this.municipalitiesLoading.set(false);
+        },
+        error: () => {
+          if (generation !== this.municipalityRequestGeneration ||
+              departmentCode !== this.selectedDepartmentCode()) return;
+          this.municipalitiesLoading.set(false);
+          this.municipalityCatalogError.set('No pudimos cargar las ciudades de este departamento. Intenta de nuevo.');
+        },
+      });
+  }
+
+  private hydrateAddress(address: AddressPayload): void {
+    const generation = ++this.hydrationGeneration;
+    this.municipalityRequestGeneration++;
+    this.geocodeGeneration++;
+    const city = address.city?.trim() ?? '';
+    const state = address.state_province?.trim() ?? '';
+    const hint = city || state ? `Antes: ${[city, state].filter(Boolean).join(', ')}` : null;
+    const hasValidCoords = this.hasValidCoords(address.latitude, address.longitude);
+
+    this.selectedDepartmentCode.set(null);
+    this.selectedMunicipalityCode.set(null);
+    this.municipalitiesForDepartment.set([]);
+    this.municipalitiesLoading.set(false);
+    this.municipalityCatalogError.set(null);
+    this.legacyAddressHint.set(hint);
+    this.form.patchValue(
+      {
+        address_line1: address.address_line1 ?? null,
+        address_line2: address.address_line2 ?? null,
+        city: null,
+        state_province: null,
+        country_code: COLOMBIA_COUNTRY_CODE,
+        postal_code: address.postal_code ?? null,
+        phone_number: address.phone_number ?? null,
+        latitude: hasValidCoords ? address.latitude : null,
+        longitude: hasValidCoords ? address.longitude : null,
+        municipality_code: null,
+      },
+      { emitEvent: false },
+    );
+    this.form.markAsPristine();
+    this.pinConfirmed.set(address.pin_confirmed === true && hasValidCoords);
+    this.precision.set(address.geocode_precision ?? null);
+    this.geocodeLabel.set(null);
+    this.addressWarning.set(null);
+    this.pendingAddressWarning = false;
+    this.coordsSignal.set(hasValidCoords
+      ? { lat: address.latitude!, lng: address.longitude! }
+      : null);
+    this.mapCenterHint.set(null);
+    this.form.updateValueAndValidity({ emitEvent: true });
+
+    const lookup$ = address.municipality_code?.trim()
+      ? this.municipalities.resolveByCode(address.municipality_code)
+      : city && state
+        ? this.municipalities.resolveByName(city, state)
+        : null;
+    if (!lookup$) return;
+
+    lookup$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (municipality) => {
+          if (generation !== this.hydrationGeneration) return;
+          if (!municipality || !/^\d{2}$/.test(municipality.department_code)) {
+            this.legacyAddressHint.set(hint);
+            return;
+          }
+          this.selectedDepartmentCode.set(municipality.department_code);
+          this.selectedMunicipalityCode.set(municipality.code);
+          this.legacyAddressHint.set(null);
+          this.form.patchValue({
+            city: municipality.name,
+            state_province: municipality.department_name,
+            municipality_code: municipality.code,
+          }, { emitEvent: false });
+          this.form.updateValueAndValidity({ emitEvent: true });
+          this.loadMunicipalities(municipality.department_code);
+        },
+        error: () => {
+          if (generation === this.hydrationGeneration) this.legacyAddressHint.set(hint);
+        },
+      });
+  }
+
+  private invalidateGeographyAndLocation(): void {
+    this.geocodeGeneration++;
+    this.pinConfirmed.set(false);
+    this.precision.set(null);
+    this.geocodeLabel.set(null);
+    this.addressWarning.set(null);
+    this.pendingAddressWarning = false;
+    this.mapCenterHint.set(null);
+    this.form.patchValue({ latitude: null, longitude: null }, { emitEvent: false });
+    this.coordsSignal.set(null);
+    this.clearPendingAutoMapFocus();
+  }
+
+  private hasValidCoords(lat: number | null | undefined, lng: number | null | undefined): boolean {
+    return lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng) &&
+      lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
   }
 
   /**
@@ -732,10 +765,8 @@ export class AddressFormFieldsComponent {
    * guess. The map now ONLY supplies lat/lng; the operator's own typed text is
    * the sole source of the written address.
    *
-   * `resolveMunicipalityFromText()` is still called directly: it does not
-   * write any address_line/city/state_province text, only derives the hidden
-   * DANE `municipality_code` from whatever city/state_province the operator
-   * already typed — so it is not "writing an address field" under the new rule.
+   * Geography remains owned by the DANE selectors; moving the pin only changes
+   * coordinates and never resolves or rewrites the selected municipality.
    */
   onLocated(coords: LatLng): void {
     // The map pin is now the source of truth for this coordinate: it must
@@ -749,46 +780,6 @@ export class AddressFormFieldsComponent {
     this.form.get('longitude')?.setValue(coords.lng);
     this.coordsSignal.set(coords);
     this.emitAddressChange();
-    this.resolveMunicipalityFromText();
-  }
-
-  /**
-   * Traduce los textos `city` + `state_province` a un municipio del catálogo y
-   * lo escribe en `municipality_code`.
-   *
-   * NO bloquea nada y NO pisa una elección previa del operador: si ya hay
-   * código puesto, se respeta. Si el catálogo no resuelve, el campo se queda
-   * vacío y el selector se lo pedirá al operador — nunca se rellena Bogotá por
-   * defecto, que es precisamente el error que el bloqueante existe para evitar.
-   */
-  private resolveMunicipalityFromText(): void {
-    const control = this.form.get('municipality_code');
-    if (!control || control.value) return;
-
-    const country = (this.form.get('country_code')?.value as string | null) ?? '';
-    if (country.trim().toUpperCase() !== COLOMBIA_COUNTRY_CODE) return;
-
-    const city = (this.form.get('city')?.value as string | null) ?? '';
-    const department =
-      (this.form.get('state_province')?.value as string | null) ?? '';
-    if (!city.trim() || !department.trim()) return;
-
-    this.municipalities
-      .resolveByName(city, department)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((municipality) => {
-        if (!municipality) return;
-        // Otra escritura pudo llegar mientras la petición estaba en vuelo.
-        if (control.value) return;
-        control.setValue(municipality.code, { emitEvent: true });
-        this.form
-          .get('city')
-          ?.setValue(municipality.name, { emitEvent: false });
-        this.form
-          .get('state_province')
-          ?.setValue(municipality.department_name, { emitEvent: false });
-        this.emitAddressChange();
-      });
   }
 
   /**

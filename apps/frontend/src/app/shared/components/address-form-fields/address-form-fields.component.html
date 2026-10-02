@@ -83,68 +83,58 @@
     ></app-input>
     }
 
-    @if (municipalitySelectVisible()) {
-      <!--
-        Municipio DANE (Divipola). Es el dato que la facturación electrónica
-        exige del adquiriente: sin él el documento declararía 11001 (Bogotá)
-        para cualquier cliente del país. Al elegirlo, ciudad y departamento se
-        completan solos desde el catálogo y quedan en solo-lectura, así que no
-        pueden discrepar del código.
-
-        H7: antes esto vivía detrás de `showAdvanced() && showMunicipality()`.
-        En `compact` (POS) `showAdvanced()` empieza en false, así que el
-        selector nunca aparecía para una dirección nueva. `municipalitySelectVisible`
-        agrega: mismo comportamiento cuando showAdvanced() es true, MÁS
-        visible en compact si el auto-resolve (constructor) no encontró
-        código — para que el cajero pueda elegirlo.
-      -->
-      <div class="field-block">
-        <label class="municipality-label" for="municipality-select">
-          Municipio (DANE)
-        </label>
-        <app-dian-municipality-select
-          id="municipality-select"
-          formControlName="municipality_code"
-          (municipalitySelected)="onMunicipalitySelected($event)"
-        />
-        <p class="field-hint">
-          Requerido para emitir factura electrónica a este cliente. Al elegirlo
-          se completan ciudad y departamento.
-        </p>
-      </div>
-    }
-
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div class="field-block">
-        <app-input
-          label="Ciudad"
-          formControlName="city"
-          placeholder="Ciudad"
-          [control]="form.get('city')!"
+        <app-selector
+          label="Departamento"
+          placeholder="Selecciona un departamento"
+          [options]="departmentOptions()"
+          [value]="selectedDepartmentCode()"
+          [searchable]="true"
+          [disabled]="departmentsLoading() || !!departmentCatalogError()"
           [required]="true"
-          [readonly]="cityLockedByMunicipality()"
-        ></app-input>
-        @if (showErrors() && cityInvalid()) {
+          (valueChange)="onDepartmentChange($event)"
+        ></app-selector>
+        @if (departmentsLoading()) {
+          <p class="field-hint" role="status">Cargando departamentos DANE…</p>
+        }
+        @if (showErrors() && stateInvalid()) {
           <p class="field-error" role="alert">
             <app-icon name="alert-triangle" [size]="14"></app-icon>
-            <span>La ciudad es obligatoria.</span>
+            <span>El departamento es obligatorio.</span>
           </p>
+        }
+        @if (departmentCatalogError(); as error) {
+          <p class="field-error" role="alert">{{ error }}</p>
+          <button type="button" class="field-hint" (click)="retryDepartments()">Reintentar</button>
         }
       </div>
 
       <div class="field-block">
-        <app-input
-          label="Departamento/Estado"
-          formControlName="state_province"
-          placeholder="Departamento o estado"
-          [control]="form.get('state_province')!"
+        <app-selector
+          label="Ciudad"
+          placeholder="Selecciona una ciudad"
+          [options]="municipalityOptions()"
+          [value]="selectedMunicipalityCode()"
+          [searchable]="true"
+          [disabled]="municipalitySelectorDisabled()"
           [required]="true"
-          [readonly]="cityLockedByMunicipality()"
-        ></app-input>
-        @if (showErrors() && stateInvalid()) {
+          (valueChange)="onCityChange($event)"
+        ></app-selector>
+        @if (municipalitiesLoading()) {
+          <p class="field-hint" role="status">Cargando municipios…</p>
+        }
+        @if (municipalityCatalogError(); as error) {
+          <p class="field-error" role="alert">{{ error }}</p>
+          <button type="button" class="field-hint" (click)="retryMunicipalities()">Reintentar</button>
+        }
+        @if (legacyAddressHint(); as hint) {
+          <p class="field-hint" role="status">{{ hint }} · Elige una ciudad del catálogo.</p>
+        }
+        @if (showErrors() && (cityInvalid() || form.get('municipality_code')?.invalid)) {
           <p class="field-error" role="alert">
             <app-icon name="alert-triangle" [size]="14"></app-icon>
-            <span>El departamento/estado es obligatorio.</span>
+            <span>La ciudad del catálogo es obligatoria.</span>
           </p>
         }
       </div>
@@ -152,13 +142,7 @@
 
     @if (showAdvanced()) {
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <!--
-        País por catálogo, no texto libre: se muestra el nombre («Colombia»)
-        pero el control sigue guardando el código ISO («CO»), que es lo que lee
-        `showMunicipality()` para ofrecer el municipio DANE y lo que espera el
-        backend. Con el input de texto el cliente veía el código crudo y podía
-        escribir cualquier cosa.
-      -->
+      <!-- El país se mantiene como CO; por ahora Colombia es el único catálogo disponible. -->
       <app-selector
         label="País"
         formControlName="country_code"
