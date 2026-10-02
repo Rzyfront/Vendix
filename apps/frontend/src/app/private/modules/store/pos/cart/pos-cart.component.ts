@@ -347,7 +347,8 @@ import {
                     <div class="flex items-center justify-between gap-1">
                       <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <h4
-                          class="text-xs font-bold text-slate-900 truncate leading-tight"
+                          class="text-xs font-bold text-slate-900 min-w-0 leading-tight"
+                          [title]="item.product.name"
                         >
                           {{ item.product.name }}
                         </h4>
