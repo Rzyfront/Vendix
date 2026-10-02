@@ -2,18 +2,20 @@ import { Component, DestroyRef, OnInit, inject, computed, signal  } from '@angul
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
+import { forkJoin } from 'rxjs';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ReviewsSummary, AnalyticsService } from '../../services/analytics.service';
+import { ReviewsSummary, RatingTrendPoint, AnalyticsService } from '../../services/analytics.service';
 import { EChartsOption } from 'echarts';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
+import { comparisonLabelFor } from '../../utils/comparison-label.util';
 
 import {
   OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
@@ -59,36 +61,36 @@ import {
       } @else {
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           <app-stats
-            title="Total Reseñas"
-            [value]="summary()?.total_reviews || 0"
-            smallText="Reseñas recibidas"
-            iconName="message-square"
-            iconBgColor="bg-blue-100"
-            iconColor="text-blue-600"
-          ></app-stats>
-
-          <app-stats
-            title="Rating Promedio"
-            [value]="summary()?.average_rating || 0"
-            smallText="Sobre 5 estrellas"
+            title="Calificación promedio"
+            [value]="summary()?.average_rating ?? 0"
+            [smallText]="averageRatingGrowthText()"
             iconName="star"
             iconBgColor="bg-yellow-100"
             iconColor="text-yellow-600"
           ></app-stats>
 
           <app-stats
-            title="Pendientes"
+            title="Reseñas del período"
+            [value]="summary()?.total_reviews || 0"
+            [smallText]="totalReviewsGrowthText()"
+            iconName="message-square"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          ></app-stats>
+
+          <app-stats
+            title="Por moderar"
             [value]="summary()?.pending_reviews || 0"
-            smallText="Por aprobar"
+            smallText="Pendientes de aprobación"
             iconName="clock"
             iconBgColor="bg-orange-100"
             iconColor="text-orange-600"
           ></app-stats>
 
           <app-stats
-            title="Aprobadas"
-            [value]="summary()?.approved_reviews || 0"
-            smallText="Publicadas"
+            title="Compras verificadas"
+            [value]="verifiedPurchaseRateText()"
+            [smallText]="verifiedPurchaseSmallText()"
             iconName="check-circle"
             iconBgColor="bg-emerald-100"
             iconColor="text-emerald-600"
@@ -135,7 +137,7 @@ import {
         >
           <div slot="header" class="results-header flex flex-col">
             <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución de Ratings</span>
-            <span class="text-xs text-[var(--color-text-secondary)]">Conteo por estrellas</span>
+            <span class="text-xs text-[var(--color-text-secondary)]">Solo aprobadas · conteo y % del total</span>
           </div>
           <div class="p-4">
             @if (loading()) {
@@ -170,6 +172,32 @@ import {
           </div>
         </app-card>
       </div>
+
+      <!-- Rating Trend Chart -->
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="results-header flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">Tendencia de Calificación Promedio</span>
+          <span class="text-xs text-[var(--color-text-secondary)]">Solo aprobadas · por período local de la tienda</span>
+        </div>
+        <div class="p-4">
+          @if (loading()) {
+            <div class="h-64 flex items-center justify-center">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          } @else {
+            <app-chart [options]="ratingTrendChartOptions()" size="large" [showLegend]="true"></app-chart>
+          }
+        </div>
+      </app-card>
+
+      <p class="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+        El promedio considera solo reseñas aprobadas (las visibles en la tienda). Pendientes y rechazadas se listan aparte. El % vs. período anterior y la compra verificada comparten ese mismo denominador.
+      </p>
       </div>
 
       <!-- Quick Links -->
@@ -195,15 +223,34 @@ export class ReviewSummaryComponent implements OnInit {
   loading = signal(true);
   exporting = signal(false);
   summary = signal<ReviewsSummary | null>(null);
+  ratingTrend = signal<RatingTrendPoint[]>([]);
 
   ratingDistributionChartOptions= signal<EChartsOption>({});
   reviewsStatusChartOptions= signal<EChartsOption>({});
+  ratingTrendChartOptions = signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'});
 
   readonly reviewsViews: AnalyticsView[] = getViewsByCategory('reviews');
+
+  /** QUI-629: la tendencia respeta el rango elegido sin selector extra. */
+  readonly trendGranularity = computed<'day' | 'week' | 'month' | 'year'>(
+    () => {
+      const range = this.dateRange();
+      const start = new Date(range.start_date).getTime();
+      const end = new Date(range.end_date).getTime();
+      if (!start || !end || Number.isNaN(start) || Number.isNaN(end)) {
+        return 'day';
+      }
+      const days = (end - start) / 86_400_000;
+      if (days <= 45) return 'day';
+      if (days <= 180) return 'week';
+      if (days <= 800) return 'month';
+      return 'year';
+    },
+  );
 
   ngOnInit(): void {
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
@@ -216,21 +263,29 @@ export class ReviewSummaryComponent implements OnInit {
   loadData(): void {
     this.loading.set(true);
 
-    this.analyticsService
-      .getReviewsSummary({ date_range: this.dateRange() })
+    forkJoin({
+      summary: this.analyticsService.getReviewsSummary({
+        date_range: this.dateRange(),
+      }),
+      trend: this.analyticsService.getRatingTrend({
+        date_range: this.dateRange(),
+        granularity: this.trendGranularity(),
+      }),
+    })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-      next: (response) => {
-        if (response?.data) {
-          this.summary.set(response.data);
+        next: ({ summary, trend }) => {
+          if (summary?.data) {
+            this.summary.set(summary.data);
+          }
+          this.ratingTrend.set(trend?.data ?? []);
           this.updateCharts();
-        }
-        this.loading.set(false);
-      },
-      error: () => {
-        this.loading.set(false);
-      },
-    });
+          this.loading.set(false);
+        },
+        error: () => {
+          this.loading.set(false);
+        },
+      });
   }
 
   exportReport(): void {
@@ -307,6 +362,38 @@ export class ReviewSummaryComponent implements OnInit {
     this.loadData();
   }
 
+  /**
+   * `null` = no hay base comparable en el período anterior ("Sin base de
+   * comparación..." en vez de inventar un 0 %).
+   */
+  private growthText(
+    growthValue: number | null | undefined,
+  ): string {
+    if (growthValue === undefined || growthValue === null) {
+      return `Sin base de comparación vs ${comparisonLabelFor(this.dateRange().preset)}`;
+    }
+    const sign = growthValue >= 0 ? '+' : '';
+    return `${sign}${growthValue.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset)}`;
+  }
+
+  readonly averageRatingGrowthText = computed<string>(() =>
+    this.growthText(this.summary()?.average_rating_growth),
+  );
+
+  readonly totalReviewsGrowthText = computed<string>(() =>
+    this.growthText(this.summary()?.total_reviews_growth),
+  );
+
+  readonly verifiedPurchaseRateText = computed<string>(() => {
+    const rate = this.summary()?.verified_purchase_rate;
+    return rate === null || rate === undefined ? '—' : `${rate.toFixed(1)}%`;
+  });
+
+  readonly verifiedPurchaseSmallText = computed<string>(() => {
+    const approved = this.summary()?.approved_reviews ?? 0;
+    return `de ${approved} aprobadas`;
+  });
+
   private updateCharts(): void {
     const style = getComputedStyle(document.documentElement);
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
@@ -315,6 +402,8 @@ export class ReviewSummaryComponent implements OnInit {
     if (!data) return;
 
     const ratingDistribution = data.rating_distribution || {};
+    const approvedTotal =
+      Object.values(ratingDistribution).reduce((a, b) => a + b, 0) || 0;
 
     // Rating Distribution Bar Chart
     const stars = [5, 4, 3, 2, 1];
@@ -325,8 +414,18 @@ export class ReviewSummaryComponent implements OnInit {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          const star = params[0];
-          return `${star.name} estrellas: <b>${star.value}</b>`;
+          // `trigger: 'axis'` sends one entry per series. Pick the non-zero
+          // one so the tooltip names the star actually under the cursor instead
+          // of whichever series happens to come first.
+          const hit = (Array.isArray(params) ? params : [params]).find(
+            (p: any) => Number(p?.value) > 0,
+          );
+          const star = hit ?? (Array.isArray(params) ? params[0] : params);
+          if (!star) return '';
+          const count = Number(star.value) || 0;
+          const pct =
+            approvedTotal > 0 ? ((count / approvedTotal) * 100).toFixed(1) : '0.0';
+          return `${star.name} estrellas: <b>${count}</b> (${pct}%)`;
         },
       },
       legend: {
@@ -354,18 +453,32 @@ export class ReviewSummaryComponent implements OnInit {
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [
-        { name: '5★', type: 'bar' as const, data: [counts[0]], itemStyle: { color: '#22c55e' }, barMaxWidth: 40 },
-        { name: '4★', type: 'bar' as const, data: [counts[1]], itemStyle: { color: '#84cc16' }, barMaxWidth: 40 },
-        { name: '3★', type: 'bar' as const, data: [counts[2]], itemStyle: { color: '#f59e0b' }, barMaxWidth: 40 },
-        { name: '2★', type: 'bar' as const, data: [counts[3]], itemStyle: { color: '#f97316' }, barMaxWidth: 40 },
-        { name: '1★', type: 'bar' as const, data: [counts[4]], itemStyle: { color: '#ef4444' }, barMaxWidth: 40 },
+        {
+          name: '5★', type: 'bar' as const, data: [counts[0], 0, 0, 0, 0],
+          itemStyle: { color: '#22c55e' }, barMaxWidth: 40,
+        },
+        {
+          name: '4★', type: 'bar' as const, data: [0, counts[1], 0, 0, 0],
+          itemStyle: { color: '#84cc16' }, barMaxWidth: 40,
+        },
+        {
+          name: '3★', type: 'bar' as const, data: [0, 0, counts[2], 0, 0],
+          itemStyle: { color: '#f59e0b' }, barMaxWidth: 40,
+        },
+        {
+          name: '2★', type: 'bar' as const, data: [0, 0, 0, counts[3], 0],
+          itemStyle: { color: '#f97316' }, barMaxWidth: 40,
+        },
+        {
+          name: '1★', type: 'bar' as const, data: [0, 0, 0, 0, counts[4]],
+          itemStyle: { color: '#ef4444' }, barMaxWidth: 40,
+        },
       ],
     });
 
@@ -423,6 +536,65 @@ export class ReviewSummaryComponent implements OnInit {
           data: [data.rejected_reviews || 0],
           itemStyle: { color: '#ef4444' },
           barMaxWidth: 40,
+        },
+      ],
+    });
+
+    // Rating Trend Line Chart (solo aprobadas, período local)
+    const points = this.ratingTrend();
+    const granularity = this.trendGranularity();
+    const trendLabels = points.map((p) =>
+      truncateLabel(formatChartPeriod(p.period, granularity), 12),
+    );
+    const trendValues = points.map((p) => Number(p.average_rating.toFixed(1) ?? 0));
+    const trendCounts = points.map((p) => p.review_count);
+
+    this.ratingTrendChartOptions.set({
+      tooltip: {
+        trigger: 'axis',
+        confine: true,
+        axisPointer: { type: 'line' },
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}<br/>Promedio: <b>${Number(p.value).toFixed(1)}</b><br/>Reseñas: ${trendCounts[p.dataIndex] ?? 0}`;
+        },
+      },
+      legend: {
+        data: ['Calificación Promedio'],
+        selectedMode: true,
+        bottom: 30,
+        left: 'center',
+        itemWidth: 14,
+        textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '5%', bottom: '20%', top: '5%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: trendLabels,
+        boundaryGap: false,
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        max: 5,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
+      },
+      series: [
+        {
+          name: 'Calificación Promedio',
+          type: 'line' as const,
+          data: trendValues,
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 6,
+          itemStyle: { color: '#f59e0b' },
+          lineStyle: { width: 2, color: '#f59e0b' },
+          areaStyle: { opacity: 0.08, color: '#f59e0b' },
         },
       ],
     });
