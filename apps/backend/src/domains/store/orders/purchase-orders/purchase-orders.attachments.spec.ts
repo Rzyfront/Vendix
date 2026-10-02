@@ -3,6 +3,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
+
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { CostingService } from '../../inventory/shared/services/costing.service';
@@ -22,6 +24,12 @@ import { VatResponsibilityService } from '@common/helpers/vat-responsibility.hel
  * la tienda, vínculo en la tx de la OC, y control de pertenencia (IDOR) en los
  * adjuntos.
  */
+
+const purchaseVatContributionProvider = () => ({
+  provide: PurchaseVatContributionService,
+  useValue: { reserve: jest.fn().mockResolvedValue({ id: 1 }) },
+});
+
 describe('PurchaseOrders — documento escaneado y adjuntos (QUI-855)', () => {
   const ORG_ID = 1;
   const STORE_ID = 10;
@@ -76,6 +84,7 @@ describe('PurchaseOrders — documento escaneado y adjuntos (QUI-855)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: stockLevelManager },
         { provide: CostingService, useValue: costingService },

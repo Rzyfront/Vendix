@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
+
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import {
@@ -34,6 +36,12 @@ import { VatResponsibilityService } from '@common/helpers/vat-responsibility.hel
  *      updateStock is still called and falls back to the receipt unit cost
  *      both for `unit_cost` and `movement_unit_cost`.
  */
+
+const purchaseVatContributionProvider = () => ({
+  provide: PurchaseVatContributionService,
+  useValue: { reserve: jest.fn().mockResolvedValue({ id: 1 }) },
+});
+
 describe('PurchaseOrdersService.receive()', () => {
   let service: PurchaseOrdersService;
   let prismaService: jest.Mocked<StorePrismaService>;
@@ -208,6 +216,7 @@ describe('PurchaseOrdersService.receive()', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
         { provide: CostingService, useValue: mockCostingService },
@@ -863,6 +872,7 @@ describe('PurchaseOrdersService.receive()', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           PurchaseOrdersService,
+        purchaseVatContributionProvider(),
           { provide: StorePrismaService, useValue: mockPrismaService },
           { provide: StockLevelManager, useValue: mockStockLevelManager },
           { provide: CostingService, useValue: mockCostingService },
@@ -1295,6 +1305,7 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: mockCostingService },
@@ -1916,6 +1927,7 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           PurchaseOrdersService,
+        purchaseVatContributionProvider(),
           { provide: StorePrismaService, useValue: mockPrismaService },
           { provide: StockLevelManager, useValue: {} as any },
           {
@@ -2212,6 +2224,7 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2440,6 +2453,7 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2717,6 +2731,7 @@ describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un s
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2848,6 +2863,7 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: {} as any },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -3089,6 +3105,7 @@ describe('PurchaseOrdersService.materializeVatDocument() — F-214', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },

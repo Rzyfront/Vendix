@@ -78,6 +78,7 @@ import {
   VatTreatmentExplanation,
   vatTreatmentFromResult,
 } from '@common/helpers/vat-responsibility.helper';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
 
 /**
  * QUI-647 — marcador del pago real de un abono registrado al crear la OC.
@@ -163,6 +164,7 @@ export class PurchaseOrdersService {
     // (antes replicado localmente aquí y en InvoiceScannerService). Cambia el
     // default pre-F4 es Paso 0.1 — fuera de P0.1.
     private vatService: VatResponsibilityService,
+    private purchaseVatContributionService: PurchaseVatContributionService,
   ) {}
 
   /**
@@ -4631,6 +4633,29 @@ export class PurchaseOrdersService {
         const net_amount = Number(result.order_subtotal || 0);
 
         if (iva_amount > 0 && accounting_entity_id != null) {
+          if (!result.updated_po.suppliers?.id || store_id == null) {
+            throw new Error('F2: supplier and store are required to reserve deductible VAT');
+          }
+          const contribution = await this.purchaseVatContributionService.reserve({
+            organization_id: result.updated_po.organization_id,
+            accounting_entity_id,
+            store_id,
+            purchase_order_id: result.updated_po.id,
+            reception_id: result.reception_id,
+            supplier_id: result.updated_po.suppliers.id,
+            supplier_tax_id_snapshot: result.updated_po.suppliers.tax_id ?? null,
+            invoice_number_snapshot: result.updated_po.supplier_invoice_number ?? null,
+            invoice_issue_date_snapshot: result.updated_po.supplier_invoice_date ?? null,
+            currency: 'COP',
+            // Keep reservation at the exact cent precision of the legacy
+            // invoice projection below.
+            net_amount: Math.round(net_amount * 100) / 100,
+            iva_amount,
+            tax_groups,
+          });
+          if (!contribution?.id) {
+            throw new Error('F2: VAT contribution reservation did not return an id');
+          }
           const invoice = await this.materializeVatDocument({
             purchase_order_id: result.updated_po.id,
             order_number: result.updated_po.order_number,
@@ -4657,6 +4682,7 @@ export class PurchaseOrdersService {
               store_id,
               accounting_entity_id,
               iva_amount,
+              contribution_id: contribution.id,
               supplier,
               user_id: RequestContextService.getUserId(),
             });
