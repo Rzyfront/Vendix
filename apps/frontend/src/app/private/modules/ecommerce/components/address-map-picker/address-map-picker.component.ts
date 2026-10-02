@@ -39,6 +39,60 @@ const LOAD_TIMEOUT_MS = 12000;
  */
 const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 
+interface RecenterMap {
+  flyTo(options: { center: [number, number]; zoom: number }): void;
+}
+
+type RecenterTarget = () => { lat: number; lng: number } | null;
+
+/** Map control that returns the camera to the current address point, never GPS. */
+export class RecenterControl {
+  private container: HTMLDivElement | null = null;
+  private button: HTMLButtonElement | null = null;
+  private map: RecenterMap | null = null;
+  private readonly handleClick = (): void => {
+    const target = this.getTarget();
+    if (!target || !this.map || this.button?.disabled) return;
+    this.map.flyTo({ center: [target.lng, target.lat], zoom: POINT_ZOOM });
+  };
+
+  constructor(private readonly getTarget: RecenterTarget) {}
+
+  onAdd(map: RecenterMap): HTMLElement {
+    this.map = map;
+    this.container = document.createElement('div');
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group amp-recenter-control';
+    this.button = document.createElement('button');
+    this.button.type = 'button';
+    this.button.className = 'amp-recenter-button';
+    this.button.disabled = true;
+    this.button.setAttribute('aria-label', 'Centrar en la dirección');
+    this.button.setAttribute('title', 'Centrar en la dirección');
+    this.button.innerHTML = [
+      '<svg class="amp-recenter-icon" viewBox="0 0 24 24" fill="none"',
+      ' stroke="currentColor" stroke-width="2" stroke-linecap="round"',
+      ' stroke-linejoin="round" aria-hidden="true">',
+      '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/>',
+      '<circle cx="12" cy="12" r="2"/></svg>',
+    ].join('');
+    this.button.addEventListener('click', this.handleClick);
+    this.container.appendChild(this.button);
+    return this.container;
+  }
+
+  setEnabled(enabled: boolean): void {
+    if (this.button) this.button.disabled = !enabled;
+  }
+
+  onRemove(): void {
+    this.button?.removeEventListener('click', this.handleClick);
+    this.container?.parentNode?.removeChild(this.container);
+    this.button = null;
+    this.container = null;
+    this.map = null;
+  }
+}
+
 /**
  * Custom "locate me" map control. Renders identically to MapLibre's native
  * `GeolocateControl` (reuses its `.maplibregl-ctrl-geolocate` /
@@ -166,6 +220,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private maplibregl: any = null;
   private map: any = null;
   private marker: any = null;
+  private recenterControl: RecenterControl | null = null;
   private mapLoaded = false;
   /** Guards the `mapReady` output so it fires exactly once. */
   private mapReadyEmitted = false;
@@ -213,6 +268,16 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         new this.maplibregl.NavigationControl({ showCompass: false }),
         'top-right',
       );
+      // Address recenter sits between navigation and fullscreen; unlike the
+      // locate control below, it never requests or reads device geolocation.
+      this.recenterControl = new RecenterControl(() => {
+        if (this.marker) {
+          const point = this.marker.getLngLat();
+          return { lat: point.lat, lng: point.lng };
+        }
+        return this.center();
+      });
+      this.map.addControl(this.recenterControl, 'top-right');
       // Fullscreen: lets the customer expand the map to place the pin precisely.
       this.map.addControl(new this.maplibregl.FullscreenControl(), 'top-right');
       // "Ubicarme": behavior depends on `delegateLocate`.
@@ -351,6 +416,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     } else {
       this.marker.setLngLat([coord.lng, coord.lat]);
     }
+    this.recenterControl?.setEnabled(true);
   }
 
   private emitFromMarker(): void {
@@ -381,6 +447,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     if (this.attribTimer) clearTimeout(this.attribTimer);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.recenterControl?.onRemove();
+    this.recenterControl = null;
     try {
       this.marker?.remove?.();
       this.map?.remove?.();

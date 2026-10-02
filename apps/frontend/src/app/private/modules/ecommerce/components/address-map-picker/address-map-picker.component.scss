@@ -42,6 +42,38 @@
   background: var(--color-background, #f3f4f6);
 }
 
+/* Address recenter is its own control (not the geolocate control), so shared
+   GPS-specific selectors can never hide it. Keep the familiar MapLibre control
+   size while using theme tokens for focus and disabled affordances. */
+.maplibregl-ctrl-group .amp-recenter-button {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  padding: 0;
+  color: var(--color-text, #374151);
+  background: var(--color-background, #fff);
+  cursor: pointer;
+}
+
+.amp-recenter-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.maplibregl-ctrl-group .amp-recenter-button:disabled {
+  color: var(--color-text-secondary, #9ca3af);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.maplibregl-ctrl-group .amp-recenter-button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--color-primary, #2563eb);
+  outline-offset: 2px;
+}
+
 /* Skeleton reserves the map's exact footprint while tiles load: a shimmering
    block plus a subtle label. Absolutely positioned over the (empty) canvas so
    the layout never jumps when the map appears. */
