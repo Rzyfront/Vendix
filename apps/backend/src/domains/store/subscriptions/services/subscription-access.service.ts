@@ -10,8 +10,11 @@ import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import {
   AccessCheckResult,
+  AIExtraQuotaCounter,
   AIFeatureKey,
   AI_FEATURE_KEYS,
+  ExtraQuotaStatus,
+  FEATURE_EXTRA_QUOTA_CONFIG,
   FEATURE_QUOTA_CONFIG,
   FeatureConfig,
   isAIFeatureKey,
@@ -422,6 +425,106 @@ export class SubscriptionAccessService {
         `consumeAIQuota failed for store=${storeId} feature=${feature} requestId=${requestId}: ${(err as Error).message}`,
       );
     }
+  }
+
+  /**
+   * R3-A — estado de un contador adicional (`daily_messages`,
+   * `monthly_tokens`) de una feature frente a su cap. Solo lectura.
+   *
+   * Nunca lanza: ante fallo de resolver/Redis devuelve `exceeded: false`
+   * (fail-open, con warn) para que el metering no rompa el turno. El que
+   * decide bloquear es el llamador, según `degradation`.
+   */
+  async checkExtraQuota(
+    storeId: number,
+    feature: AIFeatureKey,
+    counter: AIExtraQuotaCounter,
+  ): Promise<ExtraQuotaStatus> {
+    const open: ExtraQuotaStatus = {
+      exceeded: false,
+      cap: null,
+      used: 0,
+      degradation: 'warn',
+    };
+    const cfg = FEATURE_EXTRA_QUOTA_CONFIG[feature]?.[counter];
+    if (!cfg) return open;
+    if (!Number.isInteger(storeId) || storeId <= 0) return open;
+    try {
+      const resolved = await this.resolver.resolveSubscription(storeId);
+      const featureConfig = resolved.features?.[feature];
+      if (!featureConfig) return open;
+      const degradation =
+        featureConfig.degradation === 'block' ? 'block' : 'warn';
+      const capRaw = featureConfig[cfg.capField];
+      if (typeof capRaw !== 'number' || capRaw <= 0) {
+        return { ...open, degradation };
+      }
+      const used = await this.getQuotaUsed(
+        this.extraQuotaKey(storeId, feature, counter, cfg.period),
+      );
+      return {
+        exceeded: used >= capRaw,
+        cap: capRaw,
+        used,
+        degradation,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `checkExtraQuota failed for store=${storeId} feature=${feature} counter=${counter}: ${(err as Error).message}`,
+      );
+      return open;
+    }
+  }
+
+  /**
+   * R3-A — suma `units` a un contador adicional con el mismo patrón Lua
+   * (dedup por `requestId` + INCRBY + EXPIRE) que `consumeAIQuota`. Mismo
+   * contrato: `requestId` obligatorio; errores de Redis se registran y se
+   * tragan.
+   */
+  async consumeExtraQuota(
+    storeId: number,
+    feature: AIFeatureKey,
+    counter: AIExtraQuotaCounter,
+    units: number,
+    requestId: string,
+  ): Promise<void> {
+    if (typeof requestId !== 'string' || requestId.trim().length === 0) {
+      throw new InternalServerErrorException(
+        'consumeExtraQuota requires a non-empty requestId for atomic dedup.',
+      );
+    }
+    if (!Number.isInteger(storeId) || storeId <= 0) return;
+    const cfg = FEATURE_EXTRA_QUOTA_CONFIG[feature]?.[counter];
+    if (!cfg) return;
+    if (!Number.isFinite(units) || units <= 0) return;
+
+    const quotaKey = this.extraQuotaKey(storeId, feature, counter, cfg.period);
+    const dedupKey = quotaKey.replace('ai:quota:', 'ai:quota:dedup:');
+    try {
+      await this.redis.eval(
+        this.consumeQuotaLua,
+        2,
+        quotaKey,
+        dedupKey,
+        requestId,
+        Math.floor(units),
+        this.ttlForPeriod(cfg.period),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `consumeExtraQuota failed for store=${storeId} feature=${feature} counter=${counter} requestId=${requestId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private extraQuotaKey(
+    storeId: number,
+    feature: AIFeatureKey,
+    counter: AIExtraQuotaCounter,
+    period: 'daily' | 'monthly',
+  ): string {
+    return `ai:quota:${storeId}:${feature}:${counter}:${this.periodKey(period)}`;
   }
 
   /**

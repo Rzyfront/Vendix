@@ -5602,6 +5602,7 @@ model ai_agents {
   allowed_tools                 String[]                  @default([])
   denied_tools                  String[]                  @default([])
   max_iterations                Int?
+  timeout_seconds               Int?
   requires_confirmation_default Boolean   @default(false)
   is_active                     Boolean   @default(true)
   created_at                    DateTime? @default(now()) @db.Timestamp(6)

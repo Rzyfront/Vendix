@@ -422,6 +422,7 @@ export function createCashRegisterTools(
       name: 'record_cash_movement',
       version: '1',
       domain: 'cash-register',
+      irreversible: true,
       description:
         'Registra un movimiento manual de efectivo en una sesión abierta: cash_in (ingreso) o cash_out (egreso) con monto, reference y notes opcionales. Cadena: get_active_cash_session para la sesión.',
       parameters: {

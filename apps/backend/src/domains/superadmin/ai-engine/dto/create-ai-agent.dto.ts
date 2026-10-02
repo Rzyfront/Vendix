@@ -88,6 +88,18 @@ export class CreateAIAgentDto {
   @Max(60)
   max_iterations?: number | null;
 
+  /**
+   * Presupuesto de reloj del turno en segundos. `null`/ausente = default del
+   * loop (Vexi 60 s, Vex 300 s). Con un plan abierto el loop lo amplía hasta
+   * 600 s como máximo, nunca por debajo de este valor.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(30)
+  @Max(600)
+  timeout_seconds?: number | null;
+
   @IsOptional()
   @IsBoolean()
   requires_confirmation_default?: boolean;

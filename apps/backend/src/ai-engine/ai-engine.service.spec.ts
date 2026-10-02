@@ -326,3 +326,107 @@ describe('AIEngineService.runImageStream (QUI-857 C1)', () => {
     );
   });
 });
+describe('AIEngineService cache token logging (vexR3-C)', () => {
+  const buildService = () => {
+    const prisma = { ai_engine_applications: { findUnique: jest.fn() } };
+    const aiLogging = {
+      calculateCost: jest.fn().mockReturnValue(0.5),
+      logRequest: jest.fn(),
+    };
+    const service = new AIEngineService(
+      prisma as any,
+      { get: jest.fn() } as any,
+      { on: jest.fn() } as any,
+      aiLogging as any,
+      { emit: jest.fn() } as any,
+      { canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }) } as any,
+      { isEnforce: jest.fn().mockReturnValue(false) } as any,
+    );
+    return { service, prisma, aiLogging };
+  };
+
+  it('run() passes provider cache tokens to calculateCost and logRequest', async () => {
+    const { service, prisma, aiLogging } = buildService();
+    prisma.ai_engine_applications.findUnique.mockResolvedValue({
+      key: 'vex_assistant',
+      is_active: true,
+      config_id: 5,
+      model_type: 'text',
+      system_prompt: 'sys',
+      prompt_template: 'hi',
+      ai_feature_category: null,
+    });
+    (service as any).providers.set(5, {
+      chat: jest.fn().mockResolvedValue({
+        success: true,
+        content: 'ok',
+        model: 'claude',
+        usage: {
+          promptTokens: 100,
+          completionTokens: 20,
+          totalTokens: 120,
+          cacheReadTokens: 80,
+          cacheCreationTokens: 15,
+        },
+      }),
+    });
+    jest
+      .spyOn(service as any, 'runSubscriptionGate')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'checkRateLimit').mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'consumeSubscriptionQuota')
+      .mockResolvedValue(undefined);
+
+    await service.run('vex_assistant');
+
+    expect(aiLogging.calculateCost).toHaveBeenCalledWith(
+      undefined,
+      100,
+      20,
+      80,
+      15,
+    );
+    expect(aiLogging.logRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt_tokens: 100,
+        completion_tokens: 20,
+        cache_read_tokens: 80,
+        cache_creation_tokens: 15,
+      }),
+    );
+  });
+
+  it('logApplicationRequest() forwards cache tokens and defaults to 0', () => {
+    const { service, aiLogging } = buildService();
+    (service as any).logApplicationRequest({
+      appKey: 'a',
+      configId: null,
+      response: {
+        usage: {
+          promptTokens: 1,
+          completionTokens: 2,
+          totalTokens: 3,
+          cacheReadTokens: 7,
+          cacheCreationTokens: 9,
+        },
+      },
+      status: 'success',
+      startTime: Date.now(),
+    });
+    expect(aiLogging.logRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cache_read_tokens: 7, cache_creation_tokens: 9 }),
+    );
+
+    (service as any).logApplicationRequest({
+      appKey: 'a',
+      configId: null,
+      response: { usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } },
+      status: 'success',
+      startTime: Date.now(),
+    });
+    expect(aiLogging.logRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cache_read_tokens: 0, cache_creation_tokens: 0 }),
+    );
+  });
+});

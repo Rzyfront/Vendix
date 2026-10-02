@@ -190,16 +190,17 @@ describe('cash-register.tools · caja', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('solo close_cash_session declara irreversible: true', () => {
+  it('close_cash_session y record_cash_movement declaran irreversible: true', () => {
     const { byName } = buildTools();
     expect(byName.close_cash_session.irreversible).toBe(true);
-    // Apertura y movimientos se corrigen con otra escritura (cerrar con
-    // arqueo, contra-movimiento): la marca selectiva evita fatiga del badge.
+    // R3-A: el movimiento manual de efectivo mueve dinero y se aprueba con
+    // confirmación propia dentro de planes.
+    expect(byName.record_cash_movement.irreversible).toBe(true);
+    // Apertura y lecturas no llevan la marca (evita fatiga del badge).
     for (const name of [
       'get_active_cash_session',
       'list_cash_sessions',
       'open_cash_session',
-      'record_cash_movement',
     ]) {
       expect(byName[name].irreversible).not.toBe(true);
     }

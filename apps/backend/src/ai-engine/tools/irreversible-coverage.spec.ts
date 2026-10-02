@@ -2,12 +2,16 @@ import { AIToolRegistry } from './ai-tool-registry';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './bridge/capability-registry.service';
 import { createAccountingTools } from './domains/accounting.tools';
 import { createCashRegisterTools } from './domains/cash-register.tools';
+import { createExpenseTools } from './domains/expenses.tools';
+import { createFinanceOpsTools } from './domains/finance-ops.tools';
 import { createFiscalTools } from './domains/fiscal.tools';
+import { createInventoryTools } from './domains/inventory.tools';
 import { createInvoicingTools } from './domains/invoicing.tools';
 import { createOrdersTools } from './domains/orders.tools';
 import { createPaymentTools } from './domains/payments.tools';
 import { createPayrollTools } from './domains/payroll.tools';
 import { createProductTools } from './domains/products.tools';
+import { createPurchasingTools } from './domains/purchasing.tools';
 import { createReceivablesPayablesTools } from './domains/receivables-payables.tools';
 import { createReturnTools } from './domains/returns.tools';
 import { createSubscriptionTools } from './domains/subscriptions.tools';
@@ -33,7 +37,7 @@ import { createWithholdingTools } from './domains/withholding.tools';
  * Vex), con pines directos en vez de red por dominio.
  */
 const IRREVERSIBLE_NAME_PATTERN =
-  /send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_/;
+  /send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_|record_.*payment|depreciation/;
 
 /**
  * Writes que el patrón nombra pero que evalúan sin ejecutar el efecto:
@@ -171,6 +175,94 @@ describe('irreversible-coverage · dominios diferidos (E2E remediación Vex)', (
           t.readOnly !== true &&
           t.clientSide !== true,
       )
+      .filter(
+        (t) =>
+          IRREVERSIBLE_NAME_PATTERN.test(t.name) ||
+          IRREVERSIBLE_NAME_PATTERN.test(t.domain ?? ''),
+      )
+      .filter((t) => t.irreversible !== true)
+      .map((t) => `${t.domain}/${t.name}`);
+    expect(violators).toEqual([]);
+  });
+});
+
+describe('irreversible-coverage · REQUIRED_IRREVERSIBLE (R3-A)', () => {
+  // Lista fijada: cada tool que mueve dinero, contabiliza o sella un estado
+  // no reversible con otra escritura normal. Quitar la marca de cualquiera
+  // rompe este spec; añadir una a la lista exige que exista en el registro.
+  const REQUIRED_IRREVERSIBLE = [
+    // Paso 1 y diferidos (ya marcadas)
+    'close_cash_session',
+    'archive_product',
+    'delete_variant',
+    'cancel_subscription',
+    'pay_subscription_due',
+    // R3-A
+    'record_po_payment',
+    'approve_receive_purchase_order',
+    'run_depreciation',
+    'approve_expense',
+    'approve_stock_adjustment',
+    'post_journal_entry',
+    'promote_dian_to_production',
+    'upload_dian_certificate',
+    'create_invoice_from_order',
+    'approve_payroll',
+    'approve_settlement',
+    'approve_declaration',
+    'export_payroll_ach',
+    'record_cash_movement',
+  ];
+
+  function buildFullRegistry(): AIToolRegistry {
+    const deps = {} as any;
+    const registry = new AIToolRegistry(deps);
+    for (const factory of [
+      createAccountingTools,
+      createCashRegisterTools,
+      createExpenseTools,
+      createFinanceOpsTools,
+      createFiscalTools,
+      createInventoryTools,
+      createInvoicingTools,
+      createOrdersTools,
+      createPaymentTools,
+      createPayrollTools,
+      createProductTools,
+      createPurchasingTools,
+      createReceivablesPayablesTools,
+      createReturnTools,
+      createSubscriptionTools,
+      createVariantTools,
+      createWithholdingTools,
+    ]) {
+      registry.registerMany(factory(deps));
+    }
+    return registry;
+  }
+
+  it.each(REQUIRED_IRREVERSIBLE)('%s existe y porta irreversible: true', (name) => {
+    const tool = buildFullRegistry().get(name);
+    expect(tool).toBeDefined();
+    expect(tool?.irreversible).toBe(true);
+  });
+
+  it('run_close_checks sigue sin marca (exclusión fijada)', () => {
+    expect(buildFullRegistry().get('run_close_checks')?.irreversible).not.toBe(
+      true,
+    );
+  });
+
+  it('ningún write con nombre irreversible queda sin marca en el registro ampliado', () => {
+    const violators = buildFullRegistry()
+      .getAll()
+      .filter(
+        (t) =>
+          t.requiresConfirmation === true &&
+          t.readOnly !== true &&
+          t.clientSide !== true,
+      )
+      .filter((t) => !EVALUATOR_EXCLUSIONS.has(t.name))
       .filter(
         (t) =>
           IRREVERSIBLE_NAME_PATTERN.test(t.name) ||

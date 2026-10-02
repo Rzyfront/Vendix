@@ -12,7 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { randomUUID } from 'node:crypto';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -25,7 +25,7 @@ import {
 } from '../subscriptions/guards/ai-access.guard';
 import { AIFeatureKey } from '../subscriptions/types/access.types';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
-import { ApplyConfirmationDto } from '../vexi/dto/apply-confirmation.dto';
+import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { UploadAttachmentDto } from '../vexi/dto/ui-result.dto';
 import { VexiAttachmentsService } from '../vexi/vexi-attachments.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
@@ -33,6 +33,7 @@ import { VexiPlanStateService } from '../vexi/vexi-plan-state.service';
 import { VexiActivityService } from '../vexi/vexi-activity.service';
 import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { ApprovePlanDto } from './dto/approve-plan.dto';
+import { ApplyVexStepDto, PlanConversationDto } from './dto/plan-lifecycle.dto';
 import {
   BlockInteractionDto,
 } from './dto/block-interaction.dto';
@@ -51,6 +52,13 @@ import { VexActivityFeedService } from './services/vex-activity-feed.service';
  * same shape as `VexiController`, different agent. Each handler documents its
  * own gating decision so a later reader does not "fix" the omissions.
  */
+/**
+ * TTL de los tokens de un solo uso de `VexiConfirmationService`
+ * (`TOKEN_TTL_SECONDS`, 300 s, privado a ese archivo): lo que `expires_in`
+ * de la confirmación por paso le dice al cliente.
+ */
+const CONFIRMATION_TOKEN_TTL_SECONDS = 300;
+
 @Controller('store/vex')
 @UseGuards(RolesGuard, VexEnabledGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
@@ -67,7 +75,7 @@ export class VexController {
     private readonly blocks: VexBlockService,
     private readonly feed: VexActivityFeedService,
     private readonly attachments: VexiAttachmentsService,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly subscriptionAccess: SubscriptionAccessService,
   ) {}
 
   /**
@@ -96,15 +104,11 @@ export class VexController {
     @Param('id', ParseUUIDPipe) planId: string,
     @Body() dto: ApprovePlanDto,
   ) {
-    const hashes = await this.planState.getStepHashes(dto.conversation_id);
-    if (hashes.length === 0) {
-      throw new VendixHttpException(
-        ErrorCodes.SYS_NOT_FOUND_001,
-        'Ese plan ya no está activo en esta conversación.',
-      );
-    }
-
     const userId = RequestContextService.getContext()?.user_id;
+    // Propiedad, estado del plan (`proposed`), `plan_id` y antigüedad de los
+    // hashes se validan dentro del servicio, en ese orden y ANTES de leer
+    // hashes — un 404 previo filtraría la existencia del plan frente al 403.
+    // El servicio también mueve `metadata.plan.status` a `approved`.
     const approved = await this.planApproval.approvePlan({
       planId,
       conversationId: dto.conversation_id,
@@ -114,16 +118,6 @@ export class VexController {
         tool: s.tool,
         args: s.arguments as Record<string, any>,
       })),
-    });
-
-    // Evento y no llamada directa: `AIChatModule` importa `VexModule`, así
-    // que importar al revés sería circular. `AIChatService` mueve
-    // `metadata.plan.status` a `approved` para que recargar muestre la
-    // tarjeta con su estado (remediación paso 6, cableado E2E-1).
-    this.eventEmitter.emit('ai.vex.plan_approved', {
-      conversation_id: dto.conversation_id,
-      plan_id: planId,
-      user_id: userId,
     });
 
     return this.responseService.success(
@@ -142,84 +136,252 @@ export class VexController {
   }
 
   /**
-   * Applies one step of an approved plan. `confirmation_token` carries the
-   * PLAN token, not a single-use one.
+   * Cancels a plan server-side. `pending` steps become `cancelled`, the plan
+   * `rejected`, and the step hashes are deleted so a cancelled plan can never
+   * be approved again. 403 when the caller does not own the thread; 409 when
+   * the plan already ended (`applied`, `partially_applied`, `rejected`).
+   * Same `AiAccessGuard` omission rationale as approve.
+   */
+  @Post('plans/:id/reject')
+  async rejectPlan(
+    @Param('id', ParseUUIDPipe) planId: string,
+    @Body() dto: PlanConversationDto,
+  ) {
+    const userId = RequestContextService.getContext()?.user_id;
+    const result = await this.planApproval.rejectPlan({
+      planId,
+      conversationId: dto.conversation_id,
+      userId,
+    });
+    return this.responseService.success(result, 'Plan cancelado');
+  }
+
+  /**
+   * Mints the single-use confirmation token of ONE irreversible step of an
+   * approved plan — what lets a reloaded page (whose in-memory tokens are
+   * gone) apply it. The token is minted over the tool+arguments the server
+   * persisted for that step, never over client input. Only for the owner, plan
+   * `approved`, step irreversible and `pending`.
+   */
+  @Post('plans/:id/steps/:step_id/confirmation')
+  async stepConfirmation(
+    @Param('id', ParseUUIDPipe) planId: string,
+    @Param('step_id') stepId: string,
+    @Body() dto: PlanConversationDto,
+  ) {
+    const userId = RequestContextService.getContext()?.user_id;
+    const step = await this.planApproval.resolveStepForConfirmation({
+      planId,
+      stepId,
+      conversationId: dto.conversation_id,
+      userId,
+    });
+    const token = await this.confirmations.issue(
+      step.tool,
+      step.arguments,
+      userId,
+    );
+    return this.responseService.success(
+      {
+        confirmation_token: token,
+        expires_in: CONFIRMATION_TOKEN_TTL_SECONDS,
+      },
+      'Confirmación emitida',
+    );
+  }
+
+  /**
+   * Applies one step of an approved plan.
    *
-   * On `ok` the step is consumed (it can never run twice under this token)
-   * and executed through the same choke point as every other write: a
-   * single-use token is minted internally for exactly this tool+args and
-   * redeemed immediately, so permissions are re-checked on the way through
-   * and the handler re-verifies its preconditions. The plan token proves the
-   * person approved the bundle; the inner token proves this exact step.
+   * Per-step path (`step_id` present): tool and arguments come from the plan
+   * the server persisted, and exactly one of `plan_token` (plan token,
+   * reversible steps) / `confirmation_token` (single-use token from
+   * `plans/:id/steps/:step_id/confirmation`) authorizes it. Legacy path (no
+   * `step_id`): the caller declares `tool` + `arguments` and sends the PLAN
+   * token in `confirmation_token` — kept so the current client keeps working.
    *
-   * Any other outcome answers `AI_AGENT_005` carrying a FRESH single-use
-   * token in the same details shape the registry uses — the browser renders
-   * the step's own card and the person confirms it individually, through the
-   * Vexi apply endpoint. Same `AiAccessGuard` omission rationale as the
-   * approve handler above.
+   * On success the step is executed through the same choke point as every
+   * other write (permissions re-checked, audit row), one `vex_agent` quota
+   * unit is consumed, the step result is persisted and the plan status
+   * recomputed (all steps terminal → `applied`, or `partially_applied` if any
+   * failed). Any non-ok plan-token outcome answers `AI_AGENT_005` carrying a
+   * FRESH single-use token, so the browser renders the step's own card.
    *
    * `plan_id` comes from the caller (the approve URL it just called), NOT
    * re-resolved from the thread: the internal task plan and the write plan
-   * are different systems. Hallazgo live E2E-1 (2026-10-01).
+   * are different systems. Same `AiAccessGuard` omission rationale as the
+   * approve handler above.
    */
   @Post('confirmations/apply')
-  async applyPlanStep(@Body() dto: ApplyConfirmationDto) {
+  async applyPlanStep(@Body() dto: ApplyVexStepDto) {
     const userId = RequestContextService.getContext()?.user_id;
-    const args = dto.arguments as Record<string, any>;
-    if (!dto.plan_id) {
-      throw new VendixHttpException(
-        ErrorCodes.AI_AGENT_005,
-        'Esta aplicación necesita el plan aprobado.',
-        { reason: 'missing' } as any,
+    const perStep = dto.step_id !== undefined;
+
+    let tool: string;
+    let args: Record<string, any>;
+    let planId: string | undefined = dto.plan_id;
+    let singleUseToken: string | undefined;
+    const conversationId = dto.conversation_id;
+
+    if (perStep) {
+      if (
+        conversationId === undefined ||
+        !dto.plan_id ||
+        (dto.plan_token ? 1 : 0) + (dto.confirmation_token ? 1 : 0) !== 1
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Aplicar un paso requiere conversation_id, plan_id, step_id y exactamente uno de plan_token o confirmation_token.',
+        );
+      }
+      const step = await this.planApproval.resolveStepForApply({
+        planId: dto.plan_id,
+        stepId: dto.step_id!,
+        conversationId,
+        userId,
+      });
+      tool = step.tool;
+      args = step.arguments;
+      if (dto.plan_token) {
+        const outcome = await this.planApproval.redeemPlanStep(
+          dto.plan_token,
+          dto.plan_id,
+          userId,
+          tool,
+          args,
+        );
+        if (outcome !== 'ok') {
+          return this.singleStepFallback(tool, args, userId, outcome);
+        }
+        singleUseToken = await this.confirmations.issue(tool, args, userId);
+      } else {
+        // `executeTool` canjea el token y lanza `AI_AGENT_005` si venció, ya se
+        // usó o no corresponde a este tool+args: ahí el paso NO se marca fallido.
+        singleUseToken = dto.confirmation_token;
+      }
+    } else {
+      if (!dto.tool || !dto.arguments || !dto.confirmation_token) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Se requieren tool, arguments y confirmation_token.',
+        );
+      }
+      tool = dto.tool;
+      args = dto.arguments as Record<string, any>;
+      if (!dto.plan_id) {
+        throw new VendixHttpException(
+          ErrorCodes.AI_AGENT_005,
+          'Esta aplicación necesita el plan aprobado.',
+          { reason: 'missing' } as any,
+        );
+      }
+      // Un plan cancelado conserva su token vivo hasta 15 min en Redis: el
+      // estado persistido es lo que lo invalida.
+      if (conversationId !== undefined) {
+        await this.planApproval.assertConversationOwner(
+          conversationId,
+          userId,
+        );
+        const persisted = await this.planApproval.getPlan(
+          conversationId,
+          dto.plan_id,
+        );
+        if (persisted && persisted.status !== 'approved') {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'El plan no está aprobado: no se pueden aplicar sus pasos.',
+            { reason: 'plan_not_approved', plan_status: persisted.status },
+          );
+        }
+      }
+      const outcome = await this.planApproval.redeemPlanStep(
+        dto.confirmation_token,
+        dto.plan_id,
+        userId,
+        tool,
+        args,
       );
+      if (outcome !== 'ok') {
+        return this.singleStepFallback(tool, args, userId, outcome);
+      }
+      singleUseToken = await this.confirmations.issue(tool, args, userId);
     }
 
-    const outcome = await this.planApproval.redeemPlanStep(
-      dto.confirmation_token,
-      dto.plan_id,
-      userId,
-      dto.tool,
-      args,
-    );
-
-    if (outcome !== 'ok') {
-      return this.singleStepFallback(dto.tool, args, userId, outcome);
+    let output: string;
+    try {
+      output = await this.toolRegistry.executeTool(tool, args, {
+        confirmationToken: singleUseToken,
+      });
+    } catch (err) {
+      // Una propuesta/confirmación rechazada no ejecutó nada: el paso sigue
+      // pendiente. Cualquier otro fallo sí lo consumió: queda `failed`.
+      const isConfirmationRejection =
+        err instanceof VendixHttpException &&
+        err.errorCode === ErrorCodes.AI_AGENT_005.code;
+      if (!isConfirmationRejection && planId && conversationId !== undefined) {
+        await this.persistStepResult({
+          planId,
+          conversationId,
+          stepId: dto.step_id,
+          tool,
+          args,
+          outcome: 'failed',
+          error: (err as Error)?.message,
+        });
+      }
+      throw err;
     }
 
-    const singleUse = await this.confirmations.issue(dto.tool, args, userId);
-    const output = await this.toolRegistry.executeTool(dto.tool, args, {
-      confirmationToken: singleUse,
-    });
+    // Cuota post-ejecución exitosa, mismo mecanismo que el loop por tool call.
+    await this.consumeVexQuota(planId, dto.step_id ?? tool);
 
     await this.activity.recordApplied({
-      conversationId: dto.conversation_id,
-      tool: dto.tool,
-      args: dto.arguments,
+      conversationId,
+      tool,
+      args,
       output,
       agent_key: 'vex',
     });
     const summary = this.applySummary(output);
     await this.activity.recordAppliedNarration({
-      conversationId: dto.conversation_id,
+      conversationId,
       summary,
     });
 
-    if (dto.conversation_id) {
+    if (conversationId !== undefined) {
       try {
         await this.planState.markCurrentChangeStep(
-          dto.conversation_id,
+          conversationId,
           'done',
           summary ? summary.slice(0, 300) : undefined,
         );
       } catch (err) {
         this.logger.warn(
-          `No se pudo marcar el paso del plan (conversación ${dto.conversation_id}): ${(err as Error).message}`,
+          `No se pudo marcar el paso del plan (conversación ${conversationId}): ${(err as Error).message}`,
         );
       }
     }
 
+    const state =
+      planId && conversationId !== undefined
+        ? await this.persistStepResult({
+            planId,
+            conversationId,
+            stepId: dto.step_id,
+            tool,
+            args,
+            outcome: 'applied',
+          })
+        : null;
+
     return this.responseService.success(
-      { tool: dto.tool, output, summary },
+      {
+        tool,
+        output,
+        summary,
+        step_status: state?.step_status ?? 'applied',
+        plan_status: state?.plan_status ?? 'approved',
+      },
       'Paso del plan aplicado',
     );
   }
@@ -296,6 +458,65 @@ export class VexController {
   }
 
   // ── internals ─────────────────────────────────────────────────────────
+
+  /**
+   * Persists a step result without hiding it behind a bookkeeping failure: the
+   * write already happened (or already failed), so an error here is logged and
+   * the caller answers with what it knows.
+   */
+  private async persistStepResult(input: {
+    planId: string;
+    conversationId: number;
+    stepId?: string;
+    tool: string;
+    args: Record<string, any>;
+    outcome: 'applied' | 'failed';
+    error?: string;
+  }) {
+    try {
+      return await this.planApproval.recordStepResult({
+        planId: input.planId,
+        conversationId: input.conversationId,
+        stepId: input.stepId,
+        tool: input.stepId === undefined ? input.tool : undefined,
+        args: input.stepId === undefined ? input.args : undefined,
+        outcome: input.outcome,
+        error: input.error,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo persistir el estado del paso (plan ${input.planId}): ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * One `vex_agent` unit per executed step, post-success, with the same
+   * dedup-keyed Lua counter the loop uses per tool call (`consumeAIQuota`).
+   * The metering never breaks an apply that already landed.
+   */
+  private async consumeVexQuota(
+    planId: string | undefined,
+    callId: string,
+  ): Promise<void> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return;
+    try {
+      const base =
+        RequestContextService.getRequestId() ?? `internal-${randomUUID()}`;
+      await this.subscriptionAccess.consumeAIQuota(
+        storeId,
+        'vex_agent',
+        1,
+        `${base}:tool:${planId ?? 'plan'}:${callId}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `vex_agent quota not consumed (store ${storeId}): ${(err as Error).message}`,
+      );
+    }
+  }
 
   /**
    * Every non-ok plan outcome becomes the step's own confirmation proposal,

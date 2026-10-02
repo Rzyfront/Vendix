@@ -758,6 +758,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       name: 'approve_payroll',
       version: '1',
       domain: 'payroll',
+      irreversible: true,
       description:
         'Aprueba una nómina calculada (calculated → approved): estampa aprobador y fecha. Cadena: exige get_payroll_run (F-51) en calculated; la transición la valida el flow service.',
       parameters: {
@@ -1083,6 +1084,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       name: 'export_payroll_ach',
       version: '1',
       domain: 'payroll',
+      irreversible: true,
       readOnly: true,
       description:
         'Genera el archivo plano ACH de dispersión bancaria de una nómina aprobada/pagada (Bancolombia/Davivienda): valida los datos bancarios de cada empleado y devuelve la URL de descarga. Solo lectura de dominio (genera un archivo como un reporte; el service dueño lo sube al storage, igual que POST :id/export-ach).',
@@ -1942,6 +1944,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       name: 'approve_settlement',
       version: '1',
       domain: 'payroll',
+      irreversible: true,
       description:
         'Aprueba una liquidación calculada (calculated → approved). Cadena: la liquidación debe estar calculada y el contrato/motivo verificados vía get_employee (F-59); la transición la valida el flow service.',
       parameters: {

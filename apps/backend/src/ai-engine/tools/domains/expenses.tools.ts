@@ -343,6 +343,7 @@ export function createExpenseTools(deps: ExpenseToolDeps): RegisteredTool[] {
       name: 'approve_expense',
       version: '1',
       domain: 'expenses',
+      irreversible: true,
       description:
         'Aprueba un gasto en pending (pending→approved). Dispara el asiento contable expense.approved. Cadena: get_expense para confirmar que está en pending.',
       parameters: {

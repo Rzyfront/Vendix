@@ -1541,6 +1541,7 @@ export function createAccountingTools(
       name: 'post_journal_entry',
       version: '1',
       domain: 'accounting',
+      irreversible: true,
       description:
         'Postea (contabiliza) un asiento en borrador: desde ese momento afecta todos los reportes. Solo asientos draft con periodo abierto y balance intacto. Cadena habilitante: get_journal_entry (F-1) en estado draft.',
       parameters: {

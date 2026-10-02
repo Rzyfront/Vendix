@@ -2,8 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
+  agentFeedTitle,
+  describeAgentOperation,
   isUiAuditEntry,
-  redactUiAuditArgs,
+  summarizeAgentArgs,
 } from '../../vexi/vexi-activity.service';
 
 export type FeedCategory = 'sale' | 'inventory' | 'cash' | 'alert' | 'agent';
@@ -11,7 +13,8 @@ export type FeedCategory = 'sale' | 'inventory' | 'cash' | 'alert' | 'agent';
 export interface ActivityFeedEntry {
   /**
    * Stable identity for SSE dedupe: `notif-<id>` for persisted notification
-   * rows, `agent-<message_id>-<call_index>` for applied agent actions. The
+   * rows, `agent-<message_id>-<call_index>` for applied agent actions (the
+   * `ai_messages` row `VexiActivityService.recordApplied` creates, call 0). The
    * same underlying row produces the same id on every read, so a live event
    * seen over SSE and the same event re-read from the feed collapse to one.
    */
@@ -246,11 +249,8 @@ export class VexActivityFeedService {
           // it, or reloads would mint different ids for the same actions.
           id: `agent-${(message as any).id}-${callIndex}`,
           category: 'agent',
-          title:
-            agentKey === 'vex'
-              ? `Vex: ${this.describeOperation(call)}`
-              : `Vexi: ${this.describeOperation(call)}`,
-          description: this.summarizeArgs(call?.arguments),
+          title: agentFeedTitle(agentKey, call),
+          description: summarizeAgentArgs(call?.arguments),
           created_at: message.created_at,
           is_new: false,
           ref: {
@@ -278,33 +278,5 @@ export class VexActivityFeedService {
     } catch {
       return /"applied"\s*:\s*true/.test(result);
     }
-  }
-
-  /** The operation in the words the arguments carry, never a raw route. */
-  private describeOperation(call: Record<string, any>): string {
-    const args = call?.arguments as Record<string, any> | undefined;
-    if (args?.path && args?.method) {
-      const domain = String(args.path)
-        .split('/')
-        .filter((segment) => segment && !/^\d+$/.test(segment))
-        .slice(-1)[0];
-      const verb =
-        {
-          POST: 'registró',
-          PATCH: 'modificó',
-          PUT: 'reemplazó',
-          DELETE: 'archivó',
-        }[String(args.method).toUpperCase()] ?? 'cambió';
-      return `${verb} ${domain?.replace(/-/g, ' ') ?? 'un registro'}`;
-    }
-    return String(call?.name ?? 'operación').replace(/_/g, ' ');
-  }
-
-  private summarizeArgs(args: unknown): string {
-    const redacted = redactUiAuditArgs(args as Record<string, unknown>);
-    const summary = Object.entries(redacted)
-      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-      .join(' ');
-    return summary.slice(0, 280);
   }
 }

@@ -6,7 +6,7 @@ import { AILoggingService } from './ai-logging.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
-import { VendixHttpException } from '../common/errors';
+import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
@@ -69,6 +69,13 @@ const VEX_PLANNED_MAX_ITERATIONS = 60;
 const VEX_PLANNED_TIMEOUT_MS = 600_000;
 
 /**
+ * Absolute wall-clock ceiling for a turn with an explicit per-agent timeout
+ * (`ai_agents.timeout_seconds`, `@Max(600)` in the DTO). Plan widening never
+ * pushes a row-driven timeout past it.
+ */
+const AGENT_TIMEOUT_CEILING_MS = 600_000;
+
+/**
  * Absolute iteration ceiling for any agent row. Mirrors `@Max(60)` in
  * `CreateAIAgentDto` (inherited by `UpdateAIAgentDto` via `PartialType`).
  *
@@ -100,6 +107,13 @@ export interface AgentRunParams {
    * 60 s. An open plan widens it alongside the iteration budget.
    */
   timeout_ms?: number;
+  /**
+   * Per-agent wall-clock budget in seconds (`ai_agents.timeout_seconds`).
+   * When present it replaces the hardcoded 60/300 s base; an open plan widens
+   * it to at most 600 s and never below this value. Absent keeps the
+   * historical behavior.
+   */
+  agent_timeout_seconds?: number;
   config_id?: number;
   /**
    * Prior turns of the conversation, oldest first, WITHOUT the current goal —
@@ -325,6 +339,82 @@ export class AIAgentService {
       !response.tool_calls?.length &&
       !response.usage?.totalTokens
     );
+  }
+
+  /**
+   * R3-A — topes `daily_messages_cap` y `monthly_tokens_cap` de `vex_agent`,
+   * antes de la primera llamada al proveedor. Verifica ambos y, si pasan,
+   * consume 1 mensaje del contador diario. Con `degradation: 'block'` un cap
+   * agotado corta el turno con el mismo error de cuota que el resto
+   * (`SUBSCRIPTION_006`); sin `block` solo se registra. Sin tienda (interno)
+   * no hay metering.
+   */
+  private async enforceVexTurnCaps(storeId: number | undefined): Promise<void> {
+    if (!storeId) return;
+    const [daily, tokens] = await Promise.all([
+      this.subscriptionAccess.checkExtraQuota(
+        storeId,
+        'vex_agent',
+        'daily_messages',
+      ),
+      this.subscriptionAccess.checkExtraQuota(
+        storeId,
+        'vex_agent',
+        'monthly_tokens',
+      ),
+    ]);
+    for (const [counter, status] of [
+      ['daily_messages', daily],
+      ['monthly_tokens', tokens],
+    ] as const) {
+      if (!status.exceeded) continue;
+      this.logger.warn(
+        JSON.stringify({
+          event: 'VEX_CAP_EXCEEDED',
+          storeId,
+          counter,
+          cap: status.cap,
+          used: status.used,
+          degradation: status.degradation,
+        }),
+      );
+      if (status.degradation === 'block') {
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_006, undefined, {
+          feature: 'vex_agent',
+          counter,
+          cap: status.cap,
+          used: status.used,
+        });
+      }
+    }
+    await this.subscriptionAccess.consumeExtraQuota(
+      storeId,
+      'vex_agent',
+      'daily_messages',
+      1,
+      `${RequestContextService.getRequestId() ?? `internal-${randomUUID()}`}:vex-msg`,
+    );
+  }
+
+  /** R3-A — suma los tokens del turno al contador mensual de `vex_agent`. */
+  private async consumeVexTurnTokens(
+    storeId: number | undefined,
+    tokens: number,
+  ): Promise<void> {
+    if (!storeId || !(tokens > 0)) return;
+    try {
+      await this.subscriptionAccess.consumeExtraQuota(
+        storeId,
+        'vex_agent',
+        'monthly_tokens',
+        tokens,
+        `${RequestContextService.getRequestId() ?? `internal-${randomUUID()}`}:vex-tokens`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `VEX_TOKENS_CONSUMED failed for store=${storeId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -914,8 +1004,27 @@ export class AIAgentService {
     // that drives the interface now blocks up to 25 s per command waiting for the
     // browser, so two UI steps alone can consume the whole one-minute default and
     // abort a turn that was working correctly.
+    const agentTimeoutMs =
+      typeof params.agent_timeout_seconds === 'number' &&
+      params.agent_timeout_seconds > 0
+        ? Math.min(
+            Math.floor(params.agent_timeout_seconds * 1000),
+            AGENT_TIMEOUT_CEILING_MS,
+          )
+        : undefined;
     let timeoutMs =
-      params.timeout_ms || (isVex ? VEX_TIMEOUT_MS : this.DEFAULT_TIMEOUT_MS);
+      agentTimeoutMs ??
+      (params.timeout_ms || (isVex ? VEX_TIMEOUT_MS : this.DEFAULT_TIMEOUT_MS));
+    // Widening for an open plan. Without a row timeout it is the historical
+    // `max(current, planned)`; with one it is capped at 600 s and never drops
+    // below the row value.
+    const widenTimeout = (current: number): number =>
+      agentTimeoutMs === undefined
+        ? Math.max(current, plannedTimeout)
+        : Math.min(
+            Math.max(current, plannedTimeout, agentTimeoutMs),
+            AGENT_TIMEOUT_CEILING_MS,
+          );
 
     const context = RequestContextService.getContext();
 
@@ -993,7 +1102,7 @@ export class AIAgentService {
     // first iteration instead of waiting for a propose_plan that will not come.
     if (params.plan && (await params.plan.snapshot())) {
       maxIterations = Math.max(maxIterations, plannedBudget);
-      timeoutMs = Math.max(timeoutMs, plannedTimeout);
+      timeoutMs = widenTimeout(timeoutMs);
     }
 
     const messages: AIMessage[] = [];
@@ -1067,6 +1176,13 @@ export class AIAgentService {
     // Time spent blocked on the browser (`ui_*` results). It is the person's
     // screen latency, not the model's work, so it must not eat the turn budget.
     let waitedMs = 0;
+
+    // R3-A: vex caps gate the turn BEFORE the first provider call. Outside the
+    // try on purpose: a cap breach is a quota error the caller surfaces, not a
+    // loop failure to narrate.
+    if (isVex) {
+      await this.enforceVexTurnCaps(context?.store_id);
+    }
 
     try {
       while (iteration < maxIterations) {
@@ -1272,7 +1388,7 @@ export class AIAgentService {
 
               if (toolName === PROPOSE_PLAN_TOOL) {
                 maxIterations = Math.max(maxIterations, plannedBudget);
-                timeoutMs = Math.max(timeoutMs, plannedTimeout);
+                timeoutMs = widenTimeout(timeoutMs);
               }
 
               if (outcome.endTurn) {
@@ -1331,6 +1447,45 @@ export class AIAgentService {
             continue;
           }
 
+          // Execution backstop for the offered catalog. The model may only run
+          // tools from the set it was offered this turn (permissions ∩ plan ∩
+          // agent scope − denies). A call outside that set — a hallucinated
+          // name or a tool denied for this agent, e.g. `ui_navigate` in a Vex
+          // turn — is rejected HERE, before the clientSide branch and before
+          // `executeTool`: nothing reaches the browser, nothing executes,
+          // nothing consumes quota. The rejection goes back as a tool result
+          // so the model can correct itself on the next iteration.
+          //
+          // R3-A: this runs BEFORE the `ai.agent.tool_executed` event and the
+          // `tool_call` frame. The browser dispatches UI commands off that
+          // frame, so emitting it first let a not-offered `ui_*` reach the
+          // screen even though execution was rejected afterwards. A rejected
+          // call now produces only the error `tool_result`, never a `tool_call`.
+          if (!offeredNames.has(toolName)) {
+            const notAllowed =
+              `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
+              `está en el catálogo ofrecido en este turno. Usa solo las ` +
+              `herramientas ofrecidas; si ninguna sirve, dilo y pide lo que falte.`;
+            messages.push({
+              role: 'tool',
+              content: JSON.stringify({
+                error: notAllowed,
+                error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
+              }),
+              tool_call_id: toolCall.id,
+            });
+            yield {
+              type: 'tool_result',
+              tool: {
+                id: toolCall.id,
+                name: toolName,
+                summary: notAllowed.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                failed: true,
+              },
+            };
+            continue;
+          }
+
           this.logger.log(
             `Agent iteration ${iteration}: executing tool "${toolName}"`,
           );
@@ -1366,39 +1521,6 @@ export class AIAgentService {
                 : {}),
             },
           };
-
-          // Execution backstop for the offered catalog. The model may only run
-          // tools from the set it was offered this turn (permissions ∩ plan ∩
-          // agent scope − denies). A call outside that set — a hallucinated
-          // name or a tool denied for this agent, e.g. `ui_navigate` in a Vex
-          // turn — is rejected HERE, before the clientSide branch and before
-          // `executeTool`: nothing reaches the browser, nothing executes,
-          // nothing consumes quota. The rejection goes back as a tool result
-          // so the model can correct itself on the next iteration.
-          if (!offeredNames.has(toolName)) {
-            const notAllowed =
-              `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
-              `está en el catálogo ofrecido en este turno. Usa solo las ` +
-              `herramientas ofrecidas; si ninguna sirve, dilo y pide lo que falte.`;
-            messages.push({
-              role: 'tool',
-              content: JSON.stringify({
-                error: notAllowed,
-                error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
-              }),
-              tool_call_id: toolCall.id,
-            });
-            yield {
-              type: 'tool_result',
-              tool: {
-                id: toolCall.id,
-                name: toolName,
-                summary: notAllowed.slice(0, TOOL_RESULT_SUMMARY_CHARS),
-                failed: true,
-              },
-            };
-            continue;
-          }
 
           // A UI command is dispatched by the browser off the `tool_call`
           // frame just emitted; there is no router or cart in this process to
@@ -1505,7 +1627,7 @@ export class AIAgentService {
             // guessing high makes every simple question slower.
             if (toolName === PROPOSE_PLAN_TOOL) {
               maxIterations = Math.max(maxIterations, plannedBudget);
-              timeoutMs = Math.max(timeoutMs, plannedTimeout);
+              timeoutMs = widenTimeout(timeoutMs);
             }
 
             messages.push({
@@ -1901,6 +2023,12 @@ export class AIAgentService {
         success: false,
         error: error.message,
       };
+    } finally {
+      // R3-A: tokens (input + output) of the whole turn, whichever way it
+      // ended, into the monthly counter. Never throws.
+      if (isVex) {
+        await this.consumeVexTurnTokens(context?.store_id, totalTokens);
+      }
     }
   }
 }

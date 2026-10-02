@@ -1135,6 +1135,7 @@ export function createInventoryTools(
       name: 'approve_stock_adjustment',
       version: '1',
       domain: 'inventory',
+      irreversible: true,
       description:
         'Aprueba uno o varios ajustes de inventario pendientes (daño, pérdida, merma, conteo). El ajuste ya movió el stock al crearse; aprobar lo sella con aprobador y fecha. Lee primero con get_stock_adjustments para ver los pendientes con producto, bodega y cantidades.',
       parameters: {

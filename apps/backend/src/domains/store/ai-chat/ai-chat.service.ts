@@ -37,6 +37,7 @@ import { VexBlockService } from '../vex/services/vex-block.service';
 import { PlanApprovalService } from '../vex/services/plan-approval.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
   AIMessage,
@@ -134,6 +135,8 @@ interface ResolvedChatAgent {
   allowed_tools: string[];
   denied_tools: string[];
   max_iterations: number | null;
+  /** `ai_agents.timeout_seconds`; `null` → default del loop. */
+  timeout_seconds: number | null;
 }
 
 /**
@@ -158,7 +161,13 @@ interface VexBlockRef {
 }
 
 /** Estados que `metadata.plan.status` puede tomar en un hilo de Vex. */
-const VEX_PLAN_STATUSES = ['proposed', 'approved', 'rejected', 'applied'] as const;
+const VEX_PLAN_STATUSES = [
+  'proposed',
+  'approved',
+  'rejected',
+  'applied',
+  'partially_applied',
+] as const;
 type VexPlanStatus = (typeof VEX_PLAN_STATUSES)[number];
 
 /**
@@ -367,6 +376,9 @@ export class AIChatService {
   }
 
   async sendMessage(conversationId: number, dto: SendMessageDto) {
+    // Inicio del turno: el barrido de bloques huérfanos solo adopta los
+    // creados desde aquí (ver `resolveVexTurnBlocks`).
+    const turnStartedAt = new Date();
     const conversation = await this.getConversation(conversationId);
 
     if (conversation.status === 'archived') {
@@ -476,6 +488,7 @@ export class AIChatService {
       conversationId,
       vexTurn,
       vexToolsUsed,
+      turnStartedAt,
     );
     const vexMetadata = this.vexTurnMetadata(
       vexBlockRefs,
@@ -578,6 +591,7 @@ export class AIChatService {
     // Every timing mark is relative to this. Taken before the first await so it
     // includes the intent lookup the browser is already waiting through.
     const streamStartedAt = Date.now();
+    const turnStartedAt = new Date(streamStartedAt);
     const userId = RequestContextService.getContext()?.user_id;
     const intent = await this.streamIntents.consume(streamId, userId);
 
@@ -924,17 +938,22 @@ export class AIChatService {
       yield doneChunk;
     }
 
-    // Save assistant response after stream completes
-    if (fullContent) {
-      const vexBlockRefs = await this.resolveVexTurnBlocks(
-        conversationId,
-        vexTurn,
-        toolsUsed,
-      );
-      const vexMetadata = this.vexTurnMetadata(
-        vexBlockRefs,
-        vexPlan ?? vexTurn?.plan ?? null,
-      );
+    // Save assistant response after stream completes.
+    //
+    // También cuando el turno Vex no produjo texto pero sí plan o bloques: la
+    // tarjeta ya viajó al panel y, sin fila, recargar la perdería (y el
+    // approve no tendría estado contra el cual validarse).
+    const vexBlockRefs = await this.resolveVexTurnBlocks(
+      conversationId,
+      vexTurn,
+      toolsUsed,
+      turnStartedAt,
+    );
+    const vexMetadata = this.vexTurnMetadata(
+      vexBlockRefs,
+      vexPlan ?? vexTurn?.plan ?? null,
+    );
+    if (fullContent || vexMetadata) {
       // La propuesta no entra en `tool_calls`: la rama de confirmación del
       // bucle sale por `continue` sin registrarla como herramienta usada.
       // Sin esta marca, el turno siguiente no tiene forma de saber que hay
@@ -1293,6 +1312,10 @@ export class AIChatService {
       allowed_tools: row.allowed_tools ?? [],
       denied_tools: row.denied_tools ?? [],
       max_iterations: row.max_iterations,
+      // Acceso tolerante: la columna llega con la migración del paso A y el
+      // cliente Prisma local puede no tenerla generada todavía.
+      timeout_seconds:
+        (row as { timeout_seconds?: number | null }).timeout_seconds ?? null,
     };
   }
 
@@ -1373,6 +1396,7 @@ export class AIChatService {
     system_prompt?: string;
     tools?: string[];
     max_iterations?: number;
+    agent_timeout_seconds?: number;
     agent_key?: string;
     agent_allowed_tools?: string[];
     agent_denied_tools?: string[];
@@ -1388,6 +1412,11 @@ export class AIChatService {
       agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined;
     const max_iterations = agent.max_iterations ?? undefined;
     const scope = {
+      // Solo viaja cuando la fila lo define: sin valor el loop usa su default
+      // y la forma de los argumentos no cambia para los demás agentes.
+      ...(agent.timeout_seconds != null
+        ? { agent_timeout_seconds: agent.timeout_seconds }
+        : {}),
       agent_key: agent.key,
       agent_allowed_tools:
         agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined,
@@ -1468,7 +1497,12 @@ export class AIChatService {
     const planApproval = this.planApproval;
     const confirmations = this.confirmations;
     const conversationId = conversation.id;
+    // Identidad del plan que este turno proponga: el loop la lee de
+    // `plan_approval.plan_id` y la pone en el frame; los hashes se guardan con
+    // la misma, y approve exige que coincida con la de la URL.
+    const planId = randomUUID();
     return {
+      plan_id: planId,
       redeem: async () => 'missing' as const,
       issueSingleUse: (tool, args) =>
         confirmations.issue(
@@ -1478,7 +1512,7 @@ export class AIChatService {
         ),
       classifyProposedSteps: (steps) => planApproval.classifySteps(steps),
       saveProposedSteps: async (steps) => {
-        await this.planState.setStepHashes(conversationId, steps);
+        await this.planState.setStepHashes(conversationId, steps, planId);
       },
     };
   }
@@ -1656,6 +1690,7 @@ export class AIChatService {
     conversationId: number,
     vexTurn: VexTurnCollection | null,
     toolsUsed: Array<{ name: string; args: any; result: string }>,
+    turnStartedAt: Date,
   ): Promise<VexBlockRef[]> {
     if (!vexTurn) return [];
     const merged = new Map(vexTurn.blocks);
@@ -1667,6 +1702,14 @@ export class AIChatService {
         const rows = await this.vexBlocks.listByConversation(conversationId);
         for (const row of rows) {
           if (row.message_id !== null && row.message_id !== undefined) {
+            continue;
+          }
+          // Solo lo nacido durante ESTE turno: un huérfano anterior de la
+          // conversación no se adjunta al mensaje equivocado.
+          if (
+            !row.created_at ||
+            new Date(row.created_at).getTime() < turnStartedAt.getTime()
+          ) {
             continue;
           }
           if (!merged.has(row.id)) {
@@ -1690,7 +1733,8 @@ export class AIChatService {
 
   /**
    * `metadata` Vex del mensaje de cierre: punteros a bloques + plan en estado
-   * `proposed`. `null` cuando el turno no produjo nada persistible (o no es
+   * `proposed` con sus pasos `pending` (`{plan_id, status, steps[]}`; approve /
+   * reject / apply lo mueven en `PlanApprovalService`). `null` cuando el turno no produjo nada persistible (o no es
    * Vex), para que la fila quede byte-idéntica a hoy.
    */
   private vexTurnMetadata(
@@ -1702,10 +1746,14 @@ export class AIChatService {
       ...(blocks.length > 0 ? { blocks } : {}),
       ...(plan
         ? {
+            // Contrato del ciclo de vida: estado del plan + estado por paso.
             plan: {
               plan_id: plan.plan_id,
-              steps: plan.steps,
               status: 'proposed',
+              steps: plan.steps.map((raw, index) => {
+                const step = (raw ?? {}) as Record<string, any>;
+                return { ...step, order: step.order ?? index + 1, status: 'pending' };
+              }),
             },
           }
         : {}),

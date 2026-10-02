@@ -40,6 +40,14 @@ export interface PlanStepHash {
   args_hash: string;
 }
 
+export interface PlanStepHashRecord {
+  /** Plan al que pertenecen los hashes; `null` en registros antiguos. */
+  plan_id: string | null;
+  /** ISO; `null` en registros antiguos (sin expiración comprobable). */
+  created_at: string | null;
+  steps: PlanStepHash[];
+}
+
 const DONE_LIKE: AgentPlanStepStatus[] = ['done', 'skipped', 'rejected'];
 
 function reject(error: string): AgentPlanToolOutcome {
@@ -164,27 +172,51 @@ export class VexiPlanStateService {
    * after approval and the step re-confirms alone.
    */
   async getStepHashes(conversationId: number): Promise<PlanStepHash[]> {
+    return (await this.getStepHashRecord(conversationId)).steps;
+  }
+
+  /**
+   * Registro completo de hashes: `{plan_id, created_at, steps}`. Lee también
+   * la forma antigua (arreglo plano sin identidad): `plan_id`/`created_at`
+   * llegan `null`, de modo que approve la trata como no vinculada a ningún
+   * plan y la rechaza — nunca como "cualquier plan".
+   */
+  async getStepHashRecord(conversationId: number): Promise<PlanStepHashRecord> {
     // Sin gate de `agent_plan` a propósito: el plan interno de tareas y el
     // plan de escritura de Vex son sistemas distintos — un turno Vex propone
     // escrituras sin lista interna (el loop ni siquiera recibe `params.plan`)
     // y sus hashes deben leerse igual. Hallazgo live E2E-1 (2026-10-01).
     const { metadata } = await this.load(conversationId);
     const raw = (metadata as Record<string, any>).agent_plan_step_hashes;
-    if (!Array.isArray(raw)) return [];
-    return raw.filter(
-      (h): h is PlanStepHash =>
-        !!h &&
-        typeof h.order === 'number' &&
-        typeof h.tool === 'string' &&
-        typeof h.args_hash === 'string',
-    );
+    const list: unknown = Array.isArray(raw) ? raw : raw?.steps;
+    const steps = Array.isArray(list)
+      ? list.filter(
+          (h): h is PlanStepHash =>
+            !!h &&
+            typeof h.order === 'number' &&
+            typeof h.tool === 'string' &&
+            typeof h.args_hash === 'string',
+        )
+      : [];
+    return {
+      plan_id:
+        !Array.isArray(raw) && typeof raw?.plan_id === 'string'
+          ? raw.plan_id
+          : null,
+      created_at:
+        !Array.isArray(raw) && typeof raw?.created_at === 'string'
+          ? raw.created_at
+          : null,
+      steps,
+    };
   }
 
   async setStepHashes(
     conversationId: number,
     steps: Array<{ order: number; tool: string; args: Record<string, any> }>,
+    planId?: string,
   ): Promise<PlanStepHash[]> {
-    // Sin gate de `agent_plan`: ver `getStepHashes`.
+    // Sin gate de `agent_plan`: ver `getStepHashRecord`.
     const { metadata } = await this.load(conversationId);
     const hashes: PlanStepHash[] = [...steps]
       .sort((a, b) => a.order - b.order)
@@ -193,13 +225,29 @@ export class VexiPlanStateService {
         tool: s.tool,
         args_hash: canonicalStepHash(s.tool, s.args),
       }));
+    const record: PlanStepHashRecord = {
+      plan_id: planId ?? null,
+      created_at: new Date().toISOString(),
+      steps: hashes,
+    };
     await this.prisma.ai_conversations.updateMany({
       where: { id: conversationId },
       data: {
-        metadata: { ...metadata, agent_plan_step_hashes: hashes } as any,
+        metadata: { ...metadata, agent_plan_step_hashes: record } as any,
       },
     });
     return hashes;
+  }
+
+  /** Borra los hashes (rechazo del plan): un plan cancelado deja de ser aprobable. */
+  async clearStepHashes(conversationId: number): Promise<void> {
+    const { metadata } = await this.load(conversationId);
+    if (!('agent_plan_step_hashes' in metadata)) return;
+    const { agent_plan_step_hashes: _dropped, ...rest } = metadata;
+    await this.prisma.ai_conversations.updateMany({
+      where: { id: conversationId },
+      data: { metadata: rest as any },
+    });
   }
 
   createHook(conversationId: number): AgentPlanHook {

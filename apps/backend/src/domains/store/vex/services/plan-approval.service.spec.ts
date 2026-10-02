@@ -91,20 +91,90 @@ function makeRegistry() {
 function makePlanState(
   hashes: Array<{ order: number; tool: string; args_hash: string }> = [],
 ) {
+  const state = {
+    record: {
+      plan_id: null as string | null,
+      created_at: null as string | null,
+      steps: hashes,
+    },
+  };
   return {
-    getStepHashes: jest.fn(async () => hashes),
-    setStepHashes: jest.fn(async () => hashes),
+    state,
+    getStepHashRecord: jest.fn(async () => state.record),
+    getStepHashes: jest.fn(async () => state.record.steps),
+    setStepHashes: jest.fn(async () => state.record.steps),
+    clearStepHashes: jest.fn(async () => {
+      state.record = { plan_id: null, created_at: null, steps: [] };
+    }),
+  };
+}
+
+/** Sembrar los hashes vigentes de un plan (con su identidad y antigüedad). */
+function seedHashes(
+  planState: ReturnType<typeof makePlanState>,
+  planId: string,
+  steps: Array<{ order: number; tool: string; args: Record<string, any> }>,
+  createdAt: Date = new Date(),
+) {
+  planState.state.record = {
+    plan_id: planId,
+    created_at: createdAt.toISOString(),
+    steps: steps.map((s) => ({
+      order: s.order,
+      tool: s.tool,
+      args_hash: stepHash(s.tool, s.args),
+    })),
   };
 }
 
 function makePrisma(userId: number | null = 11) {
+  // Mensajes del asistente en memoria: `loadPlan` los lee, `savePlan` los
+  // reescribe con `updateMany` (mismo contrato que la fila real).
+  const messages: Array<{ id: number; metadata: any }> = [];
   return {
+    messages,
     ai_conversations: {
       findFirst: jest.fn(async () =>
         userId === null ? null : { user_id: userId },
       ),
     },
+    ai_messages: {
+      findMany: jest.fn(async () =>
+        [...messages].sort((a, b) => b.id - a.id).map((m) => ({ ...m })),
+      ),
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        const row = messages.find((m) => m.id === where.id);
+        if (!row) return { count: 0 };
+        row.metadata = data.metadata;
+        return { count: 1 };
+      }),
+    },
   };
+}
+
+function persistPlan(
+  prisma: ReturnType<typeof makePrisma>,
+  planId: string,
+  steps: Array<{
+    step_id: string;
+    order: number;
+    tool: string;
+    arguments: Record<string, any>;
+    irreversible: boolean;
+    status?: string;
+  }>,
+  status = 'proposed',
+) {
+  prisma.messages.push({
+    id: prisma.messages.length + 1,
+    metadata: {
+      plan: {
+        plan_id: planId,
+        status,
+        steps: steps.map((s) => ({ status: 'pending', ...s })),
+      },
+    },
+  });
 }
 
 describe('PlanApprovalService', () => {
@@ -406,13 +476,7 @@ describe('PlanApprovalService', () => {
       { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
       { order: 2, tool: 'send_invoice_dian', args: { order_id: 1046 } },
     ];
-    planState.getStepHashes.mockResolvedValue(
-      steps.map((s) => ({
-        order: s.order,
-        tool: s.tool,
-        args_hash: stepHash(s.tool, s.args),
-      })),
-    );
+    seedHashes(planState, 'plan-mix', steps);
 
     const out = await service.approvePlan({
       planId: 'plan-mix',
@@ -449,13 +513,7 @@ describe('PlanApprovalService', () => {
       { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
       { order: 2, tool: 'adjust_stock', args: { id: 7, qty: 2 } },
     ];
-    planState.getStepHashes.mockResolvedValue(
-      server.map((s) => ({
-        order: s.order,
-        tool: s.tool,
-        args_hash: stepHash(s.tool, s.args),
-      })),
-    );
+    seedHashes(planState, 'plan-alt', server);
 
     const out = await service.approvePlan({
       planId: 'plan-alt',
@@ -496,12 +554,8 @@ describe('PlanApprovalService', () => {
       }),
     ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
 
-    planState.getStepHashes.mockResolvedValue([
-      {
-        order: 1,
-        tool: 'create_customer',
-        args_hash: stepHash('create_customer', { name: 'Acme' }),
-      },
+    seedHashes(planState, 'plan-tampered', [
+      { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
     ]);
     await expect(
       service.approvePlan({
@@ -530,5 +584,285 @@ describe('PlanApprovalService', () => {
       { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
     ]);
     expect(redis.expire).toHaveBeenCalledWith(expect.any(String), 900);
+  });
+  describe('ciclo de vida del plan (vexR3-B)', () => {
+    const PLAN = '11111111-1111-4111-8111-111111111111';
+    const steps = [
+      { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
+      { order: 2, tool: 'send_invoice_dian', args: { order_id: 1046 } },
+    ];
+    const persisted = [
+      {
+        step_id: 's1',
+        order: 1,
+        tool: 'create_customer',
+        arguments: { name: 'Acme' },
+        irreversible: false,
+      },
+      {
+        step_id: 's2',
+        order: 2,
+        tool: 'send_invoice_dian',
+        arguments: { order_id: 1046 },
+        irreversible: true,
+      },
+    ];
+
+    beforeEach(() => {
+      seedHashes(planState, PLAN, steps);
+      persistPlan(prisma, PLAN, persisted);
+    });
+
+    it('approve mueve el plan a approved y rechaza una segunda aprobación', async () => {
+      await service.approvePlan({
+        planId: PLAN,
+        conversationId: 7,
+        userId: 11,
+        clientSteps: steps,
+      });
+      expect(prisma.messages[0].metadata.plan.status).toBe('approved');
+      await expect(
+        service.approvePlan({
+          planId: PLAN,
+          conversationId: 7,
+          userId: 11,
+          clientSteps: steps,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+    });
+
+    it('reject → pasos cancelled, hashes borrados, y approve responde 409', async () => {
+      const out = await service.rejectPlan({
+        planId: PLAN,
+        conversationId: 7,
+        userId: 11,
+      });
+      expect(out).toEqual({ plan_id: PLAN, status: 'rejected' });
+      const plan = prisma.messages[0].metadata.plan;
+      expect(plan.status).toBe('rejected');
+      expect(plan.steps.map((s: any) => s.status)).toEqual([
+        'cancelled',
+        'cancelled',
+      ]);
+      expect(planState.clearStepHashes).toHaveBeenCalledWith(7);
+
+      await expect(
+        service.approvePlan({
+          planId: PLAN,
+          conversationId: 7,
+          userId: 11,
+          clientSteps: steps,
+        }),
+      ).rejects.toMatchObject({
+        errorCode: 'SYS_CONFLICT_001',
+        details: expect.objectContaining({ reason: 'plan_not_proposed' }),
+      });
+      expect(redis.hset).not.toHaveBeenCalled();
+      // Y no se rechaza dos veces.
+      await expect(
+        service.rejectPlan({ planId: PLAN, conversationId: 7, userId: 11 }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+    });
+
+    it('reject de otro usuario → 403 sin tocar el plan ni los hashes', async () => {
+      await expect(
+        service.rejectPlan({ planId: PLAN, conversationId: 7, userId: 99 }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+      expect(prisma.messages[0].metadata.plan.status).toBe('proposed');
+      expect(planState.clearStepHashes).not.toHaveBeenCalled();
+    });
+
+    it('approve de otro usuario no lee hashes (propiedad antes que hashes)', async () => {
+      await expect(
+        service.approvePlan({
+          planId: PLAN,
+          conversationId: 7,
+          userId: 99,
+          clientSteps: steps,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+      expect(planState.getStepHashRecord).not.toHaveBeenCalled();
+    });
+
+    it('approve con plan_id distinto al de los hashes → 409 plan_mismatch', async () => {
+      await expect(
+        service.approvePlan({
+          planId: '22222222-2222-4222-8222-222222222222',
+          conversationId: 7,
+          userId: 11,
+          clientSteps: steps,
+        }),
+      ).rejects.toMatchObject({
+        errorCode: 'SYS_CONFLICT_001',
+        details: expect.objectContaining({ reason: 'plan_mismatch' }),
+      });
+      expect(redis.hset).not.toHaveBeenCalled();
+    });
+
+    it('approve con hashes de más de 24 h → 409 plan_expired', async () => {
+      seedHashes(
+        planState,
+        PLAN,
+        steps,
+        new Date(Date.now() - 25 * 60 * 60 * 1000),
+      );
+      await expect(
+        service.approvePlan({
+          planId: PLAN,
+          conversationId: 7,
+          userId: 11,
+          clientSteps: steps,
+        }),
+      ).rejects.toMatchObject({
+        errorCode: 'SYS_CONFLICT_001',
+        details: expect.objectContaining({ reason: 'plan_expired' }),
+      });
+    });
+
+    it('hashes antiguos (sin plan_id) no se aprueban', async () => {
+      planState.state.record = {
+        ...planState.state.record,
+        plan_id: null,
+        created_at: null,
+      };
+      await expect(
+        service.approvePlan({
+          planId: PLAN,
+          conversationId: 7,
+          userId: 11,
+          clientSteps: steps,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+    });
+
+    it('confirmación por paso: solo plan approved, paso irreversible y pending, dueño', async () => {
+      const input = {
+        planId: PLAN,
+        stepId: 's2',
+        conversationId: 7,
+        userId: 11,
+      };
+      // Plan aún proposed → 409.
+      await expect(
+        service.resolveStepForConfirmation(input),
+      ).rejects.toMatchObject({
+        errorCode: 'SYS_CONFLICT_001',
+        details: expect.objectContaining({ reason: 'plan_not_approved' }),
+      });
+
+      await service.approvePlan({
+        planId: PLAN,
+        conversationId: 7,
+        userId: 11,
+        clientSteps: steps,
+      });
+      // Reversible → no necesita confirmación aparte.
+      await expect(
+        service.resolveStepForConfirmation({ ...input, stepId: 's1' }),
+      ).rejects.toMatchObject({
+        details: expect.objectContaining({ reason: 'step_not_irreversible' }),
+      });
+      // Otro usuario → 403.
+      await expect(
+        service.resolveStepForConfirmation({ ...input, userId: 99 }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
+      // Irreversible y pending → devuelve tool + argumentos del servidor.
+      await expect(service.resolveStepForConfirmation(input)).resolves.toMatchObject(
+        { tool: 'send_invoice_dian', arguments: { order_id: 1046 } },
+      );
+      // Paso inexistente → 404.
+      await expect(
+        service.resolveStepForConfirmation({ ...input, stepId: 'zzz' }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
+    });
+
+    it('estados persistidos tras aplicar: approved → applied', async () => {
+      await service.approvePlan({
+        planId: PLAN,
+        conversationId: 7,
+        userId: 11,
+        clientSteps: steps,
+      });
+      const first = await service.recordStepResult({
+        planId: PLAN,
+        conversationId: 7,
+        stepId: 's1',
+        outcome: 'applied',
+      });
+      expect(first).toEqual({ step_status: 'applied', plan_status: 'approved' });
+      const last = await service.recordStepResult({
+        planId: PLAN,
+        conversationId: 7,
+        stepId: 's2',
+        outcome: 'applied',
+      });
+      expect(last).toEqual({ step_status: 'applied', plan_status: 'applied' });
+      expect(prisma.messages[0].metadata.plan.status).toBe('applied');
+      // Un paso resuelto no vuelve a aplicarse.
+      await expect(
+        service.resolveStepForApply({
+          planId: PLAN,
+          stepId: 's1',
+          conversationId: 7,
+          userId: 11,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+    });
+
+    it('estados persistidos con un paso fallido: partially_applied + error', async () => {
+      await service.approvePlan({
+        planId: PLAN,
+        conversationId: 7,
+        userId: 11,
+        clientSteps: steps,
+      });
+      await service.recordStepResult({
+        planId: PLAN,
+        conversationId: 7,
+        stepId: 's1',
+        outcome: 'applied',
+      });
+      const out = await service.recordStepResult({
+        planId: PLAN,
+        conversationId: 7,
+        stepId: 's2',
+        outcome: 'failed',
+        error: 'DIAN no respondió',
+      });
+      expect(out).toEqual({
+        step_status: 'failed',
+        plan_status: 'partially_applied',
+      });
+      const stored = prisma.messages[0].metadata.plan.steps[1];
+      expect(stored).toMatchObject({ status: 'failed', error: 'DIAN no respondió' });
+      // Un plan ya resuelto no se puede cancelar.
+      await expect(
+        service.rejectPlan({ planId: PLAN, conversationId: 7, userId: 11 }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+    });
+
+    it('lee mensajes antiguos sin status por paso como pending', async () => {
+      prisma.messages.length = 0;
+      prisma.messages.push({
+        id: 1,
+        metadata: {
+          plan: {
+            plan_id: PLAN,
+            status: 'proposed',
+            steps: [
+              {
+                step_id: 's1',
+                order: 1,
+                tool: 'create_customer',
+                arguments: { name: 'Acme' },
+                irreversible: false,
+              },
+            ],
+          },
+        },
+      });
+      const plan = await service.getPlan(7, PLAN);
+      expect(plan?.steps[0].status).toBe('pending');
+    });
   });
 });

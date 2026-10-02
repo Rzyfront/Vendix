@@ -125,3 +125,40 @@ export const FEATURE_QUOTA_CONFIG: Record<
   // `tool_result`), never the per-message counter. Mirrors `tool_agents`.
   vex_agent: { capField: 'monthly_tool_calls_cap', period: 'monthly' },
 };
+
+/**
+ * R3-A — contadores adicionales de una feature con más de un tope. `vex_agent`
+ * factura sus tool-calls con `monthly_tool_calls_cap` (ver arriba), pero su
+ * plan también declara `daily_messages_cap` y `monthly_tokens_cap`: sin
+ * este mapa esos topes se guardaban y nadie los aplicaba.
+ *
+ * Llave Redis: `ai:quota:{storeId}:{feature}:{counter}:{period}` (+ set de
+ * dedup homólogo). Periodos UTC: `YYYYMMDD` diario, `YYYYMM` mensual.
+ */
+export type AIExtraQuotaCounter = 'daily_messages' | 'monthly_tokens';
+
+export const FEATURE_EXTRA_QUOTA_CONFIG: Partial<
+  Record<
+    AIFeatureKey,
+    Partial<
+      Record<
+        AIExtraQuotaCounter,
+        { capField: keyof FeatureConfig; period: 'daily' | 'monthly' }
+      >
+    >
+  >
+> = {
+  vex_agent: {
+    daily_messages: { capField: 'daily_messages_cap', period: 'daily' },
+    monthly_tokens: { capField: 'monthly_tokens_cap', period: 'monthly' },
+  },
+};
+
+/** Estado de un contador adicional frente a su cap (solo lectura). */
+export interface ExtraQuotaStatus {
+  exceeded: boolean;
+  /** `null` = sin cap declarado (ilimitado). */
+  cap: number | null;
+  used: number;
+  degradation: 'warn' | 'block';
+}
