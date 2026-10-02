@@ -5515,12 +5515,94 @@ export class AutoEntryService {
 
   /**
    * Recognizes the persisted deductible IVA contribution as a VAT-only journal
-   * entry. It reads the immutable contribution snapshot and links the posted
-   * journal back to that row after the auto-entry path returns successfully.
-   * The link update is deliberately after journal creation: if it fails, the
-   * contribution remains pending and retry can reuse the journal through the
-   * source-key idempotency in `createAutoEntry`.
+   * entry. A journal may already have been posted before the contribution link
+   * was written, so reconciliation runs before mappings and period checks.
    */
+  async reconcilePurchaseVatContributionEntry(data: {
+    contribution_id: number;
+    organization_id: number;
+    accounting_entity_id: number;
+    store_id: number;
+  }, expected_entry_id?: number) {
+    const db = this.prisma.withoutScope();
+    const contribution = await db.purchase_vat_contributions.findFirst({
+      where: {
+        id: data.contribution_id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+      },
+      select: { id: true, ledger_status: true, accounting_entry_id: true },
+    });
+    if (!contribution) {
+      throw new Error(
+        `Purchase VAT contribution #${data.contribution_id} not found for the supplied organization/entity/store`,
+      );
+    }
+
+    const entry = await db.accounting_entries.findFirst({
+      where: {
+        source_type: 'purchase_vat_contribution',
+        source_id: contribution.id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+      },
+      select: {
+        id: true,
+        status: true,
+        source_type: true,
+        source_id: true,
+        organization_id: true,
+        accounting_entity_id: true,
+        store_id: true,
+      },
+    });
+    if (!entry) {
+      if (contribution.ledger_status === 'pending') return null;
+      if (contribution.ledger_status === 'posted' && contribution.accounting_entry_id != null) {
+        throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+      }
+      throw new Error(`Purchase VAT contribution #${contribution.id} has no matching journal entry`);
+    }
+    if (
+      entry.status !== 'posted' ||
+      entry.source_type !== 'purchase_vat_contribution' ||
+      entry.source_id !== contribution.id ||
+      entry.organization_id !== data.organization_id ||
+      entry.accounting_entity_id !== data.accounting_entity_id ||
+      entry.store_id !== data.store_id ||
+      !Number.isSafeInteger(entry.id) ||
+      entry.id <= 0
+    ) {
+      throw new Error(`Journal entry for purchase VAT contribution #${contribution.id} is not a valid posted journal in the supplied scope`);
+    }
+    if (expected_entry_id !== undefined && entry.id !== expected_entry_id) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} resolved to a different journal entry than the posted entry`);
+    }
+    if (contribution.ledger_status === 'posted' && contribution.accounting_entry_id !== entry.id) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+    }
+
+    const linked = await db.purchase_vat_contributions.updateMany({
+      where: {
+        id: contribution.id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+        OR: [
+          { ledger_status: { in: ['pending', 'failed', 'skipped'] } },
+          { ledger_status: 'posted', accounting_entry_id: entry.id },
+        ],
+      },
+      data: { ledger_status: 'posted', accounting_entry_id: entry.id },
+    });
+    if (linked.count !== 1) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+    }
+    return entry;
+  }
+
   async onPurchaseVatContributionRecognized(data: {
     contribution_id: number;
     organization_id: number;
@@ -5566,6 +5648,9 @@ export class AutoEntryService {
       return null;
     }
 
+    const reconciled = await this.reconcilePurchaseVatContributionEntry(data);
+    if (reconciled) return reconciled;
+
     const supplier_third_party: AutoEntryThirdParty = {
       id: contribution.supplier_id,
       type: 'supplier',
@@ -5592,7 +5677,7 @@ export class AutoEntryService {
       ),
     ]);
 
-    const entry = await this.createAutoEntry({
+    const event_data: AutoEntryEventData = {
       source_type: 'purchase_vat_contribution',
       source_id: contribution.id,
       organization_id: data.organization_id,
@@ -5601,32 +5686,22 @@ export class AutoEntryService {
       description: `IVA descontable compra — contribución #${contribution.id}`,
       lines,
       user_id: data.user_id,
-    });
+    };
+    const entry = await this.createAutoEntry(event_data);
     if (entry == null) return null;
     if (entry.status !== 'posted' || !Number.isSafeInteger(entry.id) || entry.id <= 0) {
       throw new Error(`Auto-entry for purchase VAT contribution #${contribution.id} did not return a valid posted journal`);
     }
-    if (contribution.ledger_status === 'posted' && contribution.accounting_entry_id !== entry.id) {
-      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+    try {
+      const linked = await this.reconcilePurchaseVatContributionEntry(data, entry.id);
+      if (!linked) {
+        throw new Error(`Posted journal #${entry.id} could not be linked to purchase VAT contribution #${contribution.id}`);
+      }
+      return linked;
+    } catch (error) {
+      await this.entry_failure_service.recordFailure(event_data, error as Error);
+      throw error;
     }
-
-    const linked = await db.purchase_vat_contributions.updateMany({
-      where: {
-        id: contribution.id,
-        organization_id: data.organization_id,
-        accounting_entity_id: data.accounting_entity_id,
-        store_id: data.store_id,
-        OR: [
-          { ledger_status: { in: ['pending', 'failed', 'skipped'] } },
-          { ledger_status: 'posted', accounting_entry_id: entry.id },
-        ],
-      },
-      data: { ledger_status: 'posted', accounting_entry_id: entry.id },
-    });
-    if (linked.count !== 1) {
-      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
-    }
-    return entry;
   }
 
   /**

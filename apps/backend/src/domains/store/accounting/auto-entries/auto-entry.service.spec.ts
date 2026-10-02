@@ -598,15 +598,29 @@ describe('AutoEntryService.onPurchaseVatContributionRecognized', () => {
     supplier_tax_id_snapshot: '900123456',
     supplier: { name: 'Proveedor persistido' },
   };
-  const build = (persisted: any = contribution) => {
+  const postedJournal = {
+    id: 501,
+    status: 'posted',
+    source_type: 'purchase_vat_contribution',
+    source_id: 88,
+    organization_id: 6,
+    accounting_entity_id: 25,
+    store_id: 10,
+  };
+  const build = (persisted: any = contribution, journal: any = null) => {
     const findFirst = jest.fn().mockResolvedValue(persisted);
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const prisma = { withoutScope: jest.fn(() => ({ purchase_vat_contributions: { findFirst, updateMany } })) };
+    const findJournal = jest.fn().mockResolvedValueOnce(journal).mockResolvedValue(postedJournal);
+    const prisma = { withoutScope: jest.fn(() => ({
+      purchase_vat_contributions: { findFirst, updateMany },
+      accounting_entries: { findFirst: findJournal },
+    })) };
     const getMapping = jest.fn();
     const recordSkip = jest.fn().mockResolvedValue(undefined);
+    const recordFailure = jest.fn().mockResolvedValue(undefined);
     const service = new AutoEntryService(
       prisma as any, { getMapping } as any, {} as any, {} as any,
-      { recordFailure: jest.fn(), recordSkip } as any,
+      { recordFailure, recordSkip } as any,
     );
     const resolve = jest.spyOn(service as any, 'resolveAccountLine').mockImplementation(
       async (_org: number, key: string, description: string, debit: number, credit: number, _store: number, thirdParty?: any) => ({
@@ -615,7 +629,7 @@ describe('AutoEntryService.onPurchaseVatContributionRecognized', () => {
       }),
     );
     const create = jest.spyOn(service, 'createAutoEntry').mockResolvedValue({ id: 501, status: 'posted' } as any);
-    return { service, prisma, findFirst, updateMany, getMapping, recordSkip, resolve, create };
+    return { service, prisma, findFirst, findJournal, updateMany, getMapping, recordSkip, recordFailure, resolve, create };
   };
 
   it('uses persisted contribution amount and supplier identity for a balanced IVA-only entry', async () => {
@@ -666,9 +680,11 @@ describe('AutoEntryService.onPurchaseVatContributionRecognized', () => {
   });
 
   it('allows an idempotent replay when already linked to the same posted journal', async () => {
-    const { service, updateMany } = build({ ...contribution, ledger_status: 'posted', accounting_entry_id: 501 });
+    const { service, updateMany, create, resolve } = build({ ...contribution, ledger_status: 'posted', accounting_entry_id: 501 }, postedJournal);
     await expect(service.onPurchaseVatContributionRecognized(data)).resolves.toMatchObject({ id: 501, status: 'posted' });
     expect(updateMany).toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -697,6 +713,55 @@ describe('AutoEntryService.onPurchaseVatContributionRecognized', () => {
     const failedLink = build();
     failedLink.updateMany.mockRejectedValue(new Error('link write failed'));
     await expect(failedLink.service.onPurchaseVatContributionRecognized(data)).rejects.toThrow('link write failed');
+    expect(failedLink.recordFailure).toHaveBeenCalledWith(failedLink.create.mock.calls[0][0], expect.any(Error));
+  });
+
+  it('reconciles an existing scoped posted journal before resolving mappings or posting', async () => {
+    const { service, findJournal, updateMany, create, resolve } = build(contribution, postedJournal);
+    await expect(service.onPurchaseVatContributionRecognized(data)).resolves.toEqual(postedJournal);
+    expect(findJournal).toHaveBeenCalledWith({
+      where: { source_type: 'purchase_vat_contribution', source_id: 88, organization_id: 6, accounting_entity_id: 25, store_id: 10 },
+      select: { id: true, status: true, source_type: true, source_id: true, organization_id: true, accounting_entity_id: true, store_id: true },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ ...postedJournal, source_type: 'purchase_vat' }, /valid posted journal/],
+    [{ ...postedJournal, source_id: 89 }, /valid posted journal/],
+    [{ ...postedJournal, organization_id: 7 }, /valid posted journal/],
+    [{ ...postedJournal, accounting_entity_id: 26 }, /valid posted journal/],
+    [{ ...postedJournal, store_id: 11 }, /valid posted journal/],
+    [{ ...postedJournal, status: 'draft' }, /valid posted journal/],
+  ])('rejects a returned journal with invalid source, scope, or status', async (journal, expected) => {
+    const { service, findJournal, updateMany } = build(contribution);
+    findJournal.mockReset().mockResolvedValue(journal);
+    await expect(service.reconcilePurchaseVatContributionEntry(data)).rejects.toThrow(expected);
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a conflicting existing contribution link and remains idempotent on an exact replay', async () => {
+    const conflict = build({ ...contribution, ledger_status: 'posted', accounting_entry_id: 777 }, postedJournal);
+    await expect(conflict.service.reconcilePurchaseVatContributionEntry(data)).rejects.toThrow(/different journal/);
+    expect(conflict.updateMany).not.toHaveBeenCalled();
+
+    const replay = build({ ...contribution, ledger_status: 'posted', accounting_entry_id: 501 }, postedJournal);
+    await expect(replay.service.reconcilePurchaseVatContributionEntry(data)).resolves.toEqual(postedJournal);
+    expect(replay.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ OR: [
+        { ledger_status: { in: ['pending', 'failed', 'skipped'] } },
+        { ledger_status: 'posted', accounting_entry_id: 501 },
+      ] }),
+    }));
+  });
+
+  it('returns null without linking a pending contribution when no source-keyed journal exists', async () => {
+    const { service, findJournal, updateMany } = build();
+    findJournal.mockReset().mockResolvedValue(null);
+    await expect(service.reconcilePurchaseVatContributionEntry(data)).resolves.toBeNull();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it('leaves legacy invoice-keyed purchase VAT recognition unchanged', async () => {
