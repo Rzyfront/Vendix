@@ -475,11 +475,16 @@
                 <button
                   type="button"
                   class="section-header pc-tip-toggle"
+                  [class.pc-tip-toggle--collapsed]="!tipExpanded()"
                   [attr.aria-expanded]="tipExpanded()"
                   aria-controls="pc-tip-fields-stepped"
                   (click)="tipExpanded.set(!tipExpanded())"
                 >
-                  <div class="section-indicator"></div>
+                  @if (tipExpanded()) {
+                    <span class="section-indicator"></span>
+                  } @else {
+                    <span class="pc-tip-add-icon"><app-icon name="plus" [size]="18" /></span>
+                  }
                   <span class="section-title">
                     @if (tipExpanded()) {
                       Propina (opcional)
@@ -489,7 +494,9 @@
                       Agregar propina
                     }
                   </span>
-                  <app-icon [name]="tipExpanded() ? 'chevron-up' : 'chevron-down'" [size]="18" />
+                  @if (tipExpanded()) {
+                    <app-icon name="chevron-up" [size]="18" />
+                  }
                 </button>
                 <div id="pc-tip-fields-stepped">
                   @if (tipExpanded()) {
@@ -1065,11 +1072,16 @@
           <button
             type="button"
             class="section-header pc-tip-toggle"
+            [class.pc-tip-toggle--collapsed]="!tipExpanded()"
             [attr.aria-expanded]="tipExpanded()"
             aria-controls="pc-tip-fields-flat"
             (click)="tipExpanded.set(!tipExpanded())"
           >
-            <div class="section-indicator"></div>
+            @if (tipExpanded()) {
+              <span class="section-indicator"></span>
+            } @else {
+              <span class="pc-tip-add-icon"><app-icon name="plus" [size]="18" /></span>
+            }
             <span class="section-title">
               @if (tipExpanded()) {
                 Propina (opcional)
@@ -1079,7 +1091,9 @@
                 Agregar propina
               }
             </span>
-            <app-icon [name]="tipExpanded() ? 'chevron-up' : 'chevron-down'" [size]="18" />
+            @if (tipExpanded()) {
+              <app-icon name="chevron-up" [size]="18" />
+            }
           </button>
           <div id="pc-tip-fields-flat">
             @if (tipExpanded()) {

@@ -703,6 +703,8 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
       expect(toggle).toBeTruthy();
       expect(toggle?.textContent).toContain('Agregar propina');
       expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle?.classList.contains('pc-tip-toggle--collapsed')).toBeTrue();
+      expect(toggle?.querySelector('.pc-tip-add-icon')).toBeTruthy();
       expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
         .toBeNull();
       expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
@@ -713,6 +715,9 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
       toggle = fixture.nativeElement.querySelector<HTMLButtonElement>('.pc-tip-toggle');
       expect(toggle?.textContent).toContain('Propina (opcional)');
       expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+      expect(toggle?.classList.contains('pc-tip-toggle--collapsed')).toBeFalse();
+      expect(toggle?.querySelector('.pc-tip-add-icon')).toBeNull();
+      expect(toggle?.querySelector('.section-indicator')).toBeTruthy();
       expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
         .toBeTruthy();
       expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
@@ -735,6 +740,8 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
       toggle?.click();
       fixture.detectChanges();
       expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle?.classList.contains('pc-tip-toggle--collapsed')).toBeTrue();
+      expect(toggle?.querySelector('.pc-tip-add-icon')).toBeTruthy();
       expect(toggle?.textContent).toContain('Propina');
       expect(toggle?.textContent).toContain('5.000');
       expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
