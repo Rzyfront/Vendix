@@ -33,6 +33,16 @@ export interface ReceivedBuyerEventVerifiedView {
   evidence_id: number;
   verified_at: Date;
 }
+export interface ReceivedBuyerEventStatusView {
+  status: ReceivedBuyerEventReadinessStatus;
+  version: number;
+  event_codes: string[];
+  dian_configuration_id: number | null;
+  evidence_id: number | null;
+  verified_at: Date | null;
+}
+export interface SuspendReceivedBuyerEventInput { expected_version: number; reason: string }
+export interface ReceivedBuyerEventSuspendedView { status: 'suspended'; version: number; event_codes: string[] }
 export type ReceivedBuyerEventReadinessStatus = 'not_started' | 'testing' | 'verified' | 'suspended';
 
 export interface ReceivedBuyerEventReadiness {
@@ -137,6 +147,24 @@ export class ReceivedBuyerEventEnablementService {
     if (!row.verified_by_user_id || !row.verified_at) blockers.push('verification_incomplete');
 
     return { status, ready: blockers.length === 0, blockers, event_codes: eventCodes };
+  }
+
+  async getStatus(ctx: ReceivedDocumentsContext): Promise<ReceivedBuyerEventStatusView> {
+    await this.receivedDocuments.assertContext(ctx);
+    const db = this.prisma.withoutScope();
+    const row = await db.received_buyer_event_enablements.findFirst({
+      where: { organization_id: ctx.organization_id, accounting_entity_id: ctx.accounting_entity_id },
+      select: { status: true, version: true, event_codes: true, dian_configuration_id: true, evidence_id: true, verified_at: true },
+    });
+    if (!row) return { status: 'not_started', version: 0, event_codes: [], dian_configuration_id: null, evidence_id: null, verified_at: null };
+    return {
+      status: this.safeStatus(row.status),
+      version: row.version,
+      event_codes: Array.isArray(row.event_codes) ? row.event_codes.filter((code): code is string => typeof code === 'string') : [],
+      dian_configuration_id: row.dian_configuration_id,
+      evidence_id: row.evidence_id,
+      verified_at: row.verified_at,
+    };
   }
 
   async requestVerification(ctx: ReceivedDocumentsContext, input: RequestReceivedBuyerEventVerificationInput): Promise<ReceivedBuyerEventVerificationRequestView> {
@@ -250,6 +278,45 @@ export class ReceivedBuyerEventEnablementService {
     }).catch((error: unknown) => {
       if (error instanceof ServiceUnavailableException) throw error;
       if (error && typeof error === 'object' && 'code' in error && ['P2002', 'P2004'].includes(String(error.code))) throw new ConflictException('La solicitud de verificación ya cambió o viola una restricción.');
+      throw error;
+    });
+  }
+
+  async suspendAsPlatformReviewer(
+    organizationId: number,
+    accountingEntityId: number,
+    reviewerUserId: number,
+    input: SuspendReceivedBuyerEventInput,
+  ): Promise<ReceivedBuyerEventSuspendedView> {
+    this.assertPositive(organizationId, 'organization');
+    this.assertPositive(accountingEntityId, 'accounting entity');
+    this.assertPositive(reviewerUserId, 'reviewer');
+    if (!Number.isSafeInteger(input?.expected_version) || input.expected_version < 1) throw new BadRequestException('La versión esperada no es válida.');
+    if (typeof input?.reason !== 'string' || input.reason.trim().length < 20 || input.reason.trim().length > 500) throw new BadRequestException('La razón debe tener entre 20 y 500 caracteres.');
+    const db = this.prisma.withoutScope();
+    return db.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "accounting_entities" WHERE "id" = ${accountingEntityId} AND "organization_id" = ${organizationId} FOR UPDATE`);
+      const where = { organization_id: organizationId, accounting_entity_id: accountingEntityId };
+      const existing = await tx.received_buyer_event_enablements.findFirst({ where });
+      if (!existing || existing.organization_id !== organizationId || existing.accounting_entity_id !== accountingEntityId || !['testing', 'verified'].includes(existing.status) || existing.version !== input.expected_version) throw new ConflictException('La activación cambió o no se puede suspender.');
+      const changed = await tx.received_buyer_event_enablements.updateMany({
+        where: { id: existing.id, ...where, version: input.expected_version, status: existing.status },
+        data: { status: 'suspended', version: { increment: 1 } },
+      });
+      if (changed.count !== 1) throw new ConflictException('La activación cambió durante la suspensión.');
+      const fresh = await tx.received_buyer_event_enablements.findFirst({ where: { id: existing.id, ...where } });
+      if (!fresh) throw new ConflictException('La activación cambió durante la suspensión.');
+      const auditValues = (value: typeof fresh) => ({ organization_id: organizationId, accounting_entity_id: accountingEntityId, status: value.status, version: value.version, dian_configuration_id: value.dian_configuration_id, evidence_id: value.evidence_id, event_codes: value.event_codes, verification_source: value.verification_source, verified_by_user_id: value.verified_by_user_id, verified_at: value.verified_at, has_software_id_snapshot: !!value.software_id_snapshot, has_certificate_fingerprint_snapshot: !!value.certificate_fingerprint_snapshot });
+      const requestId = RequestContextService.asyncLocalStorage.getStore()?.request_id;
+      try {
+        await tx.audit_logs.create({ data: { user_id: reviewerUserId, action: 'UPDATE', resource: 'received_buyer_event_enablements', resource_id: fresh.id, old_values: auditValues(existing), new_values: auditValues(fresh), metadata: { organization_id: organizationId, accounting_entity_id: accountingEntityId, reason: input.reason.trim() }, request_id: typeof requestId === 'string' && requestId.length >= 1 && requestId.length <= 100 ? requestId : null } });
+      } catch {
+        throw new ServiceUnavailableException('No fue posible registrar de forma segura la suspensión.');
+      }
+      return { status: 'suspended' as const, version: fresh.version, event_codes: Array.isArray(fresh.event_codes) ? fresh.event_codes.filter((code): code is string => typeof code === 'string') : [] };
+    }).catch((error: unknown) => {
+      if (error instanceof ServiceUnavailableException) throw error;
+      if (error && typeof error === 'object' && 'code' in error && ['P2002', 'P2004'].includes(String(error.code))) throw new ConflictException('La activación ya cambió o viola una restricción.');
       throw error;
     });
   }

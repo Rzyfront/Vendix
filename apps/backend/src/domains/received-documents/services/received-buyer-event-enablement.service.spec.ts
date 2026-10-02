@@ -93,6 +93,21 @@ describe('ReceivedBuyerEventEnablementService', () => {
     expect(result.ready).toBe(true);
   });
 
+  describe('getStatus', () => {
+    it('returns a safe not-started snapshot when absent', async () => {
+      findEnablement.mockResolvedValue(null);
+      await expect(service.getStatus(context)).resolves.toEqual({ status: 'not_started', version: 0, event_codes: [], dian_configuration_id: null, evidence_id: null, verified_at: null });
+      expect(findEnablement).toHaveBeenCalledWith({ where: { organization_id: 5, accounting_entity_id: 7 }, select: { status: true, version: true, event_codes: true, dian_configuration_id: true, evidence_id: true, verified_at: true } });
+    });
+    it('asserts tenant context first and returns only the selected safe fields', async () => {
+      findEnablement.mockResolvedValue({ status: 'verified', version: 4, event_codes: ['030'], dian_configuration_id: 20, evidence_id: 30, verified_at: new Date(), verification_source: 'secret', software_id_snapshot: 'secret', certificate_fingerprint_snapshot: 'secret' });
+      const result = await service.getStatus(context);
+      expect(assertContext).toHaveBeenCalledWith(context);
+      expect(Object.keys(result).sort()).toEqual(['dian_configuration_id', 'event_codes', 'evidence_id', 'status', 'verified_at', 'version']);
+      expect(JSON.stringify(result)).not.toMatch(/secret/);
+    });
+  });
+
   describe('requestVerification', () => {
     const input = { expected_version: 0, dian_configuration_id: 20, evidence_id: 30, event_codes: ['030', '031'] as ('030' | '031')[] };
     const makeTx = (existing: any = null) => {
@@ -254,6 +269,55 @@ describe('ReceivedBuyerEventEnablementService', () => {
       await expect(service.verifyAsPlatformReviewer(5, 7, -1, verifyInput)).rejects.toBeInstanceOf(BadRequestException);
       await expect(service.verifyAsPlatformReviewer(5, 7, 9, { ...verifyInput, expected_version: 0 })).rejects.toBeInstanceOf(BadRequestException);
       expect(tx.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it.each(['testing', 'verified'])('suspends a %s activation with scoped optimistic mutation and audit', async (currentStatus) => {
+      const { tx, pending } = makeReviewTx();
+      const before = { ...pending, status: currentStatus, version: 6, software_id_snapshot: currentStatus === 'verified' ? 'secret-software' : null, certificate_fingerprint_snapshot: currentStatus === 'verified' ? 'secret-fingerprint' : null, verification_source: currentStatus === 'verified' ? 'test_set' : null, verified_by_user_id: currentStatus === 'verified' ? 9 : null, verified_at: currentStatus === 'verified' ? new Date() : null };
+      const after = { ...before, status: 'suspended', version: 7 };
+      tx.received_buyer_event_enablements.findFirst.mockReset().mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      const input = { expected_version: 6, reason: 'La evidencia requiere una nueva revisión.' };
+      useTx(tx);
+      const result = await service.suspendAsPlatformReviewer(5, 7, 9, input);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.received_buyer_event_enablements.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 4, organization_id: 5, accounting_entity_id: 7, version: 6, status: currentStatus }, data: { status: 'suspended', version: { increment: 1 } } }));
+      expect(result).toEqual({ status: 'suspended', version: 7, event_codes: ['030', '031'] });
+      expect(tx.audit_logs.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ old_values: expect.objectContaining({ status: currentStatus }), new_values: expect.objectContaining({ status: 'suspended', version: 7 }), metadata: expect.objectContaining({ reason: input.reason }) }) }));
+      expect(JSON.stringify([result, tx.audit_logs.create.mock.calls[0][0]])).not.toMatch(/secret-software|secret-fingerprint/);
+      // The readiness read consumes the exact post-mutation row (with only the related records needed by its query).
+      const statusReadRow = { ...after, verification_source: before.verification_source, verified_by_user_id: before.verified_by_user_id, verified_at: before.verified_at, software_id_snapshot: before.software_id_snapshot, certificate_fingerprint_snapshot: before.certificate_fingerprint_snapshot,
+        dian_configuration: { organization_id: 5, accounting_entity_id: 7, configuration_type: 'invoicing', operation_mode: 'own_software', environment: 'production', enablement_status: 'enabled', software_id: 'secret-software', certificate_fingerprint: 'secret-fingerprint', certificate_s3_key: 'cert', certificate_password_encrypted: 'encrypted', certificate_kms_key_id: null, certificate_expiry: new Date(Date.now() + 86400000), nit: '900123456-8', nit_dv: '8' },
+        evidence: { organization_id: 5, accounting_entity_id: 7, evidence_type: 'test_set', storage_key: 'evidence', content_hash: null } };
+      (service as any).prisma.withoutScope.mockReturnValue({ received_buyer_event_enablements: { findFirst: jest.fn().mockResolvedValue(statusReadRow) }, accounting_entities: { findFirst: jest.fn().mockResolvedValue({ tax_id: '900123456-8' }) } });
+      const readiness = await service.getReadiness(context, '030');
+      expect(readiness.ready).toBe(false);
+      expect(readiness.status).toBe('suspended');
+      expect(readiness.blockers).toContain('suspended');
+    });
+
+    it('rejects invalid reviewer/version/reason and version/status races; audit failure aborts', async () => {
+      const validInput = { expected_version: 3, reason: 'La evidencia requiere una nueva revisión.' };
+      const invalid = makeReviewTx(); useTx(invalid.tx);
+      await expect(service.suspendAsPlatformReviewer(0, 7, 9, validInput)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.suspendAsPlatformReviewer(5, 7, 0, validInput)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.suspendAsPlatformReviewer(5, 7, 9, { ...validInput, expected_version: 0 })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.suspendAsPlatformReviewer(5, 7, 9, { ...validInput, reason: 'short' })).rejects.toBeInstanceOf(BadRequestException);
+      expect(invalid.tx.$queryRaw).not.toHaveBeenCalled();
+
+      const race = makeReviewTx(); race.tx.received_buyer_event_enablements.findFirst.mockReset().mockResolvedValue({ id: 4, status: 'testing', version: 3, event_codes: ['030'], dian_configuration_id: 20, evidence_id: 30, organization_id: 99, accounting_entity_id: 7 });
+      useTx(race.tx);
+      await expect(service.suspendAsPlatformReviewer(5, 7, 9, validInput)).rejects.toBeInstanceOf(ConflictException);
+      expect(race.tx.received_buyer_event_enablements.updateMany).not.toHaveBeenCalled();
+
+      const concurrent = makeReviewTx();
+      concurrent.tx.received_buyer_event_enablements.findFirst.mockReset().mockResolvedValue({ id: 4, organization_id: 5, accounting_entity_id: 7, status: 'testing', version: 3, event_codes: ['030'], dian_configuration_id: 20, evidence_id: 30 });
+      concurrent.tx.received_buyer_event_enablements.updateMany.mockResolvedValue({ count: 0 });
+      useTx(concurrent.tx);
+      await expect(service.suspendAsPlatformReviewer(5, 7, 9, validInput)).rejects.toBeInstanceOf(ConflictException);
+      expect(concurrent.tx.audit_logs.create).not.toHaveBeenCalled();
+
+      const auditFailure = makeReviewTx(); auditFailure.tx.audit_logs.create.mockRejectedValue(new Error('sensitive detail')); useTx(auditFailure.tx);
+      await expect(service.suspendAsPlatformReviewer(5, 7, 9, validInput)).rejects.toBeInstanceOf(ServiceUnavailableException);
     });
   });
 });
