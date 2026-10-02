@@ -500,3 +500,73 @@ describe('PopCartService — QUI-855 correcciones de auditoría', () => {
     });
   });
 });
+
+describe('PopCartService — QUI-891 la última línea eliminada no resucita', () => {
+  let service: PopCartService;
+  const STORE_ID = 7;
+  const KEY = `vendix_pop_cart_${STORE_ID}`;
+  const product: any = { id: 1, name: 'P', code: 'P1', price: 1000, cost: 100, stock: 1, is_active: true };
+
+  beforeEach(() => {
+    localStorage.removeItem(KEY);
+    TestBed.configureTestingModule({
+      providers: [
+        PopCartService,
+        { provide: WithholdingTaxService, useValue: { previewWithholding: () => of({ lines: [], total_withholding: 0 }) } },
+        { provide: AuthFacade, useValue: { activeFiscalAreas: () => [], userStore: () => ({ id: STORE_ID }) } },
+      ],
+    });
+    service = TestBed.inject(PopCartService);
+  });
+
+  afterEach(() => {
+    localStorage.removeItem(KEY);
+  });
+
+  function addOne(): PopCartItem {
+    service
+      .addToCart({ product, quantity: 1, unit_cost: 100 } as any)
+      .subscribe();
+    return service.currentState.items[0];
+  }
+
+  function seedStorageWithOneLine(): void {
+    const item = addOne();
+    // Snapshot previo al remove (el guardado real es debounced 250 ms,
+    // así que en producción este snapshot sigue ahí cuando el effect
+    // de hidratación se re-ejecuta tras vaciar el carrito).
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({ state: service.currentState, savedAt: Date.now(), storeId: STORE_ID }),
+    );
+    void item;
+  }
+
+  it('quitar la única línea la elimina y el effect no la restaura del snapshot', () => {
+    seedStorageWithOneLine();
+    TestBed.flushEffects(); // arranque: hidrata una vez para la tienda
+    expect(service.currentState.items.length).toBe(1);
+
+    const id = service.currentState.items[0].id;
+    service.removeFromCart(id).subscribe();
+    expect(service.currentState.items.length).toBe(0);
+
+    TestBed.flushEffects(); // el effect se re-ejecuta al vaciar el carrito
+    expect(service.currentState.items.length).toBe(0);
+    expect(service.currentState.summary.subtotal).toBe(0);
+  });
+
+  it('bajar cantidad a 0 (vía updateCartItem) tampoco resucita la línea', () => {
+    seedStorageWithOneLine();
+    TestBed.flushEffects();
+    expect(service.currentState.items.length).toBe(1);
+
+    service
+      .updateCartItem({ itemId: service.currentState.items[0].id, quantity: 0 })
+      .subscribe();
+    expect(service.currentState.items.length).toBe(0);
+
+    TestBed.flushEffects();
+    expect(service.currentState.items.length).toBe(0);
+  });
+});
