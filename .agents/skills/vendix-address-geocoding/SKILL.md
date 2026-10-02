@@ -14,7 +14,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Adding or editing a customer shipping address"
@@ -467,7 +467,9 @@ el geocode.
   el método `prefillFromGeocode` que antes reverse-geocodificaba el punto y rellenaba
   `address_line1`/`city`/`state_province` fue **removido** por directiva del coordinador (2026-09):
   eso producía direcciones que parecían tecleadas por el cliente pero venían de un reverse-geocode
-  aproximado. El texto tecleado por el operador es la ÚNICA fuente de la dirección escrita.
+  aproximado. `address_line1`/`address_line2` tienen como fuente el texto del operador; `city` y
+  `state_province` vienen de los nombres oficiales elegidos en el catálogo DANE (ver Geografía DANE
+  abajo).
 - **Lock `pinConfirmed`**: mientras esté en `true`, un forward-geocode disparado por seguir
   tecleando NUNCA sobreescribe la coordenada (`forwardGeocodeFromForm`, l.738 — return inmediato).
   Se resetea a `false` en cuanto `address_line1` cambia de nuevo (l.542-547) — escribir la
@@ -481,6 +483,36 @@ el geocode.
   `onMapLocated(coords)` (l.1244) y su propia lógica de `hasResolvedCoords`/`shippingBlockedReason`
   (ver Patrón de Validación arriba) en vez de delegar en este wrapper — mismo contrato de
   "el mapa solo entrega coords", implementado por separado.
+
+### Geografía DANE de la dirección
+
+El formulario compartido, por ahora solo para Colombia, elige Departamento → Ciudad con dos
+`app-selector` buscables. Departamento usa el código DANE de 2 dígitos; Ciudad usa el código
+municipal DANE de 5 dígitos y permanece deshabilitada hasta elegir departamento. No se muestra un
+tercer selector «Municipio (DANE)» ni se permite texto libre en ciudad/departamento. Al elegir el
+municipio, los controles existentes conservan los nombres oficiales en `city` y `state_province`, y
+guardan el código en `municipality_code`. Este código es requerido por la validación del form
+compartido, aunque `AddressPayload.municipality_code` siga siendo opcional para snapshots/contratos
+legados fuera del formulario.
+
+- Departamentos: `GET /store/addresses/dian/departments`. Municipios: `/store/addresses/dian/municipalities?department_code=NN`.
+  `DianMunicipalityLookupService.listDepartments()` cachea por base de endpoint;
+  `listByDepartment(code)` cachea por base + código y obtiene el departamento completo sin límite
+  de paginación (importante, por ejemplo, para Antioquia).
+- Al editar, hidratar primero por `resolveByCode(municipality_code)` y, si no hay código, intentar
+  `resolveByName(city, state_province)`. Si no coincide —incluidos los nombres cruzados— dejar los
+  selectores vacíos, mostrar una pista con los valores previos y mantener el formulario inválido
+  hasta una elección explícita. Nunca inventar una selección.
+- El geocoding actualiza coordenadas/precisión, pero nunca sobrescribe `city`, `state_province`, el
+  código seleccionado ni la geografía oficial elegida.
+
+### Recentrar el mapa en la dirección
+
+`app-address-map-picker` tiene un control independiente de geolocalización: vuela con `map.flyTo`
+al marcador actual (si existe) o al centro real de la dirección, con zoom 16. Está deshabilitado
+cuando no hay punto real (el centro inicial de Colombia no cuenta). El clic no usa GPS, no emite
+`located` y no cambia coordenadas. Retirar el control/destruir el componente debe limpiar listener y
+referencias.
 
 ## Cascade — `resolveStopCoordinates`
 
