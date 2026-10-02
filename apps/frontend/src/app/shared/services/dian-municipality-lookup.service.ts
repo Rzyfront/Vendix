@@ -98,7 +98,7 @@ export class DianMunicipalityLookupService {
   }
 
   /** Cambia la base del endpoint DANE (e.g. super-admin reusa este servicio). */
-  setBaseUrl(url: string): void {
+  setBaseUrl(url: string | null): void {
     this.customBaseUrl = url;
   }
 
