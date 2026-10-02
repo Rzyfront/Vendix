@@ -79,6 +79,16 @@ export async function seedSubscriptionPlans(
       monthly_voice_seconds_cap: 7200,
       degradation: 'block',
     },
+    // Vex agent turn budget. Trial-only: the canonical production plans in
+    // subscription-plans-production.seed.ts intentionally omit vex_agent —
+    // it is enabled per plan from the super-admin UI (commercial decision).
+    vex_agent: {
+      enabled: true,
+      monthly_tool_calls_cap: 2000,
+      monthly_tokens_cap: 2000000,
+      daily_messages_cap: 200,
+      degradation: 'block',
+    },
   };
 
   const planData = {
@@ -112,7 +122,10 @@ export async function seedSubscriptionPlans(
   let plansCreated = 0;
   let plansSkipped = 0;
 
-  // Only create the trial plan when missing. Never edit existing plans.
+  // Only create the trial plan when missing. Existing plans keep their user
+  // config, with ONE exception: the `vex_agent` flag is merged in (other flags
+  // untouched) so databases seeded before Vex existed — or with the old 'warn'
+  // degradation — actually receive it. Dev seed only.
   // Demote of other defaults only runs when we're about to insert a new trial,
   // to preserve the partial unique index invariant (at most one active default).
   await client.$transaction(async (tx) => {
@@ -121,9 +134,24 @@ export async function seedSubscriptionPlans(
     });
 
     if (existing) {
+      const currentFlags =
+        existing.ai_feature_flags &&
+        typeof existing.ai_feature_flags === 'object' &&
+        !Array.isArray(existing.ai_feature_flags)
+          ? (existing.ai_feature_flags as Record<string, unknown>)
+          : {};
+      await tx.subscription_plans.update({
+        where: { code: TRIAL_DEFAULT_CODE },
+        data: {
+          ai_feature_flags: {
+            ...currentFlags,
+            vex_agent: aiFeatureFlags.vex_agent,
+          },
+        },
+      });
       plansSkipped++;
       console.log(
-        `    Skipped (preserved user config): ${TRIAL_DEFAULT_CODE}`,
+        `    Preserved user config, merged vex_agent flag: ${TRIAL_DEFAULT_CODE}`,
       );
       return;
     }

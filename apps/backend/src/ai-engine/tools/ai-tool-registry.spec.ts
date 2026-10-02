@@ -4,6 +4,7 @@ import {
   buildToolSuccessEnvelope,
   RegisteredTool,
 } from './interfaces/tool.interface';
+import { uiTools } from './domains/ui.tools';
 import { VendixHttpException } from '../../common/errors';
 
 /**
@@ -426,5 +427,80 @@ describe('ai-tool-registry · T5 deprecación + remoción', () => {
     });
     const result = await registry.executeTool('fetch_order', {});
     expect(JSON.parse(result)).toEqual({ revived: true });
+  });
+});
+
+/**
+ * RX2 — `denied_tools` del agente sobre el registry REAL.
+ *
+ * El spec del loop mockea `getAgentDefinitions` (fija el contrato del turno),
+ * así que el filtrado real se pinnea acá, sin `jest.fn` en el camino:
+ * `ui_navigate` queda fuera del catálogo con alcance Vex y presente sin
+ * alcance (Vexi). Si `ui.tools.ts` renombra la tool, este spec falla y avisa.
+ */
+describe('ai-tool-registry · RX2 denied_tools con alcance de agente', () => {
+  const confirmations = {
+    issue: jest.fn(),
+    redeem: jest.fn(),
+  };
+
+  function buildCatalog(): AIToolRegistry {
+    const registry = new AIToolRegistry(confirmations as any);
+    registry.registerMany(uiTools);
+    registry.register({
+      name: 'list_orders',
+      domain: 'orders',
+      readOnly: true,
+      description: 'Sonda de lectura del dominio orders.',
+      parameters: { type: 'object', properties: {} },
+      handler: jest.fn().mockResolvedValue('[]'),
+    });
+    return registry;
+  }
+
+  function namesOf(defs: { function: { name: string } }[]): string[] {
+    return defs.map((d) => d.function.name);
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('ui_navigate excluido con denied_tools de vex, presente sin alcance (vexi)', () => {
+    const registry = buildCatalog();
+
+    const vex = namesOf(
+      registry.getAgentDefinitions([], { denied_tools: ['ui_navigate'] }),
+    );
+    expect(vex).not.toContain('ui_navigate');
+    expect(vex).toContain('list_orders');
+
+    const vexi = namesOf(registry.getAgentDefinitions([], {}));
+    expect(vexi).toContain('ui_navigate');
+    expect(vexi).toContain('list_orders');
+  });
+
+  it('negar el dominio ui excluye todas las ui_* de una vez', () => {
+    const registry = buildCatalog();
+
+    const vex = namesOf(
+      registry.getAgentDefinitions([], { denied_tools: ['ui'] }),
+    );
+    expect(vex).not.toContain('ui_navigate');
+    expect(vex.filter((n) => n.startsWith('ui_'))).toEqual([]);
+    expect(vex).toContain('list_orders');
+  });
+
+  it('el deny gana sobre el allow aunque ambos nombren la tool', () => {
+    const registry = buildCatalog();
+
+    const scoped = namesOf(
+      registry.getAgentDefinitions([], {
+        allowed_tools: ['ui_navigate', 'list_orders'],
+        denied_tools: ['ui_navigate'],
+      }),
+    );
+    expect(scoped).not.toContain('ui_navigate');
+    expect(scoped).toEqual(['list_orders']);
   });
 });

@@ -26,11 +26,12 @@ export type AIFeatureKey =
   | 'tool_agents'
   | 'rag_embeddings'
   | 'async_queue'
-  | 'realtime_voice';
+  | 'realtime_voice'
+  | 'vex_agent';
 
 /**
  * The runtime mirror of the union. Anything that needs to walk every feature
- * reads this instead of hand-listing keys, so adding the eighth feature is one
+ * reads this instead of hand-listing keys, so adding the next feature is one
  * edit rather than a hunt through `raw['x'] || raw['y']` chains.
  */
 export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
@@ -41,6 +42,7 @@ export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
   'rag_embeddings',
   'async_queue',
   'realtime_voice',
+  'vex_agent',
 ] as const;
 
 export type AIFeatureDegradation = 'warn' | 'block';
@@ -49,6 +51,13 @@ export interface AIFeatureConfig {
   enabled: boolean;
   monthly_tokens_cap?: number | null;
   daily_messages_cap?: number | null;
+  /**
+   * Monthly tool-execution budget for the agent features (`tool_agents`,
+   * `vex_agent`). Consumed 1 unit per successful `tool_result` by the agent
+   * loop; absent/zero reads as unlimited. Mirrors `FeatureConfig` in
+   * `apps/backend/src/domains/store/subscriptions/types/access.types.ts`.
+   */
+  monthly_tool_calls_cap?: number | null;
   retention_days?: number | null;
   tools_allowed?: string[];
   /**

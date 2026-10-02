@@ -139,6 +139,38 @@ export class AIToolRegistry {
   }
 
   /**
+   * Agent-scoped catalog: permission-filtered tools further narrowed by the
+   * agent row (`ai_agents.allowed_tools` / `ai_agents.denied_tools`).
+   *
+   * Order is load-bearing and never inverted: `allowed_tools` (when non-empty)
+   * intersects first, `denied_tools` subtracts LAST, so a deny always wins
+   * over an allow. Both lists accept bare tool names and domain names; names
+   * resolve through aliases so a renamed tool keeps its agent scope.
+   */
+  getAgentDefinitions(
+    userPermissions?: string[],
+    agentScope?: { allowed_tools?: string[]; denied_tools?: string[] },
+  ): AIToolDefinition[] {
+    const allowed = agentScope?.allowed_tools?.length
+      ? new Set(agentScope.allowed_tools.map((n) => this.canonicalName(n)))
+      : null;
+    const denied = new Set(
+      (agentScope?.denied_tools ?? []).map((n) => this.canonicalName(n)),
+    );
+    return Array.from(this.tools.values())
+      .filter((t) => {
+        if (!this.isPermitted(t, userPermissions)) return false;
+        const name = this.canonicalName(t.name);
+        if (allowed && !allowed.has(name) && !allowed.has(t.domain)) {
+          return false;
+        }
+        if (denied.has(name) || denied.has(t.domain)) return false;
+        return true;
+      })
+      .map((t) => this.toDefinition(t));
+  }
+
+  /**
    * Permission-filtered catalog restricted to side-effect-free tools.
    * Used by surfaces that execute without a confirmation step (realtime
    * voice). Fail-closed: a tool that does not declare `readOnly: true` is
@@ -175,6 +207,16 @@ export class AIToolRegistry {
   isClientSide(name: string): boolean {
     const resolved = this.resolveToolName(name);
     return resolved ? this.tools.get(resolved)?.clientSide === true : false;
+  }
+
+  /**
+   * Explicit `irreversible` mark on the resolved tool. Unknown names answer
+   * false here — the plan service fails those closed on its own layer, where
+   * it can route them to a per-step card instead of smuggling them through.
+   */
+  isIrreversible(name: string): boolean {
+    const resolved = this.resolveToolName(name);
+    return resolved ? this.tools.get(resolved)?.irreversible === true : false;
   }
 
   private isPermitted(

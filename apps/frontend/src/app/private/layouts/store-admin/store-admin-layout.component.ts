@@ -1018,15 +1018,16 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/security',
         },
         {
-          // `alwaysVisible` because Vexi deliberately has NO `panel_ui` key:
-          // the assistant is not a module an admin curates per user, it is a
-          // store-wide capability. Without this flag the entry falls into the
-          // filter's "no mapping, no children" branch and is dropped outright.
-          // Its real gate is `passesAuthorizationGates` (owner/admin), which
-          // runs before every case.
-          label: 'Vexi',
-          icon: 'circle',
-          route: '/admin/settings/vexi',
+          // `alwaysVisible` because "Agentes IA" deliberately has NO
+          // `panel_ui` key: the agents are not a module an admin curates per
+          // user, they are a store-wide capability. Without this flag the
+          // entry falls into the filter's "no mapping, no children" branch
+          // and is dropped outright. Its real gate is
+          // `passesAuthorizationGates` (owner/admin), which runs before every
+          // case.
+          label: 'Agentes IA',
+          icon: 'bot',
+          route: '/admin/settings/ai-agents',
           alwaysVisible: true,
         },
         {

@@ -43,12 +43,22 @@ export interface DianDocumentEventRequest {
   referenced_document_type_code?: string;
   /** The adquiriente of the referenced invoice. */
   customer: DianEventParty;
+  /** Supplier/issuer on a received supplier invoice. Required only by buyer-event adapters. */
+  referenced_issuer?: DianEventParty;
   /** Event issue date, `YYYY-MM-DD`. */
   issue_date: string;
   /** Event issue time with offset. Derived from the store timezone when absent. */
   issue_time?: string;
   /** Justification. RADIAN expects one on a reclamo (031). */
   description?: string;
+}
+
+/** Exact fiscal DIAN configuration selected by the caller for a buyer event. */
+export interface DianEventConfigurationSelection {
+  configuration_id: number;
+  accounting_entity_id: number;
+  /** Validated operational store for organization-scope received-document flows. */
+  store_id?: number | null;
 }
 
 export interface DianDocumentEventResult {
@@ -68,4 +78,32 @@ export interface DianDocumentEventResult {
   request_xml: string;
   response_xml?: string;
   errors: { code?: string; message: string }[];
+}
+
+/**
+ * Backend-internal JSON-safe snapshot of a signed event, before any DIAN network
+ * call. Callers preparing received-document events must restrict them to buyer
+ * event codes and roles.
+ */
+export interface DianPreparedDocumentEvent {
+  event_code: DianEventCode;
+  event_number: string;
+  dian_configuration_id: number;
+  accounting_entity_id: number;
+  /** Store used to resolve an organization-scoped fiscal entity, when applicable. */
+  store_id?: number | null;
+  environment: 'test' | 'production';
+  cude: string;
+  signed_xml: string;
+  signed_xml_sha256: string;
+  xml_filename: string;
+  zip_filename: string;
+  software_id: string;
+  certificate_s3_key: string | null;
+  certificate_kms_key_id: string | null;
+  certificate_fingerprint?: string | null;
+}
+
+export interface DianPreparedEventTransmissionResult extends DianDocumentEventResult {
+  delivery_status: 'accepted' | 'rejected' | 'unknown';
 }

@@ -1,4 +1,6 @@
 import { BadRequestException, HttpStatus, NotFoundException, RequestMethod, StreamableFile } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { HTTP_CODE_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { AI_FEATURE_KEY, AiAccessGuard } from '../store/subscriptions/guards/ai-access.guard';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
@@ -13,7 +15,9 @@ import { OrganizationReceivedDocumentsController } from './organization-received
 import { StoreReceivedDocumentsController } from './store-received-documents.controller';
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
+import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
 import { ReceivedDocumentsContext } from './received-documents.service';
+import { ReceivedBuyerEventOptionsQueryDto, ReceivedBuyerEventRequestDto } from './dto/received-buyer-event-request.dto';
 
 const STORE_CONTEXT: ReceivedDocumentsContext = {
   organization_id: 3,
@@ -54,6 +58,12 @@ function dependencies() {
     revoke: jest.fn().mockResolvedValue({ allocation: { id: 1 } }),
   };
   const matchExpenses = { list: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 20, warnings: [] }) };
+  const buyerEvents = {
+    getStatus: jest.fn().mockResolvedValue({ status: 'not_started', version: 0, event_codes: [] }),
+    getReadiness: jest.fn().mockResolvedValue({ status: 'not_started', ready: false, blockers: [], event_codes: [] }),
+    requestVerification: jest.fn().mockResolvedValue({ status: 'testing', version: 1, event_codes: [] }),
+    listOptions: jest.fn().mockResolvedValue({ dian_configurations: [], evidence: [], total: 0, page: 1, limit: 25 }),
+  };
   const contexts = {
     resolveStore: jest.fn().mockResolvedValue(STORE_CONTEXT),
     resolveOrganization: jest.fn().mockResolvedValue(ORG_CONTEXT),
@@ -64,10 +74,48 @@ function dependencies() {
     updated: jest.fn((data) => ({ data })),
     success: jest.fn((data) => ({ data })),
   };
-  return { documents, contexts, responses, scans, matchCandidates, matchAllocations, matchExpenses };
+  return { documents, contexts, responses, scans, matchCandidates, matchAllocations, matchExpenses, buyerEvents };
 }
 
 describe('received-document route controllers', () => {
+  it('validates buyer-event request codes, uniqueness, and unknown fields', () => {
+    const base = {
+      expected_version: 0,
+      dian_configuration_id: 2,
+      evidence_id: 4,
+      event_codes: ['030'],
+    };
+    const transformOptions = { enableImplicitConversion: true };
+    const validationOptions = { whitelist: true, forbidNonWhitelisted: true };
+    expect(validateSync(
+      plainToInstance(ReceivedBuyerEventRequestDto, base, transformOptions),
+      validationOptions,
+    )).toHaveLength(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventRequestDto, {
+      ...base,
+      event_codes: ['030', '999'],
+    }, transformOptions), validationOptions).length).toBeGreaterThan(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventRequestDto, {
+      ...base,
+      event_codes: ['030', '030'],
+    }, transformOptions), validationOptions).length).toBeGreaterThan(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventRequestDto, {
+      ...base,
+      unexpected: true,
+    }, transformOptions), validationOptions).some((error) =>
+      error.property === 'unexpected')).toBe(true);
+    for (const invalidNumeric of [
+      { ...base, expected_version: true },
+      { ...base, dian_configuration_id: true },
+      { ...base, evidence_id: true },
+    ]) {
+      expect(validateSync(
+        plainToInstance(ReceivedBuyerEventRequestDto, invalidNumeric, transformOptions),
+        validationOptions,
+      ).length).toBeGreaterThan(0);
+    }
+  });
+
   it('enqueues a store OCR scan with authenticated context and HTTP 202 metadata', async () => {
     const deps = dependencies();
     const controller = new StoreReceivedDocumentsController(
@@ -78,6 +126,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
     const file = {
       originalname: 'invoice.pdf',
@@ -123,6 +172,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
 
     await expect(controller.enqueueScan(undefined as never)).rejects.toThrow(
@@ -142,6 +192,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
     const file = {
       originalname: 'invoice.pdf',
@@ -176,6 +227,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
 
     await expect(controller.getScanStatus('scan-job-1', { store_id: 21 })).resolves.toEqual({
@@ -202,6 +254,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
     const query = { page: 1, limit: 25 } as ReceivedDocumentQueryDto;
 
@@ -227,6 +280,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
 
     await expect(controller.list({ store_id: 99 } as ReceivedDocumentQueryDto)).rejects.toThrow(BadRequestException);
@@ -244,6 +298,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
     const query = { page: 2, limit: 10, store_id: 21 } as ReceivedDocumentQueryDto;
 
@@ -266,6 +321,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
     const org = new OrganizationReceivedDocumentsController(
       deps.documents as unknown as ReceivedDocumentsService,
@@ -275,6 +331,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
 
     await store.createManual({} as ManualReceivedDocumentDto);
@@ -305,6 +362,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
 
     await expect(controller.importXml(undefined as never, {})).rejects.toThrow(BadRequestException);
@@ -322,6 +380,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
     deps.documents.findOne.mockResolvedValue({
       id: 1,
@@ -351,6 +410,7 @@ describe('received-document route controllers', () => {
       deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
       deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
     );
     deps.documents.findOne.mockResolvedValue({ id: 1, files: [] });
 
@@ -378,5 +438,73 @@ describe('received-document route controllers', () => {
       .toEqual(['organization:invoicing:received:review']);
     expect(Reflect.getMetadata('path', OrganizationReceivedDocumentsController.prototype.createManual))
       .toBe('manual');
+  });
+
+  it('exposes buyer event status and readiness with read permissions', async () => {
+    const deps = dependencies();
+    const controller = new StoreReceivedDocumentsController(
+      deps.documents as unknown as ReceivedDocumentsService,
+      deps.contexts as unknown as ReceivedDocumentsContextService,
+      deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
+      deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+    );
+    await controller.getBuyerEventEnablement({});
+    await controller.getBuyerEventReadiness({ eventCode: '030' }, {});
+    expect(deps.buyerEvents.getStatus).toHaveBeenCalledWith(STORE_CONTEXT);
+    expect(deps.buyerEvents.getReadiness).toHaveBeenCalledWith(STORE_CONTEXT, '030');
+    await expect(controller.getBuyerEventEnablement({ store_id: 22 })).rejects.toThrow(BadRequestException);
+    expect(deps.buyerEvents.getStatus).toHaveBeenCalledTimes(1);
+    expect(Reflect.getMetadata(PATH_METADATA, StoreReceivedDocumentsController.prototype.getBuyerEventEnablement))
+      .toBe('buyer-event-enablement');
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, StoreReceivedDocumentsController.prototype.getBuyerEventReadiness))
+      .toEqual(['invoicing:received:read']);
+  });
+
+  it('routes organization buyer-event requests through the selected store and configure permission', async () => {
+    const deps = dependencies();
+    const controller = new OrganizationReceivedDocumentsController(
+      deps.documents as unknown as ReceivedDocumentsService,
+      deps.contexts as unknown as ReceivedDocumentsContextService,
+      deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
+      deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+    );
+    const dto = { expected_version: 0, dian_configuration_id: 2, evidence_id: 4, event_codes: ['030'] as any };
+    await controller.requestBuyerEventVerification(dto, { store_id: 21 });
+    expect(deps.contexts.resolveOrganization).toHaveBeenCalledWith(21);
+    expect(deps.buyerEvents.requestVerification).toHaveBeenCalledWith(ORG_CONTEXT, dto);
+    const handler = OrganizationReceivedDocumentsController.prototype.requestBuyerEventVerification;
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(HttpStatus.OK);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual([
+      'organization:invoicing:received:events:configure',
+    ]);
+  });
+
+  it('validates strict options paging despite global implicit conversion and protects tenant selection', async () => {
+    const validationOptions = { whitelist: true, forbidNonWhitelisted: true };
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, {}, { enableImplicitConversion: true }), validationOptions)).toHaveLength(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { page: '2', limit: '100' }, { enableImplicitConversion: true }), validationOptions)).toHaveLength(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { page: '2.1' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { limit: '101' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
+    expect(validateSync(plainToInstance(ReceivedBuyerEventOptionsQueryDto, { page: 'true' }, { enableImplicitConversion: true }), validationOptions).length).toBeGreaterThan(0);
+    const deps = dependencies();
+    const store = new StoreReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never);
+    await store.getBuyerEventOptions({ page: 2, limit: 10 });
+    expect(deps.buyerEvents.listOptions).toHaveBeenCalledWith(STORE_CONTEXT, { page: 2, limit: 10 });
+    await expect(store.getBuyerEventOptions({ store_id: 99 })).rejects.toThrow(BadRequestException);
+    const org = new OrganizationReceivedDocumentsController(deps.documents as never, deps.contexts as never, deps.responses as never, deps.scans as never, deps.matchCandidates as never, deps.matchAllocations as never, deps.matchExpenses as never, deps.buyerEvents as never);
+    await org.getBuyerEventOptions({ store_id: 21, page: 1 });
+    expect(deps.contexts.resolveOrganization).toHaveBeenCalledWith(21);
+    expect(deps.buyerEvents.listOptions).toHaveBeenCalledWith(ORG_CONTEXT, { page: 1 });
+    expect(Reflect.getMetadata(PATH_METADATA, StoreReceivedDocumentsController.prototype.getBuyerEventOptions)).toBe('buyer-event-enablement/options');
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, StoreReceivedDocumentsController.prototype.getBuyerEventOptions)).toEqual(['invoicing:received:events:configure']);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, OrganizationReceivedDocumentsController.prototype.getBuyerEventOptions)).toEqual(['organization:invoicing:received:events:configure']);
   });
 });

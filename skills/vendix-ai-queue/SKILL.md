@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Working with AI async processing"
@@ -26,6 +26,7 @@ metadata:
 - Generation processor: `apps/backend/src/ai-engine/queue/processors/ai-generation.processor.ts`
 - Embedding processor: `apps/backend/src/ai-engine/queue/processors/ai-embedding.processor.ts`
 - Embedding module registration: `apps/backend/src/ai-engine/embeddings/embedding.module.ts`
+- Agent processor: `apps/backend/src/ai-engine/queue/processors/ai-agent.processor.ts` (registered in `AIEngineModule`, not `AIQueueModule`)
 
 ## Queues
 
@@ -35,11 +36,11 @@ metadata:
 - `ai-embedding`
 - `ai-agent`
 
-Current processor reality:
+Current processor reality (all three queues have workers):
 
 - `AIGenerationProcessor` is registered in `AIQueueModule`.
 - `AIEmbeddingProcessor` exists but is registered in `EmbeddingModule`, not `AIQueueModule`.
-- No `AIAgentProcessor` was found for `ai-agent`; `enqueueAgentTask()` can enqueue jobs without a processor unless one is added.
+- `AIAgentProcessor` (`@Processor('ai-agent')`) exists and is registered in `AIEngineModule` — the worker needs `AIAgentService`, which lives in that module, so registering it in `AIQueueModule` would close a dependency cycle.
 
 ## Job Methods
 
@@ -60,7 +61,7 @@ Current processor reality:
 
 - Queue `ai-agent`, job `agent-task`.
 - Attempts 1.
-- Requires a processor before relying on it operationally.
+- Consumed by `AIAgentProcessor` (registered in `AIEngineModule`).
 
 ## Processors
 
@@ -75,6 +76,13 @@ Embedding processor:
 - Handles `delete-embedding` specially.
 - Otherwise stores embedding through `EmbeddingService.storeEmbedding()`.
 - Does not emit completion/failure events.
+
+Agent processor (`AIAgentProcessor`):
+
+- Restores request context from the job via `RequestContextService.run()` — tenant ids AND the caller's `permissions`/`roles` snapshot (permissions are restored from the job, never re-resolved, so a role change between enqueue and execution cannot widen the task).
+- Runs `aiAgent.runAgent({ goal, app_key, tools, max_iterations, timeout_ms })`.
+- Emits `vexi.task.finished` on success AND failure (the person is not watching; the notification is the only way they learn the task died). Still throws on failure so BullMQ records it.
+- Has no Bearer [REDACTED] so `write_endpoint` refuses and confirmation-gated tools throw their approval demand: background tasks review, validate and prepare; the proposal comes back to the chat, where it can be approved.
 
 ## Per-domain OCR scan queues (async pattern)
 
@@ -140,7 +148,7 @@ Source of truth: `dispatch-notes.{service,controller,module}.ts` +
 ## Rules
 
 - Pass required tenant/user context in job data; request context is not naturally available in workers.
-- Do not assume all registered queues have processors.
+- All three shared queues (`ai-generation`, `ai-embedding`, `ai-agent`) have processors — but each is registered in a different module (`AIQueueModule`, `EmbeddingModule`, `AIEngineModule`); check the registration site before moving one.
 - Add processors to module providers explicitly.
 - Let BullMQ retry by throwing from processors on failures.
 - Use `getJobStatus(queueName, jobId)` for status checks.

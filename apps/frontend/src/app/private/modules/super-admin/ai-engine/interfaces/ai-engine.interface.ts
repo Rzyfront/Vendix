@@ -421,7 +421,10 @@ export interface AIAgent {
   app_key?: string | null;
   system_prompt?: string | null;
   allowed_tools: string[];
+  denied_tools: string[];
   max_iterations?: number | null;
+  /** Per-turn timeout in seconds (30–600); null = loop default. */
+  timeout_seconds?: number | null;
   requires_confirmation_default: boolean;
   is_active: boolean;
   created_at?: string;
@@ -435,7 +438,9 @@ export interface CreateAIAgentDto {
   app_key?: string | null;
   system_prompt?: string | null;
   allowed_tools?: string[];
+  denied_tools?: string[];
   max_iterations?: number | null;
+  timeout_seconds?: number | null;
   requires_confirmation_default?: boolean;
   is_active?: boolean;
 }

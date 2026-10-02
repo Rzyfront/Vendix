@@ -12,11 +12,12 @@ import type { ReceivedDocument, ReceivedDocumentFile, ReceivedDocumentTax, Recei
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentFormComponent } from './received-document-form.component';
 import { ReceivedDocumentMatchingComponent } from './received-document-matching.component';
+import { ReceivedDocumentAccountingEvidenceComponent } from './received-document-accounting-evidence.component';
 
 @Component({
   selector: 'app-received-document-detail',
   standalone: true,
-  imports: [CardComponent, StickyHeaderComponent, ReceivedDocumentFormComponent, ReceivedDocumentMatchingComponent],
+  imports: [CardComponent, StickyHeaderComponent, ReceivedDocumentFormComponent, ReceivedDocumentMatchingComponent, ReceivedDocumentAccountingEvidenceComponent],
   template: `
     <div class="w-full space-y-4">
       <app-sticky-header title="Detalle del documento recibido" subtitle="Revisión de evidencia del proveedor" icon="file-text" [showBackButton]="true" backRoute="/admin/invoicing/received-documents" [backQueryParams]="backQueryParams()" />
@@ -82,6 +83,7 @@ import { ReceivedDocumentMatchingComponent } from './received-document-matching.
         </app-card>
 
         <app-received-document-matching [document]="doc" [scope]="scope" [storeId]="storeId() ?? null" (changed)="load()" />
+        <app-received-document-accounting-evidence [scope]="scope" [documentId]="doc.id" [storeId]="storeId() ?? null" />
 
         <app-card [responsive]="true">
           <section aria-labelledby="evidence-title">

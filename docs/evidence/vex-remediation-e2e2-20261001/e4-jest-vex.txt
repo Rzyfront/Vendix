@@ -1,0 +1,15 @@
+Run 1 (observed 2026-10-01 ~18:00 UTC): npx jest --runInBand src/domains/store/vex src/domains/store/ai-chat/ai-chat.plan.spec.ts src/ai-engine/ai-agent.service.spec.ts src/ai-engine/tools/ai-tool-registry.spec.ts src/ai-engine/tools/irreversible-coverage.spec.ts
+PASS src/domains/store/ai-chat/ai-chat.plan.spec.ts
+PASS src/ai-engine/tools/irreversible-coverage.spec.ts
+PASS src/domains/store/vex/services/vex-block.service.spec.ts
+PASS src/domains/store/vexi/vexi-plan-state.service.spec.ts
+PASS src/domains/store/vex/services/vex-activity-feed.service.spec.ts
+PASS src/domains/store/vex/services/plan-approval.service.spec.ts
+PASS src/ai-engine/ai-agent.service.spec.ts
+PASS src/ai-engine/tools/ai-tool-registry.spec.ts
+PASS src/domains/store/vexi/vexi-speech.service.spec.ts
+PASS src/domains/store/vexi/vexi-realtime.service.spec.ts
+PASS src/domains/store/vexi/vexi-speech.pipeline.spec.ts
+Test Suites: 11 passed, 11 total
+Tests: 271 passed, 271 total
+Time: 77.403 s

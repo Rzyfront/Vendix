@@ -53,6 +53,8 @@ Use the domain-appropriate Prisma service:
 
 If adding a new model, register it in scoped Prisma services before relying on automatic tenant filters. See `vendix-prisma-scopes`.
 
+Module registration: never add the scoped Prisma services to `providers:`/`exports:` of a domain module (nor import `PrismaModule`); they are `@Global()` singletons from `PrismaModule`. A re-declaration spawns another `PrismaClient` (~68 MB heap each) and drops `@Optional` deps. See "Singleton Rule" in `vendix-prisma-scopes`; the CI guard "Prisma Singleton Audit" enforces it (`npm run prisma-singleton:audit`).
+
 ## Controller Rules
 
 - Controllers should stay thin: parse params, apply guards/decorators, call services.
@@ -74,6 +76,7 @@ npm run db:migrate:dev -w apps/backend
 npm run db:migrate:prod -w apps/backend
 npm run db:seed -w apps/backend
 docker logs --tail 40 vendix_backend
+npm run prisma-singleton:audit   # before pushing any backend *.module.ts change
 ```
 
 Do not run destructive reset/clean commands unless explicitly requested.

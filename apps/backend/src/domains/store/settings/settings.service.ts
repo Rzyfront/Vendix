@@ -92,6 +92,11 @@ export const KNOWN_SECTIONS = [
   // drops `{ vexi: { enabled: false } }` before validation and the endpoint
   // answers 200 with the old value — a switch that silently refuses to move.
   'vexi',
+  // Vex's store-wide master switch. Same rule: without this entry the
+  // sanitizer drops `{ vex: { enabled: true } }` and answers 200 with Vex
+  // still off — a switch that silently refuses to move, in the other
+  // direction.
+  'vex',
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
   'promotions',
   // `app` is intentionally accepted here because the service maps it to
@@ -491,6 +496,25 @@ export class SettingsService {
       }
     }
 
+    // Vex inherits the same owner/admin-only rule: the switch decides whether
+    // the store's most expensive agent may run, so a manager with
+    // `store:settings:update` must not flip it with a curl. Same role list as
+    // Vexi on purpose — one convention for both "Agentes IA" tabs.
+    if (dto.vex !== undefined) {
+      const roles = RequestContextService.getRoles();
+      const puedeConfigurarVex = roles.some((role) =>
+        ['owner', 'admin', 'STORE_OWNER', 'ORG_OWNER', 'super_admin'].includes(
+          role,
+        ),
+      );
+      if (!puedeConfigurarVex) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_FORBIDDEN_001,
+          'Solo el propietario o un administrador de la tienda pueden configurar a Vex.',
+        );
+      }
+    }
+
     // Validar que el sonido de notificación referenciado exista en el
     // catálogo global y esté activo. Permitimos null (sin sonido).
     const incomingSoundId = dto.notifications?.sound_id;
@@ -634,6 +658,18 @@ export class SettingsService {
       (updatedSettings as any).vexi = {
         ...((currentSettings as any).vexi ?? {}),
         ...dto.vexi,
+      };
+    }
+
+    // `vex` se mezcla por clave, como `vexi`: un PATCH parcial
+    // (`{ vex: { enabled: true } }` desde el interruptor de "Agentes IA") no
+    // debe destruir las claves que no menciona. Hoy el bloque sólo tiene
+    // `enabled`, pero el reemplazo de sección del bucle genérico borraría en
+    // silencio cualquier clave futura que otra pantalla edite por separado.
+    if (dto.vex !== undefined) {
+      (updatedSettings as any).vex = {
+        ...((currentSettings as any).vex ?? {}),
+        ...dto.vex,
       };
     }
 

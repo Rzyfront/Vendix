@@ -1,10 +1,19 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
+import type {
+  AgentBlockSink,
+  AgentPlanApprovalHook,
+} from '../../../ai-engine/ai-agent.service';
 import { RAGService } from '../../../ai-engine/embeddings/rag.service';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
@@ -21,7 +30,14 @@ import type {
   VexiVoiceFrame,
 } from '../vexi/vexi-speech.pipeline';
 import { RequestContextService } from '@common/context/request-context.service';
+import { UserRole } from '../../auth/enums/user-role.enum';
+import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
+import { SubscriptionGateConfig } from '../subscriptions/config/subscription-gate.config';
+import { VexBlockService } from '../vex/services/vex-block.service';
+import { PlanApprovalService } from '../vex/services/plan-approval.service';
+import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
   AIMessage,
@@ -108,16 +124,63 @@ export type ChatStreamFrame = AIStreamChunk | VexiVoiceFrame;
 /**
  * Fila de `ai_agents` tal como la consume el turno (F4).
  *
- * Sin agente (`null`) el turno sigue el camino exacto de hoy: `app_key` de la
+ * Sin agente (`null`) el turno sigue el camino anterior: `app_key` de la
  * conversación o `'chat_assistant'`, rama por `metadata.agent_enabled` de la
- * app. La fila `vexi` del seed replica ese default, no lo sustituye.
+ * app. La fila activa `vexi` configura los turnos del chat por defecto.
  */
 interface ResolvedChatAgent {
   key: string;
   app_key: string | null;
   system_prompt: string | null;
   allowed_tools: string[];
+  denied_tools: string[];
   max_iterations: number | null;
+  /** `ai_agents.timeout_seconds`; `null` → default del loop. */
+  timeout_seconds: number | null;
+}
+
+/**
+ * `key` de Vex en `ai_agents`. El único agente del chat con gate propio:
+ * los turnos que resuelven a esta key (hilo fijado u override por mensaje)
+ * exigen rol owner/admin + `settings.vex.enabled` + feature `vex_agent` del
+ * plan (ver `assertVexTurnAccess`). Cualquier otra key —incluido `vexi`—
+ * sigue el camino exacto de hoy.
+ */
+const VEX_AGENT_KEY = 'vex';
+
+/**
+ * Puntero que el mensaje del agente guarda por cada bloque del turno: lo
+ * justo para rehidratar (`GET blocks/:id` trae los datos firmados en
+ * lectura). Nunca el payload — un bloque vive en `ai_ui_blocks`, no copiado
+ * en el transcript.
+ */
+interface VexBlockRef {
+  block_id: string;
+  kind: string;
+  version: number;
+}
+
+/** Estados que `metadata.plan.status` puede tomar en un hilo de Vex. */
+const VEX_PLAN_STATUSES = [
+  'proposed',
+  'approved',
+  'rejected',
+  'applied',
+  'partially_applied',
+] as const;
+type VexPlanStatus = (typeof VEX_PLAN_STATUSES)[number];
+
+/**
+ * Lo que un turno Vex produjo y el cierre del turno persiste. Se llena por
+ * tres caminos que se fusionan al final: el sink envuelve cada `save` de
+ * compactación, el stream captura los frames `ui_block`/`plan_approval`, y
+ * el cierre barre los bloques huérfanos (`message_id` NULL) más los
+ * envelopes de render en `tools_used` — así el camino sync, que no ve
+ * frames, persiste lo mismo que el SSE.
+ */
+interface VexTurnCollection {
+  blocks: Map<string, VexBlockRef>;
+  plan: { plan_id: string; steps: unknown[] } | null;
 }
 
 @Injectable()
@@ -142,6 +205,24 @@ export class AIChatService {
     private readonly uiChannel: VexiUiChannelService,
     private readonly speech: VexiSpeechService,
     private readonly planState: VexiPlanStateService,
+    // Gate de plan de los turnos de Vex. Opcionales y al final para no romper
+    // las construcciones posicionales existentes: en producción resuelven
+    // desde `SubscriptionsModule` (`@Global()`); un turno de Vex sin ellos
+    // falla cerrado en `assertVexTurnAccess` en vez de colgar.
+    @Optional() private readonly subscriptionAccess?: SubscriptionAccessService,
+    @Optional() private readonly gateConfig?: SubscriptionGateConfig,
+    // Block selections as turn context (Vex only). Optional-trailing like
+    // the gate above: same positional-construction rule, and a Vex turn
+    // without it simply sees no selection instead of failing.
+    @Optional() private readonly vexBlocks?: VexBlockService,
+    // Whole-plan approval hook + block sink (Vex only). Optional-trailing for
+    // the same rule: in production they resolve (`VexModule` exports the
+    // approval service; the confirmations live in the global `AIEngineModule`
+    // next to the plan state already injected above). A Vex turn without them
+    // still runs — the loop accumulates and classifies locally — but its plan
+    // cannot persist hashes, so approve will ask to re-propose.
+    @Optional() private readonly planApproval?: PlanApprovalService,
+    @Optional() private readonly confirmations?: VexiConfirmationService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -171,6 +252,10 @@ export class AIChatService {
         );
       }
     }
+
+    // Un hilo de Vex nace gated: crearlo ya exige el triple
+    // (rol + toggle + plan), no solo hablar en él.
+    await this.assertVexTurnAccess(dto.agent_key ?? null);
 
     const conversation = await this.prisma.ai_conversations.create({
       data: {
@@ -238,6 +323,31 @@ export class AIChatService {
       where.title = { contains: query.search, mode: 'insensitive' };
     }
 
+    // Separación de hilos por agente (`metadata.agent_key`, paso 4):
+    // - `vex` → solo Vex.
+    // - `vexi` → Vexi más los legacy, cuyo `metadata` es NULL (hilos creados
+    //   antes de F4, cuando nada escribía la columna).
+    // - otra key → solo esa.
+    // - ausente → todo menos Vex, para que el dock de Vexi nunca liste un
+    //   hilo que no puede abrir. El `NOT` sobre JSON no matchea filas con
+    //   `metadata` NULL (`NOT NULL` es NULL), así que el NULL va en su propia
+    //   rama del OR: sin ella los hilos legacy desaparecerían del listado.
+    if (query.agent_key === VEX_AGENT_KEY) {
+      where.metadata = { path: ['agent_key'], equals: VEX_AGENT_KEY };
+    } else if (query.agent_key === 'vexi') {
+      where.OR = [
+        { metadata: { path: ['agent_key'], equals: 'vexi' } },
+        { metadata: { equals: Prisma.AnyNull } },
+      ];
+    } else if (query.agent_key) {
+      where.metadata = { path: ['agent_key'], equals: query.agent_key };
+    } else {
+      where.OR = [
+        { metadata: { equals: Prisma.AnyNull } },
+        { NOT: { metadata: { path: ['agent_key'], equals: VEX_AGENT_KEY } } },
+      ];
+    }
+
     const [data, total] = await Promise.all([
       this.prisma.ai_conversations.findMany({
         where,
@@ -266,11 +376,20 @@ export class AIChatService {
   }
 
   async sendMessage(conversationId: number, dto: SendMessageDto) {
+    // Inicio del turno: el barrido de bloques huérfanos solo adopta los
+    // creados desde aquí (ver `resolveVexTurnBlocks`).
+    const turnStartedAt = new Date();
     const conversation = await this.getConversation(conversationId);
 
     if (conversation.status === 'archived') {
       throw new VendixHttpException(ErrorCodes.AI_CHAT_002);
     }
+
+    // El override por mensaje y el agente fijado en el hilo ganan sobre Vexi.
+    // Se resuelve acá —antes de persistir la fila del usuario— para que un
+    // turno de Vex denegado no deje una pregunta huérfana en el hilo.
+    const agentKey = this.turnAgentKey(conversation, dto.agent_key);
+    await this.assertVexTurnAccess(agentKey);
 
     // Save user message
     await this.prisma.ai_messages.create({
@@ -284,10 +403,7 @@ export class AIChatService {
     // Build context window
     const contextMessages = this.buildContextWindow(conversation, dto.content);
 
-    // F4: el override por mensaje gana sobre el agente de la conversación.
-    const chatAgent = await this.resolveChatAgent(
-      dto.agent_key ?? this.conversationAgentKey(conversation),
-    );
+    const chatAgent = await this.resolveChatAgent(agentKey);
 
     // Call AI Engine
     const appKey =
@@ -301,6 +417,14 @@ export class AIChatService {
 
     let responseContent = '';
     let tokensUsed = 0;
+    // Solo los turnos Vex coleccionan: en cualquier otro agente es `null` y
+    // el cierre persiste byte-idéntico a hoy.
+    const vexTurn: VexTurnCollection | null =
+      agentKey === VEX_AGENT_KEY
+        ? { blocks: new Map(), plan: null }
+        : null;
+    let vexPlan: VexTurnCollection['plan'] = null;
+    let vexToolsUsed: Array<{ name: string; args: any; result: string }> = [];
 
     if (agentEnabled) {
       // Use Agent Loop with tools.
@@ -312,13 +436,22 @@ export class AIChatService {
       // (Con agente y sin app enlazada —ni en la fila ni en la conversación—,
       // `resolveAgentLoopArgs` omite `app_key` y el prompt propio sí viaja.)
       const agentResult = await this.aiAgent.runAgent({
-        goal: dto.content,
-        ...this.resolveAgentLoopArgs(chatAgent, conversation),
+        goal: await this.withBlockSelection(
+          dto.content,
+          agentKey,
+          conversationId,
+        ),
+        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
         messages: this.buildContextWindow(conversation),
-        variables: await this.vexiContext.buildSnapshot(),
+        variables:
+          agentKey === VEX_AGENT_KEY
+            ? await this.buildVexVariables(conversationId)
+            : await this.vexiContext.buildSnapshot(),
       });
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
+      vexPlan = agentResult.pending_plan ?? null;
+      vexToolsUsed = agentResult.tools_used ?? [];
     } else {
       // Check if RAG is enabled
       const ragEnabled =
@@ -348,7 +481,19 @@ export class AIChatService {
       }
     }
 
-    // Save assistant response
+    // Save assistant response. En turnos Vex el metadata lleva los punteros
+    // a bloques y el plan propuesto, para que recargar la conversación
+    // rehidrate lo mismo que el turno mostró en vivo.
+    const vexBlockRefs = await this.resolveVexTurnBlocks(
+      conversationId,
+      vexTurn,
+      vexToolsUsed,
+      turnStartedAt,
+    );
+    const vexMetadata = this.vexTurnMetadata(
+      vexBlockRefs,
+      vexPlan ?? vexTurn?.plan ?? null,
+    );
     const assistantMessage = await this.prisma.ai_messages.create({
       data: {
         conversation_id: conversationId,
@@ -356,8 +501,10 @@ export class AIChatService {
         content: responseContent,
         tokens_used: tokensUsed,
         cost_usd: 0,
+        ...(vexMetadata ? { metadata: vexMetadata } : {}),
       },
     });
+    await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
 
     // Update conversation timestamp
     await this.prisma.ai_conversations.update({
@@ -407,6 +554,11 @@ export class AIChatService {
       throw new VendixHttpException(ErrorCodes.AI_CHAT_002);
     }
 
+    // En SSE no hay override por mensaje: el gate decide con el agente fijado
+    // en el hilo. Acá el error viaja como HTTP con su código; el stream lo
+    // re-valida y lo emite como frame `error` (ver `sendMessageStream`).
+    await this.assertVexTurnAccess(this.turnAgentKey(conversation));
+
     return this.streamIntents.create({
       conversation_id: conversationId,
       // Un turno de continuación no lleva texto de la persona.
@@ -439,6 +591,7 @@ export class AIChatService {
     // Every timing mark is relative to this. Taken before the first await so it
     // includes the intent lookup the browser is already waiting through.
     const streamStartedAt = Date.now();
+    const turnStartedAt = new Date(streamStartedAt);
     const userId = RequestContextService.getContext()?.user_id;
     const intent = await this.streamIntents.consume(streamId, userId);
 
@@ -462,10 +615,19 @@ export class AIChatService {
     // plan se pausó, venció o se abandonó entre la tarjeta y el clic) y no es un
     // error que la persona deba ver ni un turno que valga la pena pagar: se
     // cierra sin texto y sin persistir nada.
+    //
+    // Excepción Vex: sus escrituras directas (sin `propose_plan`) aplican con
+    // tokens de un solo uso y nunca crean un plan en `planState`, así que el
+    // turno aprobado/cancelado llegaría siempre huérfano y la tarjeta quedaría
+    // muda: sin narración y sin continuar con lo que sigue (p. ej. enviar la
+    // cotización recién creada). Esos turnos sí corren el loop.
     let continuationPlan: AgentPlan | null = null;
     if (intent.continuation) {
       continuationPlan = await this.planState.getActive(conversationId);
-      if (!continuationPlan) {
+      if (
+        !continuationPlan &&
+        this.turnAgentKey(conversation) !== VEX_AGENT_KEY
+      ) {
         yield { type: 'done' };
         return;
       }
@@ -537,11 +699,23 @@ export class AIChatService {
     // siguiente iteración (`shouldAbort`).
     await this.streamIntents.claimTurn(conversationId, streamId);
 
-    // F4: en SSE no hay DTO por mensaje (el intent solo trae `content`), así
-    // que el agente sale de `metadata.agent_key` de la conversación.
-    const chatAgent = await this.resolveChatAgent(
-      this.conversationAgentKey(conversation),
-    );
+    // En SSE no hay override por mensaje: agente fijado en el hilo, o Vexi
+    // para el chat por defecto (también en conversaciones preexistentes).
+    // La key PEDIDA —no la fila resuelta— es lo que se gatea: si el agente
+    // `vex` se desactiva a mitad de un hilo largo, el turno cae al fallback
+    // de la app pero el hilo sigue siendo de owner/admin.
+    const agentKey = this.turnAgentKey(conversation);
+    try {
+      await this.assertVexTurnAccess(agentKey);
+    } catch (err) {
+      // Dentro del generador el gate denegado es un frame `error`, no un
+      // throw: el SSE ya empezó y el cliente solo entiende frames. El error
+      // con código ya viajó en el POST del intent; acá solo se llega si algo
+      // cambió en la ventana entre el intent y el stream.
+      yield { type: 'error', error: (err as Error).message };
+      return;
+    }
+    const chatAgent = await this.resolveChatAgent(agentKey);
 
     const appKey =
       chatAgent?.app_key || conversation.app_key || 'chat_assistant';
@@ -561,6 +735,11 @@ export class AIChatService {
      * endpoint y no deja rastro en la conversación hasta que se aplica.
      */
     let pendingProposal: string | null = null;
+    // Colector del turno Vex (`null` en cualquier otro agente: su cierre no
+    // cambia). El sink y los frames lo llenan mientras el turno corre.
+    const vexTurn: VexTurnCollection | null =
+      agentKey === VEX_AGENT_KEY ? { blocks: new Map(), plan: null } : null;
+    let vexPlan: VexTurnCollection['plan'] = null;
     // Held back until after the audio and timing frames. Both the SSE controller
     // and the browser close the connection the moment `done` arrives, so anything
     // emitted after it is never seen. See the agent branch below for the original
@@ -573,9 +752,13 @@ export class AIChatService {
       // `agent_enabled`, so simply opening the SSE connection turned the agent
       // off — the same question answered with data over POST and with a shrug
       // over SSE. It now runs the identical loop, narrating each tool call.
-      const goal = intent.continuation
-        ? CONTINUATION_GOALS[intent.continuation]
-        : intent.content;
+      const goal = await this.withBlockSelection(
+        intent.continuation
+          ? CONTINUATION_GOALS[intent.continuation]
+          : intent.content,
+        agentKey,
+        conversationId,
+      );
       const activePlan =
         continuationPlan ?? (await this.planState.getActive(conversationId));
       const storedPlan = activePlan
@@ -583,7 +766,7 @@ export class AIChatService {
         : await this.planState.get(conversationId);
       const agentStream = this.aiAgent.runAgentStream({
         goal,
-        ...this.resolveAgentLoopArgs(chatAgent, conversation),
+        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
         // El mismo flag que enciende la síntesis enciende el registro hablado.
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
@@ -598,10 +781,21 @@ export class AIChatService {
             isContinuation: !!intent.continuation,
           },
         ),
-        variables: await this.vexiContext.buildSnapshot({
-          uiContext: intent.ui_context,
-          attachmentIds: intent.attachment_ids,
-        }),
+        // Vex no navega pantallas (`denied_tools` le quita las `ui_*`), así
+        // que su snapshot no lleva `ui_context`: además de inútil, es
+        // material no confiable compuesto en el navegador — en su lugar trae
+        // `vex_blocks`, los bloques vivos de la conversación. Los adjuntos
+        // sí viajan: Vex también lee documentos del turno.
+        variables:
+          agentKey === VEX_AGENT_KEY
+            ? await this.buildVexVariables(
+                conversationId,
+                intent.attachment_ids,
+              )
+            : await this.vexiContext.buildSnapshot({
+                uiContext: intent.ui_context,
+                attachmentIds: intent.attachment_ids,
+              }),
         // What lets the loop wait for the browser instead of assuming its UI
         // commands worked. Only the chat surface passes it, because it is the only
         // one with an open SSE channel to a page that can answer.
@@ -620,6 +814,9 @@ export class AIChatService {
       // approval card would never render.
       while (!step.done) {
         const chunk = step.value;
+        // Lo que la persona VIO es lo que se persiste: el frame ya viaja al
+        // panel y el colector guarda su referencia para el cierre del turno.
+        if (vexTurn) this.collectVexFrame(vexTurn, chunk);
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content;
           // Segments are cut and queued here; nothing is awaited. The `await`
@@ -646,6 +843,9 @@ export class AIChatService {
       // full tool trace and, when the agent proposed a write, the token that
       // has to survive to the approval round trip.
       toolsUsed = result.tools_used;
+      // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
+      // sobre lo capturado por frames si ambos existen.
+      vexPlan = result.pending_plan ?? null;
       // `plan_continue`: el turno terminó a propósito sin texto (el cliente
       // encadena otro); `aborted`: otro turno lo reemplazó. En ambos casos el
       // silencio es correcto y el fallback sería ruido.
@@ -738,9 +938,33 @@ export class AIChatService {
       yield doneChunk;
     }
 
-    // Save assistant response after stream completes
-    if (fullContent) {
-      await this.prisma.ai_messages.create({
+    // Save assistant response after stream completes.
+    //
+    // También cuando el turno Vex no produjo texto pero sí plan o bloques: la
+    // tarjeta ya viajó al panel y, sin fila, recargar la perdería (y el
+    // approve no tendría estado contra el cual validarse).
+    const vexBlockRefs = await this.resolveVexTurnBlocks(
+      conversationId,
+      vexTurn,
+      toolsUsed,
+      turnStartedAt,
+    );
+    const vexMetadata = this.vexTurnMetadata(
+      vexBlockRefs,
+      vexPlan ?? vexTurn?.plan ?? null,
+    );
+    if (fullContent || vexMetadata) {
+      // La propuesta no entra en `tool_calls`: la rama de confirmación del
+      // bucle sale por `continue` sin registrarla como herramienta usada.
+      // Sin esta marca, el turno siguiente no tiene forma de saber que hay
+      // una tarjeta esperando, y contestar "sí" en texto acuñaba otra
+      // propuesta idéntica en vez de señalar la que ya está en pantalla.
+      // Convive con los bloques/plan de Vex en el mismo objeto.
+      const metadata = {
+        ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
+        ...vexMetadata,
+      };
+      const assistantMessage = await this.prisma.ai_messages.create({
         data: {
           conversation_id: conversationId,
           role: 'assistant',
@@ -756,18 +980,12 @@ export class AIChatService {
                 result: tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
               })) as Prisma.InputJsonValue)
             : undefined,
-          // La propuesta no entra en `tool_calls`: la rama de confirmación del
-          // bucle sale por `continue` sin registrarla como herramienta usada.
-          // Sin esta marca, el turno siguiente no tiene forma de saber que hay
-          // una tarjeta esperando, y contestar "sí" en texto acuñaba otra
-          // propuesta idéntica en vez de señalar la que ya está en pantalla.
-          ...(pendingProposal && {
-            metadata: {
-              pending_confirmation: pendingProposal,
-            } as Prisma.InputJsonValue,
-          }),
+          ...(Object.keys(metadata).length > 0
+            ? { metadata: metadata as Prisma.InputJsonValue }
+            : {}),
         },
       });
+      await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
 
       await this.prisma.ai_conversations.update({
         where: { id: conversationId },
@@ -833,6 +1051,193 @@ export class AIChatService {
   }
 
   /**
+   * Mueve el estado de la tarjeta de plan Vex (`metadata.plan.status`) en el
+   * mensaje que propuso ese `plan_id`. Lo llaman aprobar / rechazar / aplicar
+   * de la superficie Vex para que recargar la conversación muestre la tarjeta
+   * con su estado real en vez de una propuesta eterna.
+   *
+   * Propiedad del hilo vía `getConversation`: solo el dueño reescribe su
+   * tarjeta. `false` cuando ningún mensaje del hilo propuso ese plan — no es
+   * error: el plan pudo nacer en un turno que nunca persistió mensaje.
+   */
+  async updateVexPlanStatus(
+    conversationId: number,
+    planId: string,
+    status: string,
+  ): Promise<boolean> {
+    if (!(VEX_PLAN_STATUSES as readonly string[]).includes(status)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        `status debe ser uno de: ${VEX_PLAN_STATUSES.join(', ')}.`,
+      );
+    }
+    const conversation = await this.getConversation(conversationId);
+    const message = [...conversation.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === 'assistant' &&
+          (m.metadata as Record<string, any> | null)?.plan?.plan_id === planId,
+      );
+    if (!message) return false;
+    const previous = (message.metadata as Record<string, any>) ?? {};
+    const metadata = {
+      ...previous,
+      plan: { ...previous.plan, status },
+    };
+    // `updateMany` y no `update`: `ai_messages` es relational-scoped y la
+    // extensión funde `conversation: {...}` en el `where`, lo que rompe el
+    // `WhereUniqueInput` que `update` exige. Solo escalares acá: una llave
+    // `conversation` propia colisionaría con la inyectada.
+    const { count } = await this.prisma.ai_messages.updateMany({
+      where: { id: message.id, conversation_id: conversationId },
+      data: { metadata: metadata as Prisma.InputJsonValue },
+    });
+    return count > 0;
+  }
+
+  /**
+   * El approve (`VexController`) avisa por evento —llamada directa sería un
+   * import circular (`AIChatModule` → `VexModule`)— y acá se mueve la tarjeta
+   * a `approved` para que recargar muestre su estado. Contabilidad de
+   * vitrina: si falla, se registra y la aprobación (ya acuñada) sigue válida.
+   * Cableado E2E-1 del paso 6 de la remediación.
+   */
+  @OnEvent('ai.vex.plan_approved')
+  async onVexPlanApproved(payload: {
+    conversation_id: number;
+    plan_id: string;
+  }): Promise<void> {
+    try {
+      await this.updateVexPlanStatus(
+        payload.conversation_id,
+        payload.plan_id,
+        'approved',
+      );
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo marcar el plan ${payload.plan_id} como approved (conversación ${payload.conversation_id}): ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Gate de los turnos de Vex: rol + toggle + plan, en ese orden.
+   *
+   * Es la versión inline del triple que `vex.controller.ts` expresa con
+   * decoradores (`@Roles(OWNER, ADMIN)` + `VexEnabledGuard` +
+   * `@RequireAIFeature('vex_agent')`): acá no sirven los decoradores porque el
+   * gate depende de la key del turno —hilo u override por mensaje—, que solo
+   * se conoce dentro del servicio. Cada pata espeja a su gemela:
+   *
+   * 1. Rol — `RolesGuard` estricto: `owner`/`admin` del JWT, sin bypass de
+   *    `super_admin`, igual que en `vex.controller.ts`. 403 `AUTH_PERM_001`.
+   * 2. Toggle — `VexEnabledGuard`: solo `true` explícito abre; fila ausente,
+   *    bloque ausente y `false` fallan cerrados. 403 `AI_AGENT_004`.
+   * 3. Plan — `AiAccessGuard('vex_agent')` inline: respeta `STORE_GATE_ENFORCE`
+   *    (log-only observa y pasa) y mapea el `reason` al `ErrorCodes`
+   *    correspondiente. Sin `store_id` en contexto, `SUBSCRIPTION_001` en
+   *    enforce.
+   *
+   * No-op para cualquier key distinta de `vex`: los turnos de Vexi y de los
+   * demás agentes no tocan este camino.
+   */
+  private async assertVexTurnAccess(agentKey: string | null): Promise<void> {
+    if (agentKey !== VEX_AGENT_KEY) return;
+    const context = RequestContextService.getContext();
+
+    const roles = context?.roles ?? [];
+    if (!roles.includes(UserRole.OWNER) && !roles.includes(UserRole.ADMIN)) {
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
+    }
+
+    const storeId = context?.store_id;
+    // Sin tienda en scope no hay interruptor que evaluar; la pata de plan
+    // decide abajo (igual que `VexEnabledGuard` deja pasar y `AiAccessGuard`
+    // exige contexto).
+    if (storeId) {
+      const row = await this.globalPrisma.store_settings.findUnique({
+        where: { store_id: storeId },
+        select: { settings: true },
+      });
+      const settings = row?.settings as {
+        vex?: { enabled?: boolean };
+      } | null;
+      if (settings?.vex?.enabled !== true) {
+        throw new VendixHttpException(
+          ErrorCodes.AI_AGENT_004,
+          'Vex está desactivado para esta tienda. Un propietario o administrador puede volver a activarlo en Configuración → Agentes IA, pestaña Vex.',
+        );
+      }
+    }
+
+    if (!storeId) {
+      if (this.gateConfig?.isEnforce()) {
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+      }
+      this.logger.warn(
+        JSON.stringify({
+          event: 'AI_GATE_OBSERVATION',
+          feature: VEX_AGENT_KEY,
+          outcome: 'would_block',
+          reason: 'missing_store_context',
+        }),
+      );
+      return;
+    }
+
+    // `@Optional()` por las construcciones posicionales de los specs; en
+    // producción resuelven desde el `SubscriptionsModule` global. Un turno
+    // de Vex sin gate de plan falla cerrado, nunca abierto.
+    if (!this.subscriptionAccess || !this.gateConfig) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_005);
+    }
+
+    let result: Awaited<
+      ReturnType<SubscriptionAccessService['canUseAIFeature']>
+    >;
+    try {
+      result = await this.subscriptionAccess.canUseAIFeature(
+        storeId,
+        'vex_agent',
+      );
+    } catch (err) {
+      this.logger.error(
+        `AI_GATE_ERROR feature=vex_agent err=${(err as Error).message}`,
+      );
+      if (this.gateConfig.isEnforce()) {
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+      }
+      return;
+    }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'AI_GATE_CHECK',
+        storeId,
+        feature: 'vex_agent',
+        allowed: result.allowed,
+        mode: result.mode,
+        reason: result.reason,
+        state: result.subscription_state,
+        enforce: this.gateConfig.isEnforce(),
+      }),
+    );
+
+    if (result.mode === 'block' && this.gateConfig.isEnforce()) {
+      const key =
+        (result.reason as keyof typeof ErrorCodes) ?? 'SUBSCRIPTION_005';
+      const entry = ErrorCodes[key] ?? ErrorCodes.SUBSCRIPTION_005;
+      const details = {
+        subscription_state: result.subscription_state,
+        plan_id: result.plan_id ?? null,
+        has_record: result.has_record,
+      };
+      throw new VendixHttpException(entry, undefined, details);
+    }
+  }
+
+  /**
    * `agent_key` fijado en la creación, guardado en `metadata` (F4). Se lee
    * defensivo: `metadata` es `Json?` libre y puede traer cualquier forma de
    * escrituras viejas o ediciones manuales.
@@ -845,6 +1250,20 @@ export class AIChatService {
     return typeof raw === 'string' && raw.trim() ? raw : null;
   }
 
+  /** Aplica el agente configurable solo al chat por defecto, sin migrar hilos. */
+  private turnAgentKey(
+    conversation: ConversationWithMessages,
+    override?: string,
+  ): string | null {
+    return (
+      override ??
+      this.conversationAgentKey(conversation) ??
+      (!conversation.app_key || conversation.app_key === 'chat_assistant'
+        ? 'vexi'
+        : null)
+    );
+  }
+
   /**
    * Resuelve la fila de `ai_agents` para el turno, o `null` cuando no hay
    * agente (camino exacto de hoy).
@@ -853,8 +1272,8 @@ export class AIChatService {
    * resiliencia gana sobre el fallo rápido porque el turno ya existe y el
    * usuario está esperando respuesta (en `createConversation` sí se falla
    * rápido, porque ahí todavía no hay nada que romper). Un agente borrado o
-   * desactivado a mitad de una conversación larga vuelve a ser Vexi en vez de
-   * dejar el hilo muerto.
+   * desactivado a mitad de una conversación larga vuelve al comportamiento
+   * anterior de la app en vez de dejar el hilo muerto.
    */
   private async resolveChatAgent(
     agentKey: string | null,
@@ -891,8 +1310,59 @@ export class AIChatService {
       app_key: row.app_key,
       system_prompt: row.system_prompt,
       allowed_tools: row.allowed_tools ?? [],
+      denied_tools: row.denied_tools ?? [],
       max_iterations: row.max_iterations,
+      // Acceso tolerante: la columna llega con la migración del paso A y el
+      // cliente Prisma local puede no tenerla generada todavía.
+      timeout_seconds:
+        (row as { timeout_seconds?: number | null }).timeout_seconds ?? null,
     };
+  }
+
+  /**
+   * Folds the person's latest block interactions into the turn goal, so
+   * "esas filas" resolves to the actual selection.
+   *
+   * Vex turns only: Vexi never renders blocks, so its goal stays byte-identical.
+   * Never throws — a selection lookup failure must not fail the turn, and
+   * without `VexBlockService` (positional test constructions) there is simply
+   * no selection to fold.
+   */
+  private async withBlockSelection(
+    goal: string,
+    agentKey: string | null,
+    conversationId: number,
+  ): Promise<string> {
+    if (agentKey !== VEX_AGENT_KEY || !this.vexBlocks) return goal;
+    let selections: Awaited<
+      ReturnType<VexBlockService['recentSelections']>
+    > = [];
+    try {
+      selections = await this.vexBlocks.recentSelections(conversationId);
+    } catch (error) {
+      this.logger.warn(
+        `Block selections unavailable for conversation ${conversationId}: ${
+          (error as Error)?.message ?? 'unknown'
+        }`,
+      );
+      return goal;
+    }
+    if (selections.length === 0) return goal;
+    const notes = selections.map((s) => {
+      const what =
+        s.type === 'row_select'
+          ? `filas seleccionadas (${s.selection.length}${
+              s.truncated ? '+, truncadas a 50' : ''
+            })`
+          : `interacción ${s.type}`;
+      const label = s.title ? ` (“${s.title}”)` : '';
+      return `- Bloque ${s.kind}${label} ${s.block_id}: ${what}:\n${JSON.stringify(s.selection)}`;
+    });
+    return (
+      `${goal}\n\n[Contexto de pantalla: la persona interactuó con estos bloques. ` +
+      `Si se refiere a "esas", "las seleccionadas" o "lo marcado", usa estos datos, ` +
+      `no los adivines ni pidas que los repita.]\n${notes.join('\n')}`
+    );
   }
 
   /**
@@ -909,15 +1379,30 @@ export class AIChatService {
    * - `allowed_tools` no vacío como filtro adicional sobre el plan (F3); el
    *   loop lo intersecta con permisos del caller y `tools_allowed`.
    * - `max_iterations` de la fila cuando está definido.
+   * - `agent_key` + `agent_allowed_tools` / `agent_denied_tools`: alcance de
+   *   la fila (sin esto Vex vería las `ui_*` que tiene denegadas y correría
+   *   con presupuesto por defecto en vez del suyo).
+   * - `conversation_id`: el loop lo usa como default de las `vex_*` que
+   *   guardan bloques, para que el modelo no tenga que adivinarlo.
+   * - `plan_approval` + `block_sink`: SOLO cuando el agente es `vex`. Vexi y
+   *   los demás agentes reciben exactamente lo de antes, sin esas llaves.
    */
   private resolveAgentLoopArgs(
     agent: ResolvedChatAgent | null,
     conversation: ConversationWithMessages,
+    vexTurn?: VexTurnCollection | null,
   ): {
     app_key?: string;
     system_prompt?: string;
     tools?: string[];
     max_iterations?: number;
+    agent_timeout_seconds?: number;
+    agent_key?: string;
+    agent_allowed_tools?: string[];
+    agent_denied_tools?: string[];
+    conversation_id?: number;
+    plan_approval?: AgentPlanApprovalHook;
+    block_sink?: AgentBlockSink;
   } {
     const appKey = agent?.app_key || conversation.app_key || 'chat_assistant';
     if (!agent) {
@@ -926,10 +1411,377 @@ export class AIChatService {
     const tools =
       agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined;
     const max_iterations = agent.max_iterations ?? undefined;
+    const scope = {
+      // Solo viaja cuando la fila lo define: sin valor el loop usa su default
+      // y la forma de los argumentos no cambia para los demás agentes.
+      ...(agent.timeout_seconds != null
+        ? { agent_timeout_seconds: agent.timeout_seconds }
+        : {}),
+      agent_key: agent.key,
+      agent_allowed_tools:
+        agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined,
+      agent_denied_tools:
+        agent.denied_tools.length > 0 ? agent.denied_tools : undefined,
+      conversation_id: conversation.id,
+    };
+    // Solo Vex propone planes completos y compacta a bloques: el cableado viaja
+    // únicamente en sus turnos, y ausente (no `undefined`) en los demás para
+    // que su forma siga byte-idéntica a la de antes.
+    const vexWiring =
+      agent.key === VEX_AGENT_KEY
+        ? this.vexLoopWiring(conversation, vexTurn)
+        : {};
     if (!agent.app_key && !conversation.app_key && agent.system_prompt) {
-      return { system_prompt: agent.system_prompt, tools, max_iterations };
+      return {
+        system_prompt: agent.system_prompt,
+        tools,
+        max_iterations,
+        ...scope,
+        ...vexWiring,
+      };
     }
-    return { app_key: appKey, tools, max_iterations };
+    return { app_key: appKey, tools, max_iterations, ...scope, ...vexWiring };
+  }
+
+  /**
+   * Cableado Vex del loop: hook de aprobación de plan + sink de bloques.
+   *
+   * Cada pata se omite (no se pasa a medias) cuando su servicio no resolvió:
+   * un hook sin clasificador o sin persistencia de hashes propondría un plan
+   * que approve rechazaría entero, y un sink sin servicio es indistinguible de
+   * no compactar. El turno sigue corriendo en ambos casos.
+   */
+  private vexLoopWiring(
+    conversation: ConversationWithMessages,
+    vexTurn?: VexTurnCollection | null,
+  ): {
+    plan_approval?: AgentPlanApprovalHook;
+    block_sink?: AgentBlockSink;
+  } {
+    const wiring: {
+      plan_approval?: AgentPlanApprovalHook;
+      block_sink?: AgentBlockSink;
+    } = {};
+    const hook = this.planApprovalHookFor(conversation);
+    if (hook) {
+      wiring.plan_approval = hook;
+    } else {
+      this.logger.warn(
+        `Vex turn on conversation ${conversation.id} runs without the plan-approval hook (PlanApprovalService/VexiConfirmationService unresolved) — its plan cannot persist step hashes.`,
+      );
+    }
+    const sink = this.blockSinkFor(conversation, vexTurn);
+    if (sink) {
+      wiring.block_sink = sink;
+    } else {
+      this.logger.warn(
+        `Vex turn on conversation ${conversation.id} runs without the block sink (VexBlockService unresolved) — oversized results compact without a block_id.`,
+      );
+    }
+    return wiring;
+  }
+
+  /**
+   * Hook de aprobación que el loop usa en DOS fases: en la propuesta acumula
+   * (clasifica + persiste hashes vía `PlanApprovalService` +
+   * `VexiPlanStateService`); en la ejecución redime contra el token.
+   *
+   * Sin token en un turno que propone: el token lo acuña approve y vuelve con
+   * la continuación de aprobación, así que hasta entonces todo redeem responde
+   * `missing` y cada paso cae a su propia tarjeta — la dirección segura.
+   */
+  private planApprovalHookFor(
+    conversation: ConversationWithMessages,
+  ): AgentPlanApprovalHook | undefined {
+    if (!this.planApproval || !this.confirmations) return undefined;
+    const planApproval = this.planApproval;
+    const confirmations = this.confirmations;
+    const conversationId = conversation.id;
+    // Identidad del plan que este turno proponga: el loop la lee de
+    // `plan_approval.plan_id` y la pone en el frame; los hashes se guardan con
+    // la misma, y approve exige que coincida con la de la URL.
+    const planId = randomUUID();
+    return {
+      plan_id: planId,
+      redeem: async () => 'missing' as const,
+      issueSingleUse: (tool, args) =>
+        confirmations.issue(
+          tool,
+          args,
+          RequestContextService.getContext()?.user_id,
+        ),
+      classifyProposedSteps: (steps) => planApproval.classifySteps(steps),
+      saveProposedSteps: async (steps) => {
+        await this.planState.setStepHashes(conversationId, steps, planId);
+      },
+    };
+  }
+
+  /**
+   * Dónde el loop deja los payloads que no caben en la ventana (>6000
+   * caracteres): bloques `markdown` bajo esta conversación, vía
+   * `VexBlockService` tal cual (sin tocarlo).
+   *
+   * Sin `message_id`: la fila del asistente se crea cuando el stream cierra,
+   * después del turno — el bloque nace huérfano de mensaje y el cierre del
+   * turno lo enlaza (`attachVexTurnBlocks`) y guarda su puntero en
+   * `metadata.blocks`. Cada `save` también alimenta el colector, para que el
+   * cierre no dependa de re-leer lo que el turno acaba de escribir.
+   */
+  private blockSinkFor(
+    conversation: ConversationWithMessages,
+    vexTurn?: VexTurnCollection | null,
+  ): AgentBlockSink | undefined {
+    if (!this.vexBlocks) return undefined;
+    const blocks = this.vexBlocks;
+    const conversationId = conversation.id;
+    return {
+      save: async ({ conversation_id, kind, spec, data }) => {
+        const row = await blocks.create({
+          conversation_id: conversation_id ?? conversationId,
+          kind,
+          spec,
+          data: data as Record<string, any>,
+        });
+        vexTurn?.blocks.set(row.id, {
+          block_id: row.id,
+          kind: row.kind,
+          version: row.version,
+        });
+        return row.id;
+      },
+    };
+  }
+
+  /**
+   * Variables del turno Vex: el snapshot de negocio SIN `ui_context` (Vex no
+   * toca el navegador y ese material lo compone el cliente) MÁS los bloques
+   * vivos de la conversación, para que el modelo siga trabajando sobre lo
+   * que ya mostró sin re-ejecutar consultas.
+   *
+   * Nunca rompe el turno: sin `VexBlockService` (construcciones posicionales
+   * de specs) o con el listado caído, el snapshot viaja sin bloques.
+   */
+  private async buildVexVariables(
+    conversationId: number,
+    attachmentIds?: string[],
+  ): Promise<Record<string, string>> {
+    let vexBlocks: Array<{
+      block_id: string;
+      kind: string;
+      version: number;
+      title?: string;
+      rows?: number;
+    }> | undefined;
+    if (this.vexBlocks) {
+      try {
+        const rows = await this.vexBlocks.listByConversation(conversationId);
+        vexBlocks = rows.map((row) => ({
+          block_id: row.id,
+          kind: row.kind,
+          version: row.version,
+          ...(typeof row.spec?.title === 'string'
+            ? { title: row.spec.title as string }
+            : {}),
+          ...(Array.isArray((row.data as Record<string, any>)?.rows)
+            ? { rows: ((row.data as Record<string, any>).rows as unknown[]).length }
+            : {}),
+        }));
+      } catch (error) {
+        this.logger.warn(
+          `Vex blocks unavailable for conversation ${conversationId}: ${
+            (error as Error)?.message ?? 'unknown'
+          }`,
+        );
+      }
+    }
+    return this.vexiContext.buildVexSnapshot({ attachmentIds, vexBlocks });
+  }
+
+  /**
+   * Guarda la referencia de lo que el turno mostró en vivo. Solo frames con
+   * identidad: `ui_block` con `block_id`, y `plan_approval` de plan completo
+   * (con `steps` + `plan_id`) — las tarjetas de un solo paso llevan
+   * `plan_id` sin `steps` y no redefinen el plan del turno.
+   */
+  private collectVexFrame(
+    vexTurn: VexTurnCollection,
+    chunk: AIStreamChunk,
+  ): void {
+    const uiBlock = chunk.ui_block;
+    if (chunk.type === 'ui_block' && uiBlock?.block_id) {
+      vexTurn.blocks.set(uiBlock.block_id, {
+        block_id: uiBlock.block_id,
+        kind: uiBlock.kind,
+        version: typeof uiBlock.version === 'number' ? uiBlock.version : 1,
+      });
+    }
+    const approval = chunk.plan_approval;
+    if (
+      chunk.type === 'plan_approval' &&
+      approval?.plan_id &&
+      approval.steps
+    ) {
+      vexTurn.plan = { plan_id: approval.plan_id, steps: approval.steps };
+    }
+  }
+
+  /**
+   * Referencias a bloques escondidas en la traza de tools (camino sync, que
+   * no ve frames): los envelopes de `vex_render_*` / `vex_block_transform`
+   * traen `data.block_id` + la vista del panel en `data.block`. Gana la
+   * vista cuando existe — es el mismo `block_id` que el frame `ui_block`
+   * llevó al panel en el camino SSE.
+   */
+  private renderBlockRefsOf(
+    toolsUsed: Array<{ name: string; args: any; result: string }>,
+  ): VexBlockRef[] {
+    const refs: VexBlockRef[] = [];
+    for (const tool of toolsUsed) {
+      const fallbackKind =
+        tool.name === 'vex_render_table'
+          ? 'table'
+          : tool.name === 'vex_render_chart'
+            ? 'chart'
+            : tool.name === 'vex_render_kpi'
+              ? 'kpi'
+              : tool.name === 'vex_render_image'
+                ? 'image'
+                : tool.name === 'vex_render_file'
+                  ? 'file'
+                  : tool.name === 'vex_block_transform'
+                    ? 'table'
+                    : null;
+      if (!fallbackKind) continue;
+      try {
+        const data = (JSON.parse(tool.result) as any)?.data;
+        const view =
+          data?.block && typeof data.block === 'object' ? data.block : null;
+        const block_id =
+          (typeof view?.block_id === 'string' && view.block_id) ||
+          data?.block_id;
+        if (typeof block_id !== 'string' || !block_id) continue;
+        const kind =
+          (typeof view?.kind === 'string' && view.kind) ||
+          (typeof data?.kind === 'string' && data.kind) ||
+          fallbackKind;
+        const rawVersion = view?.version ?? data?.version;
+        refs.push({
+          block_id,
+          kind,
+          version: typeof rawVersion === 'number' ? rawVersion : 1,
+        });
+      } catch {
+        // Resultado compactado o no-JSON: el barrido de huérfanos lo cubre.
+      }
+    }
+    return refs;
+  }
+
+  /**
+   * Fusión final de bloques del turno: lo coleccionado en vivo (sink +
+   * frames) manda, los envelopes de la traza agregan lo que el stream no
+   * vio, y el barrido de huérfanos (`message_id` NULL) sana dos casos que
+   * ningún otro camino cubre: resultados de render tan grandes que la traza
+   * guardó su forma compactada, y bloques de un turno anterior cuyo
+   * transporte cayó antes del cierre.
+   */
+  private async resolveVexTurnBlocks(
+    conversationId: number,
+    vexTurn: VexTurnCollection | null,
+    toolsUsed: Array<{ name: string; args: any; result: string }>,
+    turnStartedAt: Date,
+  ): Promise<VexBlockRef[]> {
+    if (!vexTurn) return [];
+    const merged = new Map(vexTurn.blocks);
+    for (const ref of this.renderBlockRefsOf(toolsUsed)) {
+      if (!merged.has(ref.block_id)) merged.set(ref.block_id, ref);
+    }
+    if (this.vexBlocks) {
+      try {
+        const rows = await this.vexBlocks.listByConversation(conversationId);
+        for (const row of rows) {
+          if (row.message_id !== null && row.message_id !== undefined) {
+            continue;
+          }
+          // Solo lo nacido durante ESTE turno: un huérfano anterior de la
+          // conversación no se adjunta al mensaje equivocado.
+          if (
+            !row.created_at ||
+            new Date(row.created_at).getTime() < turnStartedAt.getTime()
+          ) {
+            continue;
+          }
+          if (!merged.has(row.id)) {
+            merged.set(row.id, {
+              block_id: row.id,
+              kind: row.kind,
+              version: row.version,
+            });
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Vex turn block sweep failed for conversation ${conversationId}: ${
+            (error as Error)?.message ?? 'unknown'
+          }`,
+        );
+      }
+    }
+    return [...merged.values()];
+  }
+
+  /**
+   * `metadata` Vex del mensaje de cierre: punteros a bloques + plan en estado
+   * `proposed` con sus pasos `pending` (`{plan_id, status, steps[]}`; approve /
+   * reject / apply lo mueven en `PlanApprovalService`). `null` cuando el turno no produjo nada persistible (o no es
+   * Vex), para que la fila quede byte-idéntica a hoy.
+   */
+  private vexTurnMetadata(
+    blocks: VexBlockRef[],
+    plan: VexTurnCollection['plan'] | null,
+  ): Record<string, unknown> | null {
+    if (blocks.length === 0 && !plan) return null;
+    return {
+      ...(blocks.length > 0 ? { blocks } : {}),
+      ...(plan
+        ? {
+            // Contrato del ciclo de vida: estado del plan + estado por paso.
+            plan: {
+              plan_id: plan.plan_id,
+              status: 'proposed',
+              steps: plan.steps.map((raw, index) => {
+                const step = (raw ?? {}) as Record<string, any>;
+                return { ...step, order: step.order ?? index + 1, status: 'pending' };
+              }),
+            },
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Enlaza los bloques del turno con el mensaje que cierra. Aislado: si
+   * falla, los bloques quedan huérfanos pero el mensaje (con sus punteros)
+   * ya persistió, y el próximo turno los recoge en su barrido.
+   */
+  private async attachVexTurnBlocks(
+    blocks: VexBlockRef[],
+    messageId: number,
+  ): Promise<void> {
+    if (blocks.length === 0 || !this.vexBlocks) return;
+    try {
+      await this.vexBlocks.attachToMessage(
+        blocks.map((b) => b.block_id),
+        messageId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Vex turn blocks could not be linked to message ${messageId}: ${
+          (error as Error)?.message ?? 'unknown'
+        }`,
+      );
+    }
   }
 
   /**

@@ -36,6 +36,24 @@ import { SubscriptionAccessService } from '../domains/store/subscriptions/servic
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 import { isAIFeatureKey } from '../domains/store/subscriptions/types/access.types';
 
+/**
+ * Reads the provider prompt-cache counters off a usage object. Providers that
+ * do not report them (OpenAI-compatible, image) yield 0 so the log columns
+ * stay count-only.
+ */
+export function extractCacheTokens(usage: object | undefined): {
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+} {
+  const u = usage as
+    | { cacheReadTokens?: number; cacheCreationTokens?: number }
+    | undefined;
+  return {
+    cache_read_tokens: u?.cacheReadTokens ?? 0,
+    cache_creation_tokens: u?.cacheCreationTokens ?? 0,
+  };
+}
+
 @Injectable()
 export class AIEngineService implements OnModuleInit {
   private readonly logger = new Logger(AIEngineService.name);
@@ -539,10 +557,13 @@ export class AIEngineService implements OnModuleInit {
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
 
+      const cacheTokens = extractCacheTokens(logResponse.usage);
       const costUsd = this.aiLoggingService.calculateCost(
         configSettings,
         logResponse.usage?.promptTokens ?? 0,
         logResponse.usage?.completionTokens ?? 0,
+        cacheTokens.cache_read_tokens,
+        cacheTokens.cache_creation_tokens,
       );
 
       this.aiLoggingService.logRequest({
@@ -554,6 +575,7 @@ export class AIEngineService implements OnModuleInit {
         model: logResponse.model,
         prompt_tokens: logResponse.usage?.promptTokens ?? 0,
         completion_tokens: logResponse.usage?.completionTokens ?? 0,
+        ...cacheTokens,
         cost_usd: costUsd,
         latency_ms: latencyMs,
         status: logStatus,
@@ -694,10 +716,13 @@ export class AIEngineService implements OnModuleInit {
         : undefined;
 
       const usage = lastChunk?.type === 'done' ? lastChunk.usage : undefined;
+      const cacheTokens = extractCacheTokens(usage);
       const costUsd = this.aiLoggingService.calculateCost(
         configSettings,
         usage?.promptTokens ?? 0,
         usage?.completionTokens ?? 0,
+        cacheTokens.cache_read_tokens,
+        cacheTokens.cache_creation_tokens,
       );
 
       this.aiLoggingService.logRequest({
@@ -709,6 +734,7 @@ export class AIEngineService implements OnModuleInit {
         model: undefined,
         prompt_tokens: usage?.promptTokens ?? 0,
         completion_tokens: usage?.completionTokens ?? 0,
+        ...cacheTokens,
         cost_usd: costUsd,
         latency_ms: latencyMs,
         status: lastChunk?.type === 'error' ? 'error' : 'success',
@@ -782,10 +808,13 @@ export class AIEngineService implements OnModuleInit {
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
 
+      const cacheTokens = extractCacheTokens(logResponse.usage);
       const costUsd = this.aiLoggingService.calculateCost(
         configSettings,
         logResponse.usage?.promptTokens ?? 0,
         logResponse.usage?.completionTokens ?? 0,
+        cacheTokens.cache_read_tokens,
+        cacheTokens.cache_creation_tokens,
       );
 
       this.aiLoggingService.logRequest({
@@ -797,6 +826,7 @@ export class AIEngineService implements OnModuleInit {
         model: logResponse.model,
         prompt_tokens: logResponse.usage?.promptTokens ?? 0,
         completion_tokens: logResponse.usage?.completionTokens ?? 0,
+        ...cacheTokens,
         cost_usd: costUsd,
         latency_ms: latencyMs,
         status: logStatus,
@@ -938,10 +968,13 @@ export class AIEngineService implements OnModuleInit {
         : undefined;
 
       const usage = completedChunk?.usage;
+      const cacheTokens = extractCacheTokens(usage);
       const costUsd = this.aiLoggingService.calculateCost(
         configSettings,
         usage?.promptTokens ?? 0,
         usage?.completionTokens ?? 0,
+        cacheTokens.cache_read_tokens,
+        cacheTokens.cache_creation_tokens,
       );
 
       this.aiLoggingService.logRequest({
@@ -953,6 +986,7 @@ export class AIEngineService implements OnModuleInit {
         model: completedChunk?.model,
         prompt_tokens: usage?.promptTokens ?? 0,
         completion_tokens: usage?.completionTokens ?? 0,
+        ...cacheTokens,
         cost_usd: costUsd,
         latency_ms: latencyMs,
         status: lastChunk?.type === 'error' ? 'error' : 'success',
@@ -1564,10 +1598,13 @@ export class AIEngineService implements OnModuleInit {
       : undefined;
     const usage = params.response.usage;
 
+    const cacheTokens = extractCacheTokens(usage);
     const costUsd = this.aiLoggingService.calculateCost(
       configSettings,
       usage?.promptTokens ?? 0,
       usage?.completionTokens ?? 0,
+      cacheTokens.cache_read_tokens,
+      cacheTokens.cache_creation_tokens,
     );
 
     this.aiLoggingService.logRequest({
@@ -1579,6 +1616,7 @@ export class AIEngineService implements OnModuleInit {
       model: params.response.model,
       prompt_tokens: usage?.promptTokens ?? 0,
       completion_tokens: usage?.completionTokens ?? 0,
+      ...cacheTokens,
       cost_usd: costUsd,
       latency_ms: latencyMs,
       status: params.status,

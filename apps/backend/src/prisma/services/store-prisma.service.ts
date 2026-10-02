@@ -91,6 +91,11 @@ export class StorePrismaService extends BasePrismaService {
     // registro.
     'ai_attachments',
     'ai_agent_tasks',
+    // Bloques UI de Vex. `store_id` propio y NO nullable: scoping directo por
+    // tienda, igual que `ai_attachments`. Sin este registro el getter
+    // devolvería un delegate SIN scoping y un bloque sería legible por id
+    // desde otra tienda.
+    'ai_ui_blocks',
     'dispatch_notes',
     'employee_stores',
     'accounts_receivable',
@@ -1544,6 +1549,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_agent_tasks() {
     return this.scoped_client.ai_agent_tasks;
+  }
+
+  get ai_ui_blocks() {
+    return this.scoped_client.ai_ui_blocks;
   }
 
   // Order Installments

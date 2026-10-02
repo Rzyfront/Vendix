@@ -1,5 +1,6 @@
 import { DianSendBillResponse } from './interfaces/dian-response.interface';
 import { DianSoapClient } from './dian-soap.client';
+import { DIAN_SOAP_ACTIONS } from './constants/dian-endpoints';
 
 /**
  * El parseo de la respuesta de la DIAN es un SCRAPE POR REGEX, y no tenía una
@@ -239,5 +240,67 @@ describe('DianSoapClient · timeout', () => {
     const result = await run(new DianSoapClient());
     expect(result.timed_out).toBe(false);
     expect(result.success).toBe(true);
+  });
+});
+
+describe('DianSoapClient · GetStatusEvent', () => {
+  const original_fetch = global.fetch;
+  afterEach(() => {
+    global.fetch = original_fetch;
+    jest.restoreAllMocks();
+  });
+
+  it('sends the CUFE as trackId with XML escaping and the official action', async () => {
+    const fetch_mock = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () => '<s:Envelope><b:StatusCode>90</b:StatusCode></s:Envelope>',
+    });
+    global.fetch = fetch_mock as any;
+
+    await new DianSoapClient().getStatusEvent('cufe<&"', 'test');
+
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
+    const [endpoint, request] = fetch_mock.mock.calls[0];
+    expect(endpoint).toContain('vpfe-hab.dian.gov.co');
+    expect(request.headers['Content-Type']).toContain(
+      `action="${DIAN_SOAP_ACTIONS.GetStatusEvent}"`,
+    );
+    expect(request.body).toContain(
+      '<wcf:GetStatusEvent><wcf:trackId>cufe&lt;&amp;&quot;</wcf:trackId></wcf:GetStatusEvent>',
+    );
+    expect(request.body).not.toContain('<wcf:SendEventUpdateStatus>');
+  });
+
+  it('rejects a blank CUFE before making a network request', async () => {
+    const fetch_mock = jest.fn();
+    global.fetch = fetch_mock as any;
+
+    await expect(new DianSoapClient().getStatusEvent(' \t ', 'test')).rejects.toThrow(
+      'CUFE is required',
+    );
+    expect(fetch_mock).not.toHaveBeenCalled();
+  });
+
+  it('reuses the signed WS-Security envelope path when credentials are supplied', async () => {
+    const client = new DianSoapClient();
+    const signed_builder = jest
+      .spyOn(client as any, 'buildSignedEnvelope')
+      .mockResolvedValue('<signed-envelope><wsse:Security/></signed-envelope>');
+    const fetch_mock = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () => '<s:Envelope><b:StatusCode>90</b:StatusCode></s:Envelope>',
+    });
+    global.fetch = fetch_mock as any;
+    const credentials = { signer: {}, certificate_der_base64: 'cert' } as any;
+
+    await client.getStatusEvent('cufe-123', 'test', credentials);
+
+    expect(signed_builder).toHaveBeenCalledWith(
+      expect.stringContaining('vpfe-hab.dian.gov.co'),
+      DIAN_SOAP_ACTIONS.GetStatusEvent,
+      '<wcf:GetStatusEvent><wcf:trackId>cufe-123</wcf:trackId></wcf:GetStatusEvent>',
+      credentials,
+    );
+    expect(fetch_mock.mock.calls[0][1].body).toContain('<wsse:Security/>');
   });
 });

@@ -27,12 +27,24 @@ export interface DianEventParty {
 }
 
 /**
- * Extra data the negotiable-instrument events (035–051) carry and the reception
- * family (030–034) does not. Every field is optional here and enforced upstream by
- * `DianEventsService`, which knows the per-event required sets — a builder that
- * throws on missing data is a builder no test can exercise in isolation.
+ * Extra data carried by buyer receipt events (030/032), claims (031), and the
+ * negotiable-instrument family (035–051). Fields remain optional at this shared
+ * builder boundary; buyer-event requirements are enforced by the provider before
+ * this builder is invoked.
  */
 export interface DianEventDetails {
+  /** Natural person who received the goods/service for buyer receipt events. */
+  receipt_person?: {
+    document_type: string;
+    document_number: string;
+    document_dv?: string;
+    first_name: string;
+    family_name: string;
+    job_title?: string;
+    organization_department?: string;
+  };
+  /** DIAN Concepto de Reclamo code (01–04), required for buyer event 031. */
+  claim_concept_code?: '01' | '02' | '03' | '04';
   /**
    * Endorsee / direct buyer / competent officer, depending on the event.
    * `cac:DocumentResponse/cac:IssuerParty` per the annex XPath.
@@ -55,6 +67,20 @@ export interface DianEventDetails {
   validity_start_date?: string;
   validity_end_date?: string;
 }
+
+const CLAIM_CONCEPT_NAMES: Record<NonNullable<DianEventDetails['claim_concept_code']>, string> = {
+  '01': 'Documento con inconsistencias',
+  '02': 'Mercancía no entregada totalmente',
+  '03': 'Mercancía no entregada parcialmente',
+  '04': 'Servicio no prestado',
+};
+
+const BUYER_EVENT_DESCRIPTIONS: Partial<Record<DianEventCode, string>> = {
+  '030': 'Acuse de recibo de Factura Electrónica de Venta',
+  '031': 'Reclamo de la Factura Electrónica de Venta',
+  '032': 'Recibo del bien y/o prestación del servicio',
+  '033': 'Aceptación expresa',
+};
 
 export interface UblApplicationResponseParams {
   /** Event consecutive assigned by us — `cbc:ID` of the ApplicationResponse. */
@@ -138,6 +164,10 @@ export class UblApplicationResponseBuilder {
       description,
     } = params;
 
+    if (details?.receipt_person && details.issuer_party) {
+      throw new Error('ApplicationResponse cannot contain both receipt_person and issuer_party');
+    }
+
     const profile_execution_id =
       environment === 'production'
         ? UBL_CONSTANTS.PROFILE_EXECUTION_ID_PROD
@@ -206,10 +236,14 @@ export class UblApplicationResponseBuilder {
     if (details?.endorsement_list_id) {
       response_code.att('listID', details.endorsement_list_id);
     }
+    if (event_code === '031' && details?.claim_concept_code && CLAIM_CONCEPT_NAMES[details.claim_concept_code]) {
+      response_code.att('listID', details.claim_concept_code);
+      response_code.att('name', CLAIM_CONCEPT_NAMES[details.claim_concept_code]);
+    }
     response_code.txt(event_code);
     response
       .ele(UBL_NAMESPACES.CBC, 'Description')
-      .txt(description || DIAN_EVENT_LABELS[event_code] || event_code);
+      .txt(BUYER_EVENT_DESCRIPTIONS[event_code] || description || DIAN_EVENT_LABELS[event_code] || event_code);
 
     // Mandate validity. An ABSENT period means "mandato ilimitado" to the annex, so
     // emitting blank dates would assert a bounded mandate with no bounds.
@@ -248,7 +282,24 @@ export class UblApplicationResponseBuilder {
     // the event. UBL sequences DocumentResponse as
     // Response → DocumentReference → IssuerParty → RecipientParty, so this must
     // come AFTER the reference block or the XSD fails.
-    if (details?.issuer_party) {
+    if (details?.receipt_person) {
+      const person = details.receipt_person;
+      const person_element = document_response
+        .ele(UBL_NAMESPACES.CAC, 'IssuerParty')
+        .ele(UBL_NAMESPACES.CAC, 'Person');
+      const id = person_element.ele(UBL_NAMESPACES.CBC, 'ID');
+      id.att('schemeName', person.document_type);
+      if (person.document_type === '31' && person.document_dv) {
+        id.att('schemeID', person.document_dv);
+      }
+      id.txt(person.document_number);
+      person_element.ele(UBL_NAMESPACES.CBC, 'FirstName').txt(person.first_name);
+      person_element.ele(UBL_NAMESPACES.CBC, 'FamilyName').txt(person.family_name);
+      if (person.job_title) person_element.ele(UBL_NAMESPACES.CBC, 'JobTitle').txt(person.job_title);
+      if (person.organization_department) {
+        person_element.ele(UBL_NAMESPACES.CBC, 'OrganizationDepartment').txt(person.organization_department);
+      }
+    } else if (details?.issuer_party) {
       UblApplicationResponseBuilder.buildEventParty(
         document_response,
         'IssuerParty',

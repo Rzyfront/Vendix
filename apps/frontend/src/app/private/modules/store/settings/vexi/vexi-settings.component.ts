@@ -15,17 +15,18 @@ import {
 } from '../../../../../core/services/vexi-api.service';
 
 /**
- * Store-wide master switch for the Vexi assistant. Vexi ships OFF: this page is
+ * Store-wide master switch for the Vexi assistant. Vexi ships OFF: this tab is
  * where each store opts in.
  *
- * Lives on its own settings page instead of as one more row inside "General"
- * because flipping this switch is not a preference — it hands an agent that
- * writes to the store's own data (products, stock, customers, orders) to every
- * user of the store, so the page has to say what is being granted and show what
- * the agent has already done. The route is gated by `vexiSettingsGuard`
- * (owner/admin) and the backend re-checks with `VexiEnabledGuard`, so hiding
- * this page is never the only thing standing between a store that never enabled
- * Vexi and the Vexi endpoints.
+ * Renders as the Vexi tab of "Agentes IA" (`AiAgentsSettingsComponent`) rather
+ * than as one more row inside "General" because flipping this switch is not a
+ * preference — it hands an agent that writes to the store's own data
+ * (products, stock, customers, orders) to every user of the store, so the tab
+ * has to say what is being granted and show what the agent has already done.
+ * The page is gated by `aiAgentsSettingsGuard` (owner/admin) and the backend
+ * re-checks with `VexiEnabledGuard`, so hiding this tab is never the only
+ * thing standing between a store that never enabled Vexi and the Vexi
+ * endpoints.
  */
 @Component({
   selector: 'app-vexi-settings',
@@ -33,14 +34,11 @@ import {
   imports: [FormsModule, SettingToggleComponent, IconComponent, DatePipe],
   template: `
     <div class="w-full max-w-3xl">
-      <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">Vexi</h1>
-        <p class="text-gray-600">
-          El asistente de Vendix. Responde preguntas sobre tu negocio, te lleva
-          al módulo que necesitas y puede ejecutar acciones por ti previa
-          confirmación.
-        </p>
-      </div>
+      <p class="text-gray-600 mb-6">
+        El asistente de Vendix. Responde preguntas sobre tu negocio, te lleva
+        al módulo que necesitas y puede ejecutar acciones por ti previa
+        confirmación.
+      </p>
 
       <div class="bg-surface rounded-lg shadow-sm border p-6">
         <app-setting-toggle

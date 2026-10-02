@@ -538,6 +538,16 @@ export function getDefaultStoreSettings(): StoreSettings {
       voice_engine: 'pipeline',
     },
 
+    // Vex — off by default, same three-legged contract as `vexi` above: the
+    // guards refuse anything but an explicit `true`, and this default is the
+    // base of `mergeStoreSettingsWithDefaults`, so `true` here would hand Vex
+    // to every store that never persisted the block — and `updateSettings`
+    // would stamp it into the row on the next unrelated save. Vex and Vexi
+    // are independent: enabling one never enables the other.
+    vex: {
+      enabled: false,
+    },
+
     // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
     promotions: {
       evaluation_strategy: 'winner_takes_all',

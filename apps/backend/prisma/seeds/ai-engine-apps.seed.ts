@@ -1,6 +1,6 @@
 import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
-import { RECEIVED_DOCUMENT_OCR_APPLICATION } from '../../src/domains/received-documents/constants/received-document-ocr.application';
+import { RECEIVED_DOCUMENT_OCR_APPLICATION } from './received-document-ocr.application';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;

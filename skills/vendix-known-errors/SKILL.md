@@ -9,7 +9,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Depurar un error cuyo síntoma no señala su causa"
@@ -100,6 +100,7 @@ Para lo demás de Zoneless y señales: `vendix-zoneless-signals`.
 | El build y los tests pasan pero la app no arranca | El **grafo de dependencias de Nest solo se valida al arrancar**. |
 | Arranca limpio y revienta en la primera petición | **Export ausente bajo SWC**: no se detecta en compilación. |
 | Un job de BullMQ reintenta más de lo configurado | **`stalled` no pasa por `attempts`**; `maxStalledCount` es otro contador. |
+| `FATAL ERROR: Reached heap limit` o heap al 90 % plano desde el arranque parece una fuga | **No es fuga: es baseline.** Un módulo re-declaró `Global/Organization/Store/EcommercePrismaService` en su `providers:` (cada copia = `PrismaClient` + `pg.Pool`, ~68 MB de heap). Esos servicios son singletons de `PrismaModule` (`@Global()`); grep en `*.module.ts` y ver `vendix-prisma-scopes` (Singleton Rule). Muestrear `heapUsed` varias veces antes de cazar fugas. |
 
 ## Prisma, base de datos y SQL
 
@@ -145,6 +146,7 @@ Puertos y contenedores: `docker restart`, **nunca matar PIDs**.
 | Dos agentes sondean y uno lee la respuesta del otro | **Nombre de archivo temporal fijo**: un `curl` fallido no escribe y `head` lee lo anterior. Usar rutas únicas por sesión. |
 | Un snapshot de Playwright no muestra el nombre accesible de un elemento | **El snapshot lo elide**, y `find` hereda la elisión. Dos señales, una sola causa. |
 | Un intento de contar impresiones da 0 aunque sí imprimió | **El iframe es un realm de JavaScript separado**: parchear `window.print` del padre no lo intercepta. Usar un `MutationObserver` que parchee `contentWindow.print` de cada iframe al agregarse. |
+| 18 suites / 295 tests en verde pero la feature no funciona en runtime | **El spec mockea el punto de cableado.** En Vex, plan/bloques pasaban porque los specs mockeaban el loop — nadie pasaba `plan_approval` ni `block_sink` en `ai-chat`. Regla: el cableado se prueba en la costura con un spy (`expect(params.plan_approval).toBeDefined()` para vex, `not.toHaveProperty` para vexi), nunca con el servicio mockeado. Ver `vendix-vex-agent` regla 3. |
 
 ## Git y árbol de trabajo compartido
 

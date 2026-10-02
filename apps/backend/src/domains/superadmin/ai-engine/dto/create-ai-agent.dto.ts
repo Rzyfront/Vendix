@@ -68,12 +68,37 @@ export class CreateAIAgentDto {
   @MaxLength(120, { each: true })
   allowed_tools?: string[];
 
+  /**
+   * Resta herramientas del catálogo del turno DESPUÉS de todos los filtros
+   * (permisos ∩ plan ∩ `allowed_tools`): lo que está acá nunca se ofrece.
+   * Vex lo usa para excluir las `ui_*`. Vacío = sin exclusiones. Misma
+   * validación blanda que `allowed_tools` (nombres desconocidos se aceptan).
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  denied_tools?: string[];
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(50)
+  @Max(60)
   max_iterations?: number | null;
+
+  /**
+   * Presupuesto de reloj del turno en segundos. `null`/ausente = default del
+   * loop (Vexi 60 s, Vex 300 s). Con un plan abierto el loop lo amplía hasta
+   * 600 s como máximo, nunca por debajo de este valor.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(30)
+  @Max(600)
+  timeout_seconds?: number | null;
 
   @IsOptional()
   @IsBoolean()

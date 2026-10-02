@@ -692,6 +692,7 @@ export function createPurchasingTools(
       name: 'approve_receive_purchase_order',
       version: '1',
       domain: 'purchasing',
+      irreversible: true,
       description:
         'Aprueba una OC en borrador y/o recibe mercancía contra ella. La recepción mueve stock real y recalcula costos: exige líneas con cantidad recibida. Guarda PO_VARIANT_001: una línea base sobre un producto con variantes se rechaza (cancela la OC y recrérala con variante). Lee primero con get_purchase_order.',
       parameters: {
@@ -993,6 +994,7 @@ export function createPurchasingTools(
       name: 'record_po_payment',
       version: '1',
       domain: 'purchasing',
+      irreversible: true,
       description:
         'Registra un pago contra una orden de compra (monto ≥0.01, método, fecha). Muestra lo ya pagado y el saldo pendiente antes de confirmar, y rechaza el sobrepago. Lee primero la orden con get_purchase_order.',
       parameters: {

@@ -180,6 +180,7 @@ export function createFinanceOpsTools(
       name: 'run_depreciation',
       version: '1',
       domain: 'finance-ops',
+      irreversible: true,
       description:
         'Corre la depreciación mensual de todos los activos activos para un año+mes: crea el asiento por activo y acumula depreciación (los periodos ya corridos se omiten sin duplicar). Cadena: list_fixed_assets (F-95) para confirmar activos depreciables. Irreversible en la práctica: exige confirmación.',
       parameters: {

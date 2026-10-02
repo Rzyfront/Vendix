@@ -114,7 +114,7 @@ export class MenuFilterService {
   private readonly authorizationGates$ = toObservable(
     computed(
       () =>
-        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.canConfigureVexi()}|${this.canAccessDashboard()}`,
+        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.canConfigureAiAgents()}|${this.canAccessDashboard()}`,
     ),
   );
 
@@ -1005,12 +1005,12 @@ export class MenuFilterService {
         fixPath: null,
       };
     }
-    if (menuItem.route === '/admin/settings/vexi' && !this.canConfigureVexi()) {
+    if (menuItem.route === '/admin/settings/ai-agents' && !this.canConfigureAiAgents()) {
       return {
         visible: false,
         blockedBy: 'permission',
         detail:
-          'Solo el propietario o un administrador puede activar o desactivar a Vexi.',
+          'Solo el propietario o un administrador puede configurar los agentes de IA.',
         fixPath: null,
       };
     }
@@ -1065,7 +1065,7 @@ export class MenuFilterService {
     if (item.route === '/admin/pqrs' && this.storeHasPqrs() !== true) {
       return false;
     }
-    if (item.route === '/admin/settings/vexi' && !this.canConfigureVexi()) {
+    if (item.route === '/admin/settings/ai-agents' && !this.canConfigureAiAgents()) {
       return false;
     }
     return true;
@@ -1264,12 +1264,13 @@ export class MenuFilterService {
   }
 
   /**
-   * Authorization over the Vexi master switch. Mirrors `vexiSettingsGuard`:
+   * Authorization over the "Agentes IA" page. Mirrors `aiAgentsSettingsGuard`:
    * role-only and deliberately narrower than `canManageUsers`, because the
-   * switch withdraws the assistant from every user of the store, not just
-   * from the person flipping it. No permission fallback on purpose.
+   * switches hand agents that write to the store's data to every user of the
+   * store, not just to the person flipping them. No permission fallback on
+   * purpose.
    */
-  private canConfigureVexi(): boolean {
+  private canConfigureAiAgents(): boolean {
     return this.authFacade.isOwner() || this.authFacade.isAdmin();
   }
 

@@ -81,6 +81,10 @@ export interface AIResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Input tokens served from the provider prompt cache (Anthropic). */
+    cacheReadTokens?: number;
+    /** Input tokens written to the provider prompt cache (Anthropic). */
+    cacheCreationTokens?: number;
   };
   model?: string;
   error?: string;
@@ -93,9 +97,64 @@ export interface AIStreamChunk {
    * `tool_call` and `tool_result` exist so the UI can narrate an agent turn
    * instead of showing a spinner for 30-40s. They are emitted by the agent
    * loop; a plain completion only ever produces `text` / `done` / `error`.
+   *
+   * `ui_block` carries a rendered UI block (Vex) whose data stays server-side;
+   * `plan_approval` carries a write proposal (single step or whole plan) for
+   * the approval card. Consumers must tolerate frames they do not understand
+   * rather than treating an unknown `type` as an error.
    */
-  type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'error' | 'plan_continue';
+  type:
+    | 'text'
+    | 'tool_call'
+    | 'tool_result'
+    | 'done'
+    | 'error'
+    | 'plan_continue'
+    | 'ui_block'
+    | 'plan_approval';
   content?: string;
+  /** Present on `ui_block`: the rendered block reference and payload. */
+  ui_block?: {
+    block_id: string;
+    kind: 'table' | 'chart' | 'kpi' | 'image' | 'file' | 'markdown';
+    version?: number;
+    spec?: Record<string, any>;
+    data?: unknown;
+  };
+  /** Present on `plan_approval`: the proposal the person must approve. */
+  plan_approval?: {
+    /**
+     * Single-step proposal (Vexi, and Vex fallback cards): the one write
+     * awaiting its own confirmation. Absent on whole-plan frames, which carry
+     * `steps` and mint their token at approve time instead of proposal time.
+     */
+    tool?: string;
+    arguments?: Record<string, any>;
+    confirmation_token?: string;
+    preview?: unknown;
+    /**
+     * Whole-plan proposal id (Vex): the active plan the steps were recorded
+     * against. Set on whole-plan frames; also echoed on single-step fallbacks
+     * resumed under an approved plan.
+     */
+    plan_id?: string;
+    /** Steps the plan token covers vs steps needing their own card. */
+    covered_steps?: number[];
+    reconfirm_steps?: number[];
+    /**
+     * Whole-plan proposal (Vex only): every write step of the turn in ONE
+     * frame, so one click approves the bundle. Absent on single-step frames.
+     */
+    steps?: Array<{
+      /** Stable within the plan (`s1`, `s2`, …); the card keys steps by it. */
+      step_id: string;
+      order: number;
+      tool: string;
+      arguments: Record<string, any>;
+      preview?: unknown;
+      irreversible: boolean;
+    }>;
+  };
   /** Present on `tool_call` and `tool_result`. */
   tool?: {
     /** Correlates the `tool_call` with its later `tool_result`. */
@@ -118,6 +177,10 @@ export interface AIStreamChunk {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Input tokens served from the provider prompt cache (Anthropic). */
+    cacheReadTokens?: number;
+    /** Input tokens written to the provider prompt cache (Anthropic). */
+    cacheCreationTokens?: number;
   };
   error?: string;
 }

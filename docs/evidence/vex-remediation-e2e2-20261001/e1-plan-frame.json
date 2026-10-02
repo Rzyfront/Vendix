@@ -1,0 +1,121 @@
+{
+ "plan_id": "44826ba2-4a02-481c-9631-e59c7beb5010",
+ "steps": [
+  {
+   "step_id": "s1",
+   "order": 1,
+   "tool": "create_product",
+   "arguments": {
+    "name": "E2E2A-vex",
+    "base_price": 1000
+   },
+   "preview": {
+    "status": "ok",
+    "target": "E2E2A-vex",
+    "changes": [
+     {
+      "field": "name",
+      "label": "Nombre",
+      "from": null,
+      "to": "E2E2A-vex"
+     },
+     {
+      "field": "base_price",
+      "label": "Precio base (sin impuestos)",
+      "from": null,
+      "to": 1000
+     },
+     {
+      "field": "product_type",
+      "label": "Tipo",
+      "from": null,
+      "to": "physical"
+     }
+    ],
+    "message": "El producto se crea activo y sin impuestos asignados; revisa sus impuestos en el m\u00f3dulo de productos.",
+    "domain": "products"
+   },
+   "irreversible": false
+  },
+  {
+   "step_id": "s2",
+   "order": 2,
+   "tool": "create_product",
+   "arguments": {
+    "name": "E2E2B-vex",
+    "base_price": 2000
+   },
+   "preview": {
+    "status": "ok",
+    "target": "E2E2B-vex",
+    "changes": [
+     {
+      "field": "name",
+      "label": "Nombre",
+      "from": null,
+      "to": "E2E2B-vex"
+     },
+     {
+      "field": "base_price",
+      "label": "Precio base (sin impuestos)",
+      "from": null,
+      "to": 2000
+     },
+     {
+      "field": "product_type",
+      "label": "Tipo",
+      "from": null,
+      "to": "physical"
+     }
+    ],
+    "message": "El producto se crea activo y sin impuestos asignados; revisa sus impuestos en el m\u00f3dulo de productos.",
+    "domain": "products"
+   },
+   "irreversible": false
+  },
+  {
+   "step_id": "s3",
+   "order": 3,
+   "tool": "archive_product",
+   "arguments": {
+    "product_id": 2513,
+    "confirmed_total_units": 0,
+    "confirmed_total_value": 0
+   },
+   "preview": {
+    "status": "warning",
+    "target": "E2E2Z-sacrificial",
+    "changes": [
+     {
+      "field": "state",
+      "label": "Estado",
+      "from": "active",
+      "to": "archived"
+     },
+     {
+      "field": "stock_write_off_units",
+      "label": "Unidades dadas de baja",
+      "from": 0,
+      "to": 0
+     },
+     {
+      "field": "stock_write_off_value",
+      "label": "Valor dado de baja",
+      "from": 0,
+      "to": 0
+     }
+    ],
+    "message": "Archivado IRREVERSIBLE: da de baja 0 unidades por 0 en 0 ubicaci\u00f3n(es).",
+    "domain": "products"
+   },
+   "irreversible": true
+  }
+ ],
+ "covered_steps": [
+  1,
+  2
+ ],
+ "reconfirm_steps": [
+  3
+ ]
+}

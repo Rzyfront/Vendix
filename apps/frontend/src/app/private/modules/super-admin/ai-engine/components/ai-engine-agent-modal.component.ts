@@ -1,4 +1,12 @@
-import { Component, input, output, OnChanges, inject } from '@angular/core';
+import {
+  Component,
+  computed,
+  inject,
+  input,
+  OnChanges,
+  output,
+  SimpleChanges,
+} from '@angular/core';
 
 import {
   ReactiveFormsModule,
@@ -9,6 +17,7 @@ import {
 } from '@angular/forms';
 import {
   AIEngineApp,
+  AIToolCatalogEntry,
   AIAgent,
   CreateAIAgentDto,
   UpdateAIAgentDto,
@@ -19,6 +28,8 @@ import {
   ButtonComponent,
   SelectorComponent,
   SelectorOption,
+  MultiSelectorComponent,
+  MultiSelectorOption,
 } from '../../../../../shared/components/index';
 
 const AGENT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
@@ -32,6 +43,7 @@ const AGENT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
     InputComponent,
     ButtonComponent,
     SelectorComponent,
+    MultiSelectorComponent,
   ],
   template: `
     <app-modal
@@ -107,16 +119,45 @@ const AGENT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
             ></textarea>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <app-input
+          <div class="space-y-1">
+            <app-multi-selector
               formControlName="allowed_tools"
-              label="Tools permitidas"
-              placeholder="search_products, get_order"
-              [control]="allowedToolsControl"
+              label="Herramientas permitidas"
+              placeholder="Sin filtro adicional"
+              [options]="toolOptions()"
               [disabled]="isSubmitting()"
-              helpText="Separadas por comas. Vacio = sin filtro adicional"
-            ></app-input>
+              helpText="Busca por nombre, dominio o descripción. Vacío = sin filtro adicional. Máximo 100 herramientas explícitas."
+              [errorText]="
+                allowedToolsControl.hasError('maxlength')
+                  ? 'Selecciona máximo 100 herramientas o deja el campo vacío para no aplicar un filtro adicional.'
+                  : ''
+              "
+            ></app-multi-selector>
+            <p class="text-xs text-text-secondary">
+              Los nombres guardados que ya no figuren en el catálogo se conservan hasta que los retires.
+            </p>
+          </div>
 
+          <div class="space-y-1">
+            <app-multi-selector
+              formControlName="denied_tools"
+              label="Herramientas denegadas"
+              placeholder="Sin exclusiones"
+              [options]="toolOptions()"
+              [disabled]="isSubmitting()"
+              helpText="Se restan del catálogo después de todos los filtros: lo que esté aquí nunca se ofrece. Vacío = sin exclusiones. Máximo 100 herramientas."
+              [errorText]="
+                deniedToolsControl.hasError('maxlength')
+                  ? 'Selecciona máximo 100 herramientas o deja el campo vacío para no excluir ninguna.'
+                  : ''
+              "
+            ></app-multi-selector>
+            <p class="text-xs text-text-secondary">
+              Vex lo usa para excluir las herramientas de interfaz (ui_*); Vexi lo deja vacío.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <app-input
               formControlName="max_iterations"
               label="Max iteraciones"
@@ -126,11 +167,18 @@ const AGENT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
               [disabled]="isSubmitting()"
               helpText="Entre 1 y 50. Vacio = default del loop"
             ></app-input>
+            <app-input
+              formControlName="timeout_seconds"
+              label="Timeout por turno (s)"
+              type="number"
+              placeholder="120"
+              [control]="timeoutSecondsControl"
+              [disabled]="isSubmitting()"
+              helpText="Entre 30 y 600. Vacio = default del loop"
+            ></app-input>
           </div>
-          <p class="text-xs text-text-secondary -mt-2">
-            Solo filtra sobre la interseccion permisos del caller y
-            tools_allowed del plan. Nombres desconocidos se aceptan con un
-            aviso en el log del backend.
+          <p class="text-xs text-text-secondary">
+            Esta selección solo restringe las herramientas disponibles por permisos y por el plan de la tienda; no concede acceso nuevo.
           </p>
 
           <div class="flex items-center gap-6 pt-2">
@@ -192,12 +240,20 @@ export class AIEngineAgentModalComponent implements OnChanges {
   isSubmitting = input<boolean>(false);
   agent = input<AIAgent | null>(null);
   apps = input<AIEngineApp[]>([]);
+  tools = input<AIToolCatalogEntry[]>([]);
   isOpenChange = output<boolean>();
   submit = output<CreateAIAgentDto | UpdateAIAgentDto>();
 
   private fb = inject(FormBuilder);
 
   appOptions: SelectorOption[] = [];
+  toolOptions = computed<MultiSelectorOption[]>(() =>
+    this.tools().map((tool) => ({
+      value: tool.name,
+      label: tool.name,
+      description: `${tool.domain} · ${tool.description}`,
+    })),
+  );
 
   form: FormGroup = this.fb.group({
     key: [
@@ -212,8 +268,10 @@ export class AIEngineAgentModalComponent implements OnChanges {
     description: [''],
     app_key: [''],
     system_prompt: [''],
-    allowed_tools: [''],
+    allowed_tools: [[] as string[], [Validators.maxLength(100)]],
+    denied_tools: [[] as string[], [Validators.maxLength(100)]],
     max_iterations: [null as number | null, [Validators.min(1), Validators.max(50)]],
+    timeout_seconds: [null as number | null, [Validators.min(30), Validators.max(600)]],
     requires_confirmation_default: [false],
     is_active: [true],
   });
@@ -234,22 +292,34 @@ export class AIEngineAgentModalComponent implements OnChanges {
     return this.form.get('app_key') as FormControl<string>;
   }
 
-  get allowedToolsControl(): FormControl<string> {
-    return this.form.get('allowed_tools') as FormControl<string>;
+  get allowedToolsControl(): FormControl<string[]> {
+    return this.form.get('allowed_tools') as FormControl<string[]>;
+  }
+
+  get deniedToolsControl(): FormControl<string[]> {
+    return this.form.get('denied_tools') as FormControl<string[]>;
   }
 
   get maxIterationsControl(): FormControl<number | null> {
     return this.form.get('max_iterations') as FormControl<number | null>;
   }
 
-  ngOnChanges(): void {
-    this.appOptions = [
-      { value: '', label: 'Sin app (usa config por defecto)' },
-      ...this.apps().map((a) => ({
-        value: a.key,
-        label: a.name + ' (' + a.key + ')',
-      })),
-    ];
+  get timeoutSecondsControl(): FormControl<number | null> {
+    return this.form.get('timeout_seconds') as FormControl<number | null>;
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['apps']) {
+      this.appOptions = [
+        { value: '', label: 'Sin app (usa config por defecto)' },
+        ...this.apps().map((a) => ({
+          value: a.key,
+          label: a.name + ' (' + a.key + ')',
+        })),
+      ];
+    }
+
+    if (!this.isOpen() || (!changes['isOpen'] && !changes['agent'])) return;
 
     if (this.isOpen() && this.agent()) {
       const a = this.agent()!;
@@ -259,8 +329,10 @@ export class AIEngineAgentModalComponent implements OnChanges {
         description: a.description || '',
         app_key: a.app_key || '',
         system_prompt: a.system_prompt || '',
-        allowed_tools: (a.allowed_tools || []).join(', '),
+        allowed_tools: [...(a.allowed_tools || [])],
+        denied_tools: [...(a.denied_tools || [])],
         max_iterations: a.max_iterations ?? null,
+        timeout_seconds: a.timeout_seconds ?? null,
         requires_confirmation_default:
           a.requires_confirmation_default ?? false,
         is_active: a.is_active,
@@ -278,11 +350,10 @@ export class AIEngineAgentModalComponent implements OnChanges {
     }
 
     const raw = this.form.getRawValue();
-    const allowedTools = (raw.allowed_tools || '')
-      .split(',')
-      .map((t: string) => t.trim())
-      .filter((t: string) => t.length > 0);
+    const allowedTools = (raw.allowed_tools as string[] | null) ?? [];
+    const deniedTools = (raw.denied_tools as string[] | null) ?? [];
     const maxIterations = this.toFiniteInt(raw.max_iterations);
+    const timeoutSeconds = this.toFiniteInt(raw.timeout_seconds);
 
     const data: CreateAIAgentDto | UpdateAIAgentDto = {
       key: raw.key,
@@ -291,7 +362,9 @@ export class AIEngineAgentModalComponent implements OnChanges {
       app_key: raw.app_key?.trim() ? raw.app_key.trim() : null,
       system_prompt: raw.system_prompt?.trim() ? raw.system_prompt : null,
       allowed_tools: allowedTools,
+      denied_tools: deniedTools,
       max_iterations: maxIterations,
+      timeout_seconds: timeoutSeconds,
       requires_confirmation_default: !!raw.requires_confirmation_default,
       is_active: !!raw.is_active,
     };
@@ -318,8 +391,10 @@ export class AIEngineAgentModalComponent implements OnChanges {
       description: '',
       app_key: '',
       system_prompt: '',
-      allowed_tools: '',
+      allowed_tools: [],
+      denied_tools: [],
       max_iterations: null,
+      timeout_seconds: null,
       requires_confirmation_default: false,
       is_active: true,
     });
