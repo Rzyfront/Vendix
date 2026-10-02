@@ -88,17 +88,44 @@ describe('PurchaseVatContributionService.reserve', () => {
     await expect(service.reserve(input({ organization_id: 8 }))).rejects.toBeInstanceOf(ConflictException);
     expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
 
-    for (const [sourcePatch, inputPatch] of [
-      [{ supplier_invoice_number: 'OTHER' }, { invoice_number_snapshot: 'OTHER' }],
-      [{ supplier_invoice_date: new Date('2026-10-01T00:00:00.000Z') }, { invoice_issue_date_snapshot: '2026-10-01' }],
-      [{ supplier_tax_id: '999' }, { supplier_tax_id_snapshot: '999' }],
-    ] as const) {
-      setup();
-      tx.purchase_orders.findFirst.mockResolvedValue({ id: 42, organization_id: 1, supplier_id: 7, location: { store_id: 3 }, ...sourcePatch });
-      tx.suppliers.findFirst.mockResolvedValue({ id: 7, tax_id: '900123456', ...('supplier_tax_id' in sourcePatch ? { tax_id: sourcePatch.supplier_tax_id } : {}) });
-      await expect(service.reserve(input(inputPatch))).rejects.toBeInstanceOf(ConflictException);
-      expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
-    }
+    setup();
+    await expect(service.reserve(input({ invoice_number_snapshot: 'OTHER' }))).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.purchase_orders.findFirst).toHaveBeenCalled();
+    expect(tx.purchase_vat_contributions.findUnique).not.toHaveBeenCalled();
+    expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
+
+    setup();
+    await expect(service.reserve(input({ invoice_issue_date_snapshot: '2026-10-01' }))).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.purchase_orders.findFirst).toHaveBeenCalled();
+    expect(tx.purchase_vat_contributions.findUnique).not.toHaveBeenCalled();
+    expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
+
+    setup();
+    await expect(service.reserve(input({ supplier_tax_id_snapshot: '999' }))).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.purchase_orders.findFirst).toHaveBeenCalled();
+    expect(tx.purchase_order_receptions.findFirst).toHaveBeenCalled();
+    expect(tx.suppliers.findFirst).toHaveBeenCalled();
+    expect(tx.purchase_vat_contributions.findUnique).not.toHaveBeenCalled();
+    expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects same-key replay hash drift after persisted PO invoice date and input move together', async () => {
+    const { buildPurchaseVatContributionSnapshot } = await import('./purchase-vat-contribution-snapshot.util');
+    const prior = buildPurchaseVatContributionSnapshot(input());
+    tx.purchase_orders.findFirst.mockResolvedValue({
+      id: 42, organization_id: 1, supplier_id: 7,
+      supplier_invoice_number: 'FC-1', supplier_invoice_date: new Date('2026-10-01T00:00:00.000Z'),
+      location: { store_id: 3 },
+    });
+    tx.purchase_vat_contributions.findUnique.mockResolvedValue({ id: 44, payload_hash: prior.payload_hash });
+
+    await expect(service.reserve(input({ invoice_issue_date_snapshot: '2026-10-01' }))).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.purchase_vat_contributions.findUnique).toHaveBeenCalledWith({
+      where: { organization_id_accounting_entity_id_source_effect_key: {
+        organization_id: 1, accounting_entity_id: 2, source_effect_key: 'po:42:deductible-iva:v1',
+      } },
+    });
+    expect(tx.purchase_vat_contributions.create).not.toHaveBeenCalled();
   });
 
   it('recovers a P2002 race by refetching and comparing the same scoped effect key', async () => {
