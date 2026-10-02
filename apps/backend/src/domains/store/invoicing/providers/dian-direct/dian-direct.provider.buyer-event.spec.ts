@@ -15,7 +15,7 @@ const base = {
 
 function buildProvider() {
   const soap = { sendEventUpdateStatus: jest.fn().mockResolvedValue({ raw_response: '<ok/>' }) };
-  const parser = { parseApplicationResponse: jest.fn().mockReturnValue({ is_valid: true, errors: [], document_key: 'track' }) };
+  const parser = { parseApplicationResponse: jest.fn().mockReturnValue({ is_valid: true, errors: [], rule_messages: [], already_processed: false, document_key: 'track', status_code: '00', status_description: '' }) };
   const provider = new DianDirectProvider({} as any, {} as any, {} as any, soap as any, {} as any, parser as any, {} as any, {} as any);
   Object.assign(provider as any, {
     loadConfig: jest.fn().mockResolvedValue({ id: 4, accounting_entity_id: 9, software_id: 'software', certificate_s3_key: 'cert.p12', certificate_kms_key_id: 'kms-key', software_pin: 'pin', environment: 'test' }),
@@ -35,6 +35,12 @@ async function expectHttpStatus(promise: Promise<unknown>, status: number) {
   expect((error as HttpException).getStatus()).toBe(status);
 }
 
+function respondWithEventKey(soap: { sendEventUpdateStatus: jest.Mock }, prepared: { cude: string }) {
+  soap.sendEventUpdateStatus.mockResolvedValueOnce({
+    raw_response: `<s:Envelope xmlns:s="urn:soap"><s:Body><x:SendEventUpdateStatusResult xmlns:x="urn:dian"><x:XmlDocumentKey>${prepared.cude}</x:XmlDocumentKey></x:SendEventUpdateStatusResult></s:Body></s:Envelope>`,
+  });
+}
+
 describe('DianDirectProvider buyer event transport', () => {
   it('builds a 030 from configured buyer to referenced supplier and hashes those parties', async () => {
     const { provider, soap } = buildProvider();
@@ -46,6 +52,7 @@ describe('DianDirectProvider buyer event transport', () => {
     expect(build.mock.calls[0][0].receiver).toMatchObject({ document_number: '800214345', document_dv: '7' });
     expect(cude).toHaveBeenCalledWith(expect.objectContaining({ issuer_nit: '900123456', customer_nit: '800214345' }));
     expect(soap.sendEventUpdateStatus).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
     cude.mockRestore(); build.mockRestore();
   });
 
@@ -73,6 +80,134 @@ describe('DianDirectProvider buyer event transport', () => {
     await expectHttpStatus(provider.prepareDocumentEvent({ ...base, event_code: '034' as any }), 400);
     expect((provider as any).signXml).not.toHaveBeenCalled();
     expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it('transmits a prepared artifact unchanged without rebuilding, recalculating or signing', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    respondWithEventKey(soap, prepared);
+    const sign = jest.spyOn(provider as any, 'signXml');
+    sign.mockClear();
+    const cude = jest.spyOn(CufeCalculator, 'generateEventCude');
+    const builder = jest.spyOn(UblApplicationResponseBuilder, 'build');
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result).toMatchObject({ success: true, delivery_status: 'accepted', cude: prepared.cude, request_xml: prepared.signed_xml });
+    expect(soap.sendEventUpdateStatus).toHaveBeenCalledTimes(1);
+    expect((provider as any).compressToZipBase64).toHaveBeenCalledWith(prepared.signed_xml, prepared.xml_filename);
+    expect((provider as any).createAuditLog).toHaveBeenCalledTimes(1);
+    expect(sign).not.toHaveBeenCalled(); expect(cude).not.toHaveBeenCalled(); expect(builder).not.toHaveBeenCalled();
+    cude.mockRestore(); builder.mockRestore();
+  });
+
+  it('rejects changed config before SOAP', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    (provider as any).loadConfig.mockResolvedValue({ id: 5, accounting_entity_id: 9, software_id: 'software', certificate_s3_key: 'cert.p12', certificate_kms_key_id: 'kms-key', environment: 'test' });
+    await expectHttpStatus(provider.sendPreparedDocumentEvent(prepared), 409);
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+    (provider as any).loadConfig.mockResolvedValue({ id: 4, accounting_entity_id: 9, software_id: 'software', certificate_s3_key: 'cert.p12', certificate_kms_key_id: 'kms-key', environment: 'test', certificate_fingerprint: 'changed' });
+    await expectHttpStatus(provider.sendPreparedDocumentEvent(prepared), 409);
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it('rejects tampered prepared XML/hash and unsupported 034 before SOAP', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    await expectHttpStatus(provider.sendPreparedDocumentEvent({ ...prepared, signed_xml: prepared.signed_xml + 'x' }), 400);
+    await expectHttpStatus(provider.sendPreparedDocumentEvent({ ...prepared, event_code: '034' as any }), 400);
+    const mismatchCude = prepared.signed_xml.replace(/(<cbc:UUID[^>]*>)[^<]+/, '$1different-cude');
+    await expectHttpStatus(provider.sendPreparedDocumentEvent({ ...prepared, signed_xml: mismatchCude, signed_xml_sha256: createHash('sha256').update(mismatchCude).digest('hex') }), 400);
+    expect(soap.sendEventUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns unknown on SOAP timeout while preserving CUDE and XML', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    soap.sendEventUpdateStatus.mockRejectedValueOnce(new Error('timeout'));
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result).toMatchObject({ success: false, delivery_status: 'unknown', cude: prepared.cude, request_xml: prepared.signed_xml });
+    expect(soap.sendEventUpdateStatus).toHaveBeenCalledTimes(1);
+    expect((provider as any).createAuditLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves accepted DIAN result when audit write fails', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    respondWithEventKey(soap, prepared);
+    (provider as any).createAuditLog.mockRejectedValueOnce(new Error('audit unavailable'));
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result).toMatchObject({ success: true, delivery_status: 'accepted', cude: prepared.cude, request_xml: prepared.signed_xml });
+    expect(soap.sendEventUpdateStatus).toHaveBeenCalledTimes(1);
+    expect((provider as any).createAuditLog).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['malformed/unknown response', { is_valid: false, status_code: 'unknown', errors: [], rule_messages: [], already_processed: false }],
+    ['already processed response', { is_valid: false, status_code: '99', errors: [], rule_messages: [{ severity: 'rechazo' }], already_processed: true }],
+  ])('returns unknown for %s', async (_label, parsed) => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    respondWithEventKey(soap, prepared);
+    (provider as any).response_parser.parseApplicationResponse.mockReturnValue(parsed);
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result.delivery_status).toBe('unknown');
+    expect(result.cude).toBe(prepared.cude);
+    expect(result.request_xml).toBe(prepared.signed_xml);
+  });
+
+  it('returns rejected only for an explicit DIAN rejection', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    respondWithEventKey(soap, prepared);
+    (provider as any).response_parser.parseApplicationResponse.mockReturnValue({
+      is_valid: false, status_code: '99', status_description: 'Rejected',
+      errors: [{ code: 'R1', message: 'Rejected' }],
+      rule_messages: [{ code: 'R1', text: 'Rejected', severity: 'rechazo' }],
+      already_processed: false,
+    });
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result.delivery_status).toBe('rejected');
+  });
+
+  it.each([undefined, 'foreign-cude'])('keeps IsValid=true inconclusive with SOAP event key %s', async (soapKey) => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    soap.sendEventUpdateStatus.mockResolvedValueOnce({
+      raw_response: soapKey
+        ? `<s:Envelope><SendEventUpdateStatusResult><XmlDocumentKey>${soapKey}</XmlDocumentKey></SendEventUpdateStatusResult></s:Envelope>`
+        : '<s:Envelope><IsValid>true</IsValid><SendEventUpdateStatusResult/></s:Envelope>',
+    });
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result).toMatchObject({ success: false, delivery_status: 'unknown', cude: prepared.cude });
+    expect(result.message).toContain('conciliar');
+    expect(result.tracking_id).toBeUndefined();
+  });
+
+  it('keeps IsValid=false rejection inconclusive when SOAP event key mismatches', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    soap.sendEventUpdateStatus.mockResolvedValueOnce({ raw_response: '<s:Envelope><SendEventUpdateStatusResult><XmlDocumentKey>foreign-cude</XmlDocumentKey></SendEventUpdateStatusResult></s:Envelope>' });
+    (provider as any).response_parser.parseApplicationResponse.mockReturnValue({
+      is_valid: false, status_code: '99', status_description: 'Rejected',
+      errors: [{ code: 'R1', message: 'Rejected' }],
+      rule_messages: [{ code: 'R1', text: 'Rejected', severity: 'rechazo' }],
+      already_processed: false,
+    });
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result.delivery_status).toBe('unknown');
+    expect(result.tracking_id).toBeUndefined();
+  });
+
+  it('keeps a SOAP Fault inconclusive even if it contains a matching CUDE', async () => {
+    const { provider, soap } = buildProvider();
+    const prepared = await provider.prepareDocumentEvent(base);
+    soap.sendEventUpdateStatus.mockResolvedValueOnce({
+      raw_response: `<s:Envelope xmlns:s="urn:soap"><s:Body><s:Fault><faultstring>DIAN fault</faultstring><XmlDocumentKey>${prepared.cude}</XmlDocumentKey></s:Fault></s:Body></s:Envelope>`,
+    });
+    const result = await provider.sendPreparedDocumentEvent(prepared);
+    expect(result).toMatchObject({ success: false, delivery_status: 'unknown', cude: prepared.cude });
+    expect(result.tracking_id).toBeUndefined();
+    expect(result.message).toContain('conciliar');
   });
 
   it('blocks a buyer identity mismatch before SOAP', async () => {

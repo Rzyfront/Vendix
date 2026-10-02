@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   UnprocessableEntityException,
@@ -99,6 +100,7 @@ import {
   DianDocumentEventRequest,
   DianDocumentEventResult,
   DianPreparedDocumentEvent,
+  DianPreparedEventTransmissionResult,
 } from './interfaces/dian-event.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -1579,7 +1581,141 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       software_id: config.software_id,
       certificate_s3_key: config.certificate_s3_key,
       certificate_kms_key_id: config.certificate_kms_key_id,
+      certificate_fingerprint: config.certificate_fingerprint ?? null,
     };
+  }
+
+  /** Transmit the exact frozen event artifact; this path never rebuilds or signs XML. */
+  async sendPreparedDocumentEvent(
+    prepared: DianPreparedDocumentEvent,
+  ): Promise<DianPreparedEventTransmissionResult> {
+    const valid_codes = ['030', '031', '032', '033'];
+    if (
+      !prepared ||
+      !valid_codes.includes(prepared.event_code) ||
+      !prepared.event_number || !prepared.dian_configuration_id ||
+      !prepared.accounting_entity_id || !prepared.environment ||
+      !prepared.cude || !prepared.signed_xml || !prepared.signed_xml_sha256 ||
+      !prepared.xml_filename || !prepared.zip_filename || !prepared.software_id ||
+      !('certificate_s3_key' in prepared) || !('certificate_kms_key_id' in prepared)
+    ) throw new BadRequestException('Prepared DIAN event is malformed or unsupported');
+
+    const actual_hash = createHash('sha256').update(prepared.signed_xml, 'utf8').digest('hex');
+    if (actual_hash !== prepared.signed_xml_sha256) {
+      throw new BadRequestException('Prepared DIAN event signed XML hash does not match');
+    }
+    try {
+      const document = new DOMParser({
+        errorHandler: {
+          warning: () => undefined,
+          error: (message) => { throw new Error(message); },
+          fatalError: (message) => { throw new Error(message); },
+        },
+      }).parseFromString(prepared.signed_xml, 'application/xml');
+      const value = (local_name: string) =>
+        document.getElementsByTagNameNS('*', local_name)[0]?.textContent?.trim();
+      if (
+        document.documentElement?.localName !== 'ApplicationResponse' ||
+        value('UUID') !== prepared.cude || value('ID') !== prepared.event_number ||
+        value('ResponseCode') !== prepared.event_code
+      ) throw new Error('Prepared event metadata does not match signed XML');
+    } catch {
+      throw new BadRequestException('Prepared event metadata does not match valid signed XML');
+    }
+    const config = await this.loadConfig();
+    if (
+      config.id !== prepared.dian_configuration_id ||
+      config.accounting_entity_id !== prepared.accounting_entity_id ||
+      config.environment !== prepared.environment ||
+      config.software_id !== prepared.software_id ||
+      config.certificate_s3_key !== prepared.certificate_s3_key ||
+      config.certificate_kms_key_id !== prepared.certificate_kms_key_id ||
+      (config.certificate_fingerprint ?? null) !== (prepared.certificate_fingerprint ?? null)
+    ) throw new ConflictException('DIAN configuration changed since event preparation');
+    this.validateCertificateExpiry(config);
+
+    const start_time = Date.now();
+    let response_xml: string | undefined;
+    let result: DianPreparedEventTransmissionResult;
+    try {
+      const zip_base64 = await this.compressToZipBase64(prepared.signed_xml, prepared.xml_filename);
+      const credentials = await this.loadWsCredentials(config);
+      const response = await this.soap_client.sendEventUpdateStatus(
+        zip_base64, prepared.zip_filename, config.environment, credentials,
+      );
+      response_xml = response.raw_response;
+      const parsed = this.response_parser.parseApplicationResponse(response_xml);
+      let soap_event_key: string | undefined;
+      let soap_result_valid = false;
+      try {
+        const soap_document = new DOMParser({
+          errorHandler: {
+            warning: () => undefined,
+            error: (message) => { throw new Error(message); },
+            fatalError: (message) => { throw new Error(message); },
+          },
+        }).parseFromString(response_xml, 'application/xml');
+        const elements = Array.from(soap_document.getElementsByTagName('*'));
+        const local_name = (element: Element) => element.localName || element.nodeName.split(':').pop();
+        const has_fault = elements.some((element) => local_name(element) === 'Fault');
+        const result_nodes = elements.filter((element) => local_name(element) === 'SendEventUpdateStatusResult');
+        if (!has_fault && result_nodes.length === 1) {
+          const keys = Array.from(result_nodes[0].childNodes).filter(
+            (node): node is Element => node.nodeType === 1 && local_name(node as Element) === 'XmlDocumentKey',
+          );
+          if (keys.length === 1) {
+            soap_event_key = keys[0].textContent?.trim();
+            soap_result_valid = Boolean(soap_event_key);
+          }
+        }
+      } catch {
+        // An unparseable SOAP envelope cannot provide a definitive DIAN verdict.
+      }
+      const matching_event_key = soap_result_valid && soap_event_key === prepared.cude;
+      const explicit_rejection =
+        parsed.is_valid === false &&
+        parsed.status_code === '99' && matching_event_key &&
+        parsed.already_processed !== true &&
+        (parsed.rule_messages?.some((rule) => rule.severity === 'rechazo') ?? false);
+      const accepted = parsed.is_valid === true && parsed.status_code === '00' && matching_event_key;
+      const delivery_status = accepted
+        ? 'accepted'
+        : explicit_rejection ? 'rejected' : 'unknown';
+      const message = delivery_status === 'unknown'
+        ? 'Respuesta inconclusa; conciliar antes de reintentar'
+        : describeDianVerdict(parsed, `Evento ${prepared.event_code} registrado en RADIAN`, `Evento ${prepared.event_code} rechazado`);
+      result = {
+        success: accepted, delivery_status,
+        event_code: prepared.event_code, dian_configuration_id: config.id,
+        cude: prepared.cude, ...(matching_event_key ? { tracking_id: prepared.cude } : {}),
+        status_code: parsed.status_code,
+        message,
+        request_xml: prepared.signed_xml, response_xml,
+        errors: parsed.errors.map((e) => ({ code: e.code, message: e.message })),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      this.logger.error(`Failed to transmit prepared DIAN event: ${message}`);
+      result = {
+        success: false, delivery_status: 'unknown', event_code: prepared.event_code,
+        dian_configuration_id: config.id, cude: prepared.cude, message,
+        request_xml: prepared.signed_xml, ...(response_xml ? { response_xml } : {}),
+        errors: [{ message }],
+      };
+    }
+    try {
+      await this.createAuditLog(config.id, {
+        action: 'send_document_event', document_type: `event_${prepared.event_code}`,
+        document_number: prepared.event_number, request_xml: prepared.signed_xml,
+        response_xml, status: result.delivery_status === 'accepted' ? 'success' : 'error',
+        error_message: result.delivery_status === 'accepted' ? null : result.message ?? null,
+        cufe: prepared.cude, duration_ms: Date.now() - start_time,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      this.logger.error(`Failed to audit prepared DIAN event: ${message}`);
+    }
+    return result;
   }
 
   /**
@@ -1828,6 +1964,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       certificate_s3_key: config.certificate_s3_key,
       certificate_password,
       certificate_kms_key_id: config.certificate_kms_key_id,
+      certificate_fingerprint: config.certificate_fingerprint ?? null,
       certificate_expiry: config.certificate_expiry,
       environment: config.environment as 'test' | 'production',
       enablement_status: config.enablement_status,

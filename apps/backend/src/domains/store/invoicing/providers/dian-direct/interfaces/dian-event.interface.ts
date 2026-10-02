@@ -91,4 +91,9 @@ export interface DianPreparedDocumentEvent {
   software_id: string;
   certificate_s3_key: string | null;
   certificate_kms_key_id: string | null;
+  certificate_fingerprint?: string | null;
+}
+
+export interface DianPreparedEventTransmissionResult extends DianDocumentEventResult {
+  delivery_status: 'accepted' | 'rejected' | 'unknown';
 }
