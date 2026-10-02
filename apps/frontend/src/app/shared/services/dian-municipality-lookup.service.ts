@@ -24,6 +24,12 @@ export interface DianMunicipalityOption {
   postal_code: string;
 }
 
+/** Departamento del catálogo Divipola que publica la DIAN. */
+export interface DianDepartmentOption {
+  code: string;
+  name: string;
+}
+
 /** Resultado de una página de búsqueda. */
 export interface DianMunicipalitySearchResult {
   items: DianMunicipalityOption[];
@@ -103,6 +109,50 @@ export class DianMunicipalityLookupService {
   >();
   /** Municipios ya resueltos por código, para hidratar el CVA sin repetir GET. */
   private readonly byCode = new Map<string, DianMunicipalityOption>();
+  /** Catálogos completos ya solicitados, segmentados por base efectiva. */
+  private readonly departments = new Map<string, Observable<DianDepartmentOption[]>>();
+  private readonly byDepartment = new Map<string, Observable<DianMunicipalityOption[]>>();
+
+  /** Departamentos DANE para poblar el selector de dirección. */
+  listDepartments(): Observable<DianDepartmentOption[]> {
+    const municipalitiesUrl = this.effectiveBaseUrl;
+    const cacheKey = municipalitiesUrl;
+    const cached = this.departments.get(cacheKey);
+    if (cached) return cached;
+
+    const departmentsUrl = municipalitiesUrl.replace(/\/municipalities\/?$/, '/departments');
+    const request$ = this.http
+      .get<SuccessEnvelope<DianDepartmentOption[]>>(departmentsUrl)
+      .pipe(
+        map((res) => Array.isArray(res?.data) ? res.data : []),
+        shareReplay({ bufferSize: 1, refCount: false }),
+      );
+    this.departments.set(cacheKey, request$);
+    return request$;
+  }
+
+  /** Municipios completos de un departamento, sin el límite de búsqueda paginada. */
+  listByDepartment(code: string): Observable<DianMunicipalityOption[]> {
+    const municipalitiesUrl = this.effectiveBaseUrl;
+    const cacheKey = `${municipalitiesUrl}|${code}`;
+    const cached = this.byDepartment.get(cacheKey);
+    if (cached) return cached;
+
+    const request$ = this.http
+      .get<PaginatedEnvelope<DianMunicipalityOption>>(municipalitiesUrl, {
+        params: new HttpParams().set('department_code', code),
+      })
+      .pipe(
+        map((res) => {
+          const items = Array.isArray(res?.data) ? res.data : [];
+          for (const item of items) this.byCode.set(`${municipalitiesUrl}|${item.code}`, item);
+          return items;
+        }),
+        shareReplay({ bufferSize: 1, refCount: false }),
+      );
+    this.byDepartment.set(cacheKey, request$);
+    return request$;
+  }
 
   /**
    * Busca por código DANE, nombre de municipio o nombre de departamento.
@@ -111,7 +161,8 @@ export class DianMunicipalityLookupService {
   search(term: string): Observable<DianMunicipalitySearchResult> {
     const trimmed = term?.trim() ?? '';
     const limit = trimmed ? SEARCH_LIMIT : FIRST_PAGE_LIMIT;
-    const key = `${trimmed.toLowerCase()}|${limit}`;
+    const municipalitiesUrl = this.effectiveBaseUrl;
+    const key = `${municipalitiesUrl}|${trimmed.toLowerCase()}|${limit}`;
 
     const cached = this.searches.get(key);
     if (cached) return cached;
@@ -120,13 +171,13 @@ export class DianMunicipalityLookupService {
     if (trimmed) params = params.set('search', trimmed);
 
     const request$ = this.http
-      .get<PaginatedEnvelope<DianMunicipalityOption>>(this.effectiveBaseUrl, { params })
+      .get<PaginatedEnvelope<DianMunicipalityOption>>(municipalitiesUrl, { params })
       .pipe(
         map((res) => {
           const items = Array.isArray(res?.data) ? res.data : [];
           // Alimenta la caché por código para que una hidratación posterior de
           // un municipio ya visto no vuelva a salir a la red.
-          for (const item of items) this.byCode.set(item.code, item);
+          for (const item of items) this.byCode.set(`${municipalitiesUrl}|${item.code}`, item);
           const total = res?.meta?.total ?? items.length;
           return { items, total, hasMore: total > items.length };
         }),
@@ -149,13 +200,15 @@ export class DianMunicipalityLookupService {
     const trimmed = code?.trim();
     if (!trimmed) return of(null);
 
-    const cached = this.byCode.get(trimmed);
+    const municipalitiesUrl = this.effectiveBaseUrl;
+    const cacheKey = `${municipalitiesUrl}|${trimmed}`;
+    const cached = this.byCode.get(cacheKey);
     if (cached) return of(cached);
 
     return this.search(trimmed).pipe(
       map((res) => {
         const exact = res.items.find((item) => item.code === trimmed) ?? null;
-        if (exact) this.byCode.set(trimmed, exact);
+        if (exact) this.byCode.set(cacheKey, exact);
         return exact;
       }),
     );
@@ -180,15 +233,16 @@ export class DianMunicipalityLookupService {
       .set('city', cityTrimmed)
       .set('department', departmentTrimmed);
 
+    const municipalitiesUrl = this.effectiveBaseUrl;
     return this.http
       .get<SuccessEnvelope<DianMunicipalityOption | null>>(
-        `${this.effectiveBaseUrl}/resolve`,
+        `${municipalitiesUrl}/resolve`,
         { params },
       )
       .pipe(
         map((res) => {
           const match = res?.data ?? null;
-          if (match?.code) this.byCode.set(match.code, match);
+          if (match?.code) this.byCode.set(`${municipalitiesUrl}|${match.code}`, match);
           return match;
         }),
         catchError(() => of(null)),
