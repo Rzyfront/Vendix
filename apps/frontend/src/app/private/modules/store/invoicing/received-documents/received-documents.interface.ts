@@ -61,6 +61,11 @@ export interface ReceivedDocumentEvent {
   id: number;
   event_type: string;
   status: string;
+  event_code?: string | null;
+  event_number?: string | null;
+  cude?: string | null;
+  event_date?: string | null;
+  confirmed_at?: string | null;
   created_at: string;
   result?: unknown;
 }
