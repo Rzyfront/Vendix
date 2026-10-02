@@ -1,0 +1,183 @@
+-- DATA IMPACT:
+-- Tables affected: received_tax_qualifications (new table only)
+-- Expected row changes: none; no qualification or business rows are inserted
+-- Destructive operations: none
+-- FK/cascade risk: all references use RESTRICT; no cascading deletes
+-- Idempotency: guarded table, constraints, indexes, functions, and triggers
+-- Approval: authorized by the received-document tax consolidation decisions
+
+CREATE TABLE IF NOT EXISTS "received_tax_qualifications" (
+    "id" SERIAL NOT NULL,
+    "organization_id" INTEGER NOT NULL,
+    "accounting_entity_id" INTEGER NOT NULL,
+    "store_id" INTEGER,
+    "document_id" INTEGER NOT NULL,
+    "document_version" INTEGER NOT NULL,
+    "tax_type" "tax_type_enum" NOT NULL,
+    "jurisdiction_key" VARCHAR(100) NOT NULL,
+    "canonical_identity_key" VARCHAR(64),
+    "revision" INTEGER NOT NULL,
+    "supersedes_id" INTEGER,
+    "idempotency_key" VARCHAR(160) NOT NULL,
+    "outcome" VARCHAR(30) NOT NULL,
+    "source_hash_snapshot" VARCHAR(64),
+    "facts_hash" VARCHAR(64) NOT NULL,
+    "decision_hash" VARCHAR(64) NOT NULL,
+    "rules_version" VARCHAR(100) NOT NULL,
+    "source_snapshot" JSONB NOT NULL,
+    "basis_snapshot" JSONB NOT NULL,
+    "decision_snapshot" JSONB NOT NULL,
+    "overlap_snapshot" JSONB NOT NULL,
+    "evidence_id" INTEGER NOT NULL,
+    "qualified_by_user_id" INTEGER NOT NULL,
+    "qualified_at" TIMESTAMPTZ(6) NOT NULL,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "received_tax_qualifications_pkey" PRIMARY KEY ("id")
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_org_fkey' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_org_fkey"
+            FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_entity_fkey' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_entity_fkey"
+            FOREIGN KEY ("accounting_entity_id") REFERENCES "accounting_entities"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_store_fkey' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_store_fkey"
+            FOREIGN KEY ("store_id") REFERENCES "stores"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_document_fkey' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_document_fkey"
+            FOREIGN KEY ("document_id") REFERENCES "received_documents"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_evidence_fkey' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_evidence_fkey"
+            FOREIGN KEY ("evidence_id") REFERENCES "fiscal_evidences"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_user_fkey' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_user_fkey"
+            FOREIGN KEY ("qualified_by_user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_supersedes_fkey' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_supersedes_fkey"
+            FOREIGN KEY ("supersedes_id") REFERENCES "received_tax_qualifications"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_supersedes_key' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_supersedes_key" UNIQUE ("supersedes_id");
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_tax_family_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_tax_family_check" CHECK ("tax_type" = 'iva');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_outcome_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_outcome_check" CHECK ("outcome" IN ('eligible', 'ineligible', 'no_adjustment', 'legacy_owned', 'blocked'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_eligible_identity_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_eligible_identity_check" CHECK ("outcome" <> 'eligible' OR "canonical_identity_key" IS NOT NULL);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_positive_versions_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_positive_versions_check" CHECK ("revision" > 0 AND "document_version" > 0);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_hash_format_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_hash_format_check"
+            CHECK ("facts_hash" ~ '^[0-9A-Fa-f]{64}$' AND "decision_hash" ~ '^[0-9A-Fa-f]{64}$' AND ("source_hash_snapshot" IS NULL OR "source_hash_snapshot" ~ '^[0-9A-Fa-f]{64}$'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_snapshot_objects_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_snapshot_objects_check"
+            CHECK (jsonb_typeof("source_snapshot") = 'object' AND jsonb_typeof("basis_snapshot") = 'object' AND jsonb_typeof("decision_snapshot") = 'object' AND jsonb_typeof("overlap_snapshot") = 'object');
+    END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "received_tax_qualifications_scope_idempotency_key"
+    ON "received_tax_qualifications"("organization_id", "accounting_entity_id", "idempotency_key");
+CREATE UNIQUE INDEX IF NOT EXISTS "received_tax_qualifications_revision_key"
+    ON "received_tax_qualifications"("organization_id", "accounting_entity_id", "document_id", "tax_type", "jurisdiction_key", "revision");
+CREATE UNIQUE INDEX IF NOT EXISTS "received_tax_qualifications_canonical_root_key"
+    ON "received_tax_qualifications"("organization_id", "accounting_entity_id", "tax_type", "jurisdiction_key", "canonical_identity_key")
+    WHERE "supersedes_id" IS NULL AND "canonical_identity_key" IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "received_tax_qualifications_document_root_key"
+    ON "received_tax_qualifications"("organization_id", "accounting_entity_id", "document_id", "tax_type", "jurisdiction_key")
+    WHERE "supersedes_id" IS NULL;
+CREATE INDEX IF NOT EXISTS "received_tax_qualifications_document_idx"
+    ON "received_tax_qualifications"("organization_id", "accounting_entity_id", "document_id", "tax_type", "jurisdiction_key");
+CREATE INDEX IF NOT EXISTS "received_tax_qualifications_fiscal_read_idx"
+    ON "received_tax_qualifications"("organization_id", "accounting_entity_id", "tax_type", "jurisdiction_key", "outcome", "qualified_at");
+CREATE INDEX IF NOT EXISTS "received_tax_qualifications_evidence_idx"
+    ON "received_tax_qualifications"("evidence_id");
+
+CREATE OR REPLACE FUNCTION "enforce_received_tax_qualification_tenant_scope"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    document_org_id INTEGER;
+    document_entity_id INTEGER;
+    document_store_id INTEGER;
+    evidence_org_id INTEGER;
+    evidence_entity_id INTEGER;
+    evidence_store_id INTEGER;
+    entity_org_id INTEGER;
+    store_org_id INTEGER;
+    user_org_id INTEGER;
+BEGIN
+    SELECT "organization_id" INTO entity_org_id
+      FROM "accounting_entities" WHERE "id" = NEW."accounting_entity_id";
+    IF entity_org_id IS DISTINCT FROM NEW."organization_id" THEN
+        RAISE EXCEPTION 'received tax qualification accounting entity must belong to its organization';
+    END IF;
+
+    IF NEW."store_id" IS NOT NULL THEN
+        SELECT "organization_id" INTO store_org_id FROM "stores" WHERE "id" = NEW."store_id";
+        IF store_org_id IS DISTINCT FROM NEW."organization_id" THEN
+            RAISE EXCEPTION 'received tax qualification store must belong to its organization';
+        END IF;
+    END IF;
+
+    SELECT "organization_id", "accounting_entity_id", "store_id"
+      INTO document_org_id, document_entity_id, document_store_id
+      FROM "received_documents" WHERE "id" = NEW."document_id";
+    IF document_org_id IS DISTINCT FROM NEW."organization_id"
+       OR document_entity_id IS DISTINCT FROM NEW."accounting_entity_id"
+       OR document_store_id IS DISTINCT FROM NEW."store_id" THEN
+        RAISE EXCEPTION 'received tax qualification document must match its organization, entity, and store';
+    END IF;
+
+    SELECT "organization_id", "accounting_entity_id", "store_id"
+      INTO evidence_org_id, evidence_entity_id, evidence_store_id
+      FROM "fiscal_evidences" WHERE "id" = NEW."evidence_id";
+    IF evidence_org_id IS DISTINCT FROM NEW."organization_id"
+       OR evidence_entity_id IS DISTINCT FROM NEW."accounting_entity_id"
+       OR evidence_store_id IS DISTINCT FROM NEW."store_id" THEN
+        RAISE EXCEPTION 'received tax qualification evidence must match its organization, entity, and store';
+    END IF;
+
+    SELECT "organization_id" INTO user_org_id FROM "users" WHERE "id" = NEW."qualified_by_user_id";
+    IF user_org_id IS DISTINCT FROM NEW."organization_id" THEN
+        RAISE EXCEPTION 'received tax qualification user must belong to its organization';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION "reject_received_tax_qualification_mutation"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'received tax qualifications are append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS "received_tax_qualifications_tenant_scope_trigger" ON "received_tax_qualifications";
+CREATE TRIGGER "received_tax_qualifications_tenant_scope_trigger"
+    BEFORE INSERT ON "received_tax_qualifications"
+    FOR EACH ROW EXECUTE FUNCTION "enforce_received_tax_qualification_tenant_scope"();
+DROP TRIGGER IF EXISTS "received_tax_qualifications_append_only_trigger" ON "received_tax_qualifications";
+CREATE TRIGGER "received_tax_qualifications_append_only_trigger"
+    BEFORE UPDATE OR DELETE ON "received_tax_qualifications"
+    FOR EACH ROW EXECUTE FUNCTION "reject_received_tax_qualification_mutation"();

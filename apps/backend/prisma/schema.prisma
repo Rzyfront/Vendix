@@ -63,6 +63,7 @@ model users {
   fiscal_tax_credits_created fiscal_tax_credits[]           @relation("fiscal_tax_credits_created_by")
   fiscal_tax_payments_created fiscal_tax_payments[]         @relation("fiscal_tax_payments_created_by")
   received_buyer_event_enablements_verified received_buyer_event_enablements[] @relation("received_buyer_event_enablements_verified_by")
+  received_tax_qualifications_qualified received_tax_qualifications[] @relation("received_tax_qualifications_qualified_by")
   fiscal_credit_applications_created fiscal_credit_applications[] @relation("fiscal_credit_applications_created_by")
   api_keys                   api_keys[]
   audit_logs                 audit_logs[]
@@ -669,6 +670,7 @@ model organizations {
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
   received_documents            received_documents[]
+  received_tax_qualifications   received_tax_qualifications[]
   received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
@@ -943,6 +945,7 @@ model stores {
   fiscal_close_sessions       fiscal_close_sessions[]
   fiscal_operation_events     fiscal_operation_events[]
   received_documents          received_documents[]
+  received_tax_qualifications received_tax_qualifications[]
   received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits           fiscal_tax_credits[]
@@ -6671,6 +6674,7 @@ model accounting_entities {
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
   received_documents            received_documents[]
+  received_tax_qualifications   received_tax_qualifications[]
   received_document_match_allocations received_document_match_allocations[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
@@ -7477,6 +7481,7 @@ model fiscal_evidences {
   fiscal_tax_payments fiscal_tax_payments[]      @relation("fiscal_tax_payments_evidence")
   operation_events    fiscal_operation_events[]
   received_buyer_event_enablement received_buyer_event_enablements? @relation("received_buyer_event_enablement_evidence")
+  received_tax_qualifications received_tax_qualifications[]
 
   @@unique([fiscal_transmission_id, evidence_type, content_hash])
   @@index([organization_id, accounting_entity_id, evidence_type])
@@ -12008,6 +12013,7 @@ model received_documents {
   links             received_document_links[]
   match_allocations received_document_match_allocations[]
   events            received_document_events[]
+  tax_qualifications received_tax_qualifications[]
   purchase_vat_contributions purchase_vat_contributions[]
 
   @@unique([accounting_entity_id, idempotency_key], map: "received_docs_entity_idempotency_key")
@@ -12239,6 +12245,51 @@ model received_document_event_attempts {
 
   @@unique([event_id, attempt_number], map: "received_doc_event_attempt_event_number_key")
   @@index([event_id], map: "received_doc_event_attempt_event_idx")
+}
+
+/// Immutable fiscal qualification authority for a received document and tax family.
+/// Operational purchase contributions remain separate from this record.
+model received_tax_qualifications {
+  id                     Int          @id @default(autoincrement())
+  organization_id        Int
+  accounting_entity_id   Int
+  store_id               Int?
+  document_id            Int
+  document_version       Int
+  tax_type               tax_type_enum
+  jurisdiction_key       String       @db.VarChar(100)
+  canonical_identity_key String?      @db.VarChar(64)
+  revision               Int
+  supersedes_id          Int?         @unique(map: "received_tax_qualifications_supersedes_key")
+  idempotency_key        String       @db.VarChar(160)
+  outcome                String       @db.VarChar(30)
+  source_hash_snapshot   String?      @db.VarChar(64)
+  facts_hash             String       @db.VarChar(64)
+  decision_hash          String       @db.VarChar(64)
+  rules_version          String       @db.VarChar(100)
+  source_snapshot        Json
+  basis_snapshot         Json
+  decision_snapshot      Json
+  overlap_snapshot       Json
+  evidence_id            Int
+  qualified_by_user_id   Int
+  qualified_at           DateTime     @db.Timestamptz(6)
+  created_at             DateTime     @default(now()) @db.Timestamptz(6)
+
+  organization      organizations       @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_org_fkey")
+  accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_entity_fkey")
+  store             stores?             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_store_fkey")
+  document          received_documents  @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_document_fkey")
+  evidence          fiscal_evidences    @relation(fields: [evidence_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_evidence_fkey")
+  qualified_by_user users               @relation("received_tax_qualifications_qualified_by", fields: [qualified_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_user_fkey")
+  supersedes        received_tax_qualifications?  @relation("received_tax_qualifications_revision", fields: [supersedes_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_tax_qualifications_supersedes_fkey")
+  successors        received_tax_qualifications[] @relation("received_tax_qualifications_revision")
+
+  @@unique([organization_id, accounting_entity_id, idempotency_key], map: "received_tax_qualifications_scope_idempotency_key")
+  @@unique([organization_id, accounting_entity_id, document_id, tax_type, jurisdiction_key, revision], map: "received_tax_qualifications_revision_key")
+  @@index([organization_id, accounting_entity_id, document_id, tax_type, jurisdiction_key], map: "received_tax_qualifications_document_idx")
+  @@index([organization_id, accounting_entity_id, tax_type, jurisdiction_key, outcome, qualified_at], map: "received_tax_qualifications_fiscal_read_idx")
+  @@index([evidence_id], map: "received_tax_qualifications_evidence_idx")
 }
 
 model document_reception_connections {
