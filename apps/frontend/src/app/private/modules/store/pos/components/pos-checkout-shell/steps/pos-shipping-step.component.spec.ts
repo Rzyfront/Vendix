@@ -1,4 +1,12 @@
-import { NO_ERRORS_SCHEMA, Pipe, PipeTransform, signal } from '@angular/core';
+import {
+  DebugElement,
+  NO_ERRORS_SCHEMA,
+  Pipe,
+  PipeTransform,
+  ViewContainerRef,
+  getDebugNode,
+  signal,
+} from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -389,6 +397,9 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
 
     expect(component.addressId()).toBe(55);
     expect(component.addressValid()).toBeFalse();
+    component.selectShippingMethod(firstMethod, { advance: false });
+    fixture.detectChanges();
+
     // Antes de este fix, la plantilla `#clientDeliveryDetails` solo mostraba
     // resumen + "Usar otra dirección" (formulario vacío) para este caso; el
     // fix reabre el mismo formulario precargado con la dirección guardada.
@@ -399,14 +410,34 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     }));
     expect(component.missingAddressFieldsLabel()).toBe('el departamento');
 
-    // El cajero completa el departamento y municipio como una ubicación DANE coherente.
-    const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
-      .componentInstance as AddressFormFieldsComponent;
-    selectMunicipality(form, '76', '76001');
-    fixture.detectChanges();
+    // En producción el checkout-shell proyecta esta TemplateRef junto al paso
+    // Cliente. La fixture de este spec monta el paso aislado, así que se inserta
+    // la misma vista proyectada para ejercitar el editor real y sus outputs.
+    const template = component.clientDeliveryDetails();
+    expect(template).toBeTruthy();
+    const embeddedView = fixture.componentRef.injector
+      .get(ViewContainerRef)
+      .createEmbeddedView(template!);
+    try {
+      embeddedView.detectChanges();
+      const formElement = embeddedView.rootNodes
+        .map((rootNode) => getDebugNode(rootNode) as DebugElement | null)
+        .filter((debugNode): debugNode is DebugElement => !!debugNode)
+        .map((debugNode) => debugNode.query(By.directive(AddressFormFieldsComponent)))
+        .find((debugNode) => !!debugNode);
+      expect(formElement).toBeTruthy();
 
-    expect(component.addressValid()).toBeTrue();
-    expect(component.addressId()).toBe(55); // sigue siendo UPDATE sobre el mismo id, no uno nuevo
+      // El cajero completa departamento y municipio como ubicación DANE coherente.
+      const form = formElement!.componentInstance as AddressFormFieldsComponent;
+      selectMunicipality(form, '76', '76001');
+      embeddedView.detectChanges();
+      fixture.detectChanges();
+
+      expect(component.addressValid()).toBeTrue();
+      expect(component.addressId()).toBe(55); // sigue siendo UPDATE sobre el mismo id, no uno nuevo
+    } finally {
+      embeddedView.destroy();
+    }
   });
 
   it('en Cliente muestra solo costo en Envío y exige método y dirección antes de avanzar', () => {
