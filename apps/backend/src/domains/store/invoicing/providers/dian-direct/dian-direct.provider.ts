@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import * as zlib from 'zlib';
 import { DOMParser } from '@xmldom/xmldom';
 import {
@@ -32,7 +37,11 @@ import {
   dianLineExtensionTotal,
   dianSum,
 } from '../../utils/dian-money.util';
-import { dianPartyId, onlyDigits } from '../../../../../common/utils/nit.util';
+import {
+  dianPartyId,
+  onlyDigits,
+  normalizeNit,
+} from '../../../../../common/utils/nit.util';
 import {
   normalizeAcquirerDocumentType,
   resolveMissingAcquirerDocumentType,
@@ -1412,10 +1421,67 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     const issuer = await this.loadIssuerData(config);
 
+    const configured_buyer_nit = event.referenced_issuer
+      ? normalizeNit(issuer.nit)
+      : undefined;
+    const declared_buyer_nit = event.referenced_issuer
+      ? normalizeNit(event.customer.document_number)
+      : undefined;
+    const supplier_nit =
+      event.referenced_issuer?.document_type === DIAN_ID_TYPES.NIT
+        ? normalizeNit(event.referenced_issuer.document_number)
+        : undefined;
+
+    // Received-document events are emitted by this tenant as the buyer. Do not
+    // allow this transport seam to masquerade as the supplier/issuer.
+    if (event.referenced_issuer) {
+      if (
+        !['030', '031', '032', '033'].includes(event.event_code) ||
+        event.generated_by !== 'customer'
+      ) {
+        throw new BadRequestException(
+          'Los eventos de comprador para facturas recibidas solo permiten códigos 030–033 generados por customer.',
+        );
+      }
+      if (
+        !configured_buyer_nit?.number ||
+        !configured_buyer_nit.dv ||
+        configured_buyer_nit.dv_mismatch ||
+        (configured_buyer_nit.provided_dv !== null &&
+          configured_buyer_nit.provided_dv !== configured_buyer_nit.dv) ||
+        configured_buyer_nit.dv !== issuer.nit_dv ||
+        event.customer.document_type !== DIAN_ID_TYPES.NIT ||
+        !declared_buyer_nit?.number ||
+        declared_buyer_nit.dv_mismatch ||
+        (event.customer.document_dv !== undefined &&
+          event.customer.document_dv !== declared_buyer_nit.dv) ||
+        configured_buyer_nit.number !== declared_buyer_nit.number ||
+        configured_buyer_nit.dv !== declared_buyer_nit.dv
+      ) {
+        throw new UnprocessableEntityException(
+          'La identificación NIT/DV del comprador no coincide con la entidad fiscal configurada o es inválida.',
+        );
+      }
+      if (
+        !supplier_nit?.number ||
+        supplier_nit.dv_mismatch ||
+        (event.referenced_issuer.document_dv !== undefined &&
+          event.referenced_issuer.document_dv !== supplier_nit.dv)
+      ) {
+        throw new UnprocessableEntityException(
+          'La identificación NIT/DV del proveedor referenciado es inválida.',
+        );
+      }
+    }
+
     const issuer_party: DianEventParty = {
       document_type: issuer.document_type || DIAN_ID_TYPES.NIT,
-      document_number: onlyDigits(issuer.nit),
-      document_dv: issuer.nit_dv,
+      document_number: event.referenced_issuer
+        ? configured_buyer_nit!.number
+        : onlyDigits(issuer.nit),
+      document_dv: event.referenced_issuer
+        ? configured_buyer_nit!.dv
+        : issuer.nit_dv,
       legal_name: issuer.legal_name,
     };
     const customer_party: DianEventParty = {
@@ -1424,10 +1490,22 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
 
     // 030/031/032/033 travel adquiriente → emisor; 034 travels the other way.
-    const sender =
-      event.generated_by === 'issuer' ? issuer_party : customer_party;
-    const receiver =
-      event.generated_by === 'issuer' ? customer_party : issuer_party;
+    const supplier_party: DianEventParty | undefined = event.referenced_issuer
+      ? {
+          ...event.referenced_issuer,
+          document_number: dianPartyId(
+            event.referenced_issuer.document_number,
+            event.referenced_issuer.document_type,
+          ),
+          document_dv: supplier_nit?.dv ?? event.referenced_issuer.document_dv,
+        }
+      : undefined;
+    const sender = event.referenced_issuer
+      ? issuer_party
+      : event.generated_by === 'issuer' ? issuer_party : customer_party;
+    const receiver = event.referenced_issuer
+      ? supplier_party!
+      : event.generated_by === 'issuer' ? customer_party : issuer_party;
 
     const issue_time =
       event.issue_time ||

@@ -43,6 +43,8 @@ export interface DianDocumentEventRequest {
   referenced_document_type_code?: string;
   /** The adquiriente of the referenced invoice. */
   customer: DianEventParty;
+  /** Supplier/issuer on a received supplier invoice. Required only by buyer-event adapters. */
+  referenced_issuer?: DianEventParty;
   /** Event issue date, `YYYY-MM-DD`. */
   issue_date: string;
   /** Event issue time with offset. Derived from the store timezone when absent. */
