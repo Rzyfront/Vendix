@@ -909,6 +909,7 @@ export class AccountingEventsListener {
   @OnEvent('purchase.vat_recognized')
   async handlePurchaseVatRecognized(event: {
     invoice_id: number;
+    contribution_id?: number;
     purchase_order_id: number;
     reception_id: number;
     organization_id: number;
@@ -919,6 +920,46 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (Object.prototype.hasOwnProperty.call(event, 'contribution_id')) {
+        const contributionId = event.contribution_id;
+        const validPositiveId = (value: unknown): value is number =>
+          Number.isSafeInteger(value) && (value as number) > 0;
+        if (!validPositiveId(contributionId)) {
+          throw new Error('Invalid purchase VAT contribution_id; legacy fallback is prohibited');
+        }
+        if (
+          !validPositiveId(event.organization_id) ||
+          !validPositiveId(event.accounting_entity_id) ||
+          !validPositiveId(event.store_id)
+        ) {
+          throw new Error('Missing or invalid fiscal scope for purchase VAT contribution; legacy fallback is prohibited');
+        }
+        if (
+          !(await this.requireFlow('purchases', {
+            organization_id: event.organization_id,
+            store_id: event.store_id,
+            source_type: 'purchase_vat_contribution',
+            source_id: contributionId,
+            event,
+          }))
+        ) {
+          return;
+        }
+        const entry = await this.auto_entry_service.onPurchaseVatContributionRecognized({
+          contribution_id: contributionId,
+          organization_id: event.organization_id,
+          accounting_entity_id: event.accounting_entity_id,
+          store_id: event.store_id,
+          user_id: event.user_id,
+        });
+        if (entry) {
+          this.logger.log(
+            `Auto-entry created for purchase VAT contribution #${contributionId} (PO #${event.purchase_order_id})`,
+          );
+        }
+        return;
+      }
+
       if (
         !(await this.requireFlow('purchases', {
           organization_id: event.organization_id,
