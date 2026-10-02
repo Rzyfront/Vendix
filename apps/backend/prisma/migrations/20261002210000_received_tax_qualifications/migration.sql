@@ -82,6 +82,18 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_positive_versions_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
         ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_positive_versions_check" CHECK ("revision" > 0 AND "document_version" > 0);
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_root_revision_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_root_revision_check"
+            CHECK (("supersedes_id" IS NULL) = ("revision" = 1));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_identity_key_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_identity_key_check"
+            CHECK ("canonical_identity_key" IS NULL OR "canonical_identity_key" ~ '^[0-9A-Fa-f]{64}$');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_nonempty_text_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
+        ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_nonempty_text_check"
+            CHECK ("jurisdiction_key" ~ '[^[:space:]]' AND "rules_version" ~ '[^[:space:]]' AND "idempotency_key" ~ '[^[:space:]]');
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'received_tax_qualifications_hash_format_check' AND conrelid = 'received_tax_qualifications'::regclass) THEN
         ALTER TABLE "received_tax_qualifications" ADD CONSTRAINT "received_tax_qualifications_hash_format_check"
             CHECK ("facts_hash" ~ '^[0-9A-Fa-f]{64}$' AND "decision_hash" ~ '^[0-9A-Fa-f]{64}$' AND ("source_hash_snapshot" IS NULL OR "source_hash_snapshot" ~ '^[0-9A-Fa-f]{64}$'));
@@ -117,12 +129,24 @@ DECLARE
     document_org_id INTEGER;
     document_entity_id INTEGER;
     document_store_id INTEGER;
+    document_version INTEGER;
+    document_source_hash VARCHAR(64);
     evidence_org_id INTEGER;
     evidence_entity_id INTEGER;
     evidence_store_id INTEGER;
+    evidence_storage_key TEXT;
+    evidence_content_hash VARCHAR(128);
     entity_org_id INTEGER;
     store_org_id INTEGER;
     user_org_id INTEGER;
+    previous_organization_id INTEGER;
+    previous_entity_id INTEGER;
+    previous_store_id INTEGER;
+    previous_document_id INTEGER;
+    previous_tax_type "tax_type_enum";
+    previous_jurisdiction_key VARCHAR(100);
+    previous_canonical_identity_key VARCHAR(64);
+    previous_revision INTEGER;
 BEGIN
     SELECT "organization_id" INTO entity_org_id
       FROM "accounting_entities" WHERE "id" = NEW."accounting_entity_id";
@@ -137,27 +161,54 @@ BEGIN
         END IF;
     END IF;
 
-    SELECT "organization_id", "accounting_entity_id", "store_id"
-      INTO document_org_id, document_entity_id, document_store_id
+    SELECT "organization_id", "accounting_entity_id", "store_id", "version", "source_hash"
+      INTO document_org_id, document_entity_id, document_store_id, document_version, document_source_hash
       FROM "received_documents" WHERE "id" = NEW."document_id";
     IF document_org_id IS DISTINCT FROM NEW."organization_id"
        OR document_entity_id IS DISTINCT FROM NEW."accounting_entity_id"
        OR document_store_id IS DISTINCT FROM NEW."store_id" THEN
         RAISE EXCEPTION 'received tax qualification document must match its organization, entity, and store';
     END IF;
+    IF NEW."document_version" IS DISTINCT FROM document_version
+       OR NEW."source_hash_snapshot" IS DISTINCT FROM document_source_hash THEN
+        RAISE EXCEPTION 'received tax qualification document snapshot is stale';
+    END IF;
 
-    SELECT "organization_id", "accounting_entity_id", "store_id"
-      INTO evidence_org_id, evidence_entity_id, evidence_store_id
+    SELECT "organization_id", "accounting_entity_id", "store_id", "storage_key", "content_hash"
+      INTO evidence_org_id, evidence_entity_id, evidence_store_id, evidence_storage_key, evidence_content_hash
       FROM "fiscal_evidences" WHERE "id" = NEW."evidence_id";
     IF evidence_org_id IS DISTINCT FROM NEW."organization_id"
        OR evidence_entity_id IS DISTINCT FROM NEW."accounting_entity_id"
-       OR evidence_store_id IS DISTINCT FROM NEW."store_id" THEN
-        RAISE EXCEPTION 'received tax qualification evidence must match its organization, entity, and store';
+       OR (evidence_store_id IS NOT NULL AND evidence_store_id IS DISTINCT FROM NEW."store_id") THEN
+        RAISE EXCEPTION 'received tax qualification evidence must match its organization and entity, and any evidence store must match';
+    END IF;
+    IF NEW."outcome" = 'eligible'
+       AND NULLIF(BTRIM(evidence_storage_key), '') IS NULL
+       AND NULLIF(BTRIM(evidence_content_hash), '') IS NULL THEN
+        RAISE EXCEPTION 'eligible received tax qualification requires fiscal evidence artifact metadata';
     END IF;
 
     SELECT "organization_id" INTO user_org_id FROM "users" WHERE "id" = NEW."qualified_by_user_id";
     IF user_org_id IS DISTINCT FROM NEW."organization_id" THEN
         RAISE EXCEPTION 'received tax qualification user must belong to its organization';
+    END IF;
+
+    IF NEW."supersedes_id" IS NOT NULL THEN
+        SELECT "organization_id", "accounting_entity_id", "store_id", "document_id", "tax_type",
+               "jurisdiction_key", "canonical_identity_key", "revision"
+          INTO previous_organization_id, previous_entity_id, previous_store_id, previous_document_id,
+               previous_tax_type, previous_jurisdiction_key, previous_canonical_identity_key, previous_revision
+          FROM "received_tax_qualifications" WHERE "id" = NEW."supersedes_id";
+        IF previous_organization_id IS DISTINCT FROM NEW."organization_id"
+           OR previous_entity_id IS DISTINCT FROM NEW."accounting_entity_id"
+           OR previous_store_id IS DISTINCT FROM NEW."store_id"
+           OR previous_document_id IS DISTINCT FROM NEW."document_id"
+           OR previous_tax_type IS DISTINCT FROM NEW."tax_type"
+           OR previous_jurisdiction_key IS DISTINCT FROM NEW."jurisdiction_key"
+           OR previous_canonical_identity_key IS DISTINCT FROM NEW."canonical_identity_key"
+           OR NEW."revision" IS DISTINCT FROM previous_revision + 1 THEN
+            RAISE EXCEPTION 'received tax qualification successor must be the next revision in the same document scope';
+        END IF;
     END IF;
 
     RETURN NEW;
