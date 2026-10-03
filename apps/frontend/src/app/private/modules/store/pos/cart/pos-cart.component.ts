@@ -1033,6 +1033,17 @@ import {
                 (decisión "sin shortcuts" del paso 1); el handler sigue
                 abriendo el checkout-shell actual sin cambios.
               -->
+              @if (hasFinancialSplit()) {
+                <button
+                  type="button"
+                  class="cart-btn checkout-btn"
+                  (click)="chargeAccounts.emit()"
+                  aria-label="Cobrar cuentas"
+                >
+                  <app-icon name="credit-card" [size]="20"></app-icon>
+                  <span>Cobrar cuentas</span>
+                </button>
+              } @else {
               <button
                 type="button"
                 class="cart-btn checkout-btn"
@@ -1063,6 +1074,7 @@ import {
                   <app-icon name="credit-card" [size]="18"></app-icon>
                   <span>Cobrar</span>
                 </button>
+              }
               }
             }
           </div>
@@ -1648,6 +1660,8 @@ private cartService = inject(PosCartService);
    * the cashier has a single, unambiguous next step.
    */
   readonly readyToPayOrder = input<unknown>(null);
+  /** La orden tiene división financiera: solo se cobra por cuentas. */
+  readonly hasFinancialSplit = input<boolean>(false);
   readonly isCharging = input<boolean>(false);
   /**
    * PSVERSION0001 paso 4 — el shell POS pasa su señal cashRegisterEnabled;
@@ -1684,6 +1698,8 @@ private cartService = inject(PosCartService);
    * mounts the reused `OrderPaymentModalComponent` over the fresh order.
    */
   readonly charge = output<void>();
+  /** El cajero pidió cobrar las cuentas de una orden dividida. */
+  readonly chargeAccounts = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
   readonly customerSelected = output<any>();

@@ -53,7 +53,19 @@
         <p>Cargando sesión…</p>
       </div>
     } @else if (session()) {
-      @if (session()?.order_id; as sourceId) {
+      @if (hasFinancialSplit() && !checkoutEnabled()) {
+        <div class="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm">
+          <app-icon name="split" [size]="16"></app-icon>
+          <span class="font-medium">
+            Cuenta dividida{{ financialSplitAccountCount() ? ' en ' + financialSplitAccountCount() + ' cuentas' : '' }}
+          </span>
+          <span class="text-[var(--color-text-secondary)]">· gestiónala en el detalle de la orden</span>
+          @if (session()?.order_id; as orderId) {
+            <a class="ml-auto font-medium text-[var(--color-primary)] underline" [routerLink]="['/admin/orders', orderId]">Ver orden</a>
+          }
+        </div>
+      }
+      @if (checkoutEnabled() && !hasFinancialSplit() && session()?.order_id; as sourceId) {
         <app-split-accounts-panel
           [sourceOrderId]="sourceId" [items]="items()" [allowCreate]="false"
           [refreshKey]="splitRefreshKey()" (loaded)="onFinancialSplitLoaded($event)"
@@ -104,7 +116,12 @@
                       → el mesero aún no la liberó).
                     - Pendiente (aún sin pagar).
                 -->
-                @if (isClosed() && isPaid()) {
+                @if (hasFinancialSplit()) {
+                  <app-badge variant="info" size="sm">
+                    <app-icon name="split" [size]="12"></app-icon>
+                    Cuenta dividida
+                  </app-badge>
+                } @else if (isClosed() && isPaid()) {
                   <app-badge variant="success" size="sm">
                     <app-icon name="circle-check" [size]="12"></app-icon>
                     Pagada / Cerrada
@@ -695,7 +712,7 @@
           (clicked)="openPay()"
         >
           <app-icon slot="icon" name="credit-card" [size]="15"></app-icon>
-          Cobrar
+          {{ hasFinancialSplit() ? 'Cobrar cuentas' : 'Cobrar' }}
         </app-button>
       }
     </div>
@@ -745,12 +762,14 @@
     (addItems)="onAddItems($event)"
   />
 
-  <app-split-order-modal
-    [(isOpen)]="isSplitOpen"
-    [orderId]="session()?.order_id ?? null"
-    [items]="items()"
-    (splitCompleted)="onSplitCompleted($event)"
-  />
+  @if (checkoutEnabled()) {
+    <app-split-order-modal
+      [(isOpen)]="isSplitOpen"
+      [orderId]="session()?.order_id ?? null"
+      [items]="items()"
+      (splitCompleted)="onSplitCompleted($event)"
+    />
+  }
 
   <app-transfer-table-modal
     [isOpen]="isTransferOpen()"
