@@ -1,11 +1,12 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { AiScanJobOptions, AiScanJobService } from '../../../../core/services/ai-scan-job.service';
+import { Observable, map } from 'rxjs';
 
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import {
   RutScanApiResponse,
+  RutScanResult,
   RutScannerScope,
 } from '../interfaces/rut-scan-result.interface';
 
@@ -26,7 +27,7 @@ import {
   providedIn: 'root',
 })
 export class RutScannerService {
-  private readonly http = inject(HttpClient);
+  private readonly aiScanJobs = inject(AiScanJobService);
   private readonly authFacade = inject(AuthFacade);
 
   /**
@@ -40,14 +41,16 @@ export class RutScannerService {
   scanRut(
     file: File,
     scope?: RutScannerScope,
+    opts?: AiScanJobOptions,
   ): Observable<RutScanApiResponse> {
     const formData = new FormData();
     formData.append('file', file);
 
-    return this.http.post<RutScanApiResponse>(
-      `${this.scanUrl(scope)}`,
-      formData,
-    );
+    // Encola en `.../scan/async` y sondea el job; se adapta el `result` a la
+    // forma `{ success, data }` que el modal ya consumía del endpoint síncrono.
+    return this.aiScanJobs
+      .enqueueAndWait<RutScanResult>(`${this.scanUrl(scope)}/async`, formData, opts)
+      .pipe(map((result) => ({ success: true, data: result })));
   }
 
   /**

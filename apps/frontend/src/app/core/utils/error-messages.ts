@@ -806,6 +806,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer la resolución. Intenta con una foto más nítida o escribe los datos a mano.',
   RESOLUTION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  RUT_SCAN_NO_FILE: 'Sube una foto o un PDF del RUT.',
+  RUT_SCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+  RUT_SCAN_AI_FAIL:
+    'La IA no pudo leer el RUT. Intenta con una foto más nítida o escribe los datos a mano.',
+  RUT_SCAN_PARSE_FAIL:
+    'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
   // Escáner IA de la habilitación DIAN (software + set de pruebas + resolución
   // de pruebas). Mismo contrato: no persiste nada, así que un fallo solo
   // significa "no pude leerlo".
