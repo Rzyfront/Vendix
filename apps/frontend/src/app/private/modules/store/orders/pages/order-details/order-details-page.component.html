@@ -204,7 +204,22 @@
     ></app-sticky-header>
 
     @if (orderData.active_financial_split_id || (showSplitConfig() && canCreateFinancialSplit())) {
-      <div class="max-w-[1600px] mx-auto mb-4">
+      <div
+        id="splitAccountsAnchor"
+        tabindex="-1"
+        class="max-w-[1600px] mx-auto mb-4 outline-none scroll-mt-24"
+      >
+        @if (!orderData.active_financial_split_id) {
+          <div class="flex justify-end mb-2">
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md border border-border text-text-secondary hover:bg-gray-50"
+              (click)="showSplitConfig.set(false)"
+            >
+              Cerrar
+            </button>
+          </div>
+        }
         <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
       </div>
     }
@@ -1891,6 +1906,48 @@
                   }
                 </div>
               }
+              @if (orderData.active_financial_split_id && !orderInvoice()) {
+                <p class="text-xs text-text-secondary">
+                  Esta orden se factura por cuenta
+                </p>
+              }
+              @if (accountInvoices().length > 0) {
+                <div [class.mt-3]="orderInvoice() !== null" class="space-y-2">
+                  <h3
+                    class="text-xs font-bold text-text-secondary uppercase tracking-wider"
+                  >
+                    Facturas por cuenta
+                  </h3>
+                  @for (inv of accountInvoices(); track inv.id) {
+                    <div
+                      class="rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center justify-between gap-2"
+                    >
+                      <div class="min-w-0">
+                        <p class="text-sm font-semibold text-gray-900">
+                          {{ inv.account_label || 'Cuenta' }} ·
+                          {{ inv.customer_name || 'Consumidor final' }}
+                        </p>
+                        <p class="text-xs text-text-secondary break-all">
+                          {{ inv.invoice_number || 'Borrador' }} ·
+                          <span
+                            class="px-1.5 py-0.5 text-[10px] font-bold uppercase rounded bg-gray-200"
+                            >{{ accountInvoiceStatusLabel(inv) }}</span
+                          >
+                          · {{ accountInvoiceTotal(inv) | currency }}
+                        </p>
+                      </div>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="openAccountInvoice(inv)"
+                      >
+                        <app-icon slot="icon" name="eye" [size]="14" />
+                        Ver
+                      </app-button>
+                    </div>
+                  }
+                </div>
+              }
               <!-- El botón NO es el `@else` del bloque de arriba: una factura
                    anulada o cancelada deja ver su registro Y habilita volver a
                    emitir, que es justo lo que hace el backend
@@ -2253,6 +2310,29 @@
             >
               Acciones
             </h2>
+
+            @if (orderData.active_financial_split_id) {
+              <div
+                class="bg-info-light border border-info/30 rounded-lg p-3 mb-3 flex items-center justify-between gap-3 flex-wrap"
+              >
+                <p class="text-sm text-text-primary">
+                  @if (splitSummary(); as summary) {
+                    Cuenta dividida en {{ summary.accounts }} cuentas · Cobrado
+                    {{ summary.paid | currency }} de {{ summary.total | currency }}
+                  } @else {
+                    Cuenta dividida · Cobrado {{ (orderData.total_paid ?? 0) | currency }} de
+                    {{ orderData.grand_total | currency }}
+                  }
+                </p>
+                <button
+                  type="button"
+                  class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+                  (click)="focusSplitAccounts()"
+                >
+                  Ir a las cuentas
+                </button>
+              </div>
+            }
 
             @if (showUnpaidBalanceNotice()) {
               <div
@@ -2645,6 +2725,12 @@
                         {{ getPaymentStateLabel(payment.state) }}
                       </span>
                     </div>
+                    @if (payment.financial_account_label) {
+                      <span
+                        class="inline-block mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-md bg-gray-100 text-text-secondary"
+                        >Cuenta: {{ payment.financial_account_label }}</span
+                      >
+                    }
                     <!-- QUI-732 (B.5) — método de pago. Fallback chain
                          display_name → system.display_name → system.name → '—'.
                          El último eslabón cubre pagos huérfanos

@@ -1,6 +1,6 @@
 import { SplitAccountsPanelComponent } from '../../../restaurant-ops/tables/components/split-accounts-panel/split-accounts-panel.component';
 import type { SplitResult } from '../../../restaurant-ops/tables/interfaces';
-import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, Injector, afterNextRender, computed, effect, inject, signal } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../environments/environment';
@@ -56,6 +56,7 @@ import {
   AssignShippingMethodDto,
   ReactivateOrderDto,
   OrderInvoiceSnapshot,
+  OrderAccountInvoice,
   OrderTableSession,
   Address,
   OrderAvailableAction,
@@ -757,6 +758,7 @@ type RefundState =
 })
 export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
+  private injector = inject(Injector);
   private vexiHosts = inject(VexiUiHostRegistry);
   orderId: string | null = null;
   order = signal<Order | null>(null);
@@ -810,7 +812,13 @@ export class OrderDetailsPageComponent {
   readonly fiscalAlert = computed<FiscalAlertEntry | null>(() => {
     const code = this.order()?.fiscal_alert_code;
     if (!code) return null;
-    return resolveFiscalAlert(code);
+    const alert = resolveFiscalAlert(code);
+    // Con división activa la orden principal es informativa: no se ofrece
+    // emitir su factura desde el banner.
+    if (this.order()?.active_financial_split_id && alert.action.kind === 'emit-invoice') {
+      return null;
+    }
+    return alert;
   });
   readonly appliedTierSummary = computed(() => {
     const order = this.order();
@@ -1736,6 +1744,7 @@ export class OrderDetailsPageComponent {
   /** Aviso de saldo (reemplaza Finalizar) en shipped/delivered/processing. */
   readonly showUnpaidBalanceNotice = computed(() => {
     const state = this.order()?.state;
+    if (this.order()?.active_financial_split_id) return false;
     return (
       this.hasUnpaidBalance() &&
       (state === 'shipped' || state === 'delivered' || state === 'processing')
@@ -1830,7 +1839,20 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    const buttons = [...buildOrderActionButtons(order)];
+    // Con división activa la orden principal es solo informativa: se ocultan
+    // las acciones de cobro/factura (el backend las rechaza con
+    // SPLIT_ACCOUNT_LOCKED); todo se cobra por las cuentas.
+    const SPLIT_HIDDEN_BUTTONS = new Set([
+      'pay',
+      'credit-payment',
+      'confirm-payment',
+      'cancel-payment',
+      'ship', // collect_payment ("Pasar a Cobro")
+      'cancel',
+    ]);
+    const buttons = buildOrderActionButtons(order).filter(
+      (b) => !(order.active_financial_split_id && SPLIT_HIDDEN_BUTTONS.has(b.id)),
+    );
 
     // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
     // reparto activo pero sí es elegible. El panel ya no se abre solo.
@@ -2445,7 +2467,50 @@ export class OrderDetailsPageComponent {
     });
   }
 
+  /** Resumen de la división para la franja informativa de la orden principal. */
+  readonly splitSummary = signal<{ accounts: number; total: number; paid: number } | null>(null);
+
+  /**
+   * Scroll + foco al panel de cuentas (`#splitAccountsAnchor`), mismo patrón
+   * que `focusGestionEnvio`. Espera al siguiente render porque el panel se
+   * monta recién al fijar `showSplitConfig`.
+   */
+  focusSplitAccounts(): void {
+    afterNextRender(
+      () => {
+        const el = document.getElementById('splitAccountsAnchor');
+        if (!el) return;
+        const reduceMotion =
+          window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ??
+          false;
+        el.scrollIntoView({
+          behavior: reduceMotion ? 'auto' : 'smooth',
+          block: 'start',
+        });
+        window.setTimeout(
+          () => el.focus({ preventScroll: true }),
+          reduceMotion ? 0 : 350,
+        );
+      },
+      { injector: this.injector },
+    );
+  }
+
   onFinancialAccountsLoaded(result: SplitResult | null): void {
+    if (result && result.split_group_id) {
+      const total = Number(result.original_total) || 0;
+      const pending = (result.accounts ?? []).reduce(
+        (sum, a) => sum + (Number(a.remaining_balance) || 0),
+        0,
+      );
+      this.splitSummary.set({
+        accounts: result.accounts?.length ?? 0,
+        total,
+        paid: Math.max(0, total - pending),
+      });
+    } else {
+      this.splitSummary.set(null);
+    }
     this.order.update((order) => order ? { ...order, active_financial_split_id: result?.split_group_id ?? null } : order);
   }
 
@@ -2671,6 +2736,7 @@ export class OrderDetailsPageComponent {
       case 'split-account':
         // QUI-885: abre la configuración de reparto bajo demanda.
         this.showSplitConfig.set(true);
+        this.focusSplitAccounts();
         break;
       case 'generate-dispatch':
         this.openDispatchModal();
@@ -5826,7 +5892,12 @@ export class OrderDetailsPageComponent {
   readonly canEmitInvoice = computed(() => {
     const code = this.order()?.fiscal_alert_code;
     const emitAllowed = !code || resolveFiscalAlert(code).allowEmitInvoiceCta;
-    return this.reinvoiceable() && this.electronicEmissionLive() && emitAllowed;
+    return (
+      !this.order()?.active_financial_split_id &&
+      this.reinvoiceable() &&
+      this.electronicEmissionLive() &&
+      emitAllowed
+    );
   });
 
   /**
@@ -5864,8 +5935,55 @@ export class OrderDetailsPageComponent {
    * ver qué pasó.
    */
   readonly showElectronicInvoiceCard = computed(
-    () => this.acceptedInvoice() !== null || this.electronicEmissionLive(),
+    () =>
+      this.acceptedInvoice() !== null ||
+      this.electronicEmissionLive() ||
+      this.accountInvoices().length > 0,
   );
+
+  /** Facturas de las cuentas de la división (no de la orden). */
+  readonly accountInvoices = computed<OrderAccountInvoice[]>(
+    () => this.order()?.account_invoices ?? [],
+  );
+
+  accountInvoiceTotal(inv: OrderAccountInvoice): number {
+    return Number(inv.grand_total) || 0;
+  }
+
+  /** Estado en español de una factura de cuenta. */
+  accountInvoiceStatusLabel(inv: OrderAccountInvoice): string {
+    if (inv.dian_status === 'accepted') return 'Aceptada DIAN';
+    if (inv.dian_status === 'rejected') return 'Rechazada DIAN';
+    if (inv.dian_status === 'pending') return 'Pendiente DIAN';
+    switch (inv.status) {
+      case 'draft': return 'Borrador';
+      case 'issued': return 'Emitida';
+      case 'sent': return 'Enviada';
+      case 'accepted': return 'Aceptada';
+      case 'rejected': return 'Rechazada';
+      case 'paid': return 'Pagada';
+      default: return inv.status;
+    }
+  }
+
+  /** Abre el mismo modal de detalle sobre la factura de una cuenta. */
+  openAccountInvoice(inv: OrderAccountInvoice): void {
+    this.noteDetailStub.set({
+      id: inv.id,
+      organization_id: 0,
+      store_id: 0,
+      invoice_number: inv.invoice_number ?? '',
+      status: inv.status,
+      dian_status: inv.dian_status,
+      subtotal_amount: 0,
+      discount_amount: 0,
+      tax_amount: 0,
+      withholding_amount: 0,
+      total_amount: Number(inv.grand_total) || 0,
+    } as unknown as Invoice);
+    this.invoiceMutatedInModal.set(false);
+    this.showInvoiceDetailModal.set(true);
+  }
 
   /**
    * STUB de `Invoice` para alimentar `vendix-invoice-detail` y
