@@ -2626,8 +2626,9 @@ export class ProductsBulkService {
       data: { state: transitionState, updated_at: new Date() },
     });
 
+    let updated: any;
     try {
-      const updated = await this.productsService.update(existing.id, dto);
+      updated = await this.productsService.update(existing.id, dto);
 
       // Variantes del archivo: emparejar por SKU con las del producto (cualquier
       // estado). Las que el archivo no trae no se tocan.
@@ -2651,24 +2652,6 @@ export class ProductsBulkService {
           }
         }
       }
-
-      const context = RequestContextService.getContext();
-      await this.prisma.audit_logs.create({
-        data: {
-          user_id: context?.user_id ?? null,
-          store_id: storeId,
-          organization_id: context?.organization_id ?? null,
-          action: 'PRODUCT_REACTIVATE',
-          resource: 'products',
-          resource_id: existing.id,
-          request_id: RequestContextService.getRequestId() ?? null,
-          old_values: { state: 'archived' },
-          new_values: { state: targetState },
-          metadata: { source: 'bulk', event: 'product_reactivated' },
-        },
-      });
-
-      return updated;
     } catch (err) {
       await this.prisma.products
         .updateMany({
@@ -2683,6 +2666,33 @@ export class ProductsBulkService {
         );
       throw err;
     }
+
+    // Fuera del try: la reactivación ya ocurrió; un fallo de auditoría no
+    // debe re-archivar un producto que ya tiene los datos del archivo.
+    const context = RequestContextService.getContext();
+    await this.prisma.audit_logs
+      .create({
+        data: {
+          user_id: context?.user_id ?? null,
+          store_id: storeId,
+          organization_id: context?.organization_id ?? null,
+          action: 'PRODUCT_REACTIVATE',
+          resource: 'products',
+          resource_id: existing.id,
+          request_id: RequestContextService.getRequestId() ?? null,
+          old_values: { state: 'archived' },
+          new_values: { state: targetState },
+          metadata: { source: 'bulk', event: 'product_reactivated' },
+        },
+      })
+      .catch((e) =>
+        this.logger.error(
+          `Audit PRODUCT_REACTIVATE failed for product ${existing.id}`,
+          e?.stack || e,
+        ),
+      );
+
+    return updated;
   }
 
   private mapToUpdateProductDto(product: BulkProductItemDto): any {
