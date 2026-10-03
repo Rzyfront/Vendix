@@ -66,21 +66,21 @@
 }
 
 .saved-address-card {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
+  position: relative;
   min-width: 0;
+  min-height: 56px;
 }
 
 .saved-address-select {
   display: flex;
-  flex: 1 1 auto;
+  width: 100%;
+  box-sizing: border-box;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
   min-width: 0;
-  min-height: 52px;
-  padding: 10px 12px;
+  min-height: 56px;
+  padding: 10px 64px 10px 12px;
   border: 1.5px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-surface);
@@ -96,8 +96,7 @@
   overflow-wrap: anywhere;
 }
 
-.saved-address-select:hover,
-.saved-address-edit:hover {
+.saved-address-select:hover {
   border-color: var(--color-primary);
 }
 
@@ -109,19 +108,27 @@
 
 .saved-address-edit {
   display: inline-flex;
-  flex: 0 0 44px;
   align-items: center;
   justify-content: center;
-  align-self: center;
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
   width: 44px;
   min-width: 44px;
   height: 44px;
+  min-height: 44px;
   padding: 0;
-  border: 1.5px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-primary);
   cursor: pointer;
+}
+
+.saved-address-edit:hover {
+  background: rgba(var(--color-primary-rgb), 0.1);
+  color: var(--color-primary);
 }
 
 .saved-address-select:focus-visible,
