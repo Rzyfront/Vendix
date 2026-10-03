@@ -44,8 +44,9 @@ type MovementKind =
  * Convención de movimientos de caja → categoría del consolidado.
  * `refund` con `payment_cancelled`/`order_cancelled` y `cash_out` legado
  * 'Cancelación orden…' son cancelaciones; refund restante = reembolso;
- * cash_out restante = retiro (efectivo). `payment_method` null → `cash`
- * salvo en `sale` (se conserva `unknown`, como `sales_by_method`).
+ * cash_out restante = retiro (efectivo). `payment_method` null en `sale` y
+ * `refund` → `unknown`: el esperado (computeCashSummary) solo cuenta como
+ * efectivo lo que dice `cash`, y el consolidado debe dar la misma cifra.
  */
 function classifyMovement(
   m: any,
@@ -56,7 +57,7 @@ function classifyMovement(
     case 'cash_in':
       return { kind: 'cash_in', method: 'cash' };
     case 'refund': {
-      const method = m.payment_method || 'cash';
+      const method = m.payment_method || 'unknown';
       const ref = m.reference ?? '';
       return ref === 'payment_cancelled' || ref === 'order_cancelled'
         ? { kind: 'cancellation', method }
@@ -1326,8 +1327,7 @@ export class SessionsService {
   /**
    * Consolidado por método en céntimos enteros. NO toca `expected_cash_total`
    * (fórmula original arriba). Para efectivo `expected = opening + entered −
-   * exited`; coincide con el esperado original salvo reembolsos con
-   * `payment_method` null (aquí cuentan como efectivo, allá no).
+   * exited`; coincide siempre con el esperado original.
    */
   private buildConsolidated(
     session: any,
