@@ -130,6 +130,13 @@ describe('SplitOrderService financial ledger', () => {
         count: jest.fn(
           async ({ where }) => invoices.filter((i) => matches(i, where)).length,
         ),
+        updateMany: jest.fn(async ({ where, data }) => {
+          const hit = invoices.filter(
+            (i) => matches(i, { ...where, store_id: undefined }) || false,
+          );
+          hit.forEach((i) => Object.assign(i, data));
+          return { count: hit.length };
+        }),
       },
       order_financial_splits: {
         findFirst: jest.fn(async ({ where, include, orderBy }) => {
@@ -180,6 +187,9 @@ describe('SplitOrderService financial ledger', () => {
           lines.push(row);
           return row;
         }),
+        findMany: jest.fn(async ({ where }) =>
+          lines.filter((l) => matches(l, where)),
+        ),
       },
       order_financial_line_taxes: {
         create: jest.fn(async ({ data }) => {
@@ -498,7 +508,7 @@ describe('SplitOrderService financial ledger', () => {
     expect(groups[1].version).toBe(2);
   });
 
-  it.each(['pending', 'authorized', 'succeeded', 'captured'])(
+  it.each(['pending', 'authorized', 'succeeded', 'captured', 'refunded'])(
     'does not cancel when a new account has %s payment',
     async (state) => {
       const result = await confirm();
@@ -509,14 +519,166 @@ describe('SplitOrderService financial ledger', () => {
         amount: '5.00',
         order_id: 100,
       });
-      await expect(
-        service.cancel(100, { source_version: result.source_version }),
-      ).rejects.toThrow('pagos nuevos');
+      const error: any = await service
+        .cancel(100, { source_version: result.source_version })
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getResponse()).toMatchObject({
+        error_code: 'SPLIT_CANCEL_BLOCKED',
+        message:
+          'No se puede quitar la división: Cuenta 1 ya tiene un pago registrado.',
+      });
       expect(source.active_financial_split_id).toBe(result.split_group_id);
     },
   );
 
-  it('cannot cancel invoice or change payer after collection; label-only retains payer', async () => {
+  it.each(['failed', 'cancelled'])(
+    'cancel ignores %s payments on a new account',
+    async (state) => {
+      const result = await confirm();
+      newPayments.push({
+        id: 10,
+        financial_account_id: result.accounts[0].id,
+        state,
+        amount: '5.00',
+      });
+      await service.cancel(100, { source_version: result.source_version });
+      expect(source.active_financial_split_id).toBeNull();
+    },
+  );
+
+  it('cancel is allowed when only the retained account has payments', async () => {
+    const result = await confirm();
+    newPayments.push({
+      id: 11,
+      financial_account_id: result.retained_account!.id,
+      state: 'succeeded',
+      amount: '40.00',
+    });
+    const read = await service.getSplit(100);
+    expect(read!.undo).toEqual({
+      allowed: true,
+      blockers: [],
+      invoices_to_discard: [],
+    });
+    await service.cancel(100, { source_version: result.source_version });
+    expect(source.active_financial_split_id).toBeNull();
+  });
+
+  it('cancel discards draft/validated account invoices in the same transaction', async () => {
+    const result = await confirm({ accounts: [{ customer_id: 8 }, {}] });
+    const [a1, a2] = result.accounts.map((a) => a.id!);
+    invoices.push(
+      { id: 9, financial_account_id: a1, order_id: 100, status: 'draft' },
+      { id: 12, financial_account_id: a2, order_id: 100, status: 'validated' },
+    );
+    expect((await service.getSplit(100))!.undo).toMatchObject({
+      allowed: true,
+      invoices_to_discard: [
+        { account_id: a1, account_label: 'Cuenta 1', invoice_id: 9 },
+        { account_id: a2, account_label: 'Cuenta 2', invoice_id: 12 },
+      ],
+    });
+    await service.cancel(100, { source_version: result.source_version });
+    expect(invoices.map((i) => i.status)).toEqual(['cancelled', 'cancelled']);
+    expect(source.active_financial_split_id).toBeNull();
+  });
+
+  it.each(['sent', 'accepted'])(
+    'cancel is blocked by an account invoice in %s',
+    async (status) => {
+      const result = await confirm();
+      invoices.push({
+        id: 9,
+        financial_account_id: result.accounts[1].id,
+        order_id: 100,
+        status,
+      });
+      expect((await service.getSplit(100))!.undo.blockers).toEqual([
+        {
+          account_id: result.accounts[1].id,
+          account_label: 'Cuenta 2',
+          reason: 'invoice_transmitted',
+          amount: null,
+        },
+      ]);
+      const error: any = await service
+        .cancel(100, { source_version: result.source_version })
+        .catch((e) => e);
+      expect(error.getResponse()).toMatchObject({
+        error_code: 'SPLIT_CANCEL_BLOCKED',
+      });
+      expect(invoices[0].status).toBe(status);
+    },
+  );
+
+  it('cancel aborts with SPLIT_SOURCE_CONFLICT when a draft changed under the tx', async () => {
+    const result = await confirm();
+    invoices.push({
+      id: 9,
+      financial_account_id: result.accounts[0].id,
+      order_id: 100,
+      status: 'draft',
+    });
+    db.invoices.updateMany.mockResolvedValueOnce({ count: 0 });
+    const error: any = await service
+      .cancel(100, { source_version: result.source_version })
+      .catch((e) => e);
+    expect(error.getResponse()).toMatchObject({
+      error_code: 'SPLIT_SOURCE_CONFLICT',
+    });
+  });
+
+  it('summary exposes mode, per-account lines, invoice and payment detail', async () => {
+    const result = await confirm({ accounts: [{ customer_id: 8 }, {}] });
+    const accountId = result.accounts[0].id!;
+    invoices.push({
+      id: 9,
+      financial_account_id: accountId,
+      order_id: 100,
+      status: 'draft',
+      invoice_number: 'SETT1',
+      dian_status: 'not_applicable',
+      total_amount: '45',
+    });
+    newPayments.push({
+      id: 10,
+      order_id: 100,
+      financial_account_id: accountId,
+      amount: '10.00',
+      state: 'succeeded',
+      created_at: new Date('2026-10-01T10:00:00Z'),
+      store_payment_method: { display_name: 'Efectivo' },
+    });
+    const read = (await service.getSplit(100))!;
+    expect(read.mode).toBe('equal');
+    expect(read.accounts[0].invoice).toEqual({
+      id: 9,
+      invoice_number: 'SETT1',
+      status: 'draft',
+      dian_status: 'not_applicable',
+      grand_total: '45.00',
+    });
+    expect(read.accounts[0].invoice_id).toBe(9);
+    expect(read.accounts[0].payments[0]).toMatchObject({
+      payment_method_name: 'Efectivo',
+      created_at: '2026-10-01T10:00:00.000Z',
+    });
+    expect(read.accounts[0].lines.length).toBeGreaterThan(0);
+    expect(read.accounts[0].lines[0]).toMatchObject({
+      order_item_id: expect.any(Number),
+      product_name: expect.stringContaining('Item'),
+      variant_name: null,
+      share_ratio: '0.3462',
+    });
+    expect(read.undo.allowed).toBe(false);
+    expect(read.undo.blockers[0]).toMatchObject({
+      reason: 'payment_registered',
+      amount: '10.00',
+    });
+  });
+
+  it('cannot change payer after collection; label-only retains payer', async () => {
     const result = await confirm({ accounts: [{ customer_id: 8 }, {}] });
     const accountId = result.accounts[0].id!;
     await service.updateCustomer(100, accountId, { label: 'Mesa A' });
@@ -527,9 +689,6 @@ describe('SplitOrderService financial ledger', () => {
       order_id: 100,
       status: 'draft',
     });
-    await expect(
-      service.cancel(100, { source_version: result.source_version }),
-    ).rejects.toThrow('documentos');
     await expect(
       service.updateCustomer(100, accountId, { customer_alias: 'Otro' }),
     ).rejects.toThrow('titular');

@@ -118,7 +118,8 @@ describe('OrdersService', () => {
     // `findActiveSalesInvoice` (helper compartido con la guarda de `update`).
     // Default `null` en el beforeEach: ninguna orden de prueba tiene factura
     // de venta vigente salvo que un spec lo sobrescriba.
-    invoices: { findFirst: jest.fn() },
+    invoices: { findFirst: jest.fn(), findMany: jest.fn() },
+    order_financial_accounts: { findMany: jest.fn() },
     table_sessions: {
       // ADR-07: los dos escritores de ítems consultan la sesión ABIERTA
       // vigente, y solo sin ella preguntan por historial de mesa.
@@ -301,6 +302,8 @@ describe('OrdersService', () => {
     // sobrescribe esto con una fila para probar el 409.
     mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
     mockPrismaService.invoices.findFirst.mockResolvedValue(null);
+    mockPrismaService.invoices.findMany.mockResolvedValue([]);
+    mockPrismaService.order_financial_accounts.findMany.mockResolvedValue([]);
     mockPrismaService.order_item_taxes.deleteMany.mockResolvedValue({
       count: 0,
     } as any);
@@ -826,7 +829,7 @@ describe('OrdersService', () => {
       expect(result.cancellation_policy).toEqual({
         can_cancel: true, can_cancel_payment: true, reason_code: null,
       });
-      expect(result.payments).toEqual(payments);
+      expect(result.payments).toMatchObject(payments);
     });
   });
 
@@ -1063,6 +1066,73 @@ describe('OrdersService', () => {
   // .getAvailableActions` calls — additive fields only, nothing existing
   // changes shape.
   // ----------------------------------------------------------------
+  describe('findOne — facturas y pagos por cuenta (división financiera)', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('separa invoices (titular) de account_invoices y etiqueta los pagos por cuenta', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 60,
+        state: 'created',
+        payments: [
+          { id: 1, state: 'succeeded', financial_account_id: 5 },
+          { id: 2, state: 'succeeded', financial_account_id: null },
+        ],
+        refunds: [],
+        order_items: [],
+        invoices: [],
+      });
+      mockPrismaService.order_financial_accounts.findMany.mockResolvedValue([
+        { id: 5, label: 'Cuenta 1' },
+      ]);
+      mockPrismaService.invoices.findMany.mockResolvedValue([
+        {
+          id: 9,
+          invoice_number: 'SETT9',
+          status: 'draft',
+          dian_status: 'not_applicable',
+          total_amount: '45.00',
+          financial_account_id: 5,
+          customer_name: 'Ana',
+        },
+      ]);
+
+      const result: any = await service.findOne(60);
+
+      // El include del titular filtra las facturas de cuenta.
+      const include = mockPrismaService.orders.findFirst.mock.calls.at(-1)![0]
+        .include;
+      expect(include.invoices.where).toEqual({ financial_account_id: null });
+      // La guarda de titular ignora facturas de cuenta.
+      expect(mockPrismaService.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ financial_account_id: null }),
+        }),
+      );
+      expect(result.account_invoices).toEqual([
+        {
+          id: 9,
+          invoice_number: 'SETT9',
+          status: 'draft',
+          dian_status: 'not_applicable',
+          grand_total: '45.00',
+          financial_account_id: 5,
+          account_label: 'Cuenta 1',
+          customer_name: 'Ana',
+        },
+      ]);
+      expect(result.payments).toMatchObject([
+        { id: 1, financial_account_id: 5, financial_account_label: 'Cuenta 1' },
+        { id: 2, financial_account_id: null, financial_account_label: null },
+      ]);
+    });
+  });
+
   describe('findOne — available_actions (order-truth-and-invoice-tz plan, Step 2)', () => {
     let contextSpy: jest.SpyInstance;
 

@@ -1419,6 +1419,9 @@ export class OrdersService {
         // necesita `invoice_type` para no decir "no es electrónica" de una
         // factura de venta recién creada que todavía no se transmitió.
         invoices: {
+          // Las facturas por cuenta de una división viajan aparte en
+          // `account_invoices`; `invoices[0]` es siempre el documento titular.
+          where: { financial_account_id: null },
           select: {
             id: true,
             invoice_number: true,
@@ -1689,6 +1692,44 @@ export class OrdersService {
     // y mezclarlas cambiaría silenciosamente `hasIssuedSalesInvoice`.
     const activeTitularInvoice = await this.findActiveTitularInvoice(id);
 
+    // División financiera: facturas y pagos por cuenta, en la misma llamada.
+    const financialAccounts = await this.prisma.order_financial_accounts.findMany(
+      {
+        where: { split: { source_order_id: id } },
+        select: { id: true, label: true },
+      },
+    );
+    const accountLabelById = new Map<number, string>(
+      financialAccounts.map((a: any) => [a.id, a.label]),
+    );
+    const accountInvoiceRows = await this.prisma.invoices.findMany({
+      where: {
+        order_id: id,
+        financial_account_id: { not: null },
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: {
+        id: true,
+        invoice_number: true,
+        status: true,
+        dian_status: true,
+        total_amount: true,
+        financial_account_id: true,
+        customer_name: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+    const account_invoices = accountInvoiceRows.map((inv: any) => ({
+      id: inv.id,
+      invoice_number: inv.invoice_number ?? null,
+      status: inv.status,
+      dian_status: inv.dian_status ?? null,
+      grand_total: String(inv.total_amount),
+      financial_account_id: inv.financial_account_id,
+      account_label: accountLabelById.get(inv.financial_account_id) ?? null,
+      customer_name: inv.customer_name ?? null,
+    }));
+
     // order-truth-and-invoice-tz plan — Step 2: additive `available_actions`
     // (order-level) + `items[].available_actions` (item-level). Both are
     // computed through the SAME util predicates
@@ -1717,6 +1758,15 @@ export class OrdersService {
 
     return {
       ...order,
+      payments: (order.payments ?? []).map((p: any) => ({
+        ...p,
+        financial_account_id: p.financial_account_id ?? null,
+        financial_account_label:
+          p.financial_account_id != null
+            ? (accountLabelById.get(p.financial_account_id) ?? null)
+            : null,
+      })),
+      account_invoices,
       order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
       active_sales_invoice: activeTitularInvoice
@@ -2602,6 +2652,7 @@ export class OrdersService {
           in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
         },
         status: { notIn: ['voided', 'cancelled'] },
+        financial_account_id: null,
       },
       select: { id: true, status: true, customer_id: true },
       orderBy: { id: 'desc' },
