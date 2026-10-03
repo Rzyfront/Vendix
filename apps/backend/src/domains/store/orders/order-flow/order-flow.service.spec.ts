@@ -5202,6 +5202,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
         amount: 60,
         payment_method: 'cash',
         user_id: USER_B,
+        payment_id: 501,
       }),
     );
   });

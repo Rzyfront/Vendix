@@ -7607,6 +7607,7 @@ export class OrderFlowService {
       orderId,
       paymentAmount,
       paymentMethod.system_payment_method.type,
+      payment.id,
     ).catch(() => {});
 
     // Emit event
