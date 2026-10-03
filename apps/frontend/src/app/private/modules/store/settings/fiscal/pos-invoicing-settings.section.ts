@@ -29,10 +29,8 @@ interface FailurePolicyOption {
 
 /**
  * Emisión automática de factura — sección UNIFICADA de los DOS carriles de
- * venta: mostrador (POS) y tienda en línea (e-commerce). Hoy vive montada en
- * la pestaña «Venta» y, transitoriamente, también en la sub-pestaña «Caja» de
- * «Facturación» (esa segunda ubicación se retira en un paso posterior — no es
- * tarea de este componente).
+ * venta: mostrador (POS) y tienda en línea (e-commerce). Vive montada como
+ * primera sección de la pestaña «Facturación» (fiscal-settings.page.ts).
  *
  * ## Qué es configurable acá y qué NO
  *
