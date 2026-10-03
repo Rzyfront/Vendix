@@ -1,6 +1,7 @@
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { RequestContextService } from '@common/context/request-context.service';
 
 describe('Products image AI async scan', () => {
   const makeService = (): any => {
@@ -118,6 +119,47 @@ describe('Products image AI async scan', () => {
         errorCode: 'SYS_VALIDATION_001',
       });
       expect(enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getAiImageBytes', () => {
+    const run = (fn: () => Promise<any>, c: any = { organization_id: 2, store_id: 5 }) =>
+      RequestContextService.run(
+        { is_super_admin: false, is_owner: false, user_id: 1, ...c } as any,
+        fn,
+      );
+    const okKey = 'ai-scans/2/store-5/product-image/123.png';
+
+    it('key valida -> bytes', async () => {
+      const svc = makeService();
+      svc['s3Service'].downloadFile = jest.fn().mockResolvedValue(Buffer.from('png'));
+      const res = await run(() => svc.getAiImageBytes(okKey));
+      expect(res.toString()).toBe('png');
+      expect(svc['s3Service'].downloadFile).toHaveBeenCalledWith(okKey);
+    });
+
+    it.each([
+      'ai-scans/2/store-6/product-image/1.png',
+      'ai-scans/3/store-5/product-image/1.png',
+      'ai-scans/2/store-5/product-image/../x/1.png',
+      'ai-scans/2/store-5/product-image/1.jpg',
+      'ai-scans/2/store-50/product-image/1.png',
+      '',
+    ])('key invalida %s -> 404 sin descargar', async (k) => {
+      const svc = makeService();
+      svc['s3Service'].downloadFile = jest.fn();
+      await expect(run(() => svc.getAiImageBytes(k))).rejects.toMatchObject({
+        errorCode: 'SYS_NOT_FOUND_001',
+      });
+      expect(svc['s3Service'].downloadFile).not.toHaveBeenCalled();
+    });
+
+    it('fallo de descarga -> 404', async () => {
+      const svc = makeService();
+      svc['s3Service'].downloadFile = jest.fn().mockRejectedValue(new Error('x'));
+      await expect(run(() => svc.getAiImageBytes(okKey))).rejects.toMatchObject({
+        errorCode: 'SYS_NOT_FOUND_001',
+      });
     });
   });
 });

@@ -700,6 +700,31 @@ export class ProductsService {
     };
   }
 
+  /**
+   * Bytes de una imagen IA generada por el job async. Sólo sirve keys del
+   * prefijo propio de la tienda del contexto; cualquier otra cosa -> 404 sin
+   * descargar (no filtra existencia).
+   */
+  async getAiImageBytes(key: string): Promise<Buffer> {
+    const ctx = RequestContextService.getContext();
+    const prefix = `ai-scans/${ctx?.organization_id}/store-${ctx?.store_id}/product-image/`;
+    if (
+      !ctx?.organization_id ||
+      !ctx?.store_id ||
+      typeof key !== 'string' ||
+      !key.startsWith(prefix) ||
+      key.includes('..') ||
+      !key.endsWith('.png')
+    ) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+    try {
+      return await this.s3Service.downloadFile(key);
+    } catch {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+  }
+
   private async resolveImageReference(imageUrl: string): Promise<string> {
     const trimmed = imageUrl.trim();
     if (trimmed.startsWith('data:image/')) {

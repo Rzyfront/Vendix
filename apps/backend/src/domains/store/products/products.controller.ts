@@ -7,12 +7,15 @@ import {
   Param,
   Delete,
   Query,
+  Res,
+  StreamableFile,
   UseGuards,
   ParseIntPipe,
   HttpStatus,
   HttpCode,
 } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ProductsService } from './products.service';
 import { ProductVariantService } from './services/product-variant.service';
 import {
@@ -92,6 +95,22 @@ export class ProductsController {
   async generateImage(@Body() dto: GenerateProductImageDto) {
     const result = await this.productsService.generateImage(dto);
     return this.responseService.success(result, 'Imagen generada exitosamente');
+  }
+
+  @ApiOperation({
+    summary:
+      'Descargar los bytes de una imagen de producto generada con IA (proxy autenticado; el bucket no tiene CORS)',
+  })
+  @Get('ai-image')
+  @Permissions('store:products:create', 'store:products:update')
+  async getAiImage(
+    @Query('key') key: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const buffer = await this.productsService.getAiImageBytes(key);
+    response.setHeader('Content-Type', 'image/png');
+    response.setHeader('Cache-Control', 'private, max-age=3600');
+    return new StreamableFile(buffer);
   }
 
   @ApiOperation({
