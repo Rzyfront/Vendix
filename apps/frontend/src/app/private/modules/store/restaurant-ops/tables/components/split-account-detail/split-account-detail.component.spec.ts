@@ -47,6 +47,7 @@ describe('SplitAccountDetailComponent', () => {
     fixture.componentRef.setInput('currency', 'COP');
     fixture.componentRef.setInput('canPay', true);
     fixture.componentRef.setInput('canInvoice', canInvoice);
+    fixture.componentRef.setInput('electronicInvoicingLive', true);
     fixture.componentRef.setInput('isOpen', true);
     fixture.detectChanges();
     return fixture.componentInstance;

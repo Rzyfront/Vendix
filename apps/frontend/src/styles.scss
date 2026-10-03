@@ -2127,3 +2127,13 @@ body.kds-fullscreen {
     display: none !important;
   }
 }
+
+/* Shell admin privado: el layout (store/org/super admin) agrega esta clase a
+   <html> mientras vive; solo su contenedor interno scrollea. Las paginas
+   publicas/ecommerce no la llevan y conservan el scroll de body. Los overlays
+   (position: fixed) no se recortan por overflow hidden en html/body. */
+html.vx-admin-shell-lock,
+html.vx-admin-shell-lock body {
+  overflow: hidden;
+  height: 100%;
+}

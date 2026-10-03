@@ -37,6 +37,7 @@ export class SplitAccountDetailComponent {
   readonly currency = input('');
   readonly canPay = input(false);
   readonly canInvoice = input(false);
+  readonly electronicInvoicingLive = input(false);
   readonly timezone = input('America/Bogota');
   readonly busy = input(false);
   readonly actionRequested = output<SplitPrimaryAction>();
@@ -62,6 +63,7 @@ export class SplitAccountDetailComponent {
     primaryAction(this.account(), {
       canPay: this.canPay(),
       canInvoice: this.canInvoice(),
+      electronicInvoicingLive: this.electronicInvoicingLive(),
     }),
   );
   readonly invoiceHint = computed(() => {

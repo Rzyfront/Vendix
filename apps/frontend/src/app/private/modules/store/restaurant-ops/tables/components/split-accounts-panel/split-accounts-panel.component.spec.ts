@@ -9,6 +9,7 @@ import { PaymentMethodsCatalogService } from '../../../../../../../shared/servic
 import { DialogService, PaymentCollectorComponent, ToastService } from '../../../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { DianConfigApiService } from '../../../../../../../shared/services/dian';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { SplitFinancialAccount, SplitResult } from '../../interfaces';
 import type { PaymentSubmit } from '../../../../../../../shared/components';
@@ -136,6 +137,7 @@ describe('SplitAccountsPanelComponent', () => {
         { provide: Router, useValue: router },
         { provide: DialogService, useValue: dialog },
         { provide: AuthFacade, useValue: { hasPermission: () => true } },
+        { provide: DianConfigApiService, useValue: { getDianEmissionStatus: () => of({ data: { is_live: true } }) } },
         { provide: StoreSettingsFacade, useValue: { timezone: signal('America/Bogota') } },
         {
           provide: CurrencyFormatService,

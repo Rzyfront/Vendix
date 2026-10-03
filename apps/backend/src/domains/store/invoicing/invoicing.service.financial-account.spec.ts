@@ -36,6 +36,7 @@ describe('InvoicingService · facturas de cuenta', () => {
       invoices: {
         findFirst: jest.fn().mockResolvedValue(opts.existing ?? null),
         create: jest.fn().mockResolvedValue(created),
+        update: jest.fn().mockResolvedValue({}),
         findFirstOrThrow: jest.fn().mockResolvedValue({ id: 99, invoice_number: null }),
       },
       invoice_taxes: { create: jest.fn() },
@@ -103,6 +104,37 @@ describe('InvoicingService · facturas de cuenta', () => {
     const { service, tx } = build({ paid: 0, existing: { id: 3 } });
     await expect(service.createFromFinancialAccount(5)).resolves.toEqual({ id: 3 });
     expect(tx.invoices.create).not.toHaveBeenCalled();
+  });
+
+  it('borrador viejo + cuenta sin cobrar: SPLIT_ACCOUNT_UNPAID_INVOICE (no lo esquiva)', async () => {
+    const { service, tx } = build({
+      paid: 0,
+      existing: { id: 3, status: 'draft', payment_form: '2', payment_means_code: '1' },
+    });
+    await expect(service.createFromFinancialAccount(5)).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'SPLIT_ACCOUNT_UNPAID_INVOICE' }),
+    });
+    expect(tx.invoices.create).not.toHaveBeenCalled();
+  });
+
+  it('borrador viejo a crédito + cuenta cobrada: refresca payment_form sin crear otra fila', async () => {
+    const { service, tx } = build({
+      paid: 100,
+      existing: { id: 3, status: 'draft', payment_form: '2', payment_means_code: '1' },
+    });
+    tx.invoices.findFirstOrThrow.mockResolvedValue({ id: 3, payment_form: '1' });
+    await service.createFromFinancialAccount(5);
+    expect(tx.invoices.create).not.toHaveBeenCalled();
+    expect(tx.invoices.update).toHaveBeenCalledWith({
+      where: { id: 3 },
+      data: expect.objectContaining({ payment_form: '1' }),
+    });
+  });
+
+  it('factura ya aceptada se devuelve tal cual aunque no haya pagos', async () => {
+    const { service, tx } = build({ paid: 0, existing: { id: 4, status: 'accepted' } });
+    await expect(service.createFromFinancialAccount(5)).resolves.toEqual({ id: 4, status: 'accepted' });
+    expect(tx.invoices.update).not.toHaveBeenCalled();
   });
 
   it('assertNotAlreadyInvoiced excluye facturas de cuenta (financial_account_id null)', async () => {

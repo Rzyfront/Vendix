@@ -286,6 +286,11 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       this.map.on('load', () => {
         this.mapLoaded = true;
         this.loading.set(false);
+        // A slow basemap can finish AFTER LOAD_TIMEOUT_MS already raised the
+        // "no se pudo cargar" placeholder. That placeholder is opaque and
+        // absolute over the canvas, so without this the map renders fine
+        // underneath but stays hidden for good. A real `load` wins.
+        this.error.set(false);
         this.clearLoadTimer();
         this.emitMapReady();
         // Let the OSM/OpenFreeMap credit flash briefly (~0.3s) on load so it is

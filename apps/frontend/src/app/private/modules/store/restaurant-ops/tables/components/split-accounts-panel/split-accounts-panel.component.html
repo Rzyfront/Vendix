@@ -340,6 +340,7 @@
     [currency]="group()?.currency ?? ''"
     [canPay]="canPay()"
     [canInvoice]="canInvoice()"
+    [electronicInvoicingLive]="electronicInvoicingLive()"
     [timezone]="timezone()"
     [busy]="busy()"
     (actionRequested)="onDetailAction($event)"

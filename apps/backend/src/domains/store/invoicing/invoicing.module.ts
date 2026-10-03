@@ -40,6 +40,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
+import { OneShotEmissionService } from './one-shot-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
@@ -152,6 +153,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // Carril del POS: emisión desacoplada del cobro + el oyente que la dispara
     // después del commit de la venta.
     PosFiscalEmissionService,
+    OneShotEmissionService,
     PosSaleCompletedListener,
   ],
   exports: [
