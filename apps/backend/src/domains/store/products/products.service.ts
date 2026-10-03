@@ -727,9 +727,23 @@ export class ProductsService {
       is_featured?: boolean | null;
       online_purchase_url?: string | null;
     },
-  >(dto: T): T {
+  >(dto: T, existingIsIngredient?: boolean | null): T {
+    // Regla del dueño: todo insumo (vendible o no) nunca se publica ni se
+    // destaca en la tienda en línea. Si el payload no trae `is_ingredient`
+    // (update parcial) se hereda el del producto existente.
+    const effectiveIsIngredient =
+      dto.is_ingredient !== undefined && dto.is_ingredient !== null
+        ? dto.is_ingredient === true
+        : existingIsIngredient === true;
     const isPure = !!dto.is_ingredient && dto.is_sellable === false;
-    if (!isPure) return dto;
+    if (!isPure) {
+      if (!effectiveIsIngredient) return dto;
+      return {
+        ...dto,
+        available_for_ecommerce: false,
+        is_featured: false,
+      } as T;
+    }
     return {
       ...dto,
       base_price: 0,
@@ -3771,7 +3785,10 @@ export class ProductsService {
         sanitizedDto,
         existingProduct.store_id,
       );
-      sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
+      sanitizedDto = this.sanitizeIngredientPayload(
+        sanitizedDto,
+        existingProduct.is_ingredient,
+      );
 
       // BLOCK: Check for active stock reservations on the product itself
       const hasActiveReservations =

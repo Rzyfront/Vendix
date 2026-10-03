@@ -3084,3 +3084,63 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     ]);
   });
 });
+
+describe('PurchaseOrdersService.persistIngredientConfigToProduct — insumos fuera de ecommerce', () => {
+  const run = async (product: Record<string, any>) => {
+    const svc: any = Object.create(PurchaseOrdersService.prototype);
+    const tx = {
+      products: {
+        findFirst: jest.fn().mockResolvedValue(product),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      stores: {
+        findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }),
+      },
+      units_of_measure: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    await svc.persistIngredientConfigToProduct(
+      7,
+      { purchase_uom_id: 3, stock_uom_id: 4 },
+      tx,
+    );
+    return tx;
+  };
+
+  it('al marcar un producto existente como insumo fuerza available_for_ecommerce=false e is_featured=false', async () => {
+    const tx = await run({
+      id: 7,
+      store_id: 10,
+      is_ingredient: false,
+      available_for_ecommerce: true,
+      is_featured: true,
+      purchase_uom_id: null,
+      stock_uom_id: null,
+      purchase_to_stock_factor: null,
+    });
+    expect(tx.products.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: expect.objectContaining({
+        is_ingredient: true,
+        available_for_ecommerce: false,
+        is_featured: false,
+      }),
+    });
+  });
+
+  it('un insumo ya publicado (dato viejo) se despublica aunque la config UoM no cambie', async () => {
+    const tx = await run({
+      id: 7,
+      store_id: 10,
+      is_ingredient: true,
+      available_for_ecommerce: true,
+      is_featured: false,
+      purchase_uom_id: 3,
+      stock_uom_id: 4,
+      purchase_to_stock_factor: null,
+    });
+    expect(tx.products.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: { available_for_ecommerce: false },
+    });
+  });
+});

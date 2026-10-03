@@ -1571,6 +1571,13 @@ export class PurchaseOrdersService {
               }
             }
 
+            // Regla del dueño: un insumo (vendible o no) nunca se publica ni se
+            // destaca en la tienda en línea.
+            if (effectiveIsIngredient || existingProduct.is_ingredient === true) {
+              productUpdateData.available_for_ecommerce = false;
+              productUpdateData.is_featured = false;
+            }
+
             await tx.products.update({
               where: { id: existingProduct.id },
               data: productUpdateData,
@@ -3334,6 +3341,8 @@ export class PurchaseOrdersService {
         id: true,
         store_id: true,
         is_ingredient: true,
+        available_for_ecommerce: true,
+        is_featured: true,
         purchase_uom_id: true,
         stock_uom_id: true,
         purchase_to_stock_factor: true,
@@ -3380,6 +3389,11 @@ export class PurchaseOrdersService {
 
     const data: Record<string, any> = {};
     if (!product.is_ingredient) data.is_ingredient = true;
+    // Regla del dueño: el producto resultante es insumo -> fuera de ecommerce.
+    if (product.available_for_ecommerce === true) {
+      data.available_for_ecommerce = false;
+    }
+    if (product.is_featured === true) data.is_featured = false;
     if (
       item.purchase_uom_id != null &&
       product.purchase_uom_id !== item.purchase_uom_id

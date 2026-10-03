@@ -951,6 +951,94 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('insumos nunca se publican en ecommerce (sanitizeIngredientPayload)', () => {
+    const sanitize = (dto: any, existing?: boolean | null) =>
+      (service as any).sanitizeIngredientPayload(dto, existing);
+
+    it('insumo vendible con ecommerce=true guarda available_for_ecommerce=false e is_featured=false sin tocar is_sellable ni precio', () => {
+      const out = sanitize({
+        is_ingredient: true,
+        is_sellable: true,
+        base_price: 50,
+        available_for_ecommerce: true,
+        is_featured: true,
+      });
+      expect(out.available_for_ecommerce).toBe(false);
+      expect(out.is_featured).toBe(false);
+      expect(out.is_sellable).toBe(true);
+      expect(out.base_price).toBe(50);
+    });
+
+    it('insumo puro sigue neutralizando todo', () => {
+      const out = sanitize({
+        is_ingredient: true,
+        is_sellable: false,
+        base_price: 50,
+        available_for_ecommerce: true,
+        is_featured: true,
+      });
+      expect(out.base_price).toBe(0);
+      expect(out.available_for_ecommerce).toBe(false);
+      expect(out.is_featured).toBe(false);
+      expect(out.online_purchase_url).toBeNull();
+    });
+
+    it('is_ingredient=false explicito no fuerza aunque el existente sea insumo', () => {
+      const out = sanitize(
+        { is_ingredient: false, available_for_ecommerce: true, is_featured: true },
+        true,
+      );
+      expect(out.available_for_ecommerce).toBe(true);
+      expect(out.is_featured).toBe(true);
+    });
+
+    it('payload sin is_ingredient sobre producto existente insumo fuerza false', () => {
+      const out = sanitize(
+        { available_for_ecommerce: true, is_featured: true },
+        true,
+      );
+      expect(out.available_for_ecommerce).toBe(false);
+      expect(out.is_featured).toBe(false);
+    });
+
+    it('producto normal no se toca', () => {
+      const dto = { available_for_ecommerce: true, is_featured: true };
+      expect(sanitize(dto, false)).toEqual(dto);
+    });
+
+    it('update sin is_ingredient sobre producto ya insumo guarda ecommerce=false', async () => {
+      const existingProduct = {
+        id: 1,
+        store_id: 1,
+        name: 'Insumo',
+        is_ingredient: true,
+        state: ProductState.ACTIVE,
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
+      };
+      mockPrismaService.products.findFirst.mockResolvedValue(existingProduct);
+      mockPrismaService.$transaction.mockImplementation((cb) =>
+        cb(mockPrismaService),
+      );
+      mockPrismaService.products.update.mockResolvedValue(existingProduct);
+
+      await service.update(1, {
+        available_for_ecommerce: true,
+        is_featured: true,
+      } as UpdateProductDto);
+
+      expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: expect.objectContaining({
+          available_for_ecommerce: false,
+          is_featured: false,
+        }),
+      });
+    });
+  });
+
   describe('deactivate', () => {
     it('should deactivate a product successfully', async () => {
       const existingProduct = {
