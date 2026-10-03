@@ -305,9 +305,9 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     state.shippingContext = undefined;
     state.linkedOrderId = null;
     state.customer = { ...state.customer!, addresses: [
-      { ...originalAddress, id: 33, is_primary: true },
+      { ...originalAddress, id: 33, is_primary: true, type: 'shipping' },
       {
-        id: 41, address_line1: 'Calle sin punto 2', city: 'Neiva',
+        id: 41, type: 'shipping', address_line1: 'Calle sin punto 2', city: 'Neiva',
         state_province: 'Huila', country_code: 'CO', phone_number: '3001234567',
         latitude: null, longitude: null, is_primary: false,
       },
@@ -341,7 +341,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   });
 
   it('persists an explicit saved-address text edit with UPDATE on the same id', () => {
-    customers.updateCustomerAddress.and.returnValue(of({}));
+    customers.updateCustomerAddress.and.returnValue(of({ id: 33 }));
     const state = cart();
     state.shippingContext = undefined;
     state.linkedOrderId = null;
