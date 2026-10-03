@@ -15,7 +15,7 @@
     <app-card>
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+          <h3 class="text-lg font-bold text-[var(--color-text-primary)]">
             Cuenta dividida en {{ g.accounts.length }}
           </h3>
           @if (groupModeLabel()) {
@@ -35,13 +35,13 @@
           }
         </div>
       </div>
-      <div class="mt-3">
-        <div class="flex flex-wrap justify-between gap-2 text-sm">
+      <div class="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--color-text-secondary)_30%,var(--color-surface))] bg-[var(--color-surface-secondary)] p-3">
+        <div class="flex flex-wrap justify-between gap-2 text-sm font-medium text-[var(--color-text-primary)]">
           <span>Cobrado {{ collected() | currency }} de {{ collectable() | currency }}</span>
           <span class="text-[var(--color-text-secondary)]">Facturadas {{ invoicedCount() }} de {{ g.accounts.length }}</span>
         </div>
         <div
-          class="mt-1 h-2 w-full overflow-hidden rounded-full bg-[var(--color-border)]"
+          class="mt-1 h-2.5 w-full overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--color-text-secondary)_25%,var(--color-surface))]"
           role="progressbar"
           aria-label="Cobrado"
           aria-valuemin="0"
@@ -92,15 +92,15 @@
       <p class="text-sm text-[var(--color-text-secondary)]">No tienes permiso para dividir esta cuenta.</p>
     } @else {
       <app-card>
-        <h3 class="mb-1 text-base font-semibold text-[var(--color-text-primary)]">Dividir cuenta</h3>
-        <app-steps-line [steps]="steps" [currentStep]="currentStep()" size="sm" />
+        <h3 class="text-lg font-bold text-[var(--color-text-primary)]">Dividir cuenta</h3>
+        <p class="text-sm text-[var(--color-text-secondary)]" data-testid="split-subtitle">{{ modeSubtitle() }}</p>
 
-        <div class="mt-3 flex w-full gap-1 rounded-lg bg-[var(--color-background)] p-1" role="tablist" aria-label="Cómo dividir">
+        <div class="mt-3 flex w-full gap-1 rounded-lg border border-[color-mix(in_srgb,var(--color-text-secondary)_30%,var(--color-surface))] bg-[var(--color-surface-secondary)] p-1" role="tablist" aria-label="Cómo dividir">
           @for (option of modeOptions; track option.value) {
             <button
               type="button"
               role="tab"
-              [class]="'min-h-[44px] flex-1 rounded-md px-2 text-sm font-medium transition-colors ' + (mode() === option.value ? 'bg-[var(--color-primary)] text-white' : 'text-[var(--color-text-secondary)]')"
+              [class]="'min-h-[44px] flex-1 rounded-md border-2 px-2 text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)] ' + (mode() === option.value ? 'border-[var(--color-primary)] bg-[var(--color-surface)] font-bold text-[var(--color-text-primary)] shadow-sm' : 'border-transparent font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]')"
               [attr.aria-selected]="mode() === option.value"
               [disabled]="busy()"
               (click)="setMode(option.value)"
@@ -117,24 +117,34 @@
         }
 
         @if (mode() === 'items') {
-          <ul class="mt-3 divide-y divide-[var(--color-border)]" aria-label="Productos">
+          <ul class="mt-3 grid gap-2" aria-label="Productos">
             @for (item of activeItems(); track item.id) {
-              <li class="py-2">
+              <li
+                [style.--tone]="assignments()[item.id] ? accountTone(assignments()[item.id]!).solid : null"
+                [class]="'rounded-lg border border-l-4 bg-[var(--color-surface-secondary)] p-3 ' + (assignments()[item.id] ? 'border-[color-mix(in_srgb,var(--color-text-secondary)_25%,var(--color-surface))] border-l-[var(--tone)]' : 'border-[var(--color-warning)] border-l-[var(--color-warning)]')"
+              >
                 <div class="flex items-baseline justify-between gap-2 text-sm">
-                  <span class="min-w-0 truncate font-medium">{{ item.product_name }} × {{ item.quantity }}</span>
-                  @if (itemTotal(item) !== null) {
-                    <span class="shrink-0 text-[var(--color-text-secondary)]">{{ itemTotal(item) | currency }}</span>
-                  }
+                  <span class="min-w-0 truncate font-semibold text-[var(--color-text-primary)]">{{ item.product_name }} × {{ item.quantity }}</span>
+                  <span class="flex shrink-0 items-center gap-2">
+                    @if (!assignments()[item.id]) {
+                      <span class="rounded-full bg-[color-mix(in_srgb,var(--color-warning)_22%,var(--color-surface))] px-2 py-0.5 text-xs font-semibold text-[var(--color-text-primary)]">Sin asignar</span>
+                    }
+                    @if (itemTotal(item) !== null) {
+                      <span class="font-semibold text-[var(--color-text-primary)]">{{ itemTotal(item) | currency }}</span>
+                    }
+                  </span>
                 </div>
-                <div class="mt-1.5 flex flex-wrap gap-1.5" role="group" [attr.aria-label]="'Cuenta de ' + item.product_name">
+                <div class="mt-2 flex flex-wrap gap-1.5" role="group" [attr.aria-label]="'Cuenta de ' + item.product_name">
                   @for (n of accountNumbers(); track n) {
                     <button
                       type="button"
-                      [class]="'min-h-[36px] rounded-full border px-3 text-xs font-medium transition-colors ' + (assignments()[item.id] === n ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white' : 'border-[var(--color-border)]')"
+                      [style.--tone]="accountTone(n).solid"
+                      [class]="'inline-flex min-h-[36px] items-center gap-1.5 rounded-full border-2 px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--tone)] ' + (assignments()[item.id] === n ? 'border-[var(--tone)] bg-[var(--tone)] text-white shadow-sm' : 'border-[var(--color-text-secondary)] bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[color-mix(in_srgb,var(--tone)_12%,var(--color-surface))]')"
                       [attr.aria-pressed]="assignments()[item.id] === n"
                       [disabled]="busy()"
                       (click)="assign(item.id, n)"
                     >
+                      <span aria-hidden="true" [class]="'h-2.5 w-2.5 rounded-full ' + (assignments()[item.id] === n ? 'bg-white' : 'bg-[var(--tone)]')"></span>
                       Cuenta {{ n }}
                     </button>
                   }
@@ -145,7 +155,7 @@
         }
 
         <div class="mt-3 flex items-center justify-between gap-2">
-          <h4 class="text-sm font-semibold">Cuentas ({{ accountCount() }})</h4>
+          <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Cuentas ({{ accountCount() }})</h4>
           <app-button variant="outline" size="sm" class="whitespace-nowrap" [disabled]="busy() || accountCount() >= 20" (clicked)="addAccount()">
             <span class="inline-flex items-center gap-1 whitespace-nowrap">
               <app-icon name="plus" [size]="14" />
@@ -156,29 +166,36 @@
 
         <div class="mt-2 grid gap-2 md:grid-cols-2">
           @for (draft of draftAccounts(); track draft.number) {
-            <div class="rounded-lg border border-[var(--color-border)] p-3">
-              <div class="flex items-center justify-between gap-2">
-                <p class="text-sm font-semibold">Cuenta {{ draft.number }}</p>
-                @if (accountCount() > 2) {
-                  <button
-                    type="button"
-                    class="rounded p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-error)]"
-                    [attr.aria-label]="'Quitar Cuenta ' + draft.number"
-                    [disabled]="busy()"
-                    (click)="removeAccount(draft.index)"
-                  >
-                    <app-icon name="x" [size]="16" />
-                  </button>
+            <div
+              [style.--tone]="accountTone(draft.number).solid"
+              class="overflow-hidden rounded-lg border border-[color-mix(in_srgb,var(--color-text-secondary)_35%,var(--color-surface))] bg-[var(--color-surface)] shadow-sm"
+            >
+              <div class="flex items-center justify-between gap-2 border-b border-[color-mix(in_srgb,var(--tone)_35%,var(--color-surface))] bg-[color-mix(in_srgb,var(--tone)_14%,var(--color-surface))] px-3 py-2">
+                <div class="flex min-w-0 items-center gap-2">
+                  <span aria-hidden="true" class="h-3 w-3 shrink-0 rounded-full bg-[var(--tone)]"></span>
+                  <p class="text-sm font-bold text-[var(--color-text-primary)]">Cuenta {{ draft.number }}</p>
+                  @if (accountCount() > 2) {
+                    <button
+                      type="button"
+                      class="rounded p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-error)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-primary)]"
+                      [attr.aria-label]="'Quitar Cuenta ' + draft.number"
+                      [disabled]="busy()"
+                      (click)="removeAccount(draft.index)"
+                    >
+                      <app-icon name="x" [size]="16" />
+                    </button>
+                  }
+                </div>
+                @if (draft.total !== null) {
+                  <span class="text-xl font-bold text-[var(--color-text-primary)]">{{ draft.total | currency: decimalsFor(draft.total) }}</span>
                 }
               </div>
-              <p class="text-xs text-[var(--color-text-secondary)]">
-                @if (mode() === 'items') {
+              <div class="p-3">
+              @if (mode() === 'items') {
+                <p class="text-xs font-medium text-[var(--color-text-secondary)]">
                   {{ draft.itemCount === 1 ? '1 producto' : draft.itemCount + ' productos' }}
-                  @if (draft.total !== null) { · {{ draft.total | currency: decimalsFor(draft.total) }} }
-                } @else if (draft.total !== null) {
-                  {{ draft.total | currency: decimalsFor(draft.total) }}
-                }
-              </p>
+                </p>
+              }
               <app-input
                 class="mt-2 block"
                 label="Nombre (opcional)"
@@ -201,6 +218,7 @@
                   {{ hasCustomer(payers()[draft.index]) ? 'Cambiar cliente' : 'Asignar cliente' }}
                 </app-button>
               </div>
+              </div>
             </div>
           }
         </div>
@@ -214,17 +232,30 @@
             }
           </p>
         }
-        @if (draftIssue()) {
-          <p class="mt-2 text-sm text-[var(--color-error)]" role="status" data-testid="draft-issue">{{ draftIssue() }}</p>
-        }
         @if (baselinePending() !== null) {
           <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
             Se reparte el saldo pendiente de {{ baselinePending()! | currency }}. Los pagos anteriores no se redistribuyen.
           </p>
         }
 
-        <div class="mt-3 flex justify-end">
-          <app-button variant="primary" [loading]="busy() || previewing()" [disabled]="!canConfirm()" (clicked)="confirmSplit()">
+        <div class="mt-3 flex flex-col gap-3 rounded-lg border border-[color-mix(in_srgb,var(--color-text-secondary)_30%,var(--color-surface))] bg-[var(--color-surface-secondary)] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0 text-sm">
+            @if (draftIssue()) {
+              <p class="font-semibold text-[var(--color-error)]" role="status" data-testid="draft-issue">{{ draftIssue() }}</p>
+            } @else {
+              <ul class="flex flex-wrap gap-x-4 gap-y-1" aria-label="Resumen de cuentas">
+                @for (draft of draftAccounts(); track draft.number) {
+                  @if (draft.total !== null) {
+                    <li class="inline-flex items-center gap-1.5 font-semibold text-[var(--color-text-primary)]" [style.--tone]="accountTone(draft.number).solid">
+                      <span aria-hidden="true" class="h-2.5 w-2.5 rounded-full bg-[var(--tone)]"></span>
+                      Cuenta {{ draft.number }} {{ draft.total | currency: decimalsFor(draft.total) }}
+                    </li>
+                  }
+                }
+              </ul>
+            }
+          </div>
+          <app-button class="sm:shrink-0" variant="primary" [loading]="busy() || previewing()" [disabled]="!canConfirm()" (clicked)="confirmSplit()">
             Crear {{ accountCount() }} cuentas
           </app-button>
         </div>
@@ -235,16 +266,22 @@
 
 <!-- Tarjeta de cuenta (creada o retenida) -->
 <ng-template #accountCardTpl let-card>
-  <app-card>
+  <div
+    [style.--tone]="accountTone(card.retained ? 0 : card.account.ordinal).solid"
+    class="overflow-hidden rounded-lg border border-t-4 border-[color-mix(in_srgb,var(--color-text-secondary)_30%,var(--color-surface))] border-t-[var(--tone)] bg-[var(--color-surface)] p-4 shadow-sm"
+  >
     <div class="flex items-start justify-between gap-2">
       <div class="min-w-0">
-        <h4 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">{{ card.title }}</h4>
+        <h4 class="flex items-center gap-2 truncate text-sm font-bold text-[var(--color-text-primary)]">
+          <span aria-hidden="true" class="h-3 w-3 shrink-0 rounded-full bg-[var(--tone)]"></span>
+          <span class="truncate">{{ card.title }}</span>
+        </h4>
         <p class="truncate text-xs text-[var(--color-text-secondary)]">{{ payerName(card.account) }}</p>
       </div>
       <app-badge [variant]="card.badge" size="sm">{{ card.statusLabel }}</app-badge>
     </div>
     <div class="mt-2 flex items-baseline justify-between gap-2">
-      <span class="text-lg font-semibold">{{ money(card.account.grand_total) | currency: decimalsFor(money(card.account.grand_total)) }}</span>
+      <span class="text-xl font-bold text-[var(--color-text-primary)]">{{ money(card.account.grand_total) | currency: decimalsFor(money(card.account.grand_total)) }}</span>
       <span class="text-xs text-[var(--color-text-secondary)]">Saldo {{ money(card.account.remaining_balance) | currency: decimalsFor(money(card.account.remaining_balance)) }}</span>
     </div>
     <p class="mt-1 text-xs text-[var(--color-text-secondary)]">{{ card.includes }}</p>
@@ -272,7 +309,7 @@
         </app-button>
       }
     </div>
-  </app-card>
+  </div>
 </ng-template>
 
 <app-change-titular-search-modal

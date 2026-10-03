@@ -30,7 +30,6 @@ import {
   InputComponent,
   ModalComponent,
   PaymentCollectorComponent,
-  StepsLineComponent,
   ToastService,
 } from '../../../../../../../shared/components';
 import type {
@@ -95,6 +94,27 @@ const MODE_LABEL: Record<SplitResultMode, string> = {
   custom: 'Por montos',
 };
 
+/** Tono de identidad de una cuenta: color solido (punto/borde/chip) para ambos temas. */
+export interface AccountTone {
+  readonly solid: string;
+}
+
+const ACCOUNT_TONES: readonly AccountTone[] = [
+  { solid: '#2563eb' }, // azul
+  { solid: '#ea580c' }, // naranja
+  { solid: '#7c3aed' }, // violeta
+  { solid: '#0d9488' }, // verde azulado
+  { solid: '#db2777' }, // rosa
+  { solid: '#ca8a04' }, // ambar
+];
+const NEUTRAL_TONE: AccountTone = { solid: '#64748b' };
+
+/** Paleta fija de 6 tonos que cicla por numero de cuenta (1-based). */
+export function accountTone(n: number): AccountTone {
+  if (!Number.isFinite(n) || n < 1) return NEUTRAL_TONE;
+  return ACCOUNT_TONES[(Math.floor(n) - 1) % ACCOUNT_TONES.length];
+}
+
 /** Shared financial-only surface: account IDs never navigate to order routes. */
 @Component({
   selector: 'app-split-accounts-panel',
@@ -110,7 +130,6 @@ const MODE_LABEL: Record<SplitResultMode, string> = {
     InputComponent,
     ModalComponent,
     PaymentCollectorComponent,
-    StepsLineComponent,
     CurrencyPipe,
     ChangeTitularSearchModalComponent,
     CustomerModalComponent,
@@ -140,6 +159,17 @@ export class SplitAccountsPanelComponent {
   readonly splitCompleted = output<SplitResult>();
 
   readonly money = money;
+  readonly accountTone = accountTone;
+  readonly modeSubtitle = computed(() => {
+    switch (this.mode()) {
+      case 'equal':
+        return 'Todas las cuentas pagan lo mismo';
+      case 'custom':
+        return 'Escribe cuánto paga cada cuenta';
+      default:
+        return 'Toca la cuenta que paga cada producto';
+    }
+  });
   readonly modeOptions: Array<{ value: SplitResultMode; label: string }> = [
     { value: 'items', label: 'Por productos' },
     { value: 'equal', label: 'Partes iguales' },
