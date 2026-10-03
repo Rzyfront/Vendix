@@ -1,4 +1,4 @@
-<div class="flex shrink-0 items-center gap-2">  @if (showCancel()) {    <app-button variant="outline" [disabled]="busy()" (clicked)="cancelled.emit()">Cancelar</app-button>  }  <app-button variant="primary" [loading]="busy() || previewing()" [disabled]="!canConfirm()" (clicked)="confirmSplit()">    Crear {{ accountCount() }} cuentas  </app-button></div><section
+<section
   class="grid gap-4"
   aria-label="Cuentas independientes"
   [hidden]="!allowCreate() && !group()"
