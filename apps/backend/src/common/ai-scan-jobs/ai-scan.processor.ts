@@ -82,7 +82,7 @@ export class AiScanProcessor extends WorkerHost {
       );
       if (error instanceof VendixHttpException) {
         // `failedReason` llega al usuario: se propaga el CODIGO.
-        if (error.getStatus() >= 400 && error.getStatus() < 500) {
+        if (error.getStatus() >= 400 && error.getStatus() < 500 && error.getStatus() !== 429) {
           throw new UnrecoverableError(error.errorCode);
         }
         throw new Error(error.errorCode); // reintentable
