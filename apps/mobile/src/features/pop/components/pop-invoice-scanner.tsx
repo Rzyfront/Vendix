@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
   Pressable,
 } from 'react-native';
-import { apiClient, Endpoints } from '@/core/api';
+import { scanInvoiceAndWait, InvoiceScanError, ScanCancelToken } from '../services/invoice-scan-job';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Icon } from '@/shared/components/icon/icon';
@@ -52,8 +52,23 @@ export default function PopInvoiceScanner({ visible, onClose, onScanComplete }: 
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
   const [supplierName, setSupplierName] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [slowWarning, setSlowWarning] = useState(false);
+  const cancelRef = useRef<ScanCancelToken | null>(null);
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopScan = useCallback(() => {
+    if (cancelRef.current) cancelRef.current.cancelled = true;
+    cancelRef.current = null;
+    if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+    slowTimerRef.current = null;
+  }, []);
+
+  // Cancela el polling al desmontar.
+  useEffect(() => stopScan, [stopScan]);
 
   const reset = useCallback(() => {
+    stopScan();
+    setSlowWarning(false);
     setCurrentStep(1);
     setImageUri(null);
     setAnalyzing(false);
@@ -61,7 +76,7 @@ export default function PopInvoiceScanner({ visible, onClose, onScanComplete }: 
     setScannedItems([]);
     setSupplierName('');
     setInvoiceNumber('');
-  }, []);
+  }, [stopScan]);
 
   const handleClose = useCallback(() => {
     reset();
@@ -125,17 +140,13 @@ export default function PopInvoiceScanner({ visible, onClose, onScanComplete }: 
         type,
       } as any);
 
-      const res = await apiClient.post<any>(
-        `${Endpoints.STORE.PURCHASE_ORDERS.CREATE}/scan?orderType=retail`,
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      );
+      const token: ScanCancelToken = { cancelled: false };
+      cancelRef.current = token;
+      setSlowWarning(false);
+      slowTimerRef.current = setTimeout(() => setSlowWarning(true), 60_000);
 
-      const scanData = res.data?.data || res.data;
+      const scanData = await scanInvoiceAndWait(formData, token);
+      if (token.cancelled) return;
       if (scanData && Array.isArray(scanData.line_items)) {
         const mappedItems: ScannedItem[] = scanData.line_items.map((item: any) => ({
           name: item.description,
@@ -153,10 +164,19 @@ export default function PopInvoiceScanner({ visible, onClose, onScanComplete }: 
         setCurrentStep(1);
       }
     } catch (err: any) {
+      if (cancelRef.current?.cancelled) return;
       console.error('Scan invoice error:', err);
-      Alert.alert('Error', err?.response?.data?.message || err?.message || 'Error al procesar la factura.');
+      Alert.alert(
+        'Error',
+        err instanceof InvoiceScanError
+          ? err.message
+          : err?.response?.data?.message || err?.message || 'Error al procesar la factura.',
+      );
       setCurrentStep(1);
     } finally {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+      slowTimerRef.current = null;
+      setSlowWarning(false);
       setAnalyzing(false);
     }
   };
@@ -297,6 +317,14 @@ export default function PopInvoiceScanner({ visible, onClose, onScanComplete }: 
                   <Text style={styles.analyzingSubtext}>
                     Extrayendo datos y buscando coincidencias con tus productos...
                   </Text>
+                  <Text style={styles.analyzingSubtext}>
+                    Esto puede tardar unos minutos. No cierres la pantalla.
+                  </Text>
+                  {slowWarning && (
+                    <Text style={styles.analyzingSubtext}>
+                      Está tardando más de lo normal, seguimos trabajando en tu factura...
+                    </Text>
+                  )}
                 </View>
               </View>
             )}
