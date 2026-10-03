@@ -85,6 +85,28 @@ describe('DispatchNotesService — flete (shipping_cost) en la remisión', () =>
 
   afterEach(() => jest.restoreAllMocks());
 
+  describe('matchReceiptItem — productos archivados', () => {
+    it('la búsqueda por SKU (variante y producto) excluye archivados', async () => {
+      prismaMock.product_variants = { findFirst: jest.fn().mockResolvedValue(null) };
+      prismaMock.products = { findFirst: jest.fn().mockResolvedValue({ id: 7 }) };
+
+      const item = await (service as any).matchReceiptItem(
+        { description: 'Café', sku: 'ABC-1', quantity: 1 },
+        [],
+      );
+
+      expect(prismaMock.product_variants.findFirst.mock.calls[0][0].where).toEqual({
+        sku: { equals: 'ABC-1', mode: 'insensitive' },
+        products: { state: { not: 'archived' } },
+      });
+      expect(prismaMock.products.findFirst.mock.calls[0][0].where).toEqual({
+        sku: { equals: 'ABC-1', mode: 'insensitive' },
+        state: { not: 'archived' },
+      });
+      expect(item.matched_product_id).toBe(7);
+    });
+  });
+
   describe('createFromOrder', () => {
     it('suma el flete de la orden al grand_total y persiste shipping_cost', async () => {
       const SHIPPING = 500;

@@ -145,6 +145,21 @@ function setup(options: {
 }
 
 describe('ReceivedDocumentMatchCandidatesService', () => {
+  it('el catálogo del proveedor excluye productos archivados', async () => {
+    const { service, prisma } = setup();
+
+    await service.list(context, 90);
+
+    expect(prisma.supplier_products.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          supplier_id: 4,
+          products: { state: { not: 'archived' } },
+        }),
+      }),
+    );
+  });
+
   it('canonicalizes supplier NIT and ranks exact supplier invoice reference before weaker product evidence', async () => {
     const weakReference = po({
       id: 302,
