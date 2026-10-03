@@ -150,6 +150,26 @@ describe('InvoiceScannerService.scanInvoiceAndWait — polling async', () => {
     expect(error?.message).toContain('ya no está disponible');
   });
 
+  it('un 400 del enqueue conserva el HttpErrorResponse (para parseApiError)', () => {
+    (service.enqueueScan as jasmine.Spy).and.returnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 400,
+            error: {
+              error_code: 'INV_SCAN_INVALID_FILE',
+              message: 'Invalid file',
+            },
+          }),
+      ),
+    );
+    let error: unknown;
+    service.scanInvoiceAndWait(file).subscribe({ error: (e) => (error = e) });
+    clock.tick(0);
+    expect(error instanceof HttpErrorResponse).toBeTrue();
+    expect((error as HttpErrorResponse).status).toBe(400);
+  });
+
   it('agota el tiempo con mensaje en español', () => {
     spyOn(service, 'getScanStatus').and.returnValue(of({ status: 'active' }));
     let error: Error | undefined;

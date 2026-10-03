@@ -290,17 +290,16 @@ export class InvoiceScannerService {
     );
   }
 
-  private normalizeScanError(err: unknown): Error {
+  private normalizeScanError(err: unknown): Error | HttpErrorResponse {
     if (err instanceof HttpErrorResponse) {
       if (err.status === 404) {
         return new Error(
           'El escaneo ya no está disponible. Vuelve a intentarlo.',
         );
       }
-      const body = err.error as { message?: string } | null;
-      return new Error(
-        body?.message || err.message || 'Error al escanear la factura',
-      );
+      // Sin envolver: el consumidor aplica parseApiError (aduana de idioma
+      // y copy curado por error_code).
+      return err;
     }
     if (err instanceof Error) return err;
     return new Error('Error al escanear la factura');
