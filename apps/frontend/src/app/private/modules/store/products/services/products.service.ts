@@ -1,8 +1,19 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, throwError, from, map, switchMap } from 'rxjs';
+import {
+  Observable,
+  catchError,
+  throwError,
+  from,
+  map,
+  switchMap,
+} from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import {
+  AiScanJobOptions,
+  AiScanJobService,
+} from '../../../../../core/services/ai-scan-job.service';
 import { AnalyticsService } from '../../analytics/services/analytics.service';
 import {
   Product,
@@ -78,6 +89,7 @@ const storeProductsStatsCache = new Map<
 export class ProductsService {
   private readonly apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000; // 30 segundos
+  private readonly aiScanJobs = inject(AiScanJobService);
 
   constructor(
     private http: HttpClient,
@@ -381,40 +393,95 @@ export class ProductsService {
       );
   }
 
+  /**
+   * Mejora una imagen con IA. Encola `enhance-image/async`, espera el job y
+   * descarga los bytes por el proxy autenticado (el bucket no tiene CORS);
+   * `image_url` del resultado es un data URI `data:image/png;base64,...`.
+   */
   enhanceProductImage(
     data: ProductImageEnhancementRequest,
+    opts?: AiScanJobOptions,
   ): Observable<ProductImageEnhancementResult> {
-    return this.http
-      .post<
-        ApiResponse<ProductImageEnhancementResult>
-      >(`${this.apiUrl}/store/products/enhance-image`, data)
-      .pipe(
-        map((response) => {
-          if (!response?.success || !response.data?.image_url) {
-            throw response;
-          }
+    return this.runImageJob(
+      `${this.apiUrl}/store/products/enhance-image/async`,
+      data,
+      opts,
+    );
+  }
 
-          return response.data;
+  /** Genera una imagen con IA (mismo flujo async que `enhanceProductImage`). */
+  generateProductImage(
+    data: ProductImageGenerationRequest,
+    opts?: AiScanJobOptions,
+  ): Observable<ProductImageEnhancementResult> {
+    return this.runImageJob(
+      `${this.apiUrl}/store/products/generate-image/async`,
+      data,
+      opts,
+    );
+  }
+
+  private runImageJob(
+    url: string,
+    body: object,
+    opts?: AiScanJobOptions,
+  ): Observable<ProductImageEnhancementResult> {
+    return this.aiScanJobs
+      .enqueueAndWait<{
+        image_key: string;
+        image_url?: string;
+        revised_prompt?: string;
+        model?: string;
+      }>(url, body, opts)
+      .pipe(
+        switchMap((result) => {
+          if (!result?.image_key) {
+            return throwError(
+              () => new Error('La IA terminó sin devolver una imagen.'),
+            );
+          }
+          return this.http
+            .get(`${this.apiUrl}/store/products/ai-image`, {
+              params: { key: result.image_key },
+              responseType: 'blob',
+            })
+            .pipe(
+              switchMap((blob) => this.blobToDataUri(blob)),
+              map(
+                (dataUri): ProductImageEnhancementResult => ({
+                  image_url: dataUri,
+                  revised_prompt: result.revised_prompt,
+                  model: result.model,
+                }),
+              ),
+            );
         }),
       );
   }
 
-  generateProductImage(
-    data: ProductImageGenerationRequest,
-  ): Observable<ProductImageEnhancementResult> {
-    return this.http
-      .post<
-        ApiResponse<ProductImageEnhancementResult>
-      >(`${this.apiUrl}/store/products/generate-image`, data)
-      .pipe(
-        map((response) => {
-          if (!response?.success || !response.data?.image_url) {
-            throw response;
-          }
-
-          return response.data;
-        }),
+  private blobToDataUri(blob: Blob): Observable<string> {
+    return new Observable<string>((subscriber) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const value = reader.result as string;
+        if (!value) {
+          subscriber.error(new Error('No se pudo leer la imagen generada.'));
+          return;
+        }
+        subscriber.next(value);
+        subscriber.complete();
+      };
+      reader.onerror = () =>
+        subscriber.error(new Error('No se pudo leer la imagen generada.'));
+      reader.readAsDataURL(
+        blob.type.startsWith('image/')
+          ? blob
+          : new Blob([blob], { type: 'image/png' }),
       );
+      return () => {
+        if (reader.readyState === 1) reader.abort();
+      };
+    });
   }
 
   // Estadísticas
