@@ -2623,6 +2623,79 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
    * validar la combinación: un producto podía nacer con IVA + INC o dos IVA y
    * cobrarse dos veces en POS. Misma regla que products (PROD_TAX_COMBO_001).
    */
+  describe('SKU de un producto archivado', () => {
+    const newProductDto = () => ({
+      ...baseDto(),
+      items: [
+        {
+          product_name: 'Camisa Nueva',
+          sku: 'SKU-ARCH',
+          quantity: 1,
+          unit_price: 1000,
+        },
+      ],
+    });
+
+    it('la OC no actualiza ni choca con el archivado: crea un producto nuevo', async () => {
+      const tx: any = mockCreateTx();
+      // El archivado existe, pero SOLO lo ve una consulta sin filtro de estado.
+      const archived = { id: 99, name: 'Camisa Vieja', state: 'archived' };
+      tx.products.findFirst = jest.fn(async ({ where }: any) =>
+        where.state?.not === 'archived' ? null : archived,
+      );
+      tx.products.create = jest.fn().mockResolvedValue({ id: 8001 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(newProductDto() as any);
+
+      // Ninguna búsqueda por SKU puede ver archivados.
+      const skuLookups = tx.products.findFirst.mock.calls.filter(
+        (c: any) => c[0].where.sku === 'SKU-ARCH',
+      );
+      expect(skuLookups).toHaveLength(2);
+      for (const [arg] of skuLookups) {
+        expect(arg.where).toEqual({
+          store_id: STORE_ID,
+          sku: 'SKU-ARCH',
+          state: { not: 'archived' },
+        });
+      }
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+      expect(tx.products.create.mock.calls[0][0].data).toMatchObject({
+        sku: 'SKU-ARCH',
+        name: 'Camisa Nueva',
+        store_id: STORE_ID,
+      });
+      expect(tx.products.update).toBeUndefined();
+    });
+
+    it('un SKU ocupado por un producto NO archivado sigue siendo PROD_SKU_COLLISION_001', async () => {
+      const tx: any = mockCreateTx();
+      // `existingProduct` (1ª consulta) no lo ve; el chequeo A.7 (2ª) sí.
+      const owner = { id: 5, name: 'Camisa Activa', state: 'active' };
+      tx.products.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(owner);
+      tx.products.create = jest.fn();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      let caught: any = null;
+      try {
+        await service.create(newProductDto() as any);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught?.errorCode).toBe('PROD_SKU_COLLISION_001');
+      expect(caught.getResponse().details).toMatchObject({
+        sku: 'SKU-ARCH',
+        product_id: 5,
+        is_archived: false,
+      });
+      expect(tx.products.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('P1-4: combinación de impuestos del producto', () => {
     const categories = [
       { id: 1, name: 'IVA 19%', tax_type: 'iva', tax_rates: [{ store_id: null }] },
