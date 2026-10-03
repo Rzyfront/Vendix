@@ -1,4 +1,5 @@
 import {
+  CASH_MOVEMENT_DELIVERY_SCOPE,
   MovementsService,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
   REFUND_CASH_MOVEMENT_KEY,
@@ -198,6 +199,7 @@ describe('MovementsService — compensación de caja', () => {
       payment_id: 55,
       amount: 15000,
       channel: 'cash',
+      delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE,
     };
 
     it('entrega a una sesión abierta del mismo registro aunque sea de OTRO usuario', async () => {
@@ -392,7 +394,7 @@ describe('MovementsService — compensación de caja', () => {
           resolved_at: null,
           event_payload: { path: ['dedupe_key'], equals: 'order_cancelled:9:55' },
         }),
-        select: { id: true },
+        select: { id: true, event_payload: true },
       });
       expect(failures.create.mock.calls[0][0].data).toMatchObject({
         organization_id: 3,
@@ -403,8 +405,36 @@ describe('MovementsService — compensación de caja', () => {
           dedupe_key: 'order_cancelled:9:55',
           payment_id: 55,
           payment_method: 'cash',
+          delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE,
         }),
       });
+    });
+
+    it('reencolar sobre una fila existente sin marca NO se la agrega; con marca la conserva', async () => {
+      const db = makeDb([], []);
+      const failures = {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce({ id: 77, event_payload: { dedupe_key: 'x' } })
+          .mockResolvedValueOnce({
+            id: 78,
+            event_payload: { delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE },
+          }),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+      };
+      const { service } = makeService(db, { stores, accounting_entry_failures: failures });
+
+      await service.recordCompensationCashMovementDurable(input);
+      await service.recordCompensationCashMovementDurable(input);
+
+      expect(
+        failures.update.mock.calls[0][0].data.event_payload,
+      ).not.toHaveProperty('delivery_scope');
+      expect(failures.update.mock.calls[1][0].data.event_payload).toHaveProperty(
+        'delivery_scope',
+        CASH_MOVEMENT_DELIVERY_SCOPE,
+      );
     });
 
     it('reencolar el mismo dedupe_key reutiliza la fila abierta (sin duplicar)', async () => {
@@ -438,6 +468,7 @@ describe('MovementsService — compensación de caja', () => {
         reference: 'order_cancelled',
         dedupe_key: 'order_cancelled:9:55',
         notes: 'nota',
+        delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE,
       };
       const db = makeDb(
         [{ id: 300, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],

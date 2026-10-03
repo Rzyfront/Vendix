@@ -38,6 +38,21 @@ export const REFUND_CASH_MOVEMENT_SOURCE = 'refund.cash_movement';
  */
 export const ORDER_CANCELLED_MOVEMENT_REFERENCE = 'order_cancelled';
 
+/**
+ * Marca de las filas del outbox encoladas con la entrega por registro (cualquier
+ * sesión abierta del mismo registro). Las filas sin esta marca son anteriores
+ * al cambio: su dinero salió de sesiones ya cerradas y NO se entregan a ninguna
+ * caja automáticamente (revisión manual).
+ */
+export const CASH_MOVEMENT_DELIVERY_SCOPE = 'register_v2';
+
+/** Prefijo de `error_message` de las filas legacy marcadas para revisión manual. */
+export const LEGACY_MANUAL_REVIEW_PREFIX = 'LEGACY_MANUAL_REVIEW';
+const LEGACY_MANUAL_REVIEW_MESSAGE =
+  `${LEGACY_MANUAL_REVIEW_PREFIX}: reembolso en efectivo encolado antes del ` +
+  `2026-10-03; no se entrega a ninguna caja automáticamente. Revisar a mano ` +
+  `contra la sesión original.`;
+
 export interface RefundCashMovementPayload {
   version: 1;
   refund_id: number;
@@ -59,6 +74,8 @@ export interface RefundCashMovementPayload {
   /** Clave de dedupe del outbox; su presencia marca el payload como compensación. */
   dedupe_key?: string;
   notes?: string;
+  /** `CASH_MOVEMENT_DELIVERY_SCOPE` en filas nuevas; ausente en las legacy. */
+  delivery_scope?: string;
 }
 
 /** `source_type` de las filas del outbox de compensaciones (≠ refund). */
@@ -591,7 +608,7 @@ export class MovementsService {
         resolved_at: null,
         event_payload: { path: ['dedupe_key'], equals: payload.dedupe_key },
       },
-      select: { id: true },
+      select: { id: true, event_payload: true },
     });
     if (existing) {
       await db.accounting_entry_failures.update({
@@ -599,7 +616,10 @@ export class MovementsService {
         data: {
           attempt_count: { increment: 1 },
           error_message: message,
-          event_payload: payload as unknown as Prisma.InputJsonValue,
+          event_payload: withDeliveryScope(
+            payload,
+            hasDeliveryScope(existing.event_payload),
+          ),
         },
       });
       return existing.id;
@@ -611,7 +631,7 @@ export class MovementsService {
         handler_key: REFUND_CASH_MOVEMENT_KEY,
         source_type: COMPENSATION_CASH_MOVEMENT_SOURCE,
         source_id: payload.payment_id ?? payload.order_id,
-        event_payload: payload as unknown as Prisma.InputJsonValue,
+        event_payload: withDeliveryScope(payload, true),
         error_message: message,
       },
     });
@@ -636,7 +656,7 @@ export class MovementsService {
         source_id: payload.refund_id,
         resolved_at: null,
       },
-      select: { id: true },
+      select: { id: true, event_payload: true },
     });
     if (existing) {
       await db.accounting_entry_failures.update({
@@ -644,7 +664,10 @@ export class MovementsService {
         data: {
           attempt_count: { increment: 1 },
           error_message: message,
-          event_payload: payload as unknown as Prisma.InputJsonValue,
+          event_payload: withDeliveryScope(
+            payload,
+            hasDeliveryScope(existing.event_payload),
+          ),
         },
       });
       return existing.id;
@@ -656,7 +679,7 @@ export class MovementsService {
         handler_key: REFUND_CASH_MOVEMENT_KEY,
         source_type: REFUND_CASH_MOVEMENT_SOURCE,
         source_id: payload.refund_id,
-        event_payload: payload as unknown as Prisma.InputJsonValue,
+        event_payload: withDeliveryScope(payload, true),
         error_message: message,
       },
     });
@@ -718,6 +741,23 @@ export class MovementsService {
               error_message: `DELIVERED_EXISTS: movement #${already.id} already recorded for refund #${payload.refund_id}`,
             },
           });
+          return;
+        }
+        // Fila anterior al cambio de entrega por registro: no entra a ninguna
+        // caja. Se marca una sola vez y queda sin resolver para revisión manual.
+        if (payload.delivery_scope !== CASH_MOVEMENT_DELIVERY_SCOPE) {
+          if (!row.error_message?.startsWith(LEGACY_MANUAL_REVIEW_PREFIX)) {
+            await tx.accounting_entry_failures.update({
+              where: { id: failureId },
+              data: {
+                attempt_count: { increment: 1 },
+                error_message: LEGACY_MANUAL_REVIEW_MESSAGE,
+              },
+            });
+            this.logger.warn(
+              `Outbox row #${failureId} (refund #${payload.refund_id}, order #${payload.order_id}) is legacy: marked for manual review, not delivered to any cash session.`,
+            );
+          }
           return;
         }
         // Cascada de compensación (compartida con el camino directo): sesión
@@ -790,6 +830,7 @@ export class MovementsService {
           handler_key: REFUND_CASH_MOVEMENT_KEY,
           resolved_at: null,
           updated_at: { lte: quietSince },
+          NOT: { error_message: { startsWith: LEGACY_MANUAL_REVIEW_PREFIX } },
         },
         select: { id: true },
         take: 50,
@@ -799,10 +840,30 @@ export class MovementsService {
       try {
         await this.deliverRefundCashMovement(row.id);
       } catch (error) {
-        this.logger.error(
+        this.logger.warn(
           `Refund cash movement delivery #${row.id} still pending: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
   }
+}
+
+function hasDeliveryScope(payload: unknown): boolean {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    (payload as { delivery_scope?: unknown }).delivery_scope ===
+      CASH_MOVEMENT_DELIVERY_SCOPE
+  );
+}
+
+/** Payload a persistir: con la marca de entrega solo si corresponde. */
+function withDeliveryScope(
+  payload: RefundCashMovementPayload,
+  mark: boolean,
+): Prisma.InputJsonValue {
+  const { delivery_scope: _drop, ...rest } = payload;
+  return (
+    mark ? { ...rest, delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE } : rest
+  ) as unknown as Prisma.InputJsonValue;
 }
