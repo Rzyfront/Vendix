@@ -455,9 +455,8 @@ el geocode.
 `apps/frontend/src/app/shared/components/address-form-fields/address-form-fields.component.ts`:
 
 - Inputs: `initialAddress`, `center`, `compact`, `dianEndpointBase`, `requirePhone`, `showPhone`,
-  `showErrors`, `allowGeolocation` (default `true` — POS pasa `false`: el dispositivo del cajero
-  está en la tienda, geolocalizarLO pondría el pin en el punto equivocado; solo pin manual tiene
-  sentido ahí).
+  `showErrors`, `allowGeolocation` (default `true`; POS mantiene el GPS disponible como acción
+  explícita porque el operador puede estar en la dirección del cliente).
 - Outputs: `addressChange` (emite el valor del form + `pin_confirmed`, `geocode_precision`,
   `has_location` — l.591-598), `validChange`.
 - Signals: `showMap`, `addressWarning`, `coordsSignal`, `precision`, `geocodeLabel`, `mapHighlight`,
@@ -511,8 +510,11 @@ legados fuera del formulario.
 `app-address-map-picker` tiene un control independiente de geolocalización: vuela con `map.flyTo`
 al marcador actual (si existe) o al centro real de la dirección, con zoom 16. Está deshabilitado
 cuando no hay punto real (el centro inicial de Colombia no cuenta). El clic no usa GPS, no emite
-`located` y no cambia coordenadas. Retirar el control/destruir el componente debe limpiar listener y
-referencias.
+`located` y no cambia coordenadas. El botón GPS, debajo de fullscreen, es un control distinto y solo
+solicita ubicación tras un clic explícito y el permiso del navegador; nunca se ejecuta automáticamente.
+Su resultado actualiza únicamente coordenadas, sin inferir/sobrescribir departamento o ciudad, que
+siguen gobernados por el catálogo DANE. Retirar el control/destruir el componente debe limpiar
+listener y referencias.
 
 ## Cascade — `resolveStopCoordinates`
 
@@ -562,7 +564,7 @@ Edit-mode sí persiste el modal directamente (el customer ya existe).
 - `apps/backend/src/domains/ecommerce/geocoding/google-geocoding.provider.ts` — fallback Google.
 - `apps/backend/src/domains/ecommerce/geocoding/colombian-address.util.ts` — parser de nomenclatura.
 - `apps/frontend/src/app/shared/components/address-form-fields/address-form-fields.component.ts:669,236,246` — `onLocated`, `pinConfirmed`, `precisionBadge`.
-- `apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:282` — `hasResolvedLocation`; template `l.104,259` — `[allowGeolocation]="false"`.
+- `apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:282` — `hasResolvedLocation`; template `l.104,259` — `[allowGeolocation]="true"`.
 
 ## Rules
 
@@ -577,6 +579,8 @@ Edit-mode sí persiste el modal directamente (el customer ya existe).
 - Usar `app-address-map-picker` (y su wrapper `app-address-form-fields`) solo para emitir coords;
   **nunca** para prefillear/sobreescribir los campos de texto de la dirección
   (`prefillFromGeocode` fue removido a propósito — ver sección del wrapper arriba).
+- El GPS del POS requiere clic/permisos explícitos, solo propone coordenadas y no cambia la ubicación
+  oficial DANE; el control «Centrar en la dirección» es una acción aparte y nunca solicita GPS.
 - No mandar `user_id`/`organization_id` desde el cliente en `POST /store/addresses` — el service
   deriva `customer_id → user_id`.
 - Bump de versión (`geocode:fwd:vN:`) al cambiar la forma de la cascade, **nunca** `FLUSHALL` en

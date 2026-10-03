@@ -110,7 +110,7 @@
             [compact]="true"
             [requirePhone]="true"
             [showErrors]="showAddressErrors()"
-            [allowGeolocation]="false"
+            [allowGeolocation]="true"
             (addressChange)="onAddressChange($event, clientAddressForm.form.dirty)"
             (validChange)="onAddressValidChange($event)"
           ></app-address-form-fields>
@@ -265,7 +265,7 @@
                 [compact]="true"
                 [requirePhone]="true"
                 [showErrors]="showAddressErrors()"
-                [allowGeolocation]="false"
+                [allowGeolocation]="true"
                 (addressChange)="onAddressChange($event)"
                 (validChange)="onAddressValidChange($event)"
               ></app-address-form-fields>

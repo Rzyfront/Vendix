@@ -193,9 +193,10 @@ export class AddressFormFieldsComponent {
    * hidden via CSS (`.no-gps`, see the stylesheet). Default true keeps the
    * historical behavior for every existing consumer.
    *
-   * POS passes `false`: the cashier's own device sits at the store, so
-   * offering to geolocate THEM would place the pin on the wrong point
-   * entirely — only manual pin placement makes sense there.
+   * POS keeps this enabled: delivery operators may be away from the store and
+   * can explicitly choose their current location. GPS is never automatic and
+   * remains separate from recentering on the typed address; it supplies only
+   * coordinates and never derives/replaces the DANE department or city.
    */
   readonly allowGeolocation = input<boolean>(true);
 

@@ -203,6 +203,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     component.addressEditing.set(true);
     fixture.detectChanges();
     const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent)).componentInstance as AddressFormFieldsComponent;
+    expect(form.allowGeolocation()).toBeTrue();
     expect(form.form.pristine).toBeTrue();
     expect(form.form.get('address_line1')?.value).toBe(originalAddress.address_line1);
     fixture.detectChanges();
@@ -437,6 +438,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
 
       // El cajero completa departamento y municipio como ubicación DANE coherente.
       const form = formElement!.componentInstance as AddressFormFieldsComponent;
+      expect(form.allowGeolocation()).toBeTrue();
       selectMunicipality(form, '76', '76001');
       embeddedView.detectChanges();
       fixture.detectChanges();
