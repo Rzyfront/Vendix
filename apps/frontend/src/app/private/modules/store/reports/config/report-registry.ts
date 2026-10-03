@@ -596,6 +596,76 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/sales/trends',
   },
 
+  {
+    // Vive en página propia (reusa SalesByDimensionComponent de analytics)
+    // porque el visor genérico solo envía fechas y aquí hay filtro por
+    // proveedor y vistas por producto/vendedor/cliente.
+    id: 'sales-by-supplier',
+    category: 'sales',
+    title: 'Ventas por Proveedor',
+    description: 'Venta neta sin IVA por proveedor, con detalle por producto, vendedor y cliente.',
+    detailedDescription:
+      'Venta neta sin IVA por proveedor con detalle por producto, vendedor y cliente, clientes impactados y referencias vendidas. La venta se atribuye al proveedor asignado al producto o, si no tiene, al de su última orden de compra.',
+    icon: 'truck',
+    route: '/admin/reports/sales/sales-by-supplier',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    columns: [
+      { key: 'dimension_name', header: 'Proveedor', type: 'text' },
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'units', header: 'Unidades', type: 'number' },
+      { key: 'net_sales', header: 'Venta neta', type: 'currency' },
+      { key: 'orders', header: 'Órdenes', type: 'number' },
+      { key: 'customers', header: 'Clientes', type: 'number' },
+    ],
+    exportFilename: 'ventas_por_proveedor',
+    stats: [
+      { key: 'net_sales', label: 'Venta neta', type: 'currency', icon: 'dollar-sign' },
+      { key: 'units', label: 'Unidades', type: 'number', icon: 'package' },
+      { key: 'impacted_customers', label: 'Clientes impactados', type: 'number', icon: 'users' },
+      { key: 'distinct_references', label: 'Referencias', type: 'number', icon: 'layers' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-dimension',
+    exportEndpoint: 'store/analytics/sales/by-dimension/export',
+  },
+
+  {
+    // Vive en página propia (reusa SalesByDimensionComponent de analytics)
+    // porque el visor genérico solo envía fechas y aquí hay filtro por
+    // marca y vistas por producto/vendedor/cliente.
+    id: 'sales-by-brand',
+    category: 'sales',
+    title: 'Ventas por Marca',
+    description: 'Venta neta sin IVA por marca, con detalle por producto, vendedor y cliente.',
+    detailedDescription:
+      'Venta neta sin IVA por marca con detalle por producto, vendedor y cliente, clientes impactados y referencias vendidas.',
+    icon: 'tag',
+    route: '/admin/reports/sales/sales-by-brand',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    columns: [
+      { key: 'dimension_name', header: 'Marca', type: 'text' },
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'units', header: 'Unidades', type: 'number' },
+      { key: 'net_sales', header: 'Venta neta', type: 'currency' },
+      { key: 'orders', header: 'Órdenes', type: 'number' },
+      { key: 'customers', header: 'Clientes', type: 'number' },
+    ],
+    exportFilename: 'ventas_por_marca',
+    stats: [
+      { key: 'net_sales', label: 'Venta neta', type: 'currency', icon: 'dollar-sign' },
+      { key: 'units', label: 'Unidades', type: 'number', icon: 'package' },
+      { key: 'impacted_customers', label: 'Clientes impactados', type: 'number', icon: 'users' },
+      { key: 'distinct_references', label: 'Referencias', type: 'number', icon: 'layers' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-dimension',
+    exportEndpoint: 'store/analytics/sales/by-dimension/export',
+  },
+
   // ─── INVENTARIO (7) ──────────────────────────────────────────────────────────
 
   {

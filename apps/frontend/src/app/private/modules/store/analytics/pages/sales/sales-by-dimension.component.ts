@@ -188,15 +188,17 @@ const EMPTY_SUMMARY: SalesByDimensionSummary = {
             </div>
           }
 
-          <!-- Quick Links -->
-          <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Ventas</span>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-              @for (view of salesViews(); track view.key) {
-                <app-analytics-card [view]="view"></app-analytics-card>
-              }
-            </div>
-          </app-card>
+          <!-- Quick Links (solo en Analíticas; en Reportes no aplica) -->
+          @if (showQuickLinks) {
+            <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Ventas</span>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                @for (view of salesViews(); track view.key) {
+                  <app-analytics-card [view]="view"></app-analytics-card>
+                }
+              </div>
+            </app-card>
+          }
         </div>
       </app-card>
     </div>
@@ -213,6 +215,9 @@ export class SalesByDimensionComponent implements OnInit {
   private readonly brandsService = inject(BrandsService);
 
   readonly limit = PAGE_SIZE;
+
+  /** En el módulo Reportes (`data.context === 'reports'`) no se muestran las vistas de Analíticas. */
+  readonly showQuickLinks = this.route.snapshot.data['context'] !== 'reports';
 
   readonly dimension = signal<SalesDimension>(
     (this.route.snapshot.data['dimension'] as SalesDimension) ?? 'supplier',
@@ -279,7 +284,7 @@ export class SalesByDimensionComponent implements OnInit {
         defaultValue: 'product',
         options: [
           { value: 'product', label: 'Por producto' },
-          { value: 'user', label: 'Por asesor' },
+          { value: 'user', label: 'Por vendedor' },
           { value: 'customer', label: 'Por cliente' },
         ],
       },
@@ -312,7 +317,7 @@ export class SalesByDimensionComponent implements OnInit {
       case 'user':
         return [
           dim,
-          { key: 'user_name', label: 'Asesor' },
+          { key: 'user_name', label: 'Vendedor' },
           { key: 'user_document', label: 'Documento', defaultValue: '—' },
           units, sales, orders, customers, references,
         ];

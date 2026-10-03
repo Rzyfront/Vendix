@@ -28,7 +28,7 @@ export const NULL_DIMENSION_LABEL: Record<SalesDimension, string> = {
   supplier: 'Sin proveedor',
   brand: 'Sin marca',
 };
-export const NO_ADVISOR_LABEL = 'Sin asesor';
+export const NO_SELLER_LABEL = 'Sin vendedor';
 export const NO_CUSTOMER_LABEL = 'Consumidor final / sin cliente';
 
 export interface SalesDimensionSummary {
@@ -183,7 +183,7 @@ export function mapUserRow(
     ...dimensionBase(raw as any, dimension),
     user_id: userId,
     user_name:
-      userId === null || !raw.user_name ? NO_ADVISOR_LABEL : String(raw.user_name),
+      userId === null || !raw.user_name ? NO_SELLER_LABEL : String(raw.user_name),
     user_document: raw.user_document ? String(raw.user_document) : null,
     units: toNumber(raw.units),
     net_sales: round2(toNumber(raw.net_sales)),

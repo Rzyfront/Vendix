@@ -26,6 +26,9 @@ import { AccountingEffects } from '../accounting/state/effects/accounting.effect
  *     fullViewRoute hops into their modules.
  *   - `inventory-low-stock-by-supplier` keeps its bespoke page (has
  *     its own searchable supplier dropdown).
+ *   - `sales-by-supplier` / `sales-by-brand` reuse the analytics
+ *     `SalesByDimensionComponent` (entity filter + product/seller/customer
+ *     views); `data.context: 'reports'` hides the analytics quick links.
  */
 export const reportsRoutes: Routes = [
   {
@@ -71,6 +74,19 @@ export const reportsRoutes: Routes = [
           { path: 'sales-by-user',         data: { reportId: 'sales-by-user' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-tips-by-waiter',  data: { reportId: 'sales-tips-by-waiter' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-trends',          data: { reportId: 'sales-trends' },          loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          // Ventas por proveedor/marca — reusan SalesByDimensionComponent de
+          // analytics (página propia: filtro por entidad + vistas). `context`
+          // oculta los accesos a vistas de Analíticas.
+          {
+            path: 'sales-by-supplier',
+            data: { dimension: 'supplier', context: 'reports' },
+            loadComponent: () => import('../analytics/pages/sales/sales-by-dimension.component').then(c => c.SalesByDimensionComponent),
+          },
+          {
+            path: 'sales-by-brand',
+            data: { dimension: 'brand', context: 'reports' },
+            loadComponent: () => import('../analytics/pages/sales/sales-by-dimension.component').then(c => c.SalesByDimensionComponent),
+          },
         ],
       },
       {

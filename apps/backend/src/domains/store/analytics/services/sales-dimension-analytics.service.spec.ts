@@ -13,7 +13,7 @@ import {
   mapSummaryRow,
   mapUserRow,
   toNumber,
-  NO_ADVISOR_LABEL,
+  NO_SELLER_LABEL,
   NO_CUSTOMER_LABEL,
 } from './sales-dimension-analytics.service';
 
@@ -202,12 +202,12 @@ describe('row mapping', () => {
     });
   });
 
-  it('maps null advisor and null customer to their labels', () => {
+  it('maps null seller and null customer to their labels', () => {
     const u = mapUserRow(
       { dimension_id: 0, dimension_name: null, user_id: null, user_name: null, units: 1, net_sales: 5, orders: 1, customers: 0, refs: 1 },
       'supplier',
     );
-    expect(u.user_name).toBe(NO_ADVISOR_LABEL);
+    expect(u.user_name).toBe(NO_SELLER_LABEL);
     expect(u.user_id).toBeNull();
     const c = mapCustomerRow(
       { dimension_id: 2, dimension_name: 'ACME', customer_id: null, customer_name: null, customer_document: null, units: 2, net_sales: 8, orders: 1, refs: 2 },

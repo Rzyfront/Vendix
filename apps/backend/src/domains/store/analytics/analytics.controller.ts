@@ -418,7 +418,7 @@ export class AnalyticsController {
     ];
     const userColumns: ReportColumn[] = [
       dim,
-      { key: 'user_name', header: 'Asesor', type: 'text' },
+      { key: 'user_name', header: 'Vendedor', type: 'text' },
       { key: 'user_document', header: 'Documento', type: 'text' },
       ...metrics(true, true),
     ];
@@ -438,7 +438,7 @@ export class AnalyticsController {
       [
         this.toSheet('Resumen', summaryColumns, result.dimension_rows, tz),
         this.toSheet('Por producto', productColumns, result.by_product, tz),
-        this.toSheet('Por asesor', userColumns, result.by_user, tz),
+        this.toSheet('Por vendedor', userColumns, result.by_user, tz),
         this.toSheet('Por cliente', customerColumns, result.by_customer, tz),
       ],
     );
