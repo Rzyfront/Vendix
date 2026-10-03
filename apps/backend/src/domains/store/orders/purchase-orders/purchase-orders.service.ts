@@ -12,6 +12,7 @@ import {
   validateFreightAndTaxHeader,
 } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
+import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
@@ -1312,14 +1313,29 @@ export class PurchaseOrdersService {
             }
           }
 
-          // Check if product with SKU exists to avoid duplicates
-          const existingProduct = await tx.products.findFirst({
-            where: {
-              sku: item.sku,
-              store_id: storeId,
-              state: { not: 'archived' },
-            },
-          });
+          // Producto existente: primero por SKU y, si no, por código de barras.
+          // Sin el respaldo por código, una línea "nueva" cuyo código ya tiene
+          // un producto no archivado (otra factura, o la misma línea repetida
+          // en esta OC) intentaba crear un duplicado y moría en P2002.
+          const normalizedBarcode =
+            typeof item.barcode === 'string' ? item.barcode.trim() : '';
+          const existingProduct =
+            (await tx.products.findFirst({
+              where: {
+                sku: item.sku,
+                store_id: storeId,
+                state: { not: 'archived' },
+              },
+            })) ??
+            (normalizedBarcode
+              ? await tx.products.findFirst({
+                  where: {
+                    barcode: normalizedBarcode,
+                    store_id: storeId,
+                    state: { not: 'archived' },
+                  },
+                })
+              : null);
 
           const availableForEcommerce = normalizeBool(
             item.available_for_ecommerce ?? true,
@@ -5517,6 +5533,100 @@ export class PurchaseOrdersService {
       },
       orderBy: { created_at: 'desc' },
     });
+  }
+
+  /**
+   * Avisa ANTES de crear la OC qué líneas «nuevas» (sin product_id) se
+   * fusionarían con un producto existente o repiten un código de barras.
+   *
+   * Replica el orden de resolución de `create()`: primero SKU, luego código de
+   * barras (ambos contra productos NO archivados de la tienda). Una línea que
+   * no resuelve a un producto y repite el código de una línea anterior (que
+   * tampoco resolvió) crearía un duplicado, así que se reporta aparte.
+   */
+  async findNewItemConflicts(dto: NewItemConflictsDto) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException('Store ID not found in context');
+    }
+
+    const lines = dto.items.map((item) => ({
+      line_index: item.line_index,
+      sku: typeof item.sku === 'string' ? item.sku.trim() : '',
+      barcode: typeof item.barcode === 'string' ? item.barcode.trim() : '',
+    }));
+    const skus = [...new Set(lines.map((l) => l.sku).filter(Boolean))];
+    const barcodes = [...new Set(lines.map((l) => l.barcode).filter(Boolean))];
+
+    // Una sola consulta para todas las líneas; los archivados no ocupan SKU
+    // ni código (índices únicos parciales), así que no cuentan.
+    const orFilters: any[] = [];
+    if (skus.length) orFilters.push({ sku: { in: skus } });
+    if (barcodes.length) orFilters.push({ barcode: { in: barcodes } });
+    const products = orFilters.length
+      ? await this.prisma.products.findMany({
+          where: {
+            store_id: storeId,
+            state: { not: 'archived' },
+            OR: orFilters,
+          },
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            barcode: true,
+            state: true,
+          },
+        })
+      : [];
+
+    const bySku = new Map<string, (typeof products)[number]>();
+    const byBarcode = new Map<string, (typeof products)[number]>();
+    for (const p of products) {
+      if (p.sku) bySku.set(p.sku, p);
+      if (p.barcode) byBarcode.set(p.barcode, p);
+    }
+
+    const conflicts: Array<Record<string, unknown>> = [];
+    // Código de barras -> primera línea que NO resolvió a un producto existente.
+    const firstLineByBarcode = new Map<string, number>();
+
+    for (const line of lines) {
+      const bySkuMatch = line.sku ? bySku.get(line.sku) : undefined;
+      const byBarcodeMatch =
+        !bySkuMatch && line.barcode ? byBarcode.get(line.barcode) : undefined;
+      const match = bySkuMatch ?? byBarcodeMatch;
+
+      if (match) {
+        conflicts.push({
+          line_index: line.line_index,
+          kind: bySkuMatch ? 'sku' : 'barcode',
+          sku: line.sku || null,
+          barcode: line.barcode || null,
+          product_id: match.id,
+          product_name: match.name,
+          product_sku: match.sku,
+          product_state: match.state,
+        });
+        continue;
+      }
+
+      if (line.barcode) {
+        const earlier = firstLineByBarcode.get(line.barcode);
+        if (earlier !== undefined) {
+          conflicts.push({
+            line_index: line.line_index,
+            kind: 'duplicate_barcode_in_order',
+            barcode: line.barcode,
+            duplicate_of_line_index: earlier,
+          });
+        } else {
+          firstLineByBarcode.set(line.barcode, line.line_index);
+        }
+      }
+    }
+
+    return { conflicts };
   }
 
   /**

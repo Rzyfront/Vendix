@@ -56,6 +56,23 @@
       ></app-steps-line>
     </div>
 
+    @if (newItemConflictMessages().length > 0) {
+      <div
+        class="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-900"
+        role="alert"
+      >
+        <div class="flex items-center gap-2 text-sm font-semibold">
+          <app-icon name="alert-triangle" [size]="16" />
+          Revisa antes de confirmar
+        </div>
+        <ul class="mt-1.5 list-disc space-y-1 pl-6 text-xs leading-snug break-words">
+          @for (msg of newItemConflictMessages(); track $index) {
+            <li>{{ msg }}</li>
+          }
+        </ul>
+      </div>
+    }
+
     <!-- Cuerpo: paso activo -->
     <div class="pop-checkout-body">
       @if (stepKeys().includes('configuracion')) {

@@ -22,6 +22,7 @@ import type {
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { focusFirstInvalid } from '../../../../../../../core/utils/focus-first-invalid';
 import { PopCartState } from '../../interfaces/pop-cart.interface';
+import type { NewItemConflict } from '../../interfaces/pop-cost-preview.interface';
 import {
   PopCostPreviewResponse,
   PopShippingAllocation,
@@ -100,6 +101,28 @@ export class PopCheckoutShellComponent {
    */
   readonly costPreviewError = input<string | null>(null);
   readonly isProcessing = input(false);
+  /** Avisos informativos de líneas nuevas que chocan con productos existentes. */
+  readonly newItemConflicts = input<NewItemConflict[]>([]);
+
+  /** Mensajes legibles (uno por conflicto); línea → nombre vía cartState. */
+  readonly newItemConflictMessages = computed<string[]>(() => {
+    const items = this.cartState()?.items ?? [];
+    const lineName = (idx: number | undefined): string => {
+      const it = idx === undefined ? undefined : items[idx];
+      return it?.prebulk_data?.name || it?.product?.name || `Línea ${(idx ?? 0) + 1}`;
+    };
+    return this.newItemConflicts().map((c) => {
+      const name = lineName(c.line_index);
+      if (c.kind === 'barcode') {
+        const detail = `SKU ${c.product_sku ?? '-'}${c.product_state === 'inactive' ? ', inactivo' : ''}`;
+        return `«${name}»: el código de barras ${c.barcode} ya pertenece a «${c.product_name}» (${detail}). La cantidad se sumará a ese producto en vez de crear uno nuevo.`;
+      }
+      if (c.kind === 'sku') {
+        return `«${name}»: el SKU ${c.sku} ya pertenece a «${c.product_name}». La cantidad se sumará a ese producto.`;
+      }
+      return `«${name}»: repite el código de barras ${c.barcode} de «${lineName(c.duplicate_of_line_index)}» en esta orden; se cargarán al mismo producto.`;
+    });
+  });
   /** Ref (`#id` / `order_number`) de la OC pendiente de recepción (reintento). */
   readonly retryOrderRef = input<string | null>(null);
 
