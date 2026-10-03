@@ -99,17 +99,11 @@ export interface AccountTone {
   readonly solid: string;
 }
 
-const ACCOUNT_TONES: readonly AccountTone[] = [
-  { solid: '#2563eb' }, // azul
-  { solid: '#ea580c' }, // naranja
-  { solid: '#7c3aed' }, // violeta
-  { solid: '#0d9488' }, // verde azulado
-  { solid: '#db2777' }, // rosa
-  { solid: '#ca8a04' }, // ambar
-];
-const NEUTRAL_TONE: AccountTone = { solid: '#64748b' };
+// Sobrio por decision del dueno: un solo acento (el primario de la marca), sin paleta por cuenta.
+const ACCOUNT_TONES: readonly AccountTone[] = [{ solid: 'var(--color-primary)' }];
+const NEUTRAL_TONE: AccountTone = { solid: 'var(--color-text-secondary)' };
 
-/** Paleta fija de 6 tonos que cicla por numero de cuenta (1-based). */
+/** Acento unico por cuenta (primario); neutro para la cuenta retenida. */
 export function accountTone(n: number): AccountTone {
   if (!Number.isFinite(n) || n < 1) return NEUTRAL_TONE;
   return ACCOUNT_TONES[(Math.floor(n) - 1) % ACCOUNT_TONES.length];
