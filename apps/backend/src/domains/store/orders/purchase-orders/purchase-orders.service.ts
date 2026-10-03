@@ -1701,10 +1701,24 @@ export class PurchaseOrdersService {
               // El filtro por `target` es deliberadamente estrecho: mapear todo
               // P2002 escondería colisiones de `slug` o `barcode`, que exigen
               // otra explicación y otro remedio.
-              const target = error?.meta?.target;
-              const hitsSku = Array.isArray(target)
-                ? target.includes('sku')
-                : typeof target === 'string' && target.includes('sku');
+              const rawTarget = error?.meta?.target;
+              const constraint =
+                error?.meta?.driverAdapterError?.cause?.constraint;
+              const targetText = [
+                Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
+                Array.isArray(constraint) ? constraint.join(', ') : constraint,
+              ]
+                .filter((v) => typeof v === 'string' && v)
+                .join(' ');
+              const hitsSku = targetText.includes('sku');
+              const hitsBarcode = targetText.includes('barcode');
+              if (error?.code === 'P2002' && hitsBarcode) {
+                throw new VendixHttpException(
+                  ErrorCodes.PROD_BARCODE_DUP_001,
+                  'El código de barras ya está en uso por otro producto de la tienda.',
+                  { concurrent: true },
+                );
+              }
               if (error?.code === 'P2002' && hitsSku) {
                 throw new VendixHttpException(
                   ErrorCodes.PROD_SKU_COLLISION_001,

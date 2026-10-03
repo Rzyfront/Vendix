@@ -2038,15 +2038,27 @@ export class ProductsBulkService {
         } else if (error instanceof BadRequestException) {
           userMessage = error.message;
         } else if (error?.code === 'P2002') {
-          const target = Array.isArray(error?.meta?.target)
-            ? (error.meta.target as string[]).join(', ')
-            : error?.meta?.target || 'desconocido';
+          const rawTarget = error?.meta?.target;
+          const constraint = error?.meta?.driverAdapterError?.cause?.constraint;
+          const targetText = [
+            Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
+            typeof constraint === 'string'
+              ? constraint
+              : Array.isArray(constraint)
+                ? constraint.join(', ')
+                : undefined,
+          ]
+            .filter((v) => typeof v === 'string' && v)
+            .join(' ');
+          const target = targetText || 'desconocido';
 
-          if (typeof target === 'string' && target.includes('slug')) {
+          if (target.includes('slug')) {
             const generated = generateSlug(productData.name || '');
             userMessage = `El nombre genera un slug duplicado ("${generated}"). Otro producto en la tienda ya lo usa.`;
-          } else if (typeof target === 'string' && target.includes('sku')) {
+          } else if (target.includes('sku')) {
             userMessage = `SKU "${productData.sku}" ya existe en la tienda.`;
+          } else if (target.includes('barcode')) {
+            userMessage = `El código de barras ya está en uso por otro producto de la tienda.`;
           } else {
             userMessage = `Violación de unicidad en campo(s): ${target}`;
           }

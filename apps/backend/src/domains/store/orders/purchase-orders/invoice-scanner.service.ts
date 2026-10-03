@@ -896,9 +896,10 @@ export class InvoiceScannerService {
    * CP-PURCHASE-TRANSPARENCY D.1 — los tres niveles excluyen los productos
    * ARCHIVADOS.
    *
-   * Por qué era la puerta de entrada del defecto: `@@unique([store_id, sku])`
-   * impide crear un producto nuevo con el SKU de uno archivado, así que el
-   * operador que «borra y vuelve a cargar» pasa forzosamente por el nivel 1. Y
+   * Por qué era la puerta de entrada del defecto: antes `@@unique([store_id, sku])`
+   * impedía crear un producto nuevo con el SKU de uno archivado; ahora los
+   * índices únicos parciales (`WHERE state <> 'archived'`) lo permiten, pero el
+   * operador que «borra y vuelve a cargar» sigue pasando por el nivel 1. Y
    * ahí el emparejamiento se autoselecciona con confianza ≥ 90 sin que nadie
    * mire: `selected_product_id` quedaba sellado contra un producto archivado y
    * la compra volvía a promediar su costo y su stock. `matchSupplier` ya

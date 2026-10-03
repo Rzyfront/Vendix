@@ -337,6 +337,28 @@ describe('ProductsBulkService', () => {
       });
     });
 
+    it('maps a P2002 on products_store_id_barcode_active_key (driverAdapterError) to a barcode message', async () => {
+      const p2002: any = new Error('Unique constraint failed');
+      p2002.code = 'P2002';
+      p2002.meta = {
+        driverAdapterError: {
+          cause: { constraint: 'products_store_id_barcode_active_key' },
+        },
+      };
+      mockProductsService.create.mockRejectedValueOnce(p2002);
+
+      const result = await service.uploadProducts(
+        {
+          products: [{ name: 'Product B', base_price: 10, sku: 'PROD-B' }],
+        } as BulkProductUploadDto,
+        mockUser,
+      );
+
+      expect(result.failed).toBe(1);
+      expect(result.results[0].message).toContain('código de barras');
+      expect(result.results[0].message).not.toContain('SKU');
+    });
+
     // DECISIÓN DE PRODUCTO A CONFIRMAR: una marca inexistente NO invalida la
     // fila. `validateProductData` la descarta (brand_id = undefined), deja un
     // logger.warn y sube el producto sin marca. La tolerancia tiene sentido en
