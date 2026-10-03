@@ -68,6 +68,7 @@ describe('ProductsService', () => {
       count: jest.fn(),
     },
     product_variants: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
       create: jest.fn(),
@@ -141,6 +142,7 @@ describe('ProductsService', () => {
       deleteMany: jest.fn(),
     },
     product_price_tier_assignments: {
+      findFirst: jest.fn(),
       createMany: jest.fn(),
       deleteMany: jest.fn(),
     },
@@ -610,6 +612,103 @@ describe('ProductsService', () => {
           { tax_category_id: 3, product_id: 1 },
           { tax_category_id: 4, product_id: 1 },
         ],
+      });
+    });
+  });
+
+  describe('unicidad de sku/slug/barcode — los archivados no bloquean', () => {
+    const dto: CreateProductDto = {
+      name: 'Nuevo',
+      base_price: 10,
+      sku: 'SKU-X',
+      barcode: '7700000000001',
+      store_id: 1,
+    } as CreateProductDto;
+    const notArchived = { state: { not: 'archived' } };
+
+    const arrange = () => {
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(null);
+      mockPrismaService.product_price_tier_assignments.findFirst.mockResolvedValue(
+        null,
+      );
+    };
+
+    it('create con sku/slug/barcode de un archivado: las consultas excluyen archivados y crea', async () => {
+      arrange();
+      const created = {
+        id: 9,
+        ...dto,
+        state: ProductState.ACTIVE,
+        stores: { id: 1, name: 'S', slug: 's', organization_id: 1 },
+        brands: null,
+        product_categories: [],
+        product_tax_assignments: [],
+        product_images: [],
+        product_variants: [],
+        reviews: [],
+        stock_levels: [],
+        product_price_tier_assignments: [],
+      };
+      mockPrismaService.products.create.mockResolvedValue(created);
+      mockPrismaService.products.findUnique.mockResolvedValue(created);
+      mockPrismaService.$transaction.mockImplementation((cb) =>
+        cb(mockPrismaService),
+      );
+
+      await service.create(dto);
+
+      const productWheres = mockPrismaService.products.findFirst.mock.calls
+        .map((c) => c[0]?.where)
+        .filter(Boolean);
+      const slugWhere = productWheres.find((w) => w.slug);
+      const skuWhere = productWheres.find((w) => w.sku);
+      const barcodeWhere = productWheres.find((w) => w.barcode);
+      expect(slugWhere).toMatchObject(notArchived);
+      expect(skuWhere).toMatchObject(notArchived);
+      expect(barcodeWhere).toMatchObject(notArchived);
+      expect(
+        mockPrismaService.product_variants.findFirst.mock.calls[0][0].where,
+      ).toMatchObject({ products: notArchived });
+      expect(mockPrismaService.products.create).toHaveBeenCalled();
+    });
+
+    it('barcode en presentación de producto archivado: PROD_BARCODE_DUP_001 nombrando el producto', async () => {
+      arrange();
+      mockPrismaService.product_price_tier_assignments.findFirst.mockResolvedValue(
+        {
+          product_id: 5,
+          price_tier_id: 2,
+          product: { id: 5, name: 'Gaseosa vieja', state: 'archived' },
+        },
+      );
+      const err: any = await service.create(dto).catch((e) => e);
+      expect(err.errorCode).toBe('PROD_BARCODE_DUP_001');
+      const res = err.getResponse();
+      expect(res.message).toBe(
+        'El código de barras lo usa una presentación del producto archivado "Gaseosa vieja"',
+      );
+      expect(res.details).toEqual({
+        barcode: '7700000000001',
+        conflict_type: 'presentation',
+        product_id: 5,
+        product_name: 'Gaseosa vieja',
+        product_archived: true,
+      });
+    });
+
+    it('barcode en producto activo: sigue rechazando con PROD_BARCODE_DUP_001', async () => {
+      arrange();
+      mockPrismaService.products.findFirst.mockImplementation(
+        async ({ where }) =>
+          where.barcode ? { id: 3, name: 'Activo' } : null,
+      );
+      const err: any = await service.create(dto).catch((e) => e);
+      expect(err.errorCode).toBe('PROD_BARCODE_DUP_001');
+      expect(err.getResponse().details).toMatchObject({
+        conflict_type: 'product',
+        product_id: 3,
+        product_name: 'Activo',
       });
     });
   });

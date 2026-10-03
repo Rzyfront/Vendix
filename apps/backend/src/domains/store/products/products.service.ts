@@ -946,33 +946,50 @@ export class ProductsService {
 
     const prisma = tx || this.prisma;
 
+    // Un producto archivado ya no ocupa su código de barras: solo bloquean
+    // los no archivados (el índice único parcial lo respalda en la base).
     const productConflict = await prisma.products.findFirst({
       where: {
         barcode: { equals: normalized },
+        state: { not: ProductState.ARCHIVED },
         ...(options.excludeProductId && { NOT: { id: options.excludeProductId } }),
       },
-      select: { id: true },
+      select: { id: true, name: true },
     });
     if (productConflict) {
       throw new VendixHttpException(
         ErrorCodes.PROD_BARCODE_DUP_001,
-        'El código de barras ya está en uso en esta tienda',
-        { barcode: normalized, conflict_type: 'product' },
+        `El código de barras ya está en uso por el producto "${productConflict.name}"`,
+        {
+          barcode: normalized,
+          conflict_type: 'product',
+          product_id: productConflict.id,
+          product_name: productConflict.name,
+        },
       );
     }
 
     const variantConflict = await prisma.product_variants.findFirst({
       where: {
         barcode: { equals: normalized },
+        products: { state: { not: ProductState.ARCHIVED } },
         ...(options.excludeVariantId && { NOT: { id: options.excludeVariantId } }),
       },
-      select: { id: true },
+      select: {
+        id: true,
+        products: { select: { id: true, name: true } },
+      },
     });
     if (variantConflict) {
       throw new VendixHttpException(
         ErrorCodes.PROD_BARCODE_DUP_001,
-        'El código de barras ya está en uso en esta tienda',
-        { barcode: normalized, conflict_type: 'variant' },
+        `El código de barras ya está en uso por una variante del producto "${variantConflict.products.name}"`,
+        {
+          barcode: normalized,
+          conflict_type: 'variant',
+          product_id: variantConflict.products.id,
+          product_name: variantConflict.products.name,
+        },
       );
     }
 
@@ -988,13 +1005,30 @@ export class ProductsService {
             NOT: { product_id: options.excludeProductId },
           }),
         },
-        select: { product_id: true, price_tier_id: true },
+        select: {
+          product_id: true,
+          price_tier_id: true,
+          product: { select: { id: true, name: true, state: true } },
+        },
       });
     if (presentationConflict) {
+      // Decisión del dueño: el bloqueo se mantiene aunque el producto dueño
+      // esté archivado (el índice único de la presentación no puede filtrar
+      // por el estado del producto), pero el mensaje debe nombrarlo.
+      const owner = presentationConflict.product;
+      const productArchived = owner?.state === ProductState.ARCHIVED;
       throw new VendixHttpException(
         ErrorCodes.PROD_BARCODE_DUP_001,
-        'El código de barras ya está en uso por una presentación de venta en esta tienda',
-        { barcode: normalized, conflict_type: 'presentation' },
+        productArchived
+          ? `El código de barras lo usa una presentación del producto archivado "${owner.name}"`
+          : 'El código de barras ya está en uso por una presentación de venta en esta tienda',
+        {
+          barcode: normalized,
+          conflict_type: 'presentation',
+          product_id: owner?.id ?? presentationConflict.product_id,
+          product_name: owner?.name ?? null,
+          product_archived: productArchived,
+        },
       );
     }
   }
@@ -1037,6 +1071,7 @@ export class ProductsService {
       const existingProduct = await this.prisma.products.findFirst({
         where: {
           slug: slug,
+          state: { not: ProductState.ARCHIVED },
         },
       });
 
@@ -1049,6 +1084,7 @@ export class ProductsService {
         const existingSku = await this.prisma.products.findFirst({
           where: {
             sku: sanitizedDto.sku,
+            state: { not: ProductState.ARCHIVED },
           },
         });
 
@@ -3909,6 +3945,7 @@ export class ProductsService {
         const existingSlug = await this.prisma.products.findFirst({
           where: {
             slug: sanitizedDto.slug,
+            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
@@ -3924,6 +3961,7 @@ export class ProductsService {
           where: {
             store_id: existingProduct.store_id,
             sku: sanitizedDto.sku,
+            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
@@ -6691,24 +6729,30 @@ export class ProductsService {
   }> {
     const [slug, sku, barcodeProduct, barcodeVariant] = await Promise.all([
       this.prisma.products.findFirst({
-        where: { slug: params.slug },
+        where: { slug: params.slug, state: { not: ProductState.ARCHIVED } },
         select: { id: true, name: true },
       }),
       params.sku
         ? this.prisma.products.findFirst({
-            where: { sku: params.sku },
+            where: { sku: params.sku, state: { not: ProductState.ARCHIVED } },
             select: { id: true, name: true },
           })
         : Promise.resolve(null),
       params.barcode
         ? this.prisma.products.findFirst({
-            where: { barcode: params.barcode },
+            where: {
+              barcode: params.barcode,
+              state: { not: ProductState.ARCHIVED },
+            },
             select: { id: true, name: true },
           })
         : Promise.resolve(null),
       params.barcode
         ? this.prisma.product_variants.findFirst({
-            where: { barcode: params.barcode },
+            where: {
+              barcode: params.barcode,
+              products: { state: { not: ProductState.ARCHIVED } },
+            },
             select: { id: true },
           })
         : Promise.resolve(null),
