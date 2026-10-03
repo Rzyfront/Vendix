@@ -1,4 +1,7 @@
-import { assertNoActiveFinancialSplit } from '../shared/financial-split-policy';
+import {
+  assertNoActiveFinancialSplit,
+  isFinancialSplitSettled,
+} from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import {
   getCancellationBlocker,
@@ -2873,12 +2876,32 @@ export class OrderFlowService {
       .reduce((sum, p) => sum.plus(p.amount), new Prisma.Decimal(0));
     if (paid.lt(order.grand_total)) return;
     const table = await this.prisma.table_sessions.findFirst({ where: { order_id: orderId, store_id: order.store_id }, select: { id: true } });
-    if (table) return;
-    if (order.state === 'draft') await this.promoteDraftToCreated(orderId, order.store_id);
+    if (order.state === 'draft') {
+      if (table) {
+        // Mesa: la promocion draft->created reserva solo lineas NO consumidas
+        // al fire (`inventory_consumed_at_fire`) ni platos de cocina, y no
+        // re-dispara KDS. Si la reserva falla (stock) el pago ya esta hecho:
+        // se registra y la orden queda recuperable via fast_track.
+        try {
+          await this.promoteDraftToCreated(orderId, order.store_id);
+        } catch (err) {
+          this.logger.warn(
+            `[settleFinancialSplitSource] promote failed for table order=${orderId}: ${(err as Error).message}`,
+          );
+          return;
+        }
+      } else {
+        await this.promoteDraftToCreated(orderId, order.store_id);
+      }
+    }
     await this.prisma.orders.updateMany({
       where: { id: orderId, store_id: order.store_id, state: { in: ['created', 'pending_payment'] }, active_financial_split_id: order.active_financial_split_id },
       data: { state: 'processing', updated_at: new Date() },
     });
+    // Mesa: la sesion sigue abierta (cierre manual) y el stock de platos ya se
+    // consumio al fire; NO se ejecuta el commit direct_delivery. La orden queda
+    // en `processing` lista para finalizar.
+    if (table) return;
     const current = await this.prisma.orders.findFirst({
       where: { id: orderId, store_id: order.store_id },
       include: { order_items: { include: { products: { select: { requires_serial_numbers: true } } } } },
@@ -8025,8 +8048,16 @@ export class OrderFlowService {
       (p) => p.state === 'succeeded',
     );
 
+    // Reparto financiero activo: sin saldar sigue totalmente bloqueado
+    // (SPLIT_ACCOUNT_LOCKED); saldado, el cobro se omite y solo avanza el
+    // ciclo de vida. Ninguna mutacion de dinero se habilita.
+    const splitSettled = isFinancialSplitSettled(order);
+    if (order.active_financial_split_id && !splitSettled) {
+      assertNoActiveFinancialSplit(order);
+    }
+
     // 1) Pay (only if not already paid)
-    if (!hasSuccessfulPayment) {
+    if (!hasSuccessfulPayment && !splitSettled) {
       if (!dto.payment) {
         throw new VendixHttpException(
           ErrorCodes.ORD_FAST_TRACK_PAYMENT_REQUIRED_001,
@@ -8041,6 +8072,23 @@ export class OrderFlowService {
       // lenient `processing` (paid) behavior instead — see payOrder above.
       await this.payOrder(orderId, dto.payment, { strictKitchenPending: true });
       stepsExecuted.push('pay');
+    }
+
+    // Recuperacion de ordenes atascadas (mesa con reparto saldado en draft):
+    // promover draft->created (idempotente; no re-consume lo consumido al fire)
+    // y avanzar a processing sin tocar pagos.
+    if (splitSettled) {
+      const stuck = await this.getOrder(orderId);
+      if (stuck.state === 'draft') {
+        await this.promoteDraftToCreated(orderId, stuck.store_id);
+        stepsExecuted.push('promote');
+      }
+      const promoted = await this.getOrder(orderId);
+      if (promoted.state === 'created' || promoted.state === 'pending_payment') {
+        this.validateTransition(promoted.state as OrderState, 'processing');
+        await this.updateOrderState(orderId, 'processing', {});
+        stepsExecuted.push('process');
+      }
     }
 
     // Reload to pick up state transitions performed by payOrder

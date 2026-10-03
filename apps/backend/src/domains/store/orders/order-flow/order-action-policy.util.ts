@@ -9,6 +9,7 @@ import {
   hasNonDirectSettledPayment,
   OrderCancellationSnapshot,
 } from './order-cancellation-policy.util';
+import { isFinancialSplitSettled } from '../shared/financial-split-policy';
 import {
   getSettledOrderAmount,
   isOrderFullyPaid,
@@ -313,6 +314,11 @@ export function canConfirmDelivery(order: OrderActionSnapshot): OrderActionResul
   if (order.state !== 'delivered' && order.state !== 'processing') {
     return { enabled: false };
   }
+  // Reparto financiero activo: solo se puede cerrar cuando todas las cuentas
+  // estan pagadas (cierre de ciclo de vida, no mutacion de dinero).
+  if (isFinancialSplitLocked(order) && !isFinancialSplitSettled(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
   if (order.hasPendingKitchen) {
     return { enabled: false, reason: 'ORDER_HAS_PENDING_KITCHEN_ITEMS' };
   }
@@ -370,6 +376,12 @@ export function canReactivateAsRole(
  * (mirrors the web's `canFastTrack`'s `order_items.length > 0`). */
 export interface FastTrackSnapshot {
   state: string;
+  /** Reparto financiero: sin saldar mantiene fast_track bloqueado; saldado lo
+   * habilita (el cobro se omite, solo avanza el ciclo de vida). */
+  active_financial_split_id?: number | null;
+  grand_total?: Prisma.Decimal | number | string | null;
+  payments?: ReadonlyArray<{ state: string; amount?: Prisma.Decimal | number | string }>;
+  refunds?: ReadonlyArray<{ state?: string | null; amount?: Prisma.Decimal | number | string }>;
   delivery_type?: string | null;
   shipping_method_id?: number | null;
   hasOrderItems?: boolean;
@@ -389,6 +401,9 @@ export function canFastTrack(order: FastTrackSnapshot): OrderActionResult {
     !order.shipping_method_id
   ) {
     return { enabled: false, reason: ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001.code };
+  }
+  if (order.active_financial_split_id && !isFinancialSplitSettled(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
   }
   if (!order.hasOrderItems) return { enabled: false };
   return { enabled: true };

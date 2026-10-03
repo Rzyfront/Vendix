@@ -1041,3 +1041,53 @@ describe('order-action-policy — bloqueo por cuenta dividida (cobro de la orden
     ).toEqual({ enabled: false, reason: SPLIT_LOCKED });
   });
 });
+
+describe('reparto financiero saldado — cierre de ciclo de vida habilitado, dinero bloqueado', () => {
+  const settledSplit = (
+    overrides: Partial<OrderActionSnapshot> & { remaining_balance?: number | null } = {},
+  ) =>
+    order({
+      state: 'processing',
+      grand_total: 100,
+      active_financial_split_id: 3,
+      remaining_balance: 0,
+      payments: [directPayment(60), directPayment(40)],
+      ...overrides,
+    });
+
+  it('happy: canConfirmDelivery habilitado en processing con split saldado', () => {
+    expect(canConfirmDelivery(settledSplit())).toEqual({ enabled: true });
+  });
+
+  it('happy: canFastTrack habilitado desde draft con split saldado', () => {
+    expect(
+      canFastTrack({
+        ...settledSplit({ state: 'draft' }),
+        delivery_type: 'dine_in',
+        hasOrderItems: true,
+      }),
+    ).toEqual({ enabled: true });
+  });
+
+  it('sad: split sin saldar mantiene confirm_delivery y fast_track bloqueados', () => {
+    const unsettled = settledSplit({ payments: [directPayment(60)], remaining_balance: 40 });
+    expect(canConfirmDelivery(unsettled)).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(
+      canFastTrack({ ...unsettled, state: 'draft', delivery_type: 'dine_in', hasOrderItems: true }),
+    ).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+  });
+
+  it('sad: con split saldado pay/cancel/edit/confirm_payment/credit_payment siguen bloqueados', () => {
+    const s = settledSplit({ state: 'created' });
+    expect(canPay(s)).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canCancel(s)).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canEditOrder(s, { roles: ['owner'] })).toMatchObject({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canConfirmPayment({ ...s, state: 'pending_payment' })).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canCreditPayment({ state: 'finished', payment_form: '2', remaining_balance: 5, active_financial_split_id: 3 }))
+      .toEqual({ enabled: false, reason: SPLIT_LOCKED });
+  });
+
+  it('sin split el comportamiento de fast_track no cambia', () => {
+    expect(canFastTrack({ state: 'draft', delivery_type: 'dine_in', hasOrderItems: true })).toEqual({ enabled: true });
+  });
+});
