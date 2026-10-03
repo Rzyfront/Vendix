@@ -2042,11 +2042,8 @@ export class ProductsBulkService {
           const constraint = error?.meta?.driverAdapterError?.cause?.constraint;
           const targetText = [
             Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
-            typeof constraint === 'string'
-              ? constraint
-              : Array.isArray(constraint)
-                ? constraint.join(', ')
-                : undefined,
+            // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
+            constraint ? JSON.stringify(constraint) : undefined,
           ]
             .filter((v) => typeof v === 'string' && v)
             .join(' ');

@@ -1706,7 +1706,8 @@ export class PurchaseOrdersService {
                 error?.meta?.driverAdapterError?.cause?.constraint;
               const targetText = [
                 Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
-                Array.isArray(constraint) ? constraint.join(', ') : constraint,
+                // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
+                constraint ? JSON.stringify(constraint) : undefined,
               ]
                 .filter((v) => typeof v === 'string' && v)
                 .join(' ');

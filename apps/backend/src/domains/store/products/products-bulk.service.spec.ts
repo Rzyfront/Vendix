@@ -342,7 +342,10 @@ describe('ProductsBulkService', () => {
       p2002.code = 'P2002';
       p2002.meta = {
         driverAdapterError: {
-          cause: { constraint: 'products_store_id_barcode_active_key' },
+          cause: {
+            kind: 'UniqueConstraintViolation',
+            constraint: { index: 'products_store_id_barcode_active_key' },
+          },
         },
       };
       mockProductsService.create.mockRejectedValueOnce(p2002);
