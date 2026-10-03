@@ -298,13 +298,15 @@
               <div class="no-methods-body">
                 <span class="no-methods-title">
                   {{ isPickupMethod() ? quoteError() : (hasResolvedLocation()
-                    ? 'No hay tarifa de envío para esta ubicación'
+                    ? (quoteError() || 'No hay una tarifa disponible para el método seleccionado.')
                     : 'Marca la ubicación en el mapa para calcular el envío') }}
                 </span>
                 <span class="no-methods-desc">
                   {{ isPickupMethod()
                     ? 'No se puede confirmar la recogida sin una tarifa activa configurada.'
-                    : 'No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.' }}
+                    : (hasResolvedLocation()
+                      ? 'Revisa las tarifas y la cobertura de este método, o selecciona otro método de envío.'
+                      : 'No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.') }}
                 </span>
               </div>
             </div>

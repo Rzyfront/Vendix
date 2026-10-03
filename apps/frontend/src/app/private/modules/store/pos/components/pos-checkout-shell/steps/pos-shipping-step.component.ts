@@ -997,7 +997,7 @@ export class PosShippingStepComponent {
           if (method.type === 'pickup' && !this.manualCostOverride()) this.shippingCost.set(0);
           this.quoteError.set(method.type === 'pickup'
             ? 'No hay tarifa activa para recoger en tienda'
-            : 'No hay tarifa de envío para esta ubicación');
+            : `No hay una tarifa disponible para "${method.name}".`);
         }
       },
       error: (error) => {
@@ -1007,7 +1007,7 @@ export class PosShippingStepComponent {
         this.shippingRateId.set(null);
         this.quoteError.set(parseApiError(error).userMessage || (method.type === 'pickup'
           ? 'No se pudo cotizar la tarifa de recogida en tienda.'
-          : 'No se pudo calcular el envío. Verifica la dirección y vuelve a intentarlo.'));
+          : 'No se pudo cotizar el método seleccionado. Intenta de nuevo.'));
       },
     });
   }

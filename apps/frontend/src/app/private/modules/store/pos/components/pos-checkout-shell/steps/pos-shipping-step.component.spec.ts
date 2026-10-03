@@ -277,8 +277,8 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     latestQuote().next([quote(7, 200)]);
     fixture.detectChanges();
     expect(component.shippingCost()).toBe(12500.5);
-    expect(component.quoteError()).toContain('No hay tarifa');
-    expect(component.editorValidationError()).toContain('No hay tarifa');
+    expect(component.quoteError()).toBe('No hay una tarifa disponible para "Mensajero".');
+    expect(component.editorValidationError()).toContain('No hay una tarifa disponible');
     expect(component.canConfirm()).toBeFalse();
   });
 
@@ -1159,6 +1159,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       expect(component.canConfirm()).toBeFalse();
       component.flashValidation();
       expect(component.flashMessage()).toBe('Marca la ubicación en el mapa para calcular el envío');
+      component.goToShipSubStep(2);
+      fixture.detectChanges();
+      const alert = fixture.debugElement.query(By.css('.no-methods-alert'));
+      expect(alert.nativeElement.textContent).toContain('Marca la ubicación en el mapa para calcular el envío');
+      expect(alert.nativeElement.textContent).toContain('No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.');
+      expect(alert.nativeElement.textContent).not.toContain('Revisa las tarifas y la cobertura');
+      expect(fixture.debugElement.query(By.css('.cost-card'))).toBeNull();
     });
 
     it('a manually typed cost cannot bypass the no-coordinates block', () => {
@@ -1204,8 +1211,15 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       fixture.detectChanges();
 
       expect(component.hasResolvedLocation()).toBeTrue();
-      expect(component.quoteError()).toBe('No hay tarifa de envío para esta ubicación');
+      expect(component.quoteError()).toBe('No hay una tarifa disponible para "Mensajero".');
       expect(component.canConfirm()).toBeFalse();
+      component.goToShipSubStep(2);
+      fixture.detectChanges();
+      const alert = fixture.debugElement.query(By.css('.no-methods-alert'));
+      expect(alert.nativeElement.textContent).toContain('No hay una tarifa disponible para "Mensajero".');
+      expect(alert.nativeElement.textContent).toContain('Revisa las tarifas y la cobertura de este método');
+      expect(alert.nativeElement.textContent).not.toContain('Marca la ubicación en el mapa');
+      expect(fixture.debugElement.query(By.css('.cost-card'))).toBeNull();
     });
   });
 });
