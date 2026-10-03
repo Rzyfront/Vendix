@@ -19,6 +19,7 @@ import { InvoiceEmissionGateService } from './services/invoice-emission-gate.ser
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
+import { FiscalScanHandlersRegistrar } from './fiscal-scan-handlers.registrar';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
@@ -114,6 +115,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     ResolutionsService,
     ResolutionScannerService,
     DianHabilitationScannerService,
+    FiscalScanHandlersRegistrar,
     InvoiceNumberGenerator,
     // Motor aritmético único del documento, puerta de identidad fiscal del
     // adquiriente y prevalidador DIAN del documento. Los tres son PUROS —sin

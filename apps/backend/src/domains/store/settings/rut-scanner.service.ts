@@ -4,6 +4,7 @@ import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { normalizeFiscalResponsibilityCode } from '@common/constants/fiscal-responsibilities';
+import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
 import sharp = require('sharp');
 
 /**
@@ -42,6 +43,15 @@ export interface RutScanResult {
   extraction_notes: string | null;
 }
 
+function toAiScanFile(file: Express.Multer.File): AiScanFile {
+  return {
+    buffer: file.buffer,
+    mimeType: file.mimetype,
+    originalName: file.originalname,
+    size: file.size,
+  };
+}
+
 @Injectable()
 export class RutScannerService {
   private readonly logger = new Logger(RutScannerService.name);
@@ -57,13 +67,24 @@ export class RutScannerService {
    * `image_url` data-uri so the vision model processes it natively.
    */
   async scanRutDocument(file: Express.Multer.File): Promise<RutScanResult> {
-    this.logger.debug(
-      `[RutScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
-    );
+    return this.scanRutFromFiles([toAiScanFile(file)]);
+  }
 
+  /** Validación previa a la IA; el controller async la llama ANTES de encolar. */
+  async assertReady(): Promise<void> {
     // Sin modelo de visión enlazado, `run()` cae al config de texto por defecto
     // y devuelve una identidad fiscal inventada con pinta de válida.
     await this.aiEngine.assertVisionModelLinked('rut_scanner');
+  }
+
+  /** Núcleo del escaneo: recibe buffer+mime (handler de la cola `ai-scan`). */
+  async scanRutFromFiles(files: AiScanFile[]): Promise<RutScanResult> {
+    const file = files[0];
+    this.logger.debug(
+      `[RutScan] File: mimetype=${file.mimeType}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+    );
+
+    await this.assertReady();
 
     const { base64, mimeType } = await this.preprocessImage(file);
     const dataUri = `data:${mimeType};base64,${base64}`;
@@ -128,7 +149,7 @@ export class RutScannerService {
    * vision model (Gemini 2.5 Flash) processes it natively.
    */
   private async preprocessImage(
-    file: Express.Multer.File,
+    file: AiScanFile,
   ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
@@ -166,7 +187,7 @@ export class RutScannerService {
       );
       return {
         base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
+        mimeType: file.mimeType,
       };
     }
   }

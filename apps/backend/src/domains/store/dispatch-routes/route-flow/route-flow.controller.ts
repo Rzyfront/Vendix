@@ -13,9 +13,12 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { RouteFlowService } from './route-flow.service';
 import { RouteSheetScannerService } from './route-sheet-scanner.service';
+import { DispatchRoutesService } from '../dispatch-routes.service';
+import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
 import {
   CloseDispatchRouteDto,
   ReleaseStopDto,
@@ -37,6 +40,8 @@ export class RouteFlowController {
   constructor(
     private readonly routeFlowService: RouteFlowService,
     private readonly routeSheetScanner: RouteSheetScannerService,
+    private readonly dispatchRoutesService: DispatchRoutesService,
+    private readonly aiScanJobs: AiScanJobService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -147,6 +152,9 @@ export class RouteFlowController {
 
   // ===== Route-sheet AI scanner =====
 
+  /**
+   * @deprecated Usar `POST :id/scan/async` (504 tras 60 s de proxy).
+   */
   @Post(':id/scan')
   @HttpCode(HttpStatus.OK)
   @Permissions('store:dispatch_routes:update')
@@ -157,6 +165,30 @@ export class RouteFlowController {
   ) {
     const result = await this.routeSheetScanner.scanRouteSheet(id, file);
     return this.responseService.success(result, 'Planilla escaneada');
+  }
+
+  @Post(':id/scan/async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('store:dispatch_routes:update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 15 * 1024 * 1024 },
+    }),
+  )
+  async scanRouteSheetAsync(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    this.routeSheetScanner.assertValidFile(file);
+    // 404 existente de la tienda (findOne es store-scoped) antes de encolar.
+    await this.dispatchRoutesService.findOne(id);
+    const { job_id } = await this.aiScanJobs.enqueue(
+      'route_sheet',
+      [this.routeSheetScanner.toScanFile(file)],
+      { route_id: id },
+    );
+    return this.responseService.success({ job_id }, 'Escaneo encolado');
   }
 
   @Post(':id/scan/match')
