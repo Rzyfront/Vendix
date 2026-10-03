@@ -536,8 +536,17 @@ export class OrdersService {
     rate: { id: number; type: string; base_cost: unknown } | null,
     orderId: number,
     storeId: number,
+    method?: { id: number; type: string },
   ): Promise<number | null> {
     if (!rate) return null;
+    if (method?.type === 'pickup') {
+      const options = await this.shippingCalculatorService.quotePickupRates(
+        storeId,
+        method.id,
+      );
+      const pickupRate = options.find((option) => option.rate_id === rate.id);
+      return pickupRate ? Number(pickupRate.cost) : null;
+    }
     const options = await this.quoteOrderShippingOptions(orderId, storeId);
     const match = options?.find((o) => o.rate_id === rate.id);
     return match ? Number(match.cost) : null;
@@ -3197,8 +3206,9 @@ export class OrdersService {
 
     // El DTO declara que la orden deja de tener envío: entonces sí, cero.
     const dtoDropsShipment =
-      dto.delivery_type === order_delivery_type_enum.pickup ||
-      dto.delivery_type === order_delivery_type_enum.dine_in;
+      dto.delivery_type === order_delivery_type_enum.dine_in ||
+      (dto.delivery_type === order_delivery_type_enum.pickup &&
+        !dto.shipping_method_id);
 
     if (dto.manual_shipping_price != null &&
       (!dto.shipping_method_id || !dto.shipping_rate_id || dtoDropsShipment)) {
@@ -3220,7 +3230,7 @@ export class OrdersService {
       shippingCost = Number.isFinite(persisted) && persisted > 0 ? persisted : 0;
     }
 
-    if (dto.shipping_method_id) {
+    if (dto.shipping_method_id && !dtoDropsShipment) {
       const method = await this.prisma.shipping_methods.findFirst({
         where: { id: dto.shipping_method_id, store_id: storeId, is_active: true },
       });
@@ -3247,8 +3257,10 @@ export class OrdersService {
           'La dirección del alias no pertenece a esta orden.',
         );
       }
-      const shippingAddressId = dto.shipping_address_id ??
-        (editingExistingAlias ? existingOrder.shipping_address_id : null);
+      const shippingAddressId = resolvedDeliveryType === order_delivery_type_enum.pickup
+        ? null
+        : dto.shipping_address_id ??
+          (editingExistingAlias ? existingOrder.shipping_address_id : null);
 
       if (
         (resolvedDeliveryType === order_delivery_type_enum.home_delivery ||
@@ -3348,7 +3360,39 @@ export class OrdersService {
         }
       }
 
-      if (dto.shipping_rate_id) {
+      if (method.type === 'pickup') {
+        const pickupOptions = await this.shippingCalculatorService.quotePickupRates(
+          storeId,
+          method.id,
+        );
+        const pickupOption = dto.shipping_rate_id != null
+          ? pickupOptions.find((option) => option.rate_id === dto.shipping_rate_id)
+          : pickupOptions[0];
+        if (!pickupOption) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'Selecciona una tarifa de recogida activa para actualizar el envío.',
+          );
+        }
+        resolvedShippingRateId = pickupOption.rate_id;
+        shippingCost = Number(pickupOption.cost);
+
+        if (dto.manual_shipping_price != null) {
+          if (!this.shippingTaxService) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+              'No se pudo calcular el impuesto del costo de recogida.',
+            );
+          }
+          manualShippingCharge = await this.shippingTaxService.chargeForRate(
+            null,
+            pickupOption.rate_id,
+            dto.manual_shipping_price,
+            { store_id: storeId },
+          );
+          shippingCost = manualShippingCharge.gross;
+        }
+      } else if (dto.shipping_rate_id) {
         const rate = await this.prisma.shipping_rates.findFirst({
           where: {
             id: dto.shipping_rate_id,
@@ -4525,10 +4569,15 @@ export class OrdersService {
                 : {}),
           notes: dto.notes ?? existingOrder.notes,
           internal_notes: dto.internal_notes ?? existingOrder.internal_notes,
-          delivery_type: dto.delivery_type ?? existingOrder.delivery_type,
+          delivery_type: resolvedDeliveryType ?? dto.delivery_type ?? existingOrder.delivery_type,
           billing_address_id: dto.billing_address_id ?? existingOrder.billing_address_id,
-          shipping_address_id: dto.shipping_address_id ?? existingOrder.shipping_address_id,
-          shipping_method_id: dto.shipping_method_id ?? existingOrder.shipping_method_id,
+          shipping_address_id:
+            dtoDropsShipment || resolvedDeliveryType === order_delivery_type_enum.pickup
+              ? null
+              : dto.shipping_address_id ?? existingOrder.shipping_address_id,
+          shipping_method_id: dtoDropsShipment
+            ? null
+            : dto.shipping_method_id ?? existingOrder.shipping_method_id,
           // Quitar el envío también suelta la tarifa (antes la conservaba);
           // un método nuevo liga su tarifa resuelta (o ninguna).
           shipping_rate_id: dtoDropsShipment
@@ -4890,14 +4939,16 @@ export class OrdersService {
 
     // Auto-calculate: resolve rate + cost from customer's shipping address
     if (dto.auto_calculate && !dto.shipping_rate_id) {
-      const options = await this.quoteOrderShippingOptions(orderId, storeId);
+      const options = method.type === 'pickup'
+        ? await this.shippingCalculatorService.quotePickupRates(storeId, method.id)
+        : await this.quoteOrderShippingOptions(orderId, storeId);
       if (!options) {
         throw new VendixHttpException(
           ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
         );
       }
 
-      const match = options.find((o) => o.method_id === method.id);
+      const match = options.find((option) => option.method_id === method.id);
       if (!match) {
         throw new VendixHttpException(
           ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
@@ -4921,7 +4972,15 @@ export class OrdersService {
       // Costo esperado de la tarifa (paso 5: helper compartido con
       // `update()`; mismo contrato que
       // `PaymentsService.resolvePosShippingTax`, 16081a2ab).
-      rateCost = await this.resolveExpectedRateCost(rate, orderId, storeId);
+      rateCost = await this.resolveExpectedRateCost(
+        rate,
+        orderId,
+        storeId,
+        method,
+      );
+      if (method.type === 'pickup' && rateCost == null) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
+      }
       if (dto.shipping_cost === undefined) {
         shippingCost = rateCost ?? Number(rate.base_cost);
       }
