@@ -4,6 +4,7 @@ import { Subject, defer, of, throwError } from 'rxjs';
 
 import { InvoiceScannerService } from './invoice-scanner.service';
 import {
+  InvoiceScanResult,
   InvoiceRevalidateJobStatus,
   InvoiceRevalidateRequest,
 } from '../interfaces/invoice-scanner.interface';
@@ -97,5 +98,88 @@ describe('InvoiceScannerService.revalidateAndWait — polling (QUI-855)', () => 
     // El GET original responde y su resultado SÍ se entrega.
     slow$.next(completed);
     expect(result).toBeDefined();
+  });
+});
+
+describe('InvoiceScannerService.scanInvoiceAndWait — polling async', () => {
+  let service: InvoiceScannerService;
+  const file = new File(['x'], 'factura.pdf');
+  const scanResult = { items: [] } as unknown as InvoiceScanResult;
+
+  let clock: jasmine.Clock;
+  beforeEach(() => {
+    clock = jasmine.clock();
+    clock.install();
+    clock.mockDate(new Date());
+    TestBed.configureTestingModule({
+      providers: [InvoiceScannerService, { provide: HttpClient, useValue: {} }],
+    });
+    service = TestBed.inject(InvoiceScannerService);
+    spyOn(service, 'enqueueScan').and.returnValue(of('job-1'));
+  });
+  afterEach(() => clock.uninstall());
+
+  it('completed emite el resultado', () => {
+    spyOn(service, 'getScanStatus').and.returnValue(
+      of({ status: 'completed', result: scanResult }),
+    );
+    let result: unknown;
+    service.scanInvoiceAndWait(file).subscribe((r) => (result = r));
+    clock.tick(0);
+    expect(result).toBe(scanResult);
+  });
+
+  it('failed propaga el texto del job', () => {
+    spyOn(service, 'getScanStatus').and.returnValue(
+      of({ status: 'failed', error: 'IA sin respuesta' }),
+    );
+    let error: Error | undefined;
+    service.scanInvoiceAndWait(file).subscribe({ error: (e) => (error = e) });
+    clock.tick(0);
+    expect(error?.message).toBe('IA sin respuesta');
+  });
+
+  it('un 404 en el poll se traduce a "ya no está disponible" sin reintentar', () => {
+    const spy = spyOn(service, 'getScanStatus').and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 404 })),
+    );
+    let error: Error | undefined;
+    service.scanInvoiceAndWait(file).subscribe({ error: (e) => (error = e) });
+    clock.tick(5000);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(error?.message).toContain('ya no está disponible');
+  });
+
+  it('agota el tiempo con mensaje en español', () => {
+    spyOn(service, 'getScanStatus').and.returnValue(of({ status: 'active' }));
+    let error: Error | undefined;
+    service.scanInvoiceAndWait(file).subscribe({ error: (e) => (error = e) });
+    clock.tick(InvoiceScannerService.SCAN_TIMEOUT_MS + 1);
+    expect(error?.message).toContain('tardó demasiado');
+  });
+
+  it('onStall se invoca una sola vez tras SCAN_STALL_NOTICE_MS', () => {
+    spyOn(service, 'getScanStatus').and.returnValue(of({ status: 'active' }));
+    const onStall = jasmine.createSpy('onStall');
+    const sub = service.scanInvoiceAndWait(file, 'retail', { onStall }).subscribe({
+      error: () => undefined,
+    });
+    clock.tick(InvoiceScannerService.SCAN_STALL_NOTICE_MS - 1);
+    expect(onStall).not.toHaveBeenCalled();
+    clock.tick(1);
+    expect(onStall).toHaveBeenCalledTimes(1);
+    clock.tick(120_000);
+    expect(onStall).toHaveBeenCalledTimes(1);
+    sub.unsubscribe();
+  });
+
+  it('onStall no se invoca si el job termina antes', () => {
+    spyOn(service, 'getScanStatus').and.returnValue(
+      of({ status: 'completed', result: scanResult }),
+    );
+    const onStall = jasmine.createSpy('onStall');
+    service.scanInvoiceAndWait(file, 'retail', { onStall }).subscribe();
+    clock.tick(InvoiceScannerService.SCAN_STALL_NOTICE_MS * 2);
+    expect(onStall).not.toHaveBeenCalled();
   });
 });

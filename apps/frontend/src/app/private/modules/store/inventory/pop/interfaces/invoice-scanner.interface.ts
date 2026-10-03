@@ -353,6 +353,21 @@ export interface InvoiceRevalidateResult {
   report: InvoiceRevalidateReport;
 }
 
+export type InvoiceScanJobState =
+  | 'waiting'
+  | 'active'
+  | 'completed'
+  | 'failed'
+  | 'delayed'
+  | 'unknown';
+
+/** `GET scan/async/:jobId` — SIN envelope de ResponseService. */
+export interface InvoiceScanJobStatus {
+  status: InvoiceScanJobState;
+  result?: InvoiceScanResult;
+  error?: string;
+}
+
 /** `GET scan/revalidate/:jobId` — SIN envelope de ResponseService. */
 export interface InvoiceRevalidateJobStatus {
   status: InvoiceRevalidateJobState;
