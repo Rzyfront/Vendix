@@ -112,4 +112,55 @@ describe('RecenterControl', () => {
     expect(located).not.toHaveBeenCalled();
     expect(getCurrentPosition).not.toHaveBeenCalled();
   });
+
+  it('removes the old pin and disables recenter when the address center is cleared', () => {
+    TestBed.configureTestingModule({ imports: [AddressMapPickerComponent] });
+    const fixture = TestBed.createComponent(AddressMapPickerComponent);
+    const component = fixture.componentInstance;
+    spyOn(component, 'ngAfterViewInit').and.stub();
+    fixture.componentRef.setInput('center', { lat: 11.5496, lng: -72.9105 });
+    fixture.detectChanges();
+
+    const marker = {
+      getLngLat: () => ({ lat: 11.5496, lng: -72.9105 }),
+      remove: jasmine.createSpy('marker.remove'),
+    };
+    const integratedMap = {
+      flyTo: jasmine.createSpy('flyTo'),
+      remove: jasmine.createSpy('map.remove'),
+    };
+    const componentInternals = component as unknown as {
+      map: typeof integratedMap | null;
+      mapLoaded: boolean;
+      marker: typeof marker | null;
+      recenterControl: RecenterControl | null;
+      createRecenterControl: () => RecenterControl;
+    };
+    componentInternals.map = integratedMap;
+    componentInternals.mapLoaded = true;
+    componentInternals.marker = marker;
+    component.hasPoint.set(true);
+
+    const integratedControl = componentInternals.createRecenterControl();
+    componentInternals.recenterControl = integratedControl;
+    const integratedRoot = document.createElement('div');
+    integratedRoot.appendChild(integratedControl.onAdd(integratedMap));
+    integratedControl.setEnabled(true);
+    const integratedButton = integratedRoot.querySelector('button') as HTMLButtonElement;
+    const located = jasmine.createSpy('located');
+    component.located.subscribe(located);
+
+    fixture.componentRef.setInput('center', null);
+    fixture.detectChanges();
+
+    expect(marker.remove).toHaveBeenCalledTimes(1);
+    expect(componentInternals.marker).toBeNull();
+    expect(component.hasPoint()).toBeFalse();
+    expect(integratedButton.disabled).toBeTrue();
+    expect(located).not.toHaveBeenCalled();
+    expect(integratedMap.flyTo).not.toHaveBeenCalled();
+
+    integratedControl.onRemove();
+    fixture.destroy();
+  });
 });

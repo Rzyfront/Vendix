@@ -117,8 +117,8 @@ class LocateButtonControl {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'maplibregl-ctrl-geolocate';
-    button.setAttribute('aria-label', 'Ubicarme');
-    button.setAttribute('title', 'Ubicarme');
+    button.setAttribute('aria-label', 'Usar mi ubicación actual');
+    button.setAttribute('title', 'Usar mi ubicación actual');
     const icon = document.createElement('span');
     icon.className = 'maplibregl-ctrl-icon';
     icon.setAttribute('aria-hidden', 'true');
@@ -242,28 +242,35 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
 
   constructor() {
     // Re-center the map + (lazily) create the marker when the parent pushes a
-    // coordinate (GPS, forward-geocode, etc.). Guarded until the map has loaded.
+    // coordinate (GPS, forward-geocode, etc.). If its center is cleared, remove
+    // the existing pin too so the control cannot return to stale coordinates.
     effect(() => {
       const next = this.center();
       if (next && this.mapLoaded && this.map) {
         this.ensureMarker(next);
         this.map.flyTo({ center: [next.lng, next.lat], zoom: POINT_ZOOM });
+      } else if (!next && this.map && this.marker) {
+        this.clearMarker();
       }
     });
   }
 
   async ngAfterViewInit(): Promise<void> {
     try {
-      const start = this.center();
-
       const maplibreModule = await import('maplibre-gl');
       this.maplibregl = (maplibreModule as any).default ?? maplibreModule;
+      // The center may change while the lazy MapLibre chunk downloads.
+      const start = this.center();
 
       this.map = new this.maplibregl.Map({
         container: this.mapContainer().nativeElement,
         style: BASEMAP_STYLE,
         center: start ? [start.lng, start.lat] : [COLOMBIA_CENTER.lng, COLOMBIA_CENTER.lat],
         zoom: start ? POINT_ZOOM : COUNTRY_ZOOM,
+        locale: {
+          'GeolocateControl.FindMyLocation': 'Usar mi ubicación actual',
+          'GeolocateControl.LocationNotAvailable': 'Ubicación no disponible',
+        },
         attributionControl: false,
       });
 
@@ -271,10 +278,6 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         new this.maplibregl.NavigationControl({ showCompass: false }),
         'top-right',
       );
-      // Address recenter sits between navigation and fullscreen; unlike the
-      // locate control below, it never requests or reads device geolocation.
-      this.recenterControl = this.createRecenterControl();
-      this.map.addControl(this.recenterControl, 'top-right');
       // Fullscreen: lets the customer expand the map to place the pin precisely.
       this.map.addControl(new this.maplibregl.FullscreenControl(), 'top-right');
       // "Ubicarme": behavior depends on `delegateLocate`.
@@ -315,6 +318,10 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
           this.emitFromMarker();
         });
       }
+      // Address recenter follows fullscreen and GPS, but remains independent:
+      // clicking it never requests or reads device geolocation.
+      this.recenterControl = this.createRecenterControl();
+      this.map.addControl(this.recenterControl, 'top-right');
       this.map.addControl(
         new this.maplibregl.AttributionControl({ compact: true }),
         'bottom-right',
@@ -356,6 +363,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         if (c) {
           this.ensureMarker(c);
           this.map.flyTo({ center: [c.lng, c.lat], zoom: POINT_ZOOM });
+        } else {
+          this.clearMarker();
         }
         // Ensure correct sizing after the container transitions into view.
         this.map.resize();
@@ -425,6 +434,18 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       this.marker.setLngLat([coord.lng, coord.lat]);
     }
     this.recenterControl?.setEnabled(true);
+  }
+
+  /** Removes a stale address point without emitting a user location change. */
+  private clearMarker(): void {
+    try {
+      this.marker?.remove?.();
+    } catch {
+      // Ignore a marker already detached by a lost WebGL context.
+    }
+    this.marker = null;
+    this.hasPoint.set(false);
+    this.recenterControl?.setEnabled(false);
   }
 
   private emitFromMarker(): void {
