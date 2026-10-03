@@ -44,6 +44,7 @@ import { PaymentMethodsCatalogService } from '../../../../../../../shared/servic
 import type { PaymentMethod } from '../../../../../../../shared/models/payment-method.model';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import { InvoicingService } from '../../../../invoicing/services/invoicing.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { ChangeTitularSearchModalComponent } from '../../../../orders/components/change-titular-search-modal/change-titular-search-modal.component';
@@ -133,6 +134,7 @@ export function accountTone(n: number): AccountTone {
 })
 export class SplitAccountsPanelComponent {
   private readonly api = inject(TablesService);
+  private readonly invoicing = inject(InvoicingService);
   private readonly catalog = inject(PaymentMethodsCatalogService);
   private readonly toast = inject(ToastService);
   private readonly dialog = inject(DialogService);
@@ -870,7 +872,40 @@ export class SplitAccountsPanelComponent {
       });
       if (!ok) return;
     }
-    await this.invoice(account);
+    await this.emitInvoice(account);
+  }
+  /** Un solo clic: crear + validar + emitir a la DIAN. Un rechazo deja la
+   * factura rechazada (se reintenta desde su tarjeta en el detalle). */
+  private async emitInvoice(account: SplitFinancialAccount): Promise<void> {
+    if (!account.id || this.busy()) return;
+    this.busy.set(true);
+    try {
+      const response = await firstValueFrom(
+        this.invoicing.emitFinancialAccount(account.id),
+      );
+      // `success: false` con 2xx llega por `next`, no por el catch.
+      if (!response?.success || !response.data) {
+        this.showError(response);
+        return;
+      }
+      const result = response.data;
+      if (result.state === 'issued') {
+        this.toast.success(
+          `${account.label} facturada${result.invoice_number ? ` · ${result.invoice_number}` : ''}`,
+        );
+      } else if (result.state === 'pending') {
+        this.toast.info(result.message || 'Factura en proceso de envío a la DIAN.');
+      } else {
+        this.toast.error(result.message || 'La DIAN no aceptó la factura. Reinténtala desde el detalle.');
+      }
+    } catch (error) {
+      this.showError(error);
+    } finally {
+      this.busy.set(false);
+    }
+    // `changed` hace que el detalle de la orden recargue sus tarjetas de factura.
+    await this.reload(true);
+    if (!this.destroyed) this.changed.emit(this.group());
   }
   openPayment(account: SplitFinancialAccount): void {
     if (
