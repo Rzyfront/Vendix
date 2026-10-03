@@ -902,7 +902,7 @@ export class SplitAccountsPanelComponent {
     this.error.set('');
     const registered: number[] = [];
     let lastSplit: SplitResult | null = null;
-    let lastPayment: { state: string; nextAction?: { url?: string } } | null =
+    let lastPayment: { state: string; nextAction?: { url?: string } | null } | null =
       null;
     try {
       for (let i = 0; i < requests.length; i++) {
