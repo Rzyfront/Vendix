@@ -275,17 +275,21 @@
   </app-card>
 </ng-template>
 
-<app-modal [(isOpen)]="pickerOpen" title="Cliente de la cuenta" size="lg" [dialog]="true">
-  @if (pickerOpen()) {
-    <app-pos-customer-selector (customerSelected)="selectCustomer($event)" />
-    <div class="mt-3 grid gap-2 rounded-lg border border-[var(--color-border)] p-3">
-      <app-input label="O dejar solo un nombre (consumidor final)" [formControl]="aliasControl" />
-      <app-button variant="outline" [disabled]="busy() || aliasControl.invalid" (clicked)="useAlias()">
-        Usar nombre / consumidor final
-      </app-button>
-    </div>
-  }
-</app-modal>
+<app-change-titular-search-modal
+  [isOpen]="pickerOpen()"
+  (closed)="closePicker()"
+  (selected)="selectCustomer($event)"
+  (createNew)="onPickerCreateNew($event)"
+></app-change-titular-search-modal>
+
+<app-customer-modal
+  [isOpen]="createCustomerOpen()"
+  [customer]="null"
+  [initialValues]="createCustomerInitialValues()"
+  [loading]="createCustomerLoading()"
+  (closed)="closeCreateCustomer()"
+  (save)="onCreateCustomerSave($event)"
+></app-customer-modal>
 
 @if (liveDetailAccount(); as detail) {
   <app-split-account-detail

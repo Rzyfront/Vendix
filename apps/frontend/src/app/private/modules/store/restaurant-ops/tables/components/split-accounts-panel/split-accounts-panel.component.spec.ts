@@ -12,6 +12,9 @@ import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { SplitFinancialAccount, SplitResult } from '../../interfaces';
 import type { PaymentSubmit } from '../../../../../../../shared/components';
+import { CustomersService } from '../../../../customers/services/customers.service';
+import { ChangeTitularSearchModalComponent } from '../../../../orders/components/change-titular-search-modal/change-titular-search-modal.component';
+import { CustomerModalComponent } from '../../../../customers/components/customer-modal/customer-modal.component';
 import { WompiSubMethod } from '../../../../../../../shared/services/wompi.service';
 
 const account = (
@@ -142,6 +145,14 @@ describe('SplitAccountsPanelComponent', () => {
             currencyDecimals: () => 0,
             format: (v: number) => `$${Math.round(v)}`,
           },
+        },
+        {
+          provide: CustomersService,
+          useValue: jasmine.createSpyObj('CustomersService', [
+            'lookupByDocument',
+            'resolveCustomer',
+            'searchCustomers',
+          ]),
         },
         {
           provide: ToastService,
@@ -437,6 +448,44 @@ describe('SplitAccountsPanelComponent', () => {
       expect(toast.error).toHaveBeenCalledWith(
         jasmine.stringMatching(/No se puede quitar la división/),
       );
+    });
+  });
+
+  describe('cliente con buscador de titular', () => {
+    const customer = { id: 55, first_name: 'Luis', last_name: 'Paz', email: 'l@x.co' } as any;
+
+    it('assigns the selected customer to a created account', async () => {
+      await create({ group: groupOf(account({ customer_id: null, customer_name: null as any }), account({ id: 903, ordinal: 2 })) });
+      api.updateFinancialAccountCustomer.and.returnValue(of(groupOf(account({ customer_id: 55 }))));
+      component.editPayer(null, component.group()!.accounts[0]);
+      expect(component.pickerOpen()).toBeTrue();
+      const search = fixture.debugElement.query(By.directive(ChangeTitularSearchModalComponent));
+      search.componentInstance.selected.emit(customer);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(api.updateFinancialAccountCustomer).toHaveBeenCalledWith(41, 902, { customer_id: 55 });
+      expect(component.pickerOpen()).toBeFalse();
+    });
+
+    it('assigns the selected customer to a draft payer', async () => {
+      await create({ allowCreate: true });
+      component.editPayer(0);
+      await component.selectCustomer(customer);
+      expect(component.payers()[0].customer_id).toBe(55);
+      expect(component.pickerOpen()).toBeFalse();
+    });
+
+    it('createNew opens the customer modal in create mode with the prefill', async () => {
+      await create({ allowCreate: true });
+      component.editPayer(0);
+      fixture.detectChanges();
+      const search = fixture.debugElement.query(By.directive(ChangeTitularSearchModalComponent));
+      search.componentInstance.createNew.emit({ first_name: 'Ana' });
+      fixture.detectChanges();
+      expect(component.pickerOpen()).toBeFalse();
+      expect(component.createCustomerOpen()).toBeTrue();
+      const modal = fixture.debugElement.query(By.directive(CustomerModalComponent));
+      expect(modal.componentInstance.initialValues()).toEqual({ first_name: 'Ana' });
+      expect(modal.componentInstance.customer()).toBeNull();
     });
   });
 

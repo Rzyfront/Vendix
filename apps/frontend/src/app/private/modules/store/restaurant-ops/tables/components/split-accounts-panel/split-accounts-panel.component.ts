@@ -19,7 +19,7 @@ import {
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { interval, firstValueFrom } from 'rxjs';
+import { interval, firstValueFrom, of, switchMap } from 'rxjs';
 import {
   AlertBannerComponent,
   BadgeComponent,
@@ -47,8 +47,17 @@ import { extractApiErrorMessage } from '../../../../../../../core/utils/api-erro
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
-import { PosCustomerSelectorComponent } from '../../../../pos/components/pos-customer-selector/pos-customer-selector.component';
-import type { PosCustomer } from '../../../../pos/models/customer.model';
+import { ChangeTitularSearchModalComponent } from '../../../../orders/components/change-titular-search-modal/change-titular-search-modal.component';
+import { CustomerModalComponent } from '../../../../customers/components/customer-modal/customer-modal.component';
+import {
+  CustomersService,
+  type ResolveCustomerRequest,
+  type ResolveCustomerResult,
+} from '../../../../customers/services/customers.service';
+import type {
+  CreateCustomerRequest,
+  Customer,
+} from '../../../../customers/models/customer.model';
 import { TablesService } from '../../services/tables.service';
 import { SplitAccountDetailComponent } from '../split-account-detail/split-account-detail.component';
 import {
@@ -103,7 +112,8 @@ const MODE_LABEL: Record<SplitResultMode, string> = {
     PaymentCollectorComponent,
     StepsLineComponent,
     CurrencyPipe,
-    PosCustomerSelectorComponent,
+    ChangeTitularSearchModalComponent,
+    CustomerModalComponent,
     SplitAccountDetailComponent,
   ],
   templateUrl: './split-accounts-panel.component.html',
@@ -116,6 +126,7 @@ export class SplitAccountsPanelComponent {
   private readonly auth = inject(AuthFacade);
   private readonly router = inject(Router);
   private readonly storeSettings = inject(StoreSettingsFacade);
+  private readonly customersService = inject(CustomersService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly currencyFormat = inject(CurrencyFormatService);
   private destroyed = false;
@@ -157,10 +168,10 @@ export class SplitAccountsPanelComponent {
   readonly paymentOpen = signal(false);
   readonly payingAccount = signal<SplitFinancialAccount | null>(null);
   readonly pickerOpen = signal(false);
-  readonly aliasControl = new FormControl('', {
-    nonNullable: true,
-    validators: [Validators.maxLength(100)],
-  });
+  readonly createCustomerOpen = signal(false);
+  readonly createCustomerLoading = signal(false);
+  readonly createCustomerInitialValues =
+    signal<Partial<CreateCustomerRequest> | null>(null);
   readonly pickerDraftIndex = signal<number | null>(null);
   readonly pickerAccount = signal<SplitFinancialAccount | null>(null);
   readonly gatewayUrl = signal<string | null>(null);
@@ -679,10 +690,6 @@ export class SplitAccountsPanelComponent {
     account: SplitFinancialAccount | null = null,
   ): void {
     if (account && !this.canEditPayer(account)) return;
-    this.aliasControl.setValue(
-      account?.customer_alias ??
-        (index != null ? this.form.controls.aliases.at(index).value : ''),
-    );
     this.pickerDraftIndex.set(index);
     this.pickerAccount.set(account);
     this.pickerOpen.set(true);
@@ -696,10 +703,60 @@ export class SplitAccountsPanelComponent {
       this.canManage()
     );
   }
-  async selectCustomer(customer: PosCustomer): Promise<void> {
+  closePicker(): void {
+    this.pickerOpen.set(false);
+  }
+  /** "Crear cliente nuevo" del buscador: abre el modal de cliente en crear-modo. */
+  onPickerCreateNew(prefill?: Partial<CreateCustomerRequest> | void): void {
+    this.createCustomerInitialValues.set(
+      (prefill as Partial<CreateCustomerRequest> | undefined) ?? null,
+    );
+    this.pickerOpen.set(false);
+    this.createCustomerOpen.set(true);
+  }
+  closeCreateCustomer(): void {
+    this.createCustomerOpen.set(false);
+    this.createCustomerInitialValues.set(null);
+  }
+  /** Busca por documento, si no existe lo crea (resolve) y lo asigna. */
+  onCreateCustomerSave(data: CreateCustomerRequest): void {
+    if (this.createCustomerLoading()) return;
+    this.createCustomerLoading.set(true);
+    const doc = data.document_number?.trim();
+    const lookup$ = doc
+      ? this.customersService.lookupByDocument(
+          doc,
+          data.document_type ?? undefined,
+        )
+      : of(null);
+    lookup$
+      .pipe(
+        switchMap((found) =>
+          found
+            ? of({ customer: found } as ResolveCustomerResult)
+            : this.customersService.resolveCustomer(
+                data as ResolveCustomerRequest,
+              ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (resolved) => {
+          this.createCustomerLoading.set(false);
+          this.closeCreateCustomer();
+          void this.selectCustomer(resolved.customer);
+        },
+        error: (error: unknown) => {
+          this.createCustomerLoading.set(false);
+          this.showError(error);
+        },
+      });
+  }
+  async selectCustomer(customer: Customer): Promise<void> {
     const name =
-      customer.name ||
-      [customer.first_name, customer.last_name].filter(Boolean).join(' ');
+      [customer.first_name, customer.last_name].filter(Boolean).join(' ') ||
+      customer.legal_name ||
+      '';
     this.customerNames.update((names) => ({ ...names, [customer.id]: name }));
     const account = this.pickerAccount();
     const index = this.pickerDraftIndex();
@@ -730,41 +787,6 @@ export class SplitAccountsPanelComponent {
       );
       // Cerrar el selector ANTES de publicar el resultado: applyResult emite
       // changed/loaded y el padre puede re-renderizar y destruir este árbol.
-      this.pickerOpen.set(false);
-      this.applyResult(result);
-    } catch (error) {
-      this.showError(error);
-    } finally {
-      this.busy.set(false);
-    }
-  }
-  async useAlias(): Promise<void> {
-    if (this.aliasControl.invalid || this.busy()) return;
-    const alias = this.aliasControl.value.trim() || null;
-    const account = this.pickerAccount();
-    const index = this.pickerDraftIndex();
-    if (!account && index != null) {
-      this.payers.update((payers) =>
-        payers.map((payer, i) =>
-          i === index
-            ? { ...payer, customer_id: null, customer_alias: alias }
-            : payer,
-        ),
-      );
-      this.form.controls.aliases.at(index).setValue(alias ?? '');
-      this.pickerOpen.set(false);
-      return;
-    }
-    if (!account?.id) return;
-    this.busy.set(true);
-    try {
-      const result = await firstValueFrom(
-        this.api.updateFinancialAccountCustomer(
-          this.sourceOrderId(),
-          account.id,
-          { customer_id: null, customer_alias: alias },
-        ),
-      );
       this.pickerOpen.set(false);
       this.applyResult(result);
     } catch (error) {
