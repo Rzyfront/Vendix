@@ -602,7 +602,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     // proveedor y vistas por producto/vendedor/cliente.
     id: 'sales-by-supplier',
     category: 'sales',
-    title: 'Ventas por Proveedor',
+    title: 'Por Proveedor',
     description: 'Venta neta sin IVA por proveedor, con detalle por producto, vendedor y cliente.',
     detailedDescription:
       'Venta neta sin IVA por proveedor con detalle por producto, vendedor y cliente, clientes impactados y referencias vendidas. La venta se atribuye al proveedor asignado al producto o, si no tiene, al de su última orden de compra.',
@@ -637,7 +637,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     // marca y vistas por producto/vendedor/cliente.
     id: 'sales-by-brand',
     category: 'sales',
-    title: 'Ventas por Marca',
+    title: 'Por Marca',
     description: 'Venta neta sin IVA por marca, con detalle por producto, vendedor y cliente.',
     detailedDescription:
       'Venta neta sin IVA por marca con detalle por producto, vendedor y cliente, clientes impactados y referencias vendidas.',
