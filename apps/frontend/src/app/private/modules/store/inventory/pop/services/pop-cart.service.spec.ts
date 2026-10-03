@@ -75,6 +75,9 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
             // toSignal con initialValue `[]` ⇒ fiscal inactivo ⇒ el preview
             // reactivo nunca dispara la llamada al backend.
             activeFiscalAreas: () => [],
+            // QUI-891: quitar la última línea llama a clearStorage() sync ⇒
+            // el mock necesita userStore como en producción (signal).
+            userStore: () => ({ id: 1 }),
           },
         },
       ],
@@ -355,7 +358,8 @@ describe('PopCartService — contrato de setShippingCostAllocation (T2/D.1)', ()
         },
         {
           provide: AuthFacade,
-          useValue: { activeFiscalAreas: () => [] },
+          // QUI-891: userStore como en producción (clearStorage sync al vaciar).
+          useValue: { activeFiscalAreas: () => [], userStore: () => ({ id: 1 }) },
         },
       ],
     });
@@ -411,7 +415,8 @@ describe('PopCartService — QUI-855 correcciones de auditoría', () => {
       providers: [
         PopCartService,
         { provide: WithholdingTaxService, useValue: { previewWithholding: () => of({ lines: [], total_withholding: 0 }) } },
-        { provide: AuthFacade, useValue: { activeFiscalAreas: () => [] } },
+        // QUI-891: userStore como en producción (clearStorage sync al vaciar).
+        { provide: AuthFacade, useValue: { activeFiscalAreas: () => [], userStore: () => ({ id: 1 }) } },
       ],
     });
     service = TestBed.inject(PopCartService);
