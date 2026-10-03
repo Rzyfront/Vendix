@@ -37,7 +37,10 @@ import type {
   PaymentSubmit,
   StepsLineItem,
 } from '../../../../../../../shared/components';
-import { CurrencyPipe } from '../../../../../../../shared/pipes';
+import {
+  CurrencyFormatService,
+  CurrencyPipe,
+} from '../../../../../../../shared/pipes';
 import { PaymentMethodsCatalogService } from '../../../../../../../shared/services/payment-methods-catalog.service';
 import type { PaymentMethod } from '../../../../../../../shared/models/payment-method.model';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
@@ -114,6 +117,8 @@ export class SplitAccountsPanelComponent {
   private readonly router = inject(Router);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly currencyFormat = inject(CurrencyFormatService);
+  private destroyed = false;
 
   readonly sourceOrderId = input.required<number>();
   readonly items = input<SplitSourceItem[]>([]);
@@ -317,6 +322,7 @@ export class SplitAccountsPanelComponent {
   });
 
   constructor() {
+    this.destroyRef.onDestroy(() => (this.destroyed = true));
     this.resizeAccounts(2);
     effect(() => {
       const sourceId = this.sourceOrderId();
@@ -387,6 +393,18 @@ export class SplitAccountsPanelComponent {
   }
   amountControl(index: number): FormControl<number> {
     return this.form.controls.amounts.at(index);
+  }
+  /** 2 decimales sólo cuando el monto trae centavos (reparto 18.333,34). */
+  decimalsFor(value: number | null | undefined): number | undefined {
+    const n = Number(value ?? 0);
+    return Math.abs(n - Math.round(n)) > 0.004 ? 2 : undefined;
+  }
+  hasCustomer(account: SplitAccountCustomer | null | undefined): boolean {
+    return !!(
+      account?.customer_id ||
+      account?.customer_alias ||
+      account?.customer_name
+    );
   }
   payerName(account: SplitAccountCustomer): string {
     return (
@@ -703,16 +721,17 @@ export class SplitAccountsPanelComponent {
     if (!account?.id || this.busy()) return;
     this.busy.set(true);
     try {
-      this.applyResult(
-        await firstValueFrom(
-          this.api.updateFinancialAccountCustomer(
-            this.sourceOrderId(),
-            account.id,
-            { customer_id: Number(customer.id) },
-          ),
+      const result = await firstValueFrom(
+        this.api.updateFinancialAccountCustomer(
+          this.sourceOrderId(),
+          account.id,
+          { customer_id: Number(customer.id) },
         ),
       );
+      // Cerrar el selector ANTES de publicar el resultado: applyResult emite
+      // changed/loaded y el padre puede re-renderizar y destruir este árbol.
       this.pickerOpen.set(false);
+      this.applyResult(result);
     } catch (error) {
       this.showError(error);
     } finally {
@@ -739,16 +758,15 @@ export class SplitAccountsPanelComponent {
     if (!account?.id) return;
     this.busy.set(true);
     try {
-      this.applyResult(
-        await firstValueFrom(
-          this.api.updateFinancialAccountCustomer(
-            this.sourceOrderId(),
-            account.id,
-            { customer_id: null, customer_alias: alias },
-          ),
+      const result = await firstValueFrom(
+        this.api.updateFinancialAccountCustomer(
+          this.sourceOrderId(),
+          account.id,
+          { customer_id: null, customer_alias: alias },
         ),
       );
       this.pickerOpen.set(false);
+      this.applyResult(result);
     } catch (error) {
       this.showError(error);
     } finally {
@@ -823,6 +841,13 @@ export class SplitAccountsPanelComponent {
     if (submit.methodType === 'wompi' && !account.customer_id) {
       this.toast.error(
         'Wompi requiere un cliente registrado. Asigna el cliente o elige un medio presencial.',
+      );
+      return;
+    }
+    const cap = money(account.available_to_pay);
+    if (money(submit.amount) > cap + 0.005) {
+      this.toast.error(
+        `El monto supera el saldo de la cuenta (${this.currencyFormat.format(cap)})`,
       );
       return;
     }
@@ -996,6 +1021,7 @@ export class SplitAccountsPanelComponent {
     if (result.source_order_id !== this.sourceOrderId()) return;
     ++this.loadSequence;
     this.group.set(result);
+    if (this.destroyed) return;
     this.changed.emit(result);
     this.loaded.emit(result);
   }

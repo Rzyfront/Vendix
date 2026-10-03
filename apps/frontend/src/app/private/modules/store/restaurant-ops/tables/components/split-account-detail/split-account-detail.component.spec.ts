@@ -66,6 +66,13 @@ describe('SplitAccountDetailComponent', () => {
   });
   afterEach(() => fixture?.destroy());
 
+  it('renders as an accessible dialog', () => {
+    create(base(), 'items');
+    const dlg = document.querySelector('[role="dialog"]');
+    expect(dlg).not.toBeNull();
+    expect(dlg!.getAttribute('aria-modal')).toBe('true');
+  });
+
   it('items mode lists the products with variant, quantity, tax and total', () => {
     create(base(), 'items');
     expect(text()).toContain('Qué incluye');

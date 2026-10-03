@@ -1,11 +1,12 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { SplitAccountsPanelComponent } from './split-accounts-panel.component';
 import { TablesService } from '../../services/tables.service';
 import { PaymentMethodsCatalogService } from '../../../../../../../shared/services/payment-methods-catalog.service';
-import { DialogService, ToastService } from '../../../../../../../shared/components';
+import { DialogService, PaymentModalComponent, ToastService } from '../../../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
@@ -83,6 +84,7 @@ describe('SplitAccountsPanelComponent', () => {
   let api: jasmine.SpyObj<TablesService>;
   let router: jasmine.SpyObj<Router>;
   let dialog: jasmine.SpyObj<DialogService>;
+  let toast: jasmine.SpyObj<ToastService>;
 
   const text = (): string =>
     (fixture.nativeElement as HTMLElement).textContent!.replace(/\s+/g, ' ');
@@ -122,6 +124,7 @@ describe('SplitAccountsPanelComponent', () => {
     router.navigate.and.resolveTo(true);
     dialog = jasmine.createSpyObj('DialogService', ['confirm']);
     dialog.confirm.and.resolveTo(true);
+    toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
     await TestBed.configureTestingModule({
       imports: [SplitAccountsPanelComponent],
       providers: [
@@ -142,7 +145,7 @@ describe('SplitAccountsPanelComponent', () => {
         },
         {
           provide: ToastService,
-          useValue: jasmine.createSpyObj('ToastService', ['success', 'error']),
+          useValue: toast,
         },
         {
           provide: PaymentMethodsCatalogService,
@@ -503,6 +506,37 @@ describe('SplitAccountsPanelComponent', () => {
       expect(component.group()?.accounts[0].payment_state).toBe('pending');
       expect(component.group()?.accounts[0].total_paid).toBe('0.00');
       expect(component.gatewayUrl()).toBe('https://checkout.wompi.co/');
+    });
+
+    it('refuses to charge more than the account balance (no API call)', async () => {
+      await create({ allowCreate: false });
+      component.openPayment(account({ available_to_pay: '15000.00', remaining_balance: '15000.00' }));
+      await component.pay({ ...wompi, methodType: 'cash', wompi: undefined, amount: 20000 });
+      expect(api.payFinancialAccount).not.toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalled();
+      expect(String(toast.error.calls.mostRecent().args[0])).toContain('supera el saldo');
+    });
+
+    it('disables the amount override in the account payment modal', async () => {
+      await create({ allowCreate: false });
+      component.openPayment(account({ available_to_pay: '15000.00' }));
+      fixture.detectChanges();
+      const modal = fixture.debugElement.query(By.directive(PaymentModalComponent));
+      expect(modal.componentInstance.allowAmountOverride()).toBeFalse();
+      expect(modal.componentInstance.amount()).toBe(15000);
+    });
+
+    it('labels the client button "Cambiar cliente" once assigned', async () => {
+      await create({ allowCreate: false });
+      expect(component.hasCustomer({})).toBeFalse();
+      expect(component.hasCustomer({ customer_id: 7 })).toBeTrue();
+      expect(component.hasCustomer({ customer_alias: 'Mesa' })).toBeTrue();
+    });
+
+    it('shows cents only when the amount has them', async () => {
+      await create({ allowCreate: false });
+      expect(component.decimalsFor(18333)).toBeUndefined();
+      expect(component.decimalsFor(18333.34)).toBe(2);
     });
 
     it('rejects executable or insecure gateway URLs', async () => {

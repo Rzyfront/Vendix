@@ -2,6 +2,7 @@
   [(isOpen)]="isOpen"
   [title]="title()"
   size="lg"
+  [dialog]="true"
   [fullScreenOnMobile]="true"
 >
   <div class="space-y-5 text-[var(--color-text-primary)]">
@@ -83,9 +84,9 @@
           <ul class="divide-y divide-[var(--color-border)] text-sm" data-testid="share-list">
             @for (share of shares(); track share.id) {
               <li class="flex items-center justify-between gap-2 py-1.5">
-                <span class="min-w-0 truncate">{{ share.name }}</span>
-                <span class="shrink-0 text-[var(--color-text-secondary)]">{{ share.percent }} %</span>
-                <span class="shrink-0 font-medium">{{ share.total | currency }}</span>
+                <span class="min-w-0 flex-1 truncate">{{ share.name }}</span>
+                <span class="w-16 shrink-0 text-right tabular-nums text-[var(--color-text-secondary)]">{{ share.percent }} %</span>
+                <span class="w-28 shrink-0 text-right font-medium tabular-nums">{{ share.total | currency }}</span>
               </li>
             }
           </ul>

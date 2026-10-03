@@ -146,9 +146,11 @@
 
         <div class="mt-3 flex items-center justify-between gap-2">
           <h4 class="text-sm font-semibold">Cuentas ({{ accountCount() }})</h4>
-          <app-button variant="outline" size="sm" [disabled]="busy() || accountCount() >= 20" (clicked)="addAccount()">
-            <app-icon name="plus" [size]="14" class="mr-1" />
-            Agregar cuenta
+          <app-button variant="outline" size="sm" class="whitespace-nowrap" [disabled]="busy() || accountCount() >= 20" (clicked)="addAccount()">
+            <span class="inline-flex items-center gap-1 whitespace-nowrap">
+              <app-icon name="plus" [size]="14" />
+              Agregar cuenta
+            </span>
           </app-button>
         </div>
 
@@ -172,9 +174,9 @@
               <p class="text-xs text-[var(--color-text-secondary)]">
                 @if (mode() === 'items') {
                   {{ draft.itemCount === 1 ? '1 producto' : draft.itemCount + ' productos' }}
-                  @if (draft.total !== null) { · {{ draft.total | currency }} }
+                  @if (draft.total !== null) { · {{ draft.total | currency: decimalsFor(draft.total) }} }
                 } @else if (draft.total !== null) {
-                  {{ draft.total | currency }}
+                  {{ draft.total | currency: decimalsFor(draft.total) }}
                 }
               </p>
               <app-input
@@ -195,7 +197,7 @@
               <div class="mt-2 flex items-center justify-between gap-2 text-sm">
                 <span class="min-w-0 truncate">{{ payerName(payers()[draft.index]) }}</span>
                 <app-button variant="ghost" size="sm" [disabled]="busy()" (clicked)="editPayer(draft.index)">
-                  Asignar cliente
+                  {{ hasCustomer(payers()[draft.index]) ? 'Cambiar cliente' : 'Asignar cliente' }}
                 </app-button>
               </div>
             </div>
@@ -241,8 +243,8 @@
       <app-badge [variant]="card.badge" size="sm">{{ card.statusLabel }}</app-badge>
     </div>
     <div class="mt-2 flex items-baseline justify-between gap-2">
-      <span class="text-lg font-semibold">{{ money(card.account.grand_total) | currency }}</span>
-      <span class="text-xs text-[var(--color-text-secondary)]">Saldo {{ money(card.account.remaining_balance) | currency }}</span>
+      <span class="text-lg font-semibold">{{ money(card.account.grand_total) | currency: decimalsFor(money(card.account.grand_total)) }}</span>
+      <span class="text-xs text-[var(--color-text-secondary)]">Saldo {{ money(card.account.remaining_balance) | currency: decimalsFor(money(card.account.remaining_balance)) }}</span>
     </div>
     <p class="mt-1 text-xs text-[var(--color-text-secondary)]">{{ card.includes }}</p>
     @if (card.help) {
@@ -252,7 +254,7 @@
       @if (card.action; as act) {
         <app-button variant="primary" size="sm" [disabled]="busy()" (clicked)="runAction(card.account, act)">
           @if (act.kind === 'pay') {
-            Cobrar {{ money(card.account.available_to_pay) | currency }}
+            Cobrar {{ money(card.account.available_to_pay) | currency: decimalsFor(money(card.account.available_to_pay)) }}
           } @else {
             {{ act.label }}
           }
@@ -263,7 +265,7 @@
       }
       <app-button variant="outline" size="sm" (clicked)="openDetail(card.account)">Ver detalle</app-button>
       @if (canEditPayer(card.account)) {
-        <app-button variant="ghost" size="sm" [disabled]="busy()" (clicked)="editPayer(null, card.account)">Cambiar cliente</app-button>
+        <app-button variant="ghost" size="sm" [disabled]="busy()" (clicked)="editPayer(null, card.account)">{{ hasCustomer(card.account) ? 'Cambiar cliente' : 'Asignar cliente' }}</app-button>
       }
     </div>
   </app-card>
@@ -309,7 +311,7 @@
     [allowCredit]="false"
     [allowWallet]="false"
     [allowWompi]="true"
-    [allowAmountOverride]="true"
+    [allowAmountOverride]="false"
     [requireCustomer]="false"
     context="generic"
     (submit)="pay($event)"
