@@ -1,4 +1,4 @@
-<app-modal [(isOpen)]="isOpen" title="Dividir saldo pendiente" subtitle="Cuentas independientes; abonos, cocina e inventario permanecen en la orden original" size="xl" [dialog]="true">
+<app-modal [(isOpen)]="isOpen" title="Dividir cuenta" subtitle="Reparte la cuenta entre varias personas" size="xl" [dialog]="true">
   @if (isOpen() && orderId(); as id) {
     <app-split-accounts-panel [sourceOrderId]="id" [items]="items()" (splitCompleted)="splitCompleted.emit($event)" />
   }

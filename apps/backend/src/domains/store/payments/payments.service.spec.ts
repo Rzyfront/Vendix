@@ -1601,6 +1601,36 @@ describe('PaymentsService', () => {
       expect(client.orders.create).not.toHaveBeenCalled();
     });
 
+    it('rejects an order with an active financial split with SPLIT_ACCOUNT_LOCKED before claiming it', async () => {
+      const client = tx({ ...order, active_financial_split_id: 8 });
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+      expect(caught.getStatus()).toBe(409);
+      expect(client.orders.updateMany).not.toHaveBeenCalled();
+      expect(client.payments.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('processPosPaymentTransaction rejects with SPLIT_ACCOUNT_LOCKED when the loaded order has a split', async () => {
+      const client: any = { payments: { create: jest.fn() } };
+      let caught: any;
+      try {
+        await (service as any).processPosPaymentTransaction(
+          client,
+          { id: 41, grand_total: 1000, active_financial_split_id: 8 },
+          { store_id: 1, currency: 'COP', payments: [{ store_payment_method_id: 1, amount: 1000 }] },
+        );
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+      expect(client.payments.create).not.toHaveBeenCalled();
+    });
+
     it.each(['succeeded', 'captured'])('rejects an already %s payment with typed 409 and order number', async (state) => {
       const client = tx(order, { id: 9, state });
       let caught: any;
@@ -1944,6 +1974,32 @@ describe('PaymentsService', () => {
   // reaches production. See PR #698 review note.
   // ---------------------------------------------------------------------------
   describe('applyPosPaymentToTableSession — table lifecycle contract', () => {
+    it('rejects with SPLIT_ACCOUNT_LOCKED when the session order has an active financial split', async () => {
+      const tx: any = {
+        table_sessions: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 99, store_id: 1, closed_at: null, order_id: 5,
+            order: { id: 5, active_financial_split_id: 3 },
+          }),
+          update: jest.fn(),
+        },
+        payments: { findFirst: jest.fn(), create: jest.fn() },
+        orders: { update: jest.fn() },
+      };
+      let caught: any;
+      try {
+        await (service as any).applyPosPaymentToTableSession(
+          tx, { store_id: 1, table_session_id: 99, currency: 'COP' }, { id: 7 }, 1,
+        );
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+      expect(tx.payments.findFirst).not.toHaveBeenCalled();
+      expect(tx.orders.update).not.toHaveBeenCalled();
+      expect(tx.table_sessions.update).not.toHaveBeenCalled();
+    });
+
     const CONTEXT_STORE_ID = 1;
     let contextSpy: jest.SpyInstance;
 

@@ -4,3 +4,4 @@ export * from './purchase-trends-query.dto';
 export * from './payable-aging-query.dto';
 export * from './low-stock-by-supplier-query.dto';
 export * from './dispatch-report-query.dto';
+export * from './sales-by-dimension-query.dto';

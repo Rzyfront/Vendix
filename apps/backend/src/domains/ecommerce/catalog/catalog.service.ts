@@ -182,6 +182,8 @@ export class CatalogService {
       state: 'active',
       available_for_ecommerce: true,
       is_sellable: true,
+      // Los insumos nunca se publican en la tienda en línea (defensa de datos viejos).
+      is_ingredient: false,
       // store_id se aplica automáticamente por EcommercePrismaService
     };
     const andFilters: any[] = [];
@@ -854,6 +856,7 @@ export class CatalogService {
         state: 'active',
         available_for_ecommerce: true,
         is_sellable: true,
+        is_ingredient: false,
         // store_id se aplica automáticamente por EcommercePrismaService
       },
       include,
@@ -2348,6 +2351,7 @@ export class CatalogService {
                     },
                     is_combo: true,
                     is_sellable: true,
+                    is_ingredient: true,
                     // Buyability invariant: a carta item must be both active
                     // and available_for_ecommerce; non-buyable products are
                     // filtered out below so the carta never shows a dish the
@@ -2400,7 +2404,8 @@ export class CatalogService {
               (item) =>
                 item.product &&
                 item.product.state === 'active' &&
-                item.product.available_for_ecommerce === true,
+                item.product.available_for_ecommerce === true &&
+                item.product.is_ingredient !== true,
             );
             const items = await Promise.all(
               buyableItems.map(async (item) => {

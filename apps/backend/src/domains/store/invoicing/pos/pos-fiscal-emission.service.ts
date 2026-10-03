@@ -238,7 +238,7 @@ export class PosFiscalEmissionService {
   private async runEmission(order_id: number): Promise<PosFiscalStatus> {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
-      select: { id: true },
+      select: { id: true, active_financial_split_id: true },
     });
 
     // El cliente scoped ya filtra por tienda: un pedido de otro tenant no
@@ -249,6 +249,15 @@ export class PosFiscalEmissionService {
         ErrorCodes.INVOICING_FIND_003,
         `No se encontró el pedido #${order_id} en esta tienda, así que no hay venta que facturar.`,
         { order_id },
+      );
+    }
+
+    // Orden con reparto financiero activo: se factura por cuenta, no por orden.
+    // Nada de crear/validar/transmitir aquí.
+    if (order.active_financial_split_id) {
+      return this.notApplicable(
+        order_id,
+        'La orden tiene un reparto de cuentas activo: cada cuenta se factura por separado, una vez cobrada.',
       );
     }
 
@@ -457,7 +466,7 @@ export class PosFiscalEmissionService {
    */
   private async findLatestSalesInvoice(order_id: number) {
     return this.prisma.invoices.findFirst({
-      where: { order_id, invoice_type: 'sales_invoice' },
+      where: { order_id, financial_account_id: null, invoice_type: 'sales_invoice' },
       orderBy: { created_at: 'desc' },
       select: {
         id: true,

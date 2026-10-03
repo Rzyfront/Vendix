@@ -588,7 +588,10 @@ export class DispatchNotesService {
       // 1 + 2 — SKU exact (variant first, then product).
       if (raw.sku) {
         const variant = await this.prisma.product_variants.findFirst({
-          where: { sku: { equals: raw.sku, mode: 'insensitive' } },
+          where: {
+            sku: { equals: raw.sku, mode: 'insensitive' },
+            products: { state: { not: 'archived' } },
+          },
           select: { id: true, product_id: true },
         });
         if (variant) {
@@ -600,7 +603,10 @@ export class DispatchNotesService {
           };
         }
         const product = await this.prisma.products.findFirst({
-          where: { sku: { equals: raw.sku, mode: 'insensitive' } },
+          where: {
+            sku: { equals: raw.sku, mode: 'insensitive' },
+            state: { not: 'archived' },
+          },
           select: { id: true },
         });
         if (product) {

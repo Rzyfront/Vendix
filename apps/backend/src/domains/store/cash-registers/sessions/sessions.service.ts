@@ -19,7 +19,58 @@ import { MovementsService } from '../movements/movements.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
 import type { SettingsService } from '../../settings/settings.service';
-import type { CashSessionCloseReport } from './interfaces/cash-session-close-report.interface';
+import type {
+  CashSessionCloseReport,
+  CashConsolidated,
+  CashConsolidatedRow,
+  CashBreakdown,
+  CashOutflow,
+  CashSalesSummary,
+  CashIntegrity,
+} from './interfaces/cash-session-close-report.interface';
+
+/** Dinero en céntimos enteros: evita acumular floats. */
+const toCents = (v: unknown): number => Math.round(Number(v ?? 0) * 100);
+const fromCents = (c: number): number => Math.round(c) / 100;
+
+type MovementKind =
+  | 'sale'
+  | 'cash_in'
+  | 'refund'
+  | 'cancellation'
+  | 'withdrawal';
+
+/**
+ * Convención de movimientos de caja → categoría del consolidado.
+ * `refund` con `payment_cancelled`/`order_cancelled` y `cash_out` legado
+ * 'Cancelación orden…' son cancelaciones; refund restante = reembolso;
+ * cash_out restante = retiro (efectivo). `payment_method` null en `sale` y
+ * `refund` → `unknown`: el esperado (computeCashSummary) solo cuenta como
+ * efectivo lo que dice `cash`, y el consolidado debe dar la misma cifra.
+ */
+function classifyMovement(
+  m: any,
+): { kind: MovementKind; method: string } | null {
+  switch (m.type) {
+    case 'sale':
+      return { kind: 'sale', method: m.payment_method || 'unknown' };
+    case 'cash_in':
+      return { kind: 'cash_in', method: 'cash' };
+    case 'refund': {
+      const method = m.payment_method || 'unknown';
+      const ref = m.reference ?? '';
+      return ref === 'payment_cancelled' || ref === 'order_cancelled'
+        ? { kind: 'cancellation', method }
+        : { kind: 'refund', method };
+    }
+    case 'cash_out':
+      return String(m.reference ?? '').startsWith('Cancelación orden')
+        ? { kind: 'cancellation', method: 'cash' }
+        : { kind: 'withdrawal', method: 'cash' };
+    default:
+      return null;
+  }
+}
 
 /**
  * QUI-784 — token de inyección para el `SettingsService` dentro del dominio de
@@ -64,6 +115,10 @@ export interface CashSummary {
   /** El número que gobierna el arqueo. */
   expected_cash_total: number;
   non_cash_total: number;
+  /** Consolidado por método (ventas, ingresos, salidas, esperado). */
+  consolidated: CashConsolidated;
+  /** Desglose del efectivo: apertura + entradas − salidas = esperado. */
+  cash_breakdown: CashBreakdown;
 }
 
 @Injectable()
@@ -269,6 +324,7 @@ export class SessionsService {
     // Calculate expected closing amount from movements
     const movements = await this.prisma.cash_register_movements.findMany({
       where: { session_id },
+      include: { user: { select: { first_name: true, last_name: true } } },
     });
 
     const summary_breakdown = this.computeCashSummary(session, movements);
@@ -298,7 +354,24 @@ export class SessionsService {
     const difference = actual_closing_amount - expected;
 
     // Generate summary grouped by payment method
-    const summary = this.generateSessionSummary(movements);
+    const closing_view = {
+      ...session,
+      status: 'closed',
+      actual_closing_amount,
+    };
+    const snapshot = this.buildConsolidated(closing_view, movements);
+    const outflows = await this.buildOutflows(closing_view, movements);
+    const prev_summary =
+      session.summary && typeof session.summary === 'object'
+        ? (session.summary as Record<string, unknown>)
+        : {};
+    const summary = {
+      ...prev_summary,
+      ...this.generateSessionSummary(movements),
+      consolidated: snapshot.consolidated,
+      cash_breakdown: snapshot.cash_breakdown,
+      outflows,
+    };
     const closed_at = new Date();
 
     const closed_session = await this.prisma.$transaction(async (tx: any) => {
@@ -572,8 +645,17 @@ export class SessionsService {
 
     const movements = await this.prisma.cash_register_movements.findMany({
       where: { session_id },
+      include: { user: { select: { first_name: true, last_name: true } } },
     });
     const summary = this.computeCashSummary(session, movements);
+    const snap: any =
+      session.status === 'closed' && session.summary ? session.summary : {};
+    const consolidated: CashConsolidated =
+      snap.consolidated ?? summary.consolidated;
+    const cash_breakdown: CashBreakdown =
+      snap.cash_breakdown ?? summary.cash_breakdown;
+    const outflows: CashOutflow[] =
+      snap.outflows ?? (await this.buildOutflows(session, movements));
     const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     const fullName = (u: any) =>
       u ? { id: u.id, name: `${u.first_name} ${u.last_name}`.trim() } : null;
@@ -605,14 +687,27 @@ export class SessionsService {
       ),
     ];
     let order_ids: number[] = [];
+    const sale_all_by_order = new Map<number, number>();
     if (candidate_ids.length) {
       const all_sales = await this.prisma.cash_register_movements.findMany({
         where: { type: 'sale', order_id: { in: candidate_ids } },
-        select: { id: true, order_id: true, session_id: true, created_at: true },
+        select: {
+          id: true,
+          type: true,
+          order_id: true,
+          session_id: true,
+          amount: true,
+          created_at: true,
+        },
         orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
       });
       const first_session = new Map<number, number>();
       for (const m of all_sales) {
+        if (m.type !== undefined && m.type !== 'sale') continue;
+        sale_all_by_order.set(
+          m.order_id!,
+          (sale_all_by_order.get(m.order_id!) ?? 0) + toCents(m.amount),
+        );
         if (!first_session.has(m.order_id!)) {
           first_session.set(m.order_id!, m.session_id);
         }
@@ -635,9 +730,43 @@ export class SessionsService {
             tip_amount: true,
             grand_total: true,
             coupon_code: true,
+            order_number: true,
+            state: true,
           },
         })
       : [];
+
+    const is_void = (o: any) => o.state === 'cancelled' || o.state === 'refunded';
+    const live_orders = orders.filter((o: any) => !is_void(o));
+    const void_orders = orders.filter((o: any) => is_void(o));
+    const aggregate = (list: any[]) => {
+      let c = {
+        subtotal: 0,
+        discounts: 0,
+        product_taxes: 0,
+        shipping_taxes: 0,
+        shipping: 0,
+        tips: 0,
+        grand_total: 0,
+      };
+      for (const o of list) {
+        c.subtotal += toCents(o.subtotal_amount);
+        c.discounts += toCents(o.discount_amount);
+        c.product_taxes += toCents(o.tax_amount);
+        c.shipping_taxes += toCents(o.shipping_tax_amount);
+        c.shipping +=
+          toCents(o.shipping_cost) - toCents(o.shipping_tax_amount);
+        c.tips += toCents(o.tip_amount);
+        c.grand_total += toCents(o.grand_total);
+      }
+      return c;
+    };
+    const live = aggregate(live_orders);
+    const void_total_c = aggregate(void_orders).grand_total;
+    const sales_collected_c = sale_movements.reduce(
+      (t: number, m: any) => t + toCents(m.amount),
+      0,
+    );
 
     let subtotal = 0;
     let discounts = 0;
@@ -793,6 +922,66 @@ export class SessionsService {
         }))
         .sort((a: any, b: any) => b.total - a.total);
 
+    const sales_summary_block: CashSalesSummary = {
+      orders_count: live_orders.length,
+      payments_count: sale_movements.length,
+      subtotal: fromCents(live.subtotal),
+      discounts: fromCents(live.discounts),
+      product_taxes: fromCents(live.product_taxes),
+      shipping_taxes: fromCents(live.shipping_taxes),
+      taxes: fromCents(live.product_taxes + live.shipping_taxes),
+      shipping: fromCents(live.shipping),
+      tips: fromCents(live.tips),
+      grand_total: fromCents(sales_collected_c),
+      orders_grand_total: fromCents(live.grand_total),
+      average_ticket: live_orders.length
+        ? fromCents(live.grand_total / live_orders.length)
+        : 0,
+      cancelled: {
+        count: void_orders.length,
+        total: fromCents(void_total_c),
+      },
+    };
+
+    // Coherencia: lo cobrado en la sesión vs consolidado y vs las órdenes.
+    const integrity_notes: string[] = [];
+    const consolidated_sales_c = consolidated.rows.reduce(
+      (t, r) => t + toCents(r.sales),
+      0,
+    );
+    let sales_match = consolidated_sales_c === sales_collected_c;
+    if (!sales_match) {
+      integrity_notes.push(
+        `Las ventas del consolidado (${fromCents(consolidated_sales_c)}) no igualan los movimientos de venta de la sesión (${fromCents(sales_collected_c)}).`,
+      );
+    }
+    for (const o of live_orders as any[]) {
+      const total_c = toCents(o.grand_total);
+      const session_c = sale_movements
+        .filter((m: any) => m.order_id === o.id)
+        .reduce((t: number, m: any) => t + toCents(m.amount), 0);
+      const all_c = sale_all_by_order.get(o.id) ?? session_c;
+      const label = o.order_number ? `#${o.order_number}` : `id ${o.id}`;
+      if (all_c !== session_c) {
+        sales_match = false;
+        integrity_notes.push(
+          `Orden ${label}: pagada en parte en otra sesión (esta sesión ${fromCents(session_c)} de ${fromCents(all_c)} cobrado).`,
+        );
+      }
+      if (all_c < total_c) {
+        sales_match = false;
+        integrity_notes.push(
+          `Orden ${label}: cobrado ${fromCents(all_c)} de ${fromCents(total_c)} (pago parcial o saldo pendiente).`,
+        );
+      } else if (all_c > total_c) {
+        sales_match = false;
+        integrity_notes.push(
+          `Orden ${label}: cobrado ${fromCents(all_c)} excede el total ${fromCents(total_c)}.`,
+        );
+      }
+    }
+    const integrity: CashIntegrity = { sales_match, notes: integrity_notes };
+
     return {
       session: {
         id: session.id,
@@ -838,6 +1027,11 @@ export class SessionsService {
             ? r2(Number(session.difference))
             : null,
       },
+      consolidated,
+      cash_breakdown,
+      outflows,
+      sales_summary: sales_summary_block,
+      integrity,
       payment_methods: summary.sales_by_method.map((m) => ({
         method: m.method,
         count: m.count,
@@ -1109,6 +1303,11 @@ export class SessionsService {
     const expected_cash_total =
       opening + cash_sales + cash_in - cash_refunds - cash_out;
 
+    const { consolidated, cash_breakdown } = this.buildConsolidated(
+      session,
+      movements,
+    );
+
     return {
       opening,
       sales_total,
@@ -1120,7 +1319,194 @@ export class SessionsService {
       cash_refunds,
       expected_cash_total,
       non_cash_total: sales_total - cash_sales,
+      consolidated,
+      cash_breakdown,
     };
+  }
+
+  /**
+   * Consolidado por método en céntimos enteros. NO toca `expected_cash_total`
+   * (fórmula original arriba). Para efectivo `expected = opening + entered −
+   * exited`; coincide siempre con el esperado original.
+   */
+  private buildConsolidated(
+    session: any,
+    movements: any[],
+  ): { consolidated: CashConsolidated; cash_breakdown: CashBreakdown } {
+    type Acc = {
+      sales: number;
+      cash_in: number;
+      refunds: number;
+      cancellations: number;
+      withdrawals: number;
+    };
+    const blank = (): Acc => ({
+      sales: 0,
+      cash_in: 0,
+      refunds: 0,
+      cancellations: 0,
+      withdrawals: 0,
+    });
+    const acc = new Map<string, Acc>();
+    acc.set('cash', blank());
+    for (const m of movements) {
+      const c = classifyMovement(m);
+      if (!c) continue;
+      const a = acc.get(c.method) ?? blank();
+      const cents = toCents(m.amount);
+      if (c.kind === 'sale') a.sales += cents;
+      else if (c.kind === 'cash_in') a.cash_in += cents;
+      else if (c.kind === 'refund') a.refunds += cents;
+      else if (c.kind === 'cancellation') a.cancellations += cents;
+      else a.withdrawals += cents;
+      acc.set(c.method, a);
+    }
+
+    const opening_c = toCents(session.opening_amount);
+    const closed =
+      session.status === 'closed' && session.actual_closing_amount != null;
+    const counted_c = closed ? toCents(session.actual_closing_amount) : null;
+
+    const rows_c = [...acc.entries()].map(([method, a]) => {
+      const entered = a.sales + a.cash_in;
+      const exited = a.refunds + a.cancellations + a.withdrawals;
+      const expected = (method === 'cash' ? opening_c : 0) + entered - exited;
+      return { method, a, entered, exited, expected };
+    });
+    rows_c.sort((x, y) => {
+      if (x.method === y.method) return 0;
+      if (x.method === 'cash') return -1;
+      if (y.method === 'cash') return 1;
+      return y.entered - x.entered || x.method.localeCompare(y.method);
+    });
+
+    const rows: CashConsolidatedRow[] = rows_c.map((r) => {
+      const is_cash = r.method === 'cash';
+      return {
+        method: r.method,
+        sales: fromCents(r.a.sales),
+        cash_in: fromCents(r.a.cash_in),
+        entered: fromCents(r.entered),
+        refunds: fromCents(r.a.refunds),
+        cancellations: fromCents(r.a.cancellations),
+        withdrawals: fromCents(r.a.withdrawals),
+        exited: fromCents(r.exited),
+        expected: fromCents(r.expected),
+        counted: is_cash && counted_c != null ? fromCents(counted_c) : null,
+        difference:
+          is_cash && counted_c != null
+            ? fromCents(counted_c - r.expected)
+            : null,
+      };
+    });
+
+    const cash = rows_c.find((r) => r.method === 'cash')!;
+    return {
+      consolidated: {
+        rows,
+        totals: {
+          entered: fromCents(rows_c.reduce((t, r) => t + r.entered, 0)),
+          exited: fromCents(rows_c.reduce((t, r) => t + r.exited, 0)),
+          expected: fromCents(rows_c.reduce((t, r) => t + r.expected, 0)),
+        },
+      },
+      cash_breakdown: {
+        opening: fromCents(opening_c),
+        sales: fromCents(cash.a.sales),
+        cash_in: fromCents(cash.a.cash_in),
+        refunds: fromCents(cash.a.refunds),
+        cancellations: fromCents(cash.a.cancellations),
+        withdrawals: fromCents(cash.a.withdrawals),
+        expected: fromCents(cash.expected),
+        counted: counted_c != null ? fromCents(counted_c) : null,
+        difference:
+          counted_c != null ? fromCents(counted_c - cash.expected) : null,
+      },
+    };
+  }
+
+  /**
+   * Lista única de salidas (reembolsos, anulaciones/cancelaciones, retiros),
+   * ordenada por fecha. Resuelve número de orden, motivo del reembolso
+   * (`refund:<id>`) y nombre del usuario cuando es posible.
+   */
+  private async buildOutflows(
+    session: any,
+    movements: any[],
+  ): Promise<CashOutflow[]> {
+    const outs = movements
+      .map((m) => ({ m, c: classifyMovement(m) }))
+      .filter(
+        (x) =>
+          x.c &&
+          (x.c.kind === 'refund' ||
+            x.c.kind === 'cancellation' ||
+            x.c.kind === 'withdrawal'),
+      ) as { m: any; c: { kind: 'refund' | 'cancellation' | 'withdrawal'; method: string } }[];
+    if (!outs.length) return [];
+
+    const refund_ids = [
+      ...new Set(
+        outs
+          .map(({ m }) => String(m.reference ?? ''))
+          .filter((r) => r.startsWith('refund:'))
+          .map((r) => Number(r.slice('refund:'.length)))
+          .filter((n) => Number.isInteger(n)),
+      ),
+    ];
+    const order_ids = [
+      ...new Set(
+        outs.map(({ m }) => m.order_id).filter((v: any): v is number => !!v),
+      ),
+    ];
+    const [refund_rows, order_rows] = await Promise.all([
+      refund_ids.length
+        ? this.prisma.refunds.findMany({
+            where: { id: { in: refund_ids } },
+            select: { id: true, reason: true },
+          })
+        : [],
+      order_ids.length
+        ? this.prisma.orders.findMany({
+            where: { id: { in: order_ids } },
+            select: { id: true, order_number: true },
+          })
+        : [],
+    ]);
+    const reason_by_refund = new Map<number, string | null>(
+      (refund_rows as any[]).map((r) => [r.id, r.reason ?? null]),
+    );
+    const number_by_order = new Map<number, string | null>(
+      (order_rows as any[]).map((o) => [o.id, o.order_number ?? null]),
+    );
+
+    return outs
+      .map(({ m, c }) => {
+        const ref = String(m.reference ?? '');
+        const refund_reason = ref.startsWith('refund:')
+          ? reason_by_refund.get(Number(ref.slice('refund:'.length))) ?? null
+          : null;
+        const at = m.created_at
+          ? new Date(m.created_at).toISOString()
+          : new Date(session.opened_at ?? 0).toISOString();
+        return {
+          id: m.id,
+          at,
+          kind: c.kind,
+          order_id: m.order_id ?? null,
+          order_number: m.order_id
+            ? number_by_order.get(m.order_id) ?? null
+            : null,
+          payment_method: c.method,
+          amount: fromCents(toCents(m.amount)),
+          reason: m.notes || refund_reason || null,
+          user_name: m.user
+            ? `${m.user.first_name ?? ''} ${m.user.last_name ?? ''}`.trim() ||
+              null
+            : null,
+        } as CashOutflow;
+      })
+      .sort((a, b) => a.at.localeCompare(b.at) || a.id - b.id);
   }
 
   private generateSessionSummary(movements: any[]) {

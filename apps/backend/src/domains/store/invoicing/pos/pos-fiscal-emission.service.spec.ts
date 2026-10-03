@@ -635,4 +635,31 @@ describe('PosFiscalEmissionService', () => {
       ).resolves.toBeUndefined();
     });
   });
+  describe('reparto financiero activo', () => {
+    it('runEmission no crea, valida ni transmite cuando la orden tiene split activo', async () => {
+      const { service, prisma, invoicing, invoice_flow } = createService();
+      prisma.orders.findFirst.mockResolvedValue({
+        id: 1,
+        active_financial_split_id: 4,
+      });
+
+      const result = await service.emitForOrder(1);
+
+      expect(result.state).toBe('not_applicable');
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+      expect(invoice_flow.validate).not.toHaveBeenCalled();
+      expect(invoice_flow.send).not.toHaveBeenCalled();
+    });
+
+    it('la factura «de la orden» excluye las facturas de cuenta', async () => {
+      const { service, prisma } = createService();
+
+      await service.getStatusForOrder(1);
+
+      expect(prisma.invoices.findFirst.mock.calls[0][0].where).toMatchObject({
+        order_id: 1,
+        financial_account_id: null,
+      });
+    });
+  });
 });

@@ -1,23 +1,27 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Observable, throwError, timer } from 'rxjs';
+import { Observable, Subject, throwError, timer } from 'rxjs';
 import {
   catchError,
   exhaustMap,
   filter,
+  finalize,
   map,
   retry,
   switchMap,
   take,
+  takeUntil,
   takeWhile,
   timeout,
 } from 'rxjs/operators';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { environment } from '../../../../../../../environments/environment';
 import {
   InvoiceScanResult,
   InvoiceMatchResult,
   ConfirmScannedInvoiceDto,
   InvoiceRevalidateJobStatus,
+  InvoiceScanJobStatus,
   InvoiceRevalidateRequest,
   InvoiceRevalidateResult,
 } from '../interfaces/invoice-scanner.interface';
@@ -42,6 +46,13 @@ export class InvoiceScannerService {
    */
   static readonly REVALIDATE_TIMEOUT_MS = 180_000;
 
+  /** Intervalo entre polls del job de escaneo (ms). */
+  static readonly SCAN_POLL_INTERVAL_MS = 2500;
+  /** Tope de todo el ciclo encolar → poll del escaneo (ms). La IA tarda hasta ~8 min. */
+  static readonly SCAN_TIMEOUT_MS = 600_000;
+  /** Tras este tiempo sin estado terminal se avisa al usuario (ms). */
+  static readonly SCAN_STALL_NOTICE_MS = 60_000;
+
   constructor(private http: HttpClient) {}
 
   /**
@@ -54,6 +65,8 @@ export class InvoiceScannerService {
    *
    * Mixed-line orders are out of scope; the caller picks one profile
    * per scan.
+   *
+   * @deprecated Usar scanInvoiceAndWait (el síncrono muere en 504 tras 60 s de proxy).
    */
   scanInvoice(
     file: File,
@@ -181,6 +194,121 @@ export class InvoiceScannerService {
         throwError(() => this.normalizeRevalidateError(err)),
       ),
     );
+  }
+
+  /** Encola el escaneo async. 202 con `job_id` dentro del envelope. */
+  enqueueScan(
+    file: File,
+    orderType: 'retail' | 'ingredient' = 'retail',
+  ): Observable<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http
+      .post<ApiResponse<{ job_id: string }>>(
+        `${this.apiUrl}/scan/async?orderType=${orderType}`,
+        formData,
+      )
+      .pipe(
+        map((response) => {
+          const jobId = response?.data?.job_id;
+          if (!response?.success || !jobId) {
+            throw new Error(
+              response?.message || 'No se pudo encolar el escaneo',
+            );
+          }
+          return jobId;
+        }),
+      );
+  }
+
+  /** Estado del job de escaneo. OJO: este GET NO viene envuelto. */
+  getScanStatus(jobId: string): Observable<InvoiceScanJobStatus> {
+    return this.http.get<InvoiceScanJobStatus>(
+      `${this.apiUrl}/scan/async/${jobId}`,
+    );
+  }
+
+  /**
+   * Encola y hace polling hasta completed/failed; emite UNA vez el resultado.
+   * `onStall` se invoca una sola vez si pasan SCAN_STALL_NOTICE_MS sin estado
+   * terminal.
+   */
+  scanInvoiceAndWait(
+    file: File,
+    orderType: 'retail' | 'ingredient' = 'retail',
+    opts?: { onStall?: () => void },
+  ): Observable<InvoiceScanResult> {
+    return this.enqueueScan(file, orderType).pipe(
+      switchMap((jobId) => {
+        const done$ = new Subject<void>();
+        if (opts?.onStall) {
+          const onStall = opts.onStall;
+          timer(InvoiceScannerService.SCAN_STALL_NOTICE_MS)
+            .pipe(takeUntil(done$))
+            .subscribe(() => onStall());
+        }
+        return timer(0, InvoiceScannerService.SCAN_POLL_INTERVAL_MS).pipe(
+          exhaustMap(() =>
+            this.getScanStatus(jobId).pipe(
+              retry({
+                count: 2,
+                delay: (err: unknown) =>
+                  err instanceof HttpErrorResponse && err.status === 404
+                    ? throwError(() => err)
+                    : timer(1000),
+              }),
+            ),
+          ),
+          takeWhile(
+            (s) => s.status !== 'completed' && s.status !== 'failed',
+            true,
+          ),
+          filter((s) => s.status === 'completed' || s.status === 'failed'),
+          map((s) => {
+            if (s.status === 'failed') {
+              // `error` es un código INV_SCAN_* o texto libre (error no tipado):
+              // siempre se muestra copy curado en español.
+              throw new Error(
+                ERROR_MESSAGES[s.error ?? ''] ??
+                  ERROR_MESSAGES['INV_SCAN_AI_FAIL'],
+              );
+            }
+            if (!s.result) {
+              throw new Error('El escaneo finalizó sin resultado');
+            }
+            return s.result;
+          }),
+          finalize(() => done$.next()),
+        );
+      }),
+      timeout({
+        first: InvoiceScannerService.SCAN_TIMEOUT_MS,
+        with: () =>
+          throwError(
+            () =>
+              new Error('El escaneo tardó demasiado. Intenta nuevamente.'),
+          ),
+      }),
+      take(1),
+      catchError((err: unknown) =>
+        throwError(() => this.normalizeScanError(err)),
+      ),
+    );
+  }
+
+  private normalizeScanError(err: unknown): Error | HttpErrorResponse {
+    if (err instanceof HttpErrorResponse) {
+      if (err.status === 404) {
+        return new Error(
+          'El escaneo ya no está disponible. Vuelve a intentarlo.',
+        );
+      }
+      // Sin envolver: el consumidor aplica parseApiError (aduana de idioma
+      // y copy curado por error_code).
+      return err;
+    }
+    if (err instanceof Error) return err;
+    return new Error('Error al escanear la factura');
   }
 
   private normalizeRevalidateError(err: unknown): Error {

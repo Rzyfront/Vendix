@@ -159,7 +159,54 @@ export interface CashSessionCloseReport {
     coupons: { code: string; count: number; total: number }[];
     other: { count: number; total: number };
   };
+  /** Bloques nuevos del rediseño (opcionales: backend viejo no los manda). */
+  consolidated?: {
+    rows: CashReportConsolidatedRow[];
+    totals: { entered: number; exited: number; expected: number };
+  };
+  cash_breakdown?: {
+    opening: number;
+    sales: number;
+    cash_in: number;
+    refunds: number;
+    cancellations: number;
+    withdrawals: number;
+    expected: number;
+    counted: number | null;
+    difference: number | null;
+  };
+  outflows?: CashReportOutflow[];
+  sales_summary?: CashSessionCloseReport['sales'] & {
+    cancelled?: { count: number; total: number };
+  };
+  integrity?: { sales_match: boolean; notes: string[] };
   generated_at: string;
+}
+
+export interface CashReportConsolidatedRow {
+  method: string;
+  sales: number;
+  cash_in: number;
+  entered: number;
+  refunds: number;
+  cancellations: number;
+  withdrawals: number;
+  exited: number;
+  expected: number;
+  counted: number | null;
+  difference: number | null;
+}
+
+export interface CashReportOutflow {
+  id: number;
+  at: string;
+  kind: 'refund' | 'cancellation' | 'withdrawal';
+  order_id: number | null;
+  order_number: string | null;
+  payment_method: string;
+  amount: number;
+  reason: string | null;
+  user_name: string | null;
 }
 
 /**

@@ -973,6 +973,11 @@
               description="Visible en tu tienda online"
             >
             </app-setting-toggle>
+            @if (isIngredient()) {
+              <p class="text-xs text-gray-500 -mt-2">
+                Los insumos no se publican en la tienda en línea
+              </p>
+            }
 
             <app-setting-toggle
               formControlName="is_featured"

@@ -19,6 +19,8 @@ import {
   SalesByUser,
   SalesByChannel,
   SalesAnalyticsQueryDto,
+  SalesByDimensionQuery,
+  SalesByDimensionResponse,
 } from '../interfaces/sales-analytics.interface';
 import {
   InventorySummary,
@@ -638,6 +640,27 @@ export class AnalyticsService {
 
   exportSalesByUser(query: SalesAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('sales/by-user/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  getSalesByDimension(
+    query: SalesByDimensionQuery,
+  ): Observable<SalesByDimensionResponse> {
+    const cacheKey = `sales-by-dimension-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<SalesByDimensionResponse>(
+        this.getApiUrl('sales/by-dimension'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportSalesByDimension(
+    query: Pick<SalesByDimensionQuery, 'dimension' | 'ids' | 'date_range'>,
+  ): Observable<Blob> {
+    return this.http.get(this.getApiUrl('sales/by-dimension/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

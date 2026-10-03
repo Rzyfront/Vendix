@@ -36,6 +36,7 @@ import { SettingsModule } from '../settings/settings.module';
 // `ProductsModule`; y el archivo `auto-entry.service.ts` no alcanza —ni
 // transitivamente— ningún archivo de `products/`, así que tampoco hay ciclo de
 // import a nivel de módulo compilado (swc iza los `export *`).
+import { AiScanHandlerRegistry } from '@common/ai-scan-jobs';
 import { AccountingModule } from '../accounting/accounting.module';
 
 @Module({
@@ -88,6 +89,7 @@ export class ProductsModule implements OnModuleInit {
     private readonly priceResolver: PriceResolverService,
     private readonly settingsService: SettingsService,
     private readonly priceTiersService: PriceTiersService,
+    private readonly aiScanRegistry: AiScanHandlerRegistry,
   ) {}
 
   /**
@@ -98,6 +100,17 @@ export class ProductsModule implements OnModuleInit {
    * domain to the engine and this module imports nothing extra.
    */
   onModuleInit(): void {
+    // Cola genérica `ai-scan`: mejora/generación de imagen de producto. El
+    // resultado se sube a S3 y el job devuelve key + URL firmada (sin base64).
+    for (const kind of [
+      'product_image_enhance',
+      'product_image_generate',
+    ] as const) {
+      this.aiScanRegistry.register(kind, ({ params, context }) =>
+        this.productsService.runImageScanJob(kind, params, context),
+      );
+    }
+
     this.toolRegistry.registerMany(
       createProductTools({
         productsService: this.productsService,

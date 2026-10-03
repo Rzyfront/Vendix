@@ -66,6 +66,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       include: {
         order_items: true,
         users: true,
+        addresses_orders_shipping_address_idToaddresses: true,
         stores: {
           include: {
             addresses: { take: 1 },
@@ -312,10 +313,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       },
     );
 
-    const customerAddress = this.buildCustomerAddressParts(
-      order.shipping_address_snapshot,
-      order.billing_address_snapshot,
-    );
+    const customerAddress = this.resolveCustomerAddress(order);
 
     return {
       store: {
@@ -345,7 +343,18 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
             address_line2: customerAddress.line2,
             city: customerAddress.city,
           }
-        : undefined,
+        : customerAddress.line1
+          ? {
+              // El despacho necesita a dónde ir: con dirección de envío se
+              // arma el bloque aunque no haya usuario (venta con alias).
+              name: order.customer_alias?.trim() || 'Cliente',
+              address: customerAddress.combined,
+              address_line1: customerAddress.line1,
+              address_line2: customerAddress.line2,
+              city: customerAddress.city,
+              ...(customerAddress.phone ? { phone: customerAddress.phone } : {}),
+            }
+          : undefined,
       document: {
         id: order.id,
         number: String(order.order_number),
@@ -369,8 +378,10 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         // que el cliente reclama en el mostrador. Spread condicional para
         // no romper el tipo estricto de `StandardPrintDataModel['document']`
         // (mismo patrón que `pos-sale-ticket.provider.ts:298-299`). NO
-        // fabrica un bloque `customer` falso a partir del alias: el alias
-        // no es un cliente formal, no tiene dirección ni documento.
+        // fabrica un bloque `customer` a partir del alias salvo en este
+        // ticket de despacho: ahí `customer` se arma (arriba) cuando hay
+        // dirección de envío, porque el despacho necesita a dónde ir; sin
+        // documento ni email.
         ...(order.customer_alias
           ? { customer_alias: order.customer_alias }
           : {}),
@@ -418,21 +429,58 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
     };
   }
 
-  private buildCustomerAddressParts(
-    shipping: any,
-    billing: any,
-  ): { line1?: string; line2?: string; city?: string; combined?: string } {
-    // Preferimos el snapshot de envío: es el que va a la guía de despacho.
-    const src = shipping || billing;
-    if (!src) return {};
-    if (typeof src === 'string') {
-      return { combined: src };
+  /**
+   * Prioridad: relación vigente `shipping_address_id` (refleja ediciones desde
+   * el detalle de la orden) > snapshot de envío > snapshot de facturación.
+   * Un candidato solo cuenta si produce `line1` no vacío.
+   */
+  private resolveCustomerAddress(order: any): {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    combined?: string;
+    phone?: string;
+  } {
+    const candidates = [
+      order.addresses_orders_shipping_address_idToaddresses,
+      order.shipping_address_snapshot,
+      order.billing_address_snapshot,
+    ];
+    for (const c of candidates) {
+      const parts = this.addressParts(c);
+      if (parts.line1) return parts;
     }
-    const a = src as any;
-    const line1 = a.address_line1 as string | undefined;
-    const line2 = a.address_line2 as string | undefined;
-    const city = a.city as string | undefined;
-    const combined = [line1, line2, city, a.state_province]
+    return {};
+  }
+
+  private addressParts(src: any): {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    combined?: string;
+    phone?: string;
+  } {
+    if (!src) return {};
+    let a: any = src;
+    if (typeof src === 'string') {
+      const trimmed = src.trim();
+      if (!trimmed) return {};
+      try {
+        const parsed = JSON.parse(trimmed);
+        a = parsed && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        a = null;
+      }
+      if (!a) return { line1: trimmed, combined: trimmed };
+    }
+    if (typeof a !== 'object') return {};
+    const clean = (v: any): string | undefined =>
+      typeof v === 'string' && v.trim() ? v.trim() : undefined;
+    const line1 = clean(a.address_line1);
+    if (!line1) return {};
+    const line2 = clean(a.address_line2);
+    const city = clean(a.city);
+    const combined = [line1, line2, city, clean(a.state_province)]
       .filter(Boolean)
       .join(', ');
     return {
@@ -440,6 +488,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       line2,
       city,
       combined: combined || undefined,
+      phone: clean(a.phone_number) ?? clean(a.phone),
     };
   }
 }

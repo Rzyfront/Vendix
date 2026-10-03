@@ -1,6 +1,7 @@
 import {Component, input, output, signal, computed, effect, viewChild, DestroyRef, Injector, afterNextRender, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { switchMap, catchError, of, Subject, Subscription } from 'rxjs';
 
@@ -260,6 +261,11 @@ import {
             <p class="text-sm text-text-secondary text-center">
               Extrayendo datos y buscando coincidencias con tus productos...
             </p>
+            @if (scanStalled()) {
+              <p class="text-sm text-text-secondary text-center">
+                Esto puede tardar unos minutos. No cierres la ventana.
+              </p>
+            }
           </div>
         </div>
       }
@@ -1616,6 +1622,7 @@ export class InvoiceScannerModalComponent {
   readonly revalidateResult = signal<InvoiceRevalidateResult | null>(null);
   readonly revalidateError = signal<string | null>(null);
   private revalidateSub: Subscription | null = null;
+  private scanSub: Subscription | null = null;
   /** Posición en `editableItems()` de cada línea enviada (las no descartadas). */
   private revalidateSentIndexes: number[] = [];
 
@@ -1783,6 +1790,12 @@ export class InvoiceScannerModalComponent {
     }
   }
 
+  private cancelScanRequest(): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.scanStalled.set(false);
+  }
+
   private cancelRevalidateRequest(): void {
     this.revalidateSub?.unsubscribe();
     this.revalidateSub = null;
@@ -1824,6 +1837,7 @@ export class InvoiceScannerModalComponent {
   fileError = signal<string | null>(null);
   isDragging = signal(false);
   isScanning = signal(false);
+  readonly scanStalled = signal(false);
   isProcessingFile = signal(false);
 
   readonly isImageFile = computed(() => {
@@ -2742,31 +2756,36 @@ export class InvoiceScannerModalComponent {
     // El servicio cachea, así que estará listo al construir editableItems.
     this.loadUomCatalog();
 
-    this.invoiceScannerService
-      .scanInvoice(file, this.scanProfile())
+    this.cancelScanRequest();
+    this.scanStalled.set(false);
+    this.scanSub = this.invoiceScannerService
+      .scanInvoiceAndWait(file, this.scanProfile(), {
+        onStall: () => this.scanStalled.set(true),
+      })
       .pipe(
-        switchMap((scanResponse) => {
-          if (!scanResponse.success || !scanResponse.data) {
-            throw new Error(
-              scanResponse.message || 'Error al escanear la factura',
-            );
-          }
-          this.scanResult.set(scanResponse.data);
-          return this.invoiceScannerService.matchProducts(scanResponse.data);
+        switchMap((scan) => {
+          this.scanResult.set(scan);
+          return this.invoiceScannerService.matchProducts(scan);
         }),
         catchError((err) => {
           // El `message` del backend es el devMessage en inglés
           // («AI OCR response parsed but is missing required fields»), que
           // llegaba tal cual al toast. parseApiError aplica la aduana de
           // idioma y cae al copy curado por `error_code`.
-          this.toastService.error(parseApiError(err).userMessage);
+          this.toastService.error(
+            err instanceof HttpErrorResponse
+              ? parseApiError(err).userMessage
+              : (err as Error)?.message || 'No se pudo escanear la factura',
+          );
           this.currentStep.set(1);
           this.isScanning.set(false);
+          this.scanStalled.set(false);
           return of(null);
         }),
       )
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((matchResponse) => {
         this.isScanning.set(false);
+        this.scanStalled.set(false);
         if (!matchResponse) return;
 
         if (matchResponse.success && matchResponse.data) {
@@ -3182,6 +3201,7 @@ export class InvoiceScannerModalComponent {
     this.filePreviewUrl.set(null);
     this.fileError.set(null);
     this.isProcessingFile.set(false);
+    this.cancelScanRequest();
     this.isScanning.set(false);
     this.scanResult.set(null);
     this.matchResult.set(null);

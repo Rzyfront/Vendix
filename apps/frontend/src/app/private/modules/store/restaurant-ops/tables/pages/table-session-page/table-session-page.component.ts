@@ -9,7 +9,7 @@ import {
   untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin, interval } from 'rxjs';
 import {
@@ -118,6 +118,7 @@ interface SecondaryAction {
   standalone: true,
   imports: [
     CommonModule,
+    RouterLink,
     StickyHeaderComponent,
     CardComponent,
     BadgeComponent,
@@ -166,6 +167,8 @@ export class TableSessionPageComponent implements OnInit {
   readonly isAddItemsOpen = signal(false);
   readonly isSplitOpen = signal(false);
   readonly hasFinancialSplit = signal(false);
+  /** Cuentas de la división activa (null = no se conoce o no hay división). */
+  readonly financialSplitAccountCount = signal<number | null>(null);
   /** Null until the order detail proves the closed check has no financial blockers. */
   readonly reassignmentEvidence = signal<TableOrderReassignmentEvidence | null>(null);
   readonly reassignmentFloorLoaded = signal(false);
@@ -610,21 +613,24 @@ export class TableSessionPageComponent implements OnInit {
     const actions: SecondaryAction[] = [];
 
     if (this.checkoutEnabled()) {
-      actions.push({
-        id: 'pay',
-        label: 'Cobrar',
-        icon: 'credit-card',
-        disabled: this.items().length === 0,
-      });
+      const split = this.hasFinancialSplit();
+      actions.push(
+        {
+          id: 'pay',
+          label: split ? 'Cobrar cuentas' : 'Cobrar',
+          icon: 'credit-card',
+          disabled: this.items().length === 0,
+        },
+        {
+          id: 'split',
+          label: split ? 'Ver cuentas' : 'Dividir cuenta',
+          icon: 'split',
+          disabled: this.items().length === 0,
+        },
+      );
     }
 
     actions.push(
-      {
-        id: 'split',
-        label: 'Dividir cuenta',
-        icon: 'split',
-        disabled: this.items().length === 0,
-      },
       {
         id: 'transfer',
         label: 'Cambiar de mesa',
@@ -710,6 +716,7 @@ export class TableSessionPageComponent implements OnInit {
         next: (s) => {
           this.session.set(s);
           this.seedKitchenStateFromOrder(s);
+          if (s.order_id) this.loadFinancialSplit(s.order_id);
           if (s.closed_at) this.loadReassignmentEvidence(s.order_id);
           else {
             this.reassignmentEvidence.set(null);
@@ -849,9 +856,13 @@ export class TableSessionPageComponent implements OnInit {
    * el resto de estados bloqueados siguen ocultos (comportamiento actual).
    * Retorna null cuando no hay bloqueo por entrega que señalizar.
    */
+  readonly splitLockedAddReason = 'Cuenta dividida: quita la división para agregar productos';
+  readonly splitLockedCancelReason = 'Cuenta dividida: quita la división para cancelar productos';
+
   removeDisabledReason(item: TableSessionOrderItem): string | null {
     if (this.isClosed()) return null;
     if (item.cancelled_at) return null;
+    if (this.hasFinancialSplit()) return this.splitLockedCancelReason;
     if (this.isDelivered(item))
       return 'Ya fue entregado al cliente. No se puede cancelar.';
     return null;
@@ -1312,6 +1323,11 @@ export class TableSessionPageComponent implements OnInit {
   // ── Split bill ─────────────────────────────────────────────────────────
 
   openSplit(): void {
+    if (!this.checkoutEnabled()) return;
+    if (this.hasFinancialSplit()) {
+      this.isSplitOpen.set(true);
+      return;
+    }
     if (this.isClosed()) {
       this.toastService.error('La mesa está cerrada');
       return;
@@ -1324,7 +1340,24 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   onFinancialSplitLoaded(result: SplitResult | null): void {
-    this.hasFinancialSplit.set(!!result?.split_group_id);
+    const active = !!result?.split_group_id;
+    this.hasFinancialSplit.set(active);
+    this.financialSplitAccountCount.set(
+      active ? (result?.accounts?.length ?? 0) + (result?.retained_account ? 1 : 0) : null,
+    );
+  }
+
+  /** Lee la división activa sin montar el panel (no hay poll): la mesa sin cobro en mesa la necesita para la franja informativa. */
+  private loadFinancialSplit(orderId: number): void {
+    this.tablesService
+      .getFinancialSplit(orderId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          if (this.session()?.order_id === orderId) this.onFinancialSplitLoaded(result);
+        },
+        error: () => undefined,
+      });
   }
 
   onFinancialSplitChanged(result: SplitResult | null): void {

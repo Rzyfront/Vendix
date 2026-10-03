@@ -94,7 +94,7 @@ const buildProductsStub = () =>
 
 const buildScannerStub = () =>
   ({
-    scanInvoice: () => of(null),
+    scanInvoiceAndWait: () => of(null),
     matchProducts: () => of(null),
   }) as unknown as InvoiceScannerService;
 

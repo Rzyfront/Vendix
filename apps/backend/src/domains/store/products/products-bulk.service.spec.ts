@@ -40,6 +40,10 @@ describe('ProductsBulkService', () => {
       findFirst: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    audit_logs: {
+      create: jest.fn().mockResolvedValue({}),
     },
     product_variants: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -81,7 +85,9 @@ describe('ProductsBulkService', () => {
 
   const mockProductsService = {
     create: jest.fn(),
+    update: jest.fn(),
     createVariant: jest.fn(),
+    updateVariant: jest.fn(),
   };
 
   const mockVariantService = {
@@ -251,11 +257,13 @@ describe('ProductsBulkService', () => {
           {
             product: createdProducts[0],
             status: 'success',
+            action: 'create',
             message: 'Producto creado exitosamente',
           },
           {
             product: createdProducts[1],
             status: 'success',
+            action: 'create',
             message: 'Producto creado exitosamente',
           },
         ],
@@ -313,6 +321,7 @@ describe('ProductsBulkService', () => {
           {
             product: createdProduct,
             status: 'success',
+            action: 'create',
             message: 'Producto creado exitosamente',
           },
           {
@@ -326,6 +335,31 @@ describe('ProductsBulkService', () => {
           },
         ],
       });
+    });
+
+    it('maps a P2002 on products_store_id_barcode_active_key (driverAdapterError) to a barcode message', async () => {
+      const p2002: any = new Error('Unique constraint failed');
+      p2002.code = 'P2002';
+      p2002.meta = {
+        driverAdapterError: {
+          cause: {
+            kind: 'UniqueConstraintViolation',
+            constraint: { index: 'products_store_id_barcode_active_key' },
+          },
+        },
+      };
+      mockProductsService.create.mockRejectedValueOnce(p2002);
+
+      const result = await service.uploadProducts(
+        {
+          products: [{ name: 'Product B', base_price: 10, sku: 'PROD-B' }],
+        } as BulkProductUploadDto,
+        mockUser,
+      );
+
+      expect(result.failed).toBe(1);
+      expect(result.results[0].message).toContain('código de barras');
+      expect(result.results[0].message).not.toContain('SKU');
     });
 
     // DECISIÓN DE PRODUCTO A CONFIRMAR: una marca inexistente NO invalida la
@@ -1067,6 +1101,48 @@ describe('ProductsBulkService', () => {
         expect(codes(result.products[1])).toContain('BARCODE_IN_USE');
       });
 
+      it('productos y variantes solo cuentan si no están archivados; presentaciones siempre', async () => {
+        await analyze(['A,S-1,444,1000']);
+        const productWhere = mockPrismaService.products.findMany.mock.calls
+          .map((c: any) => c[0].where)
+          .find((w: any) => w.barcode);
+        expect(productWhere).toEqual({
+          store_id: 1,
+          barcode: { in: ['444'] },
+          state: { not: 'archived' },
+        });
+        expect(
+          mockPrismaService.product_variants.findMany.mock.calls[0][0].where,
+        ).toEqual({
+          barcode: { in: ['444'] },
+          products: { store_id: 1, state: { not: 'archived' } },
+        });
+        // Presentaciones: sin filtro de estado del producto.
+        expect(
+          mockPrismaService.product_price_tier_assignments.findMany.mock
+            .calls[0][0].where,
+        ).toEqual({ barcode: { in: ['444'] }, product: { store_id: 1 } });
+      });
+
+      it('presentación de un producto archivado sigue bloqueando y el mensaje lo nombra', async () => {
+        mockPrismaService.product_price_tier_assignments.findMany.mockResolvedValue(
+          [
+            {
+              product_id: 61,
+              barcode: '333',
+              product: { name: 'Caja Vieja', state: 'archived' },
+            },
+          ],
+        );
+        const result = await analyze(['A,S-1,333,1000']);
+        const err = (result.products[0].errors as any[]).find(
+          (e) => e.code === 'BARCODE_IN_USE',
+        );
+        expect(err.message).toBe(
+          'El código de barras ya está en uso por una presentación de venta del producto archivado "Caja Vieja" de esta tienda',
+        );
+      });
+
       it('acepta el mismo SKU con su mismo barcode (update)', async () => {
         mockPrismaService.products.findMany.mockImplementation(
           async (args: any) =>
@@ -1281,6 +1357,275 @@ describe('ProductsBulkService', () => {
         plainToInstance(BulkUploadSessionDto, { session_id: 'x', offset: '100', limit: '100' }),
       );
       expect(ok).toHaveLength(0);
+    });
+  });
+  describe('reactivación de producto archivado por SKU', () => {
+    const csv = (rows: string[]) =>
+      Buffer.from(
+        '\uFEFF' + ['Nombre,SKU,Precio Venta', ...rows].join('\n'),
+        'utf-8',
+      );
+    const codes = (item: any) => item.errors.map((e: any) => e.code);
+
+    describe('analyzeProducts', () => {
+      beforeEach(() => {
+        mockPrismaService.products.findMany.mockReset();
+      });
+
+      it('SKU solo en un archivado => action reactivate con su id', async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 9, sku: 'S-1', name: 'Viejo', slug: 'viejo', state: 'archived' },
+        ]);
+        const result = await service.analyzeProducts(csv(['Viejo,S-1,1000']), 1);
+        const item = result.products[0];
+        expect(item.action).toBe('reactivate');
+        expect(item.existing_product_id).toBe(9);
+        expect(item.errors).toHaveLength(0);
+        // El pre-fetch ya no excluye archivados.
+        expect(
+          mockPrismaService.products.findMany.mock.calls[0][0].where,
+        ).toEqual({ store_id: 1 });
+      });
+
+      it('SKU en un activo => action update', async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 7, sku: 'S-1', name: 'Uno', slug: 'uno', state: 'active' },
+        ]);
+        const result = await service.analyzeProducts(csv(['Uno,S-1,1000']), 1);
+        expect(result.products[0].action).toBe('update');
+        expect(result.products[0].existing_product_id).toBe(7);
+      });
+
+      it('slug de un archivado de otro SKU NO choca (ya no ocupa el slug)', async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 9, sku: 'OTRO', name: 'Camisa Roja', slug: 'camisa-roja', state: 'archived' },
+        ]);
+        const result = await service.analyzeProducts(
+          csv(['Camisa Roja,S-NEW,1000']),
+          1,
+        );
+        const item = result.products[0];
+        expect(item.action).toBe('create');
+        expect(codes(item)).not.toContain('DUPLICATE_SLUG');
+        expect(item.errors).toHaveLength(0);
+        expect(result.with_errors).toBe(0);
+      });
+
+      it('slug que usa un producto NO archivado de otro SKU => DUPLICATE_SLUG sin decir archivado', async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 8, sku: 'OTRO', name: 'Camisa Roja', slug: 'camisa-roja', state: 'active' },
+        ]);
+        const result = await service.analyzeProducts(
+          csv(['Camisa Roja,S-NEW,1000']),
+          1,
+        );
+        const item = result.products[0];
+        expect(codes(item)).toContain('DUPLICATE_SLUG');
+        const msg = (item.errors[0] as any).message as string;
+        expect(msg).not.toContain('archivado');
+        expect(msg).toContain('Camisa Roja');
+        expect(item.status).toBe('error');
+      });
+
+      it('activo + archivado con el mismo SKU => update sobre el activo (cualquier orden)', async () => {
+        const active = { id: 7, sku: 'S-1', name: 'Uno', slug: 'uno', state: 'active', updated_at: new Date('2026-01-01') };
+        const arch = { id: 9, sku: 'S-1', name: 'Viejo', slug: 'viejo', state: 'archived', updated_at: new Date('2026-06-01') };
+        for (const rows of [[active, arch], [arch, active]]) {
+          mockPrismaService.products.findMany.mockResolvedValue(rows);
+          const result = await service.analyzeProducts(csv(['Uno,S-1,1000']), 1);
+          expect(result.products[0].action).toBe('update');
+          expect(result.products[0].existing_product_id).toBe(7);
+        }
+      });
+
+      it('varios archivados con el mismo SKU => reactivate del más reciente', async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 11, sku: 'S-1', name: 'Reciente', slug: 'a', state: 'archived', updated_at: new Date('2026-06-01') },
+          { id: 12, sku: 'S-1', name: 'Antiguo', slug: 'b', state: 'archived', updated_at: new Date('2026-01-01') },
+        ]);
+        const result = await service.analyzeProducts(csv(['X,S-1,1000']), 1);
+        expect(result.products[0].action).toBe('reactivate');
+        expect(result.products[0].existing_product_id).toBe(11);
+      });
+    });
+
+    describe('uploadProducts (commit)', () => {
+      // Solo hay un archivado con ese SKU; slug/barcode libres.
+      const mockOnlyArchivedBySku = (arch: any) =>
+        mockPrismaService.products.findFirst.mockImplementation(
+          async (args: any) =>
+            args.where.sku && args.where.state === 'archived' ? arch : null,
+        );
+      const row = (extra: Record<string, any> = {}): any => ({
+        name: 'Camisa Roja',
+        sku: 'S-1',
+        base_price: 50000,
+        ...extra,
+      });
+
+      it('SKU archivado: no crea, reactiva y aplica el set completo (ausentes en default/null)', async () => {
+        mockOnlyArchivedBySku({
+          id: 9,
+          sku: 'S-1',
+          state: 'archived',
+          description: 'DESCRIPCION VIEJA',
+          is_featured: true,
+        });
+        mockProductsService.update.mockResolvedValue({ id: 9, state: 'active' });
+
+        const result = await service.uploadProducts(
+          { products: [row({ description: 'Nueva' })] },
+          mockUser,
+        );
+
+        expect(mockProductsService.create).not.toHaveBeenCalled();
+        // Primero busca el NO archivado; luego el archivado más reciente.
+        const calls = mockPrismaService.products.findFirst.mock.calls;
+        expect(calls[0][0].where).toEqual({
+          store_id: 1,
+          sku: 'S-1',
+          state: { not: 'archived' },
+        });
+        expect(calls[1][0]).toMatchObject({
+          where: { store_id: 1, sku: 'S-1', state: 'archived' },
+          orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+        });
+        expect(mockPrismaService.products.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 9, store_id: 1 },
+            data: expect.objectContaining({ state: 'active' }),
+          }),
+        );
+        expect(mockProductsService.update).toHaveBeenCalledTimes(1);
+        const [id, dto] = mockProductsService.update.mock.calls[0];
+        expect(id).toBe(9);
+        expect(dto.name).toBe('Camisa Roja');
+        expect(dto.description).toBe('Nueva');
+        expect(dto).not.toHaveProperty('store_id');
+        // Ausentes en el archivo: default de creación, no el valor viejo.
+        expect(dto.is_featured).toBe(false);
+        expect(dto.brand_id).toBeNull();
+        expect(dto.category_ids).toEqual([]);
+        expect(dto.tax_category_ids).toEqual([]);
+        expect(dto.state).toBe('active');
+        expect(dto.booking_mode).toBe('provider_required');
+        expect(dto.price_unit_quantity).toBe(1);
+        expect(mockPrismaService.audit_logs.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              action: 'PRODUCT_REACTIVATE',
+              resource_id: 9,
+            }),
+          }),
+        );
+        expect(result.successful).toBe(1);
+        expect(result.results[0]).toMatchObject({
+          status: 'success',
+          action: 'reactivate',
+          message: 'Producto con SKU S-1 reactivado con los datos del archivo',
+        });
+      });
+
+      it('SKU archivado: si el update falla vuelve a archived y reporta el error', async () => {
+        mockOnlyArchivedBySku({ id: 9, sku: 'S-1', state: 'archived' });
+        mockProductsService.update.mockRejectedValue(new Error('boom'));
+
+        const result = await service.uploadProducts({ products: [row()] }, mockUser);
+
+        expect(result.failed).toBe(1);
+        expect(result.results[0].message).toBe('boom');
+        const calls = mockPrismaService.products.updateMany.mock.calls;
+        expect(calls[calls.length - 1][0].data.state).toBe('archived');
+      });
+
+      it('activo + archivado con el mismo SKU: el commit prefiere el activo', async () => {
+        mockPrismaService.products.findFirst.mockImplementation(
+          async (args: any) =>
+            args.where.state?.not === 'archived'
+              ? { id: 7, sku: 'S-1', state: 'active' }
+              : { id: 9, sku: 'S-1', state: 'archived' },
+        );
+        mockProductsService.update.mockResolvedValue({ id: 7 });
+
+        const result = await service.uploadProducts({ products: [row()] }, mockUser);
+
+        expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+        expect(mockProductsService.update.mock.calls[0][0]).toBe(7);
+        expect(result.results[0]).toMatchObject({ action: 'update' });
+      });
+
+      it('reactivación con barcode ocupado por un activo: PROD_BARCODE_DUP_001 y no cambia el estado', async () => {
+        mockPrismaService.products.findFirst.mockImplementation(
+          async (args: any) => {
+            if (args.where.sku)
+              return args.where.state === 'archived'
+                ? { id: 9, sku: 'S-1', state: 'archived' }
+                : null;
+            if (args.where.barcode)
+              return { id: 5, name: 'Camisa Azul' };
+            return null;
+          },
+        );
+
+        const result = await service.uploadProducts(
+          { products: [row({ barcode: '7701234567890' })] },
+          mockUser,
+        );
+
+        expect(result.failed).toBe(1);
+        expect(result.results[0]).toMatchObject({
+          status: 'error',
+          error_code: 'PROD_BARCODE_DUP_001',
+        });
+        expect(result.results[0].message).toContain('Camisa Azul');
+        expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+        expect(mockProductsService.update).not.toHaveBeenCalled();
+      });
+
+      it('reactivación con slug ocupado por un activo: PROD_DUP_001 y no cambia el estado', async () => {
+        mockPrismaService.products.findFirst.mockImplementation(
+          async (args: any) => {
+            if (args.where.sku)
+              return args.where.state === 'archived'
+                ? { id: 9, sku: 'S-1', state: 'archived' }
+                : null;
+            if (args.where.slug) return { id: 5, name: 'Camisa Roja 2' };
+            return null;
+          },
+        );
+
+        const result = await service.uploadProducts({ products: [row()] }, mockUser);
+
+        expect(result.results[0]).toMatchObject({
+          status: 'error',
+          error_code: 'PROD_DUP_001',
+        });
+        expect(result.results[0].message).toContain('Camisa Roja 2');
+        expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('SKU activo: sigue la ruta update sparse, sin tocar estado ni crear', async () => {
+        mockPrismaService.products.findFirst.mockResolvedValue({
+          id: 7,
+          sku: 'S-1',
+          state: 'active',
+        });
+        mockProductsService.update.mockResolvedValue({ id: 7 });
+
+        const result = await service.uploadProducts({ products: [row()] }, mockUser);
+
+        expect(mockProductsService.create).not.toHaveBeenCalled();
+        expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+        const [id, dto] = mockProductsService.update.mock.calls[0];
+        expect(id).toBe(7);
+        // Sparse: lo que el archivo no trae no aparece.
+        expect(dto).not.toHaveProperty('is_featured');
+        expect(dto).not.toHaveProperty('description');
+        expect(result.results[0]).toMatchObject({
+          action: 'update',
+          message: 'Producto con SKU S-1 actualizado exitosamente',
+        });
+      });
     });
   });
 });

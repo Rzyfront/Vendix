@@ -1571,6 +1571,13 @@ export class PurchaseOrdersService {
               }
             }
 
+            // Regla del dueño: un insumo (vendible o no) nunca se publica ni se
+            // destaca en la tienda en línea.
+            if (effectiveIsIngredient || existingProduct.is_ingredient === true) {
+              productUpdateData.available_for_ecommerce = false;
+              productUpdateData.is_featured = false;
+            }
+
             await tx.products.update({
               where: { id: existingProduct.id },
               data: productUpdateData,
@@ -1607,13 +1614,10 @@ export class PurchaseOrdersService {
 
             // ===== A.7 — la colisión de SKU no puede terminar en un 500 =====
             //
-            // `products` tiene `@@unique([store_id, sku])` y el índice NO
-            // distingue estado: el SKU de un producto ARCHIVADO lo sigue
-            // ocupando. El flujo que originó el reporte del dueño —«borro el
-            // producto y lo vuelvo a cargar»— cae justo ahí, y hasta A.4 el
-            // `try/catch` del controlador convertía el P2002 en un HTTP 200
-            // mentiroso; sin él sale un 500 crudo que no dice qué producto
-            // estorba ni ofrece salida.
+            // La unicidad de `products` (store_id, sku) es un índice único
+            // PARCIAL `WHERE state <> 'archived'`: un producto ARCHIVADO ya no
+            // ocupa su SKU, así que la OC no lo «actualiza» ni choca con él:
+            // crea uno nuevo. Solo un dueño NO archivado es colisión.
             //
             // Se comprueba ANTES de crear, no en un `catch`: un error de Postgres
             // ABORTA la transacción, así que dentro del `catch` ya no se puede
@@ -1622,7 +1626,11 @@ export class PurchaseOrdersService {
             // consulta indexada por línea, y solo por línea con producto NUEVO.
             const desiredSku = item.sku || `GEN-${Date.now()}`;
             const skuOwner = await tx.products.findFirst({
-              where: { store_id: storeId, sku: desiredSku },
+              where: {
+                store_id: storeId,
+                sku: desiredSku,
+                state: { not: 'archived' },
+              },
               select: { id: true, name: true, state: true },
             });
             if (skuOwner) {
@@ -1693,10 +1701,25 @@ export class PurchaseOrdersService {
               // El filtro por `target` es deliberadamente estrecho: mapear todo
               // P2002 escondería colisiones de `slug` o `barcode`, que exigen
               // otra explicación y otro remedio.
-              const target = error?.meta?.target;
-              const hitsSku = Array.isArray(target)
-                ? target.includes('sku')
-                : typeof target === 'string' && target.includes('sku');
+              const rawTarget = error?.meta?.target;
+              const constraint =
+                error?.meta?.driverAdapterError?.cause?.constraint;
+              const targetText = [
+                Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
+                // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
+                constraint ? JSON.stringify(constraint) : undefined,
+              ]
+                .filter((v) => typeof v === 'string' && v)
+                .join(' ');
+              const hitsSku = targetText.includes('sku');
+              const hitsBarcode = targetText.includes('barcode');
+              if (error?.code === 'P2002' && hitsBarcode) {
+                throw new VendixHttpException(
+                  ErrorCodes.PROD_BARCODE_DUP_001,
+                  'El código de barras ya está en uso por otro producto de la tienda.',
+                  { concurrent: true },
+                );
+              }
               if (error?.code === 'P2002' && hitsSku) {
                 throw new VendixHttpException(
                   ErrorCodes.PROD_SKU_COLLISION_001,
@@ -3334,6 +3357,8 @@ export class PurchaseOrdersService {
         id: true,
         store_id: true,
         is_ingredient: true,
+        available_for_ecommerce: true,
+        is_featured: true,
         purchase_uom_id: true,
         stock_uom_id: true,
         purchase_to_stock_factor: true,
@@ -3380,6 +3405,11 @@ export class PurchaseOrdersService {
 
     const data: Record<string, any> = {};
     if (!product.is_ingredient) data.is_ingredient = true;
+    // Regla del dueño: el producto resultante es insumo -> fuera de ecommerce.
+    if (product.available_for_ecommerce === true) {
+      data.available_for_ecommerce = false;
+    }
+    if (product.is_featured === true) data.is_featured = false;
     if (
       item.purchase_uom_id != null &&
       product.purchase_uom_id !== item.purchase_uom_id

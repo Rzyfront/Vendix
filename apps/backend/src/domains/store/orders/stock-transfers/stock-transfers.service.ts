@@ -949,6 +949,7 @@ export class StockTransfersService {
   ) {
     const where = {
       ...buildTokenAndFieldOr(tokens, TRANSFERABLE_SEARCH_FIELDS),
+      state: { not: 'archived' },
       stock_levels: {
         some: { location_id: fromLocationId },
       },
@@ -1031,6 +1032,7 @@ export class StockTransfersService {
           { name: { contains: search, mode: 'insensitive' } },
           { sku: { contains: search, mode: 'insensitive' } },
         ],
+        state: { not: 'archived' },
         stock_levels: {
           some: { location_id: fromLocationId },
         },

@@ -118,7 +118,8 @@ describe('OrdersService', () => {
     // `findActiveSalesInvoice` (helper compartido con la guarda de `update`).
     // Default `null` en el beforeEach: ninguna orden de prueba tiene factura
     // de venta vigente salvo que un spec lo sobrescriba.
-    invoices: { findFirst: jest.fn() },
+    invoices: { findFirst: jest.fn(), findMany: jest.fn() },
+    order_financial_accounts: { findMany: jest.fn() },
     table_sessions: {
       // ADR-07: los dos escritores de ítems consultan la sesión ABIERTA
       // vigente, y solo sin ella preguntan por historial de mesa.
@@ -202,6 +203,7 @@ describe('OrdersService', () => {
   };
   const mockShippingCalculator = {
     calculateRates: jest.fn(),
+    quotePickupRates: jest.fn(),
     // Paso 2 (unificación de envío) — el editor delega en este método para
     // la tarifa explícita cuando hay dirección resoluble; ningún test
     // existente lo dispara (`addresses.findFirst` no está mockeado salvo
@@ -300,6 +302,8 @@ describe('OrdersService', () => {
     // sobrescribe esto con una fila para probar el 409.
     mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
     mockPrismaService.invoices.findFirst.mockResolvedValue(null);
+    mockPrismaService.invoices.findMany.mockResolvedValue([]);
+    mockPrismaService.order_financial_accounts.findMany.mockResolvedValue([]);
     mockPrismaService.order_item_taxes.deleteMany.mockResolvedValue({
       count: 0,
     } as any);
@@ -825,7 +829,7 @@ describe('OrdersService', () => {
       expect(result.cancellation_policy).toEqual({
         can_cancel: true, can_cancel_payment: true, reason_code: null,
       });
-      expect(result.payments).toEqual(payments);
+      expect(result.payments).toMatchObject(payments);
     });
   });
 
@@ -1062,6 +1066,73 @@ describe('OrdersService', () => {
   // .getAvailableActions` calls — additive fields only, nothing existing
   // changes shape.
   // ----------------------------------------------------------------
+  describe('findOne — facturas y pagos por cuenta (división financiera)', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('separa invoices (titular) de account_invoices y etiqueta los pagos por cuenta', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 60,
+        state: 'created',
+        payments: [
+          { id: 1, state: 'succeeded', financial_account_id: 5 },
+          { id: 2, state: 'succeeded', financial_account_id: null },
+        ],
+        refunds: [],
+        order_items: [],
+        invoices: [],
+      });
+      mockPrismaService.order_financial_accounts.findMany.mockResolvedValue([
+        { id: 5, label: 'Cuenta 1' },
+      ]);
+      mockPrismaService.invoices.findMany.mockResolvedValue([
+        {
+          id: 9,
+          invoice_number: 'SETT9',
+          status: 'draft',
+          dian_status: 'not_applicable',
+          total_amount: '45.00',
+          financial_account_id: 5,
+          customer_name: 'Ana',
+        },
+      ]);
+
+      const result: any = await service.findOne(60);
+
+      // El include del titular filtra las facturas de cuenta.
+      const include = mockPrismaService.orders.findFirst.mock.calls.at(-1)![0]
+        .include;
+      expect(include.invoices.where).toEqual({ financial_account_id: null });
+      // La guarda de titular ignora facturas de cuenta.
+      expect(mockPrismaService.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ financial_account_id: null }),
+        }),
+      );
+      expect(result.account_invoices).toEqual([
+        {
+          id: 9,
+          invoice_number: 'SETT9',
+          status: 'draft',
+          dian_status: 'not_applicable',
+          grand_total: '45.00',
+          financial_account_id: 5,
+          account_label: 'Cuenta 1',
+          customer_name: 'Ana',
+        },
+      ]);
+      expect(result.payments).toMatchObject([
+        { id: 1, financial_account_id: 5, financial_account_label: 'Cuenta 1' },
+        { id: 2, financial_account_id: null, financial_account_label: null },
+      ]);
+    });
+  });
+
   describe('findOne — available_actions (order-truth-and-invoice-tz plan, Step 2)', () => {
     let contextSpy: jest.SpyInstance;
 
@@ -2420,6 +2491,262 @@ describe('OrdersService', () => {
             shipping_cost: 10,
             grand_total: 129,
           });
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it.each([
+        {
+          deliveryType: 'home_delivery',
+          methodType: 'own_fleet',
+          methodId: 5,
+          addressId: 33,
+          amount: 2345.67,
+        },
+        {
+          deliveryType: 'pickup',
+          methodType: 'pickup',
+          methodId: 13,
+          addressId: null,
+          amount: 0,
+        },
+      ])(
+        'tarifa personalizada sin rate: $deliveryType cobra $amount bruto, no cotiza y borra copia fiscal anterior',
+        async ({ deliveryType, methodType, methodId, addressId, amount }) => {
+          setupContext();
+          const contextSpy = spyContext();
+          try {
+            arrangeEditableDraft();
+            arrangeProduct();
+            const oldShipping = {
+              ...draftOrder,
+              delivery_type: deliveryType,
+              shipping_method_id: methodId,
+              shipping_rate_id: null,
+              shipping_address_id: addressId,
+              shipping_cost: amount.toFixed(2),
+              ...INC_SNAPSHOT,
+            };
+            const updatedShipping = {
+              ...persistedOrder,
+              delivery_type: deliveryType,
+              shipping_method_id: methodId,
+              shipping_rate_id: null,
+              shipping_address_id: addressId,
+              shipping_cost: amount,
+              grand_total: 119 + amount,
+            };
+            mockPrismaService.orders.findFirst
+              .mockReset()
+              .mockResolvedValueOnce(oldShipping as any)
+              .mockResolvedValue(updatedShipping as any);
+            mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+              id: methodId,
+              store_id: 1,
+              type: methodType,
+              is_active: true,
+            });
+
+            await service.updateOrderFromEditor(500, {
+              ...fullDto,
+              delivery_type: deliveryType,
+              shipping_method_id: methodId,
+              shipping_rate_id: undefined,
+              shipping_address_id: addressId ?? undefined,
+              shipping_cost: amount,
+              manual_shipping_price: amount,
+            });
+
+            expect(mockShippingCalculator.quoteRateGross).not.toHaveBeenCalled();
+            expect(mockShippingCalculator.calculateRates).not.toHaveBeenCalled();
+            expect(mockShippingCalculator.quotePickupRates).not.toHaveBeenCalled();
+            expect(mockPrismaService.shipping_rates.findFirst).not.toHaveBeenCalled();
+            expect(snapshotForRate).not.toHaveBeenCalled();
+            expect(mockPrismaService.shipping_methods.findFirst).toHaveBeenCalledWith({
+              where: { id: methodId, store_id: 1, is_active: true },
+            });
+            expect(headerUpdate()).toMatchObject({
+              delivery_type: deliveryType,
+              shipping_method_id: methodId,
+              shipping_rate_id: null,
+              shipping_address_id: addressId,
+              shipping_cost: amount,
+              grand_total: 119 + amount,
+              shipping_tax_rate_id: null,
+              shipping_tax_name: null,
+              shipping_tax_type: null,
+              shipping_tax_rate: null,
+              shipping_tax_amount: 0,
+              shipping_tax_is_inclusive: null,
+            });
+          } finally {
+            contextSpy.mockRestore();
+          }
+        },
+      );
+
+      it('tarifa personalizada con envío configurado a pickup: exige costo de una tarifa y no cotiza', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+            id: 13, store_id: 1, type: 'pickup', is_active: true,
+          });
+
+          await expect(service.updateOrderFromEditor(500, {
+            ...fullDto,
+            delivery_type: 'pickup',
+            shipping_method_id: 13,
+            shipping_rate_id: 31,
+            manual_shipping_price: 0,
+          })).rejects.toMatchObject({
+            errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+          });
+
+          expect(mockShippingCalculator.quotePickupRates).not.toHaveBeenCalled();
+          expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('pickup con tarifa configurada y sin override sigue cotizando y copia impuesto', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          const quotePickupRates = mockShippingCalculator.quotePickupRates as jest.Mock;
+          quotePickupRates.mockResolvedValueOnce([{ rate_id: 31, cost: 10 }]);
+          mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+            id: 13, store_id: 1, type: 'pickup', is_active: true,
+          });
+          mockPrismaService.orders.findFirst
+            .mockReset()
+            .mockResolvedValueOnce(draftOrder as any)
+            .mockResolvedValue({
+              ...persistedOrder,
+              delivery_type: 'pickup',
+              shipping_method_id: 13,
+              shipping_rate_id: 31,
+              shipping_address_id: null,
+              shipping_cost: 10,
+              grand_total: 129,
+            } as any);
+
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            delivery_type: 'pickup',
+            shipping_method_id: 13,
+            shipping_rate_id: 31,
+            shipping_address_id: undefined,
+            shipping_cost: 10,
+            manual_shipping_price: undefined,
+          });
+
+          expect(quotePickupRates).toHaveBeenCalledWith(1, 13);
+          expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 10, { store_id: 1 });
+          expect(headerUpdate()).toMatchObject({
+            delivery_type: 'pickup',
+            shipping_method_id: 13,
+            shipping_rate_id: 31,
+            shipping_address_id: null,
+            shipping_cost: 10,
+            grand_total: 129,
+          });
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it.each([NaN, -0.01, 12.345])('tarifa personalizada rechaza monto inválido %s', async (amount) => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+
+          await expect(service.updateOrderFromEditor(500, {
+            ...fullDto,
+            shipping_rate_id: undefined,
+            manual_shipping_price: amount,
+          })).rejects.toMatchObject({
+            errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+          });
+
+          expect(mockPrismaService.shipping_methods.findFirst).not.toHaveBeenCalled();
+          expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it.each([undefined, 0, -1, 5.5])('tarifa personalizada rechaza shipping_method_id inválido %s', async (methodId) => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+
+          await expect(service.updateOrderFromEditor(500, {
+            ...fullDto,
+            shipping_method_id: methodId,
+            shipping_rate_id: undefined,
+            manual_shipping_price: 12,
+          })).rejects.toMatchObject({
+            errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+          });
+
+          expect(mockPrismaService.shipping_methods.findFirst).not.toHaveBeenCalled();
+          expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it.each(['inactivo', 'de otra tienda'])('tarifa personalizada rechaza método %s', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          mockPrismaService.shipping_methods.findFirst.mockResolvedValueOnce(null);
+
+          await expect(service.updateOrderFromEditor(500, {
+            ...fullDto,
+            shipping_rate_id: undefined,
+            manual_shipping_price: 12,
+          })).rejects.toMatchObject({
+            errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+          });
+
+          expect(mockPrismaService.shipping_methods.findFirst).toHaveBeenCalledWith({
+            where: { id: 5, store_id: 1, is_active: true },
+          });
+          expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('tarifa personalizada conserva el guard si shipping_cost del cliente no coincide', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          await expect(service.updateOrderFromEditor(500, {
+            ...fullDto,
+            shipping_rate_id: undefined,
+            manual_shipping_price: 25,
+            shipping_cost: 24,
+          })).rejects.toMatchObject({
+            errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+          });
+          expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
         } finally {
           contextSpy.mockRestore();
         }

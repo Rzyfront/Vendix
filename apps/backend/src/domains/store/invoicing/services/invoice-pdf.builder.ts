@@ -76,6 +76,11 @@ export interface InvoicePdfData {
   tax_amount: number;
   withholding_amount: number;
   total_amount: number;
+  /**
+   * Propina voluntaria de la orden origen. Informativa: NO hace parte de la
+   * factura (ni base gravable ni ingreso); solo se imprime tras el TOTAL.
+   */
+  tip_amount?: number;
 
   // DIAN
   cufe?: string;
@@ -1203,6 +1208,27 @@ export class InvoicePdfBuilder {
     });
 
     doc.y = total_y + box_height + 2;
+
+    // Propina voluntaria: informativa, fuera del TOTAL y del valor en letras.
+    const tip = data.tip_amount ?? 0;
+    if (tip > 0) {
+      const paid =
+        (Math.round(data.total_amount * 100) + Math.round(tip * 100)) / 100;
+      doc.font('Helvetica').fontSize(this.fs(L, 9)).fillColor('#000000');
+      const tip_line = (label: string, value: string) => {
+        const y = doc.y + 2;
+        doc.text(label, totals_x, y, { width: totals_width * 0.6 });
+        const label_end = doc.y;
+        doc.text(value, totals_x, y, { width: totals_width, align: 'right' });
+        doc.y = Math.max(label_end, doc.y);
+      };
+      tip_line(
+        'Propina voluntaria (no hace parte de la factura):',
+        COP.format(tip),
+      );
+      tip_line('Total pagado:', COP.format(paid));
+      doc.y += 2;
+    }
 
     // VALOR EN LETRAS. Es la única cifra del documento que se escribe dos veces
     // —en números y en palabras—, así que las dos salen del MISMO

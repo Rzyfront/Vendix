@@ -135,6 +135,7 @@ class ShippingStub {
   readonly clientDeliveryDetails = viewChild<TemplateRef<unknown>>('clientDetails');
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
+  readonly notes = signal('');
   readonly shipSubStep = signal(0);
   readonly shipSubSteps = signal<any[]>([]);
   readonly canConfirm = signal(true);
@@ -273,6 +274,15 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       preventDefault: () => {},
       defaultPrevented: false,
     }) as unknown as KeyboardEvent;
+
+  const checkoutCart = (createdAt: Date, overrides: Record<string, unknown> = {}) => ({
+    items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+      unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+    customer: { id: 99, first_name: 'Cliente' }, notes: '', internalNotes: '',
+    appliedDiscounts: [], pendingBookings: [], summary: { total: 1000 },
+    createdAt, updatedAt: createdAt, linkedOrderId: null, linkedOrderNumber: null,
+    ...overrides,
+  });
 
   const searchTarget = {
     tagName: 'INPUT',
@@ -513,7 +523,10 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   // ese throw tumbaba las diez pruebas del archivo, no solo esta. El
   // equivalente zoneless de `tick()` es `await fixture.whenStable()`.
   it('apertura (false→true) enfoca el panel del paso activo', async () => {
-    fixture.componentRef.setInput('isOpen', false);
+    const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
+    modal.closed.emit(); // X/Escape path delegates to the shell's existing close handler.
+    fixture.detectChanges();
+    fixture.componentRef.setInput('isOpen', false); // reflect the parent model in this isolated fixture
     fixture.detectChanges();
     await fixture.whenStable();
     const focus = spyOn(component as unknown as { focusActiveStepSoon: () => void }, 'focusActiveStepSoon');
@@ -521,6 +534,264 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     fixture.detectChanges();
     await fixture.whenStable();
     expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserva envío, dirección, notas, cursor y collector al cerrar/reabrir el mismo checkout', async () => {
+    const createdAt = new Date('2026-10-03T12:00:00.000Z');
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt));
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    wireStubs();
+    fixture.detectChanges();
+
+    // The cashier changes lanes, then returns to delivery; the effective
+    // intent is still delivery and the intervention witness remains true.
+    component.entregaChoice.set('llevar');
+    fixture.detectChanges();
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    component.goToStep(2);
+    component.goToClienteSubStep(1);
+    const shipping = (component as any).shippingStep() as ShippingStub;
+    shipping.shipSubStep.set(1);
+    shipping.shippingCost.set(2700);
+    shipping.notes.set('Dejar en recepción');
+    shipping.shippingContext.set({
+      shippingAddress: { address_line1: 'Calle 1', city: 'Cali', latitude: 3.4, longitude: -76.5 },
+      shippingAddressId: 33, shippingCost: 2700, manualShippingPrice: 2700,
+      manualCostOverride: true, deliveryNotes: 'Dejar en recepción',
+    });
+    const payment = (component as any).paymentStep() as PaymentStub;
+    payment.mode.set('credito');
+    payment.subStep.set(1);
+    payment.tipAmount.set(500);
+    const cursor = component.currentStep();
+    const clienteCursor = component.clienteSubStep();
+    const contentEpoch = component.contentEpoch();
+    const paymentResetKey = component.paymentResetKey();
+    const focus = spyOn(component as unknown as { focusActiveStepSoon: () => void }, 'focusActiveStepSoon');
+
+    const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
+    modal.closed.emit();
+    fixture.detectChanges();
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    // The parent recomputes this from the cart on every reopen; it must not
+    // overwrite the operator's in-progress delivery choice for this identity.
+    fixture.componentRef.setInput('initialEntrega', 'llevar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    wireStubs();
+    fixture.detectChanges();
+
+    expect(component.entregaChoice()).toBe('enviar');
+    expect((component as any).entregaTouched()).toBeTrue();
+    expect(component.stepKeys()).toContain('envio');
+    expect(component.currentStep()).toBe(cursor);
+    expect(component.clienteSubStep()).toBe(clienteCursor);
+    expect(component.contentEpoch()).toBe(contentEpoch);
+    expect(component.paymentResetKey()).toBe(paymentResetKey);
+    expect((component as any).shippingStep()).toBe(shipping);
+    expect((component as any).paymentStep()).toBe(payment);
+    expect(shipping.shippingCost()).toBe(2700);
+    expect(shipping.notes()).toBe('Dejar en recepción');
+    expect(shipping.shippingContext()).toEqual(jasmine.objectContaining({
+      shippingAddressId: 33, manualShippingPrice: 2700,
+      deliveryNotes: 'Dejar en recepción',
+    }));
+    expect(payment.mode()).toBe('credito');
+    expect(payment.subStep()).toBe(1);
+    expect(payment.tipAmount()).toBe(500);
+    expect(focus).toHaveBeenCalledTimes(1);
+
+    component.onModalClosed(); // Escape/cancel callback from the shared modal.
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('initialEntrega', 'llevar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(focus).toHaveBeenCalledTimes(2);
+  });
+
+  it('no resembra el mismo carrito, pero inicia nuevas identidades de carrito y mesa', () => {
+    const createdAt = new Date('2026-10-03T12:00:00.000Z');
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt));
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    component.entregaChoice.set('llevar');
+    component.goToStep(1);
+    component.goToClienteSubStep(1);
+    fixture.detectChanges();
+    const firstEpoch = component.contentEpoch();
+
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt, {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 3,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 3000, taxAmount: 0 }],
+      customer: { id: 100, first_name: 'Otra cliente' }, summary: { total: 3000 },
+    }));
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('llevar');
+    expect(component.currentStep()).toBe(1);
+    expect(component.clienteSubStep()).toBe(1);
+    expect(component.contentEpoch()).toBe(firstEpoch);
+
+    fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-10-04T12:00:00.000Z')));
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(component.currentStep()).toBe(0);
+    expect(component.clienteSubStep()).toBe(0);
+    expect(component.contentEpoch()).toBe(firstEpoch + 1);
+
+    component.goToStep(2);
+    fixture.detectChanges();
+    const afterNewCartEpoch = component.contentEpoch();
+    fixture.componentRef.setInput('initialEntrega', 'llevar');
+    fixture.componentRef.setInput('tableId', 42);
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(component.currentStep()).toBe(2);
+    expect(component.contentEpoch()).toBe(afterNewCartEpoch);
+
+    // A second concrete table identity is a new flow; a table session's
+    // null→id promotion above is instead a continuation of the same checkout.
+    fixture.componentRef.setInput('tableId', 15);
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('mesa');
+    expect(component.currentStep()).toBe(0);
+    expect(component.contentEpoch()).toBe(afterNewCartEpoch + 1);
+  });
+
+  it('vaciar la última línea inicia flujo nuevo aunque createdAt no cambie', () => {
+    const createdAt = new Date('2026-10-03T12:00:00.000Z');
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt));
+    fixture.componentRef.setInput('initialEntrega', 'llevar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    component.entregaChoice.set('enviar');
+    component.goToStep(2);
+    fixture.detectChanges();
+    wireStubs();
+    const epochBeforeClear = component.contentEpoch();
+
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt, { items: [] }));
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('llevar');
+    expect(component.currentStep()).toBe(0);
+    expect(component.stepKeys()).not.toContain('envio');
+    expect(component.contentEpoch()).toBe(epochBeforeClear + 1);
+
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt));
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('llevar');
+    expect(component.currentStep()).toBe(0);
+    expect(component.stepKeys()).not.toContain('envio');
+    expect(component.contentEpoch()).toBe(epochBeforeClear + 1);
+  });
+
+  it('después de finalizar el próximo open siembra una nueva preselección sin reset doble', () => {
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-10-03T12:00:00.000Z')));
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    component.goToStep(2);
+    const beforeFinalize = component.contentEpoch();
+
+    component.onCheckoutCompleted({ order: { id: 700 } });
+
+    expect(component.entregaChoice()).toBe('llevar');
+    expect(component.currentStep()).toBe(0);
+    expect(component.contentEpoch()).toBe(beforeFinalize + 1);
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('initialEntrega', 'mesa');
+    fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-10-04T12:00:00.000Z')));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+
+    expect(component.entregaChoice()).toBe('mesa');
+    expect(component.currentStep()).toBe(0);
+    expect(component.contentEpoch()).toBe(beforeFinalize + 1);
+  });
+
+  it('adoptar la orden del checkout abierto y abrir la mesa no reinicia su elección', () => {
+    const createdAt = new Date('2026-10-03T12:00:00.000Z');
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt));
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    component.entregaChoice.set('enviar');
+    component.goToStep(2);
+    fixture.detectChanges();
+    const epoch = component.contentEpoch();
+
+    fixture.componentRef.setInput('tableId', 15);
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(component.currentStep()).toBe(2);
+    expect(component.contentEpoch()).toBe(epoch);
+
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt, {
+      linkedOrderId: 700, shippingContext: { orderId: 700 },
+    }));
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(component.currentStep()).toBe(2);
+    expect(component.contentEpoch()).toBe(epoch);
+
+    fixture.componentRef.setInput('tableId', 42);
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(component.currentStep()).toBe(2);
+    expect(component.contentEpoch()).toBe(epoch);
+
+    fixture.componentRef.setInput('editingOrderId', 701);
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(component.currentStep()).toBe(0);
+    expect(component.contentEpoch()).toBe(epoch + 1);
+  });
+
+  it('reabrir con otra orden cargada mientras estaba cerrado siembra el nuevo delivery', () => {
+    const createdAt = new Date('2026-10-03T12:00:00.000Z');
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.componentRef.setInput('initialEntrega', 'llevar');
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt, {
+      linkedOrderId: 700, shippingContext: { orderId: 700, deliveryType: 'direct_delivery' },
+    }));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    expect(component.entregaChoice()).toBe('llevar');
+    component.goToStep(1);
+    const previousEpoch = component.contentEpoch();
+
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('cartState', checkoutCart(createdAt, {
+      linkedOrderId: 701, shippingContext: { orderId: 701, deliveryType: 'home_delivery' },
+    }));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+
+    expect(component.entregaChoice()).toBe('enviar');
+    expect(component.stepKeys()).toContain('envio');
+    expect(component.currentStep()).toBe(0);
+    expect(component.contentEpoch()).toBe(previousEpoch + 1);
   });
 
   it('evento ya consumido (radiogroup Tipo) no navega doble', () => {
@@ -1172,6 +1443,26 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
       shipping_rate_id: 2, shipping_cost: 11900, manual_shipping_price: 10000,
     }));
+  });
+
+  it('editor conserva el precio manual cero para pickup sin dirección ni tarifa', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.hasShippingChanges.set(true);
+    ship.shippingContext.set({
+      deliveryType: 'pickup', shippingMethodId: 3,
+      shippingAddressId: null, shippingRateId: null, shippingCost: 0,
+      manualCostOverride: true, manualShippingPrice: 0,
+    });
+
+    component.onPrimaryConfirm();
+
+    const payload = update.calls.mostRecent().args[1];
+    expect(payload).toEqual(jasmine.objectContaining({
+      delivery_type: 'pickup', shipping_method_id: 3,
+      shipping_cost: 0, manual_shipping_price: 0,
+    }));
+    expect(payload.shipping_rate_id).toBeUndefined();
+    expect(payload.shipping_address_id).toBeUndefined();
   });
 
   it('muestra la propina una sola vez en el resumen sin alterar la base del cobro', () => {

@@ -204,8 +204,12 @@
     ></app-sticky-header>
 
     @if (orderData.active_financial_split_id || (showSplitConfig() && canCreateFinancialSplit())) {
-      <div class="max-w-[1600px] mx-auto mb-4">
-        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+      <div
+        id="splitAccountsAnchor"
+        tabindex="-1"
+        class="max-w-[1600px] mx-auto mb-4 outline-none scroll-mt-24"
+      >
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" [showCancel]="true" (cancelled)="showSplitConfig.set(false)" />
       </div>
     }
 
@@ -733,6 +737,15 @@
               </span>
             </div>
 
+            @if (splitLocked()) {
+              <p
+                class="mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                data-testid="split-locked-reason"
+              >
+                <app-icon name="split" [size]="14" class="mt-0.5 shrink-0" />
+                <span>{{ splitLockedReason }}</span>
+              </p>
+            }
             <div class="space-y-1 items-compact">
               @for (item of orderData.order_items; track item.id) {
                 <div
@@ -909,8 +922,8 @@
                           variant="outline"
                           size="xsm"
                           customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-amber-50 text-amber-700 border border-amber-200 disabled:opacity-50"
-                          [attr.title]="canUseReverseDelivered() ? 'Reversar la entrega de este ítem (pide motivo y destino)' : reverseDisabledReason"
-                          [disabled]="!canUseReverseDelivered()"
+                          [attr.title]="splitLocked() ? splitLockedReason : canUseReverseDelivered() ? 'Reversar la entrega de este ítem (pide motivo y destino)' : reverseDisabledReason"
+                          [disabled]="!canUseReverseDelivered() || splitLocked()"
                           [loading]="reversingItemId() === item.id"
                           (clicked)="reverseDeliveredItem(item)"
                         >
@@ -918,7 +931,7 @@
                           Reversar
                         </app-button>
                       }
-                      @if ((item.delivered_at || !item.cancelled_at) && cancellationPaid() && lineHasRefundableBalance(item)) {
+                      @if ((item.delivered_at || !item.cancelled_at) && !splitLocked() && cancellationPaid() && lineHasRefundableBalance(item)) {
                         <span class="text-xs text-amber-700">
                           Orden cobrada: no se puede cancelar este plato.
                           <button type="button" class="underline font-semibold" (click)="openRefundModal()">
@@ -953,7 +966,8 @@
                           variant="outline-danger"
                           size="xsm"
                           customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 disabled:opacity-50"
-                          title="Cancelar este ítem del pedido (queda visible, se excluye del total)"
+                          [attr.title]="splitLocked() ? splitLockedReason : 'Cancelar este ítem del pedido (queda visible, se excluye del total)'"
+                          [disabled]="splitLocked()"
                           [loading]="cancellingItemId() === item.id"
                           (clicked)="cancelItem(item)"
                         >
@@ -1891,6 +1905,48 @@
                   }
                 </div>
               }
+              @if (orderData.active_financial_split_id && !orderInvoice()) {
+                <p class="text-xs text-text-secondary">
+                  Esta orden se factura por cuenta
+                </p>
+              }
+              @if (accountInvoices().length > 0) {
+                <div [class.mt-3]="orderInvoice() !== null" class="space-y-2">
+                  <h3
+                    class="text-xs font-bold text-text-secondary uppercase tracking-wider"
+                  >
+                    Facturas por cuenta
+                  </h3>
+                  @for (inv of accountInvoices(); track inv.id) {
+                    <div
+                      class="rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center justify-between gap-2"
+                    >
+                      <div class="min-w-0">
+                        <p class="text-sm font-semibold text-gray-900">
+                          {{ inv.account_label || 'Cuenta' }} ·
+                          {{ inv.customer_name || 'Consumidor final' }}
+                        </p>
+                        <p class="text-xs text-text-secondary break-all">
+                          {{ inv.invoice_number || 'Borrador' }} ·
+                          <span
+                            class="px-1.5 py-0.5 text-[10px] font-bold uppercase rounded bg-gray-200"
+                            >{{ accountInvoiceStatusLabel(inv) }}</span
+                          >
+                          · {{ accountInvoiceTotal(inv) | currency }}
+                        </p>
+                      </div>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="openAccountInvoice(inv)"
+                      >
+                        <app-icon slot="icon" name="eye" [size]="14" />
+                        Ver
+                      </app-button>
+                    </div>
+                  }
+                </div>
+              }
               <!-- El botón NO es el `@else` del bloque de arriba: una factura
                    anulada o cancelada deja ver su registro Y habilita volver a
                    emitir, que es justo lo que hace el backend
@@ -2254,6 +2310,29 @@
               Acciones
             </h2>
 
+            @if (orderData.active_financial_split_id) {
+              <div
+                class="bg-info-light border border-info/30 rounded-lg p-3 mb-3 flex items-center justify-between gap-3 flex-wrap"
+              >
+                <p class="text-sm text-text-primary">
+                  @if (splitSummary(); as summary) {
+                    Cuenta dividida en {{ summary.accounts }} cuentas · Cobrado
+                    {{ summary.paid | currency }} de {{ summary.total | currency }}
+                  } @else {
+                    Cuenta dividida · Cobrado {{ (orderData.total_paid ?? 0) | currency }} de
+                    {{ orderData.grand_total | currency }}
+                  }
+                </p>
+                <button
+                  type="button"
+                  class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+                  (click)="focusSplitAccounts()"
+                >
+                  Ir a las cuentas
+                </button>
+              </div>
+            }
+
             @if (showUnpaidBalanceNotice()) {
               <div
                 role="alert"
@@ -2332,10 +2411,16 @@
 
             @if (canFastTrack()) {
               <div class="mt-4 pt-4 border-t border-border">
-                <label class="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-200 cursor-pointer">
+                <label
+                  class="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-200"
+                  [class.cursor-pointer]="!splitLocked()"
+                  [class.opacity-60]="splitLocked()"
+                  [attr.title]="splitLocked() ? splitLockedReason : null"
+                >
                   <input
                     type="checkbox"
-                    [checked]="fastTrackEnabled()"
+                    [checked]="fastTrackEnabled() && !splitLocked()"
+                    [disabled]="splitLocked()"
                     (change)="fastTrackEnabled.set($any($event.target).checked)"
                     class="mt-0.5"
                   />
@@ -2348,7 +2433,7 @@
                   </div>
                 </label>
 
-                @if (fastTrackEnabled()) {
+                @if (fastTrackEnabled() && !splitLocked()) {
                   <app-button
                     variant="outline-warning"
                     [fullWidth]="true"
@@ -2645,6 +2730,12 @@
                         {{ getPaymentStateLabel(payment.state) }}
                       </span>
                     </div>
+                    @if (payment.financial_account_label) {
+                      <span
+                        class="inline-block mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-md bg-gray-100 text-text-secondary"
+                        >Cuenta: {{ payment.financial_account_label }}</span
+                      >
+                    }
                     <!-- QUI-732 (B.5) — método de pago. Fallback chain
                          display_name → system.display_name → system.name → '—'.
                          El último eslabón cubre pagos huérfanos

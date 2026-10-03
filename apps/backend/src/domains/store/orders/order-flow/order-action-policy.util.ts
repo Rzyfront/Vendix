@@ -234,10 +234,22 @@ export function canRefund(order: OrderActionSnapshot): OrderActionResult {
  * lives in `order-cancellation-policy.util.ts` (owned by the pre-existing
  * B-series work), not duplicated here. */
 export function canCancel(order: OrderActionSnapshot): OrderActionResult {
+  if (isFinancialSplitLocked(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
   const policy = getOrderCancellationPolicy(order);
   return policy.can_cancel
     ? { enabled: true }
     : { enabled: false, ...(policy.reason_code ? { reason: policy.reason_code } : {}) };
+}
+
+/** `confirm_payment` — un clic que confirma el cobro de la orden completa; con
+ * cuentas independientes activas el único cobro válido es por cuenta. */
+export function canConfirmPayment(order: OrderActionSnapshot): OrderActionResult {
+  if (isFinancialSplitLocked(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
+  return { enabled: true };
 }
 
 /** `assign_shipping` — a method may be assigned whenever the order has none

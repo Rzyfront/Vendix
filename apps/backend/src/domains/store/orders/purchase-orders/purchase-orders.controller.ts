@@ -40,6 +40,10 @@ import {
   InvoiceRevalidateJob,
   InvoiceRevalidateJobStatusResult,
 } from './interfaces/invoice-revalidate-job.interface';
+import {
+  InvoiceScanJob,
+  InvoiceScanJobStatusResult,
+} from './interfaces/invoice-scan-job.interface';
 import { isSafeS3Key } from '@common/helpers/s3-url.helper';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
@@ -60,6 +64,7 @@ const PAYMENT_RECEIPT_SCAN_ALLOWED_MIMETYPES = new Set([
   'image/heif',
 ]);
 const PAYMENT_RECEIPT_SCAN_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const INVOICE_SCAN_MAX_FILE_BYTES = 15 * 1024 * 1024;
 
 /**
  * CP-PURCHASE-TRANSPARENCY K — un fallo de compras dejó de responder 200.
@@ -120,6 +125,9 @@ export class PurchaseOrdersController {
     // QUI-855 paso 8a — cola `invoice-revalidate`.
     @InjectQueue('invoice-revalidate')
     private readonly invoiceRevalidateQueue: Queue<InvoiceRevalidateJob>,
+    // Escaneo IA async de facturas de compra (cola `invoice-scan`).
+    @InjectQueue('invoice-scan')
+    private readonly invoiceScanQueue: Queue<InvoiceScanJob>,
   ) {}
 
   @Post()
@@ -309,6 +317,116 @@ export class PurchaseOrdersController {
       );
       throw error;
     }
+  }
+
+  // ===== Escaneo IA async de facturas =====
+  //   POST /scan/async         → 202 {job_id}
+  //   GET  /scan/async/:jobId  → {status, result?, error?} (poll con IDOR)
+  // Declaradas ANTES de cualquier `@Get(':id')` / `@Post(':id/...')`.
+
+  @Post('scan/async')
+  @Permissions('store:orders:purchase_orders:create')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: require('multer').memoryStorage(),
+      limits: { fileSize: INVOICE_SCAN_MAX_FILE_BYTES },
+    }),
+  )
+  async enqueueInvoiceScan(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('orderType') orderType?: 'retail' | 'ingredient',
+  ) {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+    }
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    ];
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+    }
+
+    const ctx = RequestContextService.getContext();
+    const store_id = (ctx as any)?.store_id ?? undefined;
+    const organization_id = (ctx as any)?.organization_id ?? undefined;
+    const user_id = (ctx as any)?.user_id ?? undefined;
+    if (store_id == null) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const request_id = (ctx as any)?.request_id ?? `invoice-scan-${randomUUID()}`;
+
+    // S3 es el transporte al worker: aqui la subida NO es best-effort.
+    let scanAttachment: InvoiceScanJob['scan_attachment'];
+    try {
+      scanAttachment = await this.purchaseOrdersService.uploadScanDocument(file);
+    } catch (err: any) {
+      this.logger.error(
+        `Invoice scan upload failed: ${err?.message ?? err}`,
+        err?.stack,
+      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FAILED_001);
+    }
+    if (!scanAttachment?.key) {
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FAILED_001);
+    }
+
+    try {
+      const job = await this.invoiceScanQueue.add(
+        'scan',
+        {
+          store_id,
+          organization_id,
+          user_id,
+          request_id,
+          scan_attachment_key: scanAttachment.key,
+          scan_attachment: scanAttachment,
+          order_type: orderType === 'ingredient' ? 'ingredient' : 'retail',
+        },
+        {
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 50 },
+        },
+      );
+      return this.responseService.success(
+        { job_id: job.id },
+        'Escaneo encolado',
+      );
+    } catch (err: any) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
+    }
+  }
+
+  @Get('scan/async/:jobId')
+  @Permissions('store:orders:purchase_orders:create')
+  async getInvoiceScanStatus(
+    @Param('jobId') jobId: string,
+  ): Promise<InvoiceScanJobStatusResult> {
+    const job = await this.invoiceScanQueue.getJob(jobId);
+
+    // 🔒 IDOR: job.returnvalue viene de Redis (no scoped-prisma). Mismo 404 que
+    // un job inexistente para no filtrar existencia cross-tenant.
+    const callerStoreId = RequestContextService.getContext()?.store_id as
+      | number
+      | undefined;
+    if (
+      !job ||
+      callerStoreId == null ||
+      job.data?.store_id !== callerStoreId
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+
+    return {
+      status: (await job.getState()) as any,
+      result: (job.returnvalue as any) ?? undefined,
+      error: job.failedReason ?? undefined,
+    };
   }
 
   // ===== QUI-855 paso 8a — Revalidación con IA (async) =====

@@ -31,6 +31,10 @@ import {
 const RECEIVED = ['succeeded', 'captured'];
 const RESERVED = ['pending', 'authorized'];
 const VOID_INVOICES = ['cancelled', 'voided'];
+/** Pagos que ya no cuentan: no hay dinero registrado ni en camino. */
+const DEAD_PAYMENTS = ['failed', 'cancelled'];
+/** Facturas de cuenta que aún no salieron hacia la DIAN: se descartan al quitar la división. */
+const DISCARDABLE_INVOICES = ['draft', 'validated'];
 const money = (value: unknown) => new Prisma.Decimal(String(value ?? 0));
 
 export interface SplitAccountSummary {
@@ -55,18 +59,61 @@ export interface SplitAccountSummary {
   available_to_pay: string;
   payment_state: 'unpaid' | 'pending' | 'partial' | 'paid';
   invoice_id: number | null;
+  invoice: SplitAccountInvoice | null;
+  lines: SplitAccountLine[];
   payments: Array<{
     id: number;
     amount: string;
     state: string;
+    payment_method_name: string | null;
+    created_at: string | null;
     can_confirm: boolean;
     next_action: unknown;
+  }>;
+}
+
+export interface SplitAccountInvoice {
+  id: number;
+  invoice_number: string | null;
+  status: string;
+  dian_status: string | null;
+  grand_total: string;
+}
+
+export interface SplitAccountLine {
+  id: number;
+  order_item_id: number | null;
+  product_name: string;
+  variant_name: string | null;
+  original_quantity: number | null;
+  share_ratio: string;
+  subtotal: string;
+  discount: string;
+  tax: string;
+  total: string;
+}
+
+export interface SplitUndo {
+  allowed: boolean;
+  blockers: Array<{
+    account_id: number;
+    account_label: string;
+    reason: 'payment_registered' | 'invoice_transmitted';
+    amount: string | null;
+  }>;
+  invoices_to_discard: Array<{
+    account_id: number;
+    account_label: string;
+    invoice_id: number;
+    invoice_number: string | null;
   }>;
 }
 
 export interface SplitResult {
   source_order_id: number;
   split_group_id: number | null;
+  mode: 'equal' | 'custom' | 'items' | null;
+  undo: SplitUndo;
   source_version: string;
   currency: string;
   original_total: string;
@@ -367,7 +414,7 @@ export class SplitOrderService {
       dto.accounts,
       allocation.accounts.length,
     );
-    return this.previewResult(order, allocation, dto.accounts);
+    return this.previewResult(order, allocation, dto.accounts, dto.mode);
   }
 
   async splitByItems(
@@ -609,10 +656,89 @@ export class SplitOrderService {
     }
   }
 
+  /**
+   * Regla de «Quitar división»: sólo bloquean los pagos de cuentas NUEVAS
+   * (la retenida «Abonos anteriores» son pagos previos que se quedan en la
+   * orden) y las facturas de cuenta ya transmitidas. Borradores/validadas se
+   * descartan junto con la división.
+   */
+  private buildUndo(accounts: any[], payments: any[], invoices: any[]): SplitUndo {
+    const blockers: SplitUndo['blockers'] = [];
+    const toDiscard: SplitUndo['invoices_to_discard'] = [];
+    for (const account of accounts) {
+      if (account.role !== 'payable') continue;
+      const live = payments.filter(
+        (p) =>
+          p.financial_account_id === account.id &&
+          !DEAD_PAYMENTS.includes(p.state),
+      );
+      if (live.length) {
+        blockers.push({
+          account_id: account.id,
+          account_label: account.label,
+          reason: 'payment_registered',
+          amount: live
+            .reduce((sum, p) => sum.plus(money(p.amount)), money(0))
+            .toFixed(2),
+        });
+      }
+    }
+    for (const account of accounts) {
+      for (const invoice of invoices.filter(
+        (i) => i.financial_account_id === account.id,
+      )) {
+        if (VOID_INVOICES.includes(invoice.status)) continue;
+        if (DISCARDABLE_INVOICES.includes(invoice.status)) {
+          toDiscard.push({
+            account_id: account.id,
+            account_label: account.label,
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number ?? null,
+          });
+        } else {
+          blockers.push({
+            account_id: account.id,
+            account_label: account.label,
+            reason: 'invoice_transmitted',
+            amount: null,
+          });
+        }
+      }
+    }
+    return {
+      allowed: blockers.length === 0,
+      blockers,
+      invoices_to_discard: toDiscard,
+    };
+  }
+
+  private mapLine(line: any): SplitAccountLine {
+    const snap = (line.source_snapshot ?? {}) as any;
+    const item = line.source_order_item;
+    const subtotal = money(line.subtotal_amount);
+    const itemTotal = money(snap.total_price ?? item?.total_price ?? 0);
+    const ratio = itemTotal.gt(0)
+      ? Prisma.Decimal.min(1, Prisma.Decimal.max(0, subtotal.div(itemTotal)))
+      : money(1);
+    return {
+      id: line.id,
+      order_item_id: line.source_order_item_id ?? null,
+      product_name: item?.product_name ?? snap.product_name ?? line.description,
+      variant_name: item?.variant_attributes ?? null,
+      original_quantity: snap.quantity ?? item?.quantity ?? null,
+      share_ratio: ratio.toDecimalPlaces(6).toString(),
+      subtotal: subtotal.toFixed(2),
+      discount: money(line.discount_amount).toFixed(2),
+      tax: money(line.tax_amount).toFixed(2),
+      total: money(line.total_amount).toFixed(2),
+    };
+  }
+
   private summary(
     account: any,
     payments: any[] = [],
-    invoiceId: number | null = null,
+    invoice: any | null = null,
+    lines: any[] = [],
   ): SplitAccountSummary {
     const received = payments
       .filter((p) => RECEIVED.includes(p.state))
@@ -669,11 +795,26 @@ export class SplitOrderService {
           : reserved.gt(0)
             ? 'pending'
             : 'unpaid',
-      invoice_id: invoiceId,
+      invoice_id: invoice?.id ?? null,
+      invoice: invoice
+        ? {
+            id: invoice.id,
+            invoice_number: invoice.invoice_number ?? null,
+            status: invoice.status,
+            dian_status: invoice.dian_status ?? null,
+            grand_total: money(invoice.total_amount).toFixed(2),
+          }
+        : null,
+      lines: lines.map((l) => this.mapLine(l)),
       payments: payments.map((p) => ({
         id: p.id,
         amount: money(p.amount).toFixed(2),
         state: p.state,
+        payment_method_name:
+          p.store_payment_method?.display_name ??
+          p.store_payment_method?.system_payment_method?.display_name ??
+          null,
+        created_at: p.created_at ? new Date(p.created_at).toISOString() : null,
         can_confirm:
           p.state === 'pending' &&
           p.store_payment_method?.system_payment_method?.processing_mode ===
@@ -690,10 +831,13 @@ export class SplitOrderService {
     order: any,
     result: FinancialSplitAllocationResult,
     payers?: SplitAccountCustomerDto[],
+    mode: SplitResult['mode'] = null,
   ): SplitResult {
     return {
       source_order_id: order.id,
       split_group_id: null,
+      mode,
+      undo: { allowed: false, blockers: [], invoices_to_discard: [] },
       source_version: this.version(order),
       currency: order.currency ?? 'COP',
       original_total: result.original_total,
@@ -762,19 +906,47 @@ export class SplitOrderService {
         financial_account_id: { in: ids },
         status: { notIn: VOID_INVOICES },
       },
-      select: { id: true, financial_account_id: true },
+      select: {
+        id: true,
+        invoice_number: true,
+        status: true,
+        dian_status: true,
+        total_amount: true,
+        financial_account_id: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+    const lines = await db.order_financial_lines.findMany({
+      where: { account_id: { in: ids } },
+      orderBy: { id: 'asc' },
+      include: {
+        source_order_item: {
+          select: {
+            product_name: true,
+            variant_attributes: true,
+            quantity: true,
+            total_price: true,
+          },
+        },
+      },
     });
     const accounts = group.accounts.map((account: any) =>
       this.summary(
         account,
         payments.filter((p: any) => p.financial_account_id === account.id),
-        invoices.find((i: any) => i.financial_account_id === account.id)?.id ??
-          null,
+        invoices
+          .filter((i: any) => i.financial_account_id === account.id)
+          .pop() ?? null,
+        lines.filter(
+          (l: any) => l.account_id === account.id && l.kind === 'item',
+        ),
       ),
     );
     return {
       source_order_id: order.id,
       split_group_id: group.id,
+      mode: group.mode ?? null,
+      undo: this.buildUndo(group.accounts, payments, invoices),
       source_version: group.source_version,
       currency: order.currency ?? 'COP',
       original_total: money(group.original_total).toFixed(2),
@@ -818,34 +990,56 @@ export class SplitOrderService {
           'La división cambió; recarga las cuentas.',
           'SPLIT_SOURCE_CONFLICT',
         );
-      const ids = group.accounts
-        .filter((a: any) => a.role === 'payable')
-        .map((a: any) => a.id);
-      if (
-        await tx.payments.count({
-          where: {
-            financial_account_id: { in: ids },
-            state: { in: [...RECEIVED, ...RESERVED] },
-          },
-        })
-      ) {
+      const accountIds: number[] = group.accounts.map((a: any) => a.id);
+      const payments = await tx.payments.findMany({
+        where: { financial_account_id: { in: accountIds } },
+        select: { financial_account_id: true, state: true, amount: true },
+      });
+      const invoices = await tx.invoices.findMany({
+        where: {
+          financial_account_id: { in: accountIds },
+          status: { notIn: VOID_INVOICES },
+        },
+        select: {
+          id: true,
+          invoice_number: true,
+          status: true,
+          financial_account_id: true,
+        },
+      });
+      const undo = this.buildUndo(group.accounts, payments, invoices);
+      if (!undo.allowed) {
+        const first = undo.blockers[0];
         this.reject(
-          'No se puede deshacer una división con pagos nuevos recibidos o pendientes.',
+          first.reason === 'payment_registered'
+            ? `No se puede quitar la división: ${first.account_label} ya tiene un pago registrado.`
+            : `No se puede quitar la división: la factura de ${first.account_label} ya fue enviada a la DIAN.`,
           'SPLIT_CANCEL_BLOCKED',
         );
       }
-      if (
-        await tx.invoices.count({
+      if (undo.invoices_to_discard.length) {
+        // Se descarta aquí (draft/validated -> cancelled, la misma transición
+        // de «Descartar borrador») y no con InvoiceFlowService.cancel porque
+        // éste usa su propio cliente Prisma, fuera de esta transacción: un
+        // rollback dejaría las facturas descartadas con la división vigente.
+        // Un borrador/validada nunca transmitida no afecta libros, por eso se
+        // omite el chequeo de periodo fiscal de ese método (privado).
+        const discardIds = undo.invoices_to_discard.map((i) => i.invoice_id);
+        const discarded = await tx.invoices.updateMany({
           where: {
-            financial_account_id: { in: group.accounts.map((a: any) => a.id) },
-            status: { notIn: VOID_INVOICES },
+            id: { in: discardIds },
+            store_id,
+            financial_account_id: { in: accountIds },
+            status: { in: DISCARDABLE_INVOICES },
           },
-        })
-      ) {
-        this.reject(
-          'No se puede deshacer una división con documentos vigentes.',
-          'SPLIT_CANCEL_BLOCKED',
-        );
+          data: { status: 'cancelled' },
+        });
+        if (discarded.count !== discardIds.length) {
+          this.reject(
+            'La división cambió; recarga las cuentas.',
+            'SPLIT_SOURCE_CONFLICT',
+          );
+        }
       }
       await tx.order_financial_accounts.updateMany({
         where: { split_id: group.id, store_id },

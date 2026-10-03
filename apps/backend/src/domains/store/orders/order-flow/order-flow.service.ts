@@ -10,6 +10,7 @@ import {
 } from './order-cancellation-policy.util';
 import {
   canPay,
+  canConfirmPayment,
   canCancelPayment,
   canCancelPaymentAsRole,
   canRefund,
@@ -71,7 +72,10 @@ import {
 } from '../../invoicing/pos/pos-sale-completed.event';
 import { isPresentialPosSale } from '../../invoicing/pos/presential-pos-sale';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
-import { MovementsService } from '../../cash-registers/movements/movements.service';
+import {
+  MovementsService,
+  ORDER_CANCELLED_MOVEMENT_REFERENCE,
+} from '../../cash-registers/movements/movements.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
@@ -3948,7 +3952,7 @@ export class OrderFlowService {
         actions.push({
           code: 'confirm_payment',
           label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
-          enabled: true,
+          ...canConfirmPayment(snapshot),
         });
       }
 
@@ -5207,6 +5211,18 @@ export class OrderFlowService {
         subtotal_amount: new Prisma.Decimal(subtotal),
         tax_amount: new Prisma.Decimal(tax),
         grand_total: new Prisma.Decimal(grandTotal),
+        // El saldo debe seguir el total vivo; un COD pending no es un abono.
+        // El saldo de crédito sigue perteneciendo al plan de cuotas.
+        ...(order?.payment_form !== '2'
+          ? {
+              remaining_balance: Prisma.Decimal.max(
+                0,
+                new Prisma.Decimal(grandTotal)
+                  .toDecimalPlaces(2)
+                  .minus(getSettledOrderAmount(order)),
+              ).toDecimalPlaces(2),
+            }
+          : {}),
         ...(rederivedTip != null
           ? { tip_amount: new Prisma.Decimal(rederivedTip) }
           : {}),
@@ -6129,6 +6145,7 @@ export class OrderFlowService {
         total_paid: true,
         remaining_balance: true,
         customer_id: true,
+        active_financial_split_id: true,
         stores: { select: { organization_id: true } },
       },
     });
@@ -6138,6 +6155,8 @@ export class OrderFlowService {
       );
       return;
     }
+    // Cuenta dividida: el recaudo de despacho no cobra la orden principal.
+    assertNoActiveFinancialSplit(order);
 
     const remaining = Number(order.remaining_balance);
     const applied = Math.min(input.amount, Math.max(remaining, 0));
@@ -6777,6 +6796,7 @@ export class OrderFlowService {
     // nunca queda colgado de una cancelación que hizo rollback.
     if (cashReversal) {
       const cashOutRecorded = await this.registerCancelCashOut(
+        updatedOrder.store_id,
         orderId,
         order.order_number,
         dto.reason,
@@ -6819,7 +6839,12 @@ export class OrderFlowService {
    */
   private async resolveCancelCashReversal(order: {
     payments: { id: number; state: string }[];
-  }, client: Prisma.TransactionClient | StorePrismaService = this.prisma): Promise<{ amount: Prisma.Decimal; paymentIds: number[] } | null> {
+  }, client: Prisma.TransactionClient | StorePrismaService = this.prisma): Promise<{
+    amount: Prisma.Decimal;
+    paymentIds: number[];
+    /** Desglose por pago en efectivo (un movimiento de caja por pago). */
+    payments: { id: number; amount: Prisma.Decimal }[];
+  } | null> {
     const succeededIds = order.payments
       .filter((p) => p.state === 'succeeded')
       .map((p) => p.id);
@@ -6848,7 +6873,14 @@ export class OrderFlowService {
       return null;
     }
 
-    return { amount, paymentIds: cashPayments.map((p) => p.id) };
+    return {
+      amount,
+      paymentIds: cashPayments.map((p) => p.id),
+      payments: cashPayments.map((p) => ({
+        id: p.id,
+        amount: new Prisma.Decimal(p.amount as any),
+      })),
+    };
   }
 
   /**
@@ -7026,10 +7058,15 @@ export class OrderFlowService {
    * escala, no se propaga.
    */
   private async registerCancelCashOut(
+    storeId: number,
     orderId: number,
     orderNumber: string | null,
     reason: string,
-    reversal: { amount: Prisma.Decimal; paymentIds: number[] },
+    reversal: {
+      amount: Prisma.Decimal;
+      paymentIds: number[];
+      payments: { id: number; amount: Prisma.Decimal }[];
+    },
   ): Promise<boolean> {
     const userId = RequestContextService.getUserId();
 
@@ -7054,33 +7091,47 @@ export class OrderFlowService {
         return false;
       }
 
-      const session = await this.sessionsService.getActiveSession(userId);
-      if (!session) {
-        await this.escalateCancelCashOutFailure(
-          orderId,
-          reversal,
-          'no_open_session',
-          userId,
-        );
-        return false;
+      // Un movimiento `refund` / `order_cancelled` por pago en efectivo, con su
+      // `payment_id`. NO emite `cash_register.movement`: el asiento de la salida
+      // de caja lo genera `refund.completed` (emitCancellationCashRefund) —
+      // exactamente uno por cancelación. Sesión destino: original abierta →
+      // operador → mismo registro; sin ninguna, outbox durable.
+      let pending = 0;
+      for (const pay of reversal.payments) {
+        const outcome =
+          await this.movementsService.recordCompensationCashMovementDurable({
+            store_id: storeId,
+            user_id: userId,
+            order_id: orderId,
+            payment_id: pay.id,
+            amount: Number(pay.amount),
+            reference: ORDER_CANCELLED_MOVEMENT_REFERENCE,
+            dedupe_key: `${ORDER_CANCELLED_MOVEMENT_REFERENCE}:${orderId}:${pay.id}`,
+            notes:
+              `Devolución de efectivo por cancelación de la orden ` +
+              `${orderNumber ?? `#${orderId}`} (pago #${pay.id}). Motivo: ${reason}`,
+          });
+        if (outcome.status === 'pending') pending += 1;
       }
 
-      const movement = await this.movementsService.createManualMovement(
-        session.id,
-        {
-          type: 'cash_out',
-          amount: reversal.amount,
-          reference: `Cancelación orden ${orderNumber ?? `#${orderId}`}`,
-          notes:
-            `Devolución de efectivo por cancelación de la orden #${orderId} ` +
-            `(pagos ${reversal.paymentIds.join(', ')}). Motivo: ${reason}`,
-        },
-      );
-
       this.logger.log(
-        `Order #${orderId} cancelled: cash_out #${movement.id} for ${reversal.amount.toString()} ` +
-          `registered on session #${session.id} (payments ${reversal.paymentIds.join(', ')})`,
+        `Order #${orderId} cancelled: cash refund movements for ${reversal.amount.toString()} ` +
+          `(payments ${reversal.paymentIds.join(', ')}; ${pending} queued durably)`,
       );
+      if (pending > 0) {
+        // Encolado durable: no se pierde, pero el operador debe saberlo.
+        await this.auditService.log({
+          userId,
+          action: 'order.cancel.cash_out_queued',
+          resource: AuditResource.ORDERS,
+          resourceId: orderId,
+          metadata: {
+            amount: reversal.amount.toString(),
+            payment_ids: reversal.paymentIds,
+            queued: pending,
+          },
+        });
+      }
       return true;
     } catch (error) {
       await this.escalateCancelCashOutFailure(
@@ -7432,6 +7483,7 @@ export class OrderFlowService {
     if (!order) {
       throw new NotFoundException('Order not found');
     }
+    assertNoActiveFinancialSplit(order);
 
     // Validate it's a credit order
     if (order.payment_form !== '2') {
@@ -7595,6 +7647,7 @@ export class OrderFlowService {
       orderId,
       paymentAmount,
       paymentMethod.system_payment_method.type,
+      payment.id,
     ).catch(() => {});
 
     // Emit event
@@ -8583,9 +8636,15 @@ export class OrderFlowService {
     paymentIds: number[],
   ): Promise<void> {
     if (paymentIds.length === 0) return;
+    const userId = RequestContextService.getUserId();
     try {
-      const userId = RequestContextService.getUserId();
-      if (!userId) return;
+      if (!userId) {
+        this.logger.warn(
+          `reversePaymentCashMovements: sin usuario en contexto; orden #${orderId}, pagos ${paymentIds.join(', ')} sin contra-movimiento de caja`,
+        );
+        await this.auditCashReversalFailure(orderId, paymentIds, 'no_user_context');
+        return;
+      }
       const saleMovements = await this.prisma.cash_register_movements.findMany({
         where: {
           order_id: orderId,
@@ -8601,62 +8660,108 @@ export class OrderFlowService {
       });
       if (saleMovements.length === 0) return;
 
-      const originalSessionIds = Array.from(
-        new Set(saleMovements.map((m) => m.session_id)),
-      );
-      const originalSessions = await this.prisma.cash_register_sessions.findMany({
-        where: { id: { in: originalSessionIds } },
-        select: { id: true, status: true },
-      });
-      const originalSessionStatusById = new Map(
-        originalSessions.map((s) => [s.id, s.status]),
-      );
-
-      // Lazily resolved and cached: most calls only revert a single
-      // operator's own sale, so we avoid the extra query unless an
-      // original session actually turns out closed.
-      let operatorSessionResolved = false;
-      let operatorSessionId: number | null = null;
-      const resolveOperatorSessionId = async (): Promise<number | null> => {
-        if (!operatorSessionResolved) {
-          const session = await this.sessionsService.getActiveSession(userId);
-          operatorSessionId = session?.id ?? null;
-          operatorSessionResolved = true;
-        }
-        return operatorSessionId;
-      };
-
       for (const movement of saleMovements) {
-        const originalStatus = originalSessionStatusById.get(movement.session_id);
-        let targetSessionId: number | null =
-          originalStatus === 'open' ? movement.session_id : null;
+        const paymentId = movement.payment_id;
+        const method = movement.payment_method ?? '';
+        try {
+          if (method === 'cash') {
+            // Efectivo: nunca se pierde. Cascada original → operador → mismo
+            // registro; sin sesión, outbox durable (se entrega al abrir caja).
+            const outcome =
+              await this.movementsService.recordCompensationCashMovementDurable({
+                store_id: storeId,
+                user_id: userId,
+                order_id: orderId,
+                payment_id: paymentId,
+                amount: Number(movement.amount),
+                reference: 'payment_cancelled',
+                dedupe_key: `payment_cancelled:${paymentId}`,
+                notes: `Anulación del pago #${paymentId} de la orden #${orderId}`,
+              });
+            if (outcome.status === 'pending') {
+              this.logger.warn(
+                `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId} encolado (${outcome.reason}, outbox #${outcome.failure_id})`,
+              );
+              await this.auditCashReversalFailure(orderId, [paymentId!], 'queued_' + outcome.reason);
+            }
+            continue;
+          }
 
-        if (!targetSessionId) {
-          targetSessionId = await resolveOperatorSessionId();
-        }
-
-        if (!targetSessionId) {
-          this.logger.warn(
-            `reversePaymentCashMovements: sin sesión de caja abierta para revertir la venta ` +
-              `de la orden #${orderId}, pago #${movement.payment_id ?? 'n/a'} ` +
-              `(sesión original #${movement.session_id} ya cerrada y el operador #${userId} ` +
-              `no tiene sesión activa). La venta original queda sin reversar en el cuadre.`,
+          // No efectivo: no cuenta en el esperado de efectivo; no se encola.
+          // Con sesión destino deja rastro; sin ella, auditoría explícita.
+          const targetSessionId =
+            await this.movementsService.resolveCompensationSessionId({
+              store_id: storeId,
+              user_id: userId,
+              payment_id: paymentId,
+              order_id: orderId,
+            });
+          if (!targetSessionId) {
+            this.logger.warn(
+              `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId ?? 'n/a'} (${method || 'sin método'}): sin sesión abierta; contra-movimiento no efectivo NO registrado`,
+            );
+            await this.auditCashReversalFailure(
+              orderId,
+              paymentId != null ? [paymentId] : [],
+              'no_open_session_non_cash',
+            );
+            continue;
+          }
+          await this.movementsService.recordRefundMovement(targetSessionId, {
+            store_id: storeId,
+            user_id: userId,
+            amount: Number(movement.amount),
+            payment_method: method,
+            order_id: orderId,
+            payment_id: paymentId ?? undefined,
+            reference: 'payment_cancelled',
+          });
+        } catch (error) {
+          this.logger.error(
+            `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId ?? 'n/a'}: ${(error as Error).message}`,
+            (error as Error).stack,
           );
-          continue;
+          await this.auditCashReversalFailure(
+            orderId,
+            paymentId != null ? [paymentId] : [],
+            'movement_write_failed',
+            error,
+          );
         }
-
-        await this.movementsService.recordRefundMovement(targetSessionId, {
-          store_id: storeId,
-          user_id: userId,
-          amount: Number(movement.amount),
-          payment_method: movement.payment_method ?? '',
-          order_id: orderId,
-          payment_id: movement.payment_id ?? undefined,
-          reference: 'payment_cancelled',
-        });
       }
-    } catch {
-      // Non-critical: la anulación ya quedó persistida.
+    } catch (error) {
+      // La anulación ya quedó persistida: no se rompe, pero tampoco se calla.
+      this.logger.error(
+        `reversePaymentCashMovements: orden #${orderId}, pagos ${paymentIds.join(', ')}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+      await this.auditCashReversalFailure(orderId, paymentIds, 'reversal_failed', error);
+    }
+  }
+
+  /** Constancia de auditoría de un contra-movimiento de caja no asentado/encolado. */
+  private async auditCashReversalFailure(
+    orderId: number,
+    paymentIds: number[],
+    cause: string,
+    error?: unknown,
+  ): Promise<void> {
+    try {
+      await this.auditService.log({
+        userId: RequestContextService.getUserId(),
+        action: 'payment.cancel.cash_reversal_issue',
+        resource: AuditResource.ORDERS,
+        resourceId: orderId,
+        metadata: {
+          cause,
+          payment_ids: paymentIds,
+          error: error ? (error as Error).message : undefined,
+        },
+      });
+    } catch (auditError) {
+      this.logger.error(
+        `auditCashReversalFailure: orden #${orderId}: ${(auditError as Error).message}`,
+      );
     }
   }
 
@@ -9356,7 +9461,7 @@ export class OrderFlowService {
       if (paid.lt(new Prisma.Decimal(order.grand_total ?? 0))) return;
 
       const latestInvoice = await this.prisma.invoices.findFirst({
-        where: { order_id: orderId, invoice_type: 'sales_invoice' },
+        where: { order_id: orderId, invoice_type: 'sales_invoice', financial_account_id: null },
         orderBy: { created_at: 'desc' },
         select: { id: true, status: true },
       });

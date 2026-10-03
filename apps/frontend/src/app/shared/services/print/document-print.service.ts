@@ -186,6 +186,38 @@ export class DocumentPrintService {
   private readonly mmToPx = inject(MmToPxService);
 
   /**
+   * Print Formats is the authority for automatic printing. Read the detail on
+   * each decision (rather than trusting the auth/settings snapshot) so a
+   * merchant's latest enable/auto-print choice is honoured. Manual printing
+   * deliberately does not call this gate.
+   */
+  async canAutoPrint(formatType: PrintFormatType): Promise<boolean> {
+    try {
+      const detail = await firstValueFrom(this.gatewayClient.getFormatDetail(formatType));
+      return detail.is_active && detail.definition?.paper?.auto_print !== false;
+    } catch {
+      // Fail closed: a settings/network failure must never trigger an
+      // automatic print based on stale legacy settings.
+      return false;
+    }
+  }
+
+  /** Resolve fiscal routing first, then ask whether that final format may auto-print. */
+  async canAutoPrintDocument(
+    documentType: 'pos_order' | 'pos_invoice',
+    documentId: number,
+  ): Promise<boolean> {
+    try {
+      const resolved = await firstValueFrom(
+        this.gatewayClient.resolveDocument(documentType, documentId, 'html'),
+      );
+      return await this.canAutoPrint(resolved.format_type);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Resolves the paper for a document without printing it.
    *
    * Precedence: explicit override → `receipts.printing[document]` → the legacy
@@ -319,6 +351,15 @@ export class DocumentPrintService {
     trigger?: PrintTrigger;
     fallbackRequest?: PrintRequest;
   }): Promise<PrintResult | null> {
+    if (params.trigger === 'automatic' && !(await this.canAutoPrint(params.formatType))) {
+      return {
+        documents: 0,
+        pages: 0,
+        copies: 0,
+        format: params.formatType as unknown as PrintFormat,
+      };
+    }
+
     try {
       const response = await firstValueFrom(
         this.gatewayClient.renderDocument(params.formatType, params.documentId, 'html'),
@@ -339,6 +380,11 @@ export class DocumentPrintService {
         };
       }
     } catch (err) {
+      if (this.isForbiddenError(err)) {
+        // An inactive format is a policy decision, not a gateway outage.
+        // Never bypass it by rendering a local fallback, even for manual jobs.
+        return null;
+      }
       console.warn(
         `[DocumentPrintService] Error en Print Gateway para ${params.formatType}, aplicando fallback local:`,
         err,
@@ -346,8 +392,11 @@ export class DocumentPrintService {
     }
 
     // Fallback a renderizado local en el navegador
-    if (params.fallbackRequest) {
-      return this.print(params.fallbackRequest);
+    if (params.formatType === 'dispatch_ticket' && params.fallbackRequest) {
+      return this.print({
+        ...params.fallbackRequest,
+        trigger: params.trigger ?? 'explicit',
+      });
     }
 
     return null;
@@ -374,6 +423,15 @@ export class DocumentPrintService {
     const resolved = await firstValueFrom(
       this.gatewayClient.resolveDocument(params.documentType, params.documentId, 'html'),
     );
+
+    if (params.trigger === 'automatic' && !(await this.canAutoPrint(resolved.format_type))) {
+      return {
+        documents: 0,
+        pages: 0,
+        copies: 0,
+        format: resolved.format_type as unknown as PrintFormat,
+      };
+    }
 
     const response = await firstValueFrom(
       this.gatewayClient.renderDocument(
@@ -404,6 +462,12 @@ export class DocumentPrintService {
       copies: response.copies || 1,
       format: requestedFormat,
     };
+  }
+
+  private isForbiddenError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const candidate = error as { status?: unknown; error?: { status?: unknown } };
+    return candidate.status === 403 || candidate.error?.status === 403;
   }
 
   /**

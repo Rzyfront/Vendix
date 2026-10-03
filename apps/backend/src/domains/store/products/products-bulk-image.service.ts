@@ -186,15 +186,29 @@ export class ProductsBulkImageService {
         name: true,
         slug: true,
         state: true,
+        updated_at: true,
         product_images: { select: { id: true } },
       },
     });
 
     const productMap = new Map<string, (typeof allProducts)[0]>();
     for (const product of allProducts) {
-      if (product.sku) {
-        productMap.set(product.sku.toLowerCase(), product);
+      if (!product.sku) continue;
+      const key = product.sku.toLowerCase();
+      const prev = productMap.get(key);
+      if (prev) {
+        // Un producto no archivado siempre gana; entre archivados, el más reciente.
+        const prevArchived = prev.state === 'archived';
+        const curArchived = product.state === 'archived';
+        if (!prevArchived && curArchived) continue;
+        if (
+          prevArchived === curArchived &&
+          (prev.updated_at?.getTime() ?? 0) >= (product.updated_at?.getTime() ?? 0)
+        ) {
+          continue;
+        }
       }
+      productMap.set(key, product);
     }
 
     const skus: BulkImageAnalysisSkuDto[] = [];
@@ -487,6 +501,7 @@ export class ProductsBulkImageService {
         store_id: storeId,
         sku: { equals: sku, mode: 'insensitive' },
       },
+      orderBy: [{ state: 'asc' }, { updated_at: 'desc' }],
       select: {
         id: true,
         slug: true,

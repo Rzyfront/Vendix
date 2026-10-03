@@ -122,6 +122,86 @@ export interface CancellationPendingLeg {
   method_label: string;
 }
 
+const CHANNEL_PAYMENT_STATES = ['succeeded', 'partially_refunded'];
+
+/**
+ * Pagos que pueden fijar el canal del reembolso, en orden determinista
+ * (`id asc`). Solo cuentan los que de verdad retuvieron dinero
+ * (`succeeded` / `partially_refunded`: un pago ya parcialmente devuelto sigue
+ * siendo la fuente del dinero); un pago cancelado, fallido o reembolsado
+ * nunca decide el canal. Si no hay ninguno (p.ej. cobro `pending` contra
+ * entrega) se cae a los pagos `pending`, como el resto del flujo.
+ */
+export function selectRefundChannelPayments<
+  T extends { id: number; state: string },
+>(payments: T[] | null | undefined): T[] {
+  const sorted = [...(payments ?? [])].sort((a, b) => a.id - b.id);
+  const settled = sorted.filter((p) => CHANNEL_PAYMENT_STATES.includes(p.state));
+  return settled.length > 0
+    ? settled
+    : sorted.filter((p) => p.state === 'pending');
+}
+
+export interface RefundAllocationLeg {
+  payment_id: number;
+  type: string | null;
+  /** Monto aún devolvible por este pago (monto cobrado - ya devuelto). */
+  capacity: number;
+}
+
+export interface RefundAllocationTramo {
+  payment_id: number;
+  type: string | null;
+  amount: number;
+}
+
+/**
+ * Reparte el monto de un reembolso entre varios pagos: primero los pagos en
+ * efectivo (por id) hasta su capacidad, luego el resto en orden de id. Trabaja
+ * en centavos. Lo que no cabe en ningún pago (datos inconsistentes) NO se
+ * reasigna: queda en `unallocated`.
+ */
+export function allocateRefundAcrossPayments(
+  total: number,
+  legs: RefundAllocationLeg[],
+): { tramos: RefundAllocationTramo[]; unallocated: number } {
+  const isCash = (l: RefundAllocationLeg) =>
+    resolveEffectiveRefundChannel('original_payment', l.type) === 'cash';
+  const ordered = [
+    ...legs.filter(isCash).sort((a, b) => a.payment_id - b.payment_id),
+    ...legs.filter((l) => !isCash(l)).sort((a, b) => a.payment_id - b.payment_id),
+  ];
+  let remaining = Math.round(total * 100);
+  const tramos: RefundAllocationTramo[] = [];
+  for (const leg of ordered) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, Math.max(0, Math.round(leg.capacity * 100)));
+    if (take <= 0) continue;
+    tramos.push({ payment_id: leg.payment_id, type: leg.type, amount: take / 100 });
+    remaining -= take;
+  }
+  return { tramos, unallocated: remaining / 100 };
+}
+
+/**
+ * Método con el que se asienta un movimiento NO efectivo: el tipo real del
+ * pago cuando coincide con el canal por el que salió el dinero; si el
+ * operador eligió otro canal (p.ej. pago en efectivo devuelto a saldo
+ * interno), el canal — nunca `cash`, que alteraría el arqueo.
+ */
+export function resolveNonCashMovementMethod(
+  paymentType: string | null | undefined,
+  channel: EffectiveRefundChannel,
+): string {
+  if (
+    paymentType &&
+    resolveEffectiveRefundChannel('original_payment', paymentType) === channel
+  ) {
+    return paymentType;
+  }
+  return channel;
+}
+
 @Injectable()
 export class RefundFlowService {
   private readonly logger = new Logger(RefundFlowService.name);
@@ -456,6 +536,7 @@ export class RefundFlowService {
           },
         },
         payments: {
+          orderBy: { id: 'asc' },
           include: {
             store_payment_method: {
               select: {
@@ -518,9 +599,13 @@ export class RefundFlowService {
     // (cash → caja, bank_transfer → cartera, wompi/paypal/stripe → gateway).
     // El resolver vive en `refund-channel.util.ts` para que la lógica sea
     // compartible entre backend, tests y futuros consumidores.
-    const paymentType: string | null =
-      order.payments?.[0]?.store_payment_method?.system_payment_method?.type ??
-      null;
+    // Selección determinista: solo pagos que retuvieron dinero, `id asc`
+    // (antes `payments[0]` sin orderBy: aleatorio y podía ser un pago
+    // cancelado).
+    const channelPayments = selectRefundChannelPayments(order.payments);
+    const paymentTypeOf = (p: (typeof order.payments)[number] | undefined) =>
+      p?.store_payment_method?.system_payment_method?.type ?? null;
+    const paymentType: string | null = paymentTypeOf(channelPayments[0]);
     const effectiveChannel: EffectiveRefundChannel = resolveEffectiveRefundChannel(
       dto.refund_method,
       paymentType,
@@ -1157,22 +1242,52 @@ export class RefundFlowService {
         // `store_credit` → ya se acreditó la wallet arriba.
         // `bank_transfer` → el operador transfiere desde su app bancaria
         // manualmente; no hay integración API.
-        const movesCash = effectiveChannel === 'cash';
-        // Paso 4: entrega durable y awaited — la respuesta lleva el aviso
-        // explícito (`recorded` / `pending` + fila del outbox) en vez de un
-        // éxito silencioso. El refund ya está committed: un `pending` no lo
-        // revierte, solo le dice al operador que la caja quedó por entregar.
+        // Un movimiento por tramo: con varios pagos de distinto método el
+        // monto se reparte (efectivo primero) y cada tramo se asienta con el
+        // método real de su pago. Solo con el refund ya completado (un
+        // pendiente de pasarela aún no movió dinero).
         let cash_movement: RefundCashMovementNotice | undefined;
-        if (userId && movesCash) {
-          cash_movement = await this.recordRefundCashRegisterMovement({
-            organization_id: order.stores?.organization_id,
+        if (userId && refundCompleted) {
+          const tramos = await this.buildRefundMovementTramos({
+            refundMethod: dto.refund_method,
+            effectiveChannel,
+            channelPayments: channelPayments.map((p) => ({
+              id: p.id,
+              type: paymentTypeOf(p),
+              amount: Number((p as { amount?: unknown }).amount ?? 0),
+            })),
+            linkedPaymentId: completedRefund.payment_id ?? null,
+            typeByPaymentId: new Map(
+              (order.payments ?? []).map((p) => [p.id, paymentTypeOf(p)]),
+            ),
+            total: Number(calculation.total_refund),
+            refundId: completedRefund.id,
+          });
+          const cashTramos = tramos.filter((t) => t.method === 'cash');
+          if (cashTramos.length > 0) {
+            // Paso 4: entrega durable y awaited — la respuesta lleva el aviso
+            // explícito (`recorded` / `pending` + fila del outbox). El outbox
+            // tiene una fila por refund: los tramos en efectivo se suman.
+            cash_movement = await this.recordRefundCashRegisterMovement({
+              organization_id: order.stores?.organization_id,
+              store_id: order.store_id,
+              user_id: userId,
+              refund_id: completedRefund.id,
+              order_id: orderId,
+              payment_id: cashTramos[0].payment_id,
+              amount:
+                cashTramos.reduce((acc, t) => acc + Math.round(t.amount * 100), 0) /
+                100,
+              channel: 'cash',
+            });
+          }
+          await this.recordNonCashRefundMovements({
+            organization_id: order.stores?.organization_id ?? null,
             store_id: order.store_id,
             user_id: userId,
             refund_id: completedRefund.id,
             order_id: orderId,
-            payment_id: completedRefund.payment_id ?? null,
-            amount: calculation.total_refund,
-            channel: effectiveChannel,
+            tramos: tramos.filter((t) => t.method !== 'cash'),
           });
         }
 
@@ -1718,6 +1833,170 @@ export class RefundFlowService {
   }
 
   /**
+   * Tramos (pago + método real + monto) en los que se asienta un refund
+   * completado. Un solo pago (o un método explícito distinto de
+   * `original_payment`): un tramo con el monto íntegro. Varios pagos con
+   * `original_payment`: reparto con `allocateRefundAcrossPayments`, cuya
+   * capacidad por pago descuenta lo ya devuelto según el libro de caja.
+   */
+  private async buildRefundMovementTramos(input: {
+    refundMethod: string;
+    effectiveChannel: EffectiveRefundChannel;
+    channelPayments: { id: number; type: string | null; amount: number }[];
+    linkedPaymentId: number | null;
+    typeByPaymentId: Map<number, string | null>;
+    total: number;
+    refundId: number;
+  }): Promise<{ payment_id: number | null; amount: number; method: string }[]> {
+    const methodFor = (channel: EffectiveRefundChannel, type: string | null) =>
+      channel === 'cash' ? 'cash' : resolveNonCashMovementMethod(type, channel);
+
+    if (
+      input.refundMethod === 'original_payment' &&
+      input.channelPayments.length > 1
+    ) {
+      let alreadyRefunded = new Map<number, number>();
+      try {
+        const rows = await this.prisma.cash_register_movements.groupBy({
+          by: ['payment_id'],
+          where: {
+            type: 'refund',
+            payment_id: { in: input.channelPayments.map((p) => p.id) },
+          },
+          _sum: { amount: true },
+        });
+        alreadyRefunded = new Map(
+          rows
+            .filter((r) => r.payment_id != null)
+            .map((r) => [r.payment_id as number, Number(r._sum.amount ?? 0)]),
+        );
+      } catch (error) {
+        this.logger.error(
+          `Refund #${input.refundId}: could not read prior refund movements per payment, allocating against full payment amounts: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const { tramos, unallocated } = allocateRefundAcrossPayments(
+        input.total,
+        input.channelPayments.map((p) => ({
+          payment_id: p.id,
+          type: p.type,
+          capacity: p.amount - (alreadyRefunded.get(p.id) ?? 0),
+        })),
+      );
+      if (unallocated > 0) {
+        this.logger.warn(
+          `Refund #${input.refundId}: ${unallocated} could not be allocated to any payment (capacity exhausted) — left out of the cash ledger.`,
+        );
+      }
+      return tramos.map((t) => ({
+        payment_id: t.payment_id,
+        amount: t.amount,
+        method: methodFor(
+          resolveEffectiveRefundChannel('original_payment', t.type),
+          t.type,
+        ),
+      }));
+    }
+
+    const payment_id = input.linkedPaymentId ?? input.channelPayments[0]?.id ?? null;
+    const type =
+      payment_id != null
+        ? (input.typeByPaymentId.get(payment_id) ?? null)
+        : null;
+    return [
+      {
+        payment_id,
+        amount: input.total,
+        method: methodFor(input.effectiveChannel, type),
+      },
+    ];
+  }
+
+  /**
+   * Asienta en el libro de caja los tramos NO efectivo de un refund
+   * completado (idempotente por reference). Non-blocking: el refund ya está
+   * committed. Sin sesión destino no se encola — log + audit_logs — y nunca
+   * afecta al efectivo (`computeCashSummary` solo resta refunds `cash`).
+   */
+  private async recordNonCashRefundMovements(input: {
+    organization_id: number | null;
+    store_id: number;
+    user_id: number;
+    refund_id: number;
+    order_id: number;
+    tramos: { payment_id: number | null; amount: number; method: string }[];
+  }): Promise<void> {
+    if (input.tramos.length === 0) return;
+    try {
+      const settings = await this.settingsService.getSettings();
+      if (!(settings as any)?.pos?.cash_register?.enabled) return;
+    } catch (error) {
+      this.logger.error(
+        `Refund #${input.refund_id}: cannot read cash register settings, non-cash movement not recorded: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+    for (const tramo of input.tramos) {
+      try {
+        const outcome = await this.movementsService.recordNonCashRefundMovement({
+          store_id: input.store_id,
+          user_id: input.user_id,
+          refund_id: input.refund_id,
+          order_id: input.order_id,
+          payment_id: tramo.payment_id,
+          amount: tramo.amount,
+          payment_method: tramo.method,
+        });
+        if (outcome?.status === 'skipped') {
+          await this.auditSkippedNonCashMovement(input, tramo, outcome.reason);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Refund #${input.refund_id} (order #${input.order_id}): non-cash ` +
+            `(${tramo.method}) cash movement failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
+  private async auditSkippedNonCashMovement(
+    input: {
+      organization_id: number | null;
+      store_id: number;
+      user_id: number;
+      refund_id: number;
+      order_id: number;
+    },
+    tramo: { payment_id: number | null; amount: number; method: string },
+    reason: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.audit_logs.create({
+        data: {
+          user_id: input.user_id,
+          organization_id: input.organization_id,
+          store_id: input.store_id,
+          action: 'refund.non_cash_movement_skipped',
+          resource: AuditResource.ORDERS,
+          resource_id: input.order_id,
+          metadata: {
+            refund_id: input.refund_id,
+            order_id: input.order_id,
+            payment_id: tramo.payment_id,
+            payment_method: tramo.method,
+            amount: tramo.amount,
+            reason,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Refund #${input.refund_id}: audit of skipped non-cash movement failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
    * CP-REFUND-FLOW-REDESIGN paso 4 — entrega durable del movimiento de caja
    * del refund. Reemplaza al best-effort silencioso: cada camino devuelve
    * un aviso explícito que viaja en la respuesta (`recorded` / `pending` /
@@ -1753,10 +2032,9 @@ export class RefundFlowService {
         return { status: 'pending', failure_id: null, reason: 'unknown_organization' };
       }
 
-      // Sesión activa tal cual (`getActiveSession`); `null` = el durable
-      // escribe al outbox en vez de retornar en silencio.
-      const session = await this.sessionsService.getActiveSession(input.user_id);
-
+      // La sesión destino la resuelve el durable con la cascada de
+      // compensación (sesión de la venta, operador, mismo registro); sin
+      // destino escribe al outbox en vez de retornar en silencio.
       return await this.movementsService.recordRefundCashMovementDurable({
         organization_id: input.organization_id,
         store_id: input.store_id,
@@ -1766,7 +2044,6 @@ export class RefundFlowService {
         payment_id: input.payment_id,
         amount: Number(input.amount),
         channel: input.channel,
-        session_id: session?.id ?? null,
       });
     } catch (error) {
       // Non-critical: don't fail the refund if movement recording fails —
@@ -1907,7 +2184,15 @@ export class RefundFlowService {
         state: true,
         customer_id: true,
         order_number: true,
-        payments: { select: { id: true, state: true } },
+        payments: {
+          select: {
+            id: true,
+            state: true,
+            store_payment_method: {
+              select: { system_payment_method: { select: { type: true } } },
+            },
+          },
+        },
         grand_total: true,
         shipping_cost: true,
         shipping_tax_amount: true,
@@ -2237,6 +2522,31 @@ export class RefundFlowService {
           payment_id: refund.payment_id ?? null,
           amount: fiscal.amount,
           channel: effectiveChannel,
+        });
+      } else if (userId && effectiveChannel) {
+        // Reembolso no efectivo completado a mano: rastro en el libro de caja
+        // con el método real del pago (idempotente; sin evento contable, el
+        // asiento ya va por la delivery durable).
+        const linkedPayment = (order.payments ?? []).find(
+          (p) => p.id === refund.payment_id,
+        );
+        await this.recordNonCashRefundMovements({
+          organization_id: order.stores.organization_id,
+          store_id: order.store_id,
+          user_id: userId,
+          refund_id: refundId,
+          order_id: orderId,
+          tramos: [
+            {
+              payment_id: refund.payment_id ?? null,
+              amount: fiscal.amount,
+              method: resolveNonCashMovementMethod(
+                linkedPayment?.store_payment_method?.system_payment_method?.type ??
+                  null,
+                effectiveChannel,
+              ),
+            },
+          ],
         });
       }
     }

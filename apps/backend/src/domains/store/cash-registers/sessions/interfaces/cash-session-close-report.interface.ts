@@ -1,4 +1,78 @@
 /**
+ * Consolidado por método de pago: lo que el cajero debe tener por cada método.
+ * `entered` = sales + cash_in; `exited` = refunds + cancellations + withdrawals.
+ * Efectivo: `expected = opening + entered − exited`. No efectivo:
+ * `expected = entered − exited`, `counted`/`difference` = null.
+ */
+export interface CashConsolidatedRow {
+  method: string;
+  sales: number;
+  cash_in: number;
+  entered: number;
+  refunds: number;
+  cancellations: number;
+  withdrawals: number;
+  exited: number;
+  expected: number;
+  counted: number | null;
+  difference: number | null;
+}
+
+export interface CashConsolidated {
+  rows: CashConsolidatedRow[];
+  totals: { entered: number; exited: number; expected: number };
+}
+
+export interface CashBreakdown {
+  opening: number;
+  sales: number;
+  cash_in: number;
+  refunds: number;
+  cancellations: number;
+  withdrawals: number;
+  expected: number;
+  counted: number | null;
+  difference: number | null;
+}
+
+export interface CashOutflow {
+  id: number;
+  at: string;
+  kind: 'refund' | 'cancellation' | 'withdrawal';
+  order_id: number | null;
+  order_number: string | null;
+  payment_method: string;
+  amount: number;
+  reason: string | null;
+  user_name: string | null;
+}
+
+export interface CashIntegrity {
+  sales_match: boolean;
+  notes: string[];
+}
+
+export interface CashSalesSummary {
+  orders_count: number;
+  payments_count: number;
+  subtotal: number;
+  discounts: number;
+  product_taxes: number;
+  shipping_taxes: number;
+  taxes: number;
+  shipping: number;
+  tips: number;
+  /** Total cobrado: Σ movimientos `sale` de ESTA sesión (no `orders.grand_total`). */
+  grand_total: number;
+  /** Σ `orders.grand_total` de las órdenes no canceladas con venta en la sesión. */
+  orders_grand_total: number;
+  /** orders_grand_total / orders_count. */
+  average_ticket: number;
+  /** Órdenes de la sesión canceladas o totalmente reembolsadas (excluidas arriba). */
+  cancelled: { count: number; total: number };
+}
+
+/**
  * Reporte consolidado de una sesión de caja
  * (`GET store/cash-registers/sessions/:id/close-report`).
  *
@@ -28,6 +102,11 @@ export interface CashSessionCloseReport {
     difference: number | null;
   };
   payment_methods: { method: string; count: number; total: number }[];
+  consolidated: CashConsolidated;
+  cash_breakdown: CashBreakdown;
+  outflows: CashOutflow[];
+  sales_summary: CashSalesSummary;
+  integrity: CashIntegrity;
   sales: {
     orders_count: number;
     payments_count: number;

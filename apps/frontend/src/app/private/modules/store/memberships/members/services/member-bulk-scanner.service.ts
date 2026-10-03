@@ -1,7 +1,11 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
+import {
+  AiScanJobOptions,
+  AiScanJobService,
+} from '../../../../../../core/services/ai-scan-job.service';
 import {
   CommitMemberRosterDto,
   CommitMemberRosterResult,
@@ -35,6 +39,7 @@ interface ApiResponse<T> {
 export class MemberBulkScannerService {
   private readonly apiUrl = `${environment.apiUrl}/store/memberships/bulk-scan`;
   private readonly http = inject(HttpClient);
+  private readonly aiScanJobs = inject(AiScanJobService);
 
   /**
    * Upload the source document (image or PDF, max 10MB) for AI extraction.
@@ -43,10 +48,17 @@ export class MemberBulkScannerService {
    * detected document type, plans, members, and confidence. No analysis
    * or reconciliation happens at this stage.
    */
-  scanRoster(file: File): Observable<ApiResponse<RosterScanResult>> {
+  scanRoster(
+    file: File,
+    opts?: AiScanJobOptions,
+  ): Observable<ApiResponse<RosterScanResult>> {
     const formData = new FormData();
     formData.append('file', file);
-    return this.http.post<ApiResponse<RosterScanResult>>(`${this.apiUrl}`, formData);
+    // Encola en `bulk-scan/async` y sondea el job; el `result` se adapta a
+    // `{ success, data }`. Errores sin envolver (Error | HttpErrorResponse).
+    return this.aiScanJobs
+      .enqueueAndWait<RosterScanResult>(`${this.apiUrl}/async`, formData, opts)
+      .pipe(map((result) => ({ success: true, data: result })));
   }
 
   /**

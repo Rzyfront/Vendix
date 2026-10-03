@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { dispatch_route_stop_result_enum } from '@prisma/client';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
@@ -6,6 +6,8 @@ import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RouteFlowService } from './route-flow.service';
 import { DispatchRoutesService } from '../dispatch-routes.service';
@@ -34,7 +36,7 @@ import sharp = require('sharp');
  * owns the cash/AR/withholding/refund event fan-out.
  */
 @Injectable()
-export class RouteSheetScannerService {
+export class RouteSheetScannerService implements OnModuleInit {
   private readonly logger = new Logger(RouteSheetScannerService.name);
 
   constructor(
@@ -43,7 +45,19 @@ export class RouteSheetScannerService {
     private readonly routeFlow: RouteFlowService,
     private readonly dispatchRoutes: DispatchRoutesService,
     private readonly s3Service: S3Service,
+    private readonly aiScanRegistry: AiScanHandlerRegistry,
   ) {}
+
+  /** Registra el handler async `route_sheet` (cola generica `ai-scan`). */
+  onModuleInit(): void {
+    this.aiScanRegistry.register<RouteSheetScanResult>(
+      'route_sheet',
+      ({ files, params }) =>
+        this.scanRouteSheetFromFiles(files, {
+          route_id: Number(params?.route_id),
+        }),
+    );
+  }
 
   private getStoreId(): number {
     const store_id = RequestContextService.getContext()?.store_id;
@@ -66,6 +80,22 @@ export class RouteSheetScannerService {
     file: Express.Multer.File,
   ): Promise<RouteSheetScanResult> {
     this.assertValidFile(file);
+    return this.scanRouteSheetFromFiles([this.toScanFile(file)], {
+      route_id: routeId,
+    });
+  }
+
+  /**
+   * Nucleo del escaneo (buffer + mime, sin multer). Lo usan el endpoint
+   * sincrono y el handler async `route_sheet` de la cola `ai-scan`.
+   * `route_id` hoy no se usa en el escaneo (solo se propaga por contrato).
+   */
+  async scanRouteSheetFromFiles(
+    files: AiScanFile[],
+    _params: { route_id: number },
+  ): Promise<RouteSheetScanResult> {
+    const file = files?.[0];
+    this.assertValidScanFile(file);
 
     const { base64, mimeType } = await this.preprocessImage(file);
     const dataUri = `data:${mimeType};base64,${base64}`;
@@ -422,7 +452,21 @@ export class RouteSheetScannerService {
   // Private helpers
   // ───────────────────────────────────────────────────────────────────────────
 
-  private assertValidFile(file?: Express.Multer.File): void {
+  /** Validacion previa (mime) reutilizable por el controller async antes de encolar. */
+  assertValidFile(file?: Express.Multer.File): void {
+    this.assertValidScanFile(file ? this.toScanFile(file) : undefined);
+  }
+
+  toScanFile(file: Express.Multer.File): AiScanFile {
+    return {
+      buffer: file.buffer,
+      mimeType: file.mimetype,
+      originalName: file.originalname,
+      size: file.size,
+    };
+  }
+
+  private assertValidScanFile(file?: AiScanFile): asserts file is AiScanFile {
     if (!file) {
       throw new VendixHttpException(ErrorCodes.RTSCAN_NO_FILE);
     }
@@ -432,7 +476,7 @@ export class RouteSheetScannerService {
       'image/webp',
       'application/pdf',
     ];
-    if (!allowedTypes.includes(file.mimetype)) {
+    if (!allowedTypes.includes(file.mimeType)) {
       throw new VendixHttpException(ErrorCodes.RTSCAN_INVALID_FILE);
     }
   }
@@ -479,7 +523,7 @@ export class RouteSheetScannerService {
    * natively. Identical strategy to invoice/rut scanners.
    */
   private async preprocessImage(
-    file: Express.Multer.File,
+    file: AiScanFile,
   ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
@@ -513,7 +557,7 @@ export class RouteSheetScannerService {
       );
       return {
         base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
+        mimeType: file.mimeType,
       };
     }
   }

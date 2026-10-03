@@ -1017,6 +1017,8 @@ export class PrintLayoutComposerService {
     const shipVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="order.shipping_total">&#123;&#123; money order.shipping_total &#125;&#125;</span>'
       : this.compiler.escapeHtml(totals.shipping_total_formatted || `$${Number(totals.shipping_total || 0).toLocaleString('es-CO')}`);
+    // Propina fuera del TOTAL (factura): ver `totals.tip_outside_total`.
+    const tipOutside = mode !== 'tokenized' && totals.tip_outside_total === true;
     const tipVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="order.tip_amount">&#123;&#123; money order.tip_amount &#125;&#125;</span>'
       : this.compiler.escapeHtml(totals.tip_amount_formatted || `$${Number(totals.tip_amount || 0).toLocaleString('es-CO')}`);
@@ -1049,7 +1051,7 @@ export class PrintLayoutComposerService {
               <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_reten', 'Retención'))}:</td>
               <td class="total-val discount">${retenVal}</td>
             </tr>` : ''}
-            ${showTip && (mode === 'tokenized' || Number(totals.tip_amount) > 0) ? `
+            ${showTip && !tipOutside && (mode === 'tokenized' || Number(totals.tip_amount) > 0) ? `
             <tr data-element-id="f_tip" data-section-id="sec_totals" data-token="order.tip_amount">
               <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tip', 'Propina'))}:</td>
               <td class="total-val">${tipVal}</td>
@@ -1057,6 +1059,15 @@ export class PrintLayoutComposerService {
             ${showTot ? `<tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
               <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tot', 'TOTAL'))}:</td>
               <td class="total-val grand-total">${grandVal}</td>
+            </tr>` : ''}
+            ${tipOutside && showTip && Number(totals.tip_amount) > 0 ? `
+            <tr data-element-id="f_tip" data-section-id="sec_totals" data-token="order.tip_amount">
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tip', 'Propina voluntaria'))}:</td>
+              <td class="total-val">${tipVal}</td>
+            </tr>
+            <tr class="total-paid-row" data-element-id="f_total_paid" data-section-id="sec_totals">
+              <td class="total-label">Total pagado:</td>
+              <td class="total-val">${this.compiler.escapeHtml(totals.total_paid_formatted || `$${Number(totals.total_paid || 0).toLocaleString('es-CO')}`)}</td>
             </tr>` : ''}
             ${showWords && totals.grand_total_in_words ? `
             <tr class="total-in-words-row" data-element-id="f_words" data-section-id="sec_totals" data-token="order.grand_total_in_words">

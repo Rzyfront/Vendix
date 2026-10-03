@@ -58,7 +58,7 @@ export class ItemCancellationModalComponent {
   readonly confirmed = output<ItemCancellationSubmit>();
 
   readonly reason = signal('');
-  readonly destination = signal<ItemCancellationDestination>('waste');
+  readonly destination = signal<ItemCancellationDestination>('reuse');
   private readonly localError = signal<string | null>(null);
   readonly error = computed(() => this.localError() ?? this.serverError());
 
@@ -73,7 +73,7 @@ export class ItemCancellationModalComponent {
         const open = this.isOpen();
         if (open && !wasOpen) {
           this.reason.set('');
-          this.destination.set('waste');
+          this.destination.set(this.canReuse() ? 'reuse' : 'waste');
           this.localError.set(null);
         }
         wasOpen = open;

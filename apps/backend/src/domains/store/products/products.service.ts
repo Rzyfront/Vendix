@@ -534,7 +534,16 @@ export class ProductsService {
     return { description: response.content };
   }
 
+  /**
+   * @deprecated Síncrono: devuelve el PNG como data URI (varios MB). Usar el
+   * flujo async `POST store/products/enhance-image/async` (cola `ai-scan`).
+   */
   async enhanceImage(dto: GenerateProductImageEnhancementDto) {
+    return this.enhanceImageCore(dto);
+  }
+
+  /** Núcleo compartido por el endpoint síncrono y el handler `product_image_enhance`. */
+  async enhanceImageCore(dto: GenerateProductImageEnhancementDto) {
     const referenceImage = await this.resolveImageReference(dto.image_url);
     const productTypeLabel =
       dto.product_type === 'service' ? 'servicio' : 'producto';
@@ -574,7 +583,16 @@ export class ProductsService {
     };
   }
 
+  /**
+   * @deprecated Síncrono: devuelve el PNG como data URI (varios MB). Usar el
+   * flujo async `POST store/products/generate-image/async` (cola `ai-scan`).
+   */
   async generateImage(dto: GenerateProductImageDto) {
+    return this.generateImageCore(dto);
+  }
+
+  /** Núcleo compartido por el endpoint síncrono y el handler `product_image_generate`. */
+  async generateImageCore(dto: GenerateProductImageDto) {
     const productTypeLabel =
       dto.product_type === 'service' ? 'servicio' : 'producto';
     const variables: Record<string, string> = {
@@ -631,6 +649,80 @@ export class ProductsService {
       revised_prompt: response.revisedPrompt,
       model: response.model,
     };
+  }
+
+  /**
+   * Handler de la cola `ai-scan` para `product_image_enhance` / `product_image_generate`.
+   * Ejecuta el núcleo, sube el PNG a S3 y devuelve key + URL firmada (nunca base64).
+   * Fallo de S3 -> UPLOAD_FAILED_001 (502, reintentable por BullMQ).
+   */
+  async runImageScanJob(
+    kind: 'product_image_enhance' | 'product_image_generate',
+    params: Record<string, unknown>,
+    context: { organization_id: number | null; store_id: number | null },
+  ) {
+    const result =
+      kind === 'product_image_enhance'
+        ? await this.enhanceImageCore(
+            params as unknown as GenerateProductImageEnhancementDto,
+          )
+        : await this.generateImageCore(
+            params as unknown as GenerateProductImageDto,
+          );
+
+    const match = /^data:([A-Za-z0-9.+\/-]+);base64,(.+)$/s.exec(
+      result.image_url,
+    );
+    const buffer = Buffer.from(match ? match[2] : result.image_url, 'base64');
+    const mime = match?.[1] ?? 'image/png';
+
+    const key = `ai-scans/${context.organization_id ?? 'platform'}/${
+      context.store_id ? 'store-' + context.store_id : 'org'
+    }/product-image/${Date.now()}.png`;
+
+    let image_key: string;
+    let image_url: string | undefined;
+    try {
+      image_key = await this.s3Service.uploadFile(buffer, key, mime);
+      image_url = await this.s3Service.signUrl(image_key);
+    } catch (err: any) {
+      this.logger.error(
+        `[AiScan] ${kind} S3 upload failed: ${err?.message ?? err}`,
+      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FAILED_001);
+    }
+
+    return {
+      image_key,
+      image_url,
+      revised_prompt: result.revised_prompt,
+      model: result.model,
+    };
+  }
+
+  /**
+   * Bytes de una imagen IA generada por el job async. Sólo sirve keys del
+   * prefijo propio de la tienda del contexto; cualquier otra cosa -> 404 sin
+   * descargar (no filtra existencia).
+   */
+  async getAiImageBytes(key: string): Promise<Buffer> {
+    const ctx = RequestContextService.getContext();
+    const prefix = `ai-scans/${ctx?.organization_id}/store-${ctx?.store_id}/product-image/`;
+    if (
+      !ctx?.organization_id ||
+      !ctx?.store_id ||
+      typeof key !== 'string' ||
+      !key.startsWith(prefix) ||
+      key.includes('..') ||
+      !key.endsWith('.png')
+    ) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+    try {
+      return await this.s3Service.downloadFile(key);
+    } catch {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
   }
 
   private async resolveImageReference(imageUrl: string): Promise<string> {
@@ -727,9 +819,23 @@ export class ProductsService {
       is_featured?: boolean | null;
       online_purchase_url?: string | null;
     },
-  >(dto: T): T {
+  >(dto: T, existingIsIngredient?: boolean | null): T {
+    // Regla del dueño: todo insumo (vendible o no) nunca se publica ni se
+    // destaca en la tienda en línea. Si el payload no trae `is_ingredient`
+    // (update parcial) se hereda el del producto existente.
+    const effectiveIsIngredient =
+      dto.is_ingredient !== undefined && dto.is_ingredient !== null
+        ? dto.is_ingredient === true
+        : existingIsIngredient === true;
     const isPure = !!dto.is_ingredient && dto.is_sellable === false;
-    if (!isPure) return dto;
+    if (!isPure) {
+      if (!effectiveIsIngredient) return dto;
+      return {
+        ...dto,
+        available_for_ecommerce: false,
+        is_featured: false,
+      } as T;
+    }
     return {
       ...dto,
       base_price: 0,
@@ -840,33 +946,50 @@ export class ProductsService {
 
     const prisma = tx || this.prisma;
 
+    // Un producto archivado ya no ocupa su código de barras: solo bloquean
+    // los no archivados (el índice único parcial lo respalda en la base).
     const productConflict = await prisma.products.findFirst({
       where: {
         barcode: { equals: normalized },
+        state: { not: ProductState.ARCHIVED },
         ...(options.excludeProductId && { NOT: { id: options.excludeProductId } }),
       },
-      select: { id: true },
+      select: { id: true, name: true },
     });
     if (productConflict) {
       throw new VendixHttpException(
         ErrorCodes.PROD_BARCODE_DUP_001,
-        'El código de barras ya está en uso en esta tienda',
-        { barcode: normalized, conflict_type: 'product' },
+        `El código de barras ya está en uso por el producto "${productConflict.name}"`,
+        {
+          barcode: normalized,
+          conflict_type: 'product',
+          product_id: productConflict.id,
+          product_name: productConflict.name,
+        },
       );
     }
 
     const variantConflict = await prisma.product_variants.findFirst({
       where: {
         barcode: { equals: normalized },
+        products: { state: { not: ProductState.ARCHIVED } },
         ...(options.excludeVariantId && { NOT: { id: options.excludeVariantId } }),
       },
-      select: { id: true },
+      select: {
+        id: true,
+        products: { select: { id: true, name: true } },
+      },
     });
     if (variantConflict) {
       throw new VendixHttpException(
         ErrorCodes.PROD_BARCODE_DUP_001,
-        'El código de barras ya está en uso en esta tienda',
-        { barcode: normalized, conflict_type: 'variant' },
+        `El código de barras ya está en uso por una variante del producto "${variantConflict.products.name}"`,
+        {
+          barcode: normalized,
+          conflict_type: 'variant',
+          product_id: variantConflict.products.id,
+          product_name: variantConflict.products.name,
+        },
       );
     }
 
@@ -882,13 +1005,30 @@ export class ProductsService {
             NOT: { product_id: options.excludeProductId },
           }),
         },
-        select: { product_id: true, price_tier_id: true },
+        select: {
+          product_id: true,
+          price_tier_id: true,
+          product: { select: { id: true, name: true, state: true } },
+        },
       });
     if (presentationConflict) {
+      // Decisión del dueño: el bloqueo se mantiene aunque el producto dueño
+      // esté archivado (el índice único de la presentación no puede filtrar
+      // por el estado del producto), pero el mensaje debe nombrarlo.
+      const owner = presentationConflict.product;
+      const productArchived = owner?.state === ProductState.ARCHIVED;
       throw new VendixHttpException(
         ErrorCodes.PROD_BARCODE_DUP_001,
-        'El código de barras ya está en uso por una presentación de venta en esta tienda',
-        { barcode: normalized, conflict_type: 'presentation' },
+        productArchived
+          ? `El código de barras lo usa una presentación del producto archivado "${owner.name}"`
+          : 'El código de barras ya está en uso por una presentación de venta en esta tienda',
+        {
+          barcode: normalized,
+          conflict_type: 'presentation',
+          product_id: owner?.id ?? presentationConflict.product_id,
+          product_name: owner?.name ?? null,
+          product_archived: productArchived,
+        },
       );
     }
   }
@@ -931,11 +1071,15 @@ export class ProductsService {
       const existingProduct = await this.prisma.products.findFirst({
         where: {
           slug: slug,
+          state: { not: ProductState.ARCHIVED },
         },
       });
 
       if (existingProduct) {
-        throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+        throw new VendixHttpException(
+          ErrorCodes.PROD_DUP_001,
+          `La URL (slug) "${slug}" ya la usa el producto "${existingProduct.name}"`,
+        );
       }
 
       // Verificar que el SKU sea único si se proporciona
@@ -943,11 +1087,15 @@ export class ProductsService {
         const existingSku = await this.prisma.products.findFirst({
           where: {
             sku: sanitizedDto.sku,
+            state: { not: ProductState.ARCHIVED },
           },
         });
 
         if (existingSku) {
-          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+          throw new VendixHttpException(
+            ErrorCodes.PROD_DUP_001,
+            `El SKU "${sanitizedDto.sku}" ya lo usa el producto "${existingSku.name}"`,
+          );
         }
       }
 
@@ -3771,7 +3919,10 @@ export class ProductsService {
         sanitizedDto,
         existingProduct.store_id,
       );
-      sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
+      sanitizedDto = this.sanitizeIngredientPayload(
+        sanitizedDto,
+        existingProduct.is_ingredient,
+      );
 
       // BLOCK: Check for active stock reservations on the product itself
       const hasActiveReservations =
@@ -3800,12 +3951,16 @@ export class ProductsService {
         const existingSlug = await this.prisma.products.findFirst({
           where: {
             slug: sanitizedDto.slug,
+            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
 
         if (existingSlug) {
-          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+          throw new VendixHttpException(
+            ErrorCodes.PROD_DUP_001,
+            `La URL (slug) "${sanitizedDto.slug}" ya la usa el producto "${existingSlug.name}"`,
+          );
         }
       }
 
@@ -3815,12 +3970,16 @@ export class ProductsService {
           where: {
             store_id: existingProduct.store_id,
             sku: sanitizedDto.sku,
+            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
 
         if (existingSku) {
-          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+          throw new VendixHttpException(
+            ErrorCodes.PROD_DUP_001,
+            `El SKU "${sanitizedDto.sku}" ya lo usa el producto "${existingSku.name}"`,
+          );
         }
       }
 
@@ -6582,24 +6741,30 @@ export class ProductsService {
   }> {
     const [slug, sku, barcodeProduct, barcodeVariant] = await Promise.all([
       this.prisma.products.findFirst({
-        where: { slug: params.slug },
+        where: { slug: params.slug, state: { not: ProductState.ARCHIVED } },
         select: { id: true, name: true },
       }),
       params.sku
         ? this.prisma.products.findFirst({
-            where: { sku: params.sku },
+            where: { sku: params.sku, state: { not: ProductState.ARCHIVED } },
             select: { id: true, name: true },
           })
         : Promise.resolve(null),
       params.barcode
         ? this.prisma.products.findFirst({
-            where: { barcode: params.barcode },
+            where: {
+              barcode: params.barcode,
+              state: { not: ProductState.ARCHIVED },
+            },
             select: { id: true, name: true },
           })
         : Promise.resolve(null),
       params.barcode
         ? this.prisma.product_variants.findFirst({
-            where: { barcode: params.barcode },
+            where: {
+              barcode: params.barcode,
+              products: { state: { not: ProductState.ARCHIVED } },
+            },
             select: { id: true },
           })
         : Promise.resolve(null),

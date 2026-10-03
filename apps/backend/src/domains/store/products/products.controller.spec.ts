@@ -16,6 +16,7 @@ import {
 } from './dto';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { AiScanJobService } from '@common/ai-scan-jobs';
 
 describe('ProductsController', () => {
   let controller: ProductsController;
@@ -74,6 +75,7 @@ describe('ProductsController', () => {
           provide: ProductsService,
           useValue: mockProductsService,
         },
+        { provide: AiScanJobService, useValue: { enqueue: jest.fn() } },
         // Variant writes were split out of ProductsService: the controller now
         // routes them to ProductVariantService, so the double must exist even in
         // cases that only touch simple products.

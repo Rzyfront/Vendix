@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
 import {
   InventoryCountItem,
   InventoryCountScanResult,
@@ -15,18 +17,38 @@ import sharp = require('sharp');
 type CandidateProduct = MatchedCountProduct['candidates'][number];
 
 @Injectable()
-export class InventoryCountScannerService {
+export class InventoryCountScannerService implements OnModuleInit {
   private readonly logger = new Logger(InventoryCountScannerService.name);
 
   constructor(
     private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
+    private readonly aiScanRegistry: AiScanHandlerRegistry,
   ) {}
+
+  /** Registra el handler async `inventory_count` (cola generica `ai-scan`). */
+  onModuleInit(): void {
+    this.aiScanRegistry.register<InventoryCountScanResponse>(
+      'inventory_count',
+      ({ files, params }) =>
+        this.scanCountFromFiles(files, Number(params?.location_id)),
+    );
+  }
 
   async scanCount(
     file: Express.Multer.File,
     locationId: number,
   ): Promise<InventoryCountScanResponse> {
+    return this.scanCountFromFiles([this.toScanFile(file)], locationId);
+  }
+
+  /** Nucleo (buffer + mime, sin multer): sincrono y handler async. */
+  async scanCountFromFiles(
+    files: AiScanFile[],
+    locationId: number,
+  ): Promise<InventoryCountScanResponse> {
+    const file = files?.[0];
+    this.assertValidScanFile(file);
     const scan = await this.runOcr(file);
     const { matched_products, warnings } = await this.matchProducts(
       scan,
@@ -35,13 +57,35 @@ export class InventoryCountScannerService {
     return { scan, matched_products, warnings };
   }
 
+  toScanFile(file: Express.Multer.File): AiScanFile {
+    return {
+      buffer: file.buffer,
+      mimeType: file.mimetype,
+      originalName: file.originalname,
+      size: file.size,
+    };
+  }
+
+  /** Validacion previa (archivo presente + mime) reutilizable por el controller async. */
+  assertValidScanFile(file?: AiScanFile | null): asserts file is AiScanFile {
+    if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+    const allowed = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    ];
+    if (!allowed.includes(file.mimeType))
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+  }
+
   // --- Private helpers ---
 
   private async runOcr(
-    file: Express.Multer.File,
+    file: AiScanFile,
   ): Promise<InventoryCountScanResult> {
     this.logger.debug(
-      `[InventoryCountScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+      `[InventoryCountScan] File: mimetype=${file.mimeType}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
     );
 
     const { base64, mimeType } = await this.preprocessImage(file);
@@ -447,7 +491,7 @@ export class InventoryCountScannerService {
    * procese nativamente.
    */
   private async preprocessImage(
-    file: Express.Multer.File,
+    file: AiScanFile,
   ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
@@ -485,7 +529,7 @@ export class InventoryCountScannerService {
       );
       return {
         base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
+        mimeType: file.mimeType,
       };
     }
   }
