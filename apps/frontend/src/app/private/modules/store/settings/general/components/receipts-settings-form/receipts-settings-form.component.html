@@ -79,28 +79,6 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="setting-cell">
             <app-setting-toggle
-              [formControl]="printReceiptControl"
-              label="Imprimir Recibo"
-              description="Al cerrar la venta el recibo se manda a la impresora del punto"
-              (changed)="onFieldChange()"
-            ></app-setting-toggle>
-            <div class="setting-cell__meta">
-              <app-tooltip
-                content="Apagado, la venta se cierra sin papel y el recibo queda disponible para imprimirlo o reenviarlo después desde el detalle de la orden."
-                position="top"
-                size="sm"
-                color="default"
-              >
-                <span class="help-chip">
-                  <app-icon name="help-circle" size="12"></app-icon>
-                  Si lo apago
-                </span>
-              </app-tooltip>
-            </div>
-          </div>
-
-          <div class="setting-cell">
-            <app-setting-toggle
               [formControl]="emailReceiptControl"
               label="Email al Cliente"
               description="Se envía copia digital del recibo al correo registrado del cliente"
@@ -124,10 +102,6 @@
       </div>
     }
 
-    <!-- Print formats. Read-only here: the format, the margin and the copies of
-         every printable document are configured in the "Formatos de Impresión"
-         section, which is the single source of truth for `receipts.printing`.
-         This block only previews what that configuration produces. -->
     <div>
       <div class="block-head">
         <h4 class="block-title">Formato de impresión</h4>
@@ -222,53 +196,6 @@
             se ve tal cual saldrá del rollo.
           </p>
         </div>
-        <div class="setting-cell">
-          <app-setting-toggle
-            [formControl]="posAutoPrintControl"
-            label="Imprimir el tiquete automáticamente"
-            description="Al cerrar una venta, la tirilla sale sola sin pedir confirmación"
-            (changed)="onPosAutoPrintChange($event)"
-          ></app-setting-toggle>
-          <div class="setting-cell__meta">
-            <app-badge variant="primary" size="xsm" badgeStyle="outline">
-              Pertenece a Punto de Venta
-            </app-badge>
-            <app-tooltip
-              content="El valor se guarda en el bloque Punto de Venta, no en Recibos: es el mismo ajuste que gobierna la impresión del POS, editado desde acá por cercanía de uso. Apagado, el cajero decide venta por venta si imprime."
-              position="top"
-              size="sm"
-              color="default"
-            >
-              <span class="help-chip">
-                <app-icon name="help-circle" size="12"></app-icon>
-                Dónde se guarda
-              </span>
-            </app-tooltip>
-          </div>
-        </div>
-        @if (isLive()) {
-          <div class="setting-cell">
-            <app-setting-toggle
-              [formControl]="printPosTicketControl"
-              label="Imprimir también tiquete POS"
-              description="Además de la factura, imprime el tiquete como copia interna para despacho o cocina"
-              (changed)="onFieldChange()"
-            ></app-setting-toggle>
-            <div class="setting-cell__meta">
-              <app-tooltip
-                content="El tiquete no reemplaza la factura ni tiene validez fiscal: es papel de trabajo. Con la factura ya impresa, activarlo significa dos documentos por venta."
-                position="top"
-                size="sm"
-                color="default"
-              >
-                <span class="help-chip">
-                  <app-icon name="help-circle" size="12"></app-icon>
-                  Qué imprime
-                </span>
-              </app-tooltip>
-            </div>
-          </div>
-        }
       </div>
       @if (previewError()) {
         <p class="preview-error">{{ previewError() }}</p>
@@ -281,8 +208,25 @@
           su propia fila.
         </span>
       </p>
+    </div>
 
-      @if (isLive()) {
+    <div class="cross-ref" role="note">
+      <app-icon name="printer" size="16"></app-icon>
+      <span>
+        La activación y la impresión automática de cada documento se configuran en
+        <strong>Formatos de impresión</strong>. Desactivar la automática no impide
+        imprimir manualmente.
+      </span>
+      <a
+        routerLink="/admin/settings/print-formats"
+        class="text-[var(--color-primary)] underline underline-offset-2 font-medium inline-flex items-center gap-1 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        Abrir Formatos de impresión
+        <app-icon name="external-link" size="14"></app-icon>
+      </a>
+    </div>
+
+    @if (isLive()) {
         <div class="mt-3">
           <app-expandable-card [(expanded)]="legalNoticeOpen">
             <div slot="header" class="card-head">
@@ -318,8 +262,7 @@
             </div>
           </app-expandable-card>
         </div>
-      }
-    </div>
+    }
 
     <!-- Receipt Content — applies to the printed document either way -->
     <div>
@@ -361,103 +304,23 @@
       </div>
     </div>
 
-    <!-- Impresión encadenada — CP-DTLP-20260827 / ADR-7.
-         dispatch_ticket (tiquete de despacho) se imprime con el formato y las
-         copias configuradas en "Formatos de Impresión". Acá se gobiernan los
-         DOS disparadores:
-           - Habilitar tiquete de despacho: master switch (default on).
-           - Auto-imprimir con POS/factura: encadena el tiquete cuando la venta
-             incluye envío (default off, opt-in por admin).
-         Planos bajo `receipts` raíz para que `KNOWN_SECTIONS` no los drope. -->
+    <!-- La elegibilidad de mostrador es distinta a la activación y auto-print
+         del documento, que se configuran en Formatos de impresión. -->
     <div>
       <div class="block-head">
-        <h4 class="block-title">Impresión encadenada</h4>
+        <h4 class="block-title">Tiquete de reclamo</h4>
         <p class="block-subtitle">
-          Qué tiquete sale solo y qué tiquete sale a mano. El formato y las
-          copias se editan en <strong>Formatos de Impresión</strong>.
+          Define si los pedidos para mostrador y para llevar también entregan un
+          tiquete para reclamar. La impresión automática se configura por documento
+          en Formatos de impresión.
         </p>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="setting-cell">
           <app-setting-toggle
-            [formControl]="printDispatchTicketEnabledControl"
-            label="Habilitar tiquete de despacho"
-            description="Prendido: el tiquete se puede imprimir (auto + botón manual). Apagado: no sale ningún tiquete en toda la tienda"
-            (changed)="onFieldChange()"
-          ></app-setting-toggle>
-          <div class="setting-cell__meta">
-            <app-badge variant="primary" size="xsm" badgeStyle="outline">
-              Logistica
-            </app-badge>
-            <app-tooltip
-              content="Papel logístico con cliente, dirección y cantidades pedida / despachada por línea. Sin totales ni validez fiscal."
-              position="top"
-              size="sm"
-              color="default"
-            >
-              <span class="help-chip">
-                <app-icon name="help-circle" size="12"></app-icon>
-                Qué es
-              </span>
-            </app-tooltip>
-          </div>
-        </div>
-
-        <div class="setting-cell">
-          <app-setting-toggle
-            [formControl]="printDispatchTicketAutoWithPosControl"
-            label="Auto-imprimir en POS"
-            description="Prendido: en ventas CON envío sale solo junto al ticket o factura. Apagado: solo sale con el botón manual"
-            (changed)="onFieldChange()"
-          ></app-setting-toggle>
-          <div class="setting-cell__meta">
-            <app-badge variant="info" size="xsm" badgeStyle="outline">
-              Disparador POS
-            </app-badge>
-            <app-tooltip
-              content="Solo ventas con envío (domicilio). En mostrador no sale, salvo que actives el tiquete de reclamo."
-              position="top"
-              size="sm"
-              color="default"
-            >
-              <span class="help-chip">
-                <app-icon name="alert-triangle" size="12"></app-icon>
-                Consecuencia
-              </span>
-            </app-tooltip>
-          </div>
-        </div>
-
-        <div class="setting-cell">
-          <app-setting-toggle
-            [formControl]="printDispatchTicketAutoOnPostventaControl"
-            label="Auto-imprimir en postventa"
-            description="Prendido: al confirmar la postventa sale solo junto al documento. Apagado: solo sale con el botón manual"
-            (changed)="onFieldChange()"
-          ></app-setting-toggle>
-          <div class="setting-cell__meta">
-            <app-badge variant="info" size="xsm" badgeStyle="outline">
-              Disparador postventa
-            </app-badge>
-            <app-tooltip
-              content="Solo al confirmar la postventa. El botón manual del detalle sigue disponible aunque esté apagado."
-              position="top"
-              size="sm"
-              color="default"
-            >
-              <span class="help-chip">
-                <app-icon name="alert-triangle" size="12"></app-icon>
-                Consecuencia
-              </span>
-            </app-tooltip>
-          </div>
-        </div>
-
-        <div class="setting-cell">
-          <app-setting-toggle
             [formControl]="printDispatchTicketOnCounterControl"
-            label="Tiquete de reclamo (mostrador y para llevar)"
-            description="Prendido: mostrador y para llevar también imprimen para reclamar. Apagado: esos pedidos no imprimen"
+            label="Permitir tiquete de reclamo en mostrador y para llevar"
+            description="También permite entregar un tiquete de reclamo en mostrador, para llevar y recogida."
             (changed)="onFieldChange()"
           ></app-setting-toggle>
           <div class="setting-cell__meta">
@@ -482,9 +345,7 @@
   </div>
 </div>
 
-<!-- Sample document in both cases: the invoice comes from the backend preview
-     endpoint (never consumes a number of the DIAN resolution) and the POS ticket
-     is rendered by the same service the printer uses. -->
+<!-- La muestra de factura y tiquete se presenta sin alterar la numeración fiscal. -->
 <app-modal
   [(isOpen)]="isPreviewOpen"
   [title]="previewTitle()"
@@ -493,11 +354,6 @@
   (closed)="closeFormatPreview()"
 >
   @if (previewUrl()) {
-    <!-- `src` is assigned by the component; see `previewFrame`. -->
-    <iframe
-      #previewFrame
-      class="preview-frame"
-      [title]="previewTitle()"
-    ></iframe>
+    <iframe #previewFrame class="preview-frame" [title]="previewTitle()"></iframe>
   }
 </app-modal>

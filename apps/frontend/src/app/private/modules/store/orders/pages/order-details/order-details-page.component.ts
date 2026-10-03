@@ -2150,7 +2150,8 @@ export class OrderDetailsPageComponent {
    * por auditoría).
    *
    * Política MANUAL vigente:
-   *   1. `print_dispatch_ticket_enabled` (ADR-7) — si está apagado, false.
+   *   1. La pulsación es opt-in explícito; la activación del formato
+   *      dispatch_ticket se valida al imprimir desde Formatos de impresión.
    *   2. `delivery_type === 'direct_delivery'` (mostrador puro) — solo
    *      permitido si el admin prendió `print_dispatch_ticket_on_counter`.
    *   3. cualquier otro `delivery_type` (incluido `pickup`, `home_delivery`,
@@ -2164,8 +2165,6 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     if (!order) return false;
     const receipts = this.settingsFacade.receipts();
-    const enabled = receipts?.print_dispatch_ticket_enabled ?? true;
-    if (!enabled) return false;
     const counterEnabled = receipts?.print_dispatch_ticket_on_counter ?? false;
     // Mostrador puro: requiere opt-in explícito por admin. Para el resto,
     // el click del operador es el opt-in suficiente.
@@ -4152,10 +4151,10 @@ export class OrderDetailsPageComponent {
    */
   private async autoPrintDispatchTicket(order: Order): Promise<void> {
     const context: ShouldAutoPrintDispatchTicketContext = {
-      printDispatchTicketEnabled:
-        this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true,
-      printDispatchTicketAuto:
-        this.settingsFacade.receipts()?.print_dispatch_ticket_auto_on_postventa ?? false,
+      // The central document-print service owns activation and auto-print
+      // settings for dispatch_ticket.
+      printDispatchTicketEnabled: true,
+      printDispatchTicketAuto: true,
       // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
       // y para llevar. Same flag, mismo origen, mismo predicado compartido
       // con el POS.
