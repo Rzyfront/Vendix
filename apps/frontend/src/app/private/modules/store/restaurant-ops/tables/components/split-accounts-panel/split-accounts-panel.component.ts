@@ -151,6 +151,9 @@ export class SplitAccountsPanelComponent {
   readonly changed = output<SplitResult | null>();
   readonly loaded = output<SplitResult | null>();
   readonly splitCompleted = output<SplitResult>();
+  /** Muestra "Cancelar" junto a "Crear N cuentas" (el padre cierra el armado). */
+  readonly showCancel = input(false);
+  readonly cancelled = output<void>();
 
   readonly money = money;
   readonly accountTone = accountTone;

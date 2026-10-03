@@ -209,18 +209,7 @@
         tabindex="-1"
         class="max-w-[1600px] mx-auto mb-4 outline-none scroll-mt-24"
       >
-        @if (!orderData.active_financial_split_id) {
-          <div class="flex justify-end mb-2">
-            <button
-              type="button"
-              class="px-3 py-1.5 text-xs font-semibold rounded-md border border-border text-text-secondary hover:bg-gray-50"
-              (click)="showSplitConfig.set(false)"
-            >
-              Cerrar
-            </button>
-          </div>
-        }
-        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" [showCancel]="true" (cancelled)="showSplitConfig.set(false)" />
       </div>
     }
 
