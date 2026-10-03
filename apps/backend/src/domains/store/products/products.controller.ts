@@ -33,7 +33,11 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
-import { VendixHttpException } from '@common/errors';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { AiScanJobService } from '@common/ai-scan-jobs';
+
+/** Tope del data URI de `image_url` que viaja por Redis en el job async (~5 MB). */
+const MAX_ASYNC_IMAGE_DATA_URI_LENGTH = 5 * 1024 * 1024;
 
 @Controller('store/products')
 @UseGuards(PermissionsGuard)
@@ -42,6 +46,7 @@ export class ProductsController {
     private readonly productsService: ProductsService,
     private readonly productVariantService: ProductVariantService,
     private readonly responseService: ResponseService,
+    private readonly aiScanJobService: AiScanJobService,
   ) {}
   @ApiOperation({
     summary:
@@ -71,6 +76,7 @@ export class ProductsController {
   })
   @Post('enhance-image')
   @Permissions('store:products:create', 'store:products:update')
+  /** @deprecated Usar `POST store/products/enhance-image/async`. */
   async enhanceImage(@Body() dto: GenerateProductImageEnhancementDto) {
     const result = await this.productsService.enhanceImage(dto);
     return this.responseService.success(result, 'Imagen mejorada exitosamente');
@@ -82,9 +88,49 @@ export class ProductsController {
   })
   @Post('generate-image')
   @Permissions('store:products:create', 'store:products:update')
+  /** @deprecated Usar `POST store/products/generate-image/async`. */
   async generateImage(@Body() dto: GenerateProductImageDto) {
     const result = await this.productsService.generateImage(dto);
     return this.responseService.success(result, 'Imagen generada exitosamente');
+  }
+
+  @ApiOperation({
+    summary: 'Encolar la mejora con IA de la foto de un producto (async, 202 + job_id)',
+  })
+  @Post('enhance-image/async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('store:products:create', 'store:products:update')
+  async enhanceImageAsync(@Body() dto: GenerateProductImageEnhancementDto) {
+    if (
+      typeof dto.image_url === 'string' &&
+      dto.image_url.length > MAX_ASYNC_IMAGE_DATA_URI_LENGTH
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'La imagen supera el tamaño máximo permitido (5 MB)',
+      );
+    }
+    const { job_id } = await this.aiScanJobService.enqueue(
+      'product_image_enhance',
+      [],
+      { ...dto },
+    );
+    return this.responseService.success({ job_id }, 'Generación encolada');
+  }
+
+  @ApiOperation({
+    summary: 'Encolar la generación con IA de una imagen de producto (async, 202 + job_id)',
+  })
+  @Post('generate-image/async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('store:products:create', 'store:products:update')
+  async generateImageAsync(@Body() dto: GenerateProductImageDto) {
+    const { job_id } = await this.aiScanJobService.enqueue(
+      'product_image_generate',
+      [],
+      { ...dto },
+    );
+    return this.responseService.success({ job_id }, 'Generación encolada');
   }
 
   @ApiOperation({

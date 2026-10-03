@@ -534,7 +534,16 @@ export class ProductsService {
     return { description: response.content };
   }
 
+  /**
+   * @deprecated Síncrono: devuelve el PNG como data URI (varios MB). Usar el
+   * flujo async `POST store/products/enhance-image/async` (cola `ai-scan`).
+   */
   async enhanceImage(dto: GenerateProductImageEnhancementDto) {
+    return this.enhanceImageCore(dto);
+  }
+
+  /** Núcleo compartido por el endpoint síncrono y el handler `product_image_enhance`. */
+  async enhanceImageCore(dto: GenerateProductImageEnhancementDto) {
     const referenceImage = await this.resolveImageReference(dto.image_url);
     const productTypeLabel =
       dto.product_type === 'service' ? 'servicio' : 'producto';
@@ -574,7 +583,16 @@ export class ProductsService {
     };
   }
 
+  /**
+   * @deprecated Síncrono: devuelve el PNG como data URI (varios MB). Usar el
+   * flujo async `POST store/products/generate-image/async` (cola `ai-scan`).
+   */
   async generateImage(dto: GenerateProductImageDto) {
+    return this.generateImageCore(dto);
+  }
+
+  /** Núcleo compartido por el endpoint síncrono y el handler `product_image_generate`. */
+  async generateImageCore(dto: GenerateProductImageDto) {
     const productTypeLabel =
       dto.product_type === 'service' ? 'servicio' : 'producto';
     const variables: Record<string, string> = {
@@ -630,6 +648,55 @@ export class ProductsService {
       image_url: imageUrl,
       revised_prompt: response.revisedPrompt,
       model: response.model,
+    };
+  }
+
+  /**
+   * Handler de la cola `ai-scan` para `product_image_enhance` / `product_image_generate`.
+   * Ejecuta el núcleo, sube el PNG a S3 y devuelve key + URL firmada (nunca base64).
+   * Fallo de S3 -> UPLOAD_FAILED_001 (502, reintentable por BullMQ).
+   */
+  async runImageScanJob(
+    kind: 'product_image_enhance' | 'product_image_generate',
+    params: Record<string, unknown>,
+    context: { organization_id: number | null; store_id: number | null },
+  ) {
+    const result =
+      kind === 'product_image_enhance'
+        ? await this.enhanceImageCore(
+            params as unknown as GenerateProductImageEnhancementDto,
+          )
+        : await this.generateImageCore(
+            params as unknown as GenerateProductImageDto,
+          );
+
+    const match = /^data:([A-Za-z0-9.+\/-]+);base64,(.+)$/s.exec(
+      result.image_url,
+    );
+    const buffer = Buffer.from(match ? match[2] : result.image_url, 'base64');
+    const mime = match?.[1] ?? 'image/png';
+
+    const key = `ai-scans/${context.organization_id ?? 'platform'}/${
+      context.store_id ? 'store-' + context.store_id : 'org'
+    }/product-image/${Date.now()}.png`;
+
+    let image_key: string;
+    let image_url: string | undefined;
+    try {
+      image_key = await this.s3Service.uploadFile(buffer, key, mime);
+      image_url = await this.s3Service.signUrl(image_key);
+    } catch (err: any) {
+      this.logger.error(
+        `[AiScan] ${kind} S3 upload failed: ${err?.message ?? err}`,
+      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FAILED_001);
+    }
+
+    return {
+      image_key,
+      image_url,
+      revised_prompt: result.revised_prompt,
+      model: result.model,
     };
   }
 
