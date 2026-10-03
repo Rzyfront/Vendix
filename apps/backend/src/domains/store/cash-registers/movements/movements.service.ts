@@ -31,6 +31,13 @@ import { RequestContextService } from '@common/context/request-context.service';
 export const REFUND_CASH_MOVEMENT_KEY = 'refund_cash_movement_v1';
 export const REFUND_CASH_MOVEMENT_SOURCE = 'refund.cash_movement';
 
+/**
+ * Referencia del movimiento de compensación que registra la cancelación de una
+ * orden cobrada (convención hermana de `'payment_cancelled'`, que usan las
+ * anulaciones de pago). La consume el flujo de cancelación de órdenes.
+ */
+export const ORDER_CANCELLED_MOVEMENT_REFERENCE = 'order_cancelled';
+
 export interface RefundCashMovementPayload {
   version: 1;
   refund_id: number;
@@ -43,6 +50,18 @@ export interface RefundCashMovementPayload {
   /** Canal efectivo real (`cash`), no un literal hardcodeado. */
   channel: string;
 }
+
+export interface CompensationSessionInput {
+  store_id: number;
+  user_id: number;
+  payment_id?: number | null;
+  order_id?: number | null;
+}
+
+export type NonCashRefundMovementOutcome =
+  | { status: 'recorded'; movement_id: number }
+  | { status: 'exists'; movement_id: number }
+  | { status: 'skipped'; reason: 'no_open_cash_session' };
 
 export type RefundCashMovementOutcome =
   | { status: 'recorded'; movement_id: number }
@@ -200,14 +219,147 @@ export class MovementsService {
   }
 
   /**
+   * Resuelve a qué sesión de caja debe asentarse un movimiento de
+   * compensación (reembolso, cancelación). Cascada:
+   *  a) la sesión del movimiento `sale` original (por `payment_id`; si no hay
+   *     o no aparece, por `order_id`) si sigue abierta;
+   *  b) la sesión abierta del usuario operador;
+   *  c) cualquier sesión abierta del MISMO `cash_register_id` que la sesión
+   *     original;
+   *  d) `null` — el llamador encola.
+   */
+  async resolveCompensationSessionId(
+    input: CompensationSessionInput,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number | null> {
+    const db = (tx ?? this.prisma.withoutScope()) as unknown as Prisma.TransactionClient;
+
+    let origin_session: { id: number; status: string; cash_register_id: number } | null =
+      null;
+    let sale: { session_id: number } | null = null;
+    if (input.payment_id != null) {
+      sale = await db.cash_register_movements.findFirst({
+        where: {
+          store_id: input.store_id,
+          type: 'sale',
+          payment_id: input.payment_id,
+        },
+        orderBy: { id: 'asc' },
+        select: { session_id: true },
+      });
+    }
+    if (!sale && input.order_id != null) {
+      sale = await db.cash_register_movements.findFirst({
+        where: {
+          store_id: input.store_id,
+          type: 'sale',
+          order_id: input.order_id,
+        },
+        orderBy: { id: 'asc' },
+        select: { session_id: true },
+      });
+    }
+    if (sale) {
+      origin_session = await db.cash_register_sessions.findFirst({
+        where: { id: sale.session_id, store_id: input.store_id },
+        select: { id: true, status: true, cash_register_id: true },
+      });
+      if (origin_session?.status === 'open') return origin_session.id;
+    }
+
+    const own = await db.cash_register_sessions.findFirst({
+      where: {
+        store_id: input.store_id,
+        status: 'open',
+        opened_by: input.user_id,
+      },
+      orderBy: { opened_at: 'desc' },
+      select: { id: true },
+    });
+    if (own) return own.id;
+
+    if (origin_session) {
+      const sibling = await db.cash_register_sessions.findFirst({
+        where: {
+          store_id: input.store_id,
+          status: 'open',
+          cash_register_id: origin_session.cash_register_id,
+        },
+        orderBy: { opened_at: 'desc' },
+        select: { id: true },
+      });
+      if (sibling) return sibling.id;
+    }
+    return null;
+  }
+
+  /**
+   * Movimiento `refund` de un reembolso NO efectivo ya completado
+   * (transferencia, pasarela, saldo interno). Deja rastro en el libro de caja
+   * con el método real; `computeCashSummary` solo resta refunds `cash`, así que
+   * no altera el esperado de efectivo. No emite `cash_register.movement`: el
+   * asiento contable ya lo genera `refund.completed` (evitar doble asiento).
+   * Idempotente por (store, refund, reference, payment_id, método). Sin sesión
+   * destino NO se encola: devuelve `skipped` y el llamador loguea/audita.
+   */
+  async recordNonCashRefundMovement(input: {
+    store_id: number;
+    user_id: number;
+    refund_id: number;
+    order_id: number;
+    payment_id: number | null;
+    amount: number;
+    payment_method: string;
+  }): Promise<NonCashRefundMovementOutcome> {
+    const db = this.prisma.withoutScope();
+    const reference = buildRefundCashMovementReference(input.refund_id);
+    const existing = await db.cash_register_movements.findFirst({
+      where: {
+        store_id: input.store_id,
+        type: 'refund',
+        reference,
+        payment_id: input.payment_id,
+        payment_method: input.payment_method,
+      },
+      select: { id: true },
+    });
+    if (existing) return { status: 'exists', movement_id: existing.id };
+
+    const session_id = await this.resolveCompensationSessionId({
+      store_id: input.store_id,
+      user_id: input.user_id,
+      payment_id: input.payment_id,
+      order_id: input.order_id,
+    });
+    if (session_id == null) {
+      this.logger.warn(
+        `Refund #${input.refund_id} (order #${input.order_id}): non-cash ` +
+          `(${input.payment_method}) refund movement NOT recorded — no open ` +
+          `cash session to receive it.`,
+      );
+      return { status: 'skipped', reason: 'no_open_cash_session' };
+    }
+    const movement = await this.recordRefundMovement(session_id, {
+      store_id: input.store_id,
+      user_id: input.user_id,
+      amount: input.amount,
+      payment_method: input.payment_method,
+      order_id: input.order_id,
+      payment_id: input.payment_id ?? undefined,
+      reference,
+    });
+    return { status: 'recorded', movement_id: movement.id };
+  }
+
+  /**
    * CP-REFUND-FLOW-REDESIGN paso 4 — entrega durable del movimiento de caja
    * del refund. Nunca es silenciosa: devuelve `recorded` con el movimiento,
    * o `pending` con la fila del outbox que el operador ve en
    * `store/accounting/entry-failures` y que el sweeper reintenta.
    *
-   * `session_id` lo resuelve el llamador (`SessionsService.getActiveSession`
-   * tal cual): este servicio no puede inyectar `SessionsService` porque ya
-   * lo consume (ciclo). `null` = sin sesión abierta → outbox directo.
+   * La sesión destino se resuelve aquí con `resolveCompensationSessionId`
+   * (este servicio no puede inyectar `SessionsService`: ciclo). Sin sesión
+   * destino → outbox directo.
    */
   async recordRefundCashMovementDurable(input: {
     organization_id: number;
@@ -218,7 +370,6 @@ export class MovementsService {
     payment_id: number | null;
     amount: number;
     channel: string;
-    session_id: number | null;
   }): Promise<RefundCashMovementOutcome> {
     const payload: RefundCashMovementPayload = {
       version: 1,
@@ -231,7 +382,16 @@ export class MovementsService {
       amount: input.amount,
       channel: input.channel,
     };
-    if (input.session_id == null) {
+    // Cascada de compensación: sesión de la venta original (si sigue abierta),
+    // sesión del operador, otra sesión abierta del mismo registro. `null` =
+    // nadie puede recibirlo ahora → outbox (el barrido usa la misma cascada).
+    const session_id = await this.resolveCompensationSessionId({
+      store_id: input.store_id,
+      user_id: input.user_id,
+      payment_id: input.payment_id,
+      order_id: input.order_id,
+    });
+    if (session_id == null) {
       const failure_id = await this.enqueueRefundCashMovement(
         payload,
         'PENDING_DELIVERY: no open cash session for refund cash movement',
@@ -248,7 +408,7 @@ export class MovementsService {
       };
     }
     try {
-      const movement = await this.recordRefundMovement(input.session_id, {
+      const movement = await this.recordRefundMovement(session_id, {
         store_id: input.store_id,
         user_id: input.user_id,
         amount: input.amount,
@@ -321,8 +481,8 @@ export class MovementsService {
   }
 
   /**
-   * Entrega una fila del outbox: crea el movimiento contra la sesión abierta
-   * más reciente de la tienda. Idempotente por `reference = refund:<id>`:
+   * Entrega una fila del outbox: crea el movimiento contra la sesión que
+   * resuelve `resolveCompensationSessionId`. Idempotente por `reference = refund:<id>`:
    * si el movimiento ya existe (entrega previa que resolvió tarde), solo
    * marca la fila como resuelta. Sin sesión abierta lanza — el llamador
    * registra el intento y la fila sigue abierta para el próximo barrido.
@@ -356,6 +516,7 @@ export class MovementsService {
             store_id: payload.store_id,
             type: 'refund',
             reference,
+            payment_method: payload.channel,
           },
           select: { id: true },
         });
@@ -369,25 +530,26 @@ export class MovementsService {
           });
           return;
         }
-        // Business rule: un reembolso en efectivo afecta solo el arqueo de
-        // quien lo hizo. Filtrar por `opened_by = payload.user_id` evita que
-        // caiga en la caja de otro usuario que también tenga sesión abierta
-        // en la misma tienda. Si el usuario dueño del refund no tiene una
-        // sesión abierta, la fila sigue pendiente — nunca se reasigna a otra.
-        const session = await tx.cash_register_sessions.findFirst({
-          where: {
+        // Cascada de compensación (compartida con el camino directo): sesión
+        // de la venta original si sigue abierta, sesión del operador, o
+        // cualquier sesión abierta del mismo registro que la original — así
+        // un reembolso encolado no queda varado cuando otro cajero tiene la
+        // caja. Si nadie puede recibirlo, la fila sigue pendiente.
+        const session_id = await this.resolveCompensationSessionId(
+          {
             store_id: payload.store_id,
-            status: 'open',
-            opened_by: payload.user_id,
+            user_id: payload.user_id,
+            payment_id: payload.payment_id,
+            order_id: payload.order_id,
           },
-          orderBy: { opened_at: 'desc' },
-          select: { id: true },
-        });
-        if (!session) {
+          tx,
+        );
+        if (session_id == null) {
           throw new Error(
-            `NO_OPEN_SESSION: no open cash session owned by user #${payload.user_id} in store #${payload.store_id} for refund #${payload.refund_id}`,
+            `NO_OPEN_SESSION: no open cash session owned by user #${payload.user_id} in store #${payload.store_id} for refund #${payload.refund_id} (nor in the original sale's register)`,
           );
         }
+        const session = { id: session_id };
         const movement = await tx.cash_register_movements.create({
           data: {
             session_id: session.id,

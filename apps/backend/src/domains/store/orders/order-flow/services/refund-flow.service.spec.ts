@@ -16,6 +16,11 @@ import { WalletBalanceService } from '../../../wallet/services/wallet-balance.se
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
 import { ManualRefundDeliveryService } from '../../../accounting/auto-entries/manual-refund-delivery.service';
 import { Prisma } from '@prisma/client';
+import {
+  allocateRefundAcrossPayments,
+  resolveNonCashMovementMethod,
+  selectRefundChannelPayments,
+} from './refund-flow.service';
 
 /**
  * REFUND OVERHAUL — focused regression tests for the invariants this
@@ -32,7 +37,10 @@ import { Prisma } from '@prisma/client';
 describe('RefundFlowService — refund overhaul invariants', () => {
   let service: RefundFlowService;
   let eventEmitter: { emit: jest.Mock };
-  let movementsService: { recordRefundMovement: jest.Mock };
+  let movementsService: {
+    recordRefundMovement: jest.Mock;
+    recordNonCashRefundMovement: jest.Mock;
+  };
   let paymentGatewayService: { reversePaymentWithProcessor: jest.Mock };
 
   const mockPrisma = {
@@ -65,6 +73,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
 
   const mockMovementsService = {
     recordRefundMovement: jest.fn().mockResolvedValue(undefined),
+    recordNonCashRefundMovement: jest.fn(),
   };
 
   const mockStockLevelManager = {
@@ -1475,6 +1484,164 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       // La lookup NO ocurrió porque la guarda de notas es lo primero.
       expect(mockPrisma.refunds.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.refunds.update).not.toHaveBeenCalled();
+    });
+  });
+  describe('T2 — canal determinista y movimientos por tramo', () => {
+    it('selectRefundChannelPayments: id asc, ignora cancelados/fallidos', () => {
+      const out = selectRefundChannelPayments([
+        { id: 3, state: 'cancelled' },
+        { id: 2, state: 'succeeded' },
+        { id: 4, state: 'failed' },
+        { id: 1, state: 'partially_refunded' },
+      ]);
+      expect(out.map((p) => p.id)).toEqual([1, 2]);
+    });
+
+    it('selectRefundChannelPayments: sin cobrados cae a pending (contra entrega)', () => {
+      const out = selectRefundChannelPayments([
+        { id: 5, state: 'cancelled' },
+        { id: 6, state: 'pending' },
+      ]);
+      expect(out.map((p) => p.id)).toEqual([6]);
+    });
+
+    it('allocateRefundAcrossPayments: efectivo primero hasta su monto, luego el resto en orden', () => {
+      const { tramos, unallocated } = allocateRefundAcrossPayments(3000, [
+        { payment_id: 1, type: 'card', capacity: 5000 },
+        { payment_id: 2, type: 'cash', capacity: 1000 },
+        { payment_id: 3, type: 'bank_transfer', capacity: 5000 },
+      ]);
+      expect(tramos).toEqual([
+        { payment_id: 2, type: 'cash', amount: 1000 },
+        { payment_id: 1, type: 'card', amount: 2000 },
+      ]);
+      expect(unallocated).toBe(0);
+    });
+
+    it('allocateRefundAcrossPayments: lo que no cabe queda sin asignar (no se inventa)', () => {
+      const { tramos, unallocated } = allocateRefundAcrossPayments(900, [
+        { payment_id: 2, type: 'cash', capacity: 100.5 },
+        { payment_id: 1, type: 'card', capacity: 200 },
+      ]);
+      expect(tramos.map((t) => t.amount)).toEqual([100.5, 200]);
+      expect(unallocated).toBe(599.5);
+    });
+
+    it('resolveNonCashMovementMethod: nunca devuelve cash para un canal no efectivo', () => {
+      expect(resolveNonCashMovementMethod('cash', 'store_credit')).toBe('store_credit');
+      expect(resolveNonCashMovementMethod('bank_transfer', 'bank_transfer')).toBe('bank_transfer');
+      expect(resolveNonCashMovementMethod('wompi', 'gateway')).toBe('wompi');
+      expect(resolveNonCashMovementMethod(null, 'gateway')).toBe('gateway');
+    });
+
+    it('createRefund: con un pago cancelado primero, el canal sale del pago cobrado (orderBy id asc)', async () => {
+      const wompi = { state: 'enabled', system_payment_method: { type: 'wompi', is_active: true } };
+      const cash = { state: 'enabled', system_payment_method: { type: 'cash', is_active: true } };
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 7001,
+        store_id: 10,
+        state: 'finished',
+        // Orden "aleatoria": el cancelado (wompi) llega primero.
+        payments: [
+          { id: 9, state: 'cancelled', amount: 1000, store_payment_method: wompi },
+          { id: 12, state: 'succeeded', amount: 1000, store_payment_method: cash },
+        ],
+        stores: { id: 10, organization_id: 1 },
+        order_items: [],
+      });
+      mockCalculationService.calculate.mockResolvedValue({
+        items: [], subtotal_refund: 500, tax_refund: 0, shipping_refund: 0,
+        total_refund: 500, is_full_refund: false, already_refunded: 0, max_refundable: 5000,
+      });
+      mockPrisma.stores.findUnique.mockResolvedValue({ default_location_id: null, organization_id: 1 });
+      mockPrisma.refunds.create.mockResolvedValue({ id: 2001, state: 'processing' });
+      mockPrisma.refunds.update.mockResolvedValue({ id: 2001, state: 'completed', payment_id: 12, refund_items: [] });
+      mockPrisma.order_items.findMany.mockResolvedValue([]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
+      mockPrisma.refund_items.create.mockResolvedValue({ id: 1 });
+      mockPrisma.payments.update.mockResolvedValue({});
+
+      await service.createRefund(7001, {
+        items: [], include_shipping: false, refund_method: 'original_payment', reason: 't',
+      } as any);
+
+      expect(mockPrisma.orders.findFirst.mock.calls[0][0].include.payments.orderBy).toEqual({ id: 'asc' });
+      // Canal cash (pago 12), no gateway (pago cancelado 9): refund completado en la tx.
+      expect(mockPrisma.refunds.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ state: 'completed' }) }),
+      );
+      expect(mockPrisma.refunds.create.mock.calls[0][0].data.payment_id).toBe(12);
+      expect(paymentGatewayService.reversePaymentWithProcessor).not.toHaveBeenCalled();
+    });
+
+    it('multimétodo: un tramo por pago con el método real (efectivo primero), descontando lo ya devuelto', async () => {
+      (mockPrisma as any).cash_register_movements = {
+        groupBy: jest.fn().mockResolvedValue([
+          { payment_id: 2, _sum: { amount: 400 } },
+        ]),
+      };
+      const tramos = await (service as any).buildRefundMovementTramos({
+        refundMethod: 'original_payment',
+        effectiveChannel: 'bank_transfer',
+        channelPayments: [
+          { id: 1, type: 'bank_transfer', amount: 5000 },
+          { id: 2, type: 'cash', amount: 1000 },
+        ],
+        linkedPaymentId: 1,
+        typeByPaymentId: new Map(),
+        total: 1500,
+        refundId: 3001,
+      });
+      expect(tramos).toEqual([
+        { payment_id: 2, amount: 600, method: 'cash' },
+        { payment_id: 1, amount: 900, method: 'bank_transfer' },
+      ]);
+    });
+
+    it('un solo pago: un tramo íntegro con el método real del pago', async () => {
+      const tramos = await (service as any).buildRefundMovementTramos({
+        refundMethod: 'original_payment',
+        effectiveChannel: 'bank_transfer',
+        channelPayments: [{ id: 1, type: 'bank_transfer', amount: 5000 }],
+        linkedPaymentId: 1,
+        typeByPaymentId: new Map([[1, 'bank_transfer']]),
+        total: 800,
+        refundId: 3002,
+      });
+      expect(tramos).toEqual([{ payment_id: 1, amount: 800, method: 'bank_transfer' }]);
+    });
+
+    it('movimiento no efectivo: delega al servicio idempotente y, sin sesión, audita (sin encolar)', async () => {
+      (service as any).settingsService.getSettings = jest
+        .fn()
+        .mockResolvedValue({ pos: { cash_register: { enabled: true } } });
+      (mockPrisma as any).audit_logs = { create: jest.fn().mockResolvedValue({}) };
+      movementsService.recordNonCashRefundMovement.mockResolvedValue({
+        status: 'skipped',
+        reason: 'no_open_cash_session',
+      });
+
+      await (service as any).recordNonCashRefundMovements({
+        organization_id: 1, store_id: 10, user_id: 7, refund_id: 3003, order_id: 5,
+        tramos: [{ payment_id: 1, amount: 800, method: 'bank_transfer' }],
+      });
+
+      expect(movementsService.recordNonCashRefundMovement).toHaveBeenCalledWith({
+        store_id: 10, user_id: 7, refund_id: 3003, order_id: 5,
+        payment_id: 1, amount: 800, payment_method: 'bank_transfer',
+      });
+      expect((mockPrisma as any).audit_logs.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ action: 'refund.non_cash_movement_skipped' }),
+      });
+
+      // Ya existente (idempotencia en el servicio): sin audit extra ni error.
+      (mockPrisma as any).audit_logs.create.mockClear();
+      movementsService.recordNonCashRefundMovement.mockResolvedValue({ status: 'exists', movement_id: 9 });
+      await (service as any).recordNonCashRefundMovements({
+        organization_id: 1, store_id: 10, user_id: 7, refund_id: 3003, order_id: 5,
+        tramos: [{ payment_id: 1, amount: 800, method: 'bank_transfer' }],
+      });
+      expect((mockPrisma as any).audit_logs.create).not.toHaveBeenCalled();
     });
   });
 });
