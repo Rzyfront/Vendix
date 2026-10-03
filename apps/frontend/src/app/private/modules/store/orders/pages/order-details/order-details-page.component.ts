@@ -5957,12 +5957,11 @@ export class OrderDetailsPageComponent {
     if (inv.dian_status === 'pending') return 'Pendiente DIAN';
     switch (inv.status) {
       case 'draft': return 'Borrador';
-      case 'issued': return 'Emitida';
+      case 'validated': return 'Validada';
       case 'sent': return 'Enviada';
       case 'accepted': return 'Aceptada';
       case 'rejected': return 'Rechazada';
-      case 'paid': return 'Pagada';
-      default: return inv.status;
+      default: return 'En proceso';
     }
   }
 
