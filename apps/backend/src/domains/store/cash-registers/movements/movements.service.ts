@@ -49,7 +49,20 @@ export interface RefundCashMovementPayload {
   amount: number;
   /** Canal efectivo real (`cash`), no un literal hardcodeado. */
   channel: string;
+  /**
+   * Opcionales (movimientos de compensación que no son un refund: cancelación
+   * de orden, anulación de pago). Los encolados viejos no los traen y se
+   * entregan igual: reference = `refund:<refund_id>`, método = `channel`.
+   */
+  reference?: string;
+  payment_method?: string;
+  /** Clave de dedupe del outbox; su presencia marca el payload como compensación. */
+  dedupe_key?: string;
+  notes?: string;
 }
+
+/** `source_type` de las filas del outbox de compensaciones (≠ refund). */
+export const COMPENSATION_CASH_MOVEMENT_SOURCE = 'cash.compensation_movement';
 
 export interface CompensationSessionInput {
   store_id: number;
@@ -62,6 +75,11 @@ export type NonCashRefundMovementOutcome =
   | { status: 'recorded'; movement_id: number }
   | { status: 'exists'; movement_id: number }
   | { status: 'skipped'; reason: 'no_open_cash_session' };
+
+export type CompensationCashMovementOutcome =
+  | { status: 'recorded'; movement_id: number }
+  | { status: 'exists'; movement_id: number }
+  | { status: 'pending'; failure_id: number | null; reason: string };
 
 export type RefundCashMovementOutcome =
   | { status: 'recorded'; movement_id: number }
@@ -201,9 +219,12 @@ export class MovementsService {
       order_id?: number;
       payment_id?: number;
       reference?: string;
+      notes?: string;
     },
+    tx?: Prisma.TransactionClient,
   ) {
-    return this.prisma.withoutScope().cash_register_movements.create({
+    const db = (tx ?? this.prisma.withoutScope()) as unknown as Prisma.TransactionClient;
+    return db.cash_register_movements.create({
       data: {
         session_id,
         store_id: data.store_id,
@@ -214,6 +235,7 @@ export class MovementsService {
         order_id: data.order_id,
         payment_id: data.payment_id,
         reference: data.reference,
+        notes: data.notes,
       },
     });
   }
@@ -436,6 +458,167 @@ export class MovementsService {
   }
 
   /**
+   * Movimiento `refund` de compensación que NO nace de un refund (cancelación
+   * de orden cobrada, anulación de pago). Nunca es silencioso ni se pierde:
+   *  1. idempotente por (reference, payment_id, order_id, método);
+   *  2. sesión destino por `resolveCompensationSessionId` (original abierta →
+   *     operador → mismo registro);
+   *  3. sin sesión (o si el insert falla) → outbox durable con dedupe por
+   *     `dedupe_key`; el sweeper/cola lo entrega con la misma cascada.
+   * NO emite `cash_register.movement`: el asiento contable de la salida lo
+   * genera el evento de negocio (`refund.completed`, `payment.voided`...).
+   */
+  async recordCompensationCashMovementDurable(
+    input: {
+      store_id: number;
+      user_id: number;
+      order_id: number;
+      payment_id: number | null;
+      amount: number;
+      reference: string;
+      dedupe_key: string;
+      notes?: string;
+      payment_method?: string;
+      organization_id?: number;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<CompensationCashMovementOutcome> {
+    const db = (tx ?? this.prisma.withoutScope()) as unknown as Prisma.TransactionClient;
+    const payment_method = input.payment_method ?? 'cash';
+
+    const existing = await db.cash_register_movements.findFirst({
+      where: {
+        store_id: input.store_id,
+        type: 'refund',
+        reference: input.reference,
+        payment_id: input.payment_id,
+        order_id: input.order_id,
+        payment_method,
+      },
+      select: { id: true },
+    });
+    if (existing) return { status: 'exists', movement_id: existing.id };
+
+    let organization_id = input.organization_id;
+    if (organization_id == null) {
+      const store = await db.stores.findUnique({
+        where: { id: input.store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id;
+    }
+    if (organization_id == null) {
+      throw new Error(
+        `Compensation ${input.dedupe_key}: store #${input.store_id} not found`,
+      );
+    }
+    const payload: RefundCashMovementPayload = {
+      version: 1,
+      refund_id: 0,
+      order_id: input.order_id,
+      store_id: input.store_id,
+      organization_id,
+      user_id: input.user_id,
+      payment_id: input.payment_id,
+      amount: input.amount,
+      channel: payment_method,
+      payment_method,
+      reference: input.reference,
+      dedupe_key: input.dedupe_key,
+      notes: input.notes,
+    };
+
+    const session_id = await this.resolveCompensationSessionId(
+      {
+        store_id: input.store_id,
+        user_id: input.user_id,
+        payment_id: input.payment_id,
+        order_id: input.order_id,
+      },
+      tx,
+    );
+    if (session_id == null) {
+      const failure_id = await this.enqueueCompensationCashMovement(
+        payload,
+        'PENDING_DELIVERY: no open cash session for compensation cash movement',
+      );
+      this.logger.error(
+        `Compensation ${input.dedupe_key} (order #${input.order_id}): cash ` +
+          `movement NOT recorded — no open session. Outbox row #${failure_id}. ` +
+          `Open a session; the sweeper will deliver it.`,
+      );
+      return { status: 'pending', failure_id, reason: 'no_open_cash_session' };
+    }
+    try {
+      const movement = await this.recordRefundMovement(
+        session_id,
+        {
+          store_id: input.store_id,
+          user_id: input.user_id,
+          amount: input.amount,
+          payment_method,
+          order_id: input.order_id,
+          payment_id: input.payment_id ?? undefined,
+          reference: input.reference,
+          notes: input.notes,
+        },
+        tx,
+      );
+      return { status: 'recorded', movement_id: movement.id };
+    } catch (error) {
+      const failure_id = await this.enqueueCompensationCashMovement(
+        payload,
+        `PENDING_DELIVERY: cash movement insert failed — ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.logger.error(
+        `Compensation ${input.dedupe_key} (order #${input.order_id}): cash ` +
+          `movement insert failed, outbox row #${failure_id}. ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { status: 'pending', failure_id, reason: 'movement_insert_failed' };
+    }
+  }
+
+  /** Outbox de compensaciones: una fila abierta como máximo por `dedupe_key`. */
+  private async enqueueCompensationCashMovement(
+    payload: RefundCashMovementPayload,
+    message: string,
+  ): Promise<number> {
+    const db = this.prisma.withoutScope();
+    const existing = await db.accounting_entry_failures.findFirst({
+      where: {
+        handler_key: REFUND_CASH_MOVEMENT_KEY,
+        source_type: COMPENSATION_CASH_MOVEMENT_SOURCE,
+        resolved_at: null,
+        event_payload: { path: ['dedupe_key'], equals: payload.dedupe_key },
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      await db.accounting_entry_failures.update({
+        where: { id: existing.id },
+        data: {
+          attempt_count: { increment: 1 },
+          error_message: message,
+          event_payload: payload as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return existing.id;
+    }
+    const row = await db.accounting_entry_failures.create({
+      data: {
+        organization_id: payload.organization_id,
+        store_id: payload.store_id,
+        handler_key: REFUND_CASH_MOVEMENT_KEY,
+        source_type: COMPENSATION_CASH_MOVEMENT_SOURCE,
+        source_id: payload.payment_id ?? payload.order_id,
+        event_payload: payload as unknown as Prisma.InputJsonValue,
+        error_message: message,
+      },
+    });
+    return row.id;
+  }
+
+  /**
    * Crea (o reutiliza, por dedup) la fila del outbox para el movimiento de
    * caja de un refund. Dedup por `(handler_key, source_type, source_id
    * unresolved)` — el mismo predicado que `recordFailure`: un refund tiene
@@ -502,7 +685,8 @@ export class MovementsService {
         const payload = row.event_payload as unknown as RefundCashMovementPayload;
         if (
           payload.version !== 1 ||
-          payload.refund_id !== row.source_id ||
+          (typeof payload.dedupe_key !== 'string' &&
+            payload.refund_id !== row.source_id) ||
           payload.organization_id !== row.organization_id ||
           payload.store_id !== row.store_id ||
           typeof payload.amount !== 'number' ||
@@ -510,13 +694,19 @@ export class MovementsService {
         ) {
           throw new Error(`Invalid refund cash movement delivery #${failureId}`);
         }
-        const reference = buildRefundCashMovementReference(payload.refund_id);
+        const is_compensation = typeof payload.dedupe_key === 'string';
+        const reference =
+          payload.reference ?? buildRefundCashMovementReference(payload.refund_id);
+        const payment_method = payload.payment_method ?? payload.channel;
         const already = await tx.cash_register_movements.findFirst({
           where: {
             store_id: payload.store_id,
             type: 'refund',
             reference,
-            payment_method: payload.channel,
+            payment_method,
+            ...(is_compensation
+              ? { payment_id: payload.payment_id, order_id: payload.order_id }
+              : {}),
           },
           select: { id: true },
         });
@@ -557,10 +747,11 @@ export class MovementsService {
             user_id: payload.user_id,
             type: 'refund',
             amount: payload.amount,
-            payment_method: payload.channel,
+            payment_method,
             order_id: payload.order_id,
             payment_id: payload.payment_id,
             reference,
+            notes: payload.notes,
           },
         });
         await tx.accounting_entry_failures.update({

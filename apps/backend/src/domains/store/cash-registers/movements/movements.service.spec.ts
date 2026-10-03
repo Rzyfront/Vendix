@@ -309,4 +309,172 @@ describe('MovementsService — compensación de caja', () => {
       expect(failures.create).not.toHaveBeenCalled();
     });
   });
+  describe('recordCompensationCashMovementDurable', () => {
+    const input = {
+      store_id: STORE_ID,
+      user_id: OPERATOR,
+      order_id: 9,
+      payment_id: 55,
+      amount: 5000,
+      reference: 'order_cancelled',
+      dedupe_key: 'order_cancelled:9:55',
+    };
+    const stores = { findUnique: jest.fn().mockResolvedValue({ organization_id: 3 }) };
+
+    it('con sesión: escribe refund/cash con reference y payment_id, sin emitir evento contable', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const emit = jest.fn();
+      const prisma = { withoutScope: jest.fn().mockReturnValue({ ...db, stores }) };
+      const service = new MovementsService(prisma as any, { emit } as any);
+
+      const out = await service.recordCompensationCashMovementDurable(input);
+
+      expect(out).toEqual({ status: 'recorded', movement_id: 901 });
+      expect(db.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          session_id: 200,
+          type: 'refund',
+          payment_method: 'cash',
+          payment_id: 55,
+          order_id: 9,
+          reference: 'order_cancelled',
+        }),
+      });
+      expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('sin sesión del operador pero con la sesión original abierta: cae en la original', async () => {
+      const db = makeDb(
+        [{ id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER }],
+        [{ session_id: 100, payment_id: 55, order_id: 9 }],
+      );
+      const { service } = makeService(db, { stores });
+
+      await service.recordCompensationCashMovementDurable(input);
+
+      expect(db.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ session_id: 100 }),
+      });
+    });
+
+    it('es idempotente por (reference, payment_id, order_id)', async () => {
+      const db = makeDb([], []);
+      db.cash_register_movements.findFirst.mockImplementation(async ({ where }: any) =>
+        where.type === 'refund' ? { id: 444 } : null,
+      );
+      const { service } = makeService(db, { stores });
+
+      const out = await service.recordCompensationCashMovementDurable(input);
+
+      expect(out).toEqual({ status: 'exists', movement_id: 444 });
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('sin ninguna sesión: encola en el outbox con dedupe_key y payload completo', async () => {
+      const db = makeDb([], []);
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 77 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { stores, accounting_entry_failures: failures });
+
+      const out = await service.recordCompensationCashMovementDurable(input);
+
+      expect(out).toEqual({ status: 'pending', failure_id: 77, reason: 'no_open_cash_session' });
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(failures.findFirst).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          handler_key: REFUND_CASH_MOVEMENT_KEY,
+          resolved_at: null,
+          event_payload: { path: ['dedupe_key'], equals: 'order_cancelled:9:55' },
+        }),
+        select: { id: true },
+      });
+      expect(failures.create.mock.calls[0][0].data).toMatchObject({
+        organization_id: 3,
+        handler_key: REFUND_CASH_MOVEMENT_KEY,
+        source_id: 55,
+        event_payload: expect.objectContaining({
+          reference: 'order_cancelled',
+          dedupe_key: 'order_cancelled:9:55',
+          payment_id: 55,
+          payment_method: 'cash',
+        }),
+      });
+    });
+
+    it('reencolar el mismo dedupe_key reutiliza la fila abierta (sin duplicar)', async () => {
+      const db = makeDb([], []);
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue({ id: 77 }),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+      };
+      const { service } = makeService(db, { stores, accounting_entry_failures: failures });
+
+      const out = await service.recordCompensationCashMovementDurable(input);
+
+      expect(out).toMatchObject({ status: 'pending', failure_id: 77 });
+      expect(failures.create).not.toHaveBeenCalled();
+      expect(failures.update).toHaveBeenCalled();
+    });
+
+    it('la entrega del outbox escribe el movimiento con la reference y notas del payload (y sigue entregando los payloads viejos)', async () => {
+      const payload: RefundCashMovementPayload = {
+        version: 1,
+        refund_id: 0,
+        order_id: 9,
+        store_id: STORE_ID,
+        organization_id: 3,
+        user_id: OPERATOR,
+        payment_id: 55,
+        amount: 5000,
+        channel: 'cash',
+        payment_method: 'cash',
+        reference: 'order_cancelled',
+        dedupe_key: 'order_cancelled:9:55',
+        notes: 'nota',
+      };
+      const db = makeDb(
+        [{ id: 300, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const tx = {
+        ...db,
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 5 }]),
+        accounting_entry_failures: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 5,
+            handler_key: REFUND_CASH_MOVEMENT_KEY,
+            source_id: 55,
+            organization_id: 3,
+            store_id: STORE_ID,
+            resolved_at: null,
+            event_payload: payload,
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+      const { service } = makeService(db, {
+        $transaction: jest.fn((cb: any) => cb(tx)),
+        accounting_entry_failures: { update: jest.fn() },
+      });
+
+      await service.deliverRefundCashMovement(5);
+
+      expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          session_id: 300,
+          type: 'refund',
+          reference: 'order_cancelled',
+          payment_id: 55,
+          notes: 'nota',
+        }),
+      });
+    });
+  });
 });
