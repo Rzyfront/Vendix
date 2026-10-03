@@ -629,12 +629,31 @@ export class ProductsBulkService {
 
     // 2. Pre-fetch existing products by SKU for this store
     const existingProducts = await this.prisma.products.findMany({
-      where: { store_id: storeId, state: { not: 'archived' } },
-      select: { id: true, sku: true, name: true },
+      // Incluye archivados: borrar = archivar, y la fila conserva sku/slug/
+      // barcode (únicos por tienda). Sin verlos la vista previa miente.
+      where: { store_id: storeId },
+      select: { id: true, sku: true, name: true, slug: true, state: true },
     });
-    const skuMap = new Map<string, { id: number; name: string }>();
+    const skuMap = new Map<
+      string,
+      { id: number; name: string; archived: boolean }
+    >();
+    const slugMap = new Map<
+      string,
+      { id: number; name: string; archived: boolean }
+    >();
     for (const p of existingProducts) {
-      if (p.sku) skuMap.set(p.sku.toLowerCase(), { id: p.id, name: p.name });
+      const archived = p.state === 'archived';
+      if (p.sku) {
+        const key = p.sku.toLowerCase();
+        const prev = skuMap.get(key);
+        // Si por datos viejos hubiera activo y archivado con el mismo SKU,
+        // gana el no archivado (es el que el commit actualiza).
+        if (!prev || (prev.archived && !archived)) {
+          skuMap.set(key, { id: p.id, name: p.name, archived });
+        }
+      }
+      if (p.slug) slugMap.set(p.slug, { id: p.id, name: p.name, archived });
     }
 
     // 3. Pre-fetch existing brands
@@ -806,8 +825,29 @@ export class ProductsBulkService {
         // Check if SKU exists in store
         const existing = skuMap.get(skuLower);
         if (existing) {
-          item.action = 'update';
+          item.action = existing.archived ? 'reactivate' : 'update';
           item.existing_product_id = existing.id;
+          if (existing.archived) {
+            item.warnings.push({
+              code: 'WILL_REACTIVATE_ARCHIVED',
+              message: `El SKU corresponde al producto archivado "${existing.name}": se reactivará con los datos del archivo`,
+              field: 'sku',
+            });
+          }
+        }
+      }
+
+      // Paridad con create: el slug es único por tienda y `productsService.create`
+      // lo busca SIN filtrar estado (PROD_DUP_001). Se avisa aquí, no en el commit.
+      if (item.action !== 'update' && item.name) {
+        const effectiveSlug = product.slug || generateSlug(item.name);
+        const slugOwner = effectiveSlug ? slugMap.get(effectiveSlug) : undefined;
+        if (slugOwner && slugOwner.id !== item.existing_product_id) {
+          item.errors.push({
+            code: 'DUPLICATE_SLUG',
+            message: `El nombre genera el slug "${effectiveSlug}", que ya usa el producto ${slugOwner.archived ? 'archivado ' : ''}"${slugOwner.name}". Cambia el nombre o la columna slug.`,
+            field: 'name',
+          });
         }
       }
 
@@ -928,7 +968,7 @@ export class ProductsBulkService {
       // Cross-field validations (only when BOTH fields are explicitly present)
       if (
         item.product_type === 'service' &&
-        item.action === 'create' &&
+        item.action !== 'update' &&
         product.service_duration_minutes === undefined
       ) {
         item.warnings.push({
@@ -941,7 +981,7 @@ export class ProductsBulkService {
 
       if (
         item.product_type === 'service' &&
-        item.action === 'create' &&
+        item.action !== 'update' &&
         product.service_pricing_type === undefined
       ) {
         item.warnings.push({
@@ -1839,18 +1879,31 @@ export class ProductsBulkService {
         // Validar datos
         await this.validateProductData(productData, storeId);
 
-        // Buscar si existe por SKU para decidir si Crear o Actualizar
+        // Buscar por SKU SIN filtrar estado (único por tienda): un archivado
+        // conserva su SKU y bloquearía el create con PROD_DUP_001.
         const existingProduct = await this.prisma.products.findFirst({
           where: {
             store_id: storeId,
             sku: productData.sku,
-            state: { not: 'archived' },
           },
         });
 
         let resultProduct;
 
-        if (existingProduct) {
+        if (existingProduct && existingProduct.state === 'archived') {
+          resultProduct = await this.reactivateArchivedProduct(
+            existingProduct,
+            productData,
+            storeId,
+          );
+
+          results.push({
+            product: resultProduct,
+            status: 'success',
+            action: 'reactivate',
+            message: `Producto con SKU ${productData.sku} reactivado con los datos del archivo`,
+          });
+        } else if (existingProduct) {
           // Actualizar producto existente (sparse update: solo campos presentes)
           const updateProductDto = this.mapToUpdateProductDto(productData);
           resultProduct = await this.productsService.update(
@@ -1861,6 +1914,7 @@ export class ProductsBulkService {
           results.push({
             product: resultProduct,
             status: 'success',
+            action: 'update',
             message: `Producto con SKU ${productData.sku} actualizado exitosamente`,
           });
         } else {
@@ -1885,6 +1939,7 @@ export class ProductsBulkService {
             results.push({
               product: resultProduct,
               status: 'success',
+              action: 'create',
               message: 'Producto creado exitosamente',
             });
           } catch (createErr) {
@@ -2492,6 +2547,142 @@ export class ProductsBulkService {
     }
 
     return dto;
+  }
+
+  /**
+   * Payload "set completo" para reactivar un producto archivado.
+   *
+   * Regla: parte de `mapToCreateProductDto` (lo que trae el archivo se aplica)
+   * y todo campo que ese mapper gestiona y el archivo NO trae vuelve al valor
+   * por defecto de creación (`@default` de `model products`; nullable sin
+   * default => null; listas => []). Nunca se conserva lo viejo del archivado.
+   * Sin `store_id`: `productsService.update` no lo acepta ni lo necesita.
+   * El stock no se toca (al archivar quedó en 0).
+   */
+  private mapToReactivateProductDto(product: BulkProductItemDto): any {
+    const { store_id: _omit, ...fromFile } = this.mapToCreateProductDto(
+      product,
+      0,
+    );
+    const defaults: Record<string, any> = {
+      barcode: null,
+      description: null,
+      brand_id: null,
+      category_ids: [],
+      weight: null,
+      is_on_sale: false,
+      sale_price: null,
+      state: 'active',
+      available_for_ecommerce: false,
+      is_featured: false,
+      allow_pos_price_override: false,
+      tax_category_ids: [],
+      service_duration_minutes: null,
+      service_modality: null,
+      service_pricing_type: null,
+      requires_booking: false,
+      booking_mode: 'provider_required',
+      buffer_minutes: 0,
+      is_recurring: false,
+      service_instructions: null,
+      preparation_time_minutes: null,
+      pricing_type: 'unit',
+      is_consultation: false,
+      send_preconsultation: false,
+      consultation_template_id: null,
+      preconsultation_template_id: null,
+      has_multiple_price_tiers: false,
+      stock_uom_id: null,
+      purchase_uom_id: null,
+      price_unit_quantity: 1,
+    };
+    const dto: any = { ...fromFile };
+    for (const [field, value] of Object.entries(defaults)) {
+      if (dto[field] === undefined) dto[field] = value;
+    }
+    return dto;
+  }
+
+  /**
+   * Reactiva el producto archivado que coincide por SKU (mismo id: el
+   * historial de ventas/facturas/kardex queda intacto) y le aplica el set
+   * completo del archivo. `productsService.update` rechaza archivados
+   * (PROD_FIND_001), así que primero se cambia el estado por el prisma
+   * scoped; si el update falla se compensa devolviendo `archived`.
+   */
+  private async reactivateArchivedProduct(
+    existing: { id: number; state: any },
+    productData: BulkProductItemDto,
+    storeId: number,
+  ): Promise<any> {
+    const dto = this.mapToReactivateProductDto(productData);
+    const targetState = dto.state;
+    // Un destino `archived` no tiene sentido para reactivar: se pasa por
+    // `inactive` y el update deja el estado pedido por el archivo.
+    const transitionState = targetState === 'archived' ? 'inactive' : targetState;
+
+    await this.prisma.products.updateMany({
+      where: { id: existing.id, store_id: storeId },
+      data: { state: transitionState, updated_at: new Date() },
+    });
+
+    try {
+      const updated = await this.productsService.update(existing.id, dto);
+
+      // Variantes del archivo: emparejar por SKU con las del producto (cualquier
+      // estado). Las que el archivo no trae no se tocan.
+      if (productData.variants && productData.variants.length > 0) {
+        const currentVariants = await this.prisma.product_variants.findMany({
+          where: { product_id: existing.id },
+          select: { id: true, sku: true },
+        });
+        const bySku = new Map<string, number>();
+        for (const v of currentVariants || []) {
+          bySku.set(String(v.sku).toLowerCase(), v.id);
+        }
+        for (const variantData of productData.variants as any[]) {
+          const variantId = variantData?.sku
+            ? bySku.get(String(variantData.sku).toLowerCase())
+            : undefined;
+          if (variantId) {
+            await this.productsService.updateVariant(variantId, variantData);
+          } else {
+            await this.productsService.createVariant(existing.id, variantData);
+          }
+        }
+      }
+
+      const context = RequestContextService.getContext();
+      await this.prisma.audit_logs.create({
+        data: {
+          user_id: context?.user_id ?? null,
+          store_id: storeId,
+          organization_id: context?.organization_id ?? null,
+          action: 'PRODUCT_REACTIVATE',
+          resource: 'products',
+          resource_id: existing.id,
+          request_id: RequestContextService.getRequestId() ?? null,
+          old_values: { state: 'archived' },
+          new_values: { state: targetState },
+          metadata: { source: 'bulk', event: 'product_reactivated' },
+        },
+      });
+
+      return updated;
+    } catch (err) {
+      await this.prisma.products
+        .updateMany({
+          where: { id: existing.id, store_id: storeId },
+          data: { state: 'archived', updated_at: new Date() },
+        })
+        .catch((e) =>
+          this.logger.error(
+            `Compensation (re-archive) failed for product ${existing.id}`,
+            e?.stack || e,
+          ),
+        );
+      throw err;
+    }
   }
 
   private mapToUpdateProductDto(product: BulkProductItemDto): any {
