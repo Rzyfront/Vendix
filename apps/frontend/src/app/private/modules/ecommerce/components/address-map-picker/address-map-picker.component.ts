@@ -39,63 +39,6 @@ const LOAD_TIMEOUT_MS = 12000;
  */
 const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 
-interface RecenterMap {
-  flyTo(options: { center: [number, number]; zoom: number }): void;
-}
-
-type RecenterTarget = () => { lat: number; lng: number } | null;
-
-/** Map control that returns the camera to the current address point, never GPS. */
-export class RecenterControl {
-  private container: HTMLDivElement | null = null;
-  private button: HTMLButtonElement | null = null;
-  private map: RecenterMap | null = null;
-  private readonly handleClick = (): void => {
-    const target = this.getTarget();
-    if (!target || !this.map || this.button?.disabled) return;
-    this.map.flyTo({ center: [target.lng, target.lat], zoom: POINT_ZOOM });
-  };
-
-  constructor(private readonly getTarget: RecenterTarget) {}
-
-  onAdd(map: RecenterMap): HTMLElement {
-    this.map = map;
-    this.container = document.createElement('div');
-    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group amp-recenter-control';
-    this.button = document.createElement('button');
-    this.button.type = 'button';
-    this.button.className = 'amp-recenter-button';
-    this.button.disabled = true;
-    this.button.setAttribute('aria-label', 'Centrar en la dirección');
-    this.button.setAttribute('title', 'Centrar en la dirección');
-    this.button.innerHTML = [
-      '<svg class="amp-recenter-icon" viewBox="0 0 24 24" fill="none"',
-      ' stroke="currentColor" stroke-width="2" stroke-linecap="round"',
-      ' stroke-linejoin="round" aria-hidden="true">',
-      '<circle cx="12" cy="12" r="9"/>',
-      '<line x1="22" x2="18" y1="12" y2="12"/>',
-      '<line x1="6" x2="2" y1="12" y2="12"/>',
-      '<line x1="12" x2="12" y1="6" y2="2"/>',
-      '<line x1="12" x2="12" y1="22" y2="18"/></svg>',
-    ].join('');
-    this.button.addEventListener('click', this.handleClick);
-    this.container.appendChild(this.button);
-    return this.container;
-  }
-
-  setEnabled(enabled: boolean): void {
-    if (this.button) this.button.disabled = !enabled;
-  }
-
-  onRemove(): void {
-    this.button?.removeEventListener('click', this.handleClick);
-    this.container?.parentNode?.removeChild(this.container);
-    this.button = null;
-    this.container = null;
-    this.map = null;
-  }
-}
-
 /**
  * Custom "locate me" map control. Renders identically to MapLibre's native
  * `GeolocateControl` (reuses its `.maplibregl-ctrl-geolocate` /
@@ -223,7 +166,6 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private maplibregl: any = null;
   private map: any = null;
   private marker: any = null;
-  private recenterControl: RecenterControl | null = null;
   private mapLoaded = false;
   /** Guards the `mapReady` output so it fires exactly once. */
   private mapReadyEmitted = false;
@@ -287,10 +229,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         // actual GPS request so it can show a priming permission modal first
         // when the browser permission is still undecided. GPS must NEVER
         // fire without this explicit click.
-        this.map.addControl(
-          new LocateButtonControl(() => this.locateRequested.emit()),
-          'top-right',
-        );
+        this.map.addControl(this.createLocateButtonControl(), 'top-right');
       } else {
         // Default mode (pre-`locateRequested` behavior): MapLibre's native
         // GeolocateControl resolves GPS itself and drops/moves the marker,
@@ -318,10 +257,6 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
           this.emitFromMarker();
         });
       }
-      // Address recenter follows fullscreen and GPS, but remains independent:
-      // clicking it never requests or reads device geolocation.
-      this.recenterControl = this.createRecenterControl();
-      this.map.addControl(this.recenterControl, 'top-right');
       this.map.addControl(
         new this.maplibregl.AttributionControl({ compact: true }),
         'bottom-right',
@@ -404,15 +339,9 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     attrib?.removeAttribute('open');
   }
 
-  /** Build the address-only control, preferring the marker's latest position. */
-  private createRecenterControl(): RecenterControl {
-    return new RecenterControl(() => {
-      if (this.marker) {
-        const point = this.marker.getLngLat();
-        return { lat: point.lat, lng: point.lng };
-      }
-      return this.center();
-    });
+  /** Delegated GPS control reports the click; the parent owns geolocation. */
+  private createLocateButtonControl(): LocateButtonControl {
+    return new LocateButtonControl(() => this.locateRequested.emit());
   }
 
   /** Lazily creates the draggable marker on first point, or moves the existing one. */
@@ -433,7 +362,6 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     } else {
       this.marker.setLngLat([coord.lng, coord.lat]);
     }
-    this.recenterControl?.setEnabled(true);
   }
 
   /** Removes a stale address point without emitting a user location change. */
@@ -445,7 +373,6 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     }
     this.marker = null;
     this.hasPoint.set(false);
-    this.recenterControl?.setEnabled(false);
   }
 
   private emitFromMarker(): void {
@@ -476,8 +403,6 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     if (this.attribTimer) clearTimeout(this.attribTimer);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
-    this.recenterControl?.onRemove();
-    this.recenterControl = null;
     try {
       this.marker?.remove?.();
       this.map?.remove?.();
