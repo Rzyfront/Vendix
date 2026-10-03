@@ -6,7 +6,7 @@ import { of, throwError } from 'rxjs';
 import { SplitAccountsPanelComponent } from './split-accounts-panel.component';
 import { TablesService } from '../../services/tables.service';
 import { PaymentMethodsCatalogService } from '../../../../../../../shared/services/payment-methods-catalog.service';
-import { DialogService, PaymentModalComponent, ToastService } from '../../../../../../../shared/components';
+import { DialogService, PaymentCollectorComponent, ToastService } from '../../../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
@@ -517,13 +517,98 @@ describe('SplitAccountsPanelComponent', () => {
       expect(String(toast.error.calls.mostRecent().args[0])).toContain('supera el saldo');
     });
 
-    it('disables the amount override in the account payment modal', async () => {
+    it('enables multi-tender and the amount override in the account payment collector', async () => {
       await create({ allowCreate: false });
       component.openPayment(account({ available_to_pay: '15000.00' }));
       fixture.detectChanges();
-      const modal = fixture.debugElement.query(By.directive(PaymentModalComponent));
-      expect(modal.componentInstance.allowAmountOverride()).toBeFalse();
-      expect(modal.componentInstance.amount()).toBe(15000);
+      const collector = fixture.debugElement.query(By.directive(PaymentCollectorComponent));
+      expect(collector.componentInstance.allowAmountOverrideIn()).toBeTrue();
+      expect(collector.componentInstance.allowMultiTenderIn()).toBeTrue();
+      expect(collector.componentInstance.amount()).toBe(15000);
+    });
+
+    const cash: PaymentSubmit = {
+      storePaymentMethodId: 1,
+      methodType: 'cash',
+      amount: 5000,
+      mode: 'contado',
+      method: { id: '1', name: 'Efectivo', type: 'cash', icon: 'banknote', enabled: true },
+    };
+    const okResult = (state = 'succeeded') => ({
+      payment: { id: 90, amount: '1.00', state },
+      split: groupOf(account({ available_to_pay: '5000.00' })),
+    });
+
+    it('charges a partial scalar amount with one POST', async () => {
+      await create({ allowCreate: false });
+      api.payFinancialAccount.and.returnValue(of(okResult()));
+      component.openPayment(account({ available_to_pay: '15000.00', remaining_balance: '15000.00' }));
+      await component.pay(cash);
+      expect(api.payFinancialAccount).toHaveBeenCalledTimes(1);
+      expect(api.payFinancialAccount.calls.argsFor(0)[2].amount).toBe(5000);
+      expect(component.paymentOpen()).toBeFalse();
+      expect(toast.success).toHaveBeenCalledWith('Cobro registrado');
+    });
+
+    it('charges multi-tender legs in series with distinct idempotency keys', async () => {
+      await create({ allowCreate: false });
+      api.payFinancialAccount.and.returnValue(of(okResult()));
+      component.openPayment(account({ available_to_pay: '15000.00', remaining_balance: '15000.00' }));
+      await component.pay({
+        ...cash,
+        amount: 15000,
+        legs: [
+          { storePaymentMethodId: 1, methodType: 'cash', amount: 10000, amountReceived: 20000 },
+          { storePaymentMethodId: 2, methodType: 'card', amount: 5000, reference: '1234' },
+        ],
+      });
+      expect(api.payFinancialAccount).toHaveBeenCalledTimes(2);
+      const first = api.payFinancialAccount.calls.argsFor(0)[2];
+      const second = api.payFinancialAccount.calls.argsFor(1)[2];
+      expect(first.amount).toBe(10000);
+      expect(first.amount_received).toBe(20000);
+      expect(first.store_payment_method_id).toBe(1);
+      expect(second.amount).toBe(5000);
+      expect(second.payment_reference).toBe('1234');
+      expect(first.idempotency_key).not.toBe(second.idempotency_key);
+      expect(component.paymentOpen()).toBeFalse();
+    });
+
+    it('rejects a leg total above the balance without any POST', async () => {
+      await create({ allowCreate: false });
+      component.openPayment(account({ available_to_pay: '15000.00', remaining_balance: '15000.00' }));
+      await component.pay({
+        ...cash,
+        legs: [
+          { storePaymentMethodId: 1, methodType: 'cash', amount: 10000 },
+          { storePaymentMethodId: 2, methodType: 'card', amount: 6000 },
+        ],
+      });
+      expect(api.payFinancialAccount).not.toHaveBeenCalled();
+      expect(String(toast.error.calls.mostRecent().args[0])).toContain('supera el saldo');
+    });
+
+    it('stops at a failing leg and reports the registered one', async () => {
+      await create({ allowCreate: false });
+      api.payFinancialAccount.and.returnValues(
+        of(okResult()),
+        throwError(() => new Error('boom')),
+      );
+      component.openPayment(account({ available_to_pay: '15000.00', remaining_balance: '15000.00' }));
+      component.paymentOpen.set(true);
+      await component.pay({
+        ...cash,
+        legs: [
+          { storePaymentMethodId: 1, methodType: 'cash', amount: 10000 },
+          { storePaymentMethodId: 2, methodType: 'card', amount: 4000 },
+          { storePaymentMethodId: 3, methodType: 'transfer', amount: 1000 },
+        ],
+      });
+      expect(api.payFinancialAccount).toHaveBeenCalledTimes(2);
+      const msg = String(toast.error.calls.mostRecent().args[0]);
+      expect(msg).toContain('Quedaron registrados 1 de 3');
+      expect(msg).toContain('Falló el cobro 2');
+      expect(component.paymentOpen()).toBeTrue();
     });
 
     it('labels the client button "Cambiar cliente" once assigned', async () => {

@@ -29,7 +29,7 @@ import {
   IconComponent,
   InputComponent,
   ModalComponent,
-  PaymentModalComponent,
+  PaymentCollectorComponent,
   StepsLineComponent,
   ToastService,
 } from '../../../../../../../shared/components';
@@ -100,7 +100,7 @@ const MODE_LABEL: Record<SplitResultMode, string> = {
     IconComponent,
     InputComponent,
     ModalComponent,
-    PaymentModalComponent,
+    PaymentCollectorComponent,
     StepsLineComponent,
     CurrencyPipe,
     PosCustomerSelectorComponent,
@@ -175,8 +175,8 @@ export class SplitAccountsPanelComponent {
   });
   private readonly previewFingerprint = signal('');
   private splitKey = '';
-  private paymentKey = '';
-  private paymentFingerprint = '';
+  /** fingerprint de cada POST de cobro -> idempotency key (se conserva ante fallos de transporte). */
+  private readonly paymentKeys = new Map<string, string>();
   private loadSequence = 0;
   private currentSourceId = 0;
 
@@ -837,15 +837,27 @@ export class SplitAccountsPanelComponent {
   }
   async pay(submit: PaymentSubmit): Promise<void> {
     const account = this.payingAccount();
-    if (!account?.id || !submit.storePaymentMethodId || this.busy()) return;
-    if (submit.methodType === 'wompi' && !account.customer_id) {
+    if (!account?.id || this.busy()) return;
+    const legs = submit.legs ?? [];
+    const multi = legs.length >= 2;
+    if (multi && legs.some((leg) => leg.methodType === 'wompi')) {
+      this.toast.error(
+        'Wompi solo puede cobrarse como único método. Quita Wompi o cobra solo con Wompi.',
+      );
+      return;
+    }
+    if (!multi && !submit.storePaymentMethodId) return;
+    if (!multi && submit.methodType === 'wompi' && !account.customer_id) {
       this.toast.error(
         'Wompi requiere un cliente registrado. Asigna el cliente o elige un medio presencial.',
       );
       return;
     }
     const cap = money(account.available_to_pay);
-    if (money(submit.amount) > cap + 0.005) {
+    const total = multi
+      ? legs.reduce((sum, leg) => sum + money(leg.amount), 0)
+      : money(submit.amount);
+    if (total > cap + 0.005) {
       this.toast.error(
         `El monto supera el saldo de la cuenta (${this.currencyFormat.format(cap)})`,
       );
@@ -854,54 +866,94 @@ export class SplitAccountsPanelComponent {
     const wompiMethod = submit.wompi
       ? this.wompiMethod(submit.wompi.payload)
       : undefined;
-    if (submit.wompi && !wompiMethod) {
+    if (!multi && submit.wompi && !wompiMethod) {
       this.toast.error(
         'El método de Wompi está incompleto. Vuelve a seleccionarlo.',
       );
       return;
     }
-    const request = {
-      store_payment_method_id: submit.storePaymentMethodId,
-      amount: submit.amount,
-      ...(submit.amountReceived != null
-        ? { amount_received: submit.amountReceived }
-        : {}),
-      ...(submit.reference ? { payment_reference: submit.reference } : {}),
-      ...(submit.bankAccountId
-        ? { bank_account_id: submit.bankAccountId }
-        : {}),
-      ...(wompiMethod ? { wompi_payment_method: wompiMethod } : {}),
-      return_url: window.location.href,
-      cancel_url: window.location.href,
-    };
-    const fingerprint = JSON.stringify([account.id, request]);
-    if (this.paymentFingerprint !== fingerprint) {
-      this.paymentFingerprint = fingerprint;
-      this.paymentKey = crypto.randomUUID();
-    }
-    const dto: SplitAccountPayDto = {
-      ...request,
-      idempotency_key: this.paymentKey,
-    };
+    const requests = multi
+      ? legs.map((leg) => ({
+          store_payment_method_id: leg.storePaymentMethodId,
+          amount: leg.amount,
+          ...(leg.amountReceived != null
+            ? { amount_received: leg.amountReceived }
+            : {}),
+          ...(leg.reference ? { payment_reference: leg.reference } : {}),
+          ...(leg.bankAccountId ? { bank_account_id: leg.bankAccountId } : {}),
+        }))
+      : [
+          {
+            store_payment_method_id: submit.storePaymentMethodId!,
+            amount: submit.amount,
+            ...(submit.amountReceived != null
+              ? { amount_received: submit.amountReceived }
+              : {}),
+            ...(submit.reference ? { payment_reference: submit.reference } : {}),
+            ...(submit.bankAccountId
+              ? { bank_account_id: submit.bankAccountId }
+              : {}),
+            ...(wompiMethod ? { wompi_payment_method: wompiMethod } : {}),
+            return_url: window.location.href,
+            cancel_url: window.location.href,
+          },
+        ];
     this.busy.set(true);
     this.error.set('');
+    const registered: number[] = [];
+    let lastSplit: SplitResult | null = null;
+    let lastPayment: { state: string; nextAction?: { url?: string } } | null =
+      null;
     try {
-      const result = await firstValueFrom(
-        this.api.payFinancialAccount(this.sourceOrderId(), account.id, dto),
-      );
-      this.applyResult(result.split);
+      for (let i = 0; i < requests.length; i++) {
+        const request = requests[i];
+        const fingerprint = JSON.stringify([account.id, i, request]);
+        let key = this.paymentKeys.get(fingerprint);
+        if (!key) {
+          key = crypto.randomUUID();
+          this.paymentKeys.set(fingerprint, key);
+        }
+        const dto: SplitAccountPayDto = { ...request, idempotency_key: key };
+        try {
+          const result = await firstValueFrom(
+            this.api.payFinancialAccount(this.sourceOrderId(), account.id, dto),
+          );
+          lastSplit = result.split;
+          lastPayment = result.payment;
+          registered.push(money(request.amount));
+          this.paymentKeys.delete(fingerprint);
+        } catch (error) {
+          if (lastSplit) {
+            this.applyResult(lastSplit);
+            const fresh = lastSplit.accounts.find((a) => a.id === account.id);
+            if (fresh) this.payingAccount.set(fresh);
+          }
+          if (multi) {
+            const done = registered.length
+              ? `Quedaron registrados ${registered.length} de ${requests.length} cobros (${registered
+                  .map((v) => this.currencyFormat.format(v))
+                  .join(', ')}). `
+              : 'No se registró ningún cobro. ';
+            this.toast.error(
+              `${done}Falló el cobro ${i + 1} (${this.currencyFormat.format(
+                money(request.amount),
+              )}): ${this.errorMessage(error)}`,
+            );
+          } else {
+            this.showError(error);
+          }
+          return;
+        }
+      }
+      if (lastSplit) this.applyResult(lastSplit);
       this.paymentOpen.set(false);
-      this.paymentKey = '';
-      this.paymentFingerprint = '';
-      const url = result.payment.nextAction?.url;
+      const url = lastPayment?.nextAction?.url;
       if (url && this.safeGatewayUrl(url)) this.gatewayUrl.set(url);
       this.toast.success(
-        ['succeeded', 'captured'].includes(result.payment.state)
-          ? 'Pago recibido.'
+        !lastPayment || ['succeeded', 'captured'].includes(lastPayment.state)
+          ? 'Cobro registrado'
           : 'Pago iniciado. Aún no está cobrado: falta la confirmación.',
       );
-    } catch (error) {
-      this.showError(error);
     } finally {
       this.busy.set(false);
     }

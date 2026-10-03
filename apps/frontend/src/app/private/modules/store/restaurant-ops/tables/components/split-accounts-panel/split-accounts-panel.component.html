@@ -196,7 +196,8 @@
               }
               <div class="mt-2 flex items-center justify-between gap-2 text-sm">
                 <span class="min-w-0 truncate">{{ payerName(payers()[draft.index]) }}</span>
-                <app-button variant="ghost" size="sm" [disabled]="busy()" (clicked)="editPayer(draft.index)">
+                <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="editPayer(draft.index)">
+                  <app-icon slot="icon" [name]="hasCustomer(payers()[draft.index]) ? 'user-cog' : 'user-plus'" [size]="14" />
                   {{ hasCustomer(payers()[draft.index]) ? 'Cambiar cliente' : 'Asignar cliente' }}
                 </app-button>
               </div>
@@ -265,7 +266,10 @@
       }
       <app-button variant="outline" size="sm" (clicked)="openDetail(card.account)">Ver detalle</app-button>
       @if (canEditPayer(card.account)) {
-        <app-button variant="ghost" size="sm" [disabled]="busy()" (clicked)="editPayer(null, card.account)">{{ hasCustomer(card.account) ? 'Cambiar cliente' : 'Asignar cliente' }}</app-button>
+        <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="editPayer(null, card.account)">
+          <app-icon slot="icon" [name]="hasCustomer(card.account) ? 'user-cog' : 'user-plus'" [size]="14" />
+          {{ hasCustomer(card.account) ? 'Cambiar cliente' : 'Asignar cliente' }}
+        </app-button>
       }
     </div>
   </app-card>
@@ -298,22 +302,52 @@
 }
 
 @if (paymentOpen()) {
-  <app-payment-modal
-    [(open)]="paymentOpen"
-    [title]="'Cobrar ' + (payingAccount()?.label ?? 'cuenta')"
-    [amount]="paymentAmount()"
-    [remainingBalance]="paymentAmount()"
-    [paymentMethods]="paymentMethods()"
-    [autoLoad]="false"
-    [customer]="paymentCustomer()"
-    [isProcessing]="busy()"
-    [allowTip]="false"
-    [allowCredit]="false"
-    [allowWallet]="false"
-    [allowWompi]="true"
-    [allowAmountOverride]="false"
-    [requireCustomer]="false"
-    context="generic"
-    (submit)="pay($event)"
-  />
+<app-modal
+  [isOpen]="true"
+  (isOpenChange)="paymentOpen.set($event)"
+  [title]="'Cobrar ' + (payingAccount()?.label ?? 'cuenta')"
+  size="lg"
+  [dialog]="true"
+>
+    <app-payment-collector
+      #collector
+      context="order"
+      [showKeypad]="true"
+      [allowMultiTender]="true"
+      [allowAmountOverride]="true"
+      [allowTip]="false"
+      [allowCredit]="false"
+      [allowWallet]="false"
+      [allowWompi]="true"
+      [amount]="paymentAmount()"
+      [remainingBalance]="paymentAmount()"
+      [paymentMethods]="paymentMethods()"
+      [autoLoad]="false"
+      [customer]="paymentCustomer()"
+      [isProcessing]="busy()"
+      (submit)="pay($event)"
+    />
+    @if (collector.effectiveBase() > paymentAmount() + 0.005) {
+      <p class="mt-2 text-sm font-medium text-[var(--color-destructive)]" role="alert">
+        El cobro de {{ collector.effectiveBase() | currency }} supera el saldo de la cuenta de {{ paymentAmount() | currency }}.
+      </p>
+    } @else if (paymentAmount() - collector.effectiveBase() > 0.005) {
+      <p class="mt-2 text-sm text-[var(--color-text-secondary)]" role="status">
+        Saldo pendiente tras este cobro: <strong>{{ paymentAmount() - collector.effectiveBase() | currency }}</strong>
+      </p>
+    }
+    <div slot="footer" class="grid gap-2">
+      <app-button
+        variant="primary"
+        [fullWidth]="true"
+        [loading]="busy()"
+        [disabled]="busy() || !collector.canSubmit() || collector.effectiveBase() > paymentAmount() + 0.005"
+        (clicked)="collector.triggerSubmit()"
+      >
+        <app-icon slot="icon" name="check-circle" [size]="18" />
+        Cobrar
+      </app-button>
+      <app-button variant="ghost" [fullWidth]="true" [disabled]="busy()" (clicked)="paymentOpen.set(false)">Cancelar</app-button>
+    </div>
+</app-modal>
 }
