@@ -233,6 +233,7 @@ export class PosShippingStepComponent {
     if (!this.shippingEdited()) return false;
     const original = this.originalShipping();
     return !original || this.customerChanged() || this.freeAddressEdited() ||
+      this.manualCostOverride() ||
       this.selectedShippingMethod()?.id !== original.shippingMethodId ||
       (this.isPickupMethod() ? null : this.addressId()) !== original.shippingAddressId ||
       this.shippingCost() !== Number(original.shippingCost ?? 0);
@@ -372,6 +373,29 @@ export class PosShippingStepComponent {
       description: this.currencyService.format(o.cost),
     })),
   );
+  readonly customShippingRateBlockReason = computed<string | null>(() => {
+    const method = this.selectedShippingMethod();
+    if (!method || !this.methodsLoaded()) return 'Espera a que se carguen los métodos de envío.';
+    if (method.is_active === false || !this.shippingMethods().some(
+      (candidate) => candidate.id === method.id && candidate.is_active !== false,
+    )) return 'El método seleccionado no está activo.';
+    if (this.isCalculatingShipping()) return 'Espera a que termine la cotización actual.';
+    const selectedRateId = this.shippingRateId();
+    if (selectedRateId != null && this.rateOptions().some(
+      (option) => (option.rate_id ?? option.id) === selectedRateId,
+    )) return 'Ya hay una tarifa disponible para el método seleccionado.';
+    if (this.manualCostOverride()) return 'La tarifa personalizada ya está activa.';
+    if (this.requiresAddress() && !this.addressValid()) {
+      return 'Completa una dirección válida para habilitar esta opción.';
+    }
+    if (this.requiresAddress() && !this.hasResolvedLocation()) {
+      return 'Marca la ubicación en el mapa para habilitar esta opción.';
+    }
+    return null;
+  });
+  readonly canUseCustomShippingRate = computed<boolean>(() =>
+    this.customShippingRateBlockReason() === null,
+  );
 
   // ── Envío sub-wizard (presentación; espeja el patrón de Cobro) ────────────
   /** Sub-paso activo del paso Envío: 0=Método · 1=Dirección (si no pickup) · Costo (terminal). */
@@ -437,6 +461,10 @@ export class PosShippingStepComponent {
   readonly totalWithShipping = computed<number>(
     () => this.subtotal() + this.shippingCost(),
   );
+  readonly shippingCostPending = computed<boolean>(() =>
+    !this.manualCostOverride() && !this.shippingRateId() &&
+    (this.requiresAddress() || !this.originalShipping() || this.hasShippingChanges()),
+  );
 
   /**
    * Paso 15b — desglose visible al cajero (base + impuesto del envío). Solo
@@ -468,7 +496,6 @@ export class PosShippingStepComponent {
    */
   readonly manualTaxUnavailable = computed<boolean>(() =>
     this.manualCostOverride() &&
-    !this.isPickupMethod() &&
     !this.shippingRateId(),
   );
 
@@ -1043,6 +1070,39 @@ export class PosShippingStepComponent {
     if (option) this.applyRateSelection(option);
   }
 
+  /** Explicitly enables a no-rate override; it is never selected by default. */
+  useCustomShippingRate(): void {
+    if (this.customShippingRateBlockReason()) return;
+    this.invalidateQuote();
+    this.manualQuoteGeneration++;
+    this.manualCostOverride.set(true);
+    this.manualShippingPrice.set(0);
+    this.calculatedShippingCost.set(null);
+    this.shippingRateId.set(null);
+    this.shippingCost.set(0);
+    this.manualQuotedShippingTax.set(null);
+    this.shippingEdited.set(true);
+  }
+
+  /** Leaves custom mode and explicitly asks for a fresh configured quote. */
+  useAutomaticShippingRate(): void {
+    if (!this.manualCostOverride() || this.shippingRateId() != null) return;
+    this.manualQuoteGeneration++;
+    this.invalidateQuote();
+    this.manualCostOverride.set(false);
+    this.manualShippingPrice.set(0);
+    this.manualQuotedShippingTax.set(null);
+    this.calculatedShippingCost.set(null);
+    this.shippingCost.set(0);
+    this.shippingEdited.set(true);
+
+    // The existing signal effect recalculates changed/new orders. An untouched
+    // historical snapshot also needs a quote after an explicit return to auto.
+    if (this.originalShipping() && !this.hasShippingChanges()) {
+      this.calculateShippingCost();
+    }
+  }
+
   toggleManualCost(): void {
     // Keep the selected automatic quote so switching back restores its gross.
     this.invalidateQuote(true);
@@ -1055,7 +1115,12 @@ export class PosShippingStepComponent {
       this.quoteManualCost();
     } else {
       this.manualQuotedShippingTax.set(null);
-      if (calc !== null) this.shippingCost.set(calc);
+      if (calc !== null) {
+        this.shippingCost.set(calc);
+      } else {
+        this.manualShippingPrice.set(0);
+        this.shippingCost.set(0);
+      }
     }
     this.shippingEdited.set(true);
   }
@@ -1074,7 +1139,7 @@ export class PosShippingStepComponent {
     const amount = this.manualShippingPrice();
     const rateId = this.shippingRateId();
     const methodId = this.selectedShippingMethod()?.id;
-    if (!Number.isFinite(amount) || amount < 0) {
+    if (!this.isValidManualShippingAmount(amount)) {
       this.quoteError.set('Ingresa un costo de envío válido.');
       return;
     }
@@ -1124,29 +1189,25 @@ export class PosShippingStepComponent {
     const untouchedPickupSnapshot = this.isPickupMethod() && !!original &&
       (original.deliveryType === 'pickup' || original.shippingMethod?.type === 'pickup') &&
       original.shippingMethodId === method.id && !this.hasShippingChanges();
-    if (this.isPickupMethod() && !this.shippingRateId() && !untouchedPickupSnapshot) {
+    const explicitCustomRateWithoutTable = this.manualCostOverride() && !this.shippingRateId();
+    if (this.isPickupMethod() && !this.shippingRateId() &&
+      !untouchedPickupSnapshot && !explicitCustomRateWithoutTable) {
       return { section: 'shipping-method', message: 'Selecciona una tarifa activa para recoger en tienda' };
     }
-    // Requirement 3 (coordinator, 2026-09): hard gate, no manual-cost escape
-    // hatch — a delivery method must never confirm/charge a default rate for
-    // an address with no resolved point (neither a forward-geocode hit nor a
-    // confirmed map pin). Placed before the generic shippingCost-finite check
-    // on purpose: a manually typed shipping cost
-    // (`onShippingCostChange`/`quoteManualCost`) sets `shippingCost` to a
-    // finite value regardless of location, which would otherwise slip past
-    // that check and let the cashier confirm a made-up cost for a location
-    // that was never resolved.
+    // Requirement 3 (coordinator, 2026-09): an explicit custom-rate override
+    // is allowed only after this same address-valid + resolved-coordinates
+    // gate; it must not become an escape hatch for an unresolved destination.
     //
     // Deliberately keyed on `hasResolvedLocation()`, NOT `shippingRateId()`:
-    // a `null` `shippingRateId` also covers the pre-existing, unrelated
-    // "manual cost, no automated rate table at all" path (alias deliveries,
-    // methods with no configured `shipping_rates`) — see `quoteManualCost`'s
-    // own comment. That path has real coords and is a legitimate cashier
-    // override, not the "no default rate" case this gate targets.
+    // a `null` `shippingRateId` is allowed here only after the cashier
+    // explicitly chooses the custom-rate path and this location gate passes.
     if (this.requiresAddress() && !this.hasResolvedLocation()) {
       return { section: 'address', message: 'Marca la ubicación en el mapa para calcular el envío' };
     }
     if (!Number.isFinite(this.shippingCost()) || this.shippingCost() < 0) {
+      return { section: 'shipping-method', message: 'Ingresa un costo de envío válido' };
+    }
+    if (this.manualCostOverride() && !this.isValidManualShippingAmount(this.manualShippingPrice())) {
       return { section: 'shipping-method', message: 'Ingresa un costo de envío válido' };
     }
     if (this.requiresAddress()) {
@@ -1341,7 +1402,7 @@ export class PosShippingStepComponent {
       shippingMethodId: method.id,
       shippingRateId: this.shippingRateId(),
       shippingCost: this.shippingCost(),
-      ...(this.manualCostOverride() && this.shippingRateId()
+      ...(this.manualCostOverride()
         ? { manualShippingPrice: this.manualShippingPrice() }
         : {}),
       deliveryType: method.id === this.originalShipping()?.shippingMethodId
@@ -1453,6 +1514,13 @@ export class PosShippingStepComponent {
     });
   }
 
+  private isValidManualShippingAmount(amount: number): boolean {
+    if (!Number.isFinite(amount) || amount < 0) return false;
+    const decimals = Math.min(2, Math.max(0, this.currencyService.currencyDecimals()));
+    const scale = 10 ** decimals;
+    return Math.abs(amount - Math.round(amount * scale) / scale) < 1e-8;
+  }
+
   /**
    * Mapea `AddressPayload` (claves schema Prisma) al DTO del backend
    * (`address_line_1`, `state`, `country`), incluyendo GPS. Réplica del mapper
@@ -1516,7 +1584,7 @@ export class PosShippingStepComponent {
           deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
           shippingRateId: this.shippingRateId(),
-          ...(this.manualCostOverride() && this.shippingRateId()
+          ...(this.manualCostOverride()
             ? { manualShippingPrice: this.manualShippingPrice() }
             : {}),
           manualCostOverride: this.manualCostOverride(),

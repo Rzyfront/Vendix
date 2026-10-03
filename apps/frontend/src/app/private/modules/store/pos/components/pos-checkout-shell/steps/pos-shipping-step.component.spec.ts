@@ -173,7 +173,10 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quotePickupShipping: quotePickup, quoteManualShipping: manualQuote } },
         { provide: CustomersService, useValue: customers },
         { provide: ToastService, useValue: { show: () => {} } },
-        { provide: CurrencyFormatService, useValue: { currencySymbol: signal('$'), loadCurrency: () => {}, format: (v: number) => `$${v}` } },
+        { provide: CurrencyFormatService, useValue: {
+          currencySymbol: signal('$'), currencyDecimals: signal(2),
+          loadCurrency: () => {}, format: (v: number) => `$${v}`,
+        } },
         { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]), getDefaultCountry: () => ({ code: 'CO' }) } },
         { provide: DianMunicipalityLookupService, useValue: municipalityLookup },
         { provide: GeocodingService, useValue: { forward: () => of(null), reverse: () => of(null) } },
@@ -448,6 +451,57 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.quoteError()).toBe('No hay una tarifa disponible para "Mensajero".');
     expect(component.editorValidationError()).toContain('No hay una tarifa disponible');
     expect(component.canConfirm()).toBeFalse();
+  });
+
+  it('requires explicit choice before accepting a zero custom amount for a no-rate delivery method', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([]);
+    fixture.detectChanges();
+
+    expect(component.canConfirm()).toBeFalse();
+    expect(component.manualCostOverride()).toBeFalse();
+    component.useCustomShippingRate();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.calculatedShippingCost()).toBeNull();
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBeNull();
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.totalWithShipping()).toBe(1000);
+    expect(component.buildShippingContext()).toEqual(jasmine.objectContaining({
+      shippingRateId: null, shippingCost: 0, manualShippingPrice: 0,
+      manualCostOverride: true,
+    }));
+  });
+
+  it('includes positive custom amount without a rate in sale payload and totals', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    component.onShippingCostChange(2500.5);
+
+    expect(component.shippingCost()).toBe(2500.5);
+    expect(component.totalWithShipping()).toBe(3500.5);
+    expect(component.canConfirm()).toBeTrue();
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+    (component as any).processOrder(
+      (component as any).buildShippingAddress(), 'home_delivery', null, 33,
+    );
+
+    expect(payment.processShippingSale.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      shippingRateId: null, shippingCost: 2500.5, manualShippingPrice: 2500.5,
+      manualCostOverride: true,
+    }));
   });
 
   it('keeps missing/inactive original method and address without default fallback, with warning', () => {
@@ -742,6 +796,132 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingRateId()).toBeNull();
     expect(component.shippingCost()).toBe(0);
     expect(component.quoteError()).toBe('No hay tarifa activa para recoger en tienda');
+    expect(component.canConfirm()).toBeFalse();
+  });
+
+  it('permite pickup sin dirección con costo personalizado solo tras la acción explícita', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup]);
+    component.selectShippingMethod(pickup);
+    fixture.detectChanges();
+    pickupQuotes[0].next([]);
+    fixture.detectChanges();
+
+    expect(component.address()).toBeNull();
+    expect(component.canConfirm()).toBeFalse();
+    component.useCustomShippingRate();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingCost()).toBe(0);
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.buildShippingContext()).toEqual(jasmine.objectContaining({
+      deliveryType: 'pickup', shippingAddressId: undefined,
+      shippingRateId: null, manualShippingPrice: 0, manualCostOverride: true,
+    }));
+  });
+
+  it('offers custom price for an untouched historical pickup without changing its cost before click', () => {
+    const state = cart();
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    state.shippingContext = {
+      ...state.shippingContext!, shippingMethodId: pickup.id, shippingMethod: pickup,
+      deliveryType: 'pickup', shippingAddressId: null, shippingAddress: null,
+      shippingRateId: null, shippingCost: 4800,
+    };
+    mount(state, [pickup]);
+    component.goToShipSubStep(1);
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.shippingCost()).toBe(4800);
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.shippingCostPending()).toBeFalse();
+    const action = fixture.debugElement.query(By.css('.cost-card button.no-methods-link'));
+    expect(action.nativeElement.textContent).toContain('Usar tarifa personalizada');
+    action.triggerEventHandler('click', null);
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingCost()).toBe(0);
+    expect(component.shippingCostPending()).toBeFalse();
+  });
+
+  it('rejects custom price when location is unresolved, amount invalid, or method inactive', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [
+      { id: 501, address_line1: 'Calle sin punto 1', city: 'Neiva',
+        state_province: 'Huila', country_code: 'CO', is_primary: true, type: 'shipping' },
+    ] };
+    mount(state);
+    component.useCustomShippingRate();
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.canConfirm()).toBeFalse();
+
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    component.selectShippingMethod(pickup);
+    fixture.detectChanges();
+    pickupQuotes[0].next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    component.onShippingCostChange(-1);
+    expect(component.quoteError()).toBe('Ingresa un costo de envío válido.');
+    expect(component.canConfirm()).toBeFalse();
+
+    component.onShippingCostChange(1.001);
+    expect(component.quoteError()).toBe('Ingresa un costo de envío válido.');
+    expect(component.canConfirm()).toBeFalse();
+
+    component.manualCostOverride.set(false);
+    component.selectedShippingMethod.set({ ...pickup, is_active: false });
+    component.useCustomShippingRate();
+    expect(component.manualCostOverride()).toBeFalse();
+  });
+
+  it('ignores an outstanding automatic quote after explicit custom-rate fallback', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    const staleQuote = latestQuote();
+    staleQuote.next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    staleQuote.next([quote(1, 9999, 119)]);
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.shippingCost()).toBe(0);
+  });
+
+  it('clears the custom amount and blocks again when returning to automatic with no quote', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    component.onShippingCostChange(2800);
+    component.useAutomaticShippingRate();
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBeNull();
+    latestQuote().next([]);
+    fixture.detectChanges();
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBe('No hay una tarifa disponible para "Mensajero".');
     expect(component.canConfirm()).toBeFalse();
   });
 

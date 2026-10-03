@@ -302,14 +302,13 @@
       @if (isCostSubStep()) {
         @if (selectedShippingMethod()) {
           <!--
-            Requirement 3 (coordinator, 2026-09): a delivery method with no
-            resolved location/rate must show NEITHER a zone cost NOR the
-            manual-cost fallback — only this explicit block, so the cashier's
-            eye lands on "go mark the map" instead of a $0/blank cost row
-            that reads as if envío were free or already handled.
+            Requirement 3 (coordinator, 2026-09): a delivery method without a
+            resolved location cannot show a zone cost or enable custom pricing.
+            Once the location is valid, a cashier may explicitly choose the
+            no-rate custom-price path from this alert.
           -->
-          @if ((requiresAddress() && !shippingRateId() && !isCalculatingShipping()) ||
-              (isPickupMethod() && !!quoteError())) {
+          @if ((requiresAddress() && !shippingRateId() && !isCalculatingShipping() && !manualCostOverride()) ||
+              (isPickupMethod() && !!quoteError() && !manualCostOverride())) {
             <div class="no-methods-alert" role="alert">
               <app-icon name="map-pin" [size]="18" class="no-methods-icon"></app-icon>
               <div class="no-methods-body">
@@ -320,11 +319,19 @@
                 </span>
                 <span class="no-methods-desc">
                   {{ isPickupMethod()
-                    ? 'No se puede confirmar la recogida sin una tarifa activa configurada.'
+                    ? 'Puedes usar una tarifa personalizada o configurar una tarifa para este método.'
                     : (hasResolvedLocation()
                       ? 'Revisa las tarifas y la cobertura de este método, o selecciona otro método de envío.'
                       : 'No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.') }}
                 </span>
+                <button type="button" class="no-methods-link"
+                  [disabled]="!canUseCustomShippingRate()"
+                  (click)="useCustomShippingRate()">
+                  Usar tarifa personalizada
+                </button>
+                @if (!canUseCustomShippingRate() && customShippingRateBlockReason()) {
+                  <span class="no-methods-desc">{{ customShippingRateBlockReason() }}</span>
+                }
               </div>
             </div>
           } @else {
@@ -334,9 +341,13 @@
               <span class="cost-row-label"
                 >Costo de envío
                 @if (isPickupMethod()) {
-                  (según tarifa configurada)
+                  {{ manualCostOverride()
+                    ? '(tarifa personalizada)'
+                    : (shippingRateId() ? '(según tarifa configurada)' : '(sin tarifa configurada)') }}
                 } @else {
-                  {{ manualCostOverride() ? '(manual)' : '(automático)' }}
+                  {{ manualCostOverride()
+                    ? (shippingRateId() ? '(manual)' : '(tarifa personalizada)')
+                    : '(automático)' }}
                 }</span
               >
               @if (isCalculatingShipping()) {
@@ -375,6 +386,19 @@
               </div>
             }
 
+            @if (isPickupMethod() && !shippingRateId() && !isCalculatingShipping() && !manualCostOverride()) {
+              <div class="manual-cost-input">
+                <button type="button" class="no-methods-link"
+                  [disabled]="!canUseCustomShippingRate()"
+                  (click)="useCustomShippingRate()">
+                  Usar tarifa personalizada
+                </button>
+                @if (!canUseCustomShippingRate() && customShippingRateBlockReason()) {
+                  <span class="no-methods-desc">{{ customShippingRateBlockReason() }}</span>
+                }
+              </div>
+            }
+
             @if (!isPickupMethod() && calculatedShippingCost() !== null) {
               <div class="cost-divider"></div>
               <div class="cost-row cost-row--toggle">
@@ -387,14 +411,19 @@
               </div>
             }
 
-            @if (!isPickupMethod() && manualCostOverride()) {
+            @if (manualCostOverride() && (!isPickupMethod() || !shippingRateId())) {
               <div class="manual-cost-input">
+                <label class="cost-toggle-label" for="manual-shipping-price">
+                  {{ shippingRateId() ? 'Costo de envío manual' : 'Tarifa personalizada' }}
+                </label>
                 <div class="cash-input">
                   <span class="currency">{{ currencySymbol() }}</span>
                   <input
+                    id="manual-shipping-price"
                     appCurrencyInput
                     [ngModel]="manualShippingPrice()"
                     (ngModelChange)="onShippingCostChange($event)"
+                    [attr.aria-label]="shippingRateId() ? 'Costo de envío manual' : 'Tarifa personalizada'"
                     placeholder="0.00"
                   />
                 </div>
@@ -405,12 +434,17 @@
                       : 'incluye el impuesto de la tarifa seleccionada, si aplica.' }}
                   </p>
                 }
+                @if (!shippingRateId()) {
+                  <button type="button" class="no-methods-link" (click)="useAutomaticShippingRate()">
+                    Volver a tarifa automática
+                  </button>
+                }
               </div>
             }
 
             @if (manualTaxUnavailable()) {
               <p class="manual-tax-note" role="note">
-                No hay una tarifa aplicable; este costo manual se registrará sin impuesto de envío.
+                Sin tarifa configurada, este importe no incluye impuesto de envío.
               </p>
             }
           </div>
@@ -438,7 +472,7 @@
             </div>
             <div class="totals-row">
               <span class="totals-label">Envío</span>
-              @if (requiresAddress() && !shippingRateId()) {
+              @if (shippingCostPending()) {
                 <span class="totals-amount">Pendiente</span>
               } @else {
                 <span class="totals-amount">{{ shippingCost() | currency }}</span>
