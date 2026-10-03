@@ -3209,12 +3209,31 @@ export class OrdersService {
       dto.delivery_type === order_delivery_type_enum.dine_in ||
       (dto.delivery_type === order_delivery_type_enum.pickup &&
         !dto.shipping_method_id);
+    const customShippingWithoutRate =
+      dto.manual_shipping_price != null && dto.shipping_rate_id == null;
 
     if (dto.manual_shipping_price != null &&
-      (!dto.shipping_method_id || !dto.shipping_rate_id || dtoDropsShipment)) {
+      (!dto.shipping_method_id || dtoDropsShipment)) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
-        'Selecciona una tarifa de domicilio para aplicar su impuesto al costo manual',
+        'Selecciona un método de envío activo para aplicar el costo manual.',
+      );
+    }
+    if (
+      customShippingWithoutRate &&
+      (
+        typeof dto.shipping_method_id !== 'number' ||
+        !Number.isInteger(dto.shipping_method_id) ||
+        dto.shipping_method_id <= 0 ||
+        typeof dto.manual_shipping_price !== 'number' ||
+        !Number.isFinite(dto.manual_shipping_price) ||
+        dto.manual_shipping_price < 0 ||
+        dto.manual_shipping_price !== roundMoney(dto.manual_shipping_price)
+      )
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+        'La tarifa personalizada requiere un método válido y un monto de hasta dos decimales.',
       );
     }
 
@@ -3360,7 +3379,17 @@ export class OrdersService {
         }
       }
 
-      if (method.type === 'pickup') {
+      if (customShippingWithoutRate) {
+        // Opción explícita del POS cuando no hay cotización seleccionable:
+        // el importe es bruto, no lleva copia fiscal y no se reintenta cotizar.
+        shippingCost = roundMoney(dto.manual_shipping_price!);
+      } else if (method.type === 'pickup') {
+        if (dto.manual_shipping_price != null) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'El retiro en tienda debe usar el costo de una tarifa configurada.',
+          );
+        }
         const pickupOptions = await this.shippingCalculatorService.quotePickupRates(
           storeId,
           method.id,
@@ -3376,22 +3405,6 @@ export class OrdersService {
         }
         resolvedShippingRateId = pickupOption.rate_id;
         shippingCost = Number(pickupOption.cost);
-
-        if (dto.manual_shipping_price != null) {
-          if (!this.shippingTaxService) {
-            throw new VendixHttpException(
-              ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
-              'No se pudo calcular el impuesto del costo de recogida.',
-            );
-          }
-          manualShippingCharge = await this.shippingTaxService.chargeForRate(
-            null,
-            pickupOption.rate_id,
-            dto.manual_shipping_price,
-            { store_id: storeId },
-          );
-          shippingCost = manualShippingCharge.gross;
-        }
       } else if (dto.shipping_rate_id) {
         const rate = await this.prisma.shipping_rates.findFirst({
           where: {
@@ -3520,6 +3533,7 @@ export class OrdersService {
     );
     const effectiveShippingCost = dto.shipping_cost ?? shippingCost;
     const shippingUnchanged =
+      !customShippingWithoutRate &&
       !dtoDropsShipment &&
       Math.round(Number(effectiveShippingCost ?? 0) * 100) ===
         persistedShippingCents &&
