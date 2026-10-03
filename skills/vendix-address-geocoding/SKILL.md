@@ -506,13 +506,17 @@ legados fuera del formulario.
 - El geocoding actualiza coordenadas/precisión, pero nunca sobrescribe `city`, `state_province`, el
   código seleccionado ni la geografía oficial elegida.
 
-### Recentrar el mapa en la dirección
+### GPS explícito del mapa
 
-`app-address-map-picker` tiene un control independiente de geolocalización: vuela con `map.flyTo`
-al marcador actual (si existe) o al centro real de la dirección, con zoom 16. Está deshabilitado
-cuando no hay punto real (el centro inicial de Colombia no cuenta). El clic no usa GPS, no emite
-`located` y no cambia coordenadas. Retirar el control/destruir el componente debe limpiar listener y
-referencias.
+`app-address-map-picker` mantiene los controles Navigation → Fullscreen → GPS. La acción
+«Usar mi ubicación actual» está debajo de pantalla completa y solicita permiso/posición solo tras
+un clic: no se inicia GPS al montar el mapa. El POS la habilita también para preventistas a
+domicilio; el resultado actualiza exclusivamente latitud/longitud y confirma el pin, nunca texto
+operativo ni geografía DANE. Si el permiso se deniega, se conserva la captura manual.
+
+El botón adicional de recentrado de dirección fue retirado por instrucción del owner. Al invalidar
+el centro (`center=null`), retirar el marcador y limpiar `hasPoint`, incluso si el cambio ocurre
+durante la importación o carga asíncrona del mapa.
 
 ## Cascade — `resolveStopCoordinates`
 
