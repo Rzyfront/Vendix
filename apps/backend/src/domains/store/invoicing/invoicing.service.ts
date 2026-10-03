@@ -20,7 +20,7 @@ import {
   FiscalInvoiceThresholdService,
   POS_EQUIVALENT_DOCUMENT_UVT_LIMIT,
 } from '@common/services/fiscal-invoice-threshold.service';
-import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { VendixHttpException, ErrorCodes, FinancialSplitErrors } from 'src/common/errors';
 import type { EmitReadinessFinding } from './invoice-flow/emit-readiness.contract';
 import { exceptionToFinding } from './utils/exception-to-finding.util';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
@@ -2989,6 +2989,9 @@ export class InvoicingService {
     const existing = await this.prisma.invoices.findFirst({
       where: {
         ...where,
+        // Las facturas de cuenta (reparto financiero) cuelgan de la orden por
+        // `order_id` pero no son «la factura de la orden».
+        financial_account_id: null,
         invoice_type: 'sales_invoice',
         status: { notIn: ['voided', 'cancelled'] },
       },
@@ -3780,6 +3783,11 @@ export class InvoicingService {
       }
       const existing = await tx.invoices.findFirst({ where: { financial_account_id: accountId, invoice_type: 'sales_invoice', status: { notIn: ['voided', 'cancelled'] }, store_id: context.store_id }, include: INVOICE_INCLUDE });
       if (existing) return existing;
+      // Una cuenta se factura DESPUÉS de cobrarse completa (también la retenida
+      // «paid_original»: solo se exime si ya está pagada).
+      if (paid.lt(account.grand_total)) {
+        throw new VendixHttpException(FinancialSplitErrors.SPLIT_ACCOUNT_UNPAID_INVOICE);
+      }
       const created = await tx.invoices.create({
         data: {
           organization_id: context.organization_id,
