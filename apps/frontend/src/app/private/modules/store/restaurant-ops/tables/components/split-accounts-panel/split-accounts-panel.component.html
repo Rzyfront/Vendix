@@ -1,323 +1,300 @@
-<section class="split-panel" aria-label="Cuentas independientes" [hidden]="!allowCreate() && !group()">
-  <div class="split-row">
-    <div>
-      <h3>Cuentas independientes</h3>
-      <p class="split-note">
-        Solo se divide el saldo pendiente. Los abonos anteriores no se
-        redistribuyen.
-      </p>
-    </div>
-    <app-button
-      variant="ghost"
-      [disabled]="loading() || busy()"
-      (clicked)="reload()"
-      >Actualizar</app-button
-    >
-  </div>
+<section
+  class="grid gap-4"
+  aria-label="Cuentas independientes"
+  [hidden]="!allowCreate() && !group()"
+>
   @if (loading()) {
-    <p role="status">Consultando cuentas…</p>
+    <p role="status" class="text-sm text-[var(--color-text-secondary)]">Consultando cuentas…</p>
   }
   @if (error()) {
-    <p class="split-error" role="alert">{{ error() }}</p>
+    <app-alert-banner variant="danger" icon="alert-triangle">{{ error() }}</app-alert-banner>
   }
-  @if (summary(); as totals) {
-    <div class="split-summary">
-      <div>
-        <small>Total original</small
-        ><strong>{{ money(totals.original_total) | currency }}</strong>
-      </div>
-      <div>
-        <small>Abonos conservados</small
-        ><strong>{{ money(totals.preserved_paid) | currency }}</strong>
-      </div>
-      <div>
-        <small>Saldo distribuido</small
-        ><strong>{{ money(totals.pending_to_split) | currency }}</strong>
-      </div>
-    </div>
-  }
-  @if (!group() && allowCreate() && !loading()) {
-    @if (canManage()) {
-      <div class="split-actions" aria-label="Modo de división">
-        <app-button
-          [variant]="mode() === 'equal' ? 'primary' : 'ghost'"
-          (clicked)="setMode('equal')"
-          [disabled]="busy()"
-          >Iguales</app-button
-        >
-        <app-button
-          [variant]="mode() === 'custom' ? 'primary' : 'ghost'"
-          (clicked)="setMode('custom')"
-          [disabled]="busy()"
-          >Importes exactos</app-button
-        >
-        <app-button
-          [variant]="mode() === 'items' ? 'primary' : 'ghost'"
-          (clicked)="setMode('items')"
-          [disabled]="busy()"
-          >Por ítems</app-button
-        >
-      </div>
-      <p class="split-note" id="split-steps">
-        1. Elige cuántas personas pagarán y cómo repartir el saldo. 2. Puedes
-        asignar un titular o dejar una cuenta a consumidor final. 3. Revisa la
-        vista previa y confirma para crear las cuentas; después cobra cada una.
-      </p>
-      <app-input
-        label="Número de comensales / cuentas"
-        type="number"
-        [min]="2"
-        [max]="20"
-        [formControl]="form.controls.count"
-      />
-      <p class="split-note" role="status">
-        {{ payers().length }} cuentas para gestionar. Cada tarjeta de abajo
-        corresponde a una persona.
-      </p>
-      <div class="split-accounts">
-        @for (payer of payers(); track $index; let index = $index) {
-          <div class="split-card">
-            <h4>Comensal {{ index + 1 }} · Cuenta {{ index + 1 }}</h4>
-            <p>{{ payerName(payer) }}</p>
+
+  @if (group(); as g) {
+    <!-- ═══ B. División creada ═══ -->
+    <app-card>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+            Cuenta dividida en {{ g.accounts.length }}
+          </h3>
+          @if (groupModeLabel()) {
+            <p class="text-sm text-[var(--color-text-secondary)]">{{ groupModeLabel() }}</p>
+          }
+        </div>
+        <div class="flex items-center gap-2">
+          <app-button variant="ghost" size="sm" [disabled]="loading() || busy()" (clicked)="reload()">Actualizar</app-button>
+          @if (canManage()) {
             <app-button
-              variant="ghost"
-              [disabled]="busy()"
-              (clicked)="editPayer(index)"
-              >Asignar titular</app-button
+              variant="outline"
+              size="sm"
+              [disabled]="busy() || !undo()?.allowed"
+              (clicked)="removeSplit()"
+              >Quitar división</app-button
             >
-            @if (!payer.customer_id) {
-              <app-input
-                label="Nombre del comensal (opcional)"
-                [formControl]="aliasControlAt(index)"
-              />
-            }
-            @if (mode() === "custom") {
-              <app-input
-                [label]="'Importe cuenta ' + (index + 1)"
-                [currency]="true"
-                [currencyDecimals]="2"
-                [allowNegative]="false"
-                [formControl]="amountControl(index)"
-              />
-            }
+          }
+        </div>
+      </div>
+      <div class="mt-3">
+        <div class="flex flex-wrap justify-between gap-2 text-sm">
+          <span>Cobrado {{ collected() | currency }} de {{ collectable() | currency }}</span>
+          <span class="text-[var(--color-text-secondary)]">Facturadas {{ invoicedCount() }} de {{ g.accounts.length }}</span>
+        </div>
+        <div
+          class="mt-1 h-2 w-full overflow-hidden rounded-full bg-[var(--color-border)]"
+          role="progressbar"
+          aria-label="Cobrado"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          [attr.aria-valuenow]="collectedPercent()"
+        >
+          <div class="h-full rounded-full bg-[var(--color-primary)]" [style.width.%]="collectedPercent()"></div>
+        </div>
+      </div>
+      @if (canManage() && undo(); as u) {
+        @if (!u.allowed && u.blockers.length) {
+          <div class="mt-3 text-sm text-[var(--color-text-secondary)]" data-testid="undo-blocked">
+            <p class="font-medium">No se puede quitar:</p>
+            <ul class="list-disc pl-5">
+              @for (b of u.blockers; track b.account_id + b.reason) {
+                <li>
+                  @if (b.reason === 'payment_registered') {
+                    {{ b.account_label }} ya tiene un pago registrado
+                    @if (b.amount) { de {{ money(b.amount) | currency }} }
+                  } @else {
+                    la factura de {{ b.account_label }} ya fue enviada a la DIAN
+                  }
+                </li>
+              }
+            </ul>
           </div>
         }
-      </div>
-      @if (mode() === "items") {
-        <p class="split-note">
-          Asignación financiera: incluye los platos ya cocinados y no vuelve a
-          consumir inventario.
-        </p>
-        @for (item of activeItems(); track item.id) {
-          <label class="split-item"
-            ><span>{{ item.product_name }} × {{ item.quantity }}</span>
-            <select
-              [value]="assignments()[item.id] ?? 0"
-              (change)="assign(item.id, $event)"
-              [disabled]="busy()"
-              [attr.aria-label]="'Cuenta de ' + item.product_name"
-            >
-              <option value="0">Elegir cuenta</option>
-              @for (payer of payers(); track $index) {
-                <option [value]="$index + 1">Cuenta {{ $index + 1 }}</option>
-              }
-            </select>
-          </label>
-        }
       }
-      <div class="split-actions">
-        <app-button
-          variant="outline"
-          [loading]="busy()"
-          [disabled]="busy()"
-          (clicked)="calculatePreview()"
-          >Ver vista previa del reparto</app-button
-        >
-        <app-button
-          variant="primary"
-          [disabled]="!canConfirm()"
-          (clicked)="confirmSplit()"
-          >Crear {{ payers().length }} cuentas</app-button
-        >
-      </div>
-      @if (preview() && !currentPreview() && !busy()) {
-        <p class="split-note" role="status">
-          Cambiaste el reparto. Genera otra vista previa para habilitar la
-          creación de cuentas.
-        </p>
+    </app-card>
+
+    <div class="grid gap-3 md:grid-cols-2">
+      @for (card of accountCards(); track card.account.id ?? card.account.ordinal) {
+        <ng-container [ngTemplateOutlet]="accountCardTpl" [ngTemplateOutletContext]="{ $implicit: card }" />
       }
-    } @else {
-      <p class="split-note">No tienes permiso para dividir esta cuenta.</p>
+    </div>
+    @if (retainedCard(); as retained) {
+      <ng-container [ngTemplateOutlet]="accountCardTpl" [ngTemplateOutletContext]="{ $implicit: retained }" />
     }
-  }
-  @if (accountRows().length) {
-    <h4>{{ group() ? "Cuentas creadas" : "Vista previa — aún no se han creado las cuentas" }}</h4>
-    <p class="split-note">
-      {{
-        group()
-          ? "Importes fijados: no se editan cantidades, precios ni ajustes desde estas cuentas."
-          : "Vista previa calculada por el servidor; todavía no hay cuentas creadas."
-      }}
-    </p>
-    <div class="split-accounts">
-      @for (account of accountRows(); track account.ordinal) {
-        <article class="split-card">
-          <div class="split-row">
-            <h4>{{ account.label }}</h4>
-            <strong>{{ money(account.grand_total) | currency }}</strong>
-          </div>
-          <p>{{ payerName(account) }}</p>
-          @if (!account.customer_id) {
-            <p class="split-note">
-              Sin cliente fiscal: documento a consumidor final. Para factura
-              nominativa, elige un cliente.
-            </p>
+    @if (gatewayUrl(); as url) {
+      <p role="status" class="text-sm">
+        Continúa el pago en la pasarela.
+        <a class="text-[var(--color-primary)] underline" [href]="url" target="_blank" rel="noopener noreferrer">Abrir pasarela de pago</a>
+      </p>
+    }
+  } @else if (allowCreate() && !loading()) {
+    <!-- ═══ A. Armado ═══ -->
+    @if (!canManage()) {
+      <p class="text-sm text-[var(--color-text-secondary)]">No tienes permiso para dividir esta cuenta.</p>
+    } @else {
+      <app-card>
+        <h3 class="mb-1 text-base font-semibold text-[var(--color-text-primary)]">Dividir cuenta</h3>
+        <app-steps-line [steps]="steps" [currentStep]="currentStep()" size="sm" />
+
+        <div class="mt-3 flex w-full gap-1 rounded-lg bg-[var(--color-background)] p-1" role="tablist" aria-label="Cómo dividir">
+          @for (option of modeOptions; track option.value) {
+            <button
+              type="button"
+              role="tab"
+              [class]="'min-h-[44px] flex-1 rounded-md px-2 text-sm font-medium transition-colors ' + (mode() === option.value ? 'bg-[var(--color-primary)] text-white' : 'text-[var(--color-text-secondary)]')"
+              [attr.aria-selected]="mode() === option.value"
+              [disabled]="busy()"
+              (click)="setMode(option.value)"
+            >
+              {{ option.label }}
+            </button>
           }
-          @if (group()) {
-            <p class="split-note">
-              {{ stateLabel(account.payment_state) }} · Saldo
-              {{ money(account.remaining_balance) | currency }}
-            </p>
-          }
-          <details>
-            <summary>Ver componentes</summary>
-            <div class="split-totals">
-              <span>Base</span
-              ><span>{{ money(account.subtotal_amount) | currency }}</span>
-              <span>Descuento</span
-              ><span>−{{ money(account.discount_amount) | currency }}</span>
-              <span>Impuestos</span
-              ><span>{{ money(account.tax_amount) | currency }}</span>
-              <span>Envío</span
-              ><span>{{ money(account.shipping_cost) | currency }}</span>
-              <span>Propina pactada</span
-              ><span>{{ money(account.tip_amount) | currency }}</span>
-            </div>
-          </details>
-          @if (group()) {
-            <div class="split-actions">
-              @if (canEditPayer(account)) {
-                <app-button
-                  variant="ghost"
-                  [disabled]="busy()"
-                  (clicked)="editPayer(null, account)"
-                  >Cambiar titular</app-button
-                >
-              }
-              @if (canPay() && money(account.available_to_pay) > 0) {
-                <app-button
-                  variant="primary"
-                  [disabled]="busy()"
-                  (clicked)="openPayment(account)"
-                  >Cobrar
-                  {{ money(account.available_to_pay) | currency }}</app-button
-                >
-              }
-              @if (canInvoice()) {
-                <app-button
-                  variant="outline"
-                  [disabled]="busy()"
-                  (clicked)="invoice(account)"
-                  >{{
-                    account.invoice_id ? "Abrir factura" : "Crear factura"
-                  }}</app-button
-                >
-              }
-            </div>
-            @if (money(account.reserved_amount) > 0) {
-              <p class="split-note" role="status">
-                {{ money(account.reserved_amount) | currency }} en pagos
-                pendientes. No se consideran dinero recibido.
-              </p>
+        </div>
+
+        @if (mode() !== 'items') {
+          <app-alert-banner class="mt-3" variant="warning" icon="alert-triangle">
+            Cada cuenta (y su factura) llevará una parte proporcional de cada producto. Si cada persona pagará productos distintos, usa Por productos.
+          </app-alert-banner>
+        }
+
+        @if (mode() === 'items') {
+          <ul class="mt-3 divide-y divide-[var(--color-border)]" aria-label="Productos">
+            @for (item of activeItems(); track item.id) {
+              <li class="py-2">
+                <div class="flex items-baseline justify-between gap-2 text-sm">
+                  <span class="min-w-0 truncate font-medium">{{ item.product_name }} × {{ item.quantity }}</span>
+                  @if (itemTotal(item) !== null) {
+                    <span class="shrink-0 text-[var(--color-text-secondary)]">{{ itemTotal(item) | currency }}</span>
+                  }
+                </div>
+                <div class="mt-1.5 flex flex-wrap gap-1.5" role="group" [attr.aria-label]="'Cuenta de ' + item.product_name">
+                  @for (n of accountNumbers(); track n) {
+                    <button
+                      type="button"
+                      [class]="'min-h-[36px] rounded-full border px-3 text-xs font-medium transition-colors ' + (assignments()[item.id] === n ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white' : 'border-[var(--color-border)]')"
+                      [attr.aria-pressed]="assignments()[item.id] === n"
+                      [disabled]="busy()"
+                      (click)="assign(item.id, n)"
+                    >
+                      Cuenta {{ n }}
+                    </button>
+                  }
+                </div>
+              </li>
             }
-            @for (payment of account.payments; track payment.id) {
-              <div class="split-row">
-                <small
-                  >Pago #{{ payment.id }} · {{ payment.state }} ·
-                  {{ money(payment.amount) | currency }}</small
-                >
-                @if (safeGatewayUrl(payment.next_action?.url); as paymentUrl) {
-                  <a
-                    [href]="paymentUrl"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    >Continuar pago</a
-                  >
-                }
-                @if (payment.can_confirm && canPay()) {
-                  <app-button
-                    variant="outline"
+          </ul>
+        }
+
+        <div class="mt-3 flex items-center justify-between gap-2">
+          <h4 class="text-sm font-semibold">Cuentas ({{ accountCount() }})</h4>
+          <app-button variant="outline" size="sm" [disabled]="busy() || accountCount() >= 20" (clicked)="addAccount()">
+            <app-icon name="plus" [size]="14" class="mr-1" />
+            Agregar cuenta
+          </app-button>
+        </div>
+
+        <div class="mt-2 grid gap-2 md:grid-cols-2">
+          @for (draft of draftAccounts(); track draft.number) {
+            <div class="rounded-lg border border-[var(--color-border)] p-3">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-sm font-semibold">Cuenta {{ draft.number }}</p>
+                @if (accountCount() > 2) {
+                  <button
+                    type="button"
+                    class="rounded p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-error)]"
+                    [attr.aria-label]="'Quitar Cuenta ' + draft.number"
                     [disabled]="busy()"
-                    (clicked)="confirmPayment(account, payment.id)"
-                    >Confirmar recibido</app-button
+                    (click)="removeAccount(draft.index)"
                   >
+                    <app-icon name="x" [size]="16" />
+                  </button>
                 }
               </div>
-            }
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                @if (mode() === 'items') {
+                  {{ draft.itemCount === 1 ? '1 producto' : draft.itemCount + ' productos' }}
+                  @if (draft.total !== null) { · {{ draft.total | currency }} }
+                } @else if (draft.total !== null) {
+                  {{ draft.total | currency }}
+                }
+              </p>
+              <app-input
+                class="mt-2 block"
+                label="Nombre (opcional)"
+                [formControl]="aliasControlAt(draft.index)"
+              />
+              @if (mode() === 'custom') {
+                <app-input
+                  class="mt-2 block"
+                  [label]="'Monto Cuenta ' + draft.number"
+                  [currency]="true"
+                  [currencyDecimals]="2"
+                  [allowNegative]="false"
+                  [formControl]="amountControl(draft.index)"
+                />
+              }
+              <div class="mt-2 flex items-center justify-between gap-2 text-sm">
+                <span class="min-w-0 truncate">{{ payerName(payers()[draft.index]) }}</span>
+                <app-button variant="ghost" size="sm" [disabled]="busy()" (clicked)="editPayer(draft.index)">
+                  Asignar cliente
+                </app-button>
+              </div>
+            </div>
           }
-        </article>
-      }
-    </div>
-  }
-  @if (summary()?.retained_account; as retained) {
-    <div class="split-card">
-      <h4>Abonos anteriores — conservados</h4>
-      <p>
-        {{ money(retained.grand_total) | currency }} · {{ payerName(retained) }}
-      </p>
-      <p class="split-note">
-        Sus pagos y titular originales no se copian a las nuevas cuentas.
-      </p>
-      @if (group() && canInvoice()) {
-        <app-button
-          variant="outline"
-          [disabled]="busy()"
-          (clicked)="invoice(retained)"
-          >{{
-            retained.invoice_id
-              ? "Abrir factura"
-              : "Crear factura de esta porción"
-          }}</app-button
-        >
-      }
-    </div>
-  }
-  @if (gatewayUrl(); as url) {
-    <p role="status">
-      Continúa el pago en la pasarela.
-      <a [href]="url" target="_blank" rel="noopener noreferrer"
-        >Abrir pasarela de pago</a
-      >
-    </p>
-  }
-  @if (group() && canManage() && canCancel()) {
-    <app-button variant="ghost" [disabled]="busy()" (clicked)="cancelSplit()"
-      >Anular división sin pagos nuevos ni facturas</app-button
-    >
+        </div>
+
+        @if (mode() === 'custom' && remaining() !== null && remaining() !== 0) {
+          <p class="mt-2 text-sm font-medium text-[var(--color-warning)]" role="status">
+            @if (remaining()! > 0) {
+              Falta repartir {{ remaining()! | currency }}
+            } @else {
+              Te pasaste por {{ -remaining()! | currency }}
+            }
+          </p>
+        }
+        @if (draftIssue()) {
+          <p class="mt-2 text-sm text-[var(--color-error)]" role="status" data-testid="draft-issue">{{ draftIssue() }}</p>
+        }
+        @if (baselinePending() !== null) {
+          <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
+            Se reparte el saldo pendiente de {{ baselinePending()! | currency }}. Los pagos anteriores no se redistribuyen.
+          </p>
+        }
+
+        <div class="mt-3 flex justify-end">
+          <app-button variant="primary" [loading]="busy() || previewing()" [disabled]="!canConfirm()" (clicked)="confirmSplit()">
+            Crear {{ accountCount() }} cuentas
+          </app-button>
+        </div>
+      </app-card>
+    }
   }
 </section>
-<app-modal
-  [(isOpen)]="pickerOpen"
-  title="Titular de la cuenta"
-  size="lg"
-  [dialog]="true"
->
+
+<!-- Tarjeta de cuenta (creada o retenida) -->
+<ng-template #accountCardTpl let-card>
+  <app-card>
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0">
+        <h4 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">{{ card.title }}</h4>
+        <p class="truncate text-xs text-[var(--color-text-secondary)]">{{ payerName(card.account) }}</p>
+      </div>
+      <app-badge [variant]="card.badge" size="sm">{{ card.statusLabel }}</app-badge>
+    </div>
+    <div class="mt-2 flex items-baseline justify-between gap-2">
+      <span class="text-lg font-semibold">{{ money(card.account.grand_total) | currency }}</span>
+      <span class="text-xs text-[var(--color-text-secondary)]">Saldo {{ money(card.account.remaining_balance) | currency }}</span>
+    </div>
+    <p class="mt-1 text-xs text-[var(--color-text-secondary)]">{{ card.includes }}</p>
+    @if (card.help) {
+      <p class="mt-1 text-xs text-[var(--color-text-secondary)]">{{ card.help }}</p>
+    }
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      @if (card.action; as act) {
+        <app-button variant="primary" size="sm" [disabled]="busy()" (clicked)="runAction(card.account, act)">
+          @if (act.kind === 'pay') {
+            Cobrar {{ money(card.account.available_to_pay) | currency }}
+          } @else {
+            {{ act.label }}
+          }
+        </app-button>
+        @if (card.status === 'invoiced' && card.invoiceStatusText) {
+          <span class="text-xs text-[var(--color-text-secondary)]">{{ card.invoiceStatusText }}</span>
+        }
+      }
+      <app-button variant="outline" size="sm" (clicked)="openDetail(card.account)">Ver detalle</app-button>
+      @if (canEditPayer(card.account)) {
+        <app-button variant="ghost" size="sm" [disabled]="busy()" (clicked)="editPayer(null, card.account)">Cambiar cliente</app-button>
+      }
+    </div>
+  </app-card>
+</ng-template>
+
+<app-modal [(isOpen)]="pickerOpen" title="Cliente de la cuenta" size="lg" [dialog]="true">
   @if (pickerOpen()) {
     <app-pos-customer-selector (customerSelected)="selectCustomer($event)" />
-    <div class="split-card">
-      <app-input
-        label="O usar nombre informal (consumidor final)"
-        [formControl]="aliasControl"
-      />
-      <app-button
-        variant="outline"
-        [disabled]="busy() || aliasControl.invalid"
-        (clicked)="useAlias()"
-        >Usar nombre / consumidor final</app-button
-      >
+    <div class="mt-3 grid gap-2 rounded-lg border border-[var(--color-border)] p-3">
+      <app-input label="O dejar solo un nombre (consumidor final)" [formControl]="aliasControl" />
+      <app-button variant="outline" [disabled]="busy() || aliasControl.invalid" (clicked)="useAlias()">
+        Usar nombre / consumidor final
+      </app-button>
     </div>
   }
 </app-modal>
+
+@if (liveDetailAccount(); as detail) {
+  <app-split-account-detail
+    [(isOpen)]="detailOpen"
+    [account]="detail"
+    [mode]="group()?.mode ?? null"
+    [currency]="group()?.currency ?? ''"
+    [canPay]="canPay()"
+    [canInvoice]="canInvoice()"
+    [timezone]="timezone()"
+    [busy]="busy()"
+    (actionRequested)="onDetailAction($event)"
+  />
+}
+
 @if (paymentOpen()) {
   <app-payment-modal
     [(open)]="paymentOpen"
