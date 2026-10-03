@@ -932,6 +932,9 @@ export class InvoiceScannerService {
           cost_price: true,
           state: true,
         },
+        // Un archivado ya no ocupa su SKU: si conviven activo y archivado,
+        // gana el no archivado ('archived' es el último valor del enum).
+        orderBy: [{ state: 'asc' }, { updated_at: 'desc' }],
       });
       if (bySku) {
         // `seenIds` se marca en AMBAS ramas: un archivado descartado acá no
