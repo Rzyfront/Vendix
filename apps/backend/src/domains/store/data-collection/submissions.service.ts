@@ -338,32 +338,40 @@ export class SubmissionsService {
       customer_id: submission.customer_id,
     });
 
-    // Try AI prediagnosis in background
+    // Prediagnosis runs off the request path (nginx cuts requests at 60 s).
+    // The rejection is always handled inside generatePrediagnosis.
+    void this.generatePrediagnosis(submission.id);
+
+    return updated;
+  }
+
+  /**
+   * Fire-and-forget AI prediagnosis. Never throws: failures are logged with the
+   * submission id. All Prisma access here uses withoutScope(), so it does not
+   * depend on the request's AsyncLocalStorage context.
+   */
+  private async generatePrediagnosis(submissionId: number): Promise<void> {
     try {
       const aiApp = await this.aiEngine.getApplication(
         'consultation_prediagnosis',
       );
-      if (aiApp?.is_active) {
-        const fullSubmission = await this.findOne(submission.id);
-        const variables = await this.buildPrediagnosisVariables(fullSubmission);
-        const result = await this.aiEngine.run(
-          'consultation_prediagnosis',
-          variables,
-        );
-        if ((result as any)?.text) {
-          await this.savePrediagnosis(submission.id, (result as any).text);
-          this.logger.log(
-            `Prediagnosis generated for submission ${submission.id}`,
-          );
-        }
+      if (!aiApp?.is_active) return;
+      const fullSubmission = await this.findOne(submissionId);
+      const variables = await this.buildPrediagnosisVariables(fullSubmission);
+      const result = await this.aiEngine.run(
+        'consultation_prediagnosis',
+        variables,
+      );
+      if (result?.success && result.content) {
+        await this.savePrediagnosis(submissionId, result.content);
+        this.logger.log(`Prediagnosis generated for submission ${submissionId}`);
       }
     } catch (error: any) {
-      this.logger.warn(
-        `Prediagnosis skipped for submission ${submission.id}: ${error.message}`,
+      this.logger.error(
+        `Prediagnosis failed for submission ${submissionId}: ${error?.message ?? error}`,
+        error?.stack,
       );
     }
-
-    return updated;
   }
 
   async findByStore(status?: string) {
