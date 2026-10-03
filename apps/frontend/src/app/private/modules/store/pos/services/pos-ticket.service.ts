@@ -7,12 +7,12 @@ import {
   PrintOptions,
 } from '../models/ticket.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
-import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { PrintFormat } from '../../../../../core/models/store-settings.interface';
 import { PrintFormatType } from '../../../../../core/models/print-formats.model';
 import { DocumentPrintService } from '../../../../../shared/services/print';
 import { PrintGatewayClientService } from '../../../../../shared/services/print/print-gateway-client.service';
+import type { PrintTrigger } from '../../../../../shared/services/print';
 import { normalizeFiscalResponsibilityCode } from '../../../../../shared/constants/fiscal-responsibilities.constants';
 
 /**
@@ -128,7 +128,6 @@ interface ClientTicketRefundsSection {
 })
 export class PosTicketService {
   private currencyService = inject(CurrencyFormatService);
-  private storeSettings = inject(StoreSettingsFacade);
   private authFacade = inject(AuthFacade);
   private documentPrint = inject(DocumentPrintService);
   // [print-fiscal-gate P7.2] — Necesario para `body_only=true` en el batch
@@ -170,14 +169,6 @@ export class PosTicketService {
       // 0 copies means "do not print"; the callers that ask for an explicit
       // print still get one, so clamp to at least 1 here.
       copies: Math.max(1, paper.copies),
-      // `pos.auto_print_receipt` already models this and is already editable in
-      // the POS settings form; receipts.print_pos_ticket and receipts.print_receipt
-      // also indicate the merchant expects receipt printing.
-      autoPrint: Boolean(
-        this.storeSettings.pos()?.auto_print_receipt ||
-        this.storeSettings.receipts()?.print_pos_ticket ||
-        this.storeSettings.receipts()?.print_receipt
-      ),
     };
   }
 
@@ -309,6 +300,7 @@ export class PosTicketService {
 
     return of(ticketData).pipe(
       switchMap(async () => {
+        let operationSuccessful = true;
         if (printOptions.printReceipt) {
           // [print-fiscal-gate P4] — El switch client-side formato/documentId
           // se elimina: hoy lo decide el backend en `/resolve-for-document`.
@@ -324,12 +316,19 @@ export class PosTicketService {
                 ? Number(ticketData.id)
                 : null;
 
+          let receiptPrinted = false;
           if (candidateDocId) {
-            await this.documentPrint.resolveAndPrint({
+            const result = await this.documentPrint.resolveAndPrint({
               documentType: 'pos_order',
               documentId: candidateDocId,
+              trigger: printOptions.trigger ?? 'explicit',
             });
+            receiptPrinted = result.documents > 0;
           }
+
+          // A central automatic-print gate may intentionally omit printing
+          // after a merchant disables it while FE emission was pending.
+          operationSuccessful = receiptPrinted;
         }
 
         if (printOptions.openCashDrawer) {
@@ -344,7 +343,7 @@ export class PosTicketService {
           this.smsTicket(ticketData, ticketData.customer.phone);
         }
 
-        return true;
+        return operationSuccessful;
       }),
     );
   }
@@ -1185,12 +1184,11 @@ export class PosTicketService {
   }
 
   /**
-   * Whether the POS should send the ticket to the printer without asking.
-   * Read by the printer component so the setting drives the flow, not the
-   * component's own default.
+   * The shared print service owns the current format and automatic-print gate;
+   * legacy POS/receipt settings are not authoritative for this decision.
    */
-  shouldAutoPrint(): boolean {
-    return this.currentPrinterConfig().autoPrint;
+  shouldAutoPrint(documentId: number): Promise<boolean> {
+    return this.documentPrint.canAutoPrintDocument('pos_order', documentId);
   }
 
   /** Configured POS ticket copies per sale (`receipts.pos_ticket_copies`). */
