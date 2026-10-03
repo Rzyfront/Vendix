@@ -14,6 +14,7 @@ import {
   takeWhile,
   timeout,
 } from 'rxjs/operators';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { environment } from '../../../../../../../environments/environment';
 import {
   InvoiceScanResult,
@@ -265,7 +266,12 @@ export class InvoiceScannerService {
           filter((s) => s.status === 'completed' || s.status === 'failed'),
           map((s) => {
             if (s.status === 'failed') {
-              throw new Error(s.error || 'El escaneo falló');
+              // `error` es un código INV_SCAN_* o texto libre (error no tipado):
+              // siempre se muestra copy curado en español.
+              throw new Error(
+                ERROR_MESSAGES[s.error ?? ''] ??
+                  ERROR_MESSAGES['INV_SCAN_AI_FAIL'],
+              );
             }
             if (!s.result) {
               throw new Error('El escaneo finalizó sin resultado');

@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Subject, defer, of, throwError } from 'rxjs';
 
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import {
   InvoiceScanResult,
@@ -129,14 +130,24 @@ describe('InvoiceScannerService.scanInvoiceAndWait — polling async', () => {
     expect(result).toBe(scanResult);
   });
 
-  it('failed propaga el texto del job', () => {
+  it('failed con código conocido traduce a copy curado', () => {
     spyOn(service, 'getScanStatus').and.returnValue(
-      of({ status: 'failed', error: 'IA sin respuesta' }),
+      of({ status: 'failed', error: 'INV_SCAN_INCOMPLETE' }),
     );
     let error: Error | undefined;
     service.scanInvoiceAndWait(file).subscribe({ error: (e) => (error = e) });
     clock.tick(0);
-    expect(error?.message).toBe('IA sin respuesta');
+    expect(error?.message).toBe(ERROR_MESSAGES['INV_SCAN_INCOMPLETE']);
+  });
+
+  it('failed con texto no tipado cae en INV_SCAN_AI_FAIL', () => {
+    spyOn(service, 'getScanStatus').and.returnValue(
+      of({ status: 'failed', error: 'boom' }),
+    );
+    let error: Error | undefined;
+    service.scanInvoiceAndWait(file).subscribe({ error: (e) => (error = e) });
+    clock.tick(0);
+    expect(error?.message).toBe(ERROR_MESSAGES['INV_SCAN_AI_FAIL']);
   });
 
   it('un 404 en el poll se traduce a "ya no está disponible" sin reintentar', () => {
