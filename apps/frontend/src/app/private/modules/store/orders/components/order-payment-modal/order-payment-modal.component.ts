@@ -23,6 +23,7 @@ import {
   type PaymentMethod,
 } from '../../../../../../shared/models/payment-method.model';
 import { Order } from '../../interfaces/order.interface';
+import { SETTLED_PAYMENT_STATES_FE } from '../../utils/order-settlement.util';
 import { StorePaymentMethod } from '../../../settings/payments/interfaces/payment-methods.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
@@ -144,17 +145,25 @@ export class OrderPaymentModalComponent {
    * Suggested charge: the full order total for a regular order, the remaining
    * balance for a credit abono (the collector still lets the operator override it
    * when `allowAmountOverride` is on). Fase 2 (paso 8): the manual lane also
-   * suggests the outstanding balance, falling back to the grand total when the
-   * order carries a manual `pending` payment but no computed balance yet.
+   * caps the persisted balance at the live total minus settled payments, falling
+   * back to that live balance when the persisted one has not been computed yet.
    */
   readonly chargeAmount = computed<number>(() => {
     if (this.isCreditOrder()) {
       return this.remainingBalance();
     }
-    if (this.manualPaymentPending() && this.remainingBalance() > 0) {
-      return this.remainingBalance();
+    const order = this.order();
+    const grandTotal = Number(order?.grand_total) || 0;
+    if (this.manualPaymentPending()) {
+      const settledAmount = (order?.payments ?? [])
+        .filter((payment) => SETTLED_PAYMENT_STATES_FE.has(payment.state))
+        .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+      const liveBalance = Math.max(0, Math.round((grandTotal - settledAmount) * 100) / 100);
+      return this.remainingBalance() > 0
+        ? Math.min(this.remainingBalance(), liveBalance)
+        : liveBalance;
     }
-    return Number(this.order()?.grand_total) || 0;
+    return grandTotal;
   });
 
   /** Only feed a remaining balance to the collector for credit abonos. */

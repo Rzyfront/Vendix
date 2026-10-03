@@ -5207,6 +5207,18 @@ export class OrderFlowService {
         subtotal_amount: new Prisma.Decimal(subtotal),
         tax_amount: new Prisma.Decimal(tax),
         grand_total: new Prisma.Decimal(grandTotal),
+        // El saldo debe seguir el total vivo; un COD pending no es un abono.
+        // El saldo de crédito sigue perteneciendo al plan de cuotas.
+        ...(order?.payment_form !== '2'
+          ? {
+              remaining_balance: Prisma.Decimal.max(
+                0,
+                new Prisma.Decimal(grandTotal)
+                  .toDecimalPlaces(2)
+                  .minus(getSettledOrderAmount(order)),
+              ).toDecimalPlaces(2),
+            }
+          : {}),
         ...(rederivedTip != null
           ? { tip_amount: new Prisma.Decimal(rederivedTip) }
           : {}),

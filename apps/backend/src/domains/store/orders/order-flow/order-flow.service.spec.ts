@@ -2066,6 +2066,87 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
   });
 
+  it('saldo tras cancelación: COD pendiente de 156000 queda en 38000 en la misma tx', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'pending_payment', payment_form: '1',
+        grand_total: new Prisma.Decimal(156000), remaining_balance: new Prisma.Decimal(156000),
+        payments: [{
+          id: 8556, state: 'pending', amount: new Prisma.Decimal(156000),
+          store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
+        }],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+
+    expect(txMock.orders.update).toHaveBeenCalledTimes(1);
+    expect(txMock.orders.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: expect.objectContaining({
+        grand_total: new Prisma.Decimal(38000),
+        remaining_balance: new Prisma.Decimal(38000),
+      }),
+    });
+    expect(txMock.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [8556] }, order_id: ORDER_ID, state: 'pending' },
+      data: expect.objectContaining({ amount: new Prisma.Decimal(38000) }),
+    });
+  });
+
+  it('saldo tras cancelación: no sobrescribe el saldo de una orden crédito', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'created', payment_form: '2',
+        remaining_balance: new Prisma.Decimal(156000), payments: [],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+
+    expect(txMock.orders.update).toHaveBeenCalledTimes(1);
+    expect(txMock.orders.update.mock.calls[0][0].data).not.toHaveProperty('remaining_balance');
+    expect(txMock.orders.update.mock.calls[0][0].data.grand_total).toEqual(new Prisma.Decimal(38000));
+  });
+
+  it('saldo tras cancelación: el recálculo aislado descuenta abonos con precisión Decimal', async () => {
+    const { service, txMock } = buildService({
+      activeItems: [{ total_price: 38000.01, order_item_taxes: [] }],
+    });
+
+    // El seam público rechaza cualquier pago liquidado; probar su aritmética
+    // por separado no habilita la cancelación de una orden ya cobrada.
+    await service['recalcOrderTotalsAfterItemCancelInTx'](txMock, {
+      payment_form: '1',
+      payments: [
+        { state: 'succeeded', amount: new Prisma.Decimal(10000.02) },
+        { state: 'pending', amount: new Prisma.Decimal(156000) },
+      ],
+    }, ORDER_ID);
+
+    expect(txMock.orders.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: expect.objectContaining({ remaining_balance: new Prisma.Decimal(27999.99) }),
+    });
+  });
+
+  it('saldo tras cancelación: el recálculo aislado nunca persiste saldo negativo', async () => {
+    const { service, txMock } = buildService({
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service['recalcOrderTotalsAfterItemCancelInTx'](txMock, {
+      payments: [{ state: 'captured', amount: new Prisma.Decimal(40000) }],
+    }, ORDER_ID);
+
+    expect(txMock.orders.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: expect.objectContaining({ remaining_balance: new Prisma.Decimal(0) }),
+    });
+  });
+
   it('409 si la orden tiene pago real succeeded, no un payment_status inexistente', async () => {
     const { service } = buildService({
       order: { id: ORDER_ID, state: 'created', payments: [{ state: 'succeeded' }] },

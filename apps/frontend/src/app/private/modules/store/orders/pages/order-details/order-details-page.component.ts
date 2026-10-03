@@ -64,6 +64,7 @@ import {
   OrderEventSource,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { SETTLED_PAYMENT_STATES_FE } from '../../utils/order-settlement.util';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
@@ -374,13 +375,6 @@ export function isItemActionEnabled(
 
 /** Código de error/`reason` del backend cuando finalizar exige cobrar antes. */
 export const ORD_FINISH_UNPAID_BALANCE_CODE = 'ORD_FINISH_UNPAID_BALANCE_001';
-
-const SETTLED_PAYMENT_STATES_FE: ReadonlySet<string> = new Set([
-  'succeeded',
-  'captured',
-  'partially_refunded',
-  'refunded',
-]);
 
 /**
  * Espejo EXACTO de `getUnpaidBalanceForFinish`
@@ -3581,9 +3575,9 @@ export class OrderDetailsPageComponent {
    * Decisión de cocina elegida en el modal. Vive en un signal —no en el
    * `cancelForm`— para que el gate del botón sea reactivo en zoneless
    * (leer `form.value` dentro de un `computed` no se recomputa: no es
-   * un signal). `null` hasta que el operador elige.
+   * un signal). Reusar queda preseleccionado; el operador puede cambiarlo.
    */
-  readonly cancelKitchenDisposition = signal<KitchenDisposition | null>(null);
+  readonly cancelKitchenDisposition = signal<KitchenDisposition | null>('reuse');
 
   /**
    * Gate del botón confirmar (además de `cancelForm.invalid`, que el
@@ -3609,7 +3603,7 @@ export class OrderDetailsPageComponent {
       return;
     }
     this.cancelForm.reset();
-    this.cancelKitchenDisposition.set(null);
+    this.cancelKitchenDisposition.set('reuse');
     this.showCancelModal.set(true);
   }
 
@@ -3625,10 +3619,9 @@ export class OrderDetailsPageComponent {
     )
       return;
 
-    // La decisión solo viaja cuando el operador la eligió (única forma
-    // de elegirla es con ≥1 avanzado): sin fired o solo pendientes el
-    // body queda `{ reason }`, idéntico al contrato anterior.
-    const disposition = this.cancelKitchenDisposition();
+    // La decisión solo viaja con ≥1 plato avanzado; sin fired o solo
+    // pendientes el body queda `{ reason }` y se conserva el reintegro automático.
+    const disposition = this.cancelRequiresDisposition() ? this.cancelKitchenDisposition() : null;
     const payload: FlowCancelOrderDto = {
       ...this.cancelForm.value,
       ...(disposition != null ? { kitchenDisposition: disposition } : {}),
@@ -3642,7 +3635,7 @@ export class OrderDetailsPageComponent {
         next: () => {
           this.showCancelModal.set(false);
           this.isProcessingAction.set(false);
-          this.cancelKitchenDisposition.set(null);
+          this.cancelKitchenDisposition.set('reuse');
           this.toastService.success('Orden cancelada');
           this.loadData();
         },
