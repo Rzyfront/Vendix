@@ -8,21 +8,24 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
-import { forkJoin } from 'rxjs';
-import { EChartsOption } from 'echarts';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
-import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import { AnalyticsService } from '../../services/analytics.service';
+import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
+import {
+  ResponsiveDataViewComponent,
+  TableColumn,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import { AnalyticsService } from '../../../analytics/services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { DateRangeFilter } from '../../../analytics/interfaces/analytics.interface';
 import {
   getDefaultStartDate,
   getDefaultEndDate,
+  toLocalDateString,
 } from '../../../../../../shared/utils/date.util';
-import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import {
   queryParamsToDateRange,
   dateRangeToQueryParams,
@@ -40,17 +43,12 @@ import {
   SalesByDimensionResponse,
   SalesByDimensionRow,
   SalesByDimensionSummary,
-} from '../../interfaces/sales-analytics.interface';
-import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
-import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+} from '../../../analytics/interfaces/sales-analytics.interface';
 import { SuppliersService } from '../../../inventory/services/suppliers.service';
 import { BrandsService } from '../../../products/services/brands.service';
 
-type DetailView = Exclude<SalesDimensionView, 'dimension'>;
-
-const VIEW_VALUES: DetailView[] = ['product', 'user', 'customer'];
-const TOP_N = 10;
-const BAR_COLOR = '#3b82f6';
+const VIEW_VALUES: SalesDimensionView[] = ['product', 'user', 'customer'];
+const PAGE_SIZE = 20;
 const EMPTY_SUMMARY: SalesByDimensionSummary = {
   net_sales: 0,
   units: 0,
@@ -59,36 +57,17 @@ const EMPTY_SUMMARY: SalesByDimensionSummary = {
   distinct_references: 0,
 };
 
-/** Etiqueta legible de una fila según la vista de detalle. */
-function rowLabel(row: SalesByDimensionRow, view: DetailView): string {
-  const r = row as unknown as Record<string, unknown>;
-  if (view === 'user') return String(r['user_name'] ?? '');
-  if (view === 'customer') return String(r['customer_name'] ?? '');
-  const name = String(r['product_name'] ?? '');
-  return r['variant_name'] ? `${name} — ${String(r['variant_name'])}` : name;
-}
-
-/** Hace únicas las etiquetas del eje de categorías (ECharts fusiona nombres repetidos). */
-function uniqueLabels(labels: string[]): string[] {
-  const seen = new Map<string, number>();
-  return labels.map((l) => {
-    const n = (seen.get(l) ?? 0) + 1;
-    seen.set(l, n);
-    return n > 1 ? `${l} (${n})` : l;
-  });
-}
-
 @Component({
-  selector: 'vendix-sales-by-dimension',
+  selector: 'vendix-sales-by-dimension-report',
   standalone: true,
   imports: [
     RouterModule,
     CardComponent,
-    ChartComponent,
     StatsComponent,
     IconComponent,
-    AnalyticsCardComponent,
     OptionsDropdownComponent,
+    ResponsiveDataViewComponent,
+    PaginationComponent,
   ],
   styles: [
     `
@@ -167,6 +146,7 @@ function uniqueLabels(labels: string[]): string[] {
               triggerLabel="Acciones"
               triggerIcon="plus"
               [debounceMs]="350"
+              [isLoading]="exporting()"
               (filterChange)="onFiltersDropdownChange($event)"
               (clearAllFilters)="onClearAllFilters()"
               (actionClick)="onActionsDropdownClick($event)"
@@ -174,80 +154,42 @@ function uniqueLabels(labels: string[]): string[] {
           </div>
         </div>
 
-        <div class="p-4 space-y-6">
+        <div class="p-4 space-y-4">
           @if (dimension() === 'supplier') {
             <p class="text-xs text-[var(--color-text-secondary)]">
               Las ventas se atribuyen al proveedor asignado al producto o, si no tiene, al de su última orden de compra.
             </p>
           }
 
-          <div class="grid grid-cols-1 gap-6">
-            <!-- Chart 1: venta neta por proveedor/marca -->
-            <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
-              <div slot="header" class="results-header flex flex-col">
-                <span class="text-sm font-bold text-[var(--color-text-primary)]">
-                  {{ dimensionChartTitle() }}
-                  <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
-                    (top {{ dimensionRows().length }})
-                  </span>
-                </span>
-              </div>
-              <div class="p-4">
-                @if (loading()) {
-                  <div class="h-80 flex items-center justify-center">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  </div>
-                } @else if (dimensionRows().length === 0) {
-                  <div class="h-80 flex items-center justify-center text-sm text-[var(--color-text-secondary)]">
-                    Sin ventas en el período para los filtros seleccionados.
-                  </div>
-                } @else {
-                  <app-chart [options]="dimensionChartOptions()" size="large" [showLegend]="false"></app-chart>
-                }
-              </div>
-            </app-card>
+          <app-responsive-data-view
+            [data]="rows()"
+            [columns]="columns()"
+            [cardConfig]="cardConfig()"
+            [loading]="loading()"
+            [emptyIcon]="'bar-chart-2'"
+            [emptyTitle]="'Sin ventas en el período'"
+            [emptyMessage]="'No hay ventas para los filtros seleccionados.'"
+            [emptyDescription]="emptyDescription()"
+          ></app-responsive-data-view>
 
-            <!-- Chart 2: top 10 según la vista -->
-            <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
-              <div slot="header" class="results-header flex flex-col">
-                <span class="text-sm font-bold text-[var(--color-text-primary)]">
-                  {{ detailChartTitle() }}
-                  <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
-                    (top {{ detailRows().length }})
-                  </span>
-                </span>
-              </div>
-              <div class="p-4">
-                @if (loading()) {
-                  <div class="h-80 flex items-center justify-center">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  </div>
-                } @else if (detailRows().length === 0) {
-                  <div class="h-80 flex items-center justify-center text-sm text-[var(--color-text-secondary)]">
-                    Sin ventas en el período para los filtros seleccionados.
-                  </div>
-                } @else {
-                  <app-chart [options]="detailChartOptions()" size="large" [showLegend]="false"></app-chart>
-                }
-              </div>
-            </app-card>
-          </div>
-
-          <!-- Quick Links -->
-          <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Ventas</span>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-              @for (view of salesViews(); track view.key) {
-                <app-analytics-card [view]="view"></app-analytics-card>
-              }
+          @if (totalPages() > 1) {
+            <div class="flex justify-center pt-2">
+              <app-pagination
+                [currentPage]="page()"
+                [totalPages]="totalPages()"
+                [total]="total()"
+                [limit]="limit"
+                [infoStyle]="'range'"
+                (pageChange)="onPageChange($event)"
+              ></app-pagination>
             </div>
-          </app-card>
+          }
         </div>
       </app-card>
     </div>
   `,
 })
-export class SalesByDimensionComponent implements OnInit {
+export class SalesByDimensionReportComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly analyticsService = inject(AnalyticsService);
   private readonly toastService = inject(ToastService);
@@ -256,6 +198,8 @@ export class SalesByDimensionComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly suppliersService = inject(SuppliersService);
   private readonly brandsService = inject(BrandsService);
+
+  readonly limit = PAGE_SIZE;
 
   readonly dimension = signal<SalesDimension>(
     (this.route.snapshot.data['dimension'] as SalesDimension) ?? 'supplier',
@@ -269,28 +213,16 @@ export class SalesByDimensionComponent implements OnInit {
   readonly headerIcon = computed(() =>
     this.dimension() === 'supplier' ? 'truck' : 'tag',
   );
-  readonly dimensionChartTitle = computed(() =>
-    this.dimension() === 'supplier'
-      ? 'Venta neta por proveedor'
-      : 'Venta neta por marca',
-  );
-  readonly detailChartTitle = computed(() => {
-    switch (this.view()) {
-      case 'user':
-        return 'Top 10 vendedores';
-      case 'customer':
-        return 'Top 10 clientes';
-      default:
-        return 'Top 10 productos';
-    }
-  });
 
   readonly loading = signal(false);
-  readonly dimensionRows = signal<SalesByDimensionRow[]>([]);
-  readonly detailRows = signal<SalesByDimensionRow[]>([]);
+  readonly exporting = signal(false);
+  readonly rows = signal<SalesByDimensionRow[]>([]);
   readonly summary = signal<SalesByDimensionSummary>(EMPTY_SUMMARY);
+  readonly page = signal(1);
+  readonly total = signal(0);
+  readonly totalPages = signal(0);
 
-  readonly view = signal<DetailView>('product');
+  readonly view = signal<SalesDimensionView>('product');
   readonly selectedIds = signal<string[]>([]);
   readonly dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
@@ -299,15 +231,14 @@ export class SalesByDimensionComponent implements OnInit {
   });
   private readonly entityOptions = signal<{ value: string; label: string }[]>([]);
 
-  readonly salesViews = computed<AnalyticsView[]>(() =>
-    getViewsByCategory('sales').filter(
-      (v) =>
-        v.key !== (this.dimension() === 'supplier' ? 'sales_by_supplier' : 'sales_by_brand'),
-    ),
-  );
-
   readonly netSalesLabel = computed(() =>
     this.currencyService.format(Number(this.summary().net_sales) || 0, 0),
+  );
+
+  readonly emptyDescription = computed(() =>
+    this.dimension() === 'supplier'
+      ? 'Prueba otro período o proveedor. Las ventas se atribuyen al proveedor asignado al producto o, si no tiene, al de su última orden de compra.'
+      : 'Prueba otro período o marca.',
   );
 
   readonly filterConfigs = computed<FilterConfig[]>(() => {
@@ -339,43 +270,94 @@ export class SalesByDimensionComponent implements OnInit {
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
     { action: 'refresh', label: 'Actualizar', icon: 'refresh-cw' },
+    { action: 'export-xlsx', label: 'Exportar XLSX', icon: 'download' },
   ]);
 
-  readonly dimensionChartOptions = computed<EChartsOption>(() => {
-    // Los datos llegan ordenados desc; el eje de categorías se invierte para que el mayor quede arriba.
-    const rows = this.dimensionRows();
-    const names = uniqueLabels(rows.map((r) => r.dimension_name));
-    return this.buildBarOptions(
-      names,
-      rows.map((r) => ({
-        value: Number(r.net_sales) || 0,
-        tip: `Unidades: ${Number((r as any).units) || 0}<br/>Órdenes: ${Number(r.orders) || 0}`,
-      })),
-      this.dimensionChartTitle(),
-    );
+  private money = (v: unknown): string =>
+    this.currencyService.format(Number(v) || 0, 0);
+  private num = (v: unknown): string => String(Number(v) || 0);
+
+  readonly columns = computed<TableColumn[]>(() => {
+    const dim: TableColumn = {
+      key: 'dimension_name',
+      label: this.dimensionLabel(),
+      priority: 1,
+    };
+    const units: TableColumn = { key: 'units', label: 'Unidades', align: 'right', transform: this.num };
+    const sales: TableColumn = { key: 'net_sales', label: 'Venta neta', align: 'right', transform: this.money };
+    const orders: TableColumn = { key: 'orders', label: 'Órdenes', align: 'right', transform: this.num };
+    const customers: TableColumn = { key: 'customers', label: 'Clientes', align: 'right', transform: this.num };
+    const references: TableColumn = { key: 'references', label: 'Referencias', align: 'right', transform: this.num };
+    switch (this.view()) {
+      case 'user':
+        return [
+          dim,
+          { key: 'user_name', label: 'Vendedor' },
+          { key: 'user_document', label: 'Documento', defaultValue: '—' },
+          units, sales, orders, customers, references,
+        ];
+      case 'customer':
+        return [
+          dim,
+          { key: 'customer_name', label: 'Cliente' },
+          { key: 'customer_document', label: 'Documento', defaultValue: '—' },
+          units, sales, orders, references,
+        ];
+      default:
+        return [
+          dim,
+          {
+            key: 'product_name',
+            label: 'Producto',
+            transform: (_v, item) =>
+              item?.variant_name ? `${item.product_name} — ${item.variant_name}` : (item?.product_name ?? ''),
+          },
+          { key: 'sku', label: 'SKU', defaultValue: '—' },
+          units, sales, orders, customers,
+        ];
+    }
   });
 
-  readonly detailChartOptions = computed<EChartsOption>(() => {
-    const rows = this.detailRows();
+  readonly cardConfig = computed<ItemListCardConfig>(() => {
     const view = this.view();
-    const multiDimension = new Set(rows.map((r) => r.dimension_id)).size > 1;
-    const labels = uniqueLabels(
-      rows.map((r) => {
-        const base = rowLabel(r, view);
-        return multiDimension ? `${base} · ${r.dimension_name}` : base;
-      }),
-    );
-    return this.buildBarOptions(
-      labels,
-      rows.map((r) => ({
-        value: Number(r.net_sales) || 0,
-        tip:
-          (multiDimension ? `${this.dimensionLabel()}: ${r.dimension_name}<br/>` : '') +
-          `Unidades: ${Number((r as any).units) || 0}<br/>Órdenes: ${Number(r.orders) || 0}`,
-        full: rowLabel(r, view),
-      })),
-      this.detailChartTitle(),
-    );
+    const detail = [
+      { key: 'dimension_name', label: this.dimensionLabel() },
+      { key: 'units', label: 'Unidades', transform: this.num },
+      { key: 'orders', label: 'Órdenes', transform: this.num },
+    ];
+    if (view === 'user') {
+      return {
+        titleKey: 'user_name',
+        subtitleKey: 'user_document',
+        footerKey: 'net_sales',
+        footerLabel: 'Venta neta',
+        footerStyle: 'prominent',
+        footerTransform: this.money,
+        detailKeys: [...detail, { key: 'customers', label: 'Clientes', transform: this.num }, { key: 'references', label: 'Referencias', transform: this.num }],
+      };
+    }
+    if (view === 'customer') {
+      return {
+        titleKey: 'customer_name',
+        subtitleKey: 'customer_document',
+        footerKey: 'net_sales',
+        footerLabel: 'Venta neta',
+        footerStyle: 'prominent',
+        footerTransform: this.money,
+        detailKeys: [...detail, { key: 'references', label: 'Referencias', transform: this.num }],
+      };
+    }
+    return {
+      titleKey: 'product_name',
+      titleTransform: (item) =>
+        item?.variant_name ? `${item.product_name} — ${item.variant_name}` : (item?.product_name ?? ''),
+      subtitleKey: 'sku',
+      footerKey: 'net_sales',
+      footerLabel: 'Venta neta',
+      footerStyle: 'prominent',
+      footerTransform: this.money,
+      detailKeys: [...detail, { key: 'customers', label: 'Clientes', transform: this.num }],
+    };
   });
 
   ngOnInit(): void {
@@ -391,7 +373,7 @@ export class SalesByDimensionComponent implements OnInit {
     };
     this.dateRange.set(range);
 
-    const urlView = qp.get('view') as DetailView | null;
+    const urlView = qp.get('view') as SalesDimensionView | null;
     this.view.set(urlView && VIEW_VALUES.includes(urlView) ? urlView : 'product');
 
     const urlIds = qp.get('ids');
@@ -399,63 +381,6 @@ export class SalesByDimensionComponent implements OnInit {
 
     this.syncDropdownValues();
     this.loadData();
-  }
-
-  private buildBarOptions(
-    names: string[],
-    points: { value: number; tip: string; full?: string }[],
-    seriesName: string,
-  ): EChartsOption {
-    const style = getComputedStyle(document.documentElement);
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
-
-    return {
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        formatter: (params: any) => {
-          const p = Array.isArray(params) ? params[0] : params;
-          if (!p) return '';
-          const point = points[p.dataIndex];
-          if (!point) return '';
-          const title = point.full ?? names[p.dataIndex];
-          return `<strong>${title}</strong><br/>Venta neta: ${this.currencyService.format(point.value, 0)}<br/>${point.tip}`;
-        },
-      },
-      grid: { left: '3%', right: '6%', bottom: '3%', top: '3%', containLabel: true },
-      xAxis: {
-        type: 'value',
-        min: 0,
-        splitNumber: 5,
-        axisLine: { show: false },
-        axisLabel: {
-          color: textSecondary,
-          formatter: (v: number) => this.currencyService.formatChartAxis(v),
-        },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
-      yAxis: {
-        type: 'category',
-        inverse: true,
-        data: names,
-        axisLine: { lineStyle: { color: borderColor } },
-        axisTick: { show: false },
-        axisLabel: {
-          color: textSecondary,
-          fontSize: 11,
-          formatter: (val: string) => truncateLabel(val, 24),
-        },
-      },
-      series: [
-        {
-          name: seriesName,
-          type: 'bar' as const,
-          data: points.map((p) => ({ value: p.value, itemStyle: { color: BAR_COLOR } })),
-          barMaxWidth: 28,
-        },
-      ],
-    };
   }
 
   private loadEntityOptions(): void {
@@ -503,7 +428,7 @@ export class SalesByDimensionComponent implements OnInit {
 
     const rawIds = values['ids'];
     const ids = Array.isArray(rawIds) ? rawIds : rawIds ? [rawIds] : [];
-    const rawView = values['view'] as DetailView | null;
+    const rawView = values['view'] as SalesDimensionView | null;
     const view = rawView && VIEW_VALUES.includes(rawView) ? rawView : 'product';
 
     const next: DateRangeFilter = {
@@ -523,6 +448,7 @@ export class SalesByDimensionComponent implements OnInit {
     this.dateRange.set(next);
     this.view.set(view);
     this.selectedIds.set(ids);
+    this.page.set(1);
     this.syncDropdownValues();
     this.persistQueryParams();
     this.loadData();
@@ -536,6 +462,7 @@ export class SalesByDimensionComponent implements OnInit {
     });
     this.view.set('product');
     this.selectedIds.set([]);
+    this.page.set(1);
     this.syncDropdownValues();
     this.persistQueryParams();
     this.loadData();
@@ -545,7 +472,14 @@ export class SalesByDimensionComponent implements OnInit {
     if (action === 'refresh') {
       this.analyticsService.requestInvalidation();
       this.loadData();
+    } else if (action === 'export-xlsx') {
+      this.exportReport();
     }
+  }
+
+  onPageChange(page: number): void {
+    this.page.set(page);
+    this.loadData();
   }
 
   private persistQueryParams(): void {
@@ -561,38 +495,61 @@ export class SalesByDimensionComponent implements OnInit {
     });
   }
 
-  private buildQuery(view: SalesDimensionView): SalesByDimensionQuery {
+  private buildQuery(): SalesByDimensionQuery {
     const ids = this.selectedIds();
     return {
       dimension: this.dimension(),
       ids: ids.length ? ids.join(',') : undefined,
-      view,
+      view: this.view(),
       date_range: this.dateRange(),
-      page: 1,
-      limit: TOP_N,
+      page: this.page(),
+      limit: PAGE_SIZE,
     };
   }
 
   private loadData(): void {
     this.loading.set(true);
-    forkJoin({
-      dim: this.analyticsService.getSalesByDimension(this.buildQuery('dimension')),
-      detail: this.analyticsService.getSalesByDimension(this.buildQuery(this.view())),
-    })
+    this.analyticsService
+      .getSalesByDimension(this.buildQuery())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: ({ dim, detail }: { dim: SalesByDimensionResponse; detail: SalesByDimensionResponse }) => {
-          this.dimensionRows.set(dim.data ?? []);
-          this.detailRows.set(detail.data ?? []);
-          this.summary.set(dim.meta?.summary ?? EMPTY_SUMMARY);
+        next: (res: SalesByDimensionResponse) => {
+          this.rows.set(res.data ?? []);
+          this.summary.set(res.meta?.summary ?? EMPTY_SUMMARY);
+          this.total.set(res.meta?.total ?? 0);
+          this.totalPages.set(res.meta?.totalPages ?? 0);
           this.loading.set(false);
         },
         error: () => {
-          this.dimensionRows.set([]);
-          this.detailRows.set([]);
+          this.rows.set([]);
           this.summary.set(EMPTY_SUMMARY);
+          this.total.set(0);
+          this.totalPages.set(0);
           this.toastService.error(`Error al cargar ${this.title().toLowerCase()}`);
           this.loading.set(false);
+        },
+      });
+  }
+
+  exportReport(): void {
+    this.exporting.set(true);
+    const { dimension, ids, date_range } = this.buildQuery();
+    this.analyticsService
+      .exportSalesByDimension({ dimension, ids, date_range })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `ventas-por-${dimension === 'supplier' ? 'proveedor' : 'marca'}_${toLocalDateString()}.xlsx`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+          this.exporting.set(false);
+        },
+        error: () => {
+          this.toastService.error(`Error al exportar ${this.title().toLowerCase()}`);
+          this.exporting.set(false);
         },
       });
   }

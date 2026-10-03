@@ -86,6 +86,7 @@ export interface SalesDimensionSummaryRow extends DimensionBase {
 }
 
 export type SalesDimensionRow =
+  | SalesDimensionSummaryRow
   | SalesByProductRow
   | SalesByUserRow
   | SalesByCustomerRow;
@@ -366,17 +367,30 @@ export class SalesDimensionAnalyticsService {
         FROM line_sales ls`;
   }
 
-  /** Per-dimension totals (Resumen sheet). */
-  private dimensionSummarySql(cte: Prisma.Sql): Prisma.Sql {
+  /**
+   * Per-dimension totals (Resumen sheet). With `paging` (view=dimension) it also
+   * emits `COUNT(*) OVER() AS total` and LIMIT/OFFSET; without it the SQL is the
+   * unpaged export query.
+   */
+  dimensionSummarySql(
+    cte: Prisma.Sql,
+    paging?: { limit: number; offset: number },
+  ): Prisma.Sql {
+    const total = paging ? Prisma.sql`,
+             COUNT(*) OVER() AS total` : Prisma.empty;
+    const limit = paging
+      ? Prisma.sql`LIMIT ${paging.limit} OFFSET ${paging.offset}`
+      : Prisma.empty;
     return Prisma.sql`${cte}
       SELECT ls.dimension_id, ls.dimension_name,
              SUM(ls.quantity) AS units, SUM(ls.net_sales) AS net_sales,
              COUNT(DISTINCT ls.order_id) AS orders,
              COUNT(DISTINCT ls.customer_id) AS customers,
-             COUNT(DISTINCT ${REF_EXPR}) AS refs
+             COUNT(DISTINCT ${REF_EXPR}) AS refs${total}
         FROM line_sales ls
        GROUP BY ls.dimension_id, ls.dimension_name
-       ORDER BY SUM(ls.net_sales) DESC, ls.dimension_id ASC NULLS LAST`;
+       ORDER BY SUM(ls.net_sales) DESC, ls.dimension_id ASC NULLS LAST
+       ${limit}`;
   }
 
   /** View SQL; `paging` null = no OFFSET, limited to the export hard limit. */
@@ -456,13 +470,19 @@ export class SalesDimensionAnalyticsService {
     const limit = Math.min(Math.max(query.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
     const cte = buildLineSalesCte(params);
 
+    const offset = (page - 1) * limit;
     const [summaryRows, rawRows] = await Promise.all([
       this.raw(this.summarySql(cte)),
-      this.raw(this.viewSql(view, cte, limit, (page - 1) * limit)),
+      view === 'dimension'
+        ? this.raw(this.dimensionSummarySql(cte, { limit, offset }))
+        : this.raw(this.viewSql(view, cte, limit, offset)),
     ]);
 
     return {
-      rows: this.mapView(view, rawRows, params.dimension),
+      rows:
+        view === 'dimension'
+          ? rawRows.map((r) => mapDimensionSummaryRow(r, params.dimension))
+          : this.mapView(view, rawRows, params.dimension),
       total: rawRows.length > 0 ? toNumber(rawRows[0].total) : 0,
       page,
       limit,

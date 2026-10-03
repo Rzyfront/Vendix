@@ -13,7 +13,7 @@ import { AnalyticsQueryDto } from './analytics-query.dto';
 export const SALES_DIMENSIONS = ['supplier', 'brand'] as const;
 export type SalesDimension = (typeof SALES_DIMENSIONS)[number];
 
-export const SALES_DIMENSION_VIEWS = ['product', 'user', 'customer'] as const;
+export const SALES_DIMENSION_VIEWS = ['product', 'user', 'customer', 'dimension'] as const;
 export type SalesDimensionView = (typeof SALES_DIMENSION_VIEWS)[number];
 
 /**

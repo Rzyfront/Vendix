@@ -113,7 +113,7 @@ export interface SalesAnalyticsQueryDto {
 
 // Sales by dimension (supplier | brand) — sell-out reports
 export type SalesDimension = 'supplier' | 'brand';
-export type SalesDimensionView = 'product' | 'user' | 'customer';
+export type SalesDimensionView = 'product' | 'user' | 'customer' | 'dimension';
 
 export interface SalesByDimensionQuery {
   dimension: SalesDimension;
@@ -157,7 +157,14 @@ export interface SalesByDimensionCustomerRow extends SalesByDimensionBase {
   references: number;
 }
 
+/** `view=dimension`: una fila por proveedor/marca (hoja Resumen). */
+export interface SalesByDimensionTotalsRow extends SalesByDimensionBase {
+  customers: number;
+  references: number;
+}
+
 export type SalesByDimensionRow =
+  | SalesByDimensionTotalsRow
   | SalesByDimensionProductRow
   | SalesByDimensionUserRow
   | SalesByDimensionCustomerRow;

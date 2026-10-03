@@ -13,6 +13,7 @@ import {
   mapSummaryRow,
   mapUserRow,
   toNumber,
+  SalesDimensionAnalyticsService,
   NO_SELLER_LABEL,
   NO_CUSTOMER_LABEL,
 } from './sales-dimension-analytics.service';
@@ -64,6 +65,13 @@ describe('SalesByDimensionQueryDto', () => {
     expect(bad.errors.map((e) => e.property)).toEqual(['dimension']);
     const badView = await parse({ dimension: 'brand', view: 'zzz' });
     expect(badView.errors.map((e) => e.property)).toEqual(['view']);
+  });
+
+  it("accepts view='dimension' and keeps limit max at 100", async () => {
+    const r = await parse({ dimension: 'supplier', view: 'dimension', limit: '100' });
+    expect(r.errors).toHaveLength(0);
+    expect(r.dto.view).toBe('dimension');
+    expect(r.dto.limit).toBe(100);
   });
 
   it('requires dimension', async () => {
@@ -217,5 +225,51 @@ describe('row mapping', () => {
     expect(c.customer_id).toBeNull();
     expect(c.references).toBe(2);
     expect(c.dimension_name).toBe('ACME');
+  });
+});
+
+describe("view='dimension' SQL and mapping", () => {
+  const service = new SalesDimensionAnalyticsService(null as any);
+  const cte = buildLineSalesCte(base);
+
+  it('adds COUNT(*) OVER() total and LIMIT/OFFSET as parameters when paged', () => {
+    const sql = service.dimensionSummarySql(cte, { limit: 10, offset: 20 });
+    expect(sql.sql).toContain('COUNT(*) OVER() AS total');
+    expect(sql.sql).toContain('GROUP BY ls.dimension_id, ls.dimension_name');
+    expect(sql.sql).toContain('ORDER BY SUM(ls.net_sales) DESC, ls.dimension_id ASC NULLS LAST');
+    expect(sql.sql).toContain('LIMIT ? OFFSET ?');
+    expect(sql.values.slice(-2)).toEqual([10, 20]);
+  });
+
+  it('keeps the unpaged export query without total or LIMIT', () => {
+    const sql = service.dimensionSummarySql(cte);
+    expect(sql.sql).not.toContain('OVER()');
+    expect(sql.sql).not.toContain('LIMIT');
+  });
+
+  it('maps a raw dimension row to the exact shape', () => {
+    expect(
+      mapDimensionSummaryRow(
+        {
+          dimension_id: BigInt(4),
+          dimension_name: 'Acme',
+          units: BigInt(12),
+          net_sales: '1500.456',
+          orders: BigInt(3),
+          customers: BigInt(2),
+          refs: BigInt(5),
+          total: BigInt(9),
+        },
+        'brand',
+      ),
+    ).toEqual({
+      dimension_id: 4,
+      dimension_name: 'Acme',
+      units: 12,
+      net_sales: 1500.46,
+      orders: 3,
+      customers: 2,
+      references: 5,
+    });
   });
 });
