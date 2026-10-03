@@ -4,6 +4,7 @@ import {
   DestroyRef,
   effect,
   inject,
+  Injector,
   input,
   output,
   signal,
@@ -44,6 +45,10 @@ import { PaymentMethodsCatalogService } from '../../../../../../../shared/servic
 import type { PaymentMethod } from '../../../../../../../shared/models/payment-method.model';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import { DianConfigApiService } from '../../../../../../../shared/services/dian';
+import { DocumentPrintService } from '../../../../../../../shared/services/print';
+import { PosTicketService } from '../../../../pos/services/pos-ticket.service';
+import type { TicketData } from '../../../../pos/models/ticket.model';
 import { InvoicingService } from '../../../../invoicing/services/invoicing.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
@@ -143,6 +148,8 @@ export class SplitAccountsPanelComponent {
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly customersService = inject(CustomersService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
+  private readonly dianConfigApi = inject(DianConfigApiService);
   private readonly currencyFormat = inject(CurrencyFormatService);
   private destroyed = false;
 
@@ -240,6 +247,12 @@ export class SplitAccountsPanelComponent {
   readonly canInvoice = computed(() =>
     this.auth.hasPermission('invoicing:write'),
   );
+  /**
+   * FE viva (`is_live` de la config DIAN), la misma lectura que el detalle de
+   * orden. Fail-closed: mientras carga o si falla, cuenta como NO viva y la
+   * cuenta pagada ofrece «Imprimir ticket» en lugar de «Facturar».
+   */
+  readonly electronicInvoicingLive = signal(false);
   readonly accountNumbers = computed(() =>
     Array.from({ length: this.accountCount() }, (_, i) => i + 1),
   );
@@ -364,6 +377,15 @@ export class SplitAccountsPanelComponent {
   constructor() {
     this.destroyRef.onDestroy(() => (this.destroyed = true));
     this.resizeAccounts(2);
+    // Una sola lectura por montaje: `is_live` solo cambia desde Configuración fiscal.
+    this.dianConfigApi
+      .getDianEmissionStatus()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) =>
+          this.electronicInvoicingLive.set(response?.data?.is_live === true),
+        error: () => this.electronicInvoicingLive.set(false),
+      });
     effect(() => {
       const sourceId = this.sourceOrderId();
       this.refreshKey();
@@ -470,6 +492,7 @@ export class SplitAccountsPanelComponent {
     const action = primaryAction(account, {
       canPay: this.canPay(),
       canInvoice: this.canInvoice(),
+      electronicInvoicingLive: this.electronicInvoicingLive(),
     });
     return {
       account,
@@ -856,11 +879,87 @@ export class SplitAccountsPanelComponent {
       case 'invoice':
         await this.invoiceAccount(account);
         return;
+      case 'print_ticket':
+        await this.printAccountTicket(account);
+        return;
       case 'view_invoice':
         await this.invoice(account);
         return;
     }
   }
+  /**
+   * «Imprimir ticket» de UNA cuenta. El Print Gateway del backend sólo renderiza
+   * por id de orden (imprimiría la orden completa), así que el ticket se arma en
+   * cliente con las líneas, totales y pagos de ESTA cuenta y se imprime por el
+   * render local + `DocumentPrintService`. Los servicios se resuelven al usar
+   * para no cargar el motor de impresión con el panel.
+   */
+  async printAccountTicket(account: SplitFinancialAccount): Promise<void> {
+    if (accountStatus(account) !== 'paid' || this.busy()) return;
+    try {
+      const ticketService = this.injector.get(PosTicketService);
+      const documentPrint = this.injector.get(DocumentPrintService);
+      const body = await ticketService.generateTicketHTML(
+        this.buildAccountTicketData(account),
+      );
+      await documentPrint.print({
+        document: 'pos_ticket',
+        body,
+        title: `Ticket ${account.label}`,
+        // Aplana la tarjeta del ticket para papel (mismo criterio que PosTicketService).
+        styles: `body { margin: 0; padding: 0; background: white; }
+          .ticket { border: none; border-radius: 0; box-shadow: none; }`,
+      });
+    } catch (error) {
+      console.error('Error generating split account ticket:', error);
+      this.toast.error('Error al generar el ticket');
+    }
+  }
+
+  private buildAccountTicketData(account: SplitFinancialAccount): TicketData {
+    const user = this.auth.getCurrentUser();
+    const received = account.payments.filter((p) =>
+      ['succeeded', 'captured'].includes(p.state),
+    );
+    const breakdown = received.map((p) => ({
+      label: p.payment_method_name || 'N/A',
+      amount: money(p.amount),
+    }));
+    return {
+      id: `${account.id ?? 'cuenta'}`,
+      date: new Date(),
+      items: account.lines.map((line) => {
+        const whole =
+          Number(line.share_ratio) === 1 && (line.original_quantity ?? 0) > 0;
+        const quantity = whole ? Number(line.original_quantity) : 1;
+        const name = [line.product_name, line.variant_name]
+          .filter(Boolean)
+          .join(' - ');
+        return {
+          id: String(line.id),
+          name: whole ? name : `${name} (parte)`,
+          sku: 'N/A',
+          quantity,
+          unitPrice: money(line.subtotal) / quantity,
+          totalPrice: money(line.subtotal),
+          discount: money(line.discount),
+          tax: money(line.tax),
+        };
+      }),
+      subtotal: money(account.subtotal_amount),
+      tax: money(account.tax_amount),
+      discount: money(account.discount_amount),
+      total: money(account.grand_total),
+      paymentMethod: breakdown.map((b) => b.label).join(' / ') || 'N/A',
+      paymentBreakdown: breakdown.length > 1 ? breakdown : undefined,
+      customer: {
+        name: account.customer_name || account.customer_alias || 'Consumidor final',
+        customerAlias: account.customer_alias,
+      },
+      cashier: user ? `${user.first_name} ${user.last_name}` : undefined,
+    };
+  }
+
   /** «Facturar»: cuenta cobrada; sin cliente se factura a consumidor final. */
   async invoiceAccount(account: SplitFinancialAccount): Promise<void> {
     if (accountStatus(account) !== 'paid' || this.busy()) return;

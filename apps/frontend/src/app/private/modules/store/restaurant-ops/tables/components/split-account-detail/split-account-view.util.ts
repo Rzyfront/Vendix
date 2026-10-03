@@ -17,6 +17,7 @@ export type SplitPrimaryActionKind =
   | 'confirm'
   | 'continue'
   | 'invoice'
+  | 'print_ticket'
   | 'view_invoice';
 
 export interface SplitPrimaryAction {
@@ -29,6 +30,11 @@ export interface SplitPrimaryAction {
 export interface SplitActionPermissions {
   canPay: boolean;
   canInvoice: boolean;
+  /**
+   * FE realmente viva (`is_live` de la config DIAN). Fail-closed: sin ella una
+   * cuenta pagada no se factura, se imprime su ticket (igual que una orden normal).
+   */
+  electronicInvoicingLive: boolean;
 }
 
 export const money = (value: string | number | null | undefined): number =>
@@ -166,6 +172,9 @@ export function primaryAction(
     return null;
   }
   if (status === 'paid') {
+    // Sin FE viva no hay nada que emitir: el cierre de la cuenta es el ticket.
+    if (!perms.electronicInvoicingLive)
+      return { kind: 'print_ticket', label: 'Imprimir ticket' };
     return perms.canInvoice ? { kind: 'invoice', label: 'Facturar' } : null;
   }
   if (account.role === 'payable' && perms.canPay && money(account.available_to_pay) > 0) {
