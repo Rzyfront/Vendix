@@ -10,6 +10,7 @@ import {
 } from './order-cancellation-policy.util';
 import {
   canPay,
+  canConfirmPayment,
   canCancelPayment,
   canCancelPaymentAsRole,
   canRefund,
@@ -3951,7 +3952,7 @@ export class OrderFlowService {
         actions.push({
           code: 'confirm_payment',
           label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
-          enabled: true,
+          ...canConfirmPayment(snapshot),
         });
       }
 
@@ -6144,6 +6145,7 @@ export class OrderFlowService {
         total_paid: true,
         remaining_balance: true,
         customer_id: true,
+        active_financial_split_id: true,
         stores: { select: { organization_id: true } },
       },
     });
@@ -6153,6 +6155,8 @@ export class OrderFlowService {
       );
       return;
     }
+    // Cuenta dividida: el recaudo de despacho no cobra la orden principal.
+    assertNoActiveFinancialSplit(order);
 
     const remaining = Number(order.remaining_balance);
     const applied = Math.min(input.amount, Math.max(remaining, 0));
@@ -7479,6 +7483,7 @@ export class OrderFlowService {
     if (!order) {
       throw new NotFoundException('Order not found');
     }
+    assertNoActiveFinancialSplit(order);
 
     // Validate it's a credit order
     if (order.payment_form !== '2') {
@@ -9456,7 +9461,7 @@ export class OrderFlowService {
       if (paid.lt(new Prisma.Decimal(order.grand_total ?? 0))) return;
 
       const latestInvoice = await this.prisma.invoices.findFirst({
-        where: { order_id: orderId, invoice_type: 'sales_invoice' },
+        where: { order_id: orderId, invoice_type: 'sales_invoice', financial_account_id: null },
         orderBy: { created_at: 'desc' },
         select: { id: true, status: true },
       });

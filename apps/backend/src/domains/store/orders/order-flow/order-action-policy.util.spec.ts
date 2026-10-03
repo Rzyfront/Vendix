@@ -4,6 +4,7 @@ import {
   canCancelPaymentAsRole,
   canRefund,
   canCancel,
+  canConfirmPayment,
   canAssignShipping,
   canConfirmDelivery,
   canEditOrder,
@@ -1022,5 +1023,21 @@ describe('order-action-policy — requiresPaymentRegistration (Fase 2 paso 6)', 
         requiresPaymentRegistration(order({ state, remaining_balance: 40, payments: [manualPending()] })),
       ).toBe(false);
     }
+  });
+});
+
+describe('order-action-policy — bloqueo por cuenta dividida (cobro de la orden principal)', () => {
+  it('canCancel queda deshabilitado con SPLIT_ACCOUNT_LOCKED si hay split activo', () => {
+    expect(canCancel(order({ state: 'created', active_financial_split_id: 5 }))).toEqual({
+      enabled: false,
+      reason: SPLIT_LOCKED,
+    });
+  });
+
+  it('canConfirmPayment: habilitado sin split, bloqueado con split', () => {
+    expect(canConfirmPayment(order({ state: 'pending_payment' }))).toEqual({ enabled: true });
+    expect(
+      canConfirmPayment(order({ state: 'pending_payment', active_financial_split_id: 5 })),
+    ).toEqual({ enabled: false, reason: SPLIT_LOCKED });
   });
 });

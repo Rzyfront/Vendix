@@ -119,6 +119,7 @@ import {
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
+import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -4652,6 +4653,9 @@ export class PaymentsService {
         'La sesión de mesa no tiene una orden vinculada',
       );
     }
+    // Con cuentas independientes activas la orden principal es solo
+    // informativa: el único cobro válido es por cuenta (split/accounts/:id/pay).
+    assertNoActiveFinancialSplit(session.order);
 
     // QUI-704 — second-charge guard. Now that the session is no
     // longer auto-closed on payment, a second applyPosPaymentToTableSession
@@ -5683,6 +5687,7 @@ export class PaymentsService {
             id: true, order_number: true, state: true,
             subtotal_amount: true, tax_amount: true,
             shipping_address_id: true,
+            active_financial_split_id: true,
             stores: { select: { organization_id: true } },
           },
         })
@@ -5692,6 +5697,7 @@ export class PaymentsService {
       throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
     if (existingOrder) {
+      assertNoActiveFinancialSplit(existingOrder);
       const orderLabel = existingOrder.order_number || `#${existingOrder.id}`;
       if (dto.is_draft || !['draft', 'created'].includes(existingOrder.state)) {
         throw new VendixHttpException(
@@ -6427,6 +6433,11 @@ export class PaymentsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const dtoStoreId: number = dto.store_id;
+    // Con cuentas independientes activas la orden principal no se cobra: el
+    // único camino válido es split/accounts/:id/pay. `order` es la fila ya
+    // cargada/bloqueada por createOrUpdateOrderFromPos (trae el campo); una
+    // orden nueva del propio cobro no tiene split.
+    if (order) assertNoActiveFinancialSplit(order);
     const payableAmount = this.roundMoney(
       Number(order?.grand_total ?? order?.total_amount ?? dto.total_amount ?? 0),
     );

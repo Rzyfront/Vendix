@@ -4,6 +4,7 @@ import {
   Logger,
   ConflictException,
 } from '@nestjs/common';
+import { assertNoActiveFinancialSplit } from '../../store/orders/shared/financial-split-policy';
 import { Prisma } from '@prisma/client';
 import type Redis from 'ioredis';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -1355,11 +1356,14 @@ export class EcommerceTablesService {
         // getBill; the live balance is computed from grand_total/total_paid.
         remaining_balance: true,
         currency: true,
+        active_financial_split_id: true,
       },
     });
     if (!order) {
       throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
     }
+    // Cuenta dividida: la orden principal es informativa; se cobra por cuenta.
+    assertNoActiveFinancialSplit(order);
 
     // Outstanding balance = grand_total − succeeded payments (total_paid).
     // Derived instead of reading `remaining_balance` directly because that

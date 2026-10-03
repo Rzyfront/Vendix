@@ -5063,6 +5063,20 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
     return { service, prismaMock, eventEmitter, updateOrderState, cashMovement, project };
   };
 
+  it('rechaza el abono con SPLIT_ACCOUNT_LOCKED si la orden tiene cuentas independientes', async () => {
+    const h = harness(60, 40);
+    h.prismaMock.orders.findFirst.mockImplementationOnce(async () => ({
+      id: 1, state: 'processing', payment_form: '2', remaining_balance: 60,
+      active_financial_split_id: 9,
+    }));
+
+    const error = await h.service.registerCreditPayment(1, CREDIT_DTO).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
   it('projects the table session only when the credit is fully settled', async () => {
     const h = harness(60, 40);
 
