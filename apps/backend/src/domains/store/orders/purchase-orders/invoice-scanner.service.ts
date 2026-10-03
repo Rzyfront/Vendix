@@ -153,8 +153,31 @@ export class InvoiceScannerService {
       );
     }
 
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
+    return this.scanInvoiceFromBuffer(
+      file.buffer,
+      file.mimetype,
+      orderType,
+      scanAttachment,
+    );
+  }
+
+  /**
+   * Pipeline OCR completo desde un buffer (preprocesado + IA + normalizacion).
+   * Lo usan `scanInvoice` (sync) y el processor async `invoice-scan`.
+   */
+  async scanInvoiceFromBuffer(
+    buffer: Buffer,
+    mimeType: string,
+    orderType: 'retail' | 'ingredient',
+    scanAttachment: InvoiceScanResult['scan_attachment'],
+  ): Promise<InvoiceScanResult> {
+    const prepared = await this.preprocessImage({
+      buffer,
+      mimetype: mimeType,
+      size: buffer?.length ?? 0,
+    } as Express.Multer.File);
+    const base64 = prepared.base64;
+    const dataUri = `data:${prepared.mimeType};base64,${base64}`;
 
     this.logger.debug(`[InvoiceScan] DataURI length: ${dataUri.length} chars`);
 
