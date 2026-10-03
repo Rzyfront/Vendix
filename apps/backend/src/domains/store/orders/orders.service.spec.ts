@@ -202,6 +202,7 @@ describe('OrdersService', () => {
   };
   const mockShippingCalculator = {
     calculateRates: jest.fn(),
+    quotePickupRates: jest.fn(),
     // Paso 2 (unificación de envío) — el editor delega en este método para
     // la tarifa explícita cuando hay dirección resoluble; ningún test
     // existente lo dispara (`addresses.findFirst` no está mockeado salvo
@@ -2425,6 +2426,149 @@ describe('OrdersService', () => {
         }
       });
 
+      it('pickup configurado: conserva tarifa, costo bruto e impuesto y limpia dirección vieja', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          const existingWithDelivery = {
+            ...draftOrder,
+            shipping_method_id: 5,
+            shipping_rate_id: 7,
+            shipping_address_id: 33,
+            shipping_cost: '10.00',
+          };
+          mockPrismaService.orders.findFirst
+            .mockReset()
+            .mockResolvedValueOnce(existingWithDelivery as any)
+            .mockResolvedValue({
+              ...persistedOrder,
+              delivery_type: 'pickup',
+              shipping_method_id: 13,
+              shipping_rate_id: 31,
+              shipping_address_id: null,
+              shipping_cost: 11900,
+              shipping_tax_amount: 1111.11,
+              grand_total: 12019,
+            } as any);
+          mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+            id: 13, store_id: 1, type: 'pickup', is_active: true,
+          });
+          mockShippingCalculator.quotePickupRates.mockResolvedValueOnce([{
+            id: 31,
+            rate_id: 31,
+            method_id: 13,
+            method_type: 'pickup',
+            method_name: 'Recoger en tienda',
+            cost: 11900,
+            base: 10000,
+            shipping_tax_amount: 1900,
+            tax_is_inclusive: false,
+            currency: 'COP',
+          }]);
+          snapshotForRate.mockResolvedValue({
+            ...INC_SNAPSHOT,
+            shipping_tax_amount: 1111.11,
+          });
+
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            delivery_type: 'pickup',
+            shipping_method_id: 13,
+            shipping_rate_id: 31,
+            shipping_address_id: undefined,
+            shipping_cost: 11900,
+          });
+
+          expect(mockShippingCalculator.quotePickupRates).toHaveBeenCalledWith(1, 13);
+          expect(mockShippingCalculator.quoteRateGross).not.toHaveBeenCalled();
+          expect(mockPrismaService.addresses.findFirst).not.toHaveBeenCalled();
+          expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
+          expect(headerUpdate()).toMatchObject({
+            delivery_type: 'pickup',
+            shipping_method_id: 13,
+            shipping_rate_id: 31,
+            shipping_address_id: null,
+            shipping_cost: 11900,
+            shipping_tax_amount: 1111.11,
+            grand_total: 12019,
+          });
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('pickup configurado: rechaza una tarifa solicitada que no está entre las tarifas activas', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+            id: 13, store_id: 1, type: 'pickup', is_active: true,
+          });
+          mockShippingCalculator.quotePickupRates.mockResolvedValueOnce([{
+            id: 31,
+            rate_id: 31,
+            method_id: 13,
+            method_type: 'pickup',
+            method_name: 'Recoger en tienda',
+            cost: 11900,
+            currency: 'COP',
+          }]);
+
+          await expect(service.updateOrderFromEditor(500, {
+            ...fullDto,
+            delivery_type: 'pickup',
+            shipping_method_id: 13,
+            shipping_rate_id: 99,
+            shipping_address_id: undefined,
+            shipping_cost: 0,
+          })).rejects.toMatchObject({
+            errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+          });
+          expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('pickup configurado: rechaza un costo cliente distinto al bruto cotizado', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
+            id: 13, store_id: 1, type: 'pickup', is_active: true,
+          });
+          mockShippingCalculator.quotePickupRates.mockResolvedValueOnce([{
+            id: 31,
+            rate_id: 31,
+            method_id: 13,
+            method_type: 'pickup',
+            method_name: 'Recoger en tienda',
+            cost: 11900,
+            currency: 'COP',
+          }]);
+
+          await expect(service.updateOrderFromEditor(500, {
+            ...fullDto,
+            delivery_type: 'pickup',
+            shipping_method_id: 13,
+            shipping_rate_id: 31,
+            shipping_address_id: undefined,
+            shipping_cost: 12000,
+          })).rejects.toMatchObject({
+            errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+          });
+          expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
       it('paso 2 — tarifa flat con umbral de envío gratis superado: shipping_cost 0 (unificado con quoteRateGross)', async () => {
         setupContext();
         const contextSpy = spyContext();
@@ -2529,14 +2673,18 @@ describe('OrdersService', () => {
         }
       });
 
-      it('dtoDropsShipment (pickup): limpia la copia y suelta shipping_rate_id', async () => {
+      it('pickup sin método: conserva el comportamiento legacy de limpiar envío y tarifa', async () => {
         setupContext();
         const contextSpy = spyContext();
         try {
           arrangeEditableDraft();
           arrangeProduct();
           const withShipping = {
-            ...draftOrder, shipping_cost: '10.00', shipping_method_id: 5, shipping_rate_id: 7,
+            ...draftOrder,
+            shipping_cost: '10.00',
+            shipping_method_id: 5,
+            shipping_rate_id: 7,
+            shipping_address_id: 33,
           };
           mockPrismaService.orders.findFirst.mockReset();
           mockPrismaService.orders.findFirst
@@ -2546,6 +2694,8 @@ describe('OrdersService', () => {
           await service.updateOrderFromEditor(500, { ...rest, delivery_type: 'pickup' });
           expect(snapshotForRate).not.toHaveBeenCalled();
           expect(headerUpdate()).toMatchObject({
+            shipping_method_id: null,
+            shipping_address_id: null,
             shipping_rate_id: null,
             shipping_cost: 0,
             shipping_tax_rate_id: null,

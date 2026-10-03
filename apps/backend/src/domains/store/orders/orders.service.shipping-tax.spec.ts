@@ -76,6 +76,51 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
     });
   });
 
+  it('pickup configurado: cotiza sin dirección del comprador y conserva bruto/impuesto', async () => {
+    prisma.shipping_methods.findFirst.mockResolvedValue({
+      id: 4, store_id: 1, type: 'pickup', is_active: true,
+    });
+    const quotePickupRates = jest.fn().mockResolvedValue([{
+      method_id: 4,
+      rate_id: 31,
+      cost: 11900,
+    }]);
+    const calculateRates = jest.fn();
+    service.shippingCalculatorService = { quotePickupRates, calculateRates };
+
+    await service.assignShipping(10, {
+      shipping_method_id: 4,
+      shipping_rate_id: 31,
+    });
+
+    expect(quotePickupRates).toHaveBeenCalledWith(1, 4);
+    expect(calculateRates).not.toHaveBeenCalled();
+    expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
+    expect(prisma.orders.update.mock.calls[0][0].data).toMatchObject({
+      shipping_method_id: 4,
+      shipping_rate_id: 31,
+      delivery_type: 'pickup',
+      shipping_cost: 11900,
+      shipping_tax_amount: 1111.11,
+      grand_total: 22700,
+    });
+  });
+
+  it('pickup configurado: falla cerrada si la tarifa ya no tiene cotización', async () => {
+    prisma.shipping_methods.findFirst.mockResolvedValue({
+      id: 4, store_id: 1, type: 'pickup', is_active: true,
+    });
+    service.shippingCalculatorService = {
+      quotePickupRates: jest.fn().mockResolvedValue([]),
+    };
+
+    await expect(service.assignShipping(10, {
+      shipping_method_id: 4,
+      shipping_rate_id: 31,
+    })).rejects.toMatchObject({ errorCode: 'ORD_SHIP_RATE_MISMATCH_001' });
+    expect(prisma.orders.update).not.toHaveBeenCalled();
+  });
+
   it('costo digitado igual a la tarifa: cuenta como tarifa', async () => {
     prisma.orders.findFirst
       .mockResolvedValueOnce({
