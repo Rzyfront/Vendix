@@ -84,6 +84,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a menu entry to the store module catalog | `vendix-panel-ui` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
+| Adding a new AI scan kind to the generic ai-scan queue | `vendix-ai-queue` |
 | Adding a new RUT responsibility code to forms, scanners or seeds | `vendix-dian-issuer-identity` |
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
@@ -180,6 +181,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring the Vendix Linear API key | `linear-connect` |
 | Confirming a production fix matches its requirement or reporting defects | `verify-ticket-prod` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
+| Consuming an ai-scan job from the frontend with AiScanJobService.enqueueAndWait | `vendix-ai-queue` |
 | Consuming tool_call or tool_result stream frames | `vendix-ai-streaming` |
 | Converting a client price list or product catalog into an official import template | `product-catalog-normalizer` |
 | Creating AI queue processors | `vendix-ai-queue` |
@@ -337,6 +339,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Linking a PR to its Linear issue when opening a PR to develop | `git-workflow` |
 | Linking a Vexi attachment to the record it originated | `vendix-vexi-agent` |
 | Listing Vendix issues in Linear | `linear-issues` |
+| Making an AI scanner or AI generation endpoint async (anything that can exceed 60 s) | `vendix-ai-queue` |
 | Making search accent-insensitive (cafe finds Café) | `vendix-smart-search` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
