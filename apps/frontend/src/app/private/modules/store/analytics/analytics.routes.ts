@@ -73,6 +73,22 @@ export const analyticsRoutes: Routes = [
               ),
           },
           {
+            path: 'by-supplier',
+            data: { dimension: 'supplier' },
+            loadComponent: () =>
+              import('./pages/sales/sales-by-dimension.component').then(
+                (c) => c.SalesByDimensionComponent,
+              ),
+          },
+          {
+            path: 'by-brand',
+            data: { dimension: 'brand' },
+            loadComponent: () =>
+              import('./pages/sales/sales-by-dimension.component').then(
+                (c) => c.SalesByDimensionComponent,
+              ),
+          },
+          {
             path: 'by-category',
             loadComponent: () =>
               import('./pages/sales/sales-by-category.component').then(

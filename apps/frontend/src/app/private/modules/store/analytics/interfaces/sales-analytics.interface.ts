@@ -110,3 +110,77 @@ export interface SalesAnalyticsQueryDto {
   sort_order?: 'asc' | 'desc';
   granularity?: 'hour' | 'day' | 'week' | 'month' | 'year';
 }
+
+// Sales by dimension (supplier | brand) — sell-out reports
+export type SalesDimension = 'supplier' | 'brand';
+export type SalesDimensionView = 'product' | 'user' | 'customer';
+
+export interface SalesByDimensionQuery {
+  dimension: SalesDimension;
+  /** CSV de ids; `0` = Sin proveedor / Sin marca; omitir = todos */
+  ids?: string;
+  view?: SalesDimensionView;
+  date_range?: DateRangeFilter;
+  page?: number;
+  limit?: number;
+}
+
+interface SalesByDimensionBase {
+  dimension_id: number | null;
+  dimension_name: string;
+  units: number;
+  net_sales: number;
+  orders: number;
+}
+
+export interface SalesByDimensionProductRow extends SalesByDimensionBase {
+  product_id: number;
+  product_variant_id: number | null;
+  product_name: string;
+  variant_name: string | null;
+  sku: string | null;
+  customers: number;
+}
+
+export interface SalesByDimensionUserRow extends SalesByDimensionBase {
+  user_id: number | null;
+  user_name: string;
+  user_document: string | null;
+  customers: number;
+  references: number;
+}
+
+export interface SalesByDimensionCustomerRow extends SalesByDimensionBase {
+  customer_id: number | null;
+  customer_name: string;
+  customer_document: string | null;
+  references: number;
+}
+
+export type SalesByDimensionRow =
+  | SalesByDimensionProductRow
+  | SalesByDimensionUserRow
+  | SalesByDimensionCustomerRow;
+
+export interface SalesByDimensionSummary {
+  net_sales: number;
+  units: number;
+  orders: number;
+  impacted_customers: number;
+  distinct_references: number;
+}
+
+export interface SalesByDimensionResponse {
+  success: boolean;
+  message?: string;
+  data: SalesByDimensionRow[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+    summary: SalesByDimensionSummary;
+  };
+}
