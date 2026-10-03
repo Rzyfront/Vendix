@@ -1076,7 +1076,10 @@ export class ProductsService {
       });
 
       if (existingProduct) {
-        throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+        throw new VendixHttpException(
+          ErrorCodes.PROD_DUP_001,
+          `La URL (slug) "${slug}" ya la usa el producto "${existingProduct.name}"`,
+        );
       }
 
       // Verificar que el SKU sea único si se proporciona
@@ -1089,7 +1092,10 @@ export class ProductsService {
         });
 
         if (existingSku) {
-          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+          throw new VendixHttpException(
+            ErrorCodes.PROD_DUP_001,
+            `El SKU "${sanitizedDto.sku}" ya lo usa el producto "${existingSku.name}"`,
+          );
         }
       }
 
@@ -3951,7 +3957,10 @@ export class ProductsService {
         });
 
         if (existingSlug) {
-          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+          throw new VendixHttpException(
+            ErrorCodes.PROD_DUP_001,
+            `La URL (slug) "${sanitizedDto.slug}" ya la usa el producto "${existingSlug.name}"`,
+          );
         }
       }
 
@@ -3967,7 +3976,10 @@ export class ProductsService {
         });
 
         if (existingSku) {
-          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+          throw new VendixHttpException(
+            ErrorCodes.PROD_DUP_001,
+            `El SKU "${sanitizedDto.sku}" ya lo usa el producto "${existingSku.name}"`,
+          );
         }
       }
 
