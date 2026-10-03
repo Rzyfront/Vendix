@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import {
   Component,
   ViewChild,
@@ -1130,6 +1131,14 @@ export class StoreAdminLayoutComponent {
   };
 
   constructor() {
+    // El shell admin scrollea solo en su contenedor interno: se bloquea el
+    // scroll de html/body mientras este layout vive (las paginas publicas no
+    // pasan por aqui y conservan su scroll de body).
+    const rootEl = inject(DOCUMENT).documentElement;
+    rootEl.classList.add('vx-admin-shell-lock');
+    this.destroyRef.onDestroy(() =>
+      rootEl.classList.remove('vx-admin-shell-lock'),
+    );
     // A.4: registra el árbol real del sidebar en MenuFilterService para que
     // `currentMenuTree()`/`firstActiveModuleRoute()` lo usen una vez montado
     // (los guards usan el catálogo mientras el layout aún no existe).
