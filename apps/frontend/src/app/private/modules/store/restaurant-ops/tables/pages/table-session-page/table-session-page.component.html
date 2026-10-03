@@ -54,15 +54,19 @@
       </div>
     } @else if (session()) {
       @if (hasFinancialSplit() && !checkoutEnabled()) {
-        <div class="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm">
-          <app-icon name="split" [size]="16"></app-icon>
-          <span class="font-medium">
-            Cuenta dividida{{ financialSplitAccountCount() ? ' en ' + financialSplitAccountCount() + ' cuentas' : '' }}
-          </span>
-          <span class="text-[var(--color-text-secondary)]">· gestiónala en el detalle de la orden</span>
-          @if (session()?.order_id; as orderId) {
-            <a class="ml-auto font-medium text-[var(--color-primary)] underline" [routerLink]="['/admin/orders', orderId]">Ver orden</a>
-          }
+        <div class="flex items-start gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm">
+          <app-icon name="split" [size]="16" class="mt-0.5 shrink-0"></app-icon>
+          <div class="min-w-0">
+            <p class="font-medium">
+              Cuenta dividida{{ financialSplitAccountCount() ? ' en ' + financialSplitAccountCount() + ' cuentas' : '' }}
+            </p>
+            <p class="text-[var(--color-text-secondary)]">
+              Gestiónala en el detalle de la orden
+              @if (session()?.order_id; as orderId) {
+                <a class="ml-1 font-medium text-[var(--color-primary)] underline" [routerLink]="['/admin/orders', orderId]">Ver orden</a>
+              }
+            </p>
+          </div>
         </div>
       }
       @if (checkoutEnabled() && !hasFinancialSplit() && session()?.order_id; as sourceId) {
@@ -267,7 +271,8 @@
                 class="items-card-add"
                 variant="primary"
                 size="sm"
-                [disabled]="isClosed()"
+                [disabled]="isClosed() || hasFinancialSplit()"
+                [attr.title]="hasFinancialSplit() ? splitLockedAddReason : null"
                 (clicked)="openAddItems()"
               >
                 <app-icon slot="icon" name="plus" [size]="14"></app-icon>
@@ -284,7 +289,7 @@
                 <p class="empty-sub">
                   Agrega items para empezar a tomar el pedido de esta mesa.
                 </p>
-                @if (!isClosed()) {
+                @if (!isClosed() && !hasFinancialSplit()) {
                   <app-button variant="primary" size="md" (clicked)="openAddItems()">
                     <app-icon slot="icon" name="plus" [size]="15"></app-icon>
                     Agregar el primer plato
@@ -694,7 +699,8 @@
         size="md"
         customClasses="!h-11"
         [fullWidth]="!checkoutEnabled()"
-        [disabled]="isClosed()"
+        [disabled]="isClosed() || hasFinancialSplit()"
+        [attr.title]="hasFinancialSplit() ? splitLockedAddReason : null"
         (clicked)="openAddItems()"
       >
         <app-icon slot="icon" name="plus" [size]="15"></app-icon>

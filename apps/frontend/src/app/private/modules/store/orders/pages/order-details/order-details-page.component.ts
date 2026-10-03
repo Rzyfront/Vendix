@@ -277,6 +277,11 @@ export function isManualPaymentPending(
   });
 }
 
+/** Con división activa los importes quedan fijados (el backend responde 409 SPLIT_ACCOUNT_LOCKED al cambiarlos). */
+export function isOrderSplitLocked(order: { active_financial_split_id?: number | null } | null | undefined): boolean {
+  return !!order?.active_financial_split_id;
+}
+
 export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
   if (!order || order.active_financial_split_id) return false;
   if (['cancelled', 'refunded'].includes(order.state)) return false;
@@ -5241,6 +5246,11 @@ export class OrderDetailsPageComponent {
   );
   readonly resendDisabledReason =
     'Solo un encargado puede reenviar platos a cocina';
+  /** Con división activa los importes quedan fijados: el backend rechaza (409 SPLIT_ACCOUNT_LOCKED) cancelar/reversar ítems y procesar la orden completa. */
+  readonly splitLocked = computed(() => isOrderSplitLocked(this.order()));
+  readonly splitLockedReason =
+    'Cuenta dividida: los productos y montos están fijados. Para cambiarlos, quita la división.';
+
   readonly canUseReverseDelivered = computed(() =>
     this.hasNamedPermission('store:orders:order_flow:cancel_delivered'),
   );
@@ -5447,6 +5457,7 @@ export class OrderDetailsPageComponent {
    * ítems proyectados, igual que deliver — patrón de `deliverItem`).
    */
   cancelItem(item: OrderItem): void {
+    if (this.splitLocked()) return;
     if (this.cancellationBlockedByPayment()) return;
     if (!this.canCancelItem(item)) return;
     const orderId = this.order()?.id;
@@ -5545,6 +5556,7 @@ export class OrderDetailsPageComponent {
    * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
    */
   reverseDeliveredItem(item: OrderItem): void {
+    if (this.splitLocked()) return;
     if (this.cancellationBlockedByPayment()) return;
     if (!this.canReverseDeliveredItem(item) || !this.canUseReverseDelivered())
       return;

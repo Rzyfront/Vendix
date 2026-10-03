@@ -72,7 +72,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
     Object.defineProperty(api, 'floorTables', { value: floorTables });
     api.getFloorMap.and.returnValue(of([]));
     kitchen = jasmine.createSpyObj('KitchenTicketsService', ['markDelivered']);
-    toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    toast = jasmine.createSpyObj('ToastService', ['success', 'error', 'warning']);
     dialog = jasmine.createSpyObj('DialogService', ['confirm', 'prompt']);
     kdsSse = { tickets: signal([]), refreshSnapshot: jasmine.createSpy().and.resolveTo([]) };
     router = jasmine.createSpyObj('Router', ['navigate']);
@@ -457,6 +457,15 @@ describe('TableSessionPageComponent waiter delivery', () => {
       component.openPay();
       expect(component.isSplitOpen()).toBeTrue();
       expect(component.isPayOpen()).toBeFalse();
+    });
+
+    it('with split, adding and cancelling items are blocked and cancel shows the reason', () => {
+      component.onFinancialSplitLoaded(splitResult(2));
+      expect(component.canRemoveItem(item(1, false))).toBeFalse();
+      expect(component.removeDisabledReason(item(1, false))).toBe(component.splitLockedCancelReason);
+      expect(component.splitLockedAddReason).toContain('quita la división');
+      component.openAddItems();
+      expect(component.isAddItemsOpen()).toBeFalse();
     });
 
     it('with table checkout and no split offers Cobrar and Dividir cuenta', () => {

@@ -856,9 +856,13 @@ export class TableSessionPageComponent implements OnInit {
    * el resto de estados bloqueados siguen ocultos (comportamiento actual).
    * Retorna null cuando no hay bloqueo por entrega que señalizar.
    */
+  readonly splitLockedAddReason = 'Cuenta dividida: quita la división para agregar productos';
+  readonly splitLockedCancelReason = 'Cuenta dividida: quita la división para cancelar productos';
+
   removeDisabledReason(item: TableSessionOrderItem): string | null {
     if (this.isClosed()) return null;
     if (item.cancelled_at) return null;
+    if (this.hasFinancialSplit()) return this.splitLockedCancelReason;
     if (this.isDelivered(item))
       return 'Ya fue entregado al cliente. No se puede cancelar.';
     return null;

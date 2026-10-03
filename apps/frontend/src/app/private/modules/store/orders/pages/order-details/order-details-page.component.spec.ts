@@ -6,7 +6,7 @@ import {
   orderStateLabel, orderEventLabel, orderEventActorLabel, isRefundOrderEvent,
   cancelPaymentCopy,
   isCodAwaitingConfirmation, isOrderEligibleForSplitCreation,
-  isManualPaymentPending,
+  isManualPaymentPending, isOrderSplitLocked,
 } from './order-details-page.component';
 import { Order, OrderItem, OrderEvent } from '../../interfaces/order.interface';
 import {
@@ -529,5 +529,13 @@ describe('cancelPaymentCopy — el texto de «Cancelar pago» dice lo que hace e
       expect(copy.confirm).toContain('no se vuelven a descontar');
       expect(copy.success).toContain('"Creada"');
     }
+  });
+});
+
+describe('OrderDetailsPageComponent — cuenta dividida fija los importes', () => {
+  it('bloquea cancelar/procesar completa solo con división activa', () => {
+    expect(isOrderSplitLocked({ active_financial_split_id: 5 })).toBeTrue();
+    expect(isOrderSplitLocked({ active_financial_split_id: null })).toBeFalse();
+    expect(isOrderSplitLocked(null)).toBeFalse();
   });
 });
