@@ -1480,11 +1480,15 @@ export class PosCheckoutShellComponent {
         return {
           payload: {
             delivery_type: context.deliveryType,
-            shipping_address_id: context.shippingAddressId ?? undefined,
+            ...(context.shippingAddressId != null
+              ? { shipping_address_id: context.shippingAddressId }
+              : {}),
             shipping_method_id: context.shippingMethodId,
-            shipping_rate_id: context.shippingRateId ?? undefined,
+            ...(context.shippingRateId != null
+              ? { shipping_rate_id: context.shippingRateId }
+              : {}),
             shipping_cost: context.shippingCost,
-            ...(context.manualCostOverride && context.shippingRateId != null
+            ...(context.manualCostOverride && context.manualShippingPrice != null
               ? { manual_shipping_price: context.manualShippingPrice }
               : {}),
           },

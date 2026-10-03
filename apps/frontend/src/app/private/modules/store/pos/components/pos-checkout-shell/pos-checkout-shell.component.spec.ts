@@ -1174,6 +1174,26 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     }));
   });
 
+  it('editor conserva el precio manual cero para pickup sin dirección ni tarifa', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.hasShippingChanges.set(true);
+    ship.shippingContext.set({
+      deliveryType: 'pickup', shippingMethodId: 3,
+      shippingAddressId: null, shippingRateId: null, shippingCost: 0,
+      manualCostOverride: true, manualShippingPrice: 0,
+    });
+
+    component.onPrimaryConfirm();
+
+    const payload = update.calls.mostRecent().args[1];
+    expect(payload).toEqual(jasmine.objectContaining({
+      delivery_type: 'pickup', shipping_method_id: 3,
+      shipping_cost: 0, manual_shipping_price: 0,
+    }));
+    expect(payload.shipping_rate_id).toBeUndefined();
+    expect(payload.shipping_address_id).toBeUndefined();
+  });
+
   it('muestra la propina una sola vez en el resumen sin alterar la base del cobro', () => {
     fixture.componentRef.setInput('cartState', {
       customer: { id: 99, first_name: 'Ana' },

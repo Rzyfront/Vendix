@@ -48,6 +48,9 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     bookings: { updateMany: jest.fn() },
     order_items: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
     order_item_taxes: { update: jest.fn() },
+    shipping_methods: {
+      findFirst: jest.fn().mockResolvedValue({ id: 5, store_id: 1, is_active: true }),
+    },
     shipping_rates: { findFirst: jest.fn().mockResolvedValue(rate) },
   });
   const pickupRate = (methodType = 'pickup') => ({
@@ -114,6 +117,101 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
       shipping_cost: 12000,
       grand_total: 22000,
     }));
+  });
+
+  describe('tarifa personalizada explícita sin cotización', () => {
+    it.each([
+      { delivery_type: 'home_delivery', amount: 2345.67, clientCost: 1 },
+      { delivery_type: 'pickup', amount: 0, clientCost: 9876 },
+    ])('usa el monto explícito $amount como bruto para $delivery_type sin consultar tarifa', async ({
+      delivery_type,
+      amount,
+      clientCost,
+    }) => {
+      const client = tx();
+      const quotePickupRates = jest.fn();
+      const calculateRates = jest.fn();
+      service.shippingCalculatorService = { quotePickupRates, calculateRates };
+
+      await service.createOrUpdateOrderFromPos(client, dto({
+        delivery_type,
+        shipping_rate_id: undefined,
+        manual_shipping_price: amount,
+        // Deliberadamente distinto: el precio explícito enviado es authority.
+        shipping_cost: clientCost,
+      }), user);
+
+      expect(client.shipping_methods.findFirst).toHaveBeenCalledWith({
+        where: { id: 5, store_id: 1, is_active: true },
+        select: { id: true },
+      });
+      expect(client.shipping_rates.findFirst).not.toHaveBeenCalled();
+      expect(quotePickupRates).not.toHaveBeenCalled();
+      expect(calculateRates).not.toHaveBeenCalled();
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      expect(client.orders.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+        ...EMPTY_SHIPPING_TAX,
+        shipping_method_id: 5,
+        shipping_rate_id: null,
+        shipping_cost: amount,
+        grand_total: 10000 + amount,
+      }));
+    });
+
+    it.each([
+      { label: 'ausente', methodId: undefined },
+      { label: 'cero', methodId: 0 },
+      { label: 'negativo', methodId: -5 },
+      { label: 'fraccionario', methodId: 5.5 },
+    ])('rechaza método $label antes de escribir', async ({ methodId }) => {
+      const client = tx();
+
+      await expect(service.createOrUpdateOrderFromPos(client, dto({
+        shipping_method_id: methodId,
+        shipping_rate_id: undefined,
+        manual_shipping_price: 12,
+      }), user)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_SHIP_INVALID_METHOD_001.code,
+      });
+
+      expect(client.shipping_methods.findFirst).not.toHaveBeenCalled();
+      expect(client.orders.update).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['inactivo/ajeno', 'no encontrado'])('rechaza método %s sin mutación', async () => {
+      const client = tx();
+      client.shipping_methods.findFirst.mockResolvedValueOnce(null);
+
+      await expect(service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: undefined,
+        manual_shipping_price: 12,
+      }), user)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_SHIP_INVALID_METHOD_001.code,
+      });
+
+      expect(client.shipping_methods.findFirst).toHaveBeenCalledWith({
+        where: { id: 5, store_id: 1, is_active: true },
+        select: { id: true },
+      });
+      expect(client.orders.update).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it.each([NaN, Infinity, -0.01, 12.345])('rechaza monto inválido %s', async (amount) => {
+      const client = tx();
+
+      await expect(service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: undefined,
+        manual_shipping_price: amount,
+      }), user)).rejects.toMatchObject({
+        errorCode: ErrorCodes.PAY_VALIDATE_001.code,
+      });
+
+      expect(client.shipping_methods.findFirst).not.toHaveBeenCalled();
+      expect(client.orders.update).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('tarifas de retiro en tienda', () => {
