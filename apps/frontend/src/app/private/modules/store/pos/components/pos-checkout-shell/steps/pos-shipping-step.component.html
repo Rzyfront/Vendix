@@ -45,13 +45,21 @@
         @if (cartState()?.customer?.addresses?.length) {
           <div class="method-grid saved-addresses" aria-label="Direcciones guardadas del cliente">
             @for (saved of cartState()!.customer!.addresses!; track saved.id) {
-              <button type="button" class="method-card"
-                [class.selected]="addressId() === saved.id && !addressEditing()"
-                [attr.aria-pressed]="addressId() === saved.id && !addressEditing()"
-                (click)="selectSavedAddress(saved.id)">
-                <app-icon name="map-pin" [size]="18"></app-icon>
-                <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
-              </button>
+              <div class="saved-address-card">
+                <button type="button" class="saved-address-select"
+                  [class.selected]="addressId() === saved.id"
+                  [attr.aria-pressed]="addressId() === saved.id"
+                  (click)="selectSavedAddress(saved.id)">
+                  <app-icon name="map-pin" [size]="18"></app-icon>
+                  <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
+                </button>
+                <button type="button" class="saved-address-edit"
+                  [attr.aria-label]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                  [attr.title]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                  (click)="editSavedAddress(saved.id)">
+                  <app-icon name="edit" [size]="18"></app-icon>
+                </button>
+              </div>
             }
           </div>
         }
@@ -237,11 +245,20 @@
             @if (cartState()?.customer?.addresses?.length) {
               <div class="method-grid" aria-label="Direcciones guardadas del cliente">
                 @for (saved of cartState()!.customer!.addresses!; track saved.id) {
-                  <button type="button" class="method-card"
-                    [class.selected]="addressId() === saved.id"
-                    (click)="selectSavedAddress(saved.id)">
-                    {{ saved.address_line1 }}, {{ saved.city }}
-                  </button>
+                  <div class="saved-address-card">
+                    <button type="button" class="saved-address-select"
+                      [class.selected]="addressId() === saved.id"
+                      [attr.aria-pressed]="addressId() === saved.id"
+                      (click)="selectSavedAddress(saved.id)">
+                      <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
+                    </button>
+                    <button type="button" class="saved-address-edit"
+                      [attr.aria-label]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                      [attr.title]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                      (click)="editSavedAddress(saved.id)">
+                      <app-icon name="edit" [size]="18"></app-icon>
+                    </button>
+                  </div>
                 }
               </div>
             }

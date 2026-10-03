@@ -757,10 +757,11 @@ export class PosShippingStepComponent {
     };
   }
 
-  selectSavedAddress(id: number): void {
+  selectSavedAddress(id: number, opts?: { backfillCoordinates?: boolean }): void {
     const address = this.cartState()?.customer?.addresses?.find((a) => a.id === id);
     if (!address) return;
-    if (id === this.addressId() && !this.freeAddressEdited()) return;
+    if (id === this.addressId() && !this.freeAddressEdited() &&
+      this.addressCustomerId() === (this.cartState()?.customer?.id ?? null)) return;
     this.invalidateQuote();
     this.manualCostOverride.set(false);
     this.shippingRateId.set(null);
@@ -770,10 +771,23 @@ export class PosShippingStepComponent {
     this.addressEditing.set(false);
     const payload = this.toAddressPayload(address);
     this.setAddress(payload, id);
-    this.ensureSavedAddressCoords(id, payload);
+    if (opts?.backfillCoordinates !== false) this.ensureSavedAddressCoords(id, payload);
     // H6 — una dirección guardada distinta puede resultar igual de incompleta;
     // reabre el formulario precargado en vez de dejar el resumen sin salida.
     this.addressEditing.set(!this.addressValid());
+  }
+
+  /** Opens a saved-address editor without persisting a change just by opening it. */
+  editSavedAddress(id: number): void {
+    const customer = this.cartState()?.customer;
+    if (!customer?.addresses?.some((saved) => saved.id === id)) return;
+
+    // Preserve in-progress edits when the current saved address is already open.
+    if (this.addressId() !== id || this.addressCustomerId() !== (customer.id ?? null)) {
+      this.selectSavedAddress(id, { backfillCoordinates: false });
+    }
+    this.addressEditing.set(true);
+    if (!this.detailsInCliente()) this.goToShipSubStep(1);
   }
 
   onAddressChange(payload: AddressPayload, formDirty = this.addressForm()?.form.dirty ?? true): void {

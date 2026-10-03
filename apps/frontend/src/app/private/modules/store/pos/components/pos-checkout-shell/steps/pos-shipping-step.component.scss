@@ -61,6 +61,75 @@
   gap: 8px;
 }
 
+.saved-addresses {
+  grid-template-columns: 1fr;
+}
+
+.saved-address-card {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.saved-address-select {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.saved-address-select .method-card-label {
+  min-width: 0;
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.saved-address-select:hover,
+.saved-address-edit:hover {
+  border-color: var(--color-primary);
+}
+
+.saved-address-select.selected {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-success-rgb), 0.14);
+  color: var(--color-success-800);
+}
+
+.saved-address-edit {
+  display: inline-flex;
+  flex: 0 0 44px;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.saved-address-select:focus-visible,
+.saved-address-edit:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* H6 — aviso de dirección guardada incompleta (state_province/phone_number
    nulos) que precede el formulario precargado en #clientDeliveryDetails.
    Mismos tokens de warning que .flash-banner. */

@@ -132,6 +132,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     form.onDepartmentChange(departmentCode);
     form.onCityChange(municipalityCode);
   };
+  const renderClientDeliveryDetails = () => {
+    const template = component.clientDeliveryDetails();
+    expect(template).toBeTruthy();
+    return fixture.componentRef.injector
+      .get(ViewContainerRef)
+      .createEmbeddedView(template!);
+  };
 
   beforeEach(async () => {
     methods = new Subject();
@@ -245,6 +252,167 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       deliveryType: 'direct_delivery', shippingAddressId: 1,
       shippingMethodId: 7, shippingRateId: 93, shippingCost: 9000,
     }));
+  });
+
+  it('edits the selected saved address without replacing its seed or persisting on open', () => {
+    mount();
+    const seed = component.initialAddress();
+    component.editSavedAddress(33);
+
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.addressId()).toBe(33);
+    expect(component.hasShippingChanges()).toBeFalse();
+    expect(component.editorValidationError()).toBeNull();
+    expect(component.initialAddress()).toEqual(seed);
+    expect(component.address()).toEqual(seed);
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+
+    const edited = { ...originalAddress, address_line1: 'Calle modificada 9' };
+    component.onAddressChange(edited, true);
+    component.editSavedAddress(33);
+    expect(component.address()).toEqual(edited);
+    expect(component.initialAddress()).toEqual(seed);
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.addressId()).toBe(33);
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('selects and prefills another saved address before opening its editor', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+
+    component.editSavedAddress(33);
+
+    expect(component.addressId()).toBe(33);
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.initialAddress()).toEqual(jasmine.objectContaining({
+      address_line1: originalAddress.address_line1,
+      city: originalAddress.city,
+      state_province: originalAddress.state_province,
+    }));
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('opens an unlocated saved address without triggering geocoding persistence', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [
+      { ...originalAddress, id: 33, is_primary: true },
+      {
+        id: 41, address_line1: 'Calle sin punto 2', city: 'Neiva',
+        state_province: 'Huila', country_code: 'CO', phone_number: '3001234567',
+        latitude: null, longitude: null, is_primary: false,
+      },
+    ] };
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(of(null));
+    mount(state);
+
+    component.editSavedAddress(41);
+
+    expect(component.addressId()).toBe(41);
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.address()?.latitude).toBeNull();
+    expect(geocoding.forward).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('ignores edit requests for an address outside the current customer', () => {
+    mount();
+    const address = component.address();
+    const seed = component.initialAddress();
+
+    component.editSavedAddress(999);
+
+    expect(component.addressId()).toBe(33);
+    expect(component.address()).toBe(address);
+    expect(component.initialAddress()).toBe(seed);
+    expect(component.addressEditing()).toBeFalse();
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('persists an explicit saved-address text edit with UPDATE on the same id', () => {
+    customers.updateCustomerAddress.and.returnValue(of({}));
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    component.editSavedAddress(33);
+    component.onAddressChange({ ...originalAddress, address_line1: 'Calle actualizada 15' }, true);
+    const processOrder = spyOn<any>(component, 'processOrder');
+
+    (component as any).persistAddressThenProcess(
+      component.address(), (component as any).buildShippingAddress(), 'home_delivery', null,
+    );
+
+    expect(customers.updateCustomerAddress).toHaveBeenCalledWith(33,
+      jasmine.objectContaining({ address_line_1: 'Calle actualizada 15' }));
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(processOrder).toHaveBeenCalled();
+  });
+
+  it('shows sibling accessible edit buttons for every saved address in both POS surfaces', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('detailsInCliente', true);
+    mount(state);
+    const embeddedView = renderClientDeliveryDetails();
+    try {
+      embeddedView.detectChanges();
+      const root = embeddedView.rootNodes
+        .map((rootNode) => getDebugNode(rootNode) as DebugElement | null)
+        .find((debugNode) => !!debugNode && debugNode.query(By.css('.saved-addresses')));
+      const cards = root?.queryAll(By.css('.saved-address-card')) ?? [];
+      expect(cards.length).toBe(state.customer!.addresses!.length);
+      for (const card of cards) {
+        const buttons = card.queryAll(By.css('button'));
+        expect(buttons.length).toBe(2);
+        expect(buttons[0].nativeElement.contains(buttons[1].nativeElement)).toBeFalse();
+        const edit = card.query(By.css('button.saved-address-edit'));
+        expect(edit.attributes['aria-label']).toContain('Editar dirección');
+        expect(edit.attributes['title']).toContain('Editar dirección');
+        expect(edit.query(By.css('app-icon'))).toBeTruthy();
+        expect(card.query(By.css('button.saved-address-select'))).toBeTruthy();
+      }
+      cards[1].query(By.css('button.saved-address-edit')).triggerEventHandler('click', null);
+      embeddedView.detectChanges();
+      expect(component.addressId()).toBe(state.customer!.addresses![1].id);
+      expect(component.addressEditing()).toBeTrue();
+      expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+      expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+    } finally {
+      embeddedView.destroy();
+    }
+
+    fixture.componentRef.setInput('detailsInCliente', false);
+    fixture.detectChanges();
+    component.goToShipSubStep(1);
+    fixture.detectChanges();
+    const inlineCards = fixture.debugElement.queryAll(By.css('.saved-address-card'));
+    expect(inlineCards.length).toBe(state.customer!.addresses!.length);
+    for (const card of inlineCards) {
+      const buttons = card.queryAll(By.css('button'));
+      expect(buttons.length).toBe(2);
+      expect(buttons[0].nativeElement.contains(buttons[1].nativeElement)).toBeFalse();
+      const edit = card.query(By.css('button.saved-address-edit'));
+      expect(edit.attributes['aria-label'])
+        .toContain('Editar dirección');
+      expect(edit.attributes['title']).toContain('Editar dirección');
+      expect(edit.query(By.css('app-icon'))).toBeTruthy();
+    }
+    inlineCards[0].query(By.css('button.saved-address-edit')).triggerEventHandler('click', null);
+    fixture.detectChanges();
+    expect(component.addressId()).toBe(state.customer!.addresses![0].id);
+    expect(component.addressEditing()).toBeTrue();
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
   });
 
   it('selecting the existing method/address again does not requote or dirty', () => {
@@ -862,10 +1030,11 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     state.linkedOrderId = null;
     state.customer = { ...state.customer!, addresses: [] };
     mount(state);
+    customers.createCustomerAddress.and.returnValue(of({ id: 321 }));
+    component.beginNewAddress();
     component.address.set(originalAddress);
     component.addressValid.set(true);
     component.manualCostOverride.set(true);
-    customers.createCustomerAddress.and.returnValue(of({ id: 321 }));
     const payment = TestBed.inject(PosPaymentService) as any;
     payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
       of({ success: true, order: { id: 700 } }),
