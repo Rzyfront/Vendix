@@ -45,6 +45,7 @@ import { PaymentMethodsCatalogService } from '../../../../../../../shared/servic
 import type { PaymentMethod } from '../../../../../../../shared/models/payment-method.model';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import { formatStockShortageSummary } from '../../../../../../../core/utils/stock-shortage.util';
 import { DianConfigApiService } from '../../../../../../../shared/services/dian';
 import { DocumentPrintService } from '../../../../../../../shared/services/print';
 import { PosTicketService } from '../../../../pos/services/pos-ticket.service';
@@ -1262,7 +1263,11 @@ export class SplitAccountsPanelComponent {
   }
   private errorMessage(error: unknown): string {
     if (typeof error === 'string') return error;
-    const code = parseApiError(error).errorCode;
+    const parsed = parseApiError(error);
+    const code = parsed.errorCode;
+    if (code === 'INV_STOCK_INSUFFICIENT_LINES' && parsed.stockShortages?.length) {
+      return formatStockShortageSummary(parsed.stockShortages);
+    }
     return (code && SPLIT_ERROR_COPY[code]) || extractApiErrorMessage(error);
   }
   private showError(error: unknown, inline = false): void {
