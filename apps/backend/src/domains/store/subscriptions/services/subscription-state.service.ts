@@ -10,6 +10,7 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionAccessService } from './subscription-access.service';
 import {
   FREE_PLAN_LAPSE_REASON,
+  freePlanLapseDeadline,
   shouldLapseFreePlanAtPeriodEnd,
 } from '../contracts/free-plan-lapse.contract';
 import {
@@ -1587,8 +1588,8 @@ export class SubscriptionStateService {
 
     // 3. Period expiry — dunning windows
     if (sub.current_period_end && new Date(sub.current_period_end) < now) {
-      // Free promo / auto_renew=false plans lapse at period end: no grace,
-      // no dunning (see free-plan-lapse.contract.ts).
+      // Free promo / auto_renew=false plans lapse 1 day after period end: the grace
+      // day keeps the sub active, then it expires with no dunning (see free-plan-lapse.contract.ts).
       if (
         currentState === 'active' &&
         shouldLapseFreePlanAtPeriodEnd({
@@ -1598,6 +1599,11 @@ export class SubscriptionStateService {
           autoRenew: sub.auto_renew,
         })
       ) {
+        const lapseDeadline = freePlanLapseDeadline(
+          new Date(sub.current_period_end),
+        );
+        // Gracia de 1 día: la tienda sigue operando (active, sin dunning).
+        if (now < lapseDeadline) return;
         await this.transition(sub.store_id, 'expired', {
           reason: FREE_PLAN_LAPSE_REASON,
           triggeredByJob: 'subscription-state-engine',
@@ -1606,6 +1612,7 @@ export class SubscriptionStateService {
             plan_id: sub.plan_id,
             is_promotional: plan?.is_promotional ?? null,
             auto_renew: sub.auto_renew,
+            grace_deadline: lapseDeadline.toISOString(),
           },
         });
         return;
