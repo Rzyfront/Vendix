@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, MessageEvent } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import Redis from 'ioredis';
 import { Observable, interval } from 'rxjs';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { ImageContext } from '../../../common/config/image-presets';
 import { RequestContextService } from '../../../common/context/request-context.service';

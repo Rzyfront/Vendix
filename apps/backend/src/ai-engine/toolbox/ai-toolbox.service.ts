@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 import { AIEngineService } from '../ai-engine.service';
 import { AIMessage } from '../interfaces/ai-provider.interface';
 import { parseAiJson } from '../utils/ai-json.util';

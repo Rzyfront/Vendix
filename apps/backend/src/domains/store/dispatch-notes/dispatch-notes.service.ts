@@ -75,7 +75,7 @@ import {
 } from './types/dispatch-note-direction.type';
 import { DispatchFulfillmentListener } from './listeners/dispatch-fulfillment.listener';
 import { POOL_PUBLISHABLE_ORDER_STATES } from '../carrier/carrier-pool.contract';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 const DISPATCH_NOTE_INCLUDE = {
   dispatch_note_items: {
