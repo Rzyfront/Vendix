@@ -153,7 +153,19 @@
     "typescript-eslint": "^8.20.0"
   },
   "overrides": {
-    "multer": "^2.3.0"
+    "multer": "^2.3.0",
+    "mysql2": "^3.23.1",
+    "fflate": "^0.8.3",
+    "deepmerge-ts": "^8.0.2",
+    "exceljs": {
+      "uuid": "^11.1.1"
+    },
+    "engine.io": {
+      "ws": "^8.21.0"
+    },
+    "socket.io-adapter": {
+      "ws": "^8.21.0"
+    }
   },
   "jest": {
     "moduleFileExtensions": [
