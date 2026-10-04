@@ -52,7 +52,7 @@
     "react-native-web": "^0.21.0",
     "react-native-worklets": "0.5.1",
     "victory-native": "^41.20.2",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
