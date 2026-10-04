@@ -34,7 +34,10 @@ import { AILoggingService } from './ai-logging.service';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
-import { isAIFeatureKey } from '../domains/store/subscriptions/types/access.types';
+import {
+  AIFeatureKey,
+  isAIFeatureKey,
+} from '../domains/store/subscriptions/types/access.types';
 
 /**
  * Reads the provider prompt-cache counters off a usage object. Providers that
@@ -1882,7 +1885,7 @@ export class AIEngineService implements OnModuleInit {
     // base = RequestContext request id, or `internal-<uuid>` when absent.
     // Without suffix, many calls within one request dedupe to a single unit
     // (1 user message = 1 unit); with `:callId` every provider call counts.
-    let feature: string;
+    let feature: AIFeatureKey;
     let effectiveUnits: number;
     let perCall: boolean;
     if (featureCategory === 'conversations') {
@@ -1924,7 +1927,7 @@ export class AIEngineService implements OnModuleInit {
         : base;
       await this.subscriptionAccess.consumeAIQuota(
         storeId,
-        feature as any,
+        feature,
         effectiveUnits,
         requestId,
       );
