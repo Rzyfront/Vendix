@@ -479,6 +479,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       enable_table_checkout: false,
       qr_scan_behavior: 'menu_only',
       qr_auto_fire: false,
+      enable_tips: true,
+      tip_distribution_mode: 'waiter',
     },
 
     // Membership - gym/membership suite behavior toggles. Ambient access

@@ -1167,6 +1167,26 @@ export class RestaurantSettingsDto {
   @IsOptional()
   @IsBoolean()
   qr_auto_fire?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'Habilita el cobro de propinas en pedidos de restaurante/mesas.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_tips?: boolean;
+
+  @ApiProperty({
+    enum: ['waiter', 'pooled'],
+    example: 'waiter',
+    required: false,
+    description:
+      'Modalidad de distribución de propinas: `waiter` (atribución individual por mesero) o `pooled` (propina acumulada / fondo común).',
+  })
+  @IsOptional()
+  @IsIn(['waiter', 'pooled'])
+  tip_distribution_mode?: 'waiter' | 'pooled';
 }
 
 export class FingerprintDeviceConfigDto {

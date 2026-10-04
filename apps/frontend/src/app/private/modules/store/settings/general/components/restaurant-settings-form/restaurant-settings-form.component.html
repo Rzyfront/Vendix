@@ -195,4 +195,75 @@
       </app-expandable-card>
     </div>
   </div>
+
+  <div>
+    <h4 class="settings-kicker">
+      <app-icon name="coins" [size]="13"></app-icon>
+      Propinas en mesas
+    </h4>
+    <div class="space-y-4">
+      <div class="setting-row">
+        <div class="setting-row__copy">
+          <p class="setting-row__label">
+            <span>Habilitar cobro de propinas</span>
+            <app-tooltip
+              content="Permite sugerir y registrar propinas voluntarias al momento de cobrar la mesa o cuenta en el salón."
+              position="top"
+            >
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="13"></app-icon>
+              </span>
+            </app-tooltip>
+          </p>
+          <p class="setting-row__desc">
+            Activa la captura de propinas voluntarias en las cuentas y mesas del restaurante.
+          </p>
+        </div>
+        <app-toggle
+          [formControl]="enableTipsControl"
+          ariaLabel="Habilitar cobro de propinas"
+          (changed)="onFieldChange()"
+        ></app-toggle>
+      </div>
+
+      @if (enableTips()) {
+        <div>
+          <p class="setting-row__label">Modalidad de distribución de propinas</p>
+          <p class="settings-hint">
+            Define cómo se organizan y liquidan las propinas en el negocio: directo por mesero o acumulado en un fondo común para repartir al fin del período.
+          </p>
+        </div>
+        <div class="qr-behavior-grid" role="radiogroup" aria-label="Modalidad de distribución de propinas" [formGroup]="form">
+          @for (opt of tipDistributionModes; track opt.value) {
+            <label
+              class="qr-behavior-card"
+              [class.selected]="opt.value === selectedTipMode()"
+            >
+              <input
+                type="radio"
+                formControlName="tip_distribution_mode"
+                [value]="opt.value"
+                class="sr-only"
+                (change)="onFieldChange()"
+              />
+              <span class="qr-behavior-icon" aria-hidden="true">
+                <app-icon [name]="opt.icon" [size]="20" />
+              </span>
+              <h3 class="qr-behavior-title">{{ opt.title }}</h3>
+              <p class="qr-behavior-desc">{{ opt.description }}</p>
+              <p class="qr-behavior-guest">
+                <app-icon name="info" [size]="12" />
+                <span>{{ opt.note }}</span>
+              </p>
+              @if (opt.value === selectedTipMode()) {
+                <span class="qr-behavior-check" aria-hidden="true">
+                  <app-icon name="check" [size]="14" />
+                </span>
+              }
+            </label>
+          }
+        </div>
+      }
+    </div>
+  </div>
 </div>

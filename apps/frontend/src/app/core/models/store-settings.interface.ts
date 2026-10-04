@@ -382,6 +382,7 @@ export interface DispatchSettings {
  * `store_settings.settings.restaurant`.
  */
 export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+export type TipDistributionMode = 'waiter' | 'pooled';
 
 export interface RestaurantSettings {
   /**
@@ -404,6 +405,17 @@ export interface RestaurantSettings {
    * (KDS) without waiter intervention. Default `false`.
    */
   qr_auto_fire?: boolean;
+  /**
+   * When `true`, tip collection is enabled for tables / restaurant orders.
+   * Default `true`.
+   */
+  enable_tips?: boolean;
+  /**
+   * Tip distribution mode:
+   * - `waiter`: Direct attribution per waiter (default).
+   * - `pooled`: Pooled tips / common fund to divide at end of period.
+   */
+  tip_distribution_mode?: TipDistributionMode;
 }
 
 /**

@@ -12,12 +12,42 @@ import { TooltipComponent } from '../../../../../../../shared/components/tooltip
 import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
 
 export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+export type TipDistributionMode = 'waiter' | 'pooled';
 
 export interface RestaurantSettings {
   enable_table_checkout: boolean;
   qr_scan_behavior?: QrScanBehavior;
   qr_auto_fire?: boolean;
+  enable_tips?: boolean;
+  tip_distribution_mode?: TipDistributionMode;
 }
+
+export interface TipDistributionModeOption {
+  readonly value: TipDistributionMode;
+  readonly title: string;
+  readonly description: string;
+  readonly note: string;
+  readonly icon: 'user-check' | 'users';
+}
+
+const TIP_DISTRIBUTION_MODES: ReadonlyArray<TipDistributionModeOption> = [
+  {
+    value: 'waiter',
+    title: 'Propina por mesero',
+    description:
+      'La propina se atribuye directamente al mesero asignado a la mesa u orden.',
+    note: 'Individual: el recaudo se liquida o consulta directamente por cada mesero.',
+    icon: 'user-check',
+  },
+  {
+    value: 'pooled',
+    title: 'Propina acumulada (Fondo común)',
+    description:
+      'Las propinas se acumulan en un fondo general del restaurante.',
+    note: 'Fondo común: pensado para dividirse equitativamente entre el equipo al final del período.',
+    icon: 'users',
+  },
+];
 
 interface QrScanBehaviorOption {
   readonly value: QrScanBehavior;
@@ -361,6 +391,7 @@ export class RestaurantSettingsForm {
   readonly settingsChange = output<RestaurantSettings>();
 
   readonly qrScanBehaviors = QR_SCAN_BEHAVIORS;
+  readonly tipDistributionModes = TIP_DISTRIBUTION_MODES;
 
   /**
    * Espejos en señal del formulario. Los FormControl no son señales: leerlos
@@ -369,6 +400,8 @@ export class RestaurantSettingsForm {
    */
   readonly selectedBehavior = signal<QrScanBehavior>('menu_only');
   readonly autoFire = signal(false);
+  readonly enableTips = signal(true);
+  readonly selectedTipMode = signal<TipDistributionMode>('waiter');
 
   /** Panel colapsable con el recorrido completo del QR de mesa. */
   readonly qrHelpOpen = signal(false);
@@ -400,6 +433,12 @@ export class RestaurantSettingsForm {
     qr_auto_fire: new FormControl<boolean>(false, {
       nonNullable: true,
     }),
+    enable_tips: new FormControl<boolean>(true, {
+      nonNullable: true,
+    }),
+    tip_distribution_mode: new FormControl<TipDistributionMode>('waiter', {
+      nonNullable: true,
+    }),
   });
 
   get enableTableCheckoutControl(): FormControl<boolean> {
@@ -412,6 +451,14 @@ export class RestaurantSettingsForm {
 
   get qrAutoFireControl(): FormControl<boolean> {
     return this.form.get('qr_auto_fire') as FormControl<boolean>;
+  }
+
+  get enableTipsControl(): FormControl<boolean> {
+    return this.form.get('enable_tips') as FormControl<boolean>;
+  }
+
+  get tipDistributionModeControl(): FormControl<TipDistributionMode> {
+    return this.form.get('tip_distribution_mode') as FormControl<TipDistributionMode>;
   }
 
   constructor() {
@@ -435,5 +482,7 @@ export class RestaurantSettingsForm {
   private syncMirrors(): void {
     this.selectedBehavior.set(this.qrScanBehaviorControl.value ?? 'menu_only');
     this.autoFire.set(this.qrAutoFireControl.value === true);
+    this.enableTips.set(this.enableTipsControl.value !== false);
+    this.selectedTipMode.set(this.tipDistributionModeControl.value ?? 'waiter');
   }
 }

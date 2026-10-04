@@ -1135,6 +1135,7 @@ export interface OperationsSettings {
 // RESTAURANT - Restaurant suite behavior toggles
 // ============================================================================
 export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+export type TipDistributionMode = 'waiter' | 'pooled';
 
 export interface RestaurantSettings {
   /**
@@ -1157,6 +1158,17 @@ export interface RestaurantSettings {
    * draft until staff fires them.
    */
   qr_auto_fire: boolean;
+  /**
+   * Enables tip collection in restaurant/table orders.
+   * Default `true`.
+   */
+  enable_tips?: boolean;
+  /**
+   * Tip distribution mode:
+   * - `waiter`: Direct attribution per waiter (default).
+   * - `pooled`: Pooled tips / common fund to divide at end of period.
+   */
+  tip_distribution_mode?: TipDistributionMode;
 }
 
 export interface FingerprintDeviceConfig {
