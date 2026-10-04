@@ -40,7 +40,7 @@
         "decimal.js": "10.5.0",
         "echarts": "^6.0.0",
         "lucide-angular": "^0.544.0",
-        "maplibre-gl": "^5.24.0",
+        "maplibre-gl": "^6.12.0",
         "marked": "^17.0.1",
         "ngx-echarts": "^21.0.0",
         "qrcode": "^1.5.4",
