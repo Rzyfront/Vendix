@@ -545,16 +545,29 @@
                     @if (tipValidationError()) {
                       <p class="pc-warn">{{ tipValidationError() }}</p>
                     }
-                    <label class="pc-tip-waiter">
-                      <span>Mesero (opcional)</span>
-                      <app-store-user-select
-                        lookupMode="staff"
-                        placeholder="Buscar mesero..."
-                        [value]="tipWaiterId()"
-                        (valueChange)="tipWaiterId.set($event)"
-                        aria-label="Mesero que recibe la propina"
-                      ></app-store-user-select>
-                    </label>
+                    @if (isPooledTipMode()) {
+                      <div class="pc-tip-pooled-badge">
+                        <app-icon name="users" [size]="16" class="pc-tip-pooled-icon"></app-icon>
+                        <div class="pc-tip-pooled-content">
+                          <span class="pc-tip-pooled-title">Propina acumulada</span>
+                          <span class="pc-tip-pooled-desc">Se destina al fondo común de meseros.</span>
+                        </div>
+                      </div>
+                    } @else {
+                      <label class="pc-tip-waiter">
+                        <span class="pc-tip-waiter-header">
+                          <span>Mesero (opcional)</span>
+                          <span class="pc-tip-mode-pill">Por mesero</span>
+                        </span>
+                        <app-store-user-select
+                          lookupMode="staff"
+                          placeholder="Buscar mesero..."
+                          [value]="tipWaiterId()"
+                          (valueChange)="tipWaiterId.set($event)"
+                          aria-label="Mesero que recibe la propina"
+                        ></app-store-user-select>
+                      </label>
+                    }
                   }
                 </div>
               </section>
@@ -1142,16 +1155,29 @@
               @if (tipValidationError()) {
                 <p class="pc-warn">{{ tipValidationError() }}</p>
               }
-              <label class="pc-tip-waiter">
-                <span>Mesero (opcional)</span>
-                <app-store-user-select
-                  lookupMode="staff"
-                  placeholder="Buscar mesero..."
-                  [value]="tipWaiterId()"
-                  (valueChange)="tipWaiterId.set($event)"
-                  aria-label="Mesero que recibe la propina"
-                ></app-store-user-select>
-              </label>
+              @if (isPooledTipMode()) {
+                <div class="pc-tip-pooled-badge">
+                  <app-icon name="users" [size]="16" class="pc-tip-pooled-icon"></app-icon>
+                  <div class="pc-tip-pooled-content">
+                    <span class="pc-tip-pooled-title">Propina acumulada</span>
+                    <span class="pc-tip-pooled-desc">Se destina al fondo común de meseros.</span>
+                  </div>
+                </div>
+              } @else {
+                <label class="pc-tip-waiter">
+                  <span class="pc-tip-waiter-header">
+                    <span>Mesero (opcional)</span>
+                    <span class="pc-tip-mode-pill">Por mesero</span>
+                  </span>
+                  <app-store-user-select
+                    lookupMode="staff"
+                    placeholder="Buscar mesero..."
+                    [value]="tipWaiterId()"
+                    (valueChange)="tipWaiterId.set($event)"
+                    aria-label="Mesero que recibe la propina"
+                  ></app-store-user-select>
+                </label>
+              }
             }
           </div>
         </section>

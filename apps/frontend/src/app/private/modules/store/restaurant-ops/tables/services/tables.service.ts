@@ -611,7 +611,12 @@ export class TablesService {
               : {}),
           }),
       ...(payload.tip_amount != null && payload.tip_amount > 0
-        ? { tip_amount: payload.tip_amount }
+        ? {
+            tip_amount: payload.tip_amount,
+            ...(payload.tip_type ? { tip_type: payload.tip_type } : {}),
+            ...(payload.tip_value != null ? { tip_value: payload.tip_value } : {}),
+            ...(payload.tip_waiter_id != null ? { tip_waiter_id: payload.tip_waiter_id } : {}),
+          }
         : {}),
     };
     return this.http

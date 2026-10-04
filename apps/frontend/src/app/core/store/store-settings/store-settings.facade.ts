@@ -11,6 +11,8 @@ import {
   NotificationsSettings,
   ReceiptsSettings,
   VexiSettings,
+  RestaurantSettings,
+  TipDistributionMode,
 } from '../../models/store-settings.interface';
 
 /**
@@ -111,6 +113,21 @@ export class StoreSettingsFacade {
 
   readonly modules = computed<Record<string, any> | null>(
     () => this.settings()?.module_flows ?? null,
+  );
+
+  /** Restaurant settings (tables, KDS, tips mode). */
+  readonly restaurant = computed<RestaurantSettings | null>(
+    () => this.settings()?.restaurant ?? null,
+  );
+
+  /** Active tip distribution mode ('waiter' vs 'pooled'). Defaults to 'waiter'. */
+  readonly tipDistributionMode = computed<TipDistributionMode>(
+    () => this.settings()?.restaurant?.tip_distribution_mode ?? 'waiter',
+  );
+
+  /** Whether tip collection is enabled for restaurant orders. Defaults to true. */
+  readonly enableTips = computed<boolean>(
+    () => this.settings()?.restaurant?.enable_tips !== false,
   );
 
   /** Raw Vexi block. `null` when the store never persisted the switch. */

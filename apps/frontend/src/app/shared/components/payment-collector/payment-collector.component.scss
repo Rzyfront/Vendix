@@ -903,6 +903,43 @@
   text-align: center;
 }
 
+.pc-tip-pooled-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-primary, #6366f1) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary, #6366f1) 20%, transparent);
+
+  .pc-tip-pooled-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-primary, #6366f1);
+    flex-shrink: 0;
+  }
+
+  .pc-tip-pooled-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+  }
+
+  .pc-tip-pooled-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--color-text-primary, #111827);
+  }
+
+  .pc-tip-pooled-desc {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary, #6b7280);
+    line-height: 1.25;
+  }
+}
+
 .pc-tip-waiter {
   display: flex;
   flex-direction: column;
@@ -910,6 +947,30 @@
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--color-text-secondary, #6b7280);
+
+  .pc-tip-waiter-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+
+    > span:first-child {
+      color: color-mix(
+        in srgb,
+        var(--color-text-primary) 78%,
+        transparent
+      );
+    }
+  }
+
+  .pc-tip-mode-pill {
+    font-size: 0.68rem;
+    font-weight: 500;
+    padding: 0.1rem 0.4rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--color-text-secondary, #6b7280) 12%, transparent);
+    color: var(--color-text-secondary, #6b7280);
+  }
 
   > span {
     // El label hereda el color muted, pero la cifra del input tiene

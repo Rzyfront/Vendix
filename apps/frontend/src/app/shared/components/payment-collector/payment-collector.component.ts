@@ -31,6 +31,8 @@ import { PaymentWompiFieldsComponent } from './payment-wompi-fields.component';
 import { PaymentCreditFieldsComponent } from './payment-credit-fields.component';
 import { StepsLineComponent, type StepsLineItem } from '../steps-line/steps-line.component';
 import { StoreUserSelectComponent } from '../store-user-select/store-user-select.component';
+import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
+import type { TipDistributionMode } from '../../../core/models/store-settings.interface';
 import {
   DEFAULT_CONFIG_BY_CONTEXT,
   type BankAccountSelectOption,
@@ -126,6 +128,7 @@ interface MultiLegRowValue {
 export class PaymentCollectorComponent implements OnInit {
   private readonly catalog = inject(PaymentMethodsCatalogService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly storeSettingsFacade = inject(StoreSettingsFacade, { optional: true });
   /**
    * T1 — símbolo de la moneda del tenant (no del locale del browser).
    * Mismo origen que el resto del repo: el CurrencyFormatService
@@ -171,6 +174,7 @@ export class PaymentCollectorComponent implements OnInit {
   readonly allowCashIn = input<boolean | undefined>(undefined, { alias: 'allowCash' });
   readonly allowReferenceIn = input<boolean | undefined>(undefined, { alias: 'allowReference' });
   readonly allowTipIn = input<boolean | undefined>(undefined, { alias: 'allowTip' });
+  readonly tipDistributionModeIn = input<TipDistributionMode | undefined>(undefined, { alias: 'tipDistributionMode' });
   readonly allowCreditIn = input<boolean | undefined>(undefined, { alias: 'allowCredit' });
   readonly allowWompiIn = input<boolean | undefined>(undefined, { alias: 'allowWompi' });
   readonly allowWalletIn = input<boolean | undefined>(undefined, { alias: 'allowWallet' });
@@ -213,6 +217,21 @@ export class PaymentCollectorComponent implements OnInit {
   readonly tipType = signal<'percentage' | 'fixed'>('fixed');
   readonly tipExpanded = signal(false);
   readonly tipWaiterId = signal<number | null>(null);
+
+  /**
+   * Modalidad de distribución de propina ('pooled' o 'waiter').
+   * Si no se especifica por input, se deriva de `store_settings.restaurant.tip_distribution_mode`.
+   */
+  readonly tipDistributionMode = computed<TipDistributionMode>(() => {
+    return this.tipDistributionModeIn() ?? this.storeSettingsFacade?.tipDistributionMode() ?? 'waiter';
+  });
+
+  /**
+   * En modalidad 'pooled' (Propina acumulada / Fondo común), la propina se destina
+   * al fondo común de meseros y no se asocia a un mesero individual.
+   */
+  readonly isPooledTipMode = computed<boolean>(() => this.tipDistributionMode() === 'pooled');
+
   readonly tipValidationError = computed<string | null>(() => {
     if (!this.config().allowTip || this.mode() !== 'contado') return null;
     const raw = Number(this.tip());
@@ -345,7 +364,7 @@ export class PaymentCollectorComponent implements OnInit {
     return {
       allowCash: this.allowCashIn() ?? base.allowCash,
       allowReference: this.allowReferenceIn() ?? base.allowReference,
-      allowTip: this.allowTipIn() ?? base.allowTip,
+      allowTip: (this.allowTipIn() ?? base.allowTip) && (this.storeSettingsFacade ? this.storeSettingsFacade.enableTips() : true),
       allowCredit: this.allowCreditIn() ?? base.allowCredit,
       allowWompi: this.allowWompiIn() ?? base.allowWompi,
       allowWallet: this.allowWalletIn() ?? base.allowWallet,
@@ -712,6 +731,13 @@ export class PaymentCollectorComponent implements OnInit {
       this.context();
       this.paymentResetKey();
       untracked(() => this.resetState());
+    });
+
+    // En modalidad acumulada (fondo común), la propina no se atribuye a un mesero individual
+    effect(() => {
+      if (this.isPooledTipMode() && this.tipWaiterId() !== null) {
+        untracked(() => this.tipWaiterId.set(null));
+      }
     });
 
     // Flag genuine operator edits to the cash amount (keypad / typing). Skips

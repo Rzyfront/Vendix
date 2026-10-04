@@ -11,6 +11,7 @@ import type {
   PaymentContext,
   PaymentSubmit,
 } from './payment-collector.model';
+import type { TipDistributionMode } from '../../../core/models/store-settings.interface';
 
 /**
  * Thin, optional modal wrapper around {@link PaymentCollectorComponent}.
@@ -57,6 +58,7 @@ import type {
         [allowCash]="allowCash()"
         [allowReference]="allowReference()"
         [allowTip]="allowTip()"
+        [tipDistributionMode]="tipDistributionMode()"
         [allowCredit]="allowCredit()"
         [allowWompi]="allowWompi()"
         [allowWallet]="allowWallet()"
@@ -137,6 +139,7 @@ export class PaymentModalComponent {
   readonly allowCash = input<boolean | undefined>(undefined);
   readonly allowReference = input<boolean | undefined>(undefined);
   readonly allowTip = input<boolean | undefined>(undefined);
+  readonly tipDistributionMode = input<TipDistributionMode | undefined>(undefined);
   readonly allowCredit = input<boolean | undefined>(undefined);
   readonly allowWompi = input<boolean | undefined>(undefined);
   readonly allowWallet = input<boolean | undefined>(undefined);
