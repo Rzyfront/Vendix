@@ -282,11 +282,36 @@ export function cashDiffLabel(diff: number | null | undefined): string {
         <div class="csr-row"><span>Envíos</span><span class="csr-num">{{ sl.shipping | currency }}</span></div>
         <div class="csr-row"><span>Propinas</span><span class="csr-num">{{ sl.tips | currency }}</span></div>
         <div class="csr-row csr-strong csr-highlight"><span>Total cobrado</span><span class="csr-num">{{ sl.grand_total | currency }}</span></div>
+        @if (sl.tips > 0) {
+          <div class="csr-row csr-strong">
+            <span>Ventas netas negocio</span>
+            <span class="csr-num">{{ (sl.net_sales != null ? sl.net_sales : (sl.grand_total - sl.tips)) | currency }}</span>
+          </div>
+        }
         <div class="csr-row"><span>Ticket promedio</span><span class="csr-num">{{ sl.average_ticket | currency }}</span></div>
         @if (cancelled(); as c) {
           <div class="csr-row"><span>Canceladas / reembolsadas ({{ c.count }})</span><span class="csr-num">{{ c.total | currency }}</span></div>
         }
       </section>
+
+      <!-- Propinas -->
+      @if (sl.tips > 0) {
+        <section class="csr-sec">
+          <h3 class="csr-title">Propinas ({{ sl.tips_summary?.mode_label || 'Recaudo' }})</h3>
+          <div class="csr-row csr-strong">
+            <span>Total propinas</span>
+            <span class="csr-num">{{ sl.tips | currency }}</span>
+          </div>
+          @if (sl.tips_summary?.by_waiter?.length) {
+            @for (w of sl.tips_summary!.by_waiter; track (w.waiter_id ?? w.waiter_name)) {
+              <div class="csr-row csr-sub">
+                <span>{{ w.waiter_name }}</span>
+                <span class="csr-num">{{ w.total | currency }}</span>
+              </div>
+            }
+          }
+        </section>
+      }
 
       @if (!hasNew()) {
       <!-- Devoluciones -->
@@ -317,6 +342,9 @@ export function cashDiffLabel(diff: number | null | undefined): string {
         <section class="csr-sec">
           <h3 class="csr-title">Neto</h3>
           <div class="csr-row csr-strong csr-highlight"><span>Ventas netas</span><span class="csr-num">{{ r.net.net_sales | currency }}</span></div>
+          @if (r.net.net_business_sales != null && sl.tips > 0) {
+            <div class="csr-row csr-strong"><span>Neto negocio (sin propinas)</span><span class="csr-num">{{ r.net.net_business_sales | currency }}</span></div>
+          }
           <div class="csr-row"><span>Impuesto neto</span><span class="csr-num">{{ r.net.net_taxes | currency }}</span></div>
         </section>
       }

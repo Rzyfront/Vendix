@@ -120,11 +120,34 @@ export class CashSessionReportPrintService {
         row('Envíos', fmt(sl.shipping)) +
         row('Propinas', fmt(sl.tips)) +
         row('Total cobrado', fmt(sl.grand_total), 'strong') +
+        (sl.tips > 0
+          ? row(
+              'Ventas netas negocio',
+              fmt(sl.net_sales != null ? sl.net_sales : sl.grand_total - sl.tips),
+              'strong',
+            )
+          : '') +
         row('Ticket promedio', fmt(sl.average_ticket)) +
         (cancelled && cancelled.count > 0
           ? row(`Canceladas / reembolsadas (${cancelled.count})`, fmt(cancelled.total))
           : ''),
     );
+
+    const tipsSummary = sl.tips_summary;
+    const tipsSection =
+      sl.tips > 0
+        ? section(
+            `Propinas (${tipsSummary?.mode_label || 'Recaudo'})`,
+            table(
+              row('Total propinas', fmt(sl.tips), 'strong') +
+                (tipsSummary?.by_waiter
+                  ? tipsSummary.by_waiter
+                      .map((w) => row(w.waiter_name, fmt(w.total), 'sub'))
+                      .join('')
+                  : ''),
+            ),
+          )
+        : '';
 
     const ret = cashReportReturns(r);
     const hasReturns =
@@ -149,6 +172,9 @@ export class CashSessionReportPrintService {
           'Neto',
           table(
             row('Ventas netas', fmt(r.net.net_sales), 'strong') +
+              (r.net.net_business_sales != null && sl.tips > 0
+                ? row('Neto negocio (sin propinas)', fmt(r.net.net_business_sales), 'strong')
+                : '') +
               row('Impuesto neto', fmt(r.net.net_taxes)),
           ),
         )
@@ -244,12 +270,14 @@ export class CashSessionReportPrintService {
         integrity +
         section('Cómo se llega al efectivo', breakdown) +
         section('Salidas de la sesión', outflowsHtml) +
-        section('Ventas', sales);
+        section('Ventas', sales) +
+        tipsSection;
     } else {
       top =
         section('Métodos de pago', methods) +
         section('Efectivo', cash) +
         section('Ventas cobradas', sales) +
+        tipsSection +
         returnsSection +
         netSection +
         pendingSection;

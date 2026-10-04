@@ -27,6 +27,7 @@ import type {
   CashOutflow,
   CashSalesSummary,
   CashIntegrity,
+  CashTipsSummary,
 } from './interfaces/cash-session-close-report.interface';
 
 /** Dinero en céntimos enteros: evita acumular floats. */
@@ -728,6 +729,15 @@ export class SessionsService {
             shipping_cost: true,
             shipping_tax_amount: true,
             tip_amount: true,
+            tip_waiter_id: true,
+            users_orders_tip_waiter_idTousers: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+              },
+            },
             grand_total: true,
             coupon_code: true,
             order_number: true,
@@ -922,6 +932,83 @@ export class SessionsService {
         }))
         .sort((a: any, b: any) => b.total - a.total);
 
+    const storeSettings = await this.settingsService
+      .getSettings()
+      .catch(() => null);
+    const tip_mode: 'waiter' | 'pooled' =
+      storeSettings?.restaurant?.tip_distribution_mode ?? 'waiter';
+
+    let pooled_tips_c = 0;
+    let waiter_tips_c = 0;
+    const waiter_tips_map = new Map<
+      number | string,
+      { waiter_id: number | null; waiter_name: string; total_c: number }
+    >();
+
+    for (const o of live_orders as any[]) {
+      const tip_c = toCents(o.tip_amount);
+      if (tip_c <= 0) continue;
+
+      const waiter = o.users_orders_tip_waiter_idTousers;
+      const waiter_id = o.tip_waiter_id;
+
+      if (tip_mode === 'pooled') {
+        pooled_tips_c += tip_c;
+      } else {
+        if (waiter_id) {
+          waiter_tips_c += tip_c;
+          const wName = waiter
+            ? `${waiter.first_name || ''} ${waiter.last_name || ''}`.trim() ||
+              waiter.email ||
+              `Mesero #${waiter_id}`
+            : `Mesero #${waiter_id}`;
+          const existing = waiter_tips_map.get(waiter_id) ?? {
+            waiter_id,
+            waiter_name: wName,
+            total_c: 0,
+          };
+          existing.total_c += tip_c;
+          waiter_tips_map.set(waiter_id, existing);
+        } else {
+          pooled_tips_c += tip_c;
+          const existing = waiter_tips_map.get('unassigned') ?? {
+            waiter_id: null,
+            waiter_name: 'Sin asignar (Fondo común)',
+            total_c: 0,
+          };
+          existing.total_c += tip_c;
+          waiter_tips_map.set('unassigned', existing);
+        }
+      }
+    }
+
+    const tips_summary: CashTipsSummary = {
+      total: fromCents(live.tips),
+      mode: tip_mode,
+      mode_label:
+        tip_mode === 'pooled'
+          ? 'Propina acumulada (Fondo común)'
+          : 'Propina por mesero',
+      pooled_total: fromCents(pooled_tips_c),
+      waiter_total: fromCents(waiter_tips_c),
+      by_waiter:
+        tip_mode === 'pooled'
+          ? [
+              {
+                waiter_id: null,
+                waiter_name: 'Fondo común acumulado',
+                total: fromCents(pooled_tips_c),
+              },
+            ]
+          : Array.from(waiter_tips_map.values())
+              .map((w) => ({
+                waiter_id: w.waiter_id,
+                waiter_name: w.waiter_name,
+                total: fromCents(w.total_c),
+              }))
+              .sort((a, b) => b.total - a.total),
+    };
+
     const sales_summary_block: CashSalesSummary = {
       orders_count: live_orders.length,
       payments_count: sale_movements.length,
@@ -932,6 +1019,8 @@ export class SessionsService {
       taxes: fromCents(live.product_taxes + live.shipping_taxes),
       shipping: fromCents(live.shipping),
       tips: fromCents(live.tips),
+      net_sales: fromCents(Math.max(0, sales_collected_c - live.tips)),
+      tips_summary,
       grand_total: fromCents(sales_collected_c),
       orders_grand_total: fromCents(live.grand_total),
       average_ticket: live_orders.length
@@ -1047,6 +1136,8 @@ export class SessionsService {
         taxes: r2(taxes),
         shipping: r2(shipping),
         tips: r2(tips),
+        net_sales: r2(Math.max(0, grand_total - tips)),
+        tips_summary,
         grand_total: r2(grand_total),
         average_ticket: orders.length ? r2(grand_total / orders.length) : 0,
       },
@@ -1069,6 +1160,9 @@ export class SessionsService {
       net: {
         net_sales: r2(grand_total - refunds_total - cancellations.total),
         net_taxes: r2(taxes - refunds_tax),
+        net_business_sales: r2(
+          Math.max(0, grand_total - tips - refunds_total - cancellations.total),
+        ),
       },
       pending_collection: {
         count: pending_orders.length,

@@ -96,6 +96,19 @@ export interface CashSessionSummary {
  * Solo totales: nunca líneas individuales. Envelope crudo del backend
  * (`GET /store/cash-registers/sessions/:id/close-report`).
  */
+export interface CashTipsSummary {
+  total: number;
+  mode: 'waiter' | 'pooled';
+  mode_label: string;
+  pooled_total: number;
+  waiter_total: number;
+  by_waiter: {
+    waiter_id: number | null;
+    waiter_name: string;
+    total: number;
+  }[];
+}
+
 export interface CashSessionCloseReport {
   session: {
     id: number;
@@ -133,6 +146,10 @@ export interface CashSessionCloseReport {
     /** Envíos netos de impuesto (backend viejo: bruto). */
     shipping: number;
     tips: number;
+    /** Ventas netas del negocio (sin propinas). */
+    net_sales?: number;
+    /** Desglose de propinas según modalidad. */
+    tips_summary?: CashTipsSummary;
     grand_total: number;
     average_ticket: number;
   };
@@ -150,7 +167,7 @@ export interface CashSessionCloseReport {
     payments_cancelled_count: number;
     payments_cancelled_total: number;
   };
-  net?: { net_sales: number; net_taxes: number };
+  net?: { net_sales: number; net_taxes: number; net_business_sales?: number };
   pending_collection?: { count: number; total: number };
   discounts: {
     orders_with_discount: number;

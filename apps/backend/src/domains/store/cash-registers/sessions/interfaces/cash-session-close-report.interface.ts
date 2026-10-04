@@ -52,6 +52,19 @@ export interface CashIntegrity {
   notes: string[];
 }
 
+export interface CashTipsSummary {
+  total: number;
+  mode: 'waiter' | 'pooled';
+  mode_label: string;
+  pooled_total: number;
+  waiter_total: number;
+  by_waiter: {
+    waiter_id: number | null;
+    waiter_name: string;
+    total: number;
+  }[];
+}
+
 export interface CashSalesSummary {
   orders_count: number;
   payments_count: number;
@@ -62,6 +75,10 @@ export interface CashSalesSummary {
   taxes: number;
   shipping: number;
   tips: number;
+  /** Ventas netas del negocio (sin propinas). */
+  net_sales?: number;
+  /** Desglose de propinas según modalidad. */
+  tips_summary?: CashTipsSummary;
   /** Total cobrado: Σ movimientos `sale` de ESTA sesión (no `orders.grand_total`). */
   grand_total: number;
   /** Σ `orders.grand_total` de las órdenes no canceladas con venta en la sesión. */
@@ -121,6 +138,10 @@ export interface CashSessionCloseReport {
     /** Envíos NETOS de impuesto (shipping_cost − shipping_tax_amount). */
     shipping: number;
     tips: number;
+    /** Ventas netas del negocio (sin propinas). */
+    net_sales?: number;
+    /** Desglose de propinas según modalidad. */
+    tips_summary?: CashTipsSummary;
     grand_total: number;
     average_ticket: number;
   };
@@ -143,6 +164,8 @@ export interface CashSessionCloseReport {
   net: {
     net_sales: number;
     net_taxes: number;
+    /** Ventas netas del negocio deduciendo devoluciones y propinas. */
+    net_business_sales?: number;
   };
   /** Órdenes enviadas/entregadas con saldo por cobrar al momento de la consulta. */
   pending_collection: { count: number; total: number };
