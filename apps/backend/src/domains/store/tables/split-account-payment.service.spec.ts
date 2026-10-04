@@ -526,9 +526,8 @@ describe('SplitAccountPaymentService', () => {
 
   it('keeps effects marker pending on event failure, retries post-commit without a new payment', async () => {
     events.emitAsync.mockRejectedValueOnce(new Error('accounting down'));
-    await expect(service.pay(100, 11, makeRequest())).rejects.toThrow(
-      'accounting down',
-    );
+    // El dinero ya entró: el fallo de efectos no se propaga como error HTTP.
+    await expect(service.pay(100, 11, makeRequest())).resolves.toBeDefined();
     expect(payments[1].state).toBe('succeeded');
     expect(payments[1].financial_effects_recorded_at).toBeNull();
     await service.reconcileReceivedForOrder(100);
@@ -540,9 +539,8 @@ describe('SplitAccountPaymentService', () => {
 
   it('webhook reconciliation works without request user, preserving original actor', async () => {
     events.emitAsync.mockRejectedValueOnce(new Error('interrupted'));
-    await expect(service.pay(100, 11, makeRequest())).rejects.toThrow(
-      'interrupted',
-    );
+    // El dinero ya entró: el fallo de efectos no se propaga como error HTTP.
+    await expect(service.pay(100, 11, makeRequest())).resolves.toBeDefined();
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ ...context, user_id: undefined });
@@ -555,9 +553,8 @@ describe('SplitAccountPaymentService', () => {
 
   it('never attributes replay to a different organization actor', async () => {
     events.emitAsync.mockRejectedValueOnce(new Error('interrupted'));
-    await expect(service.pay(100, 11, makeRequest())).rejects.toThrow(
-      'interrupted',
-    );
+    // El dinero ya entró: el fallo de efectos no se propaga como error HTTP.
+    await expect(service.pay(100, 11, makeRequest())).resolves.toBeDefined();
     db.users.findFirst.mockResolvedValue(null);
     await expect(service.reconcilePayment(2)).rejects.toThrow('autorización');
     expect(payments[1].financial_effects_recorded_at).toBeNull();
@@ -622,9 +619,7 @@ describe('SplitAccountPaymentService', () => {
     );
     await expect(
       service.pay(100, 12, makeRequest({ idempotency_key: 'payment-key-002' })),
-    ).rejects.toMatchObject({
-      errorCode: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
-    });
+    ).resolves.toBeDefined();
     expect(emitAfterCommit).not.toHaveBeenCalled();
     expect(payments[2].state).toBe('succeeded');
   });
@@ -635,9 +630,7 @@ describe('SplitAccountPaymentService', () => {
       new Error('stock unavailable'),
     );
     const request = makeRequest({ idempotency_key: 'payment-key-002' });
-    await expect(service.pay(100, 12, request)).rejects.toThrow(
-      'stock unavailable',
-    );
+    await expect(service.pay(100, 12, request)).resolves.toBeDefined();
     expect(payments[2].state).toBe('succeeded');
     expect(payments[2].financial_effects_recorded_at).toBeNull();
     await service.reconcileReceivedForOrder(100);
@@ -667,5 +660,50 @@ describe('SplitAccountPaymentService', () => {
     await service.reconcilePayment(1);
     expect(events.emitAsync).not.toHaveBeenCalled();
     expect(gateway.processReservedPayment).not.toHaveBeenCalled();
+  });
+
+  describe('guard de stock al cobrar la última cuenta (mesa en draft)', () => {
+    beforeEach(() => {
+      source.state = 'draft';
+      db.order_financial_accounts.findMany = jest.fn(async ({ where }) =>
+        accounts.filter((a) => matches(a, where)),
+      );
+      orderFlow.assertSplitSourceSettleable = jest.fn(async () => undefined);
+    });
+
+    it('última cuenta abierta + faltante de stock: rechaza con INV_STOCK_INSUFFICIENT_LINES y no crea el pago', async () => {
+      accounts[1].paid_snapshot = '100.00';
+      orderFlow.assertSplitSourceSettleable.mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES),
+      );
+      await expect(service.pay(100, 11, makeRequest())).rejects.toMatchObject({
+        errorCode: 'INV_STOCK_INSUFFICIENT_LINES',
+      });
+      expect(orderFlow.assertSplitSourceSettleable).toHaveBeenCalledWith(
+        100,
+        10,
+        db,
+      );
+      expect(db.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('cuenta intermedia (queda otra abierta sin pagar): no valida stock', async () => {
+      await service.pay(100, 11, makeRequest());
+      expect(orderFlow.assertSplitSourceSettleable).not.toHaveBeenCalled();
+      expect(db.payments.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('si settle lanza dentro de reconcilePayment: no marca efectos ni emite payment.received, y pay resuelve', async () => {
+      accounts[1].paid_snapshot = '100.00';
+      payments[0].amount = '200.00'; // con este pago la fuente queda saldada
+      orderFlow.settleFinancialSplitSource.mockRejectedValueOnce(
+        new Error('stock unavailable'),
+      );
+      await expect(service.pay(100, 11, makeRequest())).resolves.toBeDefined();
+      expect(payments[1].state).toBe('succeeded');
+      expect(payments[1].financial_effects_recorded_at).toBeNull();
+      expect(events.emitAsync).not.toHaveBeenCalled();
+      expect(redis.eval).toHaveBeenCalledTimes(1);
+    });
   });
 });

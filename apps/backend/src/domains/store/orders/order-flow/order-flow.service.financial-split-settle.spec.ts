@@ -77,10 +77,15 @@ describe('OrderFlowService — reparto financiero saldado (mesa)', () => {
       expect(h.prisma.orders.updateMany).not.toHaveBeenCalled();
     });
 
-    it('mesa: si la reserva falla no propaga (pago ya hecho) ni avanza a processing', async () => {
+    it('mesa: si la reserva falla relanza (para dejar los efectos del pago pendientes), registra logger.error y no avanza a processing', async () => {
       const h = build({});
+      const errorLog = jest
+        .spyOn((h.service as any).logger, 'error')
+        .mockImplementation(() => undefined);
       h.promote.mockRejectedValueOnce(new Error('stock'));
-      await expect(h.service.settleFinancialSplitSource(9635)).resolves.toBeUndefined();
+      await expect(h.service.settleFinancialSplitSource(9635)).rejects.toThrow('stock');
+      expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('order=9635'));
+      expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('stock'));
       expect(h.prisma.orders.updateMany).not.toHaveBeenCalled();
     });
 

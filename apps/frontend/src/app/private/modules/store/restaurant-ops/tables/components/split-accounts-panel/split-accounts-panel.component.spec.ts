@@ -2,6 +2,7 @@ import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
 import { SplitAccountsPanelComponent } from './split-accounts-panel.component';
 import { TablesService } from '../../services/tables.service';
@@ -10,6 +11,7 @@ import { DialogService, PaymentCollectorComponent, ToastService } from '../../..
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { DianConfigApiService } from '../../../../../../../shared/services/dian';
+import { InvoicingService } from '../../../../invoicing/services/invoicing.service';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { SplitFinancialAccount, SplitResult } from '../../interfaces';
 import type { PaymentSubmit } from '../../../../../../../shared/components';
@@ -137,6 +139,7 @@ describe('SplitAccountsPanelComponent', () => {
         { provide: Router, useValue: router },
         { provide: DialogService, useValue: dialog },
         { provide: AuthFacade, useValue: { hasPermission: () => true } },
+        { provide: InvoicingService, useValue: { emitFinancialAccount: () => of({ success: true, data: {} }) } },
         { provide: DianConfigApiService, useValue: { getDianEmissionStatus: () => of({ data: { is_live: true } }) } },
         { provide: StoreSettingsFacade, useValue: { timezone: signal('America/Bogota') } },
         {
@@ -660,6 +663,49 @@ describe('SplitAccountsPanelComponent', () => {
       expect(msg).toContain('Quedaron registrados 1 de 3');
       expect(msg).toContain('Falló el cobro 2');
       expect(component.paymentOpen()).toBeTrue();
+    });
+
+    it('shows the stock shortage and stops when the last account cannot close the order', async () => {
+      await create({ allowCreate: false });
+      api.payFinancialAccount.and.returnValues(
+        of(okResult()),
+        throwError(
+          () =>
+            new HttpErrorResponse({
+              status: 409,
+              error: {
+                statusCode: 409,
+                error_code: 'INV_STOCK_INSUFFICIENT_LINES',
+                message: 'Stock insuficiente',
+                details: {
+                  items: [
+                    {
+                      product_id: 5,
+                      product_variant_id: null,
+                      product_name: 'Club Colombia',
+                      kind: 'product',
+                      requested: 2,
+                      available: 0,
+                    },
+                  ],
+                },
+              },
+            }),
+        ),
+      );
+      component.openPayment(account({ available_to_pay: '15000.00', remaining_balance: '15000.00' }));
+      component.paymentOpen.set(true);
+      await component.pay({
+        ...cash,
+        legs: [
+          { storePaymentMethodId: 1, methodType: 'cash', amount: 10000 },
+          { storePaymentMethodId: 2, methodType: 'card', amount: 4000 },
+          { storePaymentMethodId: 3, methodType: 'transfer', amount: 1000 },
+        ],
+      });
+      expect(api.payFinancialAccount).toHaveBeenCalledTimes(2);
+      expect(String(toast.error.calls.mostRecent().args[0])).toContain('Club Colombia');
+      expect(component.busy()).toBeFalse();
     });
 
     it('labels the client button "Cambiar cliente" once assigned', async () => {

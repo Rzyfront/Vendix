@@ -275,6 +275,13 @@ export function isManualConfirmationPending(
   return !['wallet', 'wompi'].includes(system.type ?? '');
 }
 
+type ReservationGroup = {
+  product_id: number;
+  product_variant_id: number | undefined;
+  demand: number; // total stock units this order needs reserved
+  product_name: string;
+};
+
 @Injectable()
 export class OrderFlowService {
   private readonly logger = new Logger(OrderFlowService.name);
@@ -1133,6 +1140,121 @@ export class OrderFlowService {
   }
 
   /**
+   * Single source of truth for "what stock does this draft order still need
+   * reserved". Shared by `promoteDraftToCreated` and
+   * `assertSplitSourceSettleable` so the pre-check can never diverge.
+   * Excludes services, untracked lines, lines consumed at fire, delivered
+   * (`inventory_committed`) or cancelled lines, and kitchen dishes.
+   */
+  private collectDraftReservationDemand(
+    order: any,
+    isRestaurant: boolean,
+  ): ReservationGroup[] {
+    const groups = new Map<string, ReservationGroup>();
+
+    for (const item of order.order_items) {
+      const product = item.products;
+      if (!product || product.product_type === 'service') continue;
+
+      const effectiveTracking =
+        item.product_variants?.track_inventory_override ??
+        product.track_inventory ??
+        false;
+      if (!effectiveTracking) continue;
+
+      if (item.inventory_consumed_at_fire === true) continue;
+
+      // BUG 1 (no-overselling-stock-guard-plan.md, 2026-09-26): una línea
+      // ya ENTREGADA (`inventory_committed=true`, su stock ya se descontó
+      // en `commitOrderLines` y la reserva que la cubría ya fue consumida)
+      // o CANCELADA (`cancelled_at`, su reserva ya fue liberada) no tiene
+      // nada pendiente que reclamar. Re-demandarla aquí duplicaba stock
+      // que ya salió o que nunca se iba a vender.
+      if (item.inventory_committed === true || item.cancelled_at != null) {
+        continue;
+      }
+
+      const isKitchenDish =
+        isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
+      if (isKitchenDish) continue;
+
+      const variantId = item.product_variant_id ?? undefined;
+      const key = `${item.product_id}-${variantId ?? 'null'}`;
+      const qty = item.stock_units_consumed ?? item.quantity;
+      const productName = item.product_variants?.name
+        ? `${product.name} - ${item.product_variants.name}`
+        : product.name;
+
+      const existing = groups.get(key);
+      if (existing) {
+        existing.demand += qty;
+      } else {
+        groups.set(key, {
+          product_id: item.product_id,
+          product_variant_id: variantId,
+          demand: qty,
+          product_name: productName,
+        });
+      }
+    }
+    return Array.from(groups.values());
+  }
+
+  /**
+   * Pre-check for the LAST open account of a split table order: validates the
+   * stock that `promoteDraftToCreated` will reserve when settling, so the
+   * payment is rejected (409 INV_STOCK_INSUFFICIENT_LINES) before any money
+   * is received. No-op when the order is not in `draft`.
+   */
+  async assertSplitSourceSettleable(
+    orderId: number,
+    storeId: number,
+    tx: any,
+  ): Promise<void> {
+    const order = await tx.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+      include: {
+        stores: { select: { industries: true } },
+        order_items: {
+          include: {
+            products: {
+              select: {
+                id: true,
+                name: true,
+                track_inventory: true,
+                product_type: true,
+              },
+            },
+            product_variants: {
+              select: { id: true, name: true, track_inventory_override: true },
+            },
+          },
+        },
+      },
+    });
+    if (!order || order.state !== 'draft') return;
+
+    const isRestaurant = storeIsRestaurant((order as any).stores?.industries);
+    const groups = this.collectDraftReservationDemand(order, isRestaurant);
+    if (groups.length === 0) return;
+
+    const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(
+      storeId,
+      tx,
+    );
+    const allowOversell = inventoryPolicy?.allowOversell === true;
+    await this.stockValidator?.assertLinesAvailable(
+      groups.map((g) => ({
+        product_id: g.product_id,
+        product_variant_id: g.product_variant_id ?? null,
+        quantity: g.demand,
+        product_name: g.product_name,
+      })),
+      { orderId, tx, allowOversell },
+    );
+  }
+
+  /**
    * Reserve stock for a draft promotion, without releasing payOrder's claim.
    *
    * Table/POS drafts can be born without a stock reservation. Reserve each
@@ -1241,61 +1363,9 @@ export class OrderFlowService {
         // at fire by kitchen-fire.service.ts, never by their own
         // finished-good stock. Lines already `inventory_consumed_at_fire`
         // are excluded too — their stock was already deducted, not reserved.
-        type ReservationGroup = {
-          product_id: number;
-          product_variant_id: number | undefined;
-          demand: number; // total stock units this order needs reserved
-          product_name: string;
-        };
-        const groups = new Map<string, ReservationGroup>();
+        const groups = this.collectDraftReservationDemand(order, isRestaurant);
 
-        for (const item of order.order_items) {
-          const product = item.products;
-          if (!product || product.product_type === 'service') continue;
-
-          const effectiveTracking =
-            item.product_variants?.track_inventory_override ??
-            product.track_inventory ??
-            false;
-          if (!effectiveTracking) continue;
-
-          if (item.inventory_consumed_at_fire === true) continue;
-
-          // BUG 1 (no-overselling-stock-guard-plan.md, 2026-09-26): una línea
-          // ya ENTREGADA (`inventory_committed=true`, su stock ya se descontó
-          // en `commitOrderLines` y la reserva que la cubría ya fue consumida)
-          // o CANCELADA (`cancelled_at`, su reserva ya fue liberada) no tiene
-          // nada pendiente que reclamar. Re-demandarla aquí duplicaba stock
-          // que ya salió o que nunca se iba a vender.
-          if (item.inventory_committed === true || item.cancelled_at != null) {
-            continue;
-          }
-
-          const isKitchenDish =
-            isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
-          if (isKitchenDish) continue;
-
-          const variantId = item.product_variant_id ?? undefined;
-          const key = `${item.product_id}-${variantId ?? 'null'}`;
-          const qty = item.stock_units_consumed ?? item.quantity;
-          const productName = item.product_variants?.name
-            ? `${product.name} - ${item.product_variants.name}`
-            : product.name;
-
-          const existing = groups.get(key);
-          if (existing) {
-            existing.demand += qty;
-          } else {
-            groups.set(key, {
-              product_id: item.product_id,
-              product_variant_id: variantId,
-              demand: qty,
-              product_name: productName,
-            });
-          }
-        }
-
-        if (groups.size > 0) {
+        if (groups.length > 0) {
           // Strict guard (reverses QUI-557): a draft/table order is only
           // payable when the order's TOTAL demand per identity is covered by
           // sellable stock plus its own already-reserved quantity. Throws
@@ -1314,7 +1384,7 @@ export class OrderFlowService {
           );
           const allowOversell = inventoryPolicy?.allowOversell === true;
           await this.stockValidator?.assertLinesAvailable(
-            Array.from(groups.values()).map((g) => ({
+            groups.map((g) => ({
               product_id: g.product_id,
               product_variant_id: g.product_variant_id ?? null,
               quantity: g.demand,
@@ -1323,7 +1393,7 @@ export class OrderFlowService {
             { orderId, tx, allowOversell },
           );
 
-          for (const group of groups.values()) {
+          for (const group of groups) {
             const alreadyReserved = await tx.stock_reservations.aggregate({
               where: {
                 reserved_for_type: 'order',
@@ -2880,15 +2950,15 @@ export class OrderFlowService {
       if (table) {
         // Mesa: la promocion draft->created reserva solo lineas NO consumidas
         // al fire (`inventory_consumed_at_fire`) ni platos de cocina, y no
-        // re-dispara KDS. Si la reserva falla (stock) el pago ya esta hecho:
-        // se registra y la orden queda recuperable via fast_track.
+        // re-dispara KDS. Si la reserva falla se relanza: el caller no marca
+        // los efectos del pago y /split/reconcile reintenta el cierre.
         try {
           await this.promoteDraftToCreated(orderId, order.store_id);
         } catch (err) {
-          this.logger.warn(
+          this.logger.error(
             `[settleFinancialSplitSource] promote failed for table order=${orderId}: ${(err as Error).message}`,
           );
-          return;
+          throw err;
         }
       } else {
         await this.promoteDraftToCreated(orderId, order.store_id);

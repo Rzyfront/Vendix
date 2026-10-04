@@ -1,5 +1,6 @@
 import { AIEngineService } from './ai-engine.service';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
+import { RequestContextService } from '../common/context/request-context.service';
 
 /**
  * QUI-857 — Generación/mejora de imágenes de producto con IA.
@@ -428,5 +429,134 @@ describe('AIEngineService cache token logging (vexR3-C)', () => {
     expect(aiLogging.logRequest).toHaveBeenLastCalledWith(
       expect.objectContaining({ cache_read_tokens: 0, cache_creation_tokens: 0 }),
     );
+  });
+});
+
+describe('AIEngineService.consumeSubscriptionQuota wiring', () => {
+  const STORE_ID = 42;
+  const BASE = 'req-base-1';
+
+  const buildService = () => {
+    const prisma = { ai_engine_applications: { findUnique: jest.fn() } };
+    const subscriptionAccess = {
+      canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }),
+      consumeAIQuota: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new AIEngineService(
+      prisma as any,
+      { get: jest.fn() } as any,
+      { on: jest.fn() } as any,
+      { calculateCost: jest.fn().mockReturnValue(0), logRequest: jest.fn() } as any,
+      { emit: jest.fn() } as any,
+      subscriptionAccess as any,
+      { isEnforce: jest.fn().mockReturnValue(false) } as any,
+    );
+    jest.spyOn(service as any, 'runSubscriptionGate').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'checkRateLimit').mockResolvedValue(undefined);
+    return { service, prisma, subscriptionAccess };
+  };
+
+  const inRequest = <T>(fn: () => Promise<T>): Promise<T> =>
+    RequestContextService.run(
+      {
+        is_super_admin: false,
+        is_owner: false,
+        store_id: STORE_ID,
+        request_id: BASE,
+      },
+      fn,
+    );
+
+  const textApp = (key: string, category: string) => ({
+    key,
+    is_active: true,
+    config_id: 5,
+    model_type: 'text',
+    system_prompt: 'sys',
+    prompt_template: 'hi',
+    ai_feature_category: category,
+  });
+
+  const withTextProvider = (service: AIEngineService) =>
+    (service as any).providers.set(5, {
+      chat: jest.fn().mockResolvedValue({
+        success: true,
+        content: 'ok',
+        model: 'm',
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      }),
+    });
+
+  it('counts every text_generation run() of the same request with distinct requestIds', async () => {
+    const { service, prisma, subscriptionAccess } = buildService();
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(
+      textApp('some_text_app', 'text_generation'),
+    );
+    withTextProvider(service);
+
+    await inRequest(async () => {
+      await service.run('some_text_app');
+      await service.run('some_text_app');
+    });
+
+    const calls = subscriptionAccess.consumeAIQuota.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0].slice(0, 3)).toEqual([STORE_ID, 'text_generation', 15]);
+    expect(calls[1].slice(0, 3)).toEqual([STORE_ID, 'text_generation', 15]);
+    expect(calls[0][3]).toMatch(new RegExp(`^${BASE}:.+`));
+    expect(calls[1][3]).toMatch(new RegExp(`^${BASE}:.+`));
+    expect(calls[0][3]).not.toEqual(calls[1][3]);
+  });
+
+  it('charges chat_assistant (conversations) as 1 streaming_chat unit with the base requestId', async () => {
+    const { service, prisma, subscriptionAccess } = buildService();
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(
+      textApp('chat_assistant', 'conversations'),
+    );
+    withTextProvider(service);
+
+    await inRequest(() => service.run('chat_assistant'));
+
+    expect(subscriptionAccess.consumeAIQuota).toHaveBeenCalledTimes(1);
+    expect(subscriptionAccess.consumeAIQuota).toHaveBeenCalledWith(
+      STORE_ID,
+      'streaming_chat',
+      1,
+      BASE,
+    );
+  });
+
+  it('does not consume quota for vex_assistant (own counters)', async () => {
+    const { service, prisma, subscriptionAccess } = buildService();
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(
+      textApp('vex_assistant', 'conversations'),
+    );
+    withTextProvider(service);
+
+    await inRequest(() => service.run('vex_assistant'));
+
+    expect(subscriptionAccess.consumeAIQuota).not.toHaveBeenCalled();
+  });
+
+  it('charges one rag_embeddings unit per embedding regardless of tokens', async () => {
+    const { service, subscriptionAccess } = buildService();
+    jest.spyOn(service as any, 'resolveApplicationExecution').mockResolvedValue({
+      app: { key: 'rag_embedder', ai_feature_category: 'rag_embeddings' },
+      provider: {
+        generateEmbedding: jest.fn().mockResolvedValue({
+          success: true,
+          embeddings: [[0.1]],
+          usage: { totalTokens: 500 },
+        }),
+      },
+      configId: 9,
+    });
+
+    await inRequest(() => service.runEmbedding('rag_embedder', {}, 'doc'));
+
+    expect(subscriptionAccess.consumeAIQuota).toHaveBeenCalledTimes(1);
+    const args = subscriptionAccess.consumeAIQuota.mock.calls[0];
+    expect(args.slice(0, 3)).toEqual([STORE_ID, 'rag_embeddings', 1]);
+    expect(args[3]).toMatch(new RegExp(`^${BASE}:.+`));
   });
 });
