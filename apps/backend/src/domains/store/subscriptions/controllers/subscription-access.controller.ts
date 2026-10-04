@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -10,6 +10,11 @@ import {
 } from '../dto/access-check-response.dto';
 import { store_subscription_state_enum } from '@prisma/client';
 import { SkipSubscriptionGate } from '../decorators/skip-subscription-gate.decorator';
+import {
+  AI_USAGE_GROUPS,
+  AiUsageGroup,
+  USAGE_GROUP_QUOTA,
+} from '../contracts/ai-usage-groups.contract';
 import { FEATURE_QUOTA_CONFIG, AI_FEATURE_KEYS } from '../types/access.types';
 
 /**
@@ -23,6 +28,8 @@ import { FEATURE_QUOTA_CONFIG, AI_FEATURE_KEYS } from '../types/access.types';
 @SkipSubscriptionGate()
 @Controller('store/subscriptions')
 export class SubscriptionAccessController {
+  private readonly logger = new Logger(SubscriptionAccessController.name);
+
   constructor(
     private readonly resolver: SubscriptionResolverService,
     private readonly access: SubscriptionAccessService,
@@ -81,8 +88,44 @@ export class SubscriptionAccessController {
 
     const resolved = await this.resolver.resolveSubscription(storeId);
 
+    // Inicio de mes UTC, coherente con la llave Redis YYYYMM.
+    const now = new Date();
+    const periodStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
+    const period_start = periodStart.toISOString();
+
+    let consumptionByGroup: Record<
+      AiUsageGroup,
+      { calls: number; tokens: number }
+    > | null = null;
+    try {
+      consumptionByGroup = await this.access.getAIConsumptionByGroup(
+        storeId,
+        periodStart,
+        now,
+      );
+    } catch (err) {
+      this.logger.error(
+        `getAIConsumptionByGroup failed for store=${storeId}: ${(err as Error).message}`,
+      );
+    }
+
     if (!resolved.found) {
-      return this.responseService.success({ features: {} }, 'Usage retrieved');
+      return this.responseService.success(
+        {
+          features: {},
+          period_start,
+          consumption: consumptionByGroup
+            ? AI_USAGE_GROUPS.map((group) => ({
+                group,
+                ...consumptionByGroup![group],
+                quota: null,
+              }))
+            : null,
+        },
+        'Usage retrieved',
+      );
     }
 
     const features: Record<
@@ -116,7 +159,31 @@ export class SubscriptionAccessController {
       };
     }
 
-    return this.responseService.success({ features }, 'Usage retrieved');
+    const consumption = consumptionByGroup
+      ? AI_USAGE_GROUPS.map((group) => {
+          const groupQuota = USAGE_GROUP_QUOTA[group];
+          const f = groupQuota ? features[groupQuota.feature] : undefined;
+          return {
+            group,
+            ...consumptionByGroup![group],
+            quota:
+              groupQuota && f
+                ? {
+                    feature: groupQuota.feature,
+                    used: f.used,
+                    cap: f.cap,
+                    period: f.period,
+                    unit: groupQuota.unit,
+                  }
+                : null,
+          };
+        })
+      : null;
+
+    return this.responseService.success(
+      { features, period_start, consumption },
+      'Usage retrieved',
+    );
   }
 
   private getPeriodKey(period: 'daily' | 'monthly'): string {

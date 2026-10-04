@@ -21,6 +21,11 @@ import {
   ResolvedSubscription,
 } from '../types/access.types';
 import { SubscriptionResolverService } from './subscription-resolver.service';
+import {
+  AI_USAGE_GROUPS,
+  AiUsageGroup,
+  resolveUsageGroup,
+} from '../contracts/ai-usage-groups.contract';
 import { AutoRenewWarningState } from '../renewal-eligibility.contract';
 
 export interface DunningOverdueInvoice {
@@ -1088,6 +1093,57 @@ export class SubscriptionAccessService {
     }
 
     return snapshot;
+  }
+
+  /**
+   * Consumo IA real por grupo visible, leido de `ai_engine_logs` (fuente de
+   * verdad; los contadores Redis no reciben Chat/Vex). Solo llamadas
+   * exitosas de la tienda en [from, to]. Siempre devuelve los 6 grupos.
+   */
+  async getAIConsumptionByGroup(
+    storeId: number,
+    from: Date,
+    to: Date,
+  ): Promise<Record<AiUsageGroup, { calls: number; tokens: number }>> {
+    const result = Object.fromEntries(
+      AI_USAGE_GROUPS.map((g) => [g, { calls: 0, tokens: 0 }]),
+    ) as Record<AiUsageGroup, { calls: number; tokens: number }>;
+
+    const rows = await this.prisma.ai_engine_logs.groupBy({
+      by: ['app_key'],
+      where: {
+        store_id: storeId,
+        status: 'success',
+        created_at: { gte: from, lte: to },
+      },
+      _count: { _all: true },
+      _sum: { prompt_tokens: true, completion_tokens: true },
+    });
+    if (rows.length === 0) return result;
+
+    const appKeys = rows
+      .map((r) => r.app_key)
+      .filter((k): k is string => typeof k === 'string');
+    const apps = appKeys.length
+      ? await this.prisma.ai_engine_applications.findMany({
+          where: { key: { in: appKeys } },
+          select: { key: true, ai_feature_category: true },
+        })
+      : [];
+    const categoryByKey = new Map(
+      apps.map((a) => [a.key, a.ai_feature_category]),
+    );
+
+    for (const row of rows) {
+      const group = resolveUsageGroup(
+        row.app_key,
+        row.app_key ? (categoryByKey.get(row.app_key) ?? null) : null,
+      );
+      result[group].calls += row._count._all;
+      result[group].tokens +=
+        (row._sum.prompt_tokens ?? 0) + (row._sum.completion_tokens ?? 0);
+    }
+    return result;
   }
 
   /**

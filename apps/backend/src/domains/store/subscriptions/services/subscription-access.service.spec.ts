@@ -893,4 +893,86 @@ describe('SubscriptionAccessService', () => {
       expect(out.invoices_overdue[0].amount_due).toBe(60000);
     });
   });
+
+  describe('getAIConsumptionByGroup', () => {
+    const from = new Date('2026-10-01T00:00:00.000Z');
+    const to = new Date('2026-10-04T12:00:00.000Z');
+
+    function build(rows: any[], apps: any[]) {
+      const prismaMock = {
+        ai_engine_logs: { groupBy: jest.fn().mockResolvedValue(rows) },
+        ai_engine_applications: {
+          findMany: jest.fn().mockResolvedValue(apps),
+        },
+      };
+      const svc = new SubscriptionAccessService(
+        resolverMock as any,
+        redisMock,
+        prismaMock as any,
+      );
+      return { svc, prismaMock };
+    }
+
+    const row = (app_key: string | null, calls: number, p: number, c: number) => ({
+      app_key,
+      _count: { _all: calls },
+      _sum: { prompt_tokens: p, completion_tokens: c },
+    });
+
+    it('groups by app, sums tokens and zero-fills empty groups', async () => {
+      const { svc, prismaMock } = build(
+        [
+          row('chat_assistant', 3, 100, 50),
+          row('vex_assistant', 2, 10, 5),
+          row('queue_app', 4, 7, 3),
+          row('orphan_app', 1, 20, 1),
+        ],
+        [
+          { key: 'chat_assistant', ai_feature_category: 'streaming_chat' },
+          { key: 'vex_assistant', ai_feature_category: 'tool_agents' },
+          { key: 'queue_app', ai_feature_category: 'async_queue' },
+        ],
+      );
+      const out = await svc.getAIConsumptionByGroup(7, from, to);
+      expect(out).toEqual({
+        assistant: { calls: 3, tokens: 150 },
+        vex: { calls: 2, tokens: 15 },
+        text_generation: { calls: 1, tokens: 21 },
+        jobs: { calls: 4, tokens: 10 },
+        semantic_search: { calls: 0, tokens: 0 },
+        voice: { calls: 0, tokens: 0 },
+      });
+      expect(prismaMock.ai_engine_logs.groupBy).toHaveBeenCalledWith({
+        by: ['app_key'],
+        where: {
+          store_id: 7,
+          status: 'success',
+          created_at: { gte: from, lte: to },
+        },
+        _count: { _all: true },
+        _sum: { prompt_tokens: true, completion_tokens: true },
+      });
+      expect(prismaMock.ai_engine_applications.findMany).toHaveBeenCalledWith({
+        where: {
+          key: { in: ['chat_assistant', 'vex_assistant', 'queue_app', 'orphan_app'] },
+        },
+        select: { key: true, ai_feature_category: true },
+      });
+    });
+
+    it('returns all six groups at zero when there are no logs', async () => {
+      const { svc, prismaMock } = build([], []);
+      const out = await svc.getAIConsumptionByGroup(7, from, to);
+      expect(Object.keys(out)).toEqual([
+        'assistant',
+        'vex',
+        'text_generation',
+        'jobs',
+        'semantic_search',
+        'voice',
+      ]);
+      expect(Object.values(out).every((g) => g.calls === 0 && g.tokens === 0)).toBe(true);
+      expect(prismaMock.ai_engine_applications.findMany).not.toHaveBeenCalled();
+    });
+  });
 });
