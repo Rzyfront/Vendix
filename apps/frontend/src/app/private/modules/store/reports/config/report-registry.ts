@@ -549,6 +549,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     type: 'list' as ReportType,
     trackKey: 'id',
     columns: [
+      { key: 'tip_mode_label', header: 'Modalidad', type: 'text' },
       { key: 'waiter_name', header: 'Mesero', type: 'text' },
       { key: 'waiter_email', header: 'Correo', type: 'text' },
       { key: 'tipped_orders_count', header: 'Órdenes con propina', type: 'number', footer: 'sum' },

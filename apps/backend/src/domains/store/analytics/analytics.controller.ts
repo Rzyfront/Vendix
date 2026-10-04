@@ -470,6 +470,7 @@ export class AnalyticsController {
       await this.sales_analytics_service.getTipsByWaiterForExport(query);
 
     const summaryColumns: ReportColumn[] = [
+      { key: 'tip_mode_label', header: 'Modalidad', type: 'text' },
       { key: 'waiter_name', header: 'Mesero', type: 'text' },
       { key: 'waiter_email', header: 'Correo', type: 'text' },
       { key: 'tipped_orders_count', header: 'Órdenes con propina', type: 'number' },

@@ -1896,6 +1896,17 @@ export class SalesAnalyticsService {
       take: 10_000,
     });
 
+    const storeId = RequestContextService.getContext()?.store_id;
+    const storeSettingsRow = storeId
+      ? await this.prisma.store_settings.findUnique({
+          where: { store_id: storeId },
+          select: { settings: true },
+        })
+      : null;
+    const rawSettings = (storeSettingsRow?.settings || {}) as any;
+    const isStorePooled =
+      rawSettings?.restaurant?.tip_distribution_mode === 'pooled';
+
     const waiterMap = new Map<
       string,
       {
@@ -1903,6 +1914,8 @@ export class SalesAnalyticsService {
         waiter_id: number | null;
         waiter_name: string;
         waiter_email: string;
+        tip_mode: 'waiter' | 'pooled';
+        tip_mode_label: string;
         tipped_orders_count: number;
         total_tips: number;
         last_tip_date: Date | null;
@@ -1912,20 +1925,38 @@ export class SalesAnalyticsService {
     for (const order of orders) {
       const waiter = order.users_orders_tip_waiter_idTousers;
       const waiterId = order.tip_waiter_id;
-      const waiterKey = waiterId ? String(waiterId) : 'unassigned';
+      const isPooled = isStorePooled || !waiterId;
+      const tipMode: 'waiter' | 'pooled' = isPooled ? 'pooled' : 'waiter';
+      const tipModeLabel =
+        tipMode === 'pooled'
+          ? 'Propina acumulada (Fondo común)'
+          : 'Propina por mesero';
+
+      const waiterKey = waiterId
+        ? `${waiterId}_${tipMode}`
+        : 'unassigned_pooled';
 
       let entry = waiterMap.get(waiterKey);
       if (!entry) {
-        const waiterName = waiter
-          ? `${waiter.first_name || ''} ${waiter.last_name || ''}`.trim() ||
+        let waiterName: string;
+        if (!waiterId) {
+          waiterName = 'Fondo común (Sin mesero)';
+        } else if (waiter) {
+          waiterName =
+            `${waiter.first_name || ''} ${waiter.last_name || ''}`.trim() ||
             waiter.email ||
-            'Mesero'
-          : 'Sin asignar';
+            `Mesero #${waiterId}`;
+        } else {
+          waiterName = `Mesero #${waiterId}`;
+        }
+
         entry = {
           id: waiterKey,
           waiter_id: waiterId ?? null,
           waiter_name: waiterName,
           waiter_email: waiter?.email || '',
+          tip_mode: tipMode,
+          tip_mode_label: tipModeLabel,
           tipped_orders_count: 0,
           total_tips: 0,
           last_tip_date: null,
@@ -2041,6 +2072,8 @@ export interface TipsByWaiterRow {
   waiter_id: number | null;
   waiter_name: string;
   waiter_email: string;
+  tip_mode: 'waiter' | 'pooled';
+  tip_mode_label: string;
   tipped_orders_count: number;
   total_tips: number;
   avg_tip: number;
