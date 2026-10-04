@@ -18,6 +18,7 @@ import {
   buildSubscriptionLineDescription,
   dianUnitCodeForBillingCycle,
 } from '../types/subscription-invoice-fiscal.contract';
+import { shouldLapseFreePlanAtPeriodEnd } from '../contracts/free-plan-lapse.contract';
 
 /**
  * Advisory lock key (int4) for invoice numbering sequence.
@@ -53,6 +54,10 @@ const DECIMAL_100 = new Prisma.Decimal(100);
  *   subsidized), we SKIP invoice emission and silently advance the billing
  *   window + write a `renewed` event with `skipped_reason='zero_price'`.
  *   This keeps `core-free` plans from generating invoices.
+ *   EXCEPTION: a zero-price plan that is promotional OR has `auto_renew=false`
+ *   (and is not a fresh initial/resubscribe/trial_conversion) does NOT advance:
+ *   we log FREE_PLAN_LAPSE_SKIP and return null so the state engine expires it
+ *   at period end (see free-plan-lapse.contract.ts).
  *
  * CRITICAL — Race conditions:
  *   Invoice number sequence uses a Postgres advisory lock inside the issuing
@@ -293,6 +298,29 @@ export class SubscriptionBillingService {
           unitPrice.lessThanOrEqualTo(DECIMAL_ZERO) &&
           pricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO)
         ) {
+          if (
+            !isFreshChange &&
+            !opts.invoicePreview &&
+            shouldLapseFreePlanAtPeriodEnd({
+              effectivePrice: unitPrice,
+              marginAmount: pricing.margin_amount,
+              isPromotional: sub.plan.is_promotional,
+              autoRenew: sub.auto_renew,
+            })
+          ) {
+            this.logger.log(
+              JSON.stringify({
+                event: 'FREE_PLAN_LAPSE_SKIP',
+                subscription_id: sub.id,
+                store_id: sub.store_id,
+                plan_id: sub.plan_id,
+                is_promotional: sub.plan.is_promotional,
+                auto_renew: sub.auto_renew,
+                current_period_end: sub.current_period_end,
+              }),
+            );
+            return null;
+          }
           await tx.store_subscriptions.update({
             where: { id: sub.id },
             data: {
