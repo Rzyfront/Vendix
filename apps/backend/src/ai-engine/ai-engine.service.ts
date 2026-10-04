@@ -423,6 +423,7 @@ export class AIEngineService implements OnModuleInit {
     optionsOverride?: AIRequestOptions,
   ): Promise<AIResponse> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AIResponse = { success: false, error: 'No attempt made' };
     let resolvedConfigId: number | null = null;
@@ -527,6 +528,7 @@ export class AIEngineService implements OnModuleInit {
             lastResponse.usage?.totalTokens ??
               (lastResponse.usage?.promptTokens ?? 0) +
                 (lastResponse.usage?.completionTokens ?? 0),
+            { appKey: app.key ?? appKey, callId },
           );
 
           logStatus = 'success';
@@ -601,6 +603,7 @@ export class AIEngineService implements OnModuleInit {
     optionsOverride?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let lastChunk: AIStreamChunk | null = null;
     let resolvedConfigId: number | null = null;
 
@@ -705,7 +708,10 @@ export class AIEngineService implements OnModuleInit {
         const tokens =
           usage?.totalTokens ??
           (usage?.promptTokens ?? 0) + (usage?.completionTokens ?? 0);
-        await this.consumeSubscriptionQuota(app.ai_feature_category, tokens);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, tokens, {
+          appKey: app.key ?? appKey,
+          callId,
+        });
       }
     } finally {
       // Log after stream completes — always runs regardless of early returns
@@ -751,6 +757,7 @@ export class AIEngineService implements OnModuleInit {
     imageOptions?: AIImageRequestOptions,
   ): Promise<AIImageResponse> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AIImageResponse = {
       success: false,
@@ -794,7 +801,10 @@ export class AIEngineService implements OnModuleInit {
       logResponse = response;
       if (response.success) {
         logStatus = 'success';
-        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1, {
+          appKey: app.key ?? appKey,
+          callId,
+        });
       }
 
       return response;
@@ -851,6 +861,7 @@ export class AIEngineService implements OnModuleInit {
     imageOptions?: AIImageRequestOptions,
   ): AsyncGenerator<AIImageStreamChunk> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let lastChunk: AIImageStreamChunk | null = null;
     let completedChunk: AIImageStreamChunk | null = null;
     let resolvedConfigId: number | null = null;
@@ -955,7 +966,10 @@ export class AIEngineService implements OnModuleInit {
       }
 
       if (completedChunk) {
-        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1, {
+          appKey: app.key ?? appKey,
+          callId,
+        });
       }
     } catch (error: any) {
       lastChunk = { type: 'error', error: error.message };
@@ -1118,6 +1132,7 @@ export class AIEngineService implements OnModuleInit {
     input?: string | string[],
   ): Promise<AIEmbeddingResponse> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AIEmbeddingResponse = {
       success: false,
@@ -1150,6 +1165,7 @@ export class AIEngineService implements OnModuleInit {
         await this.consumeSubscriptionQuota(
           app.ai_feature_category,
           response.usage?.totalTokens ?? 1,
+          { appKey: app.key ?? appKey, callId },
         );
       }
 
@@ -1176,6 +1192,7 @@ export class AIEngineService implements OnModuleInit {
     videoOptions?: AIVideoRequestOptions,
   ): Promise<AIVideoResponse> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AIVideoResponse = {
       success: false,
@@ -1206,7 +1223,10 @@ export class AIEngineService implements OnModuleInit {
       logResponse = response;
       if (response.success) {
         logStatus = 'success';
-        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1, {
+          appKey: app.key ?? appKey,
+          callId,
+        });
       }
 
       return response;
@@ -1232,6 +1252,7 @@ export class AIEngineService implements OnModuleInit {
     speechOptions?: AISpeechRequestOptions,
   ): Promise<AISpeechResponse> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AISpeechResponse = {
       success: false,
@@ -1262,7 +1283,10 @@ export class AIEngineService implements OnModuleInit {
       logResponse = response;
       if (response.success) {
         logStatus = 'success';
-        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1, {
+          appKey: app.key ?? appKey,
+          callId,
+        });
       }
 
       return response;
@@ -1288,6 +1312,7 @@ export class AIEngineService implements OnModuleInit {
     variables?: Record<string, string>,
   ): Promise<AITranscriptionResponse> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AITranscriptionResponse = {
       success: false,
@@ -1318,6 +1343,7 @@ export class AIEngineService implements OnModuleInit {
         await this.consumeSubscriptionQuota(
           app.ai_feature_category,
           response.usage?.totalTokens ?? 1,
+          { appKey: app.key ?? appKey, callId },
         );
       }
 
@@ -1344,6 +1370,7 @@ export class AIEngineService implements OnModuleInit {
     rerankOptions?: Partial<AIRerankRequestOptions>,
   ): Promise<AIRerankResponse> {
     const startTime = Date.now();
+    const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AIRerankResponse = {
       success: false,
@@ -1373,7 +1400,10 @@ export class AIEngineService implements OnModuleInit {
       logResponse = response;
       if (response.success) {
         logStatus = 'success';
-        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1, {
+          appKey: app.key ?? appKey,
+          callId,
+        });
       }
 
       return response;
@@ -1833,47 +1863,68 @@ export class AIEngineService implements OnModuleInit {
   private async consumeSubscriptionQuota(
     featureCategory: string | null,
     units: number,
+    opts: { appKey?: string | null; callId?: string } = {},
   ): Promise<void> {
     const storeId = RequestContextService.getStoreId();
     if (!storeId) return;
-    if (!featureCategory || !isAIFeatureKey(featureCategory)) return;
-    const feature = featureCategory;
+    if (!featureCategory) return;
 
-    // Quota unit policy per feature:
-    //   text_generation → token count (units arg)
-    //   streaming_chat  → 1 message
-    //   async_queue     → 1 job
-    //   rag_embeddings  → document count (caller should pass; fallback=1)
-    //   tool_agents / conversations → no numeric quota
+    // Quota unit policy:
+    //   category          | feature consumed  | units              | requestId
+    //   conversations     | streaming_chat    | 1 (chat_assistant) | base (no suffix)
+    //     (vex_assistant / other apps: no consumption here; Vex keeps its own
+    //      counters in ai-agent.service.ts)
+    //   text_generation   | text_generation   | token count        | base:callId
+    //   async_queue       | async_queue       | 1 job              | base:callId
+    //   rag_embeddings    | rag_embeddings    | 1 (one document)   | base:callId
+    //   streaming_chat    | streaming_chat    | 1 message          | base (no suffix)
+    //   anything else     | no numeric quota
+    // base = RequestContext request id, or `internal-<uuid>` when absent.
+    // Without suffix, many calls within one request dedupe to a single unit
+    // (1 user message = 1 unit); with `:callId` every provider call counts.
+    let feature: string;
     let effectiveUnits: number;
-    switch (feature) {
-      case 'text_generation':
-        effectiveUnits = Math.max(0, Math.floor(units));
-        break;
-      case 'streaming_chat':
-      case 'async_queue':
-        effectiveUnits = 1;
-        break;
-      case 'rag_embeddings':
-        effectiveUnits = Math.max(1, Math.floor(units || 1));
-        break;
-      default:
-        return;
+    let perCall: boolean;
+    if (featureCategory === 'conversations') {
+      if (opts.appKey !== 'chat_assistant') return;
+      feature = 'streaming_chat';
+      effectiveUnits = 1;
+      perCall = false;
+    } else if (!isAIFeatureKey(featureCategory)) {
+      return;
+    } else {
+      feature = featureCategory;
+      switch (feature) {
+        case 'text_generation':
+          effectiveUnits = Math.max(0, Math.floor(units));
+          perCall = true;
+          break;
+        case 'async_queue':
+        case 'rag_embeddings':
+          effectiveUnits = 1;
+          perCall = true;
+          break;
+        case 'streaming_chat':
+          effectiveUnits = 1;
+          perCall = false;
+          break;
+        default:
+          return;
+      }
     }
     if (effectiveUnits <= 0) return;
 
     try {
-      // requestId is now MANDATORY for atomic dedup (G7). The HTTP path
-      // populates it via middleware; queue processors re-establish the
-      // RequestContext from job data before calling aiEngine.run(). In the
-      // rare case where neither is set (internal/cron callers), synthesize
-      // a fresh UUID — a unique requestId is harmless: it just disables
-      // dedup for that single call (no retry exists to dedup against).
-      const requestId =
+      // requestId is MANDATORY for atomic dedup. HTTP path populates it via
+      // middleware; queue processors re-establish the RequestContext.
+      const base =
         RequestContextService.getRequestId() ?? `internal-${randomUUID()}`;
+      const requestId = perCall
+        ? `${base}:${opts.callId ?? randomUUID()}`
+        : base;
       await this.subscriptionAccess.consumeAIQuota(
         storeId,
-        feature,
+        feature as any,
         effectiveUnits,
         requestId,
       );
