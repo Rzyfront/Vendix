@@ -72,6 +72,9 @@
     },
     "socket.io-adapter": {
       "ws": "^8.21.0"
+    },
+    "@angular/build": {
+      "piscina": "^5.3.2"
     }
   }
 }
