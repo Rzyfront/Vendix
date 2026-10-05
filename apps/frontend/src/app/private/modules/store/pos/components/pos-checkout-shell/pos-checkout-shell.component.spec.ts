@@ -20,6 +20,7 @@ import type { PaymentMethod } from '../../../../../../shared/models/payment-meth
 import { deliveryTypeToEntregaChoice } from '../../models/cart.model';
 import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -324,6 +325,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: StoreOrdersService, useValue: { getOrderById: (id: string) => of({ id: Number(id) }) } },
         { provide: ToastService, useValue: {} },
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
+        { provide: KitchenTicketPrintService, useValue: { printAfterFire: () => {} } },
       ],
     });
 
