@@ -186,6 +186,7 @@ export class StorePlanActivationService {
         effective_price: round2(pricing.effective_price),
         vendix_base_price: round2(pricing.base_price),
         partner_margin_amount: round2(pricing.margin_amount),
+        currency: plan.currency,
         resolved_features: (plan.ai_feature_flags ??
           {}) as Prisma.InputJsonValue,
         resolved_at: now,
@@ -240,39 +241,52 @@ export class StorePlanActivationService {
           : 'resubscribe';
 
     // ---- Invoice + payment / free activation ------------------------------
-    const invoice = await this.billing.issueInvoice(subscriptionId, {
-      fromPlanId: oldPlanId,
-      toPlanId: plan.id,
-      changeKind,
-    });
-
-    const extraMetadata = {
-      source: 'superadmin_activation',
-      payment_method: dto.payment_method ?? null,
-      notes: dto.notes ?? null,
-    };
-
-    if (invoice) {
-      await this.manualPaymentService.recordManualPayment(invoice.id, {
-        bankReference: dto.reference?.trim() || `SA-${storeId}-${Date.now()}`,
-        paidAt: this.parsePaidAt(dto.paid_at),
-        amount:
-          dto.amount != null
-            ? new Prisma.Decimal(dto.amount)
-            : new Prisma.Decimal(invoice.total),
-        recordedByUserId: actorUserId,
-        periodEnd: invoice.period_end,
-        planId: plan.id,
-        extraMetadata,
+    // Not atomic with Tx 1: a failure here leaves the plan assigned.
+    let invoice: Awaited<ReturnType<SubscriptionBillingService['issueInvoice']>>;
+    try {
+      invoice = await this.billing.issueInvoice(subscriptionId, {
+        fromPlanId: oldPlanId,
+        toPlanId: plan.id,
+        changeKind,
       });
-    } else {
-      await this.stateService.ensureOperational(storeId, {
-        reason: 'superadmin_plan_activation',
-        triggeredByUserId: actorUserId,
-        periodEnd,
-        planId: plan.id,
-        payload: { ...extraMetadata, reference: dto.reference ?? null },
-      });
+
+      const extraMetadata = {
+        source: 'superadmin_activation',
+        payment_method: dto.payment_method ?? null,
+        notes: dto.notes ?? null,
+      };
+
+      if (invoice) {
+        await this.manualPaymentService.recordManualPayment(invoice.id, {
+          bankReference: dto.reference?.trim() || `SA-${storeId}-${Date.now()}`,
+          paidAt: this.parsePaidAt(dto.paid_at),
+          amount:
+            dto.amount != null
+              ? new Prisma.Decimal(dto.amount)
+              : new Prisma.Decimal(invoice.total),
+          recordedByUserId: actorUserId,
+          periodEnd: invoice.period_end,
+          planId: plan.id,
+          extraMetadata,
+        });
+      } else {
+        await this.stateService.ensureOperational(storeId, {
+          reason: 'superadmin_plan_activation',
+          triggeredByUserId: actorUserId,
+          periodEnd,
+          planId: plan.id,
+          payload: { ...extraMetadata, reference: dto.reference ?? null },
+        });
+      }
+    } catch (e: any) {
+      this.logger.error(
+        `Plan activation failed after plan assignment: store=${storeId} subscription=${subscriptionId} plan=${plan.id}: ${e?.message ?? e}`,
+        e?.stack,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+        'El plan quedó asignado pero el pago no se registró. Reintenta la activación: es seguro, anula la factura pendiente y vuelve a emitir.',
+      );
     }
 
     // ---- Post-commit side effects -----------------------------------------

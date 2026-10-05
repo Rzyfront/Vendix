@@ -256,4 +256,35 @@ describe('StorePlanActivationService', () => {
     expect(err.getResponse()).toMatchObject({ error_code: 'PLAN_001' });
     expect(h.prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it('existing subscription: updates currency to the plan currency', async () => {
+    const h = build({
+      plan: makePlan({ currency: 'USD' }),
+      existingSub: {
+        id: 12,
+        plan_id: 3,
+        state: 'cancelled',
+        currency: 'COP',
+        partner_override: null,
+      },
+    });
+    await h.svc.activatePlan(1, { plan_id: 7 }, 99);
+    const upd = h.tx.store_subscriptions.update.mock.calls[0][0];
+    expect(upd.data.currency).toBe('USD');
+  });
+
+  it('recordManualPayment failure after plan assignment: explains partial state with SUBSCRIPTION_INTERNAL_ERROR', async () => {
+    const h = build({});
+    h.manual.recordManualPayment.mockRejectedValue(new Error('boom'));
+    let err: any;
+    try {
+      await h.svc.activatePlan(1, { plan_id: 7 }, 99);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(VendixHttpException);
+    const res = err.getResponse();
+    expect(res.error_code).toBe('SUBSCRIPTION_INTERNAL_ERROR');
+    expect(res.message).toContain('Reintenta');
+  });
 });
