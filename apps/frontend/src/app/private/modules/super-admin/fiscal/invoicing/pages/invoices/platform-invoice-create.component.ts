@@ -390,8 +390,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   );
 
   readonly withholdingRoleOptions: SelectorOption[] = [
-    { value: 'practiced', label: 'Practicada (la retiene el cliente)' },
-    { value: 'suffered', label: 'Sufrida (nos la retienen)' },
+    { value: 'suffered', label: 'Sufrida (la retiene el cliente)' },
+    { value: 'practiced', label: 'Practicada (la practicamos nosotros)' },
     { value: 'self', label: 'Autorretención' },
   ];
 
@@ -1232,7 +1232,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     this.withholdingsArray.push(
       this.fb.group({
         concept_id: [null as number | null, Validators.required],
-        role: ['practiced', Validators.required],
+        role: ['suffered', Validators.required],
         rate: [
           0,
           [Validators.required, Validators.min(0), Validators.max(100)],
@@ -1381,7 +1381,12 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       this.withholdingsArray.push(
         this.fb.group({
           concept_id: [conceptId, Validators.required],
-          role: [String(w['role'] ?? 'practiced'), Validators.required],
+          // Los perfiles guardados con la etiqueta vieja («practicada = la
+          // retiene el cliente») significaban `suffered` en una venta.
+          role: [
+            w['role'] === 'self' ? 'self' : 'suffered',
+            Validators.required,
+          ],
           rate: [
             Number(w['rate']) || 0,
             [Validators.required, Validators.min(0), Validators.max(100)],
@@ -1627,7 +1632,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     return (val['withholdings'] as any[])
       .filter((w) => w?.concept_id)
       .map((w, index) => ({
-        role: w.role || 'practiced',
+        role: w.role || 'suffered',
         concept_id: Number(w.concept_id),
         base_amount: roundMoney(Number(w.base) || 0),
         rate: (Number(w.rate) || 0) / 100,
