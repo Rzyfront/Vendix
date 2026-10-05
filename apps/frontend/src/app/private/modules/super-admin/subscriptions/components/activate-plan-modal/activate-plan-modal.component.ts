@@ -31,6 +31,10 @@ import {
   SubscriptionPlan,
 } from '../../interfaces/subscription-admin.interface';
 
+function hasNoValue(v: unknown): boolean {
+  return v === null || v === undefined || v === '';
+}
+
 const CYCLE_LABELS: Record<string, string> = {
   monthly: 'mensual',
   quarterly: 'trimestral',
@@ -68,6 +72,13 @@ const CYCLE_LABELS: Record<string, string> = {
           [formControl]="form.controls.plan_id"
         ></app-selector>
 
+        @if (isFreePlan()) {
+          <p class="text-xs text-text-secondary">
+            Plan gratuito: se activa sin factura ni pago.
+          </p>
+        }
+
+        @if (!isFreePlan()) {
         <app-input
           label="Monto recibido"
           placeholder="Si lo dejas vacío se registra el precio del plan"
@@ -93,6 +104,7 @@ const CYCLE_LABELS: Record<string, string> = {
           placeholder="Opcional"
           [formControl]="form.controls.reference"
         ></app-input>
+        }
 
         <app-textarea
           label="Notas"
@@ -156,6 +168,16 @@ export class ActivatePlanModalComponent {
     return v !== null && v !== undefined && v !== '';
   });
 
+  readonly selectedPlan = computed<SubscriptionPlan | null>(() => {
+    const id = this.planIdValue();
+    if (hasNoValue(id)) return null;
+    return this.plans().find((p) => String(p.id) === String(id)) ?? null;
+  });
+  readonly isFreePlan = computed(() => {
+    const plan = this.selectedPlan();
+    return !!plan && (plan.is_free === true || Number(plan.base_price) <= 0);
+  });
+
   readonly planOptions = computed<SelectorOption[]>(() =>
     this.plans().map((p) => ({
       value: p.id,
@@ -213,15 +235,19 @@ export class ActivatePlanModalComponent {
     if (!this.hasPlan() || this.submitting()) return;
 
     const body: ActivateStorePlanDto = { plan_id: Number(v.plan_id) };
-    if (v.amount !== null && v.amount !== '' && v.amount !== undefined) {
-      body.amount = String(v.amount);
+    if (this.isFreePlan()) {
+      if (v.notes?.trim()) body.notes = v.notes.trim();
+    } else {
+      if (v.amount !== null && v.amount !== '' && v.amount !== undefined) {
+        body.amount = String(v.amount);
+      }
+      if (v.payment_method) {
+        body.payment_method = v.payment_method as ActivatePlanPaymentMethod;
+      }
+      if (v.reference?.trim()) body.reference = v.reference.trim();
+      if (v.paid_at) body.paid_at = v.paid_at;
+      if (v.notes?.trim()) body.notes = v.notes.trim();
     }
-    if (v.payment_method) {
-      body.payment_method = v.payment_method as ActivatePlanPaymentMethod;
-    }
-    if (v.reference?.trim()) body.reference = v.reference.trim();
-    if (v.paid_at) body.paid_at = v.paid_at;
-    if (v.notes?.trim()) body.notes = v.notes.trim();
 
     this.submitting.set(true);
     this.subscriptionAdmin
