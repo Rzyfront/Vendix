@@ -17,7 +17,7 @@ export type KitchenMode = 'virtual' | 'physical';
 
 export interface RestaurantSettings {
   enable_table_checkout: boolean;
-  kitchen_mode?: KitchenMode | null;
+  kitchen_mode?: KitchenMode;
   qr_scan_behavior?: QrScanBehavior;
   qr_auto_fire?: boolean;
 }
