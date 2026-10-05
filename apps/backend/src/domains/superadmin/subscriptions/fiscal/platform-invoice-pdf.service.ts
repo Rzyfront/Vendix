@@ -13,6 +13,7 @@
  * `InvoicePdfService` — y se sube a S3 bajo `platform/invoices/{transmissionId}/...`.
  */
 import { Injectable, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 import * as QRCode from 'qrcode';
 
 import { ErrorCodes, VendixHttpException } from '@common/errors';
@@ -34,10 +35,62 @@ import {
 // 2010/2019 art. 160). Consume ahora la derivación única del num. 12 del art. 11
 // de la Res. DIAN 000165/2023 en vez de una tabla propia.
 import { resolveFiscalQualitiesLine } from '../../../store/print-formats/services/fiscal-issuer-identity';
-import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
+import {
+  PLATFORM_FISCAL_SETTINGS_KEY,
+  PLATFORM_TIMEZONE,
+} from '../../../../common/constants/platform-fiscal.constants';
 import { formatStoreDate } from '../../../../common/utils/store-timezone.util';
+import { findFiscalResponsibility } from '../../../fiscal-operations/constants/fiscal-responsibilities.catalog';
+
+// sharp 0.35 types are ESM-only (export default) but the CJS runtime exports the function.
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment
 
 const PLATFORM_PDF_KEY_PREFIX = 'platform/invoices';
+
+/** Nombres legibles de las unidades DIAN de uso comun (UN/ECE tal como las publica la DIAN). */
+const UNIT_LABELS: Record<string, string> = {
+  EA: 'Unidad',
+  NIU: 'Unidad',
+  '94': 'Unidad',
+  C62: 'Unidad',
+  LUN: 'Mes',
+  ANA: 'Ano',
+  DAY: 'Dia',
+  HUR: 'Hora',
+  MIN: 'Minuto',
+  KGM: 'Kilogramo',
+  GRM: 'Gramo',
+  LTR: 'Litro',
+  MTR: 'Metro',
+  SET: 'Conjunto',
+  ZZ: 'Mutuamente definido',
+};
+
+/** Tributos DIAN (`cbc:ID`) -> rotulo corto. */
+const TAX_CODE_LABELS: Record<string, string> = {
+  '01': 'IVA',
+  '02': 'IC',
+  '03': 'ICA',
+  '04': 'INC',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'borrador',
+  queued: 'en cola',
+  signing: 'firmando',
+  signed: 'firmado',
+  submitted: 'enviado a la DIAN',
+  accepted: 'aceptado',
+  rejected: 'rechazado',
+  error: 'con error',
+  retrying: 'reintentando',
+  cancelled: 'cancelado',
+  contingency: 'en contingencia',
+  pending: 'pendiente',
+  not_applicable: 'no aplica',
+};
+
+type PlatformInvoiceSnapshot = Record<string, unknown> | null;
 
 @Injectable()
 export class PlatformInvoicePdfService {
@@ -91,14 +144,7 @@ export class PlatformInvoicePdfService {
     const issuer = this.resolveIssuer(org, false);
     const format = await this.resolveInvoiceFormat(ctx.organization_id, transmission);
 
-    let logo_buffer: Buffer | undefined;
-    if (issuer.logo_url) {
-      try {
-        logo_buffer = await this.s3_service.downloadImage(issuer.logo_url);
-      } catch {
-        this.logger.warn('Could not download issuer logo for platform PDF preview');
-      }
-    }
+    const logo_buffer = await this.loadLogo(issuer.logo_url, 'platform PDF preview');
 
     const snapshot = await this.loadTransmissionSnapshot(transmission.id);
     const pdf_data = await this.buildPdfDataFromTransmission(
@@ -164,11 +210,17 @@ export class PlatformInvoicePdfService {
       );
     }
 
-    if (!force && transmission.pdf_url) {
+    // La llave S3 lleva estado de transmision + hash del snapshot: si cualquiera
+    // cambia, la llave cambia y el PDF se regenera (antes se guardaba una vez y
+    // quedaba con datos/estado viejos para siempre).
+    const snapshot = await this.loadTransmissionSnapshot(transmission.id);
+    const s3_key = this.buildS3Key(transmission, snapshot);
+
+    if (!force && transmission.pdf_url === s3_key) {
       try {
-        const url = await this.s3_service.getPresignedUrl(transmission.pdf_url);
-        this.logger.log(`PDF cache hit for platform transmission #${transmission_id} (${transmission.pdf_url})`);
-        return { key: transmission.pdf_url, url };
+        const url = await this.s3_service.getPresignedUrl(s3_key);
+        this.logger.log(`PDF cache hit for platform transmission #${transmission_id} (${s3_key})`);
+        return { key: s3_key, url };
       } catch (error) {
         this.logger.warn(
           `Failed to sign existing pdf_url for transmission #${transmission_id}: ${(error as Error)?.message} — regenerating`,
@@ -181,16 +233,8 @@ export class PlatformInvoicePdfService {
     const issuer = this.resolveIssuer(org, is_electronic_document);
     const format = await this.resolveInvoiceFormat(ctx.organization_id, transmission);
 
-    let logo_buffer: Buffer | undefined;
-    if (issuer.logo_url) {
-      try {
-        logo_buffer = await this.s3_service.downloadImage(issuer.logo_url);
-      } catch {
-        this.logger.warn('Could not download issuer logo for platform invoice PDF');
-      }
-    }
+    const logo_buffer = await this.loadLogo(issuer.logo_url, 'platform invoice PDF');
 
-    const snapshot = await this.loadTransmissionSnapshot(transmission.id);
     const pdf_data = await this.buildPdfDataFromTransmission(
       transmission,
       snapshot,
@@ -201,7 +245,6 @@ export class PlatformInvoicePdfService {
     );
 
     const pdf_buffer = await InvoicePdfBuilder.generate(pdf_data);
-    const s3_key = this.buildS3Key(transmission.id, transmission.document_number);
 
     await this.s3_service.uploadFile(pdf_buffer, s3_key, 'application/pdf');
 
@@ -274,14 +317,7 @@ export class PlatformInvoicePdfService {
     const issuer = this.resolveIssuer(org, is_electronic_document);
     const format = await this.resolveInvoiceFormat(platform_org_id, invoice as any);
 
-    let logo_buffer: Buffer | undefined;
-    if (issuer.logo_url) {
-      try {
-        logo_buffer = await this.s3_service.downloadImage(issuer.logo_url);
-      } catch {
-        this.logger.warn('Could not download issuer logo for platform invoice PDF (invoices fallback)');
-      }
-    }
+    const logo_buffer = await this.loadLogo(issuer.logo_url, 'platform invoice PDF (invoices fallback)');
 
     const customer_address = this.formatCustomerAddress((invoice as any).customer_address);
     const customer = (invoice as any).customer;
@@ -350,7 +386,7 @@ export class PlatformInvoicePdfService {
     };
 
     const pdf_buffer = await InvoicePdfBuilder.generate(pdf_data);
-    const s3_key = this.buildS3Key(invoice.id, (invoice as any).invoice_number);
+    const s3_key = this.buildLegacyS3Key(invoice.id, (invoice as any).invoice_number);
 
     await this.s3_service.uploadFile(pdf_buffer, s3_key, 'application/pdf');
     await this.prisma.withoutScope().invoices.update({
@@ -619,6 +655,15 @@ export class PlatformInvoicePdfService {
           withholdings?: unknown[];
           global_discount_amount?: number;
           operation_type?: string;
+          issue_date?: string;
+          issue_time?: string;
+          payment_form?: string;
+          payment_means_code?: string;
+          due_date?: string | null;
+          notes?: string | null;
+          exchange_rate?: number | string | null;
+          tax_breakdown?: Array<Record<string, unknown>>;
+          resolution_id?: number | null;
         }
       | null;
 
@@ -675,6 +720,7 @@ export class PlatformInvoicePdfService {
 
     // Items
     const rawItems = (invoiceSnap?.items as Array<Record<string, unknown>> | undefined) ?? [];
+    const line_taxes: Array<{ type: string; rate: number; base: number; amount: number }> = [];
     const items: InvoicePdfData['items'] = rawItems.length
       ? rawItems.map((raw: Record<string, unknown>) => {
           const quantity = Number((raw['quantity'] as number) ?? 1);
@@ -682,17 +728,34 @@ export class PlatformInvoicePdfService {
           const line_total = Number(
             (raw['line_total'] as number) ?? (raw['total'] as number) ?? quantity * unit_price,
           );
+          const taxes_raw = Array.isArray(raw['taxes'])
+            ? (raw['taxes'] as Array<Record<string, unknown>>)
+            : [];
+          const parsed = taxes_raw.map((t) => ({
+            type: this.taxLabelOf(t),
+            rate: this.toPercent(t['rate'] ?? t['tax_rate']),
+            base: Number(t['taxable_amount'] ?? t['base'] ?? 0),
+            amount: Number(t['tax_amount'] ?? t['amount'] ?? 0),
+          }));
+          line_taxes.push(...parsed);
+          const tax_from_lines = parsed.reduce((acc, t) => acc + t.amount, 0);
+          const unit_code = raw['unit_code'] ? String(raw['unit_code']) : '';
           return {
             description: String(raw['description'] ?? 'Item'),
             quantity,
             unit_price,
-            discount_amount: Number((raw['discount_amount'] as number) ?? 0),
-            tax_amount: Number((raw['tax_amount'] as number) ?? 0),
+            discount_amount: Number((raw['discount_amount'] as number) ?? (raw['discount'] as number) ?? 0),
+            tax_amount:
+              raw['tax_amount'] !== undefined ? Number(raw['tax_amount']) : tax_from_lines,
             total_amount: line_total,
             applied_price_tier_name: (raw['applied_price_tier_name'] as string | null) ?? null,
             stock_units_consumed:
               typeof raw['stock_units_consumed'] === 'number' ? (raw['stock_units_consumed'] as number) : null,
             serial_numbers_snapshot: (raw['serial_numbers_snapshot'] as string | null) ?? null,
+            unit_label: unit_code ? (UNIT_LABELS[unit_code] ?? unit_code) : null,
+            tax_label: parsed.length
+              ? parsed.map((t) => `${t.type} ${this.fmtRate(t.rate)}%`).join(' + ')
+              : null,
           };
         })
       : [
@@ -709,23 +772,89 @@ export class PlatformInvoicePdfService {
           },
         ];
 
-    // Taxes — por ahora vacío; si el snapshot trae taxes, mapear
-    const taxes: InvoicePdfData['taxes'] = [];
+    // Desglose de impuestos: tax_breakdown del snapshot; fallback, agrupar desde las lineas.
+    const breakdown_raw = Array.isArray(invoiceSnap?.tax_breakdown) ? invoiceSnap!.tax_breakdown! : [];
+    let breakdown: Array<{ type: string; name: string; rate: number; base: number; amount: number }>;
+    if (breakdown_raw.length) {
+      breakdown = breakdown_raw.map((t) => {
+        const type = this.taxLabelOf(t);
+        return {
+          type,
+          name: t['name'] ? String(t['name']) : type,
+          rate: this.toPercent(t['rate'] ?? t['tax_rate']),
+          base: Number(t['base'] ?? t['taxable_amount'] ?? 0),
+          amount: Number(t['amount'] ?? t['tax_amount'] ?? 0),
+        };
+      });
+    } else {
+      const grouped = new Map<string, { type: string; name: string; rate: number; base: number; amount: number }>();
+      for (const t of line_taxes) {
+        const key = `${t.type}|${t.rate}`;
+        const cur = grouped.get(key) ?? { type: t.type, name: t.type, rate: t.rate, base: 0, amount: 0 };
+        cur.base = Math.round((cur.base + t.base) * 100) / 100;
+        cur.amount = Math.round((cur.amount + t.amount) * 100) / 100;
+        grouped.set(key, cur);
+      }
+      breakdown = [...grouped.values()];
+    }
+    const taxes: InvoicePdfData['taxes'] = breakdown.map((t) => ({
+      tax_name: t.name,
+      tax_rate: t.rate,
+      taxable_amount: t.base,
+      tax_amount: t.amount,
+    }));
+    const tax_types = new Set(breakdown.map((t) => t.type));
+    const tax_column_label =
+      tax_types.size === 1 ? [...tax_types][0] : tax_types.size > 1 ? 'Imp.' : undefined;
+    const tax_total_lines = breakdown.length
+      ? breakdown.map((t) => ({ label: `${t.type} ${this.fmtRate(t.rate)}%`, amount: t.amount }))
+      : undefined;
 
     const totals = invoiceSnap?.totals ?? { subtotal: 0, tax_amount: 0, total: 0 };
     const subtotal_amount = Number(totals.subtotal ?? 0);
     const tax_amount = Number(totals.tax_amount ?? 0);
     const total_amount = Number(totals.total ?? 0);
     const discount_amount = Number(invoiceSnap?.global_discount_amount ?? 0);
-    const withholding_amount = 0;
+    const withholding_amount = Array.isArray(invoiceSnap?.withholdings)
+      ? Math.round(
+          (invoiceSnap!.withholdings as Array<Record<string, unknown>>).reduce((acc, w) => {
+            const amount =
+              w?.['amount'] != null
+                ? Number(w['amount'])
+                : Math.round(Number(w?.['base_amount'] ?? 0) * Number(w?.['rate'] ?? 0) * 100) / 100;
+            return acc + (Number.isFinite(amount) ? amount : 0);
+          }, 0) * 100,
+        ) / 100
+      : 0;
 
-    // Resolucion — intenta desde platform_settings
-    const resolution = await this.loadResolutionForTransmission(transmission);
+    // Resolucion usada por la factura (snapshot.resolution_id), no la clave tecnica
+    const resolution = await this.loadResolutionForTransmission(transmission, invoiceSnap?.resolution_id);
 
-    const issue_date = transmission.created_at
-      ? this.formatDate(new Date(transmission.created_at))
-      : this.formatDate(new Date());
+    // Fecha de expedicion real (snapshot); fallback created_at para facturas viejas.
+    const snap_issue = this.formatIsoDateOnly(invoiceSnap?.issue_date);
+    const issue_date =
+      snap_issue ??
+      (transmission.created_at
+        ? this.formatDate(new Date(transmission.created_at))
+        : this.formatDate(new Date()));
+    const due_date = this.formatIsoDateOnly(invoiceSnap?.due_date) ?? undefined;
+    const issue_time =
+      typeof invoiceSnap?.issue_time === 'string' && invoiceSnap.issue_time
+        ? invoiceSnap.issue_time.slice(0, 8)
+        : undefined;
     const currency = (invoiceSnap?.currency as string) || 'COP';
+    const exchange_rate = Number(invoiceSnap?.exchange_rate);
+    const currency_note =
+      currency !== 'COP'
+        ? `Moneda: ${currency}${
+            Number.isFinite(exchange_rate) && exchange_rate > 0
+              ? `  |  TRM: ${new Intl.NumberFormat('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(exchange_rate)} COP`
+              : ''
+          }`
+        : undefined;
+
+    const responsibility_labels = this.resolveResponsibilityLabels(issuer.tax_responsibilities);
+    const validity_legend = this.buildValidityLegend(transmission);
 
     const invoice_type =
       transmission.document_type === 'support_document' ? 'purchase_invoice' : 'invoice';
@@ -755,8 +884,10 @@ export class PlatformInvoicePdfService {
       invoice_number: transmission.document_number,
       invoice_type,
       issue_date,
+      issue_time,
+      due_date,
       currency,
-      notes: undefined,
+      notes: invoiceSnap?.notes ? String(invoiceSnap.notes) : undefined,
       items,
       taxes,
       subtotal_amount,
@@ -767,64 +898,149 @@ export class PlatformInvoicePdfService {
       cufe: transmission.cufe || undefined,
       qr_code: transmission.qr_code || undefined,
       qr_code_buffer: await this.renderVerificationQr(transmission.qr_code),
+      payment_form: invoiceSnap?.payment_form ? String(invoiceSnap.payment_form) : undefined,
+      payment_method: invoiceSnap?.payment_means_code
+        ? String(invoiceSnap.payment_means_code)
+        : undefined,
+      money_decimals: 2,
+      tax_column_label,
+      tax_total_lines,
+      show_net_payable: true,
+      currency_note,
+      company_tax_responsibility_labels: responsibility_labels,
+      validity_legend,
     };
   }
 
-  private async loadResolutionForTransmission(transmission: any) {
+  private taxLabelOf(t: Record<string, unknown>): string {
+    const raw = String(t['tax_type'] ?? t['code'] ?? t['tax_code'] ?? 'IVA').trim();
+    return TAX_CODE_LABELS[raw] ?? raw.toUpperCase();
+  }
+
+  /** `0.19` (fraccion) o `19` (porcentaje) -> `19`. */
+  private toPercent(value: unknown): number {
+    const n = Number(value ?? 0);
+    if (!Number.isFinite(n)) return 0;
+    return n > 0 && n < 1 ? Math.round(n * 10000) / 100 : n;
+  }
+
+  private fmtRate(rate: number): string {
+    return String(Math.round(rate * 100) / 100);
+  }
+
+  /** `YYYY-MM-DD[...]` -> `DD/MM/YYYY` sin pasar por zonas horarias. */
+  private formatIsoDateOnly(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
+  }
+
+  private resolveResponsibilityLabels(codes?: string[]): string[] | undefined {
+    if (!codes?.length) return undefined;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const code of codes) {
+      const def = findFiscalResponsibility(code);
+      const key = def?.code ?? String(code);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(def ? `${def.code} ${def.label}` : String(code));
+    }
+    return out;
+  }
+
+  private buildValidityLegend(transmission: any): string {
+    const accepted =
+      transmission.dian_status === 'accepted' || transmission.transmission_status === 'accepted';
+    if (accepted) {
+      return 'Documento validado por la DIAN. Esta factura electronica fue generada por Vendix y es valida conforme a la normativa de la DIAN.';
+    }
+    const raw = String(
+      transmission.dian_status && transmission.dian_status !== 'not_applicable'
+        ? transmission.dian_status
+        : (transmission.transmission_status ?? 'pendiente'),
+    );
+    return `Documento NO validado por la DIAN — estado: ${STATUS_LABELS[raw] ?? raw}`;
+  }
+
+  /**
+   * Convierte a PNG un logo WebP: pdfkit no decodifica WebP y el catch del
+   * builder descartaba el logo en silencio.
+   */
+  private async loadLogo(logo_url: string | undefined, context: string): Promise<Buffer | undefined> {
+    if (!logo_url) return undefined;
+    let buffer: Buffer | undefined;
     try {
-      const settingsRow = await this.prisma
-        .withoutScope()
-        .platform_settings.findUnique({ where: { key: 'subscription_fiscal' } });
-      const value = (settingsRow?.value ?? {}) as { invoice_resolution_id?: number | null };
-      const resolutionId = value.invoice_resolution_id;
-      if (resolutionId) {
-        const res = await this.prisma.withoutScope().invoice_resolutions.findUnique({
-          where: { id: resolutionId },
-          select: {
-            resolution_number: true,
-            prefix: true,
-            range_from: true,
-            range_to: true,
-            resolution_date: true,
-            valid_from: true,
-            valid_to: true,
-          },
+      buffer = await this.s3_service.downloadImage(logo_url);
+    } catch (error) {
+      this.logger.warn(`Could not download issuer logo for ${context}: ${(error as Error)?.message}`);
+      return undefined;
+    }
+    if (!buffer) return undefined;
+    const is_webp =
+      buffer.length > 12 &&
+      buffer.toString('ascii', 0, 4) === 'RIFF' &&
+      buffer.toString('ascii', 8, 12) === 'WEBP';
+    if (!is_webp) return buffer;
+    try {
+      return await sharp(buffer).png().toBuffer();
+    } catch (error) {
+      this.logger.warn(`Could not convert WebP issuer logo to PNG for ${context}: ${(error as Error)?.message}`);
+      return undefined;
+    }
+  }
+
+  private async loadResolutionForTransmission(transmission: any, snapshot_resolution_id?: number | null) {
+    const select = {
+      resolution_number: true,
+      prefix: true,
+      range_from: true,
+      range_to: true,
+      resolution_date: true,
+      valid_from: true,
+      valid_to: true,
+    } as const;
+    try {
+      // 1) La resolucion con que se emitio (snapshot.resolution_id).
+      if (typeof snapshot_resolution_id === 'number') {
+        const used = await this.prisma.withoutScope().invoice_resolutions.findUnique({
+          where: { id: snapshot_resolution_id },
+          select,
         });
-        if (res) return res;
+        if (used) return used;
       }
-      // Fallback: intenta por prefijo del document_number (primeras letras)
+      // 2) Por prefijo del consecutivo (facturas viejas sin resolution_id en snapshot).
       const prefix = String(transmission.document_number || '').replace(/[0-9]/g, '').slice(0, 10);
       if (prefix) {
         const byPrefix = await this.prisma.withoutScope().invoice_resolutions.findFirst({
           where: { prefix, organization_id: transmission.organization_id },
-          select: {
-            resolution_number: true,
-            prefix: true,
-            range_from: true,
-            range_to: true,
-            resolution_date: true,
-            valid_from: true,
-            valid_to: true,
-          },
+          select,
           orderBy: { created_at: 'desc' },
         });
         if (byPrefix) return byPrefix;
       }
-    } catch {}
+      // 3) Ultimo recurso: la resolucion configurada hoy en la plataforma.
+      const settingsRow = await this.prisma
+        .withoutScope()
+        .platform_settings.findUnique({ where: { key: PLATFORM_FISCAL_SETTINGS_KEY } });
+      const value = (settingsRow?.value ?? {}) as { invoice_resolution_id?: number | null };
+      if (value.invoice_resolution_id) {
+        const res = await this.prisma.withoutScope().invoice_resolutions.findUnique({
+          where: { id: value.invoice_resolution_id },
+          select,
+        });
+        if (res) return res;
+      }
+    } catch (error) {
+      this.logger.warn(`Could not resolve invoice resolution for platform PDF: ${(error as Error)?.message}`);
+    }
     return null;
   }
 
   private async buildSamplePreview(organization_id: number): Promise<Buffer> {
     const org = await this.loadPlatformOrganization(organization_id);
     const issuer = this.resolveIssuer(org, false);
-    let logo_buffer: Buffer | undefined;
-    if (issuer.logo_url) {
-      try {
-        logo_buffer = await this.s3_service.downloadImage(issuer.logo_url);
-      } catch {
-        this.logger.warn('Could not download issuer logo for platform PDF sample preview');
-      }
-    }
+    const logo_buffer = await this.loadLogo(issuer.logo_url, 'platform PDF sample preview');
     const format = await this.resolveInvoiceFormat(organization_id);
     const today = this.formatDate(new Date());
     const sample_qr_url =
@@ -880,9 +1096,42 @@ export class PlatformInvoicePdfService {
     });
   }
 
-  private buildS3Key(transmissionId: number, document_number: string): string {
-    const safeNumber = String(document_number || transmissionId).replace(/[^A-Za-z0-9\-_]/g, '_');
-    return `${PLATFORM_PDF_KEY_PREFIX}/${transmissionId}/invoice-${safeNumber}.pdf`;
+  /**
+   * `platform/invoices/<id>/<consecutivo>-<status>-<hash8>.pdf`: estado de la
+   * transmision + hash corto del contenido, para regenerar al cambiar cualquiera.
+   */
+  private buildS3Key(
+    transmission: any,
+    snapshot: {
+      invoiceSnapshot: PlatformInvoiceSnapshot;
+      acquirerSnapshot: PlatformInvoiceSnapshot;
+    },
+  ): string {
+    const safeNumber = String(transmission.document_number || transmission.id).replace(
+      /[^A-Za-z0-9\-_]/g,
+      '_',
+    );
+    const status = [transmission.transmission_status, transmission.dian_status]
+      .filter(Boolean)
+      .join('-')
+      .replace(/[^A-Za-z0-9\-_]/g, '_');
+    const hash = createHash('sha256')
+      .update(
+        JSON.stringify([
+          snapshot.invoiceSnapshot,
+          snapshot.acquirerSnapshot,
+          transmission.cufe ?? null,
+          transmission.qr_code ?? null,
+        ]),
+      )
+      .digest('hex')
+      .slice(0, 8);
+    return `${PLATFORM_PDF_KEY_PREFIX}/${transmission.id}/${safeNumber}-${status}-${hash}.pdf`;
+  }
+
+  private buildLegacyS3Key(id: number, document_number: string): string {
+    const safeNumber = String(document_number || id).replace(/[^A-Za-z0-9\-_]/g, '_');
+    return `${PLATFORM_PDF_KEY_PREFIX}/${id}/invoice-${safeNumber}.pdf`;
   }
 
   private async renderVerificationQr(qr_content?: string | null): Promise<Buffer | undefined> {
