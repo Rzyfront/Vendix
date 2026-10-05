@@ -557,9 +557,8 @@ export class PlatformInvoicingController {
    * Reenvía una factura plataforma a un correo arbitrario. Body:
    * `{ email: string }`.
    *
-   * Slice C.3 mínimo viable: valida email + pertenencia + escribe fila
-   * `invoice_delivery_events` con `status='queued'` (store_id NULL).
-   * La pieza de armado del ZIP + envío S3/SMTP es C.3.5 — siguiente slice.
+   * Envía por correo el ZIP (XML firmado + PDF) de una factura plataforma
+   * aceptada por la DIAN. `:id` es `fiscal_transmissions.id`.
    */
   @Post('sales-invoices/:id/deliver')
   @HttpCode(HttpStatus.OK)
@@ -580,7 +579,7 @@ export class PlatformInvoicingController {
     );
     return this.responseService.success(
       result,
-      'Reenvío plataforma encolado',
+      'Factura enviada por correo',
     );
   }
 
