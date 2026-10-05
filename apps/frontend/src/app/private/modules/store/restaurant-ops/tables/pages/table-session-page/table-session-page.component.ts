@@ -55,6 +55,7 @@ import {
   KdsSseService,
   KitchenMutationError,
 } from '../../../kds/services';
+import { KitchenTicketPrintService } from '../../../kds/services/kitchen-ticket-print.service';
 import type {
   FireConfirmPayload,
   FireItemExclusion,
@@ -145,6 +146,7 @@ interface SecondaryAction {
 export class TableSessionPageComponent implements OnInit {
   private readonly tablesService = inject(TablesService);
   private readonly kitchenService = inject(KitchenTicketsService);
+  protected readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private readonly kdsSse = inject(KdsSseService);
   private readonly adminTablesSse = inject(AdminTablesSseService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
@@ -917,7 +919,34 @@ export class TableSessionPageComponent implements OnInit {
     // cerveza en botella se quedaba sin ningún estado de entrega alcanzable.
     if (!this.needsKitchen(item)) return true;
 
-    return this.kitchenStatusFor(item) === 'ready';
+    const kitchenStatus = this.kitchenStatusFor(item);
+    // Cocina fisica: no hay KDS que marque listo; el usuario entrega a mano
+    // un plato pendiente / en preparacion / listo.
+    if (this.kitchenTicketPrint.isPhysicalKitchen()) {
+      return (
+        kitchenStatus === 'pending' ||
+        kitchenStatus === 'in_preparation' ||
+        kitchenStatus === 'ready'
+      );
+    }
+    return kitchenStatus === 'ready';
+  }
+
+  /** Ids distintos de tickets de cocina no cancelados de la cuenta actual. */
+  readonly printableTicketIds = computed<number[]>(() => {
+    const ids = new Set<number>();
+    for (const item of this.items()) {
+      for (const row of item.kitchen_ticket_items ?? []) {
+        if (row.status === 'cancelled' || row.kitchen_ticket?.status === 'cancelled') continue;
+        ids.add(row.kitchen_ticket_id);
+      }
+    }
+    return Array.from(ids);
+  });
+
+  /** Boton "Imprimir comanda" (solo cocina fisica): reimprime los tickets de la cuenta. */
+  printKitchenTickets(): void {
+    this.kitchenTicketPrint.printTickets(this.printableTicketIds());
   }
 
   /**
@@ -1473,6 +1502,10 @@ export class TableSessionPageComponent implements OnInit {
           if (res?.kitchen_ticket_id) {
             this.toastService.success(
               `Enviado a cocina — ticket #${res.kitchen_ticket_id}`,
+            );
+            // No-op en cocina virtual; en fisica imprime la comanda.
+            this.kitchenTicketPrint.printAfterFire(
+              res.kitchen_ticket_ids ?? [res.kitchen_ticket_id],
             );
           } else {
             this.toastService.warning(

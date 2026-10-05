@@ -43,6 +43,11 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
+import {
+  dianLineExtension,
+  dianSum,
+} from '../../../../common/money-kernel/dian-money';
+import { isDianUnitCode } from '../../../store/invoicing/providers/dian-direct/constants/dian-unit-codes';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import {
   PlatformCreateCreditNoteDto,
@@ -63,6 +68,73 @@ const CORRECTABLE_BY_NOTE = [
   'export_invoice',
   'purchase_invoice',
 ];
+
+export const PLATFORM_NOTE_DEFAULT_UNIT_CODE = 'NIU';
+
+/**
+ * Normaliza y valida las líneas de una nota (función pura):
+ *  - `unit_code` por línea: el de la línea, o el de la línea original, o 'NIU'.
+ *    Debe pertenecer al catálogo DIAN (`isDianUnitCode`); 'MON' no existe (el mes es 'LUN').
+ *  - importes con el kernel DIAN (`dianLineExtension`/`dianSum`), sin Math.round.
+ *  - si `balance` viene, la suma de las líneas no puede superarlo.
+ */
+export function buildPlatformNoteLines(
+  items: Array<{
+    description: string;
+    quantity: number | string;
+    unit_price?: number | string;
+    unit_code?: string;
+  }>,
+  opts: { balance?: number | string; fallback_unit_code?: string } = {},
+): {
+  lines: Array<{
+    description: string;
+    quantity: number;
+    unit_price: number;
+    unit_code: string;
+    line_extension: string;
+  }>;
+  total: string;
+} {
+  const lines = items.map((line) => {
+    const unit_code =
+      line.unit_code ??
+      opts.fallback_unit_code ??
+      PLATFORM_NOTE_DEFAULT_UNIT_CODE;
+    if (!isDianUnitCode(unit_code)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        `unit_code «${unit_code}» no es una unidad de medida DIAN válida (el mes es «LUN», no «MON»).`,
+        { unit_code },
+      );
+    }
+    const quantity = Number(line.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'La cantidad de cada línea debe ser mayor que 0.',
+        { quantity: line.quantity },
+      );
+    }
+    const unit_price = Number(line.unit_price) || 0;
+    return {
+      description: line.description,
+      quantity,
+      unit_price,
+      unit_code,
+      line_extension: dianLineExtension({ quantity, unit_price }),
+    };
+  });
+  const total = dianSum(lines.map((l) => l.line_extension));
+  if (opts.balance !== undefined && Number(total) > Number(opts.balance)) {
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_VALIDATE_001,
+      `El valor de la nota (${total}) supera el saldo de la factura original (${Number(opts.balance)}).`,
+      { total, balance: Number(opts.balance) },
+    );
+  }
+  return { lines, total };
+}
 
 export interface PlatformCreditNoteResult {
   invoice_id: number;
@@ -192,6 +264,11 @@ export class PlatformCreditNotesService {
 
     // 2. Construir el DTO del riel tienda con la información de la nota.
     //    Mapeo equivalente al que usa `mapMvpV1ToLegacyCreateDto` en C.1.
+    // TODO(platform-credit-notes): el lookup sigue en `invoices` porque `invoices.related_invoice_id` es FK a `invoices`; la factura de plataforma vive en fiscal_transmissions.
+    const noteLines = buildPlatformNoteLines((dto.items ?? []) as any[], {
+      balance:
+        type === 'credit_note' ? await this.creditBalance(related.id) : undefined,
+    });
     const noteDto: any = {
       invoice_type: type,
       customer: dto.customer ?? {
@@ -199,10 +276,11 @@ export class PlatformCreditNotesService {
         tax_id_dv: '',
         legal_name: 'Plataforma',
       },
-      items: (dto.items ?? []).map((line: any) => ({
+      items: noteLines.lines.map((line) => ({
         description: line.description,
-        quantity: Number(line.quantity) || 1,
-        unit_price: Number(line.unit_price) || 0,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        unit_code: line.unit_code,
         note_concept_code: dto.note_concept_code,
       })),
       currency: 'COP',
@@ -260,5 +338,26 @@ export class PlatformCreditNotesService {
       status: created.status,
       cufe: created.cufe,
     };
+  }
+
+  /** Saldo = total de la factura original menos notas crédito previas no anuladas. */
+  private async creditBalance(related_invoice_id: number): Promise<number | undefined> {
+    const db = this.prisma.withoutScope();
+    const original = await db.invoices.findFirst({
+      where: { id: related_invoice_id },
+      select: { subtotal_amount: true },
+    });
+    if (!original) return undefined;
+    const prior = await db.invoices.aggregate({
+      where: {
+        related_invoice_id,
+        invoice_type: 'credit_note',
+        status: { notIn: ['voided', 'rejected', 'cancelled'] as any },
+      },
+      _sum: { subtotal_amount: true },
+    });
+    return (
+      Number(original.subtotal_amount) - Number(prior._sum?.subtotal_amount ?? 0)
+    );
   }
 }

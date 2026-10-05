@@ -9,6 +9,7 @@ import {
   hasNonDirectSettledPayment,
   OrderCancellationSnapshot,
 } from './order-cancellation-policy.util';
+import type { KitchenMode } from '../../settings/interfaces/store-settings.interface';
 import { isFinancialSplitSettled } from '../shared/financial-split-policy';
 import {
   getSettledOrderAmount,
@@ -720,6 +721,9 @@ export interface OrderItemActionSnapshot {
    * when the caller resolves it AND the line has no kitchen ticket yet.
    * Defaults to `true` (historic behavior) when unresolved. */
   isRestaurant?: boolean;
+  /** Modo cocina de la tienda. `physical`: sin KDS, un plato con ticket
+   * `pending`/`in_preparation` es entregable. Ausente/`virtual`: exige `ready`. */
+  kitchen_mode?: KitchenMode;
 }
 
 const ITEM_UNDELIVERABLE_ORDER_STATES = new Set(['cancelled', 'refunded']);
@@ -752,7 +756,15 @@ export function canDeliverItem(item: OrderItemActionSnapshot): OrderActionResult
     item.latestKitchenStatus != null ||
     (isRestaurant &&
       (item.item_type === 'prepared' || (item.product_type === 'prepared' && !item.skip_kds)));
-  if (requiresKitchen && item.latestKitchenStatus !== 'ready') {
+  const physicalDeliverable =
+    item.kitchen_mode === 'physical' &&
+    (item.latestKitchenStatus === 'pending' ||
+      item.latestKitchenStatus === 'in_preparation');
+  if (
+    requiresKitchen &&
+    item.latestKitchenStatus !== 'ready' &&
+    !physicalDeliverable
+  ) {
     return { enabled: false, reason: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code };
   }
   return { enabled: true };

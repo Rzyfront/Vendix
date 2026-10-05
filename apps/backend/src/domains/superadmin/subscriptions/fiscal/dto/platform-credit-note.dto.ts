@@ -3,14 +3,19 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   MaxLength,
   Min,
   MinLength,
   ValidateNested,
+  registerDecorator,
+  ValidationOptions,
 } from 'class-validator';
 
+import { isDianUnitCode } from '../../../../store/invoicing/providers/dian-direct/constants/dian-unit-codes';
 import {
   DIAN_CREDIT_NOTE_CONCEPTS,
   DIAN_CREDIT_NOTE_CONCEPT_LABELS,
@@ -46,6 +51,17 @@ const debitMessage =
     .join(', ') +
   '.';
 
+function IsDianUnitCodeValue(options?: ValidationOptions) {
+  return (target: object, propertyName: string) =>
+    registerDecorator({
+      name: 'isDianUnitCodeValue',
+      target: target.constructor,
+      propertyName,
+      options,
+      validator: { validate: (value: unknown) => isDianUnitCode(value) },
+    });
+}
+
 /**
  * Línea opcional de la nota. La nota TOTAL (sólo motivo) NO lleva items.
  * Si trae, debe respetar la shape mínima que `InvoicingService.create` espera.
@@ -58,12 +74,25 @@ class PlatformNoteLineDto {
   })
   description!: string;
 
-  @IsInt({ message: 'quantity debe ser entero.' })
-  @Min(1, { message: 'quantity debe ser >= 1.' })
+  @IsNumber(
+    { maxDecimalPlaces: 6 },
+    { message: 'quantity debe ser un número con hasta 6 decimales.' },
+  )
+  @IsPositive({ message: 'quantity debe ser mayor que 0.' })
   quantity!: number;
 
   @IsOptional()
   unit_price?: number;
+
+  /** Unidad de medida DIAN (UN/ECE rec. 20). Default 'NIU'; el mes es 'LUN', nunca 'MON'. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(5)
+  @IsDianUnitCodeValue({
+    message:
+      'unit_code no es una unidad de medida DIAN válida (ej. "NIU", "KGM", "LUN" para mes; "MON" no existe).',
+  })
+  unit_code?: string;
 }
 
 /**

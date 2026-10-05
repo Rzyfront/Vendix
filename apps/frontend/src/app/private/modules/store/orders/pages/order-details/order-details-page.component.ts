@@ -76,7 +76,10 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
-import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import {
+  KitchenTicketsService,
+} from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
@@ -2283,6 +2286,7 @@ export class OrderDetailsPageComponent {
   // patch, or for online orders not auto-fireable, the operator can
   // dispatch them from this page).
   private kitchenTicketsService = inject(KitchenTicketsService);
+  protected readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private sanitizer = inject(DomSanitizer);
   // Carril B - B3: SSE del detalle. connect(orderId) en el init del page,
   // disconnect via DestroyRef cuando el componente se destruye. Un effect
@@ -4891,6 +4895,8 @@ export class OrderDetailsPageComponent {
    * clickear el badge "Cocina: <estado>" de un plato disparado a cocina.
    */
   openKdsTicket(ks: { kitchen_ticket_id?: number } | null): void {
+    // Cocina fisica: no hay pantalla KDS a la que navegar.
+    if (this.kitchenTicketPrint.isPhysicalKitchen()) return;
     if (!ks?.kitchen_ticket_id) return;
     void this.router.navigate(['/admin/restaurant-ops/kds'], {
       queryParams: { ticket: ks.kitchen_ticket_id },
@@ -4951,6 +4957,10 @@ export class OrderDetailsPageComponent {
           this.isFiringKitchen.set(false);
           this.clearKitchenSelection();
           this.toastService.success('Enviado a cocina');
+          // No-op en cocina virtual; en fisica imprime la comanda.
+          this.kitchenTicketPrint.printAfterFire(
+            res.kitchen_ticket_ids ?? [res.kitchen_ticket_id],
+          );
           if (res?.stock_warnings?.length) {
             this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
           }
@@ -5395,6 +5405,62 @@ export class OrderDetailsPageComponent {
           console.error('Deliver item failed', err);
         },
       });
+  }
+
+  /** Cocina fisica: items con estado de cocina no terminal, entregables a mano. */
+  readonly deliverableKitchenItems = computed<OrderItem[]>(() =>
+    (this.order()?.order_items ?? []).filter((it) => {
+      if (it.cancelled_at != null || it.delivered_at != null) return false;
+      const st = this.kitchenStateFor(it)?.status;
+      return st === 'pending' || st === 'in_preparation' || st === 'ready';
+    }),
+  );
+
+  readonly deliveringAll = signal(false);
+
+  /**
+   * Cocina fisica: entrega en secuencia cada plato con estado de cocina no
+   * terminal, reutilizando `deliverOrderItem` (misma llamada que `deliverItem`).
+   * Para en el primer error; un solo toast de exito y un solo refreshOrder.
+   */
+  async deliverAllKitchenItems(): Promise<void> {
+    const orderId = this.order()?.id;
+    const items = this.deliverableKitchenItems();
+    if (!orderId || items.length === 0 || this.deliveringAll()) return;
+    this.deliveringAll.set(true);
+    let delivered = 0;
+    try {
+      for (const item of items) {
+        await firstValueFrom(this.ordersFlowService.deliverOrderItem(orderId, item.id));
+        delivered++;
+      }
+      this.toastService.success(
+        delivered === 1 ? '1 plato entregado' : `${delivered} platos entregados`,
+      );
+    } catch (err: unknown) {
+      this.showDeliveryStockError(err, 'No se pudo marcar como entregado');
+      console.error('Deliver all failed', err);
+    } finally {
+      this.deliveringAll.set(false);
+      if (delivered > 0) this.refreshOrder();
+    }
+  }
+
+  /** Ids distintos de tickets de cocina no cancelados de la orden. */
+  readonly printableTicketIds = computed<number[]>(() => {
+    const ids = new Set<number>();
+    for (const it of this.order()?.order_items ?? []) {
+      for (const row of it.kitchen_ticket_items ?? []) {
+        if (row.status === 'cancelled' || row.kitchen_ticket?.status === 'cancelled') continue;
+        ids.add(row.kitchen_ticket_id);
+      }
+    }
+    return Array.from(ids);
+  });
+
+  /** Boton "Imprimir comanda" (solo cocina fisica). */
+  printKitchenTickets(): void {
+    this.kitchenTicketPrint.printTickets(this.printableTicketIds());
   }
 
   /** Keep every short line visible and offer the first product's inventory settings. */

@@ -93,6 +93,7 @@ import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
+import { KitchenTicketPrintService } from '../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../dispatch-ticket/models/dispatch-ticket-data.model';
 import {
@@ -1248,6 +1249,7 @@ export class PosComponent {
   protected restaurantIntegration = inject(PosRestaurantIntegrationService);
   // Phase D.3 — settings facade + payment catalog are read-only inputs here.
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private readonly paymentMethodsCatalogService = inject(
     PaymentMethodsCatalogService,
   );
@@ -2269,6 +2271,9 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                this.kitchenTicketPrint.printAfterFire(
+                  fireResult.kitchen_ticket_ids ?? [fireResult.kitchen_ticket_id],
+                );
                 if (fireResult.stock_warnings?.length) {
                   this.toastService.warning(
                     formatStockWarningSummary(fireResult.stock_warnings),
@@ -2373,6 +2378,9 @@ export class PosComponent {
                 this.loading.set(false);
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
+                );
+                this.kitchenTicketPrint.printAfterFire(
+                  fireResult.kitchen_ticket_ids ?? [fireResult.kitchen_ticket_id],
                 );
                 if (fireResult.stock_warnings?.length) {
                   this.toastService.warning(
@@ -2862,6 +2870,10 @@ export class PosComponent {
       if (fireInfo && Number(fireInfo.fired_count) > 0) {
         this.toastService.success(
           `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
+        );
+        this.kitchenTicketPrint.printAfterFire(
+          fireInfo.kitchen_ticket_ids ??
+            (fireInfo.kitchen_ticket_id != null ? [fireInfo.kitchen_ticket_id] : []),
         );
       }
 
@@ -3832,6 +3844,10 @@ export class PosComponent {
       if (fireInfo && Number(fireInfo.fired_count) > 0) {
         this.toastService.success(
           `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
+        );
+        this.kitchenTicketPrint.printAfterFire(
+          fireInfo.kitchen_ticket_ids ??
+            (fireInfo.kitchen_ticket_id != null ? [fireInfo.kitchen_ticket_id] : []),
         );
       }
 

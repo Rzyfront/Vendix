@@ -1024,7 +1024,7 @@ export class PlatformProfileEditorComponent {
     this.modelLines.push(this.fb.group({
       description: [data?.['description'] ?? ''],
       quantity: [data?.['quantity'] ?? 1],
-      unit_code: [data?.['unit_code'] ?? '94'],
+      unit_code: [data?.['unit_code'] ?? 'NIU'],
       unit_price: [data?.['unit_price'] ?? 0],
       bucket: [data?.['bucket'] ?? 'administracion'],
     }));
@@ -1104,7 +1104,7 @@ export class PlatformProfileEditorComponent {
       model_lines: (v.model_lines ?? []).map((l: Record<string, unknown>) => ({
         description: l['description'] ?? '',
         quantity: l['quantity'] ?? 1,
-        unit_code: l['unit_code'] ?? '94',
+        unit_code: l['unit_code'] ?? 'NIU',
         unit_price: l['unit_price'] ?? 0,
         bucket: l['bucket'] ?? 'administracion',
       })),

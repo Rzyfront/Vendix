@@ -21,6 +21,7 @@ import { OrderHistoryService } from '../orders/order-history/order-history.servi
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { AuditResource } from '../../../common/audit/audit.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { resolveKitchenMode } from './kitchen-mode.util';
 
 /**
  * Puerto mínimo de OrderFlowService que necesita cocina para mantener
@@ -1234,6 +1235,9 @@ export class KitchenFireService {
 
     // Orden estable por kds_id: hace el resultado determinista entre corridas
     // y deja el ticket "primario" (el primero) siempre en la misma estacion.
+    // Modo cocina fisico: sin tablero, el ticket nace en preparacion.
+    const kitchenMode = await resolveKitchenMode(tx, store_id);
+    const bornStatus = kitchenMode === 'physical' ? 'in_preparation' : 'pending';
     for (const kdsId of [...snapshotsByKds.keys()].sort((a, b) => a - b)) {
       const snaps = snapshotsByKds.get(kdsId)!;
 
@@ -1260,7 +1264,7 @@ export class KitchenFireService {
           // (mostrador / delivery); el ticket no se rompe, solo pierde el dato.
           table_id: order.table_id ?? null,
           kds_id: kdsId,
-          status: 'pending',
+          status: bornStatus,
           daily_number: sameDayCount + 1,
           business_date: businessDateAsDate,
           fired_at: new Date(),
@@ -1269,7 +1273,7 @@ export class KitchenFireService {
               order_item_id: snap.orderItemId,
               product_id: snap.productId,
               quantity: snap.quantity,
-              status: 'pending',
+              status: bornStatus,
               // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja al ticket de
               // cocina. NULL para producto sin variantes (ticket idéntico al de
               // hoy). `variant_label` es un snapshot inmutable: no se re-etiqueta
@@ -1856,6 +1860,11 @@ export class KitchenFireService {
           await this.cancelTicketInTx(tx, oldTicketId);
         }
 
+        // Modo cocina fisico: el ticket reenviado nace en preparacion.
+        const kitchenMode = await resolveKitchenMode(tx, store_id);
+        const bornStatus =
+          kitchenMode === 'physical' ? 'in_preparation' : 'pending';
+
         // Orden estable por kds_id: mismo shape que el fire normal.
         for (const kdsId of [...snapshotsByKds.keys()].sort((a, b) => a - b)) {
           const snaps = snapshotsByKds.get(kdsId)!;
@@ -1881,7 +1890,7 @@ export class KitchenFireService {
               // del pedido original, no del ticket anterior.
               table_id: order.table_sessions?.[0]?.table_id ?? null,
               kds_id: kdsId,
-              status: 'pending',
+              status: bornStatus,
               daily_number: sameDayCount + 1,
               business_date: businessDateAsDate,
               fired_at: new Date(),
@@ -1890,7 +1899,7 @@ export class KitchenFireService {
                   order_item_id: snap.orderItemId,
                   product_id: snap.productId,
                   quantity: snap.quantity,
-                  status: 'pending',
+                  status: bornStatus,
                   // El snapshot del variant_label viaja igual que en el
                   // fire normal — inmutable a cambios posteriores del
                   // nombre de la variante.
@@ -3044,7 +3053,10 @@ export class KitchenFireService {
         },
       );
     }
-    if (ticket.status === 'pending') {
+    // Modo cocina fisico: no hay tablero que marque `ready`; se entrega a mano
+    // desde pending/in_preparation. Virtual: identico a siempre.
+    const kitchenMode = await resolveKitchenMode(this.prisma, store_id);
+    if (ticket.status === 'pending' && kitchenMode !== 'physical') {
       // The operator-visible "Marcar entregado" button should NEVER be
       // enabled for pending items. If it fires (race, stale UI, devtools)
       // we surface a specific message that points at the KDS board.
@@ -3096,7 +3108,10 @@ export class KitchenFireService {
     }
     // ticket.status is `ready` or `in_preparation` — both valid.
     // If still in_preparation, bump to ready first (sets ready_at).
-    if (ticket.status === 'in_preparation') {
+    if (
+      ticket.status === 'in_preparation' ||
+      (ticket.status === 'pending' && kitchenMode === 'physical')
+    ) {
       await this.prisma.kitchen_tickets.update({
         where: { id: ticketId },
         data: { status: 'ready', ready_at: new Date(), updated_at: new Date() },

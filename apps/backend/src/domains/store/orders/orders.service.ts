@@ -1,4 +1,5 @@
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
+import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
@@ -1742,6 +1743,12 @@ export class OrdersService {
     const orderHasSettledPayment = (order.payments ?? []).some((p: any) =>
       SETTLED_PAYMENT_STATES.has(p.state),
     );
+    // Modo cocina: UNA lectura por orden (no por item). Solo gobierna la
+    // elegibilidad de `deliver` (fisico: sin KDS, entregable desde pending).
+    const kitchenMode = await resolveKitchenMode(
+      this.prisma,
+      (order as any).store_id,
+    );
     const orderItemsWithActions = (order.order_items ?? []).map((item: any) => ({
       ...item,
       available_actions: computeItemActions({
@@ -1753,6 +1760,7 @@ export class OrdersService {
         cancelled_at: item.cancelled_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
+        kitchen_mode: kitchenMode,
       }),
     }));
 

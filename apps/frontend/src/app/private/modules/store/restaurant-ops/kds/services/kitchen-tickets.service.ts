@@ -19,6 +19,8 @@ import {
 /** Result of `POST /store/kitchen-fire` (fire-to-kitchen). */
 export interface FireOrderItemsResult {
   kitchen_ticket_id: number;
+  /** One ticket per KDS station; primary first. */
+  kitchen_ticket_ids?: number[];
   cogs_total: number;
   order_id: number;
   ticket?: KitchenTicket;

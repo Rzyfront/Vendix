@@ -4,8 +4,10 @@ import {
   DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
@@ -17,10 +19,10 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { Observable, firstValueFrom, of } from 'rxjs';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { catchError, map, startWith } from 'rxjs/operators';
+import { catchError, debounceTime, distinctUntilChanged, map, startWith, switchMap } from 'rxjs/operators';
 
 import { environment } from '../../../../../../../../environments/environment';
 import {
@@ -52,6 +54,7 @@ import type { InvoiceResolution } from '../../../../../store/invoicing/interface
 import { PlatformSectionWrapperComponent } from '../../components/platform-section-wrapper/platform-section-wrapper.component';
 import {
   DivisaSectionPaths,
+  DocumentoSectionErrors,
   DocumentoSectionPaths,
   InvoiceSectionDivisaComponent,
   InvoiceSectionDocumentoComponent,
@@ -75,12 +78,10 @@ import { TenantPickerComponent } from '../../components/tenant-picker/tenant-pic
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import type {
-  PlatformProfilePreviewResult,
   PlatformResolution,
-  PreviewPlatformProfilePayload,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { PlatformAcquirer } from '../../state';
-import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 /**
  * Cálculo estándar DIAN del Dígito de Verificación (Módulo 11).
@@ -156,6 +157,45 @@ interface LineSeed {
   unit_price: number;
   discount_amount: number;
   unit_code: string;
+}
+
+/** Redondeo a 2 decimales: el DTO exige `@IsNumber({ maxDecimalPlaces: 2 })`. */
+function roundMoney(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+/**
+ * Sólo deja viajar fechas `YYYY-MM-DD`: cualquier otra cosa falla
+ * `@IsISO8601()` con 400, y sin ella el backend usa su default.
+ */
+function isoDateOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value) ? value : undefined;
+}
+
+/**
+ * Respuesta de `POST superadmin/subscriptions/fiscal/sales-invoices/preview`:
+ * totales calculados por el MISMO motor con que se firma (fuente de verdad).
+ * Los importes viajan como cadenas DIAN ("1234.56").
+ */
+interface PlatformInvoiceTotalsPreview {
+  lines: Array<{
+    position: number;
+    description: string;
+    quantity: string;
+    unit_price: string;
+    discount_amount: string;
+    base: string;
+    tax_amount: string;
+    total: string;
+  }>;
+  subtotal: string;
+  discount_total: string;
+  tax_total: string;
+  tax_breakdown: Array<{ tax_type: string; rate: number; base: string; amount: string }>;
+  withholdings_total: string;
+  total: string;
+  payable: string;
+  net_after_withholdings: string;
 }
 
 @Component({
@@ -245,7 +285,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     ],
     payment_form: ['1', Validators.required],
     payment_means_code: ['10'],
-    issue_date: [formatDateOnlyUTC(new Date())],
+    issue_date: [toLocalDateString()],
     due_date: [''],
     notes: [''],
 
@@ -273,7 +313,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     declare_foreign: [false],
     foreign_currency_code: ['USD'],
     exchange_rate: [null as number | null],
-    exchange_rate_date: [formatDateOnlyUTC(new Date())],
+    exchange_rate_date: [toLocalDateString()],
 
     // Guardar como perfil
     save_as_profile_enabled: [false],
@@ -350,8 +390,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   );
 
   readonly withholdingRoleOptions: SelectorOption[] = [
-    { value: 'practiced', label: 'Practicada (la retiene el cliente)' },
-    { value: 'suffered', label: 'Sufrida (nos la retienen)' },
+    { value: 'suffered', label: 'Sufrida (la retiene el cliente)' },
+    { value: 'practiced', label: 'Practicada (la practicamos nosotros)' },
     { value: 'self', label: 'Autorretención' },
   ];
 
@@ -430,6 +470,25 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       totalTax += line.taxAmount;
     }
 
+    // El backend es la fuente de verdad: si su cálculo (mismo motor que firma)
+    // difiere del local, se muestra el del backend.
+    const server = this.backendPreview();
+    if (server) {
+      const serverBase = Number(server.subtotal);
+      const serverTax = Number(server.tax_total);
+      const serverTotal = Number(server.total);
+      const serverWithheld = Number(server.withholdings_total);
+      return {
+        grossSubtotal,
+        totalDiscount,
+        taxableBase: serverBase,
+        totalIva: serverTax,
+        total: serverTotal,
+        totalWithheld: serverWithheld,
+        netPayable: serverTotal - serverWithheld,
+      };
+    }
+
     const total = taxableBase + totalTax;
 
     return {
@@ -490,6 +549,31 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   readonly totalWithheld = computed(() =>
     this.withholdingAmounts().reduce((acc, amount) => acc + amount, 0),
   );
+
+  /**
+   * Mantiene la base de cada retención alineada con la base gravable.
+   *
+   * Un perfil aplica sus retenciones antes (o en el mismo tick) que sus líneas
+   * modelo: la fila nacía con base 0 y la retención calculaba 0. Cuando la base
+   * gravable cambia se reescribe la base de las filas que siguen en 0 o que
+   * todavía llevan el último valor automático; una base editada a mano se
+   * respeta.
+   */
+  private lastAutoWithholdingBase = 0;
+  private readonly syncWithholdingBase = effect(() => {
+    const base = roundMoney(this.totals().taxableBase);
+    untracked(() => {
+      const prev = this.lastAutoWithholdingBase;
+      if (base === prev) return;
+      for (const row of this.withholdingsArray.controls) {
+        const ctrl = row.get('base');
+        if (!ctrl) continue;
+        const current = Number(ctrl.value) || 0;
+        if (current === 0 || roundMoney(current) === prev) ctrl.setValue(base);
+      }
+      this.lastAutoWithholdingBase = base;
+    });
+  });
 
   // ── Paths para las secciones compartidas ────────────────────────
   readonly documentoSectionPaths: DocumentoSectionPaths = {
@@ -737,9 +821,64 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       if (unitPrice?.invalid && unitPrice.touched) {
         errors.unit_price = 'El precio no puede ser negativo.';
       }
+      // Sin `touched`: el descuento mayor al bruto es un error de negocio que
+      // debe verse al instante y que además bloquea el envío.
+      if (this.discountExceedsGross(row.getRawValue())) {
+        errors.discount_amount =
+          'El descuento no puede ser mayor que el valor bruto de la línea (cantidad × precio).';
+      }
       return errors;
     }),
   );
+
+  private discountExceedsGross(item: any): boolean {
+    const gross = (Number(item?.quantity) || 0) * (Number(item?.unit_price) || 0);
+    const discount = Number(item?.discount_amount) || 0;
+    return discount > 0 && roundMoney(discount) > roundMoney(gross);
+  }
+
+  /**
+   * Errores de fechas/forma de pago de la sección Documento. Las fechas son
+   * cadenas `YYYY-MM-DD`: se comparan como texto, sin pasar por `Date`, para no
+   * correr el día por la zona horaria.
+   */
+  readonly documentoErrors = computed<DocumentoSectionErrors>(() => {
+    const val = this.rawValue();
+    const errors: DocumentoSectionErrors = {};
+    if (val['payment_form'] === '2') {
+      const due = isoDateOrUndefined(val['due_date'])?.slice(0, 10);
+      const issue = isoDateOrUndefined(val['issue_date'])?.slice(0, 10);
+      if (!due) {
+        errors.due_date = 'La fecha de vencimiento es obligatoria a crédito.';
+      } else if (issue && due < issue) {
+        errors.due_date =
+          'El vencimiento no puede ser anterior a la fecha de emisión.';
+      }
+    }
+    return errors;
+  });
+
+  /** Motivos que impiden emitir, independientes de si el campo fue tocado. */
+  readonly blockingIssues = computed<string[]>(() => {
+    const issues: string[] = [];
+    const val = this.rawValue();
+    const items = (val['items'] || []) as any[];
+    items.forEach((item, i) => {
+      if (this.discountExceedsGross(item)) {
+        issues.push(`Línea ${i + 1}: el descuento supera el valor bruto de la línea.`);
+      }
+    });
+    if (val['payment_form'] === '2') {
+      const due = isoDateOrUndefined(val['due_date'])?.slice(0, 10);
+      const issue = isoDateOrUndefined(val['issue_date'])?.slice(0, 10);
+      if (!due) {
+        issues.push('A crédito debes indicar la fecha de vencimiento.');
+      } else if (issue && due < issue) {
+        issues.push('El vencimiento no puede ser anterior a la fecha de emisión.');
+      }
+    }
+    return issues;
+  });
 
   /** Resumen por fila que pinta la sección compartida bajo cada renglón. */
   readonly lineasRowSummaries = computed<string[]>(() =>
@@ -1093,7 +1232,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     this.withholdingsArray.push(
       this.fb.group({
         concept_id: [null as number | null, Validators.required],
-        role: ['practiced', Validators.required],
+        role: ['suffered', Validators.required],
         rate: [
           0,
           [Validators.required, Validators.min(0), Validators.max(100)],
@@ -1242,7 +1381,12 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       this.withholdingsArray.push(
         this.fb.group({
           concept_id: [conceptId, Validators.required],
-          role: [String(w['role'] ?? 'practiced'), Validators.required],
+          // Los perfiles guardados con la etiqueta vieja («practicada = la
+          // retiene el cliente») significaban `suffered` en una venta.
+          role: [
+            w['role'] === 'self' ? 'self' : 'suffered',
+            Validators.required,
+          ],
           rate: [
             Number(w['rate']) || 0,
             [Validators.required, Validators.min(0), Validators.max(100)],
@@ -1315,90 +1459,101 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   // ── Previsualizar & Emitir ──────────────────────────────────────
   readonly printPreviewOpen = signal(false);
   readonly printPreviewLoading = signal(false);
-  // Paso 7 del plan AIU: tipado fuerte —el `any` impedía que el compilador
-  // viera que el contrato nunca declaró `html`, que es justo lo que rompió
-  // este modal (iframe en blanco). El próximo desajuste falla al compilar.
-  readonly printPreviewResult = signal<PlatformProfilePreviewResult | null>(null);
   readonly printPreviewError = signal('');
-  readonly printPreviewSrcdoc = computed(() => this.printPreviewResult()?.html || '');
+
+  /** Último cálculo del backend para lo capturado en el formulario. */
+  readonly backendPreview = signal<PlatformInvoiceTotalsPreview | null>(null);
+  /** Error (400) del cálculo en vivo; vacío si el último cálculo fue válido. */
+  readonly backendPreviewError = signal('');
+
+  private readonly previewUrl = `${environment.apiUrl}/superadmin/subscriptions/fiscal/sales-invoices/preview`;
 
   /**
-   * Payload de la MUESTRA. No es el de emisión.
-   *
-   * El endpoint de previsualización valida `PreviewProfileDto` bajo
-   * `forbidNonWhitelisted: true`: mandarle el DTO de la factura devolvía un
-   * 400 en TODAS las previsualizaciones, y el modal lo pintaba como «no se
-   * pudo generar» sin decir por qué.
-   *
-   * `bucket: 'costo'` es lo correcto para una factura estándar — el servicio lo
-   * traduce a `aiu_component: null`, que es exactamente «esta línea no hace
-   * parte de una base AIU».
+   * Payload de la previsualización: lo CAPTURADO (líneas, descuentos,
+   * impuestos, retenciones, fechas, moneda). Es el mismo DTO de la emisión,
+   * sin cliente ni perfil: el cálculo de totales no los necesita y el
+   * formulario puede estar a medias. No muestra toasts.
    */
-  private buildPreviewPayload(): PreviewPlatformProfilePayload {
+  private buildPreviewPayload(): any | null {
     const val = this.rawValue();
-    const items = (val['items'] || []) as any[];
+    if (!val['items'] || val['items'].length === 0) return null;
 
-    const payload: PreviewPlatformProfilePayload = {
-      // Paso 7 del plan AIU: pide el `html` que alimenta el `iframe`.
-      include_render: true,
-      issue_date: val['issue_date'] || undefined,
-      lines: items.map((i) => ({
-        bucket: 'costo',
-        description: i.description || undefined,
-        quantity: Number(i.quantity) || 1,
-        unit_price: Number(i.unit_price) || 0,
-        discount_amount: Number(i.discount_amount) || 0,
-        unit_code: i.unit_code || DEFAULT_UNIT_CODE,
-      })),
+    const dto: any = {
+      items: this.buildItemsPayload(val),
+      operation_type: PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD,
+      payment_form: val['payment_form'] || '1',
+      issue_date: isoDateOrUndefined(val['issue_date']),
     };
-
-    if (this.acquirerMode() === 'external' && val['external_legal_name']?.trim()) {
-      payload.customer = {
-        legal_name: val['external_legal_name'].trim(),
-        document_number: val['external_tax_id']?.trim() || undefined,
-        document_type: val['external_document_type'] || undefined,
-      };
-    } else {
-      const tenant = val['customer_tenant'] as PlatformAcquirer | null;
-      if (tenant) {
-        payload.customer = {
-          legal_name: tenant.legal_name || tenant.name || undefined,
-          document_number: tenant.tax_id || undefined,
-          document_type: '31',
-        };
-      }
+    if (val['payment_form'] === '2' && isoDateOrUndefined(val['due_date'])) {
+      dto.due_date = isoDateOrUndefined(val['due_date']);
     }
-
-    return payload;
+    const withholdings = this.buildWithholdingsPayload(val);
+    if (withholdings.length > 0) dto.withholdings = withholdings;
+    if (val['declare_foreign'] && val['foreign_currency_code']) {
+      dto.currency = {
+        iso_4217: val['foreign_currency_code'],
+        exchange_rate: val['exchange_rate'] ? Number(val['exchange_rate']) : undefined,
+        exchange_rate_date: isoDateOrUndefined(val['exchange_rate_date']),
+      };
+    }
+    return dto;
   }
 
-  openPrintPreview(): void {
-    const profileId =
-      this.invoiceForm.value.profile_id ??
-      this.store.profiles().find((p) => p.is_default)?.id ??
-      this.profilesForOperationType()[0]?.id ??
-      null;
+  private requestPreview(payload: any): Observable<PlatformInvoiceTotalsPreview> {
+    return this.http
+      .post<{ data: PlatformInvoiceTotalsPreview }>(this.previewUrl, payload)
+      .pipe(map((res) => res.data));
+  }
 
-    if (!profileId) {
-      this.printPreviewError.set(
-        'No hay ningún perfil de facturación estándar configurado. Crea uno para poder previsualizar el documento.',
-      );
-      this.printPreviewResult.set(null);
-      this.printPreviewOpen.set(true);
+  /**
+   * Recalculo en vivo con debounce: cada cambio del formulario cancela la
+   * petición anterior (`switchMap`) y se limpia con el ciclo de vida.
+   */
+  private readonly livePreviewSub = toObservable(
+    computed(() => JSON.stringify(this.buildPreviewPayload())),
+  )
+    .pipe(
+      debounceTime(500),
+      distinctUntilChanged(),
+      switchMap((json) => {
+        if (!json || json === 'null') return of({ ok: true as const, data: null });
+        return this.requestPreview(JSON.parse(json)).pipe(
+          map((data) => ({ ok: true as const, data })),
+          catchError((error: unknown) =>
+            of({ ok: false as const, message: this.describeError(error, 'calcular') }),
+          ),
+        );
+      }),
+      takeUntilDestroyed(this.destroyRef),
+    )
+    .subscribe((r) => {
+      if (r.ok) {
+        this.backendPreview.set(r.data);
+        this.backendPreviewError.set('');
+      } else {
+        this.backendPreview.set(null);
+        this.backendPreviewError.set(r.message);
+      }
+    });
+
+  openPrintPreview(): void {
+    const payload = this.buildPreviewPayload();
+    this.printPreviewOpen.set(true);
+    this.previewBlockers.set([]);
+    if (!payload) {
+      this.printPreviewError.set('Agrega al menos una línea para previsualizar los totales.');
       return;
     }
 
     this.printPreviewLoading.set(true);
-    this.printPreviewOpen.set(true);
     this.printPreviewError.set('');
-    this.previewBlockers.set([]);
 
-    this.store
-      .previewProfile(profileId, this.buildPreviewPayload())
+    this.requestPreview(payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.printPreviewResult.set(res);
+          this.backendPreview.set(res);
+          this.backendPreviewError.set('');
           this.printPreviewLoading.set(false);
         },
         error: (error: unknown) => {
@@ -1412,7 +1567,6 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   closePrintPreview(open: boolean): void {
     this.printPreviewOpen.set(open);
     if (!open) {
-      this.printPreviewResult.set(null);
       this.printPreviewError.set('');
       this.previewBlockers.set([]);
     }
@@ -1433,12 +1587,57 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   private describeError(error: unknown, action: string): string {
     if (error instanceof HttpErrorResponse) {
       const body = error.error;
+      // «Validation failed» a secas oculta la causa: el filtro global deja los
+      // textos de class-validator en `details.validationErrors`.
+      // `parseApiError` los excluye a propósito, así que se leen aquí.
+      const validationErrors = (parseApiError(error).details as any)?.validationErrors;
+      if (Array.isArray(validationErrors)) {
+        const texts = validationErrors.filter(
+          (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0,
+        );
+        if (texts.length) return texts.join(' · ');
+      }
       const message = body?.message ?? body?.error ?? error.message;
       if (Array.isArray(message)) return message.join(' · ');
       if (typeof message === 'string' && message.trim()) return message;
     }
     if (error instanceof Error && error.message) return error.message;
     return `No se pudo ${action} el documento.`;
+  }
+
+  private buildItemsPayload(val: Record<string, any>): any[] {
+    return (val['items'] as any[]).map((i) => {
+      const financials = this.lineFinancials(i);
+      return {
+        description: i.description,
+        quantity: +i.quantity,
+        unit_price: +i.unit_price,
+        unit_code: i.unit_code || DEFAULT_UNIT_CODE,
+        discount_amount: roundMoney(+i.discount_amount || 0),
+        account_code: i.account_code?.trim() || undefined,
+        // ÚNICO punto de conversión porcentaje → fracción 0–1, que es lo que
+        // valida `MvpV1InvoiceLineTaxDto` (`@Min(0) @Max(1)`).
+        taxes: ((i.taxes || []) as LineTaxSelection[]).map((t, taxIndex) => ({
+          tax_type: (t.tax_type || 'IVA').toUpperCase(),
+          rate: (Number(t.rate) || 0) / 100,
+          is_inclusive: Boolean(t.is_inclusive),
+          taxable_amount: roundMoney(financials.base),
+          tax_amount: roundMoney(financials.taxes[taxIndex]?.amount ?? 0),
+        })),
+      };
+    });
+  }
+
+  private buildWithholdingsPayload(val: Record<string, any>): any[] {
+    return (val['withholdings'] as any[])
+      .filter((w) => w?.concept_id)
+      .map((w, index) => ({
+        role: w.role || 'suffered',
+        concept_id: Number(w.concept_id),
+        base_amount: roundMoney(Number(w.base) || 0),
+        rate: (Number(w.rate) || 0) / 100,
+        amount: roundMoney(this.withholdingAmounts()[index] ?? 0),
+      }));
   }
 
   buildPayload(): any | null {
@@ -1525,37 +1724,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       };
     }
 
-    const items = (val['items'] as any[]).map((i) => {
-      const financials = this.lineFinancials(i);
-      return {
-        description: i.description,
-        quantity: +i.quantity,
-        unit_price: +i.unit_price,
-        unit_code: i.unit_code || DEFAULT_UNIT_CODE,
-        discount_amount: +i.discount_amount || 0,
-        account_code: i.account_code?.trim() || undefined,
-        // ÚNICO punto de conversión porcentaje → fracción 0–1, que es lo que
-        // valida `MvpV1InvoiceLineTaxDto` (`@Min(0) @Max(1)`).
-        taxes: ((i.taxes || []) as LineTaxSelection[]).map((t, taxIndex) => ({
-          tax_type: (t.tax_type || 'IVA').toUpperCase(),
-          rate: (Number(t.rate) || 0) / 100,
-          is_inclusive: Boolean(t.is_inclusive),
-          taxable_amount: Math.round(financials.base * 100) / 100,
-          tax_amount:
-            Math.round((financials.taxes[taxIndex]?.amount ?? 0) * 100) / 100,
-        })),
-      };
-    });
-
-    const withholdings = (val['withholdings'] as any[])
-      .filter((w) => w?.concept_id)
-      .map((w, index) => ({
-        role: w.role || 'practiced',
-        concept_id: Number(w.concept_id),
-        base_amount: Math.round((Number(w.base) || 0) * 100) / 100,
-        rate: (Number(w.rate) || 0) / 100,
-        amount: Math.round((this.withholdingAmounts()[index] ?? 0) * 100) / 100,
-      }));
+    const items = this.buildItemsPayload(val);
+    const withholdings = this.buildWithholdingsPayload(val);
 
     const dto: any = {
       profile_id: val['profile_id'] || undefined,
@@ -1565,15 +1735,15 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       operation_type: PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD,
       payment_form: val['payment_form'] || '1',
       payment_means_code: val['payment_means_code'] || '10',
-      issue_date: val['issue_date'] || undefined,
+      issue_date: isoDateOrUndefined(val['issue_date']),
       notes: val['notes']?.trim() || undefined,
       counterpart_account_code: val['counterpart_account_code']?.trim() || undefined,
     };
 
     // `due_date` sólo viaja si de verdad hay una fecha: la cadena vacía falla
     // `@IsISO8601()` y devolvía un 400 en toda factura a crédito.
-    if (val['payment_form'] === '2' && val['due_date']) {
-      dto.due_date = val['due_date'];
+    if (val['payment_form'] === '2' && isoDateOrUndefined(val['due_date'])) {
+      dto.due_date = isoDateOrUndefined(val['due_date']);
     }
 
     if (withholdings.length > 0) {
@@ -1584,7 +1754,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       dto.currency = {
         iso_4217: val['foreign_currency_code'],
         exchange_rate: val['exchange_rate'] ? Number(val['exchange_rate']) : undefined,
-        exchange_rate_date: val['exchange_rate_date'] || undefined,
+        exchange_rate_date: isoDateOrUndefined(val['exchange_rate_date']),
       };
     }
 
@@ -1599,6 +1769,9 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
+    // Guarda de doble clic: el botón se deshabilita con `submitting`, pero un
+    // segundo clic puede entrar antes de que la plantilla se repinte.
+    if (this.submitting()) return;
     // Antes se emitía sin mirar la validez: el selector de resolución era
     // `Validators.required` y aun así se podía disparar el POST sin ninguna.
     this.invoiceForm.markAllAsTouched();
@@ -1611,10 +1784,21 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       return;
     }
 
-    const dto = this.buildPayload();
-    if (!dto) return;
+    const blocking = this.blockingIssues();
+    if (blocking.length > 0) {
+      this.issueBlockers.set([]);
+      this.errorMessage.set(blocking.join(' '));
+      this.toast.error(blocking[0]);
+      return;
+    }
 
+    // Se marca ANTES de armar el payload y de disparar el POST.
     this.submitting.set(true);
+    const dto = this.buildPayload();
+    if (!dto) {
+      this.submitting.set(false);
+      return;
+    }
     this.errorMessage.set('');
     this.issueBlockers.set([]);
 
@@ -1624,13 +1808,37 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       const res = await firstValueFrom(
         this.http.post<{
           success: boolean;
-          data: { invoice_id: number; fiscal_number: string };
+          data: {
+            invoice_id: number;
+            fiscal_number: string;
+            transmission_status?: string;
+            dian_status?: string;
+          };
         }>(url, dto),
       );
       if (res.success && res.data?.invoice_id) {
-        this.toast.success(
-          `Factura ${res.data.fiscal_number || ''} emitida exitosamente. Redirigiendo al detalle...`,
-        );
+        const number = res.data.fiscal_number || '';
+        const status = res.data.transmission_status;
+        const dianStatus = res.data.dian_status;
+        if (status === 'rejected' || dianStatus === 'rejected') {
+          this.toast.error(
+            `La factura ${number} fue rechazada por la DIAN. Revisa el detalle.`,
+            'Factura rechazada',
+          );
+        } else if (status === 'error' || dianStatus === 'error') {
+          this.toast.error(
+            `La factura ${number} se creó pero la transmisión falló. Revisa el detalle.`,
+            'Error de transmisión',
+          );
+        } else if (status === 'accepted') {
+          this.toast.success(`Factura ${number} emitida y aceptada por la DIAN.`);
+        } else {
+          this.toast.warning(
+            `Factura ${number} creada; la DIAN aún no la ha aceptado (estado: ${status ?? 'pendiente'}). Redirigiendo al detalle...`,
+            'Pendiente de aceptación',
+            6000,
+          );
+        }
         // `invoice_id` es un `fiscal_transmissions.id`, NO un
         // `subscription_invoices.id`: la ruta `invoices/:id` resuelve la
         // secuencia de suscripciones y mostraba el documento equivocado.

@@ -324,6 +324,39 @@ describe('order-action-policy — canDeliverItem (B1b)', () => {
     });
   });
 
+  describe('kitchen_mode', () => {
+    it.each(['pending', 'in_preparation'])(
+      'physical + %s => enabled',
+      (latestKitchenStatus) =>
+        expect(
+          canDeliverItem(item({ kitchen_mode: 'physical', item_type: 'prepared', latestKitchenStatus })),
+        ).toEqual({ enabled: true }),
+    );
+
+    it.each(['pending', 'in_preparation'])('virtual + %s => disabled', (latestKitchenStatus) =>
+      expect(
+        canDeliverItem(item({ kitchen_mode: 'virtual', item_type: 'prepared', latestKitchenStatus })),
+      ).toEqual({ enabled: false, reason: ITEM_NOT_DELIVERABLE }),
+    );
+
+    it('ausente + in_preparation => disabled (igual que hoy)', () =>
+      expect(canDeliverItem(item({ item_type: 'prepared', latestKitchenStatus: 'in_preparation' }))).toEqual({
+        enabled: false,
+        reason: ITEM_NOT_DELIVERABLE,
+      }));
+
+    it('physical + estado de cocina terminal cancelled => sigue bloqueado', () =>
+      expect(
+        canDeliverItem(item({ kitchen_mode: 'physical', item_type: 'prepared', latestKitchenStatus: 'cancelled' })),
+      ).toEqual({ enabled: false, reason: ITEM_NOT_DELIVERABLE }));
+
+    it('physical + sin ticket de cocina => igual que hoy (prepared exige cocina)', () =>
+      expect(canDeliverItem(item({ kitchen_mode: 'physical', item_type: 'prepared' }))).toEqual({
+        enabled: false,
+        reason: ITEM_NOT_DELIVERABLE,
+      }));
+  });
+
   it('allows a prepared item once ready', () => {
     expect(canDeliverItem(item({ item_type: 'prepared', latestKitchenStatus: 'ready' }))).toEqual({
       enabled: true,

@@ -91,6 +91,7 @@ import { SellableStockAllocator } from '../../inventory/shared/services/sellable
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
+import { resolveKitchenMode } from '../../kitchen-fire/kitchen-mode.util';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 import { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
 import { ShippingCalculatorService } from '../../shipping/shipping-calculator.service';
@@ -4557,7 +4558,13 @@ export class OrderFlowService {
       // 3. The same item policy used by order detail gates the write. Do not
       // check item_type alone: prepared products persist as `physical` items.
       const kitchenStatus = item.kitchen_ticket_items[0]?.status ?? null;
+      // Modo cocina fisico: sin KDS, se entrega desde pending/in_preparation.
+      const kitchenMode = await resolveKitchenMode(
+        this.prisma,
+        (order as any).store_id,
+      );
       const kitchenGate = canDeliverItem({
+        kitchen_mode: kitchenMode,
         order_state: order.state,
         item_type: item.item_type,
         product_type: item.products?.product_type,
@@ -4717,9 +4724,19 @@ export class OrderFlowService {
       // The waiter may hand off only a ready dish. A delivered remisión is
       // different: the customer already received the order, so the order-side
       // delivery fact wins even if KDS still says pending/in_preparation.
+      // Modo cocina fisico: no hay tablero que marque `ready`; una fila
+      // pending/in_preparation se cierra saltando `ready` (como fromDispatch)
+      // pero SIN perder el puente all-delivered. Una fila cancelled no se toca.
+      const physicalSkipsReady =
+        !options.fromDispatch &&
+        (latest.status === 'pending' || latest.status === 'in_preparation') &&
+        storeId != null &&
+        (await resolveKitchenMode(this.prisma, storeId)) === 'physical';
       if (
         latest.status === 'delivered' ||
-        (!options.fromDispatch && latest.status !== 'ready')
+        (!options.fromDispatch &&
+          !physicalSkipsReady &&
+          latest.status !== 'ready')
       ) {
         return;
       }

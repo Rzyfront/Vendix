@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '../../../../common/responses/response.module';
 import { S3Module } from '../../../../common/services/s3.module';
+import { EmailModule } from '../../../../email/email.module';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { BullModule } from '@nestjs/bullmq';
@@ -66,6 +67,7 @@ import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
     PrismaModule,
     ResponseModule,
     S3Module,
+    EmailModule,
     DianDirectModule,
     BullModule.registerQueue({ name: 'dian-test-set' }),
     // InvoicingModule provee los servicios de aritmetica/validator/UBL

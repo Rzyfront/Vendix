@@ -27,6 +27,7 @@ import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.ty
 import { S3Service } from '@common/services/s3.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
+import { normalizeKitchenMode } from '../../store/kitchen-fire/kitchen-mode.util';
 // C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — mismo resolvedor que
 // usan los providers del gateway de impresión para las superficies
 // `@OptionalAuth` (sin usuario del que leer el estado fiscal).
@@ -313,7 +314,12 @@ export class EcommerceTablesService {
 
     return {
       behavior: (restaurant.qr_scan_behavior as QrScanBehavior) ?? 'menu_only',
-      auto_fire: !!restaurant.qr_auto_fire,
+      // Modo cocina fisico: no hay KDS ni auto-fire desde QR. Efectivo, sin
+      // tocar el valor guardado.
+      auto_fire:
+        normalizeKitchenMode(restaurant.kitchen_mode) === 'physical'
+          ? false
+          : !!restaurant.qr_auto_fire,
       enable_table_checkout: !!restaurant.enable_table_checkout,
       allow_anonymous_sales: pos.allow_anonymous_sales === true,
       anonymous_sales_as_default: pos.anonymous_sales_as_default === true,
