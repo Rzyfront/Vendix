@@ -112,6 +112,9 @@ export class PlatformInvoicingService {
     transmission_status: string;
     dian_status: string;
     cufe: string | null;
+    accepted: boolean;
+    error_message: string | null;
+    idempotent_replay: boolean;
   }> {
     let tenant: any;
     if (args.dto.customer?.kind === 'external') {
@@ -276,10 +279,14 @@ document_type: args.dto.customer.document_type ?? '31',
         // El snapshot va anidado bajo `dian` porque esa es la forma que
         // `normalizeAndAssertProfileConfig` conoce; las claves planas que se
         // pasaban antes se habrian rechazado uno por uno como desconocidas.
-        // El cruce de nombres es deliberado y sigue a UBL:
-        //   · `payment_form` ('1' contado / '2' credito) es `cbc:PaymentMeansCode`
-        //   · `payment_means_code` ('10' efectivo)       es `cbc:PaymentMeansID`
-        // que el contrato nombra `payment_means_code` y `payment_method_code`.
+        // Contrato del perfil (no hay cruce de nombres):
+        //   · `dian.payment_means_code`  = MEDIO de pago ('10' efectivo, '42'
+        //     consignacion...), el `cbc:PaymentMeansCode` del XML
+        //   · `dian.payment_method_code` = FORMA de pago ('1' contado / '2'
+        //     credito), el `cbc:ID` de `cac:PaymentMeans`
+        // Aqui estaban invertidos: el perfil guardado salia con la forma donde
+        // va el medio y viceversa, y al aplicarlo la factura heredaba un medio
+        // de pago '1'/'2' que no existe en el catalogo.
         // `config` es el snapshot COMPLETO del documento fiscal — diez
         // secciones —, no las cuatro claves que la emisión conoce. Mandar sólo
         // `dian` lo hace rechazar por `config_version`,
@@ -304,8 +311,8 @@ document_type: args.dto.customer.document_type ?? '31',
             dian: {
               ...template.config.dian,
               resolution_id: args.dto.resolution_id ?? null,
-              payment_means_code: args.dto.payment_form ?? '1',
-              payment_method_code: args.dto.payment_means_code ?? '10',
+              payment_means_code: args.dto.payment_means_code ?? '10',
+              payment_method_code: args.dto.payment_form ?? '1',
               header_notes: args.dto.notes ? [args.dto.notes] : null,
             },
           },
@@ -325,6 +332,12 @@ document_type: args.dto.customer.document_type ?? '31',
       transmission_status: legacyResult.transmission_status,
       dian_status: legacyResult.dian_status,
       cufe: legacyResult.cufe,
+      // Estado REAL de la transmision: un documento rechazado por la DIAN
+      // responde 201 con el numero ya quemado, y el controller necesita estos
+      // dos campos para no anunciar «creada» / «aceptada» sobre un rechazo.
+      accepted: legacyResult.accepted,
+      error_message: legacyResult.error_message,
+      idempotent_replay: legacyResult.idempotent_replay ?? false,
     };
   }
 
@@ -402,6 +415,8 @@ document_type: args.dto.customer.document_type ?? '31',
       cufe: transmission.cufe,
       fiscal_number: transmission.document_number,
       document_type: transmission.document_type,
+      accepted: transmission.transmission_status === 'accepted',
+      error_message: transmission.error_message ?? null,
     };
   }
 
