@@ -86,7 +86,10 @@ function build(opts: {
   const manual: any = {
     recordManualPayment: jest.fn().mockResolvedValue(undefined),
   };
-  const state: any = { ensureOperational: jest.fn().mockResolvedValue({}) };
+  const state: any = {
+    ensureOperational: jest.fn().mockResolvedValue({}),
+    transitionInTx: jest.fn().mockResolvedValue({}),
+  };
   const resolver: any = { invalidate: jest.fn().mockResolvedValue(undefined) };
   const events: any = { emit: jest.fn() };
   const svc = new StorePlanActivationService(
@@ -199,6 +202,46 @@ describe('StorePlanActivationService', () => {
     expect(res.invoice_id).toBeNull();
     expect(res.payment_id).toBeNull();
     expect(res.amount_paid).toBeNull();
+  });
+
+  it('trial subscription: transitions to pending_payment and converts', async () => {
+    const h = build({
+      existingSub: {
+        id: 12,
+        plan_id: 3,
+        state: 'trial',
+        partner_override: null,
+      },
+    });
+    await h.svc.activatePlan(1, { plan_id: 7, paid_at: '2026-10-05' }, 99);
+
+    expect(h.state.transitionInTx).toHaveBeenCalledWith(
+      h.tx,
+      1,
+      'pending_payment',
+      expect.objectContaining({ reason: 'superadmin_plan_activation' }),
+    );
+    const upd = h.tx.store_subscriptions.update.mock.calls[0][0];
+    expect(upd.data.trial_ends_at).toBeNull();
+    expect(h.billing.issueInvoice).toHaveBeenCalledWith(
+      12,
+      expect.objectContaining({ changeKind: 'trial_conversion' }),
+    );
+    const paidAt: Date = h.manual.recordManualPayment.mock.calls[0][1].paidAt;
+    expect(paidAt.toISOString()).toBe('2026-10-05T12:00:00.000Z');
+  });
+
+  it('non-trial subscription does not call transitionInTx', async () => {
+    const h = build({
+      existingSub: {
+        id: 12,
+        plan_id: 3,
+        state: 'cancelled',
+        partner_override: null,
+      },
+    });
+    await h.svc.activatePlan(1, { plan_id: 7 }, 99);
+    expect(h.state.transitionInTx).not.toHaveBeenCalled();
   });
 
   it('rejects an inactive plan with PLAN_001', async () => {

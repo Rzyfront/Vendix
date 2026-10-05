@@ -204,6 +204,16 @@ export class StorePlanActivationService {
       if (sub.state === 'trial') {
         updateData.trial_ends_at = null;
       }
+      // `trial` counts as already operational for the reactivation seam, so
+      // park it in `pending_payment` first; the payment / free activation
+      // then walks it to `active`.
+      if (sub.state === 'trial') {
+        await this.stateService.transitionInTx(tx, storeId, 'pending_payment', {
+          reason: 'superadmin_plan_activation',
+          triggeredByUserId: actorUserId || undefined,
+          payload: { source: 'superadmin_activation', to_plan_id: plan.id },
+        });
+      }
       await tx.store_subscriptions.update({
         where: { id: sub.id },
         data: updateData,
@@ -245,7 +255,7 @@ export class StorePlanActivationService {
     if (invoice) {
       await this.manualPaymentService.recordManualPayment(invoice.id, {
         bankReference: dto.reference?.trim() || `SA-${storeId}-${Date.now()}`,
-        paidAt: dto.paid_at ? new Date(dto.paid_at) : new Date(),
+        paidAt: this.parsePaidAt(dto.paid_at),
         amount:
           dto.amount != null
             ? new Prisma.Decimal(dto.amount)
@@ -326,6 +336,18 @@ export class StorePlanActivationService {
         ? new Prisma.Decimal(payment.amount).toFixed(2)
         : null,
     };
+  }
+
+  /**
+   * Date-only `YYYY-MM-DD` -> noon UTC, so the day does not slip back in
+   * Bogota (UTC-5). Full ISO timestamps are parsed as given.
+   */
+  private parsePaidAt(value?: string): Date {
+    if (!value) return new Date();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return new Date(`${value}T12:00:00Z`);
+    }
+    return new Date(value);
   }
 
   private async createPlanChangedEvent(
