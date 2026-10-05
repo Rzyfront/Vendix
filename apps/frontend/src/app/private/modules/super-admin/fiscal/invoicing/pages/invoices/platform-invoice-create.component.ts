@@ -4,8 +4,10 @@ import {
   DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
@@ -52,6 +54,7 @@ import type { InvoiceResolution } from '../../../../../store/invoicing/interface
 import { PlatformSectionWrapperComponent } from '../../components/platform-section-wrapper/platform-section-wrapper.component';
 import {
   DivisaSectionPaths,
+  DocumentoSectionErrors,
   DocumentoSectionPaths,
   InvoiceSectionDivisaComponent,
   InvoiceSectionDocumentoComponent,
@@ -504,6 +507,31 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     this.withholdingAmounts().reduce((acc, amount) => acc + amount, 0),
   );
 
+  /**
+   * Mantiene la base de cada retención alineada con la base gravable.
+   *
+   * Un perfil aplica sus retenciones antes (o en el mismo tick) que sus líneas
+   * modelo: la fila nacía con base 0 y la retención calculaba 0. Cuando la base
+   * gravable cambia se reescribe la base de las filas que siguen en 0 o que
+   * todavía llevan el último valor automático; una base editada a mano se
+   * respeta.
+   */
+  private lastAutoWithholdingBase = 0;
+  private readonly syncWithholdingBase = effect(() => {
+    const base = roundMoney(this.totals().taxableBase);
+    untracked(() => {
+      const prev = this.lastAutoWithholdingBase;
+      if (base === prev) return;
+      for (const row of this.withholdingsArray.controls) {
+        const ctrl = row.get('base');
+        if (!ctrl) continue;
+        const current = Number(ctrl.value) || 0;
+        if (current === 0 || roundMoney(current) === prev) ctrl.setValue(base);
+      }
+      this.lastAutoWithholdingBase = base;
+    });
+  });
+
   // ── Paths para las secciones compartidas ────────────────────────
   readonly documentoSectionPaths: DocumentoSectionPaths = {
     invoice_type: 'invoice_type',
@@ -750,9 +778,64 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       if (unitPrice?.invalid && unitPrice.touched) {
         errors.unit_price = 'El precio no puede ser negativo.';
       }
+      // Sin `touched`: el descuento mayor al bruto es un error de negocio que
+      // debe verse al instante y que además bloquea el envío.
+      if (this.discountExceedsGross(row.getRawValue())) {
+        errors.discount_amount =
+          'El descuento no puede ser mayor que el valor bruto de la línea (cantidad × precio).';
+      }
       return errors;
     }),
   );
+
+  private discountExceedsGross(item: any): boolean {
+    const gross = (Number(item?.quantity) || 0) * (Number(item?.unit_price) || 0);
+    const discount = Number(item?.discount_amount) || 0;
+    return discount > 0 && roundMoney(discount) > roundMoney(gross);
+  }
+
+  /**
+   * Errores de fechas/forma de pago de la sección Documento. Las fechas son
+   * cadenas `YYYY-MM-DD`: se comparan como texto, sin pasar por `Date`, para no
+   * correr el día por la zona horaria.
+   */
+  readonly documentoErrors = computed<DocumentoSectionErrors>(() => {
+    const val = this.rawValue();
+    const errors: DocumentoSectionErrors = {};
+    if (val['payment_form'] === '2') {
+      const due = isoDateOrUndefined(val['due_date'])?.slice(0, 10);
+      const issue = isoDateOrUndefined(val['issue_date'])?.slice(0, 10);
+      if (!due) {
+        errors.due_date = 'La fecha de vencimiento es obligatoria a crédito.';
+      } else if (issue && due < issue) {
+        errors.due_date =
+          'El vencimiento no puede ser anterior a la fecha de emisión.';
+      }
+    }
+    return errors;
+  });
+
+  /** Motivos que impiden emitir, independientes de si el campo fue tocado. */
+  readonly blockingIssues = computed<string[]>(() => {
+    const issues: string[] = [];
+    const val = this.rawValue();
+    const items = (val['items'] || []) as any[];
+    items.forEach((item, i) => {
+      if (this.discountExceedsGross(item)) {
+        issues.push(`Línea ${i + 1}: el descuento supera el valor bruto de la línea.`);
+      }
+    });
+    if (val['payment_form'] === '2') {
+      const due = isoDateOrUndefined(val['due_date'])?.slice(0, 10);
+      const issue = isoDateOrUndefined(val['issue_date'])?.slice(0, 10);
+      if (!due) {
+        issues.push('A crédito debes indicar la fecha de vencimiento.');
+      } else if (issue && due < issue) {
+        issues.push('El vencimiento no puede ser anterior a la fecha de emisión.');
+      }
+    }
+    return issues;
+  });
 
   /** Resumen por fila que pinta la sección compartida bajo cada renglón. */
   readonly lineasRowSummaries = computed<string[]>(() =>
@@ -1621,6 +1704,9 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
+    // Guarda de doble clic: el botón se deshabilita con `submitting`, pero un
+    // segundo clic puede entrar antes de que la plantilla se repinte.
+    if (this.submitting()) return;
     // Antes se emitía sin mirar la validez: el selector de resolución era
     // `Validators.required` y aun así se podía disparar el POST sin ninguna.
     this.invoiceForm.markAllAsTouched();
@@ -1633,10 +1719,21 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       return;
     }
 
-    const dto = this.buildPayload();
-    if (!dto) return;
+    const blocking = this.blockingIssues();
+    if (blocking.length > 0) {
+      this.issueBlockers.set([]);
+      this.errorMessage.set(blocking.join(' '));
+      this.toast.error(blocking[0]);
+      return;
+    }
 
+    // Se marca ANTES de armar el payload y de disparar el POST.
     this.submitting.set(true);
+    const dto = this.buildPayload();
+    if (!dto) {
+      this.submitting.set(false);
+      return;
+    }
     this.errorMessage.set('');
     this.issueBlockers.set([]);
 
@@ -1646,13 +1743,37 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       const res = await firstValueFrom(
         this.http.post<{
           success: boolean;
-          data: { invoice_id: number; fiscal_number: string };
+          data: {
+            invoice_id: number;
+            fiscal_number: string;
+            transmission_status?: string;
+            dian_status?: string;
+          };
         }>(url, dto),
       );
       if (res.success && res.data?.invoice_id) {
-        this.toast.success(
-          `Factura ${res.data.fiscal_number || ''} emitida exitosamente. Redirigiendo al detalle...`,
-        );
+        const number = res.data.fiscal_number || '';
+        const status = res.data.transmission_status;
+        const dianStatus = res.data.dian_status;
+        if (status === 'rejected' || dianStatus === 'rejected') {
+          this.toast.error(
+            `La factura ${number} fue rechazada por la DIAN. Revisa el detalle.`,
+            'Factura rechazada',
+          );
+        } else if (status === 'error' || dianStatus === 'error') {
+          this.toast.error(
+            `La factura ${number} se creó pero la transmisión falló. Revisa el detalle.`,
+            'Error de transmisión',
+          );
+        } else if (status === 'accepted') {
+          this.toast.success(`Factura ${number} emitida y aceptada por la DIAN.`);
+        } else {
+          this.toast.warning(
+            `Factura ${number} creada; la DIAN aún no la ha aceptada (estado: ${status ?? 'pendiente'}). Redirigiendo al detalle...`,
+            'Pendiente de aceptación',
+            6000,
+          );
+        }
         // `invoice_id` es un `fiscal_transmissions.id`, NO un
         // `subscription_invoices.id`: la ruta `invoices/:id` resuelve la
         // secuencia de suscripciones y mostraba el documento equivocado.

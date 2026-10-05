@@ -80,6 +80,7 @@
             [activeResolutionLoading]="store.loadingResolutions()"
             documentLabel="Factura de venta"
             [dueDateRequired]="isCredit()"
+            [errors]="documentoErrors()"
             dueDateHelp="Obligatoria cuando la forma de pago es a crédito."
             resolutionPlaceholder="Selecciona una resolución DIAN activa"
           ></vendix-invoice-section-documento>
