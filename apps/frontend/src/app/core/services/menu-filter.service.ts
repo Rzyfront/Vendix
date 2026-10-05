@@ -955,8 +955,8 @@ export class MenuFilterService {
           visible: false,
           blockedBy: 'store_panel_ui',
           detail:
-            'La tienda usa KDS físico (comandas impresas), por eso la pantalla de Comandas está oculta. Se puede volver al KDS virtual en Configuración > Restaurante.',
-          fixPath: '/admin/settings/general',
+            'La tienda usa KDS físico (comandas impresas), por eso la pantalla de Comandas está oculta. Se puede volver al KDS virtual en Configuración > Mesas.',
+          fixPath: '/admin/settings/general/mesas',
         };
       }
 
