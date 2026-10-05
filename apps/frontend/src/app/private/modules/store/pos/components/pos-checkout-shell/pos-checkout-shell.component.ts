@@ -52,6 +52,7 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 
@@ -156,6 +157,7 @@ export class PosCheckoutShellComponent {
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly integration = inject(PosRestaurantIntegrationService);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   // CP-POS-MODAL-SCOPE-001 / Phase A.2 — orderService for PUT /editor
   // (mode='edit') and for any future order-level operations.
   private readonly ordersService = inject(StoreOrdersService);
@@ -2345,6 +2347,11 @@ export class PosCheckoutShellComponent {
           const fired = !!fireRes && fireRes.fired_item_ids.length > 0;
           if (fired) {
             this.toastService.success('Orden creada y enviada a cocina');
+            const ids = (fireRes as { kitchen_ticket_ids?: number[] } | null)
+              ?.kitchen_ticket_ids;
+            this.kitchenTicketPrint.printAfterFire(
+              ids ?? (fireRes ? [fireRes.kitchen_ticket_id] : []),
+            );
           } else {
             this.toastService.success('Orden creada');
           }
