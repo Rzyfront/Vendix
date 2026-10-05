@@ -2288,57 +2288,22 @@ export class SubscriptionFiscalService {
         );
       }
       const m: any = meta;
-      const customer = m.customer as {
-        legal_name: string;
-        tax_id: string;
-        tax_id_dv: string;
-        email?: string;
-        address_line?: string;
-        city?: string;
-        department_code?: string;
-      };
-      const items = m.items as Array<{
-        position: number;
-        description: string;
-        quantity: number;
-        unit_price: number;
-        line_total: number | string;
-      }>;
-      /**
-       * Las líneas del snapshot en la forma que el emisor firma
-       * (`UblDocumentLine`, todos los importes en cadena).
-       *
-       * NO se enriquecen con `discount_amount` / `unit_code` aunque el snapshot
-       * los tenga: el primer intento los emitió ausentes, y el reintento tiene
-       * que reproducir EL MISMO documento. Cambiar cualquiera de los dos mueve
-       * `cbc:LineExtensionAmount` o la unidad y con ellos el CUFE, sobre un
-       * consecutivo que la DIAN ya quemó.
-       */
-      const providerItems: UblDocumentLine[] = items.map((it) => ({
-        description: it.description,
-        // `String(...)` y no `dianAmount(...)`: truncar a 2 decimales cambiaría
-        // el precio que el primer intento declaró en una línea con 4 decimales.
-        quantity: String(it.quantity),
-        unit_price: String(it.unit_price),
-        discount_amount: dianAmount(0),
-        tax_amount: dianAmount(0),
-        total_amount: dianAmount(it.line_total),
-      }));
-      const totals = m.totals as { subtotal: number; tax_amount: number; total: number };
-      const periodStart = (m.period_start as string | null) ?? null;
-      const periodEnd = (m.period_end as string | null) ?? null;
-      const currency = (m.currency as string) ?? 'COP';
-
-      // Fechas del primer intento: si cambian, el CUFE recalculado ya
-      // no matchea el burnt y la DIAN rechaza. La fila trae `created_at`
-      // que es el instante del primer CREATE.
+      // El payload EXACTO del primer intento (`createPlatformInvoice` lo
+      // persiste en el snapshot). Antes el reenvío reconstruía el documento con
+      // defaults —tipo de documento '31', régimen '49', forma de pago '1', medio
+      // '42', vencimiento = creación + 7, notas con «(retry)», moneda del
+      // snapshot— y firmaba OTRO documento sobre un consecutivo ya quemado.
+      const storedProviderData = m.provider_data as
+        | PlatformProviderInvoiceData
+        | undefined;
+      if (!storedProviderData || typeof storedProviderData !== 'object') {
+        throw new BadRequestException(
+          'El snapshot de esta factura no guarda el payload firmado (emitida antes de que se persistiera): ' +
+            'reconstruirlo con valores por defecto firmaría un documento distinto sobre un consecutivo ya gastado. ' +
+            'Corrígela con una nota crédito y vuelve a emitir.',
+        );
+      }
       const firstAttemptAt = transmission.created_at ?? new Date();
-      const firstAttemptDate = localDateString(firstAttemptAt, PLATFORM_TIMEZONE);
-      const firstAttemptTime = localTimeString(firstAttemptAt, PLATFORM_TIMEZONE);
-      const firstAttemptDueDate = localDateString(
-        new Date(firstAttemptAt.getTime() + 7 * 24 * 60 * 60 * 1000),
-        PLATFORM_TIMEZONE,
-      );
 
       // Resolución: la MISMA que se usó en el primer intento. La fuente
       // correcta es el snapshot persistido en `createPlatformInvoice`
@@ -2372,58 +2337,19 @@ export class SubscriptionFiscalService {
       }
 
       const providerData: PlatformProviderInvoiceData = {
+        ...storedProviderData,
         invoice_number: transmission.document_number,
-        invoice_type: 'sales_invoice',
-        issue_date: firstAttemptDate,
-        issue_time: firstAttemptTime,
-        due_date: firstAttemptDueDate,
-        invoice_period: {
-          start_date: periodStart ? localDateString(new Date(periodStart), PLATFORM_TIMEZONE) : firstAttemptDate,
-          end_date: periodEnd ? localDateString(new Date(periodEnd), PLATFORM_TIMEZONE) : firstAttemptDate,
-        },
-        customer_name: customer.legal_name,
-        customer_tax_id: customer.tax_id,
-        customer_email: customer.email ?? undefined,
-        customer_address: customer.address_line
-          ? {
-              line: customer.address_line,
-              city: customer.city ?? null,
-              department_code: customer.department_code ?? null,
-              country_code: 'CO',
-            }
-          : null,
-        customer_document_type: '31',
-        customer_verification_digit: customer.tax_id_dv ?? undefined,
-        customer_person_type: '2',
-        customer_regime: '49',
-        customer_tax_responsibilities: ['O-13'],
-        subtotal_amount: Number(totals.subtotal ?? 0).toFixed(2),
-        discount_amount: '0.00',
-        tax_amount: Number(totals.tax_amount ?? 0).toFixed(2),
-        withholding_amount: '0.00',
-        total_amount: Number(totals.total ?? 0).toFixed(2),
-        currency,
-        items: providerItems,
-        taxes: [],
-        notes: [
-          `Factura de servicios generada desde super-admin el ${firstAttemptDate}`,
-          'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
-          `(retry) ${localDateString(new Date(), PLATFORM_TIMEZONE)} ${localTimeString(new Date(), PLATFORM_TIMEZONE)}`,
-        ].join('\n'),
-        // `order_reference` / `payment_method`: mismo residuo legado que en
-        // `buildPlatformProviderData` — el emisor de factura de venta no lee
-        // ninguno de los dos, y viajaban en `null`.
-        // `resolution_number` es `string | null` en la fila y el contrato lo
-        // declara OPCIONAL: otro null que la aserción de tipo ocultaba.
+        // Lo que SÍ se re-deriva de la resolución del primer intento.
         resolution_number: resolution.resolution_number ?? undefined,
         technical_key: this.technicalKeyVault.reveal(resolution) ?? undefined,
         control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, firstAttemptAt, {
           resolution_id: resolution.id,
           document_type: 'sales_invoice',
         }),
-        payment_form: '1',
-        payment_means: '42',
       };
+
+      // Sin certificado no se firma: se corta antes de tocar la transmisión.
+      await this.assertPlatformSigningReady(settings);
 
       // No se reescribe `request_hash`: el primer intento ya lo dejó
       // firmado. Bump de `retry_count` ocurre implícitamente al
@@ -2442,17 +2368,10 @@ export class SubscriptionFiscalService {
         throw error;
       }
 
-      const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
-        where: { id: transmission.id },
-      });
-
-      return {
-        transmission_id: transmission.id,
-        fiscal_number: final?.document_number ?? transmission.document_number,
-        transmission_status: final?.transmission_status ?? 'unknown',
-        dian_status: final?.dian_status ?? 'unknown',
-        cufe: final?.cufe ?? null,
-      };
+      return this.platformTransmissionResult(
+        transmission.id,
+        transmission.document_number,
+      );
     });
   }
 
@@ -2802,6 +2721,80 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * Sin certificado vigente NO se emite. El emisor, fuera de producción,
+   * devuelve el XML SIN FIRMAR y el documento quedaba «exitoso» sin firma.
+   * Se evalúa ANTES de asignar consecutivo.
+   */
+  private async assertPlatformSigningReady(
+    settings: SubscriptionFiscalSettings,
+  ): Promise<void> {
+    const config = settings.dian_configuration_id
+      ? await this.prisma.withoutScope().dian_configurations.findUnique({
+          where: { id: settings.dian_configuration_id },
+        })
+      : null;
+    const hasCertificate =
+      !!config?.certificate_s3_key &&
+      (!!config.certificate_password_encrypted || !!config.certificate_kms_key_id);
+    if (!hasCertificate) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_CONFIG_INCOMPLETE,
+        'La plataforma no tiene un certificado de firma cargado: no se puede emitir un documento sin firmar. ' +
+          'Sube el certificado en la configuración DIAN de la plataforma.',
+        { missing_field: 'certificate' },
+      );
+    }
+    if (
+      config!.certificate_expiry &&
+      config!.certificate_expiry.getTime() <= Date.now()
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CERT_003,
+        'El certificado de firma de la plataforma está vencido: renuévalo antes de emitir.',
+      );
+    }
+  }
+
+  /** Forma de respuesta de emisión/reintento: refleja el estado REAL. */
+  private async platformTransmissionResult(
+    transmissionId: number,
+    fallbackNumber: string,
+  ) {
+    const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
+      where: { id: transmissionId },
+    });
+    const status = final?.transmission_status ?? 'unknown';
+    return {
+      invoice_id: transmissionId,
+      transmission_id: transmissionId,
+      fiscal_number: final?.document_number ?? fallbackNumber,
+      transmission_status: status,
+      dian_status: final?.dian_status ?? 'unknown',
+      cufe: final?.cufe ?? null,
+      accepted: status === 'accepted',
+      error_message: final?.error_message ?? null,
+    };
+  }
+
+  /**
+   * El payload firmado, listo para `fiscal_evidences.metadata` (JSON). Sin los
+   * campos que se RE-DERIVAN de la resolución en cada envío: `technical_key` es
+   * un secreto de la bóveda y no debe quedar en una tabla de evidencias;
+   * `control` y `resolution_number` salen de la fila `invoice_resolutions`.
+   */
+  private serializablePlatformProviderData(
+    data: PlatformProviderInvoiceData,
+  ): Record<string, unknown> {
+    const {
+      technical_key: _technicalKey,
+      control: _control,
+      resolution_number: _resolutionNumber,
+      ...rest
+    } = data as PlatformProviderInvoiceData & Record<string, unknown>;
+    return JSON.parse(JSON.stringify(rest));
+  }
+
+  /**
    * C.11: crea una factura personalizada de plataforma. A diferencia de
    * `issueForInvoice` (que firma una `subscription_invoice` ya existente),
    * este método arma la `fiscal_transmission` con `source_type='platform_invoice'`
@@ -2821,6 +2814,12 @@ export class SubscriptionFiscalService {
     transmission_status: string;
     dian_status: string;
     cufe: string | null;
+    /** `true` sólo cuando la DIAN aceptó el documento. */
+    accepted: boolean;
+    /** Motivo del rechazo/fallo de la transmisión, si lo hay. */
+    error_message: string | null;
+    /** `true` cuando la idempotency_key ya existía: no se emitió otra factura. */
+    idempotent_replay?: boolean;
   }> {
     const settings = await this.getSettings();
     if (!settings.is_enabled) {
@@ -3099,7 +3098,30 @@ export class SubscriptionFiscalService {
       //    `tx` ya hizo COMMIT y la siguiente query (el SELECT FOR
       //    UPDATE del lock) recibe P2028. La memoria del proyecto
       //    documenta esto en `prisma_transaction_returns_committed_handle`.
-      const result = await this.prisma.$transaction(async (tx) => {
+      let result;
+      try {
+        result = await this.prisma.$transaction(async (tx) => {
+        // 1.0) Sin certificado vigente NO se emite: el emisor, fuera de
+        //      producción, devuelve el XML SIN FIRMAR y el documento quedaba
+        //      «exitoso» con el consecutivo ya quemado. Va ANTES de asignar.
+        await this.assertPlatformSigningReady(settings);
+
+        // 1.0.b) Idempotencia: si la key ya existe se devuelve esa factura sin
+        //      asignar número ni reenviar. Se consulta ANTES de insertar porque
+        //      un P2002 dentro de una transacción interactiva la deja abortada
+        //      (25P02): cualquier consulta posterior —la que antes buscaba la
+        //      fila «existente»— fallaba y el cliente recibía un 500.
+        const prior = await tx.fiscal_transmissions.findFirst({
+          where: {
+            accounting_entity_id: settings.accounting_entity_id!,
+            document_type: 'sales_invoice' as const,
+            idempotency_key: idempotencyKey,
+          },
+        });
+        if (prior) {
+          return { replay: true as const, transmission: prior };
+        }
+
         // 1.a) Asignar número con el lock consultivo.
         const allocated = await this.allocateFiscalNumber(tx, settings, dto.resolution_id);
         const fiscalNumber = allocated.invoice_number;
@@ -3129,50 +3151,28 @@ export class SubscriptionFiscalService {
           notesText,
         );
 
-        // 1.c) Insertar la fila. Si la idempotency_key ya existe, el
-        // UNIQUE la rechaza y devolvemos la fila existente — el caller
-        // ve la misma respuesta que la primera.
-        let transmission;
-        try {
-          transmission = await tx.fiscal_transmissions.create({
-            data: {
-              organization_id: settings.platform_organization_id!,
-              store_id: null,
-              accounting_entity_id: settings.accounting_entity_id!,
-              dian_configuration_id: settings.dian_configuration_id!,
-              source_type: 'platform_invoice',
-              source_id: 0,
-              document_type: 'sales_invoice',
-              document_number: fiscalNumber,
-              transmission_status: 'queued',
-              dian_status: 'pending',
-              accounting_status: 'provisional',
-              idempotency_key: idempotencyKey,
-              request_hash: this.hash(providerData),
-            },
-          });
-        } catch (error: any) {
-          if (error?.code === 'P2002') {
-            // Idempotencia: la UNIQUE (accounting_entity_id,
-            // document_type, idempotency_key) rechazó. Devolvemos la
-            // fila existente. La transacción sigue para que el lock
-            // se libere al COMMIT.
-            const existing = await tx.fiscal_transmissions.findFirst({
-              where: {
-                accounting_entity_id: settings.accounting_entity_id!,
-                document_type: 'sales_invoice' as const,
-                idempotency_key: idempotencyKey,
-              },
-            });
-            if (existing) {
-              transmission = existing;
-            } else {
-              throw error;
-            }
-          } else {
-            throw error;
-          }
-        }
+        // 1.c) Insertar la fila. Si una petición CONCURRENTE ganó la carrera
+        //      por la misma idempotency_key, el UNIQUE rechaza acá con P2002:
+        //      la transacción entera (incluida la asignación de número) se
+        //      revierte —no se quema consecutivo— y el `catch` de afuera
+        //      devuelve la factura ganadora.
+        const transmission = await tx.fiscal_transmissions.create({
+          data: {
+            organization_id: settings.platform_organization_id!,
+            store_id: null,
+            accounting_entity_id: settings.accounting_entity_id!,
+            dian_configuration_id: settings.dian_configuration_id!,
+            source_type: 'platform_invoice',
+            source_id: 0,
+            document_type: 'sales_invoice',
+            document_number: fiscalNumber,
+            transmission_status: 'queued',
+            dian_status: 'pending',
+            accounting_status: 'provisional',
+            idempotency_key: idempotencyKey,
+            request_hash: this.hash(providerData),
+          },
+        });
 
         // 1.d) Snapshot del origen. El frontend navega a `/invoices/:id`
         //     usando `transmission.id` como id (la UNIQUE del cursor es la
@@ -3225,13 +3225,71 @@ export class SubscriptionFiscalService {
               counterpart_account_code: dto.counterpart_account_code ?? null,
               resolution_id: resolution.id,
               issue_date: issueAtLocal,
+              // Lo que se FIRMÓ, para que reenvío, PDF y asiento lean el mismo
+              // dato y no un default: hora, forma y medio de pago, vencimiento,
+              // notas, TRM y el desglose de impuestos que el XML declara.
+              issue_time: providerData.issue_time,
+              payment_form: providerData.payment_form,
+              payment_means_code: providerData.payment_means,
+              due_date: providerData.due_date,
+              notes: providerData.notes,
+              exchange_rate: providerData.exchange_rate ?? null,
+              tax_breakdown: computed.taxBreakdown,
+              // El payload EXACTO que se firmó (sin los secretos que se
+              // re-derivan de la resolución: `technical_key`, `control`,
+              // `resolution_number`). El reenvío parte de acá: reconstruir el
+              // documento con defaults cambia fecha, tipo de identificación o
+              // forma de pago sobre un consecutivo ya quemado.
+              provider_data: this.serializablePlatformProviderData(providerData),
               created_by: 'createPlatformInvoice',
             },
           },
         });
 
-        return { transmission, providerData, resolution };
+        return {
+          replay: false as const,
+          transmission,
+          providerData,
+          resolution,
+        };
       });
+      } catch (error: any) {
+        if (error?.code === 'P2002') {
+          const winner = await this.prisma
+            .withoutScope()
+            .fiscal_transmissions.findFirst({
+              where: {
+                accounting_entity_id: settings.accounting_entity_id!,
+                document_type: 'sales_invoice' as const,
+                idempotency_key: idempotencyKey,
+              },
+            });
+          if (winner) {
+            return {
+              ...(await this.platformTransmissionResult(
+                winner.id,
+                winner.document_number,
+              )),
+              idempotent_replay: true,
+            };
+          }
+          throw new VendixHttpException(
+            ErrorCodes.FISCAL_IDEMPOTENCY_CONFLICT,
+            'Otra emisión simultánea chocó con esta (restricción única) y no se pudo localizar la factura existente; reintenta en unos segundos.',
+          );
+        }
+        throw error;
+      }
+
+      if (result.replay) {
+        return {
+          ...(await this.platformTransmissionResult(
+            result.transmission.id,
+            result.transmission.document_number,
+          )),
+          idempotent_replay: true,
+        };
+      }
 
       const { transmission, providerData, resolution } = result;
 
@@ -3253,18 +3311,10 @@ export class SubscriptionFiscalService {
         throw error;
       }
 
-      const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
-        where: { id: transmission.id },
-      });
-
-      return {
-        invoice_id: transmission.id,
-        transmission_id: transmission.id,
-        fiscal_number: final?.document_number ?? '',
-        transmission_status: final?.transmission_status ?? 'unknown',
-        dian_status: final?.dian_status ?? 'unknown',
-        cufe: final?.cufe ?? null,
-      };
+      return this.platformTransmissionResult(
+        transmission.id,
+        transmission.document_number,
+      );
     });
   }
 
