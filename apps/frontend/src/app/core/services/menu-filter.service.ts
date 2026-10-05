@@ -326,6 +326,20 @@ export class MenuFilterService {
   };
 
   /**
+   * Module keys hidden by a store setting (not by panel_ui). Today only the
+   * physical kitchen mode: comandas are printed, so the virtual KDS screen
+   * ("Comandas") makes no sense. Absent / null / 'virtual' hides nothing.
+   * KDS station configuration is a different entry and stays visible.
+   */
+  private hiddenBySettings(
+    settings: { restaurant?: { kitchen_mode?: string | null } } | null | undefined,
+  ): string[] {
+    return settings?.restaurant?.kitchen_mode === 'physical'
+      ? ['restaurant_ops_kds']
+      : [];
+  }
+
+  /**
    * Filter menu items based on panel_ui configuration.
    * Returns an Observable that emits filtered menu items.
    *
@@ -393,6 +407,8 @@ export class MenuFilterService {
                 .filter(([, allowed]) => allowed === false)
                 .map(([key]) => key)
             : [];
+          // Store settings that hide modules outside panel_ui (kitchen_mode).
+          hiddenByStorePanel.push(...this.hiddenBySettings(storeSettings));
 
           // Layer 3: user panel UI (the existing per-user `panel_ui` map — comes in
           // as `visibleModules` from `getVisibleModules$()` — already merged with
@@ -563,6 +579,8 @@ export class MenuFilterService {
     if (keys.every((key) => hiddenByIndustries.includes(key))) return 'industry';
     const storePanel = settings?.panel_ui?.STORE_ADMIN as Record<string, boolean> | undefined;
     if (storePanel && keys.every((key) => storePanel[key] === false)) return 'store_panel_ui';
+    const hiddenBySettings = this.hiddenBySettings(settings);
+    if (keys.every((key) => hiddenBySettings.includes(key))) return 'store_panel_ui';
     const storeType = settings?.general?.store_type || this.authFacade.userStoreType();
     const hiddenByStoreType = this.storeTypeHiddenModules[storeType || ''] || [];
     if (keys.every((key) => hiddenByStoreType.includes(key))) return 'store_type';
@@ -927,6 +945,17 @@ export class MenuFilterService {
           blockedBy: 'store_panel_ui',
           detail:
             'El módulo está desactivado para toda la tienda en la configuración de módulos del panel. El propietario o un administrador puede volver a activarlo.',
+          fixPath: '/admin/settings/general',
+        };
+      }
+
+      const hiddenBySettings = this.hiddenBySettings(settings);
+      if (moduleKeys.every((key) => hiddenBySettings.includes(key))) {
+        return {
+          visible: false,
+          blockedBy: 'store_panel_ui',
+          detail:
+            'La tienda usa KDS físico (comandas impresas), por eso la pantalla de Comandas está oculta. Se puede volver al KDS virtual en Configuración > Restaurante.',
           fixPath: '/admin/settings/general',
         };
       }
