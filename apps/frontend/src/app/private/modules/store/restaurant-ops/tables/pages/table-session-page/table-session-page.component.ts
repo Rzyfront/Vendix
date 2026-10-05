@@ -54,7 +54,6 @@ import {
   KitchenTicketsService,
   KdsSseService,
   KitchenMutationError,
-  type FireOrderItemsResult,
 } from '../../../kds/services';
 import { KitchenTicketPrintService } from '../../../kds/services/kitchen-ticket-print.service';
 import type {
@@ -1506,8 +1505,7 @@ export class TableSessionPageComponent implements OnInit {
             );
             // No-op en cocina virtual; en fisica imprime la comanda.
             this.kitchenTicketPrint.printAfterFire(
-              (res as FireOrderItemsResult & { kitchen_ticket_ids?: number[] })
-                .kitchen_ticket_ids ?? [res.kitchen_ticket_id],
+              res.kitchen_ticket_ids ?? [res.kitchen_ticket_id],
             );
           } else {
             this.toastService.warning(

@@ -78,7 +78,6 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import {
   KitchenTicketsService,
-  type FireOrderItemsResult,
 } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
@@ -4960,8 +4959,7 @@ export class OrderDetailsPageComponent {
           this.toastService.success('Enviado a cocina');
           // No-op en cocina virtual; en fisica imprime la comanda.
           this.kitchenTicketPrint.printAfterFire(
-            (res as FireOrderItemsResult & { kitchen_ticket_ids?: number[] })
-              .kitchen_ticket_ids ?? [res.kitchen_ticket_id],
+            res.kitchen_ticket_ids ?? [res.kitchen_ticket_id],
           );
           if (res?.stock_warnings?.length) {
             this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
