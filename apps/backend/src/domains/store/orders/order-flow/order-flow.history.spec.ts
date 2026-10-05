@@ -890,6 +890,8 @@ describe('OrderFlowService.deliverOrderItem — item_delivered', () => {
       stores: { organization_id: 9 },
     };
     const prismaMock: any = {
+      // kitchen_mode (modo cocina fisica): sin ajustes => 'virtual'.
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         findFirst: jest.fn().mockResolvedValue({
           id: ITEM_ID,

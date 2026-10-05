@@ -2527,6 +2527,10 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     };
     const prismaMock: any = {
       $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
+      // kitchen_mode (modo cocina fisica): sin ajustes => 'virtual'.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       order_items: {
         findFirst: jest
           .fn()
