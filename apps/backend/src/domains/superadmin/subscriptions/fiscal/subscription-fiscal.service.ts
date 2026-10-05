@@ -5,11 +5,16 @@ import {
   dianAmount,
   dianLineExtension,
   dianLineExtensionTotal,
+  dianRate,
   dianSum,
   clearInclusiveLine,
   toDecimal,
 } from '../../../store/invoicing/utils/dian-money.util';
 import { create as xmlCreate } from 'xmlbuilder2';
+import {
+  TaxBreakdownItem,
+  TaxFiscalTypeValue,
+} from '../../../../common/interfaces/tax-breakdown.interface';
 import { InvoiceCalculatorService } from '../../../store/invoicing/services/invoice-calculator.service';
 import { DianTotalsValidator } from '../../../store/invoicing/providers/dian-direct/xml/dian-totals.validator';
 import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/xml/xml-namespaces';
@@ -114,6 +119,7 @@ import {
   SubscriptionInvoiceMetadata,
 } from '../../../store/subscriptions/types/billing.types';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
+import { isDianUnitCode } from '../../../store/invoicing/providers/dian-direct/constants/dian-unit-codes';
 import {
   buildSubscriptionItemCode,
   buildSubscriptionInvoiceNotes,
@@ -137,6 +143,7 @@ import {
   DianAddressFields,
   DianDocumentExtras,
   DianExchangeRateDeclaration,
+  ProviderInvoiceWithholding,
   UblCommonBuilder,
   UblDocumentLine,
 } from '../../../store/invoicing/providers/dian-direct/xml/ubl-common.builder';
@@ -216,6 +223,8 @@ export interface PlatformInvoiceComputation {
   /** `PayableAmount` = ValTot del CUFE. */
   payable: string;
   hasAnyTax: boolean;
+  /** Alguna línea declara un impuesto a tarifa 0 % (EXENTO, art. 477 ET). */
+  hasExemptLine: boolean;
   taxBreakdown: Array<{
     tax_type: string;
     code: string;
@@ -266,6 +275,74 @@ const SETTINGS_KEY = PLATFORM_FISCAL_SETTINGS_KEY;
 const VENDOR_SUPPORT_SETTINGS_KEY = 'vendor_support_fiscal';
 const PRODUCTION_TEST_FRESHNESS_MS = 60 * 60 * 1000;
 const DECIMAL_ZERO = new Prisma.Decimal(0);
+
+/**
+ * `tax_type` de retención (`RETE_FUENTE`, `RETE_IVA`, `RETE_ICA`, `WITHHOLDING`…):
+ * no es un impuesto de línea, viaja en `withholdings`.
+ */
+function isWithholdingTaxType(taxType: unknown): boolean {
+  return /^(rete|withholding)/i.test(String(taxType ?? '').trim());
+}
+
+/** Importe de una retención calculado por el servidor (no se confía en el cliente). */
+function platformWithholdingAmount(w: {
+  base_amount: number;
+  rate: number;
+}): number {
+  return Math.round((Number(w.base_amount) || 0) * (Number(w.rate) || 0) * 100) / 100;
+}
+
+interface PlatformWithholdingConcept {
+  id: number;
+  code: string;
+  withholding_type: 'retefuente' | 'reteiva' | 'reteica';
+  account_code: string | null;
+}
+
+/**
+ * Retenciones tal como viajan a `cac:WithholdingTaxTotal`, con el MISMO
+ * contrato que `InvoiceFlowService.toProviderWithholdings` del riel tienda:
+ * tarifa FRACCIÓN → PORCENTAJE formateado, base e importe a 2 decimales, y se
+ * descartan las de importe 0. Un concepto no resuelto se omite del XML.
+ */
+function buildPlatformXmlWithholdings(
+  withholdings: Array<{ concept_id: number; base_amount: number; rate: number }>,
+  concepts: Map<number, PlatformWithholdingConcept>,
+): ProviderInvoiceWithholding[] {
+  const out: ProviderInvoiceWithholding[] = [];
+  for (const w of withholdings) {
+    const concept = concepts.get(Number(w.concept_id));
+    const amount = platformWithholdingAmount(w as any);
+    if (!concept || !(amount > 0)) continue;
+    out.push({
+      withholding_type: concept.withholding_type,
+      concept_code: concept.code,
+      rate: dianRate(toDecimal(w.rate).times(100)),
+      base: dianAmount(w.base_amount),
+      amount: dianAmount(amount),
+    });
+  }
+  return out;
+}
+
+/**
+ * Unidad de medida de una línea: default `NIU`; `MON` (que perfiles guardados
+ * arrastran) es el mes en UN/ECE pero la DIAN publicó `LUN`, así que se mapea;
+ * cualquier otro código fuera del catálogo DIAN es un 400 legible, ANTES de
+ * reservar consecutivo.
+ */
+function resolvePlatformUnitCode(raw: string | undefined | null, index: number): string {
+  const code = String(raw ?? '').trim();
+  if (!code) return 'NIU';
+  if (code.toUpperCase() === 'MON') return 'LUN';
+  if (!isDianUnitCode(code)) {
+    throw new BadRequestException(
+      `Línea ${index + 1}: la unidad de medida «${code}» no pertenece al catálogo DIAN ` +
+        '(ej. NIU unidad, LUN mes, ANA año, HUR hora).',
+    );
+  }
+  return code;
+}
 /**
  * Respaldo cuando `organizations.is_platform` no está sembrado todavía. NO es la
  * fuente de verdad: el id se deriva vía `PlatformOrgService`, que lee la fila
@@ -2113,6 +2190,7 @@ export class SubscriptionFiscalService {
     withholdingAmount: number,
     hasAnyTax: boolean,
     notesText: string,
+    xmlWithholdings: ProviderInvoiceWithholding[] = [],
   ): PlatformProviderInvoiceData {
     const customerDocumentType = dto.customer.document_type ?? '31';
     const customerPersonType = dto.customer.person_type ?? '2';
@@ -2166,6 +2244,8 @@ export class SubscriptionFiscalService {
       discount_amount: dianSum(lineItems.map((it) => it.discount_amount)),
       tax_amount: taxAmount,
       withholding_amount: withholdingAmount.toFixed(2),
+      // Vacío ⇒ el grupo no se emite (igual que el riel tienda).
+      ...(xmlWithholdings.length > 0 ? { withholdings: xmlWithholdings } : {}),
       total_amount: total,
       currency: 'COP',
       ...((): {
@@ -2476,8 +2556,23 @@ export class SubscriptionFiscalService {
    * Lo que el cliente mande en `tax_amount` / `taxable_amount` se IGNORA.
    */
   computePlatformInvoiceTotals(
-    dto: Pick<CreatePlatformInvoiceDto, 'items'>,
+    input: Pick<CreatePlatformInvoiceDto, 'items'>,
   ): PlatformInvoiceComputation {
+    // Entradas normalizadas ANTES de calcular y ANTES del consecutivo:
+    //  · las filas de RETENCIÓN (`RETE_*`) que lleguen dentro de `taxes` NO son
+    //    impuestos de línea (el motor las rechazaba como `tax_type:unknown` y
+    //    la línea caía en `invalid_line_input`); la retención viaja en
+    //    `withholdings`, así que acá se descartan del cálculo;
+    //  · `unit_code` validado contra el catálogo DIAN (default `NIU`).
+    const dto = {
+      items: input.items.map((item, index) => ({
+        ...item,
+        taxes: (Array.isArray(item.taxes) ? item.taxes : []).filter(
+          (t) => !isWithholdingTaxType(t.tax_type),
+        ),
+        unit_code: resolvePlatformUnitCode(item.unit_code, index),
+      })),
+    };
     const calculation = new InvoiceCalculatorService().calculate({
       items: dto.items.map((item) => ({
         description: item.description,
@@ -2489,11 +2584,18 @@ export class SubscriptionFiscalService {
           // que viajaba al proveedor y lo que lee el snapshot contable.
           tax_name: t.tax_type,
           tax_type: String(t.tax_type ?? '').toLowerCase(),
-          // Porcentaje, la unidad que el XML declara (`cbc:Percent`).
-          tax_rate: toDecimal(t.rate ?? 0).times(100),
-          // El DTO declara FRACCIÓN: se convierte a porcentaje y se fija la
-          // unidad. Sin esto un ICA caería en `per_mil` (default del motor).
-          rate_basis: 'percent' as const,
+          // El DTO declara FRACCIÓN y acá se convierte a la unidad del
+          // contrato del proveedor: porcentaje para todo tributo, POR MIL para
+          // el ICA (9,66 ‰ = 0.00966 → 9.66; el builder del XML lo divide por
+          // 10 al imprimir `cbc:Percent`). Sin fijarla, el motor deduciría la
+          // unidad y el ICA firmaría una tarifa diez veces menor.
+          tax_rate: toDecimal(t.rate ?? 0).times(
+            String(t.tax_type ?? '').toLowerCase() === 'ica' ? 1000 : 100,
+          ),
+          rate_basis:
+            String(t.tax_type ?? '').toLowerCase() === 'ica'
+              ? ('per_mil' as const)
+              : ('percent' as const),
           is_inclusive: t.is_inclusive === true,
         })),
       })),
@@ -2521,6 +2623,7 @@ export class SubscriptionFiscalService {
       { tax_type: string; code: string; rate: number; bases: string[]; amounts: string[] }
     >();
     let hasAnyTax = false;
+    let hasExemptLine = false;
 
     calculation.lines.forEach((cl, i) => {
       const item = dto.items[i];
@@ -2586,13 +2689,18 @@ export class SubscriptionFiscalService {
         is_inclusive: ct.is_inclusive,
         taxable_amount: Number(ct.taxable_amount),
       }));
-      for (const ct of cl.taxes) {
+      for (const [k, ct] of cl.taxes.entries()) {
         hasAnyTax = true;
-        const key = `${ct.tax_name}|${ct.tax_rate}`;
+        // Tarifa 0 % con su grupo emitido = EXENTO (art. 477 ET), no excluido.
+        if (toDecimal(ct.tax_rate).isZero()) hasExemptLine = true;
+        // FRACCIÓN (0,19), igual que las líneas del snapshot: la tarifa que el
+        // contrato guarda, no el porcentaje truncado que el XML imprime.
+        const fractionRate = snapshotTaxes[k].rate;
+        const key = `${ct.tax_name}|${fractionRate}`;
         const row = breakdown.get(key) ?? {
           tax_type: ct.tax_name,
           code: ct.dian_tax_code,
-          rate: toDecimal(ct.tax_rate).dividedBy(100).toNumber(),
+          rate: fractionRate,
           bases: [],
           amounts: [],
         };
@@ -2601,7 +2709,7 @@ export class SubscriptionFiscalService {
         breakdown.set(key, row);
       }
 
-      const unit_code = item.unit_code ?? 'NIU';
+      const unit_code = item.unit_code;
       lineItems.push({
         description: item.description,
         quantity: String(qty),
@@ -2655,6 +2763,7 @@ export class SubscriptionFiscalService {
       discountTotal,
       payable,
       hasAnyTax,
+      hasExemptLine,
       taxBreakdown: [...breakdown.values()].map((r) => ({
         tax_type: r.tax_type,
         code: r.code,
@@ -2777,6 +2886,40 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * Conceptos de retención referenciados por la factura (tipo y código para el
+   * XML y el asiento). Degrada a mapa vacío si la lectura falla: la emisión no
+   * se bloquea por el catálogo; la retención simplemente no se declara.
+   */
+  private async loadPlatformWithholdingConcepts(
+    withholdings: Array<{ concept_id: number }>,
+  ): Promise<Map<number, PlatformWithholdingConcept>> {
+    const ids = [...new Set(withholdings.map((w) => Number(w.concept_id)))].filter(
+      (id) => Number.isInteger(id) && id > 0,
+    );
+    const map = new Map<number, PlatformWithholdingConcept>();
+    if (ids.length === 0) return map;
+    try {
+      const rows = await this.prisma.withoutScope().withholding_concepts.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, code: true, withholding_type: true, account_code: true },
+      });
+      for (const r of rows) {
+        map.set(r.id, {
+          id: r.id,
+          code: r.code,
+          withholding_type: r.withholding_type as PlatformWithholdingConcept['withholding_type'],
+          account_code: r.account_code ?? null,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron leer los conceptos de retención ${ids.join(',')}: ${(error as Error).message}`,
+      );
+    }
+    return map;
+  }
+
+  /**
    * El payload firmado, listo para `fiscal_evidences.metadata` (JSON). Sin los
    * campos que se RE-DERIVAN de la resolución en cada envío: `technical_key` es
    * un secreto de la bóveda y no debe quedar en una tabla de evidencias;
@@ -2896,7 +3039,7 @@ export class SubscriptionFiscalService {
       //     de exclusión art. 476 num. 21 ET; si al menos una trae, la nota NO
       //     se emite (sería una declaración falsa).
       const computed = this.computePlatformInvoiceTotals(dto);
-      const { lineItems, snapshotItems, hasAnyTax } = computed;
+      const { lineItems, snapshotItems, hasAnyTax, hasExemptLine } = computed;
       const subtotal = computed.subtotal;
       const taxAmount = computed.taxTotal;
       const total = computed.payable;
@@ -2911,11 +3054,16 @@ export class SubscriptionFiscalService {
       // confiar en lo que mande el cliente — mismo razonamiento que para
       // `tax_amount`: un navegador se puede manipular.
       const withholdings = Array.isArray(dto.withholdings) ? dto.withholdings : [];
-      const withholdingAmount = withholdings.reduce((acc, w) => {
-        const base = Number(w.base_amount) || 0;
-        const rate = Number(w.rate) || 0;
-        return acc + Math.round(base * rate * 100) / 100;
-      }, 0);
+      const withholdingAmount = withholdings.reduce(
+        (acc, w) => acc + platformWithholdingAmount(w),
+        0,
+      );
+      // `cac:WithholdingTaxTotal` — mismo contrato que el riel tienda: se
+      // DECLARAN las retenciones, NO restan de `PayableAmount` (Anexo 1.9
+      // §11.9.1). Se resuelven ANTES del consecutivo; un concepto que no se
+      // pueda resolver se omite del XML (recuperable) sin bloquear la emisión.
+      const conceptById = await this.loadPlatformWithholdingConcepts(withholdings);
+      const xmlWithholdings = buildPlatformXmlWithholdings(withholdings, conceptById);
 
       // 0.c) Idempotencia por contenido. Doble click en el botón =
       //     mismo tax_id + mismas items + mismo período → misma key.
@@ -3003,7 +3151,15 @@ export class SubscriptionFiscalService {
       // del sondeo. Si la nota cambia entre sondeo y final —no puede, sale
       // sólo del DTO y de los totales locales, todos inmutables entre los dos
       // puntos— el providerData real lo recalcula dentro de la tx.
-      const defaultNotes = hasAnyTax
+      // Nota legal: art. 476 ET (excluido) SOLO si la factura no declara
+      // ningún impuesto; con líneas exentas al 0 % la referencia es el art.
+      // 477 ET (exentos), que es otra figura.
+      const defaultNotes = hasExemptLine
+        ? [
+            `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
+            'Operación exenta de IVA (tarifa 0 %) — art. 477 del Estatuto Tributario',
+          ]
+        : hasAnyTax
         ? [`Factura de servicios generada desde super-admin el ${issueAtLocal}`]
         : [
             `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
@@ -3026,6 +3182,7 @@ export class SubscriptionFiscalService {
         withholdingAmount,
         hasAnyTax,
         notesText,
+        xmlWithholdings,
       );
 
       // `fix` viaja junto al `problem`: es la mitad accionable del hallazgo, y
@@ -3149,6 +3306,7 @@ export class SubscriptionFiscalService {
           withholdingAmount,
           hasAnyTax,
           notesText,
+          xmlWithholdings,
         );
 
         // 1.c) Insertar la fila. Si una petición CONCURRENTE ganó la carrera
@@ -3215,13 +3373,26 @@ export class SubscriptionFiscalService {
               period_start: dto.period_start ?? null,
               period_end: dto.period_end ?? null,
               currency: dto.currency ?? 'COP',
-              withholdings: withholdings.map((w) => ({
-                role: w.role,
-                concept_id: w.concept_id,
-                base_amount: Number(w.base_amount),
-                rate: Number(w.rate),
-                amount: w.amount != null ? Number(w.amount) : Math.round(Number(w.base_amount) * Number(w.rate) * 100) / 100,
-              })),
+              withholdings: withholdings.map((w) => {
+                const concept = conceptById.get(Number(w.concept_id));
+                return {
+                  role: w.role,
+                  concept_id: w.concept_id,
+                  base_amount: Number(w.base_amount),
+                  rate: Number(w.rate),
+                  // Calculado por el servidor, el mismo importe del XML.
+                  amount: platformWithholdingAmount(w),
+                  // Clasificación que el asiento y el PDF necesitan; su
+                  // presencia marca el snapshot con el rol ya corregido.
+                  ...(concept
+                    ? {
+                        withholding_type: concept.withholding_type,
+                        concept_code: concept.code,
+                        account_code: concept.account_code ?? null,
+                      }
+                    : {}),
+                };
+              }),
               counterpart_account_code: dto.counterpart_account_code ?? null,
               resolution_id: resolution.id,
               issue_date: issueAtLocal,
@@ -5972,19 +6143,42 @@ export class SubscriptionFiscalService {
         .map((it) => (it as any)?.account_code ?? null)
         .filter((c): c is string => typeof c === 'string');
 
-      const withholding_breakdown = Array.isArray(snapshot.withholdings)
-        ? (snapshot.withholdings as unknown as Array<{
-            tax_type?: string;
-            amount?: number;
-            [k: string]: unknown;
-          }>)
-        : undefined;
+      // El evento `invoice.accepted` trata el `withholding_breakdown` como
+      // retención SUFRIDA (DR 1355xx, rebaja la CxC): sólo entra lo que el
+      // adquiriente le retiene a la plataforma (`role='suffered'`). La
+      // autorretención y cualquier otro rol no mueven la CxC. Una fila sin
+      // clasificar (snapshot anterior a que se persistiera el tipo) no se puede
+      // rutear a una cuenta y se omite, como el resto del snapshot legado.
+      const withholding_breakdown = (
+        Array.isArray(snapshot.withholdings) ? snapshot.withholdings : []
+      )
+        .filter(
+          (w) =>
+            (w as any)?.role === 'suffered' &&
+            typeof (w as any)?.withholding_type === 'string' &&
+            Number((w as any)?.amount) > 0,
+        )
+        .map((w: any) => ({
+          withholding_type: w.withholding_type,
+          concept_code: String(w.concept_code ?? w.concept_id ?? ''),
+          concept_id: w.concept_id,
+          rate: Number(w.rate),
+          base: Number(w.base_amount),
+          amount: Number(w.amount),
+          role: 'suffered' as const,
+          account_role: `withholding.suffered.${w.withholding_type}_receivable`,
+          account_code: w.account_code ?? null,
+        }));
 
-      // `tax_breakdown` por línea no existe todavía en el snapshot V1; el
-      // listener y `AutoEntryService` toleran su ausencia cayendo al mapping key
-      // legacy `invoice.validated.vat_payable` (suma simple). El contrato
-      // formal de `tax_breakdown` se completará cuando `elon` lo agregue al
-      // snapshot — el campo es optional en el listener.
+      // Desglose TIPADO de impuestos (IVA → 2408, INC → 2436, ICA → 2412) que
+      // `createPlatformInvoice` persiste en el snapshot. Snapshot anterior sin
+      // desglose, o desglose que no suma el impuesto de cabecera: `undefined`
+      // ⇒ comportamiento previo (todo a `invoice.validated.vat_payable`).
+      const tax_breakdown = await this.loadPlatformTaxBreakdown(
+        transmission.id,
+        Number(snapshot.totals?.tax_amount ?? 0),
+      );
+
       const payload = {
         invoice_id: transmission.id,
         invoice_number: transmission.document_number,
@@ -5994,7 +6188,8 @@ export class SubscriptionFiscalService {
         subtotal_amount: Number(snapshot.totals?.subtotal ?? 0),
         tax_amount: Number(snapshot.totals?.tax_amount ?? 0),
         total_amount: Number(snapshot.totals?.total ?? 0),
-        withholding_breakdown,
+        withholding_breakdown: withholding_breakdown.length > 0 ? withholding_breakdown : undefined,
+        tax_breakdown,
         user_id: transmission.created_by_user_id ?? undefined,
         customer: snapshot.customer as { id: number; name?: string; tax_id?: string } | undefined,
         // Regla de precedencia: cuenta del operador > mapeo automático.
@@ -6020,6 +6215,43 @@ export class SubscriptionFiscalService {
         (error as Error).stack,
       );
     }
+  }
+
+  /**
+   * `tax_breakdown` del snapshot (filas `{tax_type, rate (fracción), base,
+   * amount}`) → `TaxBreakdownItem[]` tipado por tributo. Se lee directo de la
+   * evidencia porque `loadInvoiceSnapshot` no lo expone. Devuelve `undefined`
+   * (⇒ asiento legado) si no hay desglose o no suma el impuesto de cabecera.
+   */
+  private async loadPlatformTaxBreakdown(
+    transmissionId: number,
+    headerTaxAmount: number,
+  ): Promise<TaxBreakdownItem[] | undefined> {
+    const row = await this.prisma.withoutScope().fiscal_evidences.findFirst({
+      where: { fiscal_transmission_id: transmissionId, evidence_type: 'manual_support' },
+      orderBy: { created_at: 'desc' },
+      select: { metadata: true },
+    });
+    const meta = row?.metadata as Record<string, unknown> | null | undefined;
+    const rows = meta && meta['kind'] === 'platform_invoice_snapshot' ? meta['tax_breakdown'] : null;
+    if (!Array.isArray(rows) || rows.length === 0) return undefined;
+
+    const byType = new Map<TaxFiscalTypeValue, number>();
+    for (const r of rows as Array<Record<string, unknown>>) {
+      const amount = Number(r?.['amount']);
+      if (!Number.isFinite(amount) || amount < 0) return undefined;
+      const raw = String(r?.['tax_type'] ?? '').toLowerCase();
+      // Tipos con cuenta propia; el resto (ICUI…) cae a IVA como todo tipo sin tipar.
+      const type: TaxFiscalTypeValue = raw === 'inc' || raw === 'ica' ? raw : 'iva';
+      byType.set(type, (byType.get(type) ?? 0) + amount);
+    }
+    const items: TaxBreakdownItem[] = [...byType].map(([tax_type, tax_amount]) => ({
+      tax_type,
+      tax_amount: Math.round(tax_amount * 100) / 100,
+    }));
+    const sumCents = items.reduce((acc, i) => acc + Math.round(i.tax_amount * 100), 0);
+    if (sumCents !== Math.round(headerTaxAmount * 100)) return undefined;
+    return items;
   }
 
   private async markRejected(

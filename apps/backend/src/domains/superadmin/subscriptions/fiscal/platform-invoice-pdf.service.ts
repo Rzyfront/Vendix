@@ -831,6 +831,12 @@ export class PlatformInvoicePdfService {
     const withholding_amount = Array.isArray(invoiceSnap?.withholdings)
       ? Math.round(
           (invoiceSnap!.withholdings as Array<Record<string, unknown>>).reduce((acc, w) => {
+            // NETO A PAGAR: sólo resta lo que el ADQUIRIENTE le retiene a la
+            // plataforma (`role='suffered'`); la autorretención no la paga el
+            // cliente de menos. El snapshot sin `withholding_type` es anterior
+            // a la corrección del rol: se conserva su comportamiento histórico
+            // (suma todo) para no cambiar el PDF de un documento ya emitido.
+            if (w?.['withholding_type'] != null && w?.['role'] !== 'suffered') return acc;
             const amount =
               w?.['amount'] != null
                 ? Number(w['amount'])
