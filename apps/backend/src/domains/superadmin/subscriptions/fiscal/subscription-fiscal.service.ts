@@ -5,6 +5,7 @@ import {
   dianAmount,
   dianLineExtension,
   dianLineExtensionTotal,
+  dianSum,
   clearInclusiveLine,
 } from '../../../store/invoicing/utils/dian-money.util';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
@@ -2122,9 +2123,15 @@ export class SubscriptionFiscalService {
       customer_regime: customerRegime,
       customer_tax_responsibilities: customerResponsibilities,
       subtotal_amount: subtotal.toFixed(2),
-      discount_amount: dto.items
-        .reduce((acc, it) => acc + Number(it.discount_amount ?? 0), 0)
-        .toFixed(2),
+      // Σ de los descuentos que las LÍNEAS EMITEN, no de los capturados en el
+      // DTO. En una línea con impuesto incluido el descuento se despeja junto
+      // con el precio (`clearInclusiveLine`): 10.000 capturados viajan como
+      // 8.403,36. Sumar el capturado dejaba un remanente de 1.596,64 que
+      // `UblCommonBuilder.documentDiscount` leía como descuento DE PIE: el XML
+      // descontaba dos veces y el prevalidador cortaba con
+      // `PAYABLE_AMOUNT_MISMATCH`. El riel tienda no tiene remanente porque
+      // sus descuentos nacen por línea; con esto la plataforma tampoco.
+      discount_amount: dianSum(lineItems.map((it) => it.discount_amount)),
       tax_amount: taxAmount.toFixed(2),
       withholding_amount: withholdingAmount.toFixed(2),
       total_amount: total.toFixed(2),
