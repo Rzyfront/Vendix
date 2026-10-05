@@ -209,7 +209,7 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
 
         <!-- Page Content -->
         <main
-          class="flex-1 flex flex-col transition-all duration-300 ease-in-out"
+          class="flex-1 flex flex-col min-h-0 transition-all duration-300 ease-in-out"
           [class.overflow-y-auto]="!isPosRoute()"
           [class.overflow-x-hidden]="!isPosRoute()"
           [class.px-1]="!isPosRoute()"
