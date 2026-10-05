@@ -193,6 +193,7 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
                   refreshing={refreshing}
                   onRefresh={onRefresh}
                   tintColor={colors.primary}
+                  colors={[colors.primary]}
                 />
               }
               renderItem={({ item }) => (

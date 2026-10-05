@@ -3158,6 +3158,7 @@ const PosScreen = () => {
               refreshing={isRefetchingProducts}
               onRefresh={() => refetchProducts()}
               tintColor={colors.primary}
+              colors={[colors.primary]}
             />
           }
           columnWrapperStyle={{ gap: GRID_COLUMN_GAP }}

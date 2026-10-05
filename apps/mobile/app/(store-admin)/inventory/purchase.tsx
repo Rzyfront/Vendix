@@ -252,6 +252,7 @@ export default function PurchaseInventoryScreen() {
             refreshing={isRefetchingProducts}
             onRefresh={() => refetchProducts()}
             tintColor={colors.primary}
+            colors={[colors.primary]}
           />
         }
         columnWrapperStyle={styles.productColumns}
