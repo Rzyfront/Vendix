@@ -368,6 +368,37 @@ helper `kitchenStateFor(item)` prefers a non-terminal (in-flight) row
 over the most recent terminal row, so the badge tracks the active state
 even after re-fires.
 
+### KDS físico vs virtual (`restaurant.kitchen_mode`)
+
+`store_settings.settings.restaurant.kitchen_mode: 'virtual' | 'physical'`. One
+enum, so the two modes are mutually exclusive. Missing/null/garbage resolves to
+`'virtual'` via `normalizeKitchenMode` / `resolveKitchenMode`
+(`kitchen-fire/kitchen-mode.util.ts`) — the ONLY backend reader; never read the
+field ad hoc and never default to physical.
+
+Physical mode (small kitchens, paper comandas, no KDS screens):
+
+- Same tickets, same stations, same inventory/COGS at fire. Only three things
+  change: tickets and items are born `in_preparation` (`fireOrderItemsInTx`,
+  `resendOrderItems`); delivery is allowed from any non-terminal kitchen state
+  (`canDeliverItem` via `kitchen_mode` on the snapshot, `deliverOrderItem` /
+  `syncKitchenOnOrderItemDelivered` skip `ready` like `fromDispatch`,
+  `markDelivered` accepts `pending`); and the storefront QR's effective
+  `auto_fire` is `false` (`getQrSettings`), because "the device that fires
+  prints" and a server-side fire has no device.
+- Finish gates (`hasPendingKitchenItems`, `kitchenHandoffBlocker`, auto-finish)
+  are NOT relaxed — the user satisfies them by marking dishes delivered.
+- Frontend: `KitchenTicketPrintService` (`restaurant-ops/kds/services/`) is the
+  single reader (`isPhysicalKitchen`). `printAfterFire(kitchen_ticket_ids)`
+  runs after every fire (POS, checkout shell, table page, order detail, resend
+  modal); it is a no-op in virtual, deduped 30 s, and honors the
+  `kitchen_ticket` print format's `is_active` / `auto_print`. `printTickets` is
+  the manual "Imprimir comanda". The order detail has "Entregar todo", which
+  delivers sequentially through `deliverOrderItem`. The "Comandas" sidebar item
+  (`restaurant_ops_kds`) is hidden by `MenuFilterService.hiddenBySettings`.
+- Printing uses `window.print()` (one dialog per comanda). For silent printing,
+  run Chrome with `--kiosk-printing` and the thermal printer as the default.
+
 ## Menu / Carta
 
 - A `menus` is a named carta with `menu_sections`, each with
