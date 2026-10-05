@@ -2097,10 +2097,10 @@ export class SubscriptionFiscalService {
       due_date: dueAt,
       invoice_period: {
         start_date: dto.period_start
-          ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
+          ? this.toCivilDate(dto.period_start, 'period_start')
           : issueAtLocal,
         end_date: dto.period_end
-          ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
+          ? this.toCivilDate(dto.period_end, 'period_end')
           : issueAtLocal,
       },
       customer_name: dto.customer.legal_name,
@@ -2136,9 +2136,9 @@ export class SubscriptionFiscalService {
       withholding_amount: withholdingAmount.toFixed(2),
       total_amount: total.toFixed(2),
       currency: 'COP',
-      ...(function buildExchangeRate(): {
+      ...((): {
         exchange_rate?: DianExchangeRateDeclaration;
-      } {
+      } => {
         const cur = dto.exchange_rate_payload;
         if (!cur) return {};
         const foreign = cur.iso_4217;
@@ -2149,7 +2149,9 @@ export class SubscriptionFiscalService {
           exchange_rate: {
             foreign_currency: foreign.toUpperCase(),
             rate: dianAmount(rateRaw),
-            date: cur.exchange_rate_date ?? issueAtLocal,
+            date: cur.exchange_rate_date
+              ? this.toCivilDate(cur.exchange_rate_date, 'exchange_rate_date')
+              : issueAtLocal,
           },
         };
       })(),
@@ -2422,6 +2424,96 @@ export class SubscriptionFiscalService {
     });
   }
 
+  // ───────────────────────────────────────────────────────────────────────
+  // Factura de plataforma: fechas civiles, cálculo por kernel y compuertas
+  // previas al consecutivo. Todo lo de esta sección es PURO (sin BD), salvo
+  // `assertPlatformSigningReady`, que sólo lee la configuración DIAN.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Una fecha de negocio (`issue_date`, `due_date`, período, fecha de la TRM)
+   * es un DÍA CIVIL, no un instante. `'2026-09-11'` parseado con `new Date()`
+   * es la medianoche UTC, que en Bogotá (UTC-5) es el 10 de septiembre: el
+   * documento firmado salía un día antes del que el operador eligió.
+   *
+   * Regla: `YYYY-MM-DD` (o ese mismo día a medianoche exacta, con `Z` o sin
+   * zona) se usa TAL CUAL; sólo un instante con hora real se convierte a la
+   * fecha civil de la plataforma.
+   */
+  private toCivilDate(value: string, field: string): string {
+    const raw = String(value ?? '').trim();
+    const midnight =
+      /^(\d{4}-\d{2}-\d{2})(?:T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)?)?$/.exec(
+        raw,
+      );
+    if (midnight) {
+      const day = midnight[1];
+      const parsed = new Date(`${day}T00:00:00Z`);
+      if (
+        Number.isNaN(parsed.getTime()) ||
+        parsed.toISOString().slice(0, 10) !== day
+      ) {
+        throw new BadRequestException(
+          `${field} no es una fecha válida (${raw}).`,
+        );
+      }
+      return day;
+    }
+    const instant = new Date(raw);
+    if (Number.isNaN(instant.getTime())) {
+      throw new BadRequestException(`${field} no es una fecha válida (${raw}).`);
+    }
+    return localDateString(instant, PLATFORM_TIMEZONE);
+  }
+
+  private addCivilDays(day: string, days: number): string {
+    const base = new Date(`${day}T00:00:00Z`);
+    base.setUTCDate(base.getUTCDate() + days);
+    return base.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Fechas del documento, todas como día civil. Valida `due_date >= issue_date`
+   * y exige `due_date` en una factura a crédito (`payment_form = '2'`).
+   * Default de vencimiento (contado): emisión + 7 días, como siempre.
+   */
+  private resolvePlatformCivilDates(
+    dto: CreatePlatformInvoiceDto,
+    issuedAt: Date,
+  ): {
+    issueAt: string;
+    dueAt: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+  } {
+    const issueAt = dto.issue_date
+      ? this.toCivilDate(dto.issue_date, 'La fecha de emisión (issue_date)')
+      : localDateString(issuedAt, PLATFORM_TIMEZONE);
+    if (dto.payment_form === '2' && !dto.due_date) {
+      throw new BadRequestException(
+        'Una factura a crédito requiere fecha de vencimiento (due_date).',
+      );
+    }
+    const dueAt = dto.due_date
+      ? this.toCivilDate(dto.due_date, 'La fecha de vencimiento (due_date)')
+      : this.addCivilDays(issueAt, 7);
+    if (dueAt < issueAt) {
+      throw new BadRequestException(
+        `La fecha de vencimiento (${dueAt}) no puede ser anterior a la fecha de emisión (${issueAt}).`,
+      );
+    }
+    return {
+      issueAt,
+      dueAt,
+      periodStart: dto.period_start
+        ? this.toCivilDate(dto.period_start, 'El inicio del período (period_start)')
+        : null,
+      periodEnd: dto.period_end
+        ? this.toCivilDate(dto.period_end, 'El fin del período (period_end)')
+        : null,
+    };
+  }
+
   /**
    * C.11: crea una factura personalizada de plataforma. A diferencia de
    * `issueForInvoice` (que firma una `subscription_invoice` ya existente),
@@ -2499,20 +2591,14 @@ export class SubscriptionFiscalService {
 
     return this.runInPlatformContext(settings, async () => {
       const issuedAt = new Date();
-      const issuedAtLocal = localDateString(issuedAt, PLATFORM_TIMEZONE);
       const issuedAtTime = localTimeString(issuedAt, PLATFORM_TIMEZONE);
-      // due_date: el caller puede sobreescribirla (DTO). Default legacy:
-      // emisión + 7 días. ISO8601 → YYYY-MM-DD local.
-      const dueAt = dto.due_date
-        ? localDateString(new Date(dto.due_date), PLATFORM_TIMEZONE)
-        : localDateString(
-            new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
-            PLATFORM_TIMEZONE,
-          );
-      // issue_date: idem, default = emisión.
-      const issueAtLocal = dto.issue_date
-        ? localDateString(new Date(dto.issue_date), PLATFORM_TIMEZONE)
-        : issuedAtLocal;
+      // Fechas de NEGOCIO como día civil (`YYYY-MM-DD`), nunca como instante:
+      // `'2026-09-11'` pasado por `new Date()` es la medianoche UTC = 10/09 en
+      // Bogotá. Valida además `due_date >= issue_date` y exige `due_date` en
+      // una factura a crédito (`payment_form = '2'`).
+      const civil = this.resolvePlatformCivilDates(dto, issuedAt);
+      const dueAt = civil.dueAt;
+      const issueAtLocal = civil.issueAt;
 
       // 0.b) Cálculo por línea. Construye `lineItems` (forma que firma la
       //     DIAN) Y `snapshotItems` (forma del snapshot contable que lee el
