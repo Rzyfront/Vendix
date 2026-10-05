@@ -1769,7 +1769,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
           this.toast.success(`Factura ${number} emitida y aceptada por la DIAN.`);
         } else {
           this.toast.warning(
-            `Factura ${number} creada; la DIAN aún no la ha aceptada (estado: ${status ?? 'pendiente'}). Redirigiendo al detalle...`,
+            `Factura ${number} creada; la DIAN aún no la ha aceptado (estado: ${status ?? 'pendiente'}). Redirigiendo al detalle...`,
             'Pendiente de aceptación',
             6000,
           );
