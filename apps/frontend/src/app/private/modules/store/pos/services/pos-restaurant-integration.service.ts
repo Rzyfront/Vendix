@@ -34,6 +34,8 @@ import type {
 
 interface FireOrderItemsResponse {
   kitchen_ticket_id: number;
+  /** One ticket per KDS station; primary first. */
+  kitchen_ticket_ids?: number[];
   order_id: number;
   fired_item_ids: number[];
   skipped_item_ids: number[];

@@ -2347,10 +2347,9 @@ export class PosCheckoutShellComponent {
           const fired = !!fireRes && fireRes.fired_item_ids.length > 0;
           if (fired) {
             this.toastService.success('Orden creada y enviada a cocina');
-            const ids = (fireRes as { kitchen_ticket_ids?: number[] } | null)
-              ?.kitchen_ticket_ids;
             this.kitchenTicketPrint.printAfterFire(
-              ids ?? (fireRes ? [fireRes.kitchen_ticket_id] : []),
+              fireRes?.kitchen_ticket_ids ??
+                (fireRes ? [fireRes.kitchen_ticket_id] : []),
             );
           } else {
             this.toastService.success('Orden creada');
