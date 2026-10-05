@@ -294,6 +294,26 @@ describe('PlatformInvoicePdfService (graphic representation)', () => {
     expect(miss.s3.uploadFile).toHaveBeenCalledTimes(1);
   });
 
+  it('serves a legacy invoice (pdf_url set, snapshot without issue_date) as-is, without builder or S3 put', async () => {
+    const gen = jest.spyOn(InvoicePdfBuilder, 'generate').mockResolvedValue(Buffer.from('%PDF'));
+    const { issue_date: _omit, ...legacy_snapshot } = SNAPSHOT;
+    const old_key = 'platform/invoices/69/invoice-VNDS1.pdf';
+    const { svc, s3, db } = setup(makeTx({ pdf_url: old_key }), legacy_snapshot);
+
+    const res = await svc.getPdf(69);
+
+    expect(res.key).toBe(old_key);
+    expect(gen).not.toHaveBeenCalled();
+    expect(s3.uploadFile).not.toHaveBeenCalled();
+    expect(db.fiscal_transmissions.update).not.toHaveBeenCalled();
+
+    // La regeneracion explicita (manual) si la rehace.
+    const forced = await svc.regeneratePdf(69);
+    expect(gen).toHaveBeenCalledTimes(1);
+    expect(s3.uploadFile).toHaveBeenCalledTimes(1);
+    expect(forced.key).not.toBe(old_key);
+  });
+
   it('converts a WebP logo to PNG before handing it to the builder', async () => {
     const gen = jest.spyOn(InvoicePdfBuilder, 'generate').mockResolvedValue(Buffer.from('%PDF'));
     const webp = await sharp({

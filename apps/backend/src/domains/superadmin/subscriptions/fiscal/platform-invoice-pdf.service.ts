@@ -214,6 +214,19 @@ export class PlatformInvoicePdfService {
     // cambia, la llave cambia y el PDF se regenera (antes se guardaba una vez y
     // quedaba con datos/estado viejos para siempre).
     const snapshot = await this.loadTransmissionSnapshot(transmission.id);
+
+    // Factura anterior al fix (ya tiene PDF y su snapshot no trae `issue_date`):
+    // se sirve el PDF existente tal cual; no se regenera ni se reescribe S3 ni
+    // `pdf_url`. Solo la regeneracion explicita (`force`, endpoint regenerate)
+    // puede rehacerla. Si firmar falla se propaga: no se reescribe en silencio.
+    if (!force && transmission.pdf_url && !snapshot.invoiceSnapshot?.['issue_date']) {
+      const url = await this.s3_service.getPresignedUrl(transmission.pdf_url);
+      this.logger.log(
+        `Legacy PDF served as-is for platform transmission #${transmission_id} (${transmission.pdf_url})`,
+      );
+      return { key: transmission.pdf_url, url };
+    }
+
     const s3_key = this.buildS3Key(transmission, snapshot);
 
     if (!force && transmission.pdf_url === s3_key) {
