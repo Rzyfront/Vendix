@@ -41,6 +41,7 @@ import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
+import { PreviewPlatformSalesInvoiceDto } from './dto/platform-invoice-preview.dto';
 import {
   CreatePlatformSalesInvoiceDto,
   CreatePlatformSupportDocumentDto,
@@ -204,6 +205,38 @@ export class PlatformInvoicingController {
   }
 
   /**
+   * Mensaje según el estado REAL de la transmisión (no anuncia éxito sobre un
+   * rechazo de la DIAN).
+   */
+  private emissionMessage(data: any): string {
+    const accepted =
+      data?.accepted === true || data?.transmission_status === 'accepted';
+    if (accepted) return 'Factura emitida y aceptada por la DIAN';
+    const detail =
+      data?.error_message ||
+      (data?.transmission_status
+        ? `estado ${data.transmission_status}`
+        : 'sin detalle');
+    return `Factura creada pero la DIAN no la aceptó: ${detail}`;
+  }
+
+  /**
+   * Previsualiza los totales de una factura de plataforma con el cálculo con
+   * que se firma. No numera, no persiste, no firma, no llama a la DIAN.
+   * Declarada ANTES de las rutas `sales-invoices/:id/...`.
+   */
+  @Post('sales-invoices/preview')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'Previsualizar totales de una sales_invoice de plataforma' })
+  async previewSalesInvoice(
+    @Body() dto: PreviewPlatformSalesInvoiceDto,
+  ): Promise<any> {
+    const data = this.platformInvoicing.previewSalesInvoice(dto);
+    return this.responseService.success(data, 'Previsualización calculada');
+  }
+
+  /**
    * Crea una `sales_invoice` del rail plataforma. El `customer` del
    * body es un tenant (ADR-7: no es `users`). Emisor: la org plataforma
    * (Vendix Corp).
@@ -223,7 +256,7 @@ export class PlatformInvoicingController {
       actorUserId: 0,
       dto,
     });
-    return this.responseService.created(data, 'Sales invoice del rail plataforma creada');
+    return this.responseService.created(data, this.emissionMessage(data));
   }
 
   /**
@@ -260,7 +293,7 @@ export class PlatformInvoicingController {
       invoiceId: id,
       actorUserId: 0,
     });
-    return this.responseService.success(data, 'Envio platform a DIAN aceptado');
+    return this.responseService.success(data, this.emissionMessage(data));
   }
 
   /**

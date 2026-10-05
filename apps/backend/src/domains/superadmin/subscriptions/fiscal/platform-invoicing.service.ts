@@ -342,6 +342,64 @@ document_type: args.dto.customer.document_type ?? '31',
   }
 
   /**
+   * Previsualización de totales de una factura de plataforma. PURA: usa el
+   * mismo cálculo con que se firma (`computePlatformInvoiceTotals`); no asigna
+   * consecutivo, no persiste, no firma ni llama a la DIAN.
+   */
+  previewSalesInvoice(dto: any) {
+    const items = (dto.items ?? []).map((line: any) => ({
+      description: line.description,
+      quantity: Number(line.quantity) || 1,
+      unit_price: Number(line.unit_price) || 0,
+      unit_code: line.unit_code ?? 'NIU',
+      discount_amount: line.discount_amount ?? 0,
+      account_code: line.account_code ?? undefined,
+      taxes: (line.taxes ?? []).map((t: any) => ({
+        tax_type: t.tax_type,
+        rate: t.rate,
+        is_inclusive: t.is_inclusive ?? false,
+      })),
+    }));
+    const computed = this.subscriptionFiscalService.computePlatformInvoiceTotals({
+      items,
+    } as any);
+
+    const lines = computed.lineItems.map((l, i) => {
+      const snap = computed.snapshotItems[i];
+      return {
+        position: i + 1,
+        description: l.description,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        discount_amount: l.discount_amount,
+        base: String(snap?.line_total ?? ''),
+        taxes: snap?.taxes ?? [],
+        tax_amount: l.tax_amount,
+        total: l.total_amount,
+      };
+    });
+
+    const withholdings = Array.isArray(dto.withholdings) ? dto.withholdings : [];
+    const withholdingsTotal = withholdings.reduce(
+      (acc: number, w: any) =>
+        acc + Math.round((Number(w.base_amount) || 0) * (Number(w.rate) || 0) * 100) / 100,
+      0,
+    );
+
+    return {
+      lines,
+      subtotal: computed.subtotal,
+      discount_total: computed.discountTotal,
+      tax_total: computed.taxTotal,
+      tax_breakdown: computed.taxBreakdown,
+      withholdings_total: withholdingsTotal.toFixed(2),
+      total: computed.payable,
+      payable: computed.payable,
+      net_after_withholdings: (Number(computed.payable) - withholdingsTotal).toFixed(2),
+    };
+  }
+
+  /**
    * Crea un `support_document` (DSA) del rail super-admin.
    *
    * MVP: el legacy `subscriptionFiscalService` no tiene un
