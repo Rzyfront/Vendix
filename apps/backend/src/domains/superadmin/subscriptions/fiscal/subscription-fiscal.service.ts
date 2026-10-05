@@ -7,7 +7,12 @@ import {
   dianLineExtensionTotal,
   dianSum,
   clearInclusiveLine,
+  toDecimal,
 } from '../../../store/invoicing/utils/dian-money.util';
+import { create as xmlCreate } from 'xmlbuilder2';
+import { InvoiceCalculatorService } from '../../../store/invoicing/services/invoice-calculator.service';
+import { DianTotalsValidator } from '../../../store/invoicing/providers/dian-direct/xml/dian-totals.validator';
+import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/xml/xml-namespaces';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 // Mismas funciones que el generador de numeración de tiendas, sin copia local:
 // la forma de una ClTec no puede tener dos definiciones, o el carril que valida
@@ -132,6 +137,7 @@ import {
   DianAddressFields,
   DianDocumentExtras,
   DianExchangeRateDeclaration,
+  UblCommonBuilder,
   UblDocumentLine,
 } from '../../../store/invoicing/providers/dian-direct/xml/ubl-common.builder';
 
@@ -191,6 +197,32 @@ interface PlatformSnapshotLine {
   unit_code: string;
   taxes: PlatformTaxBreakdownRow[];
   account_code: string | null;
+}
+
+/**
+ * Resultado del cálculo PURO de la factura de plataforma
+ * (`computePlatformInvoiceTotals`): lo que se firma (`lineItems`), lo que se
+ * persiste (`snapshotItems`) y los totales de cabecera como CADENAS DIAN.
+ */
+export interface PlatformInvoiceComputation {
+  lineItems: UblDocumentLine[];
+  snapshotItems: PlatformSnapshotLine[];
+  /** `LegalMonetaryTotal/LineExtensionAmount` = ValFac del CUFE. */
+  subtotal: string;
+  /** Σ de los impuestos de línea = `TaxTotal/TaxAmount`. */
+  taxTotal: string;
+  /** Σ de los descuentos que las líneas EMITEN. */
+  discountTotal: string;
+  /** `PayableAmount` = ValTot del CUFE. */
+  payable: string;
+  hasAnyTax: boolean;
+  taxBreakdown: Array<{
+    tax_type: string;
+    code: string;
+    rate: number;
+    base: string;
+    amount: string;
+  }>;
 }
 
 /**
@@ -2075,9 +2107,9 @@ export class SubscriptionFiscalService {
     dueAt: string,
     issueAtLocal: string,
     lineItems: UblDocumentLine[],
-    subtotal: number,
-    taxAmount: number,
-    total: number,
+    subtotal: string,
+    taxAmount: string,
+    total: string,
     withholdingAmount: number,
     hasAnyTax: boolean,
     notesText: string,
@@ -2122,7 +2154,7 @@ export class SubscriptionFiscalService {
       customer_person_type: customerPersonType,
       customer_regime: customerRegime,
       customer_tax_responsibilities: customerResponsibilities,
-      subtotal_amount: subtotal.toFixed(2),
+      subtotal_amount: subtotal,
       // Σ de los descuentos que las LÍNEAS EMITEN, no de los capturados en el
       // DTO. En una línea con impuesto incluido el descuento se despeja junto
       // con el precio (`clearInclusiveLine`): 10.000 capturados viajan como
@@ -2132,9 +2164,9 @@ export class SubscriptionFiscalService {
       // `PAYABLE_AMOUNT_MISMATCH`. El riel tienda no tiene remanente porque
       // sus descuentos nacen por línea; con esto la plataforma tampoco.
       discount_amount: dianSum(lineItems.map((it) => it.discount_amount)),
-      tax_amount: taxAmount.toFixed(2),
+      tax_amount: taxAmount,
       withholding_amount: withholdingAmount.toFixed(2),
-      total_amount: total.toFixed(2),
+      total_amount: total,
       currency: 'COP',
       ...((): {
         exchange_rate?: DianExchangeRateDeclaration;
@@ -2515,6 +2547,261 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * CÁLCULO PURO de la factura de plataforma, con el MISMO motor que el riel de
+   * tiendas (`InvoiceCalculatorService` + kernel `dian-money`): importes de
+   * línea truncados (`dianLineExtension`), impuestos por línea truncados,
+   * impuesto incluido por absorción de centavos (`absorbInclusiveLine`) y
+   * precio despejado con `clearInclusiveLine`, cabecera = `dianSum` de lo que
+   * las líneas declaran. Sin BD: la previsualización lo reutiliza.
+   *
+   * Lo que el cliente mande en `tax_amount` / `taxable_amount` se IGNORA.
+   */
+  computePlatformInvoiceTotals(
+    dto: Pick<CreatePlatformInvoiceDto, 'items'>,
+  ): PlatformInvoiceComputation {
+    const calculation = new InvoiceCalculatorService().calculate({
+      items: dto.items.map((item) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount ?? 0,
+        taxes: (Array.isArray(item.taxes) ? item.taxes : []).map((t) => ({
+          // El nombre conserva el `tax_type` del DTO ('IVA', 'INC'…): es lo
+          // que viajaba al proveedor y lo que lee el snapshot contable.
+          tax_name: t.tax_type,
+          tax_type: String(t.tax_type ?? '').toLowerCase(),
+          // Porcentaje, la unidad que el XML declara (`cbc:Percent`).
+          tax_rate: toDecimal(t.rate ?? 0).times(100),
+          // El DTO declara FRACCIÓN: se convierte a porcentaje y se fija la
+          // unidad. Sin esto un ICA caería en `per_mil` (default del motor).
+          rate_basis: 'percent' as const,
+          is_inclusive: t.is_inclusive === true,
+        })),
+      })),
+    });
+
+    const blocking = calculation.divergences.filter(
+      (d) => d.scope === 'unclosed_residual' || d.scope === 'invalid_line_input',
+    );
+    if (blocking.length > 0) {
+      const first = blocking[0];
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        first.scope === 'unclosed_residual'
+          ? `Línea ${first.line_index + 1}: el valor con impuesto incluido no se puede despejar a centavos exactos; ` +
+              'ajusta el precio o captura el impuesto como adicional.'
+          : `Línea ${first.line_index + 1}: datos de cantidad, precio, descuento o tarifa inválidos (${first.detail ?? 'sin detalle'}).`,
+        { divergences: blocking },
+      );
+    }
+
+    const lineItems: UblDocumentLine[] = [];
+    const snapshotItems: PlatformSnapshotLine[] = [];
+    const breakdown = new Map<
+      string,
+      { tax_type: string; code: string; rate: number; bases: string[]; amounts: string[] }
+    >();
+    let hasAnyTax = false;
+
+    calculation.lines.forEach((cl, i) => {
+      const item = dto.items[i];
+      const qty = Number(item.quantity);
+      const price = Number(item.unit_price);
+      const discount = Number(item.discount_amount ?? 0);
+      const taxesIn = Array.isArray(item.taxes) ? item.taxes : [];
+      const inclusive = taxesIn.some(
+        (t) => t.is_inclusive === true && Number(t.rate || 0) > 0,
+      );
+
+      let emittedUnitPrice = String(price);
+      let emittedDiscount = dianAmount(discount);
+      let lineNet = dianLineExtension({
+        quantity: qty,
+        unit_price: price,
+        discount_amount: discount,
+      });
+      if (inclusive) {
+        // Mismo despeje que el riel tienda (`resolveInclusiveLineOverrides`):
+        // la base es la que el motor acaba de calcular, no una segunda.
+        const cleared = clearInclusiveLine({
+          quantity: qty,
+          unit_price: price,
+          discount_amount: discount,
+          taxable_base: cl.line_extension_amount,
+        });
+        if (cleared) {
+          emittedUnitPrice = cleared.unit_price;
+          emittedDiscount = cleared.discount_amount;
+          lineNet = dianLineExtension({
+            quantity: qty,
+            unit_price: cleared.unit_price,
+            discount_amount: cleared.discount_amount,
+          });
+        }
+      }
+      if (lineNet !== cl.line_extension_amount) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_VALIDATE_001,
+          discount > qty * price
+            ? `Línea ${i + 1}: el descuento supera el valor de la línea.`
+            : `Línea ${i + 1}: el importe de la línea (${lineNet}) no cuadra con su base gravable (${cl.line_extension_amount}); revisa cantidad, precio y descuento.`,
+        );
+      }
+
+      const providerTaxes: ProviderInvoiceTax[] = cl.taxes.map((ct) => ({
+        tax_type: ct.tax_name,
+        tax_name: ct.tax_name,
+        tax_rate: ct.tax_rate,
+        taxable_amount: ct.taxable_amount,
+        tax_amount: ct.tax_amount,
+      }));
+      // Tarifa en FRACCIÓN para el snapshot: la del DTO cuando el motor
+      // devuelve una fila por impuesto declarado (sin perder decimales).
+      const snapshotTaxes: PlatformTaxBreakdownRow[] = cl.taxes.map((ct, k) => ({
+        tax_type: ct.tax_name,
+        rate:
+          cl.taxes.length === taxesIn.length
+            ? Number(taxesIn[k].rate)
+            : toDecimal(ct.tax_rate).dividedBy(100).toNumber(),
+        tax_amount: Number(ct.tax_amount),
+        is_inclusive: ct.is_inclusive,
+        taxable_amount: Number(ct.taxable_amount),
+      }));
+      for (const ct of cl.taxes) {
+        hasAnyTax = true;
+        const key = `${ct.tax_name}|${ct.tax_rate}`;
+        const row = breakdown.get(key) ?? {
+          tax_type: ct.tax_name,
+          code: ct.dian_tax_code,
+          rate: toDecimal(ct.tax_rate).dividedBy(100).toNumber(),
+          bases: [],
+          amounts: [],
+        };
+        row.bases.push(ct.taxable_amount);
+        row.amounts.push(ct.tax_amount);
+        breakdown.set(key, row);
+      }
+
+      const unit_code = item.unit_code ?? 'NIU';
+      lineItems.push({
+        description: item.description,
+        quantity: String(qty),
+        unit_price: emittedUnitPrice,
+        discount_amount: emittedDiscount,
+        tax_amount: cl.tax_amount,
+        total_amount: dianSum([lineNet, cl.tax_amount]),
+        unit_code,
+        // Sólo la línea SIN `taxes` calla su grupo (excluido, art. 476 ET).
+        omit_tax_total: taxesIn.length === 0,
+        ...(taxesIn.length > 0 ? { taxes: providerTaxes } : {}),
+      });
+      snapshotItems.push({
+        position: i + 1,
+        description: item.description,
+        quantity: qty,
+        // El snapshot guarda lo que se FIRMÓ, no lo que se capturó.
+        unit_price: Number(emittedUnitPrice),
+        line_total: Number(lineNet),
+        discount_amount: Number(emittedDiscount),
+        unit_code,
+        taxes: snapshotTaxes,
+        account_code: item.account_code ?? null,
+      });
+    });
+
+    // Cabecera = suma de lo que las líneas DECLARAN (FAU02 / FAS02), nunca
+    // base × tarifa sobre el subtotal.
+    const subtotal = dianLineExtensionTotal(lineItems);
+    const taxTotal = dianSum(lineItems.map((l) => l.tax_amount));
+    const discountTotal = dianSum(lineItems.map((l) => l.discount_amount));
+    const payable = dianSum([subtotal, taxTotal]);
+
+    if (
+      subtotal !== calculation.totals.total_before_tax ||
+      taxTotal !== calculation.totals.tax_amount ||
+      payable !== calculation.totals.total_amount
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'Los totales de la factura no cuadran con la suma de sus líneas ' +
+          `(líneas ${subtotal} + impuestos ${taxTotal} ≠ motor ${calculation.totals.total_amount}). No se consumió consecutivo.`,
+      );
+    }
+
+    return {
+      lineItems,
+      snapshotItems,
+      subtotal,
+      taxTotal,
+      discountTotal,
+      payable,
+      hasAnyTax,
+      taxBreakdown: [...breakdown.values()].map((r) => ({
+        tax_type: r.tax_type,
+        code: r.code,
+        rate: r.rate,
+        base: dianSum(r.bases),
+        amount: dianSum(r.amounts),
+      })),
+    };
+  }
+
+  /**
+   * Compuerta de totales ANTES de reservar consecutivo. Arma el XML de totales
+   * con el mismo `UblCommonBuilder` que firma el emisor y lo pasa por
+   * `DianTotalsValidator` (FAU02/04/06/14, FAS01b/02), y comprueba además lo que
+   * el CUFE hashea: `ValFac` = `LineExtensionAmount` y `ValTot` =
+   * `PayableAmount`, con tolerancia 0. Antes esto fallaba (422) DESPUÉS de
+   * gastar el número, que la DIAN no devuelve.
+   */
+  private assertPlatformTotalsCoherent(data: PlatformProviderInvoiceData): void {
+    const currency = data.currency || 'COP';
+    const doc = xmlCreate({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+    UblCommonBuilder.buildDocumentAllowanceCharge(doc, data as any, currency);
+    UblCommonBuilder.buildPaymentExchangeRate(doc, data.exchange_rate);
+    UblCommonBuilder.buildTaxTotals(doc, data.taxes, currency);
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, data as any, currency);
+    UblCommonBuilder.buildInvoiceLines(doc, data.items as any, data.taxes, currency);
+    const xml = doc.end({ prettyPrint: false });
+
+    const problems: string[] = DianTotalsValidator.validate(xml).violations.map(
+      (v: any) => `${v.rule}: ${v.message}`,
+    );
+    const group = xml.match(/<cac:LegalMonetaryTotal>(.*?)<\/cac:LegalMonetaryTotal>/);
+    const xmlAmount = (name: string): string | undefined =>
+      group?.[1].match(
+        new RegExp(`<cbc:${name} currencyID="[^"]*">([^<]*)</cbc:${name}>`),
+      )?.[1];
+    const valFac = dianLineExtensionTotal(data.items);
+    if (xmlAmount('LineExtensionAmount') !== valFac) {
+      problems.push(
+        `ValFac: el XML declara LineExtensionAmount ${xmlAmount('LineExtensionAmount')} y las líneas suman ${valFac}`,
+      );
+    }
+    if (xmlAmount('PayableAmount') !== data.total_amount) {
+      problems.push(
+        `ValTot: el XML declara PayableAmount ${xmlAmount('PayableAmount')} y el documento declara ${data.total_amount}`,
+      );
+    }
+    if (problems.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'Los totales de la factura no cuadran y la DIAN la rechazaría; no se consumió consecutivo: ' +
+          problems[0],
+        { problems },
+      );
+    }
+  }
+
+  /**
    * C.11: crea una factura personalizada de plataforma. A diferencia de
    * `issueForInvoice` (que firma una `subscription_invoice` ya existente),
    * este método arma la `fiscal_transmission` con `source_type='platform_invoice'`
@@ -2600,252 +2887,20 @@ export class SubscriptionFiscalService {
       const dueAt = civil.dueAt;
       const issueAtLocal = civil.issueAt;
 
-      // 0.b) Cálculo por línea. Construye `lineItems` (forma que firma la
-      //     DIAN) Y `snapshotItems` (forma del snapshot contable que lee el
-      //     listener de auto-asientos vía `loadInvoiceSnapshot`).
+      // 0.b) Cálculo con el MISMO motor que el riel de tiendas
+      //     (`InvoiceCalculatorService` + kernel `dian-money`): truncado por
+      //     hoja, impuesto incluido por absorción de centavos, cabecera = Σ de
+      //     lo que las líneas declaran. Todo lo numérico vive en
+      //     `computePlatformInvoiceTotals` (puro, sin BD); acá sólo se consume.
       //
-      //     Regla de cuadre FAS02 (peer rule 3): `tax_amount` de cabecera
-      //     es SIEMPRE la suma de los impuestos por línea — NUNCA base×tarifa
-      //     recalculada sobre el subtotal. Recalcular da un céntimo de
-      //     diferencia y lo rechaza la DIAN.
-      //
-      //     Regla de impuesto incluido (peer rule 4): cuando una línea trae
-      //     `taxes[].is_inclusive=true`, su base gravable es
-      //     `neto / (1 + Σ tarifas_inclusivas)`. Cada impuesto exclusivo
-      //     usa esa misma base despejada. El frontend manda `rate` en
-      //     fracción 0–1.
-      //
-      //     Backward compat (peer rule 2): si NINGUNA línea trae `taxes`,
-      //     `tax_amount = 0` y se conserva la nota de exclusión art. 476
-      //     num. 21 ET. Si AL MENOS una línea trae `taxes`, la nota de
-      //     exclusión NO se emite (sería una declaración falsa) y la
-      //     cabecera lleva `taxes[]`.
-      let hasAnyTax = false;
-      let totalTaxAmount = 0;
-      // Subtotal acumulado línea a línea. Antes se derivaba de un campo
-      // `line_total` que el payload del proveedor arrastraba sólo para esto y
-      // que el contrato del emisor no tiene; acumularlo acá deja la línea
-      // exactamente en la forma que se firma.
-      let subtotalAccum = 0;
-      const lineItems: UblDocumentLine[] = [];
-      const snapshotItems: PlatformSnapshotLine[] = [];
-
-      for (let i = 0; i < dto.items.length; i++) {
-        const item = dto.items[i];
-        const qty = Number(item.quantity);
-        const price = Number(item.unit_price);
-        const discount = Number(item.discount_amount ?? 0);
-        // Redondeo POR LÍNEA, después suma. Coincide con la convención
-        // `LineExtensionAmount` de la DIAN; una suma de floats sin
-        // redondeo intermedio puede dar FAU04 al cuadrar con
-        // TaxExclusiveAmount.
-        const gross = Math.round((qty * price - discount) * 100) / 100;
-
-        const taxes = Array.isArray(item.taxes) ? item.taxes : [];
-        const inclusiveRateSum = taxes
-          .filter((t) => t.is_inclusive === true)
-          .reduce((acc, t) => acc + Number(t.rate || 0), 0);
-
-        let lineBaseForExclusiveTaxes: number;
-        let lineBaseForInclusiveTaxes: number;
-        if (inclusiveRateSum > 0) {
-          // gross = base * (1 + Σ inclusive). Despejamos.
-          lineBaseForInclusiveTaxes = Math.round((gross / (1 + inclusiveRateSum)) * 100) / 100;
-          // La base para exclusivos comparte el mismo neto despejado: ambos
-          // tipos tributan sobre el valor sin impuesto (post-disc, pre-tax).
-          lineBaseForExclusiveTaxes = lineBaseForInclusiveTaxes;
-        } else {
-          lineBaseForExclusiveTaxes = gross;
-          lineBaseForInclusiveTaxes = gross;
-        }
-
-        // DESPEJE DEL PRECIO CUANDO EL IMPUESTO VIENE DENTRO.
-        //
-        // Despejar sólo la BASE del `cac:TaxSubtotal` y dejar el precio con el
-        // impuesto adentro produce un documento que se contradice: una línea de
-        // 1 × $1.190 con IVA 19 % incluido declaraba `LineExtensionAmount`
-        // 1.190 contra una `TaxableAmount` de 1.000, y la cabecera cerraba en
-        // 1.190 + 190 = **$1.380** por una venta de $1.190. Peor que un
-        // rechazo: la aritmética del XML es internamente consistente, así que
-        // la DIAN puede ACEPTARLO y dejar firmada una factura por un importe
-        // que nadie pagó, con el consecutivo ya quemado.
-        //
-        // Se despeja el PRECIO, no sólo el importe, porque la regla FAV06
-        // (rechazo) valida la línea contra su propio precio:
-        // `LineExtensionAmount = PriceAmount × cantidad − descuentos`. El
-        // descuento se despeja en la misma proporción, porque un descuento
-        // sobre un precio con impuesto dentro también lo lleva dentro.
-        //
-        // Es el mismo helper que usa el riel tienda (`invoice-flow.service.ts`
-        // → `resolveInclusiveLineOverrides`), no una segunda implementación:
-        // dos despejes distintos del mismo importe es exactamente el defecto
-        // que este bloque cierra.
-        let emittedUnitPrice: string = String(price);
-        let emittedDiscount: string = discount.toFixed(2);
-        let lineNet = gross;
-        if (inclusiveRateSum > 0) {
-          const cleared = clearInclusiveLine({
-            quantity: qty,
-            unit_price: price,
-            discount_amount: discount,
-            taxable_base: lineBaseForInclusiveTaxes,
-          });
-          if (cleared) {
-            emittedUnitPrice = cleared.unit_price;
-            emittedDiscount = cleared.discount_amount;
-            // El neto vuelve a derivarse del precio despejado con la MISMA
-            // función que el emisor usa para escribir `LineExtensionAmount`,
-            // para que la igualdad de FAV06 se cumpla por construcción y no
-            // por coincidencia aritmética.
-            lineNet = Number(
-              dianLineExtension({
-                quantity: qty,
-                unit_price: cleared.unit_price,
-                discount_amount: cleared.discount_amount,
-              }),
-            );
-          } else {
-            // Cantidad cero o base inservible frente al bruto. Se deja la línea
-            // como estaba —comportamiento histórico— y que la puerta de
-            // pre-emisión la frene: visible, no silencioso.
-            this.logger.warn(
-              `Línea ${i + 1} de la factura de plataforma declara impuesto incluido pero su base ` +
-                `${lineBaseForInclusiveTaxes} no es despejable contra el bruto ${gross}; se emite sin ` +
-                `despejar y la validación de pre-emisión decidirá.`,
-            );
-          }
-        }
-
-        const providerTaxes: ProviderInvoiceTax[] = [];
-        const taxBreakdownSnapshot: PlatformTaxBreakdownRow[] = [];
-        let lineTaxTotal = 0;
-        for (const tax of taxes) {
-          const rate = Number(tax.rate || 0);
-          if (rate <= 0) continue;
-          // El frontend PUEDE mandar `tax_amount` calculado, pero un navegador
-          // es un origen que se puede manipular: si el monto que inyecta no
-          // cuadra con `base × tarifa`, la DIAN lo rechaza con FAS02 firmando
-          // con NUESTRO certificado. El monto que va al XML sale SIEMPRE de
-          // nuestro cálculo sobre la base despejada; el del cliente, si llega,
-          // se descarta (peer rule de vendix-db).
-          // La BASE la calcula el servidor, igual que el importe: el inclusivo
-          // grava el neto despejado (`gross / (1 + Σ tarifas)`) y el exclusivo
-          // el neto tal cual. `tax.taxable_amount` del DTO se IGNORA a
-          // propósito, por el mismo motivo que `tax.tax_amount`: es un dato de
-          // origen manipulable, y una base que no cuadra con el importe hace
-          // que la DIAN rechace por FAS02 un documento firmado con NUESTRO
-          // certificado.
-          const taxableBase = tax.is_inclusive
-            ? lineBaseForInclusiveTaxes
-            : lineBaseForExclusiveTaxes;
-          const taxAmount = Math.round(taxableBase * rate * 100) / 100;
-          lineTaxTotal += taxAmount;
-          providerTaxes.push({
-            tax_type: tax.tax_type,
-            tax_name: tax.tax_type, // el mapper legacy renombra según enum
-            // UNIDADES: el DTO trae `rate` en FRACCIÓN (0,19) y el contrato del
-            // proveedor —`ProviderInvoiceTax.tax_rate`— lo quiere en PORCENTAJE
-            // como cadena ('19.00'), que es lo que va a `cbc:Percent`. La
-            // conversión ocurre UNA sola vez, acá. Antes se empujaba la
-            // fracción bajo el nombre `rate`, un campo que el contrato no
-            // tiene: el emisor leía `tax_rate` → `undefined`, y el
-            // prevalidador levantaba `TAX_RATE_MISSING` en TODA factura con
-            // impuestos.
-            tax_rate: (rate * 100).toFixed(2),
-            taxable_amount: taxableBase.toFixed(2),
-            tax_amount: taxAmount.toFixed(2),
-            // `is_inclusive` NO viaja al proveedor: el contrato no lo tiene y
-            // el emisor no lo lee. El dato sigue vivo en
-            // `taxBreakdownSnapshot`, que es el snapshot contable.
-          });
-          // El snapshot contable conserva la FRACCIÓN (`rate`) y el
-          // `is_inclusive` que el proveedor no lleva: es el único sitio donde
-          // ese par sigue vivo después de firmar. La base es la MISMA que se
-          // declara en el XML —una sola fuente— en vez de la del DTO, que
-          // podía llegar nula y dejaba el asiento sin base.
-          taxBreakdownSnapshot.push({
-            tax_type: tax.tax_type,
-            rate,
-            tax_amount: taxAmount,
-            is_inclusive: !!tax.is_inclusive,
-            taxable_amount: taxableBase,
-          });
-          hasAnyTax = true;
-        }
-
-        // Default unit_code: 'NIU' (UN/ECE Rec. 20). 'EA' no está en la rec.
-        // y ningún selector del front lo puede pintar — el legacy lo
-        // hardcodeaba por bug histórico.
-        const unit_code = item.unit_code ?? 'NIU';
-
-        // La línea viaja en el contrato del emisor (`UblDocumentLine`): todos
-        // sus importes son CADENAS. `position` y `line_total` ya no viajan —
-        // el XML numera por índice y deriva el importe de
-        // `cantidad × precio − descuento`, así que nadie los leía; el subtotal
-        // que sí los usaba se acumula ahora en `subtotalAccum`. La forma con
-        // ordinal e importe de línea sigue existiendo donde SÍ se lee: en
-        // `snapshotItems`, que es lo que persiste el snapshot contable.
-        lineItems.push({
-          description: item.description,
-          quantity: String(qty),
-          // Precio y descuento YA DESPEJADOS cuando la línea captura con
-          // impuesto incluido; idénticos a los del DTO en cualquier otro caso.
-          unit_price: emittedUnitPrice,
-          // Si la línea no trae descuento lo emitimos como 0 explícito
-          // para que el snapshot refleje el cálculo real; si lo trae, fluye.
-          discount_amount: emittedDiscount,
-          // Importes de la línea que el contrato exige. El XML no los lee (la
-          // línea con impuestos declara su propio desglose y la que no los
-          // tiene calla su grupo), pero declararlos evita que el payload
-          // afirme cero donde hay impuesto.
-          tax_amount: lineTaxTotal.toFixed(2),
-          total_amount: (Math.round((lineNet + lineTaxTotal) * 100) / 100).toFixed(2),
-          unit_code,
-          // `omit_tax_total: true` SÓLO cuando la línea no trae taxes (legacy).
-          // Con taxes presentes la línea SÍ tributa y la DIAN debe incluirla
-          // en TaxSubtotal.
-          omit_tax_total: taxes.length === 0,
-          // Si la línea trae taxes, propagamos al provider; el mapper los
-          // aplana al array `taxes` de cabecera. Si NO trae taxes, no
-          // emitimos `taxes` por línea — el legacy así lo hacía.
-          ...(taxes.length > 0 ? { taxes: providerTaxes } : {}),
-        });
-
-        snapshotItems.push({
-          position: i + 1,
-          description: item.description,
-          quantity: qty,
-          // El snapshot guarda lo que se FIRMÓ, no lo que se capturó. Dos
-          // motivos: (1) el asiento contable debe reconocer como ingreso la
-          // base sin impuesto —con el bruto inclusivo el asiento quedaba
-          // 1.190 de ingreso + 190 de IVA contra un cobro de 1.190—; (2)
-          // `resendPlatformTransmission` reconstruye el documento desde acá y
-          // tiene que reproducir el MISMO XML, o cambia el CUFE sobre un
-          // consecutivo ya gastado.
-          unit_price: Number(emittedUnitPrice),
-          line_total: lineNet,
-          discount_amount: Number(emittedDiscount),
-          unit_code,
-          taxes: taxBreakdownSnapshot,
-          // Peer rule: cuenta PUC de ingreso por línea. Si falta, queda
-          // null en el snapshot; el listener cae al mapping legacy
-          // `invoice.validated.revenue`.
-          account_code: item.account_code ?? null,
-          // Para asiento multi-crédito futuro: la línea PUEDE llevar
-          // también un centro de costo / descripción adicional, pero el
-          // DTO V1 no lo trae — se omite.
-        });
-
-        totalTaxAmount += lineTaxTotal;
-        // El subtotal de cabecera es la suma de los importes que las líneas
-        // DECLARAN (`lineNet`), no la de los brutos capturados: FAU02 compara
-        // `LegalMonetaryTotal/LineExtensionAmount` contra esa misma suma.
-        subtotalAccum += lineNet;
-      }
-
-      const subtotal = Math.round(subtotalAccum * 100) / 100;
-      const taxAmount = Math.round(totalTaxAmount * 100) / 100;
-      const total = Math.round((subtotal + taxAmount) * 100) / 100;
+      //     Backward compat: si NINGUNA línea trae `taxes` se conserva la nota
+      //     de exclusión art. 476 num. 21 ET; si al menos una trae, la nota NO
+      //     se emite (sería una declaración falsa).
+      const computed = this.computePlatformInvoiceTotals(dto);
+      const { lineItems, snapshotItems, hasAnyTax } = computed;
+      const subtotal = computed.subtotal;
+      const taxAmount = computed.taxTotal;
+      const total = computed.payable;
 
       // Withholdings: suman al campo withholding_amount del provider (asset
       // debit en el listener — ver onInvoiceValidated caso 2). Si el caller
@@ -3031,6 +3086,13 @@ export class SubscriptionFiscalService {
         );
       }
 
+      // 0.e) Compuerta de TOTALES antes del consecutivo: lo que el XML declara
+      //     (`LineExtensionAmount` = ValFac, `PayableAmount` = ValTot) tiene que
+      //     cuadrar con las líneas y pasar `DianTotalsValidator`. Si no, el
+      //     proveedor lo rechaza con 422 `INVOICING_CUFE_001` DESPUÉS de gastar
+      //     el número, que la DIAN no devuelve.
+      this.assertPlatformTotalsCoherent(probeProviderData);
+
       // 1) TODO dentro de UNA transacción. `pg_advisory_xact_lock` se
       //    libera al COMMIT, no antes. Si la llamada anterior era
       //    `await this.prisma.$transaction(async (tx) => tx)`, el
@@ -3145,7 +3207,11 @@ export class SubscriptionFiscalService {
               kind: 'platform_invoice_snapshot',
               customer: dto.customer,
               items: snapshotItems,
-              totals: { subtotal, tax_amount: taxAmount, total },
+              totals: {
+                subtotal: Number(subtotal),
+                tax_amount: Number(taxAmount),
+                total: Number(total),
+              },
               period_start: dto.period_start ?? null,
               period_end: dto.period_end ?? null,
               currency: dto.currency ?? 'COP',
