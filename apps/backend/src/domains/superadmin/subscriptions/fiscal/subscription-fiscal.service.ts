@@ -177,7 +177,7 @@ type PlatformProviderInvoiceData = ProviderInvoiceData &
  * `is_inclusive`. Sin este registro, después de firmar no quedaría rastro de
  * si el precio traía el impuesto dentro.
  */
-interface PlatformTaxBreakdownRow {
+export interface PlatformTaxBreakdownRow {
   tax_type: string;
   /** Tarifa en FRACCIÓN (0,19), NO en porcentaje. */
   rate: number;

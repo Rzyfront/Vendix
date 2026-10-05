@@ -658,9 +658,9 @@
                 <td class="px-3 py-2">{{ line.position }}</td>
                 <td class="px-3 py-2">{{ line.description }}</td>
                 <td class="px-3 py-2 text-right">{{ line.quantity }}</td>
-                <td class="px-3 py-2 text-right">{{ line.base | currency }}</td>
-                <td class="px-3 py-2 text-right">{{ line.tax_amount | currency }}</td>
-                <td class="px-3 py-2 text-right font-medium">{{ line.total | currency }}</td>
+                <td class="px-3 py-2 text-right">{{ +line.base | currency }}</td>
+                <td class="px-3 py-2 text-right">{{ +line.tax_amount | currency }}</td>
+                <td class="px-3 py-2 text-right font-medium">{{ +line.total | currency }}</td>
               </tr>
             }
           </tbody>
@@ -670,36 +670,36 @@
       <dl class="space-y-2 max-w-sm ml-auto">
         <div class="flex justify-between text-text-secondary">
           <dt>Base gravable:</dt>
-          <dd class="font-medium text-text-primary">{{ preview.subtotal | currency }}</dd>
+          <dd class="font-medium text-text-primary">{{ +preview.subtotal | currency }}</dd>
         </div>
         @if (+preview.discount_total > 0) {
           <div class="flex justify-between text-success">
             <dt>Descuentos:</dt>
-            <dd class="font-medium">{{ preview.discount_total | currency }}</dd>
+            <dd class="font-medium">{{ +preview.discount_total | currency }}</dd>
           </div>
         }
         @for (row of preview.tax_breakdown; track $index) {
           <div class="flex justify-between text-text-secondary">
-            <dt>{{ row.tax_type }} {{ row.rate * 100 }}% (base {{ row.base | currency }}):</dt>
-            <dd class="font-medium text-text-primary">{{ row.amount | currency }}</dd>
+            <dt>{{ row.tax_type }} {{ row.rate * 100 }}% (base {{ +row.base | currency }}):</dt>
+            <dd class="font-medium text-text-primary">{{ +row.amount | currency }}</dd>
           </div>
         }
         <div class="flex justify-between text-text-secondary">
           <dt>Total impuestos:</dt>
-          <dd class="font-medium text-text-primary">{{ preview.tax_total | currency }}</dd>
+          <dd class="font-medium text-text-primary">{{ +preview.tax_total | currency }}</dd>
         </div>
         <div class="flex justify-between border-t border-border pt-2 text-sm font-bold text-text-primary">
           <dt>Total factura:</dt>
-          <dd class="text-primary">{{ preview.total | currency }}</dd>
+          <dd class="text-primary">{{ +preview.total | currency }}</dd>
         </div>
         @if (+preview.withholdings_total > 0) {
           <div class="flex justify-between text-warning">
             <dt>Retenciones:</dt>
-            <dd class="font-medium">- {{ preview.withholdings_total | currency }}</dd>
+            <dd class="font-medium">- {{ +preview.withholdings_total | currency }}</dd>
           </div>
           <div class="flex justify-between text-text-secondary">
             <dt>Neto a girar:</dt>
-            <dd class="font-semibold text-text-primary">{{ preview.net_after_withholdings | currency }}</dd>
+            <dd class="font-semibold text-text-primary">{{ +preview.net_after_withholdings | currency }}</dd>
           </div>
         }
       </dl>
