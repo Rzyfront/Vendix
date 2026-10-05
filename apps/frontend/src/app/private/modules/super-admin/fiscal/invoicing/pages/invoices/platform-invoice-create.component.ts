@@ -80,7 +80,7 @@ import type {
   PreviewPlatformProfilePayload,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { PlatformAcquirer } from '../../state';
-import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 /**
  * Cálculo estándar DIAN del Dígito de Verificación (Módulo 11).
@@ -156,6 +156,19 @@ interface LineSeed {
   unit_price: number;
   discount_amount: number;
   unit_code: string;
+}
+
+/** Redondeo a 2 decimales: el DTO exige `@IsNumber({ maxDecimalPlaces: 2 })`. */
+function roundMoney(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+/**
+ * Sólo deja viajar fechas `YYYY-MM-DD`: cualquier otra cosa falla
+ * `@IsISO8601()` con 400, y sin ella el backend usa su default.
+ */
+function isoDateOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value) ? value : undefined;
 }
 
 @Component({
@@ -245,7 +258,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     ],
     payment_form: ['1', Validators.required],
     payment_means_code: ['10'],
-    issue_date: [formatDateOnlyUTC(new Date())],
+    issue_date: [toLocalDateString()],
     due_date: [''],
     notes: [''],
 
@@ -273,7 +286,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     declare_foreign: [false],
     foreign_currency_code: ['USD'],
     exchange_rate: [null as number | null],
-    exchange_rate_date: [formatDateOnlyUTC(new Date())],
+    exchange_rate_date: [toLocalDateString()],
 
     // Guardar como perfil
     save_as_profile_enabled: [false],
@@ -1341,13 +1354,13 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     const payload: PreviewPlatformProfilePayload = {
       // Paso 7 del plan AIU: pide el `html` que alimenta el `iframe`.
       include_render: true,
-      issue_date: val['issue_date'] || undefined,
+      issue_date: isoDateOrUndefined(val['issue_date']),
       lines: items.map((i) => ({
         bucket: 'costo',
         description: i.description || undefined,
         quantity: Number(i.quantity) || 1,
         unit_price: Number(i.unit_price) || 0,
-        discount_amount: Number(i.discount_amount) || 0,
+        discount_amount: roundMoney(Number(i.discount_amount) || 0),
         unit_code: i.unit_code || DEFAULT_UNIT_CODE,
       })),
     };
@@ -1433,6 +1446,16 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   private describeError(error: unknown, action: string): string {
     if (error instanceof HttpErrorResponse) {
       const body = error.error;
+      // «Validation failed» a secas oculta la causa: el filtro global deja los
+      // textos de class-validator en `details.validationErrors`.
+      // `parseApiError` los excluye a propósito, así que se leen aquí.
+      const validationErrors = (parseApiError(error).details as any)?.validationErrors;
+      if (Array.isArray(validationErrors)) {
+        const texts = validationErrors.filter(
+          (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0,
+        );
+        if (texts.length) return texts.join(' · ');
+      }
       const message = body?.message ?? body?.error ?? error.message;
       if (Array.isArray(message)) return message.join(' · ');
       if (typeof message === 'string' && message.trim()) return message;
@@ -1532,7 +1555,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         quantity: +i.quantity,
         unit_price: +i.unit_price,
         unit_code: i.unit_code || DEFAULT_UNIT_CODE,
-        discount_amount: +i.discount_amount || 0,
+        discount_amount: roundMoney(+i.discount_amount || 0),
         account_code: i.account_code?.trim() || undefined,
         // ÚNICO punto de conversión porcentaje → fracción 0–1, que es lo que
         // valida `MvpV1InvoiceLineTaxDto` (`@Min(0) @Max(1)`).
@@ -1540,9 +1563,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
           tax_type: (t.tax_type || 'IVA').toUpperCase(),
           rate: (Number(t.rate) || 0) / 100,
           is_inclusive: Boolean(t.is_inclusive),
-          taxable_amount: Math.round(financials.base * 100) / 100,
-          tax_amount:
-            Math.round((financials.taxes[taxIndex]?.amount ?? 0) * 100) / 100,
+          taxable_amount: roundMoney(financials.base),
+          tax_amount: roundMoney(financials.taxes[taxIndex]?.amount ?? 0),
         })),
       };
     });
@@ -1552,9 +1574,9 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       .map((w, index) => ({
         role: w.role || 'practiced',
         concept_id: Number(w.concept_id),
-        base_amount: Math.round((Number(w.base) || 0) * 100) / 100,
+        base_amount: roundMoney(Number(w.base) || 0),
         rate: (Number(w.rate) || 0) / 100,
-        amount: Math.round((this.withholdingAmounts()[index] ?? 0) * 100) / 100,
+        amount: roundMoney(this.withholdingAmounts()[index] ?? 0),
       }));
 
     const dto: any = {
@@ -1565,15 +1587,15 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       operation_type: PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD,
       payment_form: val['payment_form'] || '1',
       payment_means_code: val['payment_means_code'] || '10',
-      issue_date: val['issue_date'] || undefined,
+      issue_date: isoDateOrUndefined(val['issue_date']),
       notes: val['notes']?.trim() || undefined,
       counterpart_account_code: val['counterpart_account_code']?.trim() || undefined,
     };
 
     // `due_date` sólo viaja si de verdad hay una fecha: la cadena vacía falla
     // `@IsISO8601()` y devolvía un 400 en toda factura a crédito.
-    if (val['payment_form'] === '2' && val['due_date']) {
-      dto.due_date = val['due_date'];
+    if (val['payment_form'] === '2' && isoDateOrUndefined(val['due_date'])) {
+      dto.due_date = isoDateOrUndefined(val['due_date']);
     }
 
     if (withholdings.length > 0) {
@@ -1584,7 +1606,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       dto.currency = {
         iso_4217: val['foreign_currency_code'],
         exchange_rate: val['exchange_rate'] ? Number(val['exchange_rate']) : undefined,
-        exchange_rate_date: val['exchange_rate_date'] || undefined,
+        exchange_rate_date: isoDateOrUndefined(val['exchange_rate_date']),
       };
     }
 
