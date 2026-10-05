@@ -5,7 +5,7 @@ import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { normalizeFiscalResponsibilityCode } from '@common/constants/fiscal-responsibilities';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * Normalized RUT extraction contract.

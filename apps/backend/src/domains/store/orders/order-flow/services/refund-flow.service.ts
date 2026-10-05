@@ -32,6 +32,7 @@ import { SettingsService } from '../../../settings/settings.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import {
   MovementsService,
+  ORDER_CANCELLED_MOVEMENT_REFERENCE,
   type RefundCashMovementOutcome,
 } from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
@@ -120,7 +121,16 @@ export interface CancellationPendingLeg {
   amount: Prisma.Decimal;
   /** Concrete rail for the audit notes (e.g. 'card', 'wompi', 'abono CxC #5 (transferencia)'). */
   method_label: string;
+  /** Raw method type of the leg (`system_payment_methods.type` for a payment,
+   * `ar_payments.payment_method` for a CxC abono); drives the effective
+   * channel when the refund is completed right after the cancel commit. */
+  method_type?: string | null;
 }
+
+/** One refund created by `recordCancellationPendingRefunds`, with its leg. */
+export type CancellationLegRefundResult = Awaited<
+  ReturnType<RefundFlowService['recordCancellationCashRefund']>
+> & { leg: CancellationPendingLeg };
 
 const CHANNEL_PAYMENT_STATES = ['succeeded', 'partially_refunded'];
 
@@ -312,10 +322,12 @@ export class RefundFlowService {
     return { refund, breakdown };
   }
 
-  /** ADR-12 — one `requested` refund per settled non-cash leg, created inside
-   * the caller's cancel transaction BEFORE the atomic claim, so a lost race
-   * rolls every leg back with the claim. The original payments stay
-   * `succeeded`: this method documents the debt to return, it never reverses.
+  /** ADR-13 (supersedes ADR-12's `requested`) — one `processing` refund per
+   * settled non-cash leg, created inside the caller's cancel transaction
+   * BEFORE the atomic claim, so a lost race rolls every leg back with the
+   * claim. `processing` is a ledger state (reserves ceiling and coverage);
+   * the caller marks the payments `cancelled` in the same tx and, after the
+   * commit, `completeCancellationNonCashRefunds` closes every leg in the act.
    *
    * `alreadyPlanned` is the cash amount the caller already recorded in this
    * same transaction: the cumulative ceiling (cash + every leg) is checked
@@ -325,7 +337,7 @@ export class RefundFlowService {
    * `refund_method` is the domain vocabulary for "return via the original
    * rail" (`original_payment` → 1110 fallback in accounting); the concrete
    * rail travels on the linked payment row and in `notes`. Manual closure
-   * overwrites it with the real payout channel anyway.
+   * overwrites it with the real payout channel anyway (historical rows only).
    */
   async recordCancellationPendingRefunds(
     tx: Prisma.TransactionClient,
@@ -362,7 +374,7 @@ export class RefundFlowService {
         `Cancellation refunds ${plannedTotal.toString()} exceed the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
       );
     }
-    const created: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>>[] = [];
+    const created: CancellationLegRefundResult[] = [];
     for (const leg of legs) {
       const hasPayment = leg.payment_id != null;
       const hasArPayment = leg.ar_payment_id != null;
@@ -407,10 +419,10 @@ export class RefundFlowService {
           shipping_refund: breakdown.shipping,
           currency: order.currency,
           reason,
-          notes: `Cancelación ADR-12; pierna ${leg.method_label}`,
+          notes: `Cancelación ADR-13; pierna ${leg.method_label}`,
           refund_method: 'original_payment',
           refund_transaction_id: refundTransactionId,
-          state: 'requested',
+          state: 'processing',
           processed_by_user_id: RequestContextService.getUserId(),
           requested_at: new Date(),
           processed_at: null,
@@ -425,7 +437,7 @@ export class RefundFlowService {
         amount: breakdown.amount.toString(),
         payload: { reason, refund_id: refund.id, refund_method: 'original_payment', ar_payment_id: leg.ar_payment_id ?? null },
       });
-      created.push({ refund, breakdown });
+      created.push({ refund, breakdown, leg });
     }
     return created;
   }
@@ -440,6 +452,17 @@ export class RefundFlowService {
   async emitCancellationCashRefund(
     order: { id: number; store_id: number; grand_total: Prisma.Decimal },
     result: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>>,
+  ) {
+    await this.emitCancellationRefundCompleted(order, result, 'cash', 'cash');
+  }
+
+  /** `refund.completed` of a cancellation refund (cash or non-cash leg):
+   * same payload, the channel decides the journal credit side. */
+  private async emitCancellationRefundCompleted(
+    order: { id: number; store_id: number; grand_total: Prisma.Decimal },
+    result: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>>,
+    refundMethod: string,
+    effectiveChannel: EffectiveRefundChannel,
   ) {
     const store = await this.prisma.stores.findUnique({
       where: { id: order.store_id }, select: { organization_id: true },
@@ -479,9 +502,264 @@ export class RefundFlowService {
       shipping: Number(result.breakdown.shipping),
       is_full_refund: result.breakdown.amount.equals(order.grand_total),
       user_id: RequestContextService.getUserId(),
-      refund_method: 'cash',
-      effective_channel: 'cash',
+      refund_method: refundMethod,
+      effective_channel: effectiveChannel,
     });
+  }
+
+  /**
+   * ADR-13 — completes, right after the cancel commit, every non-cash leg
+   * created by `recordCancellationPendingRefunds` (owner decision 2026-10-05:
+   * "en todo caso que se complete"). Per leg: API-reversible gateway →
+   * attempt `dispatchRefundProcessor` first; whatever the outcome the refund
+   * ends `completed` (a gateway failure is audited + warned so the merchant
+   * returns the money on its own). Then `refund_resolved` history, the
+   * non-cash cash-ledger counter-movement, wallet credit (store_credit) and a
+   * single `refund.completed`. Never throws: the cancellation already
+   * committed; every failure is logged + audited.
+   */
+  async completeCancellationNonCashRefunds(
+    order: { id: number; store_id: number; grand_total: Prisma.Decimal },
+    results: CancellationLegRefundResult[],
+  ): Promise<void> {
+    for (const result of results) {
+      try {
+        await this.completeCancellationNonCashLeg(order, result);
+      } catch (error) {
+        this.logger.error(
+          `Order #${order.id}: cancellation refund #${result.refund.id} completion failed: ${error instanceof Error ? error.message : String(error)}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+        await this.auditCancellationRefundIssue(
+          order, result.refund.id, result.leg.payment_id ? [result.leg.payment_id] : [],
+          'completion_failed', error,
+        );
+      }
+    }
+  }
+
+  private async completeCancellationNonCashLeg(
+    order: { id: number; store_id: number; grand_total: Prisma.Decimal },
+    result: CancellationLegRefundResult,
+  ): Promise<void> {
+    const { refund, breakdown, leg } = result;
+    const userId = RequestContextService.getUserId();
+    const paymentIds = leg.payment_id != null ? [leg.payment_id] : [];
+
+    const payment =
+      leg.payment_id != null
+        ? await this.prisma.payments.findFirst({
+            where: { id: leg.payment_id },
+            include: {
+              store_payment_method: {
+                select: { system_payment_method: { select: { type: true } } },
+              },
+            },
+          })
+        : null;
+    const methodType =
+      payment?.store_payment_method?.system_payment_method?.type ??
+      leg.method_type ??
+      null;
+
+    // (a) Pasarela con reversa por API: intento primero, resultado irrelevante
+    // para el cierre. `dispatchRefundProcessor` busca un pago `succeeded`: el
+    // pago ya está `cancelled` en BD, así que se le presenta como recibido.
+    let gatewayClosedRefund = false;
+    if (
+      payment &&
+      methodType &&
+      (API_REVERSIBLE_REFUND_PROCESSORS as readonly string[]).includes(methodType)
+    ) {
+      let gatewayOk = false;
+      let gatewayMessage: string | undefined;
+      try {
+        const outcome = await this.dispatchRefundProcessor(
+          { id: order.id, payments: [{ ...payment, state: 'succeeded' }] },
+          refund,
+          Number(breakdown.amount),
+        );
+        gatewayOk = outcome.status === 'completed';
+        // Reversa exitosa: `dispatchRefundProcessor` ya persistió `completed`.
+        gatewayClosedRefund = gatewayOk;
+        gatewayMessage = outcome.message;
+      } catch (error) {
+        gatewayMessage = error instanceof Error ? error.message : String(error);
+      }
+      if (!gatewayOk) {
+        this.logger.warn(
+          `Order #${order.id}: gateway reversal of refund #${refund.id} (payment #${payment.id}, ${methodType}) did not complete` +
+            `${gatewayMessage ? ` (${gatewayMessage})` : ''}; refund closed anyway — the merchant must return the money manually`,
+        );
+        await this.auditCancellationRefundIssue(
+          order, refund.id, paymentIds, 'gateway_reversal_failed', gatewayMessage,
+        );
+      }
+    }
+
+    // (b) Cierre: el claim sobre estados no terminales evita doble emisión si
+    // el cierre se corre dos veces. Si la pasarela reversó con éxito, el row ya
+    // quedó `completed` por `dispatchRefundProcessor`: no hay claim que ganar y
+    // los efectos (historial, caja, evento) siguen igual, una sola vez.
+    if (!gatewayClosedRefund) {
+      const claim = await this.prisma.refunds.updateMany({
+        where: { id: refund.id, state: { in: ['processing', 'failed'] } },
+        data: { state: 'completed', processed_at: new Date(), updated_at: new Date() },
+      });
+      if (claim.count !== 1) {
+        this.logger.warn(
+          `Order #${order.id}: cancellation refund #${refund.id} already closed; completion skipped`,
+        );
+        return;
+      }
+    }
+    const store = await this.prisma.stores.findUnique({
+      where: { id: order.store_id },
+      select: { organization_id: true },
+    });
+    await this.orderHistoryService?.record(this.prisma, {
+      orderId: order.id,
+      storeId: order.store_id,
+      organizationId: store?.organization_id ?? null,
+      type: 'refund_resolved',
+      paymentId: leg.payment_id ?? null,
+      amount: breakdown.amount.toString(),
+      payload: {
+        refund_id: refund.id,
+        target_state: 'completed',
+        cancellation: true,
+        payout_channel: methodType,
+      },
+    });
+
+    const channel = resolveEffectiveRefundChannel('original_payment', methodType);
+
+    // Contra-movimiento de caja no efectivo (rama no efectivo de la reversa de
+    // pagos): solo si el cobro dejó un movimiento `sale` que contrarrestar.
+    if (leg.payment_id != null) {
+      await this.recordCancellationNonCashMovement(order, refund.id, leg.payment_id, Number(breakdown.amount), userId);
+    }
+
+    // Wallet / voucher: la devolución es saldo interno; mismo crédito durable
+    // que `createRefund`.
+    if (channel === 'store_credit') {
+      const orderRow = await this.prisma.orders.findFirst({
+        where: { id: order.id },
+        select: { customer_id: true },
+      });
+      if (orderRow?.customer_id) {
+        try {
+          await this.walletService.creditForRefund(
+            orderRow.customer_id,
+            Number(breakdown.amount),
+            { refund_id: refund.id, order_id: order.id, user_id: userId },
+          );
+        } catch (error) {
+          this.logger.error(
+            `Failed to credit wallet for cancellation refund #${refund.id} (customer=${orderRow.customer_id}): ${error instanceof Error ? error.message : String(error)}`,
+          );
+          await this.auditCancellationRefundIssue(order, refund.id, paymentIds, 'wallet_credit_failed', error);
+        }
+      } else {
+        await this.auditCancellationRefundIssue(order, refund.id, paymentIds, 'wallet_credit_no_customer');
+      }
+    }
+
+    await this.emitCancellationRefundCompleted(order, result, 'original_payment', channel);
+  }
+
+  /** Non-cash counter-movement (`refund` / `order_cancelled`) with the real
+   * payment method. No open session → audit, never queued (same as
+   * `reversePaymentCashMovements`). Idempotent per payment. */
+  private async recordCancellationNonCashMovement(
+    order: { id: number; store_id: number },
+    refundId: number,
+    paymentId: number,
+    amount: number,
+    userId: number | null | undefined,
+  ): Promise<void> {
+    try {
+      const sale = await this.prisma.cash_register_movements.findFirst({
+        where: { order_id: order.id, type: 'sale', payment_id: paymentId },
+        orderBy: { id: 'asc' },
+        select: { payment_method: true },
+      });
+      if (!sale) return;
+      if (!userId) {
+        await this.auditCancellationRefundIssue(order, refundId, [paymentId], 'no_user_context');
+        return;
+      }
+      const existing = await this.prisma.cash_register_movements.findFirst({
+        where: {
+          order_id: order.id,
+          type: 'refund',
+          payment_id: paymentId,
+          reference: ORDER_CANCELLED_MOVEMENT_REFERENCE,
+        },
+        select: { id: true },
+      });
+      if (existing) return;
+      const targetSessionId = await this.movementsService.resolveCompensationSessionId({
+        store_id: order.store_id,
+        user_id: userId,
+        payment_id: paymentId,
+        order_id: order.id,
+      });
+      if (!targetSessionId) {
+        this.logger.warn(
+          `Order #${order.id}: payment #${paymentId} (${sale.payment_method ?? 'sin método'}): sin sesión abierta; contra-movimiento no efectivo NO registrado`,
+        );
+        await this.auditCancellationRefundIssue(order, refundId, [paymentId], 'no_open_session_non_cash');
+        return;
+      }
+      await this.movementsService.recordRefundMovement(targetSessionId, {
+        store_id: order.store_id,
+        user_id: userId,
+        amount,
+        payment_method: sale.payment_method ?? '',
+        order_id: order.id,
+        payment_id: paymentId,
+        reference: ORDER_CANCELLED_MOVEMENT_REFERENCE,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Order #${order.id}: non-cash counter-movement of payment #${paymentId} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      await this.auditCancellationRefundIssue(order, refundId, [paymentId], 'movement_write_failed', error);
+    }
+  }
+
+  /** Same audit row shape as `OrderFlowService.auditCashReversalFailure`. */
+  private async auditCancellationRefundIssue(
+    order: { id: number; store_id: number },
+    refundId: number,
+    paymentIds: number[],
+    cause: string,
+    error?: unknown,
+  ): Promise<void> {
+    try {
+      await this.prisma.audit_logs.create({
+        data: {
+          user_id: RequestContextService.getUserId() ?? null,
+          store_id: order.store_id,
+          action: 'payment.cancel.cash_reversal_issue',
+          resource: AuditResource.ORDERS,
+          resource_id: order.id,
+          metadata: {
+            cause,
+            refund_id: refundId,
+            payment_ids: paymentIds,
+            error: error
+              ? error instanceof Error ? error.message : String(error)
+              : undefined,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch (auditError) {
+      this.logger.error(
+        `auditCancellationRefundIssue: order #${order.id}: ${auditError instanceof Error ? auditError.message : String(auditError)}`,
+      );
+    }
   }
 
   async previewRefund(

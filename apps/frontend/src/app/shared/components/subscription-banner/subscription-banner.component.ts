@@ -237,17 +237,18 @@ export class SubscriptionBannerComponent implements OnInit {
     // Role gate — hide entirely for non-owner store users.
     if (!this.canManageSubscription()) return false;
     if (this.dismissed()) return false;
-    // RNC-PaidPlan — Top alert is now driven by the unified subscription UI
-    // state (ADR-4). Only `payment_due`, `expiring_soon`, `grace_*`, and
-    // billing-warning kinds surface here.
+    // RNC-PaidPlan — Top alert is driven by the unified subscription UI state
+    // (ADR-4). Owner decision 2026-10-05: only grace (`grace_*`) and a
+    // scheduled cancellation surface here. Payment due, renewal soon and the
+    // auto-renew / billing warnings no longer show a banner; they stay in the
+    // notifications dropdown and the subscription pages.
     const ui = this.facade.subscriptionUiState();
+    if (ui.kind === 'grace_soft' || ui.kind === 'grace_hard') return true;
+    if (ui.kind !== 'expiring_soon') return false;
+    const status = this.facade.status();
     return (
-      ui.kind === 'payment_due' ||
-      ui.kind === 'expiring_soon' ||
-      ui.kind === 'grace_soft' ||
-      ui.kind === 'grace_hard' ||
-      ui.kind === 'auto_renew_disabled_no_credential' ||
-      ui.kind === 'renewal_failed'
+      !!this.facade.scheduledCancelAt() &&
+      (status === 'active' || status === 'trialing' || status === 'trial')
     );
   });
 

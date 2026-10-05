@@ -51,7 +51,7 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma, order_delivery_type_enum, order_state_enum, payments_state_enum } from '@prisma/client';
+import { Prisma, order_delivery_type_enum, order_state_enum, payment_methods_type_enum, payments_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { resolveTip } from '@common/utils/tip.util';
@@ -79,6 +79,7 @@ import {
   MovementsService,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
 } from '../../cash-registers/movements/movements.service';
+import { CASH_PAYMENT_TYPES } from './services/refund-channel.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
@@ -101,7 +102,11 @@ import {
   AuditService,
   AuditResource,
 } from '@common/audit/audit.service';
-import { RefundFlowService, type CancellationPendingLeg } from './services/refund-flow.service';
+import {
+  RefundFlowService,
+  type CancellationLegRefundResult,
+  type CancellationPendingLeg,
+} from './services/refund-flow.service';
 import {
   getSettledOrderAmount,
   isOrderFullyPaid,
@@ -180,6 +185,10 @@ export const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
 };
 
 const CANCELABLE_STATES: OrderState[] = [...CANCELABLE_ORDER_STATES];
+/** Tipos de método tratados como efectivo al anular (`cash`, `cash_on_delivery`). */
+const CASH_METHOD_ENUM_VALUES: payment_methods_type_enum[] = Object.values(
+  payment_methods_type_enum,
+).filter((type) => CASH_PAYMENT_TYPES.has(type));
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 
 /**
@@ -6472,6 +6481,9 @@ export class OrderFlowService {
     // si el claim perdiera la carrera o la rama KDS abortara con 422.
     let cashReversal: Awaited<ReturnType<OrderFlowService['resolveCancelCashReversal']>> = null;
     let cancellationRefund: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>> | null = null;
+    // ADR-13: piernas no efectivo creadas en `processing` dentro del tx; se
+    // completan después del commit.
+    let nonCashRefunds: CancellationLegRefundResult[] = [];
 
     // Build cancel metadata exactly as updateOrderState would: `orders` has no
     // cancelled_at/cancellation_reason columns, so these + previous_state live
@@ -6550,7 +6562,7 @@ export class OrderFlowService {
       const nonCashLegs = await this.resolveCancelNonCashLegs(freshOrder, tx);
       const nonCashIds = new Set(nonCashLegs.map((leg) => leg.payment_id));
       // ADR-12: la guarda es cash-only — un recibido (`succeeded`/`captured`)
-      // no-efectivo sin reversa ya no es un error (genera su `requested`
+      // no-efectivo sin reversa ya no es un error (genera su reembolso `processing`
       // abajo); solo falla si EXISTE efectivo liquidado y no se pudo
       // resolver su monto.
       const cashSucceededIds = freshOrder.payments
@@ -6608,6 +6620,7 @@ export class OrderFlowService {
           payment_id: leg.payment_id,
           amount: leg.amount,
           method_label: `pago #${leg.payment_id} (${leg.method_type ?? 'método desconocido'})`,
+          method_type: leg.method_type,
         })),
         ...arLegs,
       ];
@@ -6615,7 +6628,7 @@ export class OrderFlowService {
         if (!this.refundFlowService) {
           throw new InternalServerErrorException('RefundFlowService no disponible para documentar los reembolsos pendientes de la cancelación');
         }
-        await this.refundFlowService.recordCancellationPendingRefunds(
+        nonCashRefunds = await this.refundFlowService.recordCancellationPendingRefunds(
           tx,
           freshOrder,
           pendingLegs,
@@ -6646,14 +6659,19 @@ export class OrderFlowService {
         toState: 'cancelled',
       });
 
-      // Winner (ADR-12, cash-only): cancel pending attempts plus the
-      // succeeded CASH legs the cash-out just returned — the same SQL-verified
-      // set, never the include. Non-cash received rows (`succeeded`/`captured`)
-      // stay as the historical fact; their return travels in the `requested`
-      // refunds. `captured` never flips here even if its channel were cash.
-      const cashIds = new Set(cashReversal?.paymentIds ?? []);
+      // Winner (ADR-13): cancel pending attempts plus EVERY received leg
+      // (`succeeded`/`captured`) — the cash legs the cash-out just returned
+      // and the non-cash legs whose `processing` refund was created above
+      // (completed right after commit). Same SQL-verified sets, never the
+      // include: a received row outside both sets would have thrown earlier.
+      const returnedIds = new Set<number>([
+        ...(cashReversal?.paymentIds ?? []),
+        ...nonCashIds,
+      ]);
       const activePayments = freshOrder.payments.filter(
-        (p) => p.state === 'pending' || (p.state === 'succeeded' && cashIds.has(p.id)),
+        (p) =>
+          p.state === 'pending' ||
+          ((p.state === 'succeeded' || p.state === 'captured') && returnedIds.has(p.id)),
       );
       for (const payment of activePayments) {
         await tx.payments.update({
@@ -6906,6 +6924,22 @@ export class OrderFlowService {
       }
     }
 
+    // ADR-13: las piernas no efectivo se reembolsan y cierran en el acto, tras
+    // el commit. `completeCancellationNonCashRefunds` nunca lanza (loguea y
+    // audita); el try/catch es cinturón extra para no romper la anulación.
+    if (nonCashRefunds.length > 0) {
+      try {
+        await this.refundFlowService!.completeCancellationNonCashRefunds(
+          order, nonCashRefunds,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Order #${orderId}: non-cash cancellation refunds completion failed`,
+          (error as Error).stack,
+        );
+      }
+    }
+
     this.logger.log(
       `Order #${orderId} cancelled: ${dto.reason} ` +
         `(kitchenDisposition=${dto.kitchenDisposition ?? 'n/a'} ticketsCancelled=${cancelledTicketIds.length})`,
@@ -6948,7 +6982,9 @@ export class OrderFlowService {
     const cashPayments = await client.payments.findMany({
       where: {
         id: { in: succeededIds },
-        store_payment_method: { system_payment_method: { type: 'cash' } },
+        store_payment_method: {
+          system_payment_method: { type: { in: CASH_METHOD_ENUM_VALUES } },
+        },
       },
       select: { id: true, amount: true },
     });
@@ -7002,7 +7038,11 @@ export class OrderFlowService {
     const rows = await tx.payments.findMany({
       where: {
         id: { in: receivedIds },
-        NOT: { store_payment_method: { system_payment_method: { type: 'cash' } } },
+        NOT: {
+          store_payment_method: {
+            system_payment_method: { type: { in: CASH_METHOD_ENUM_VALUES } },
+          },
+        },
       },
       select: {
         id: true,
@@ -7099,6 +7139,7 @@ export class OrderFlowService {
           ar_payment_id: abono.id,
           amount: new Prisma.Decimal(abono.amount as any),
           method_label: `abono CxC #${abono.id}${abono.payment_method ? ` (${abono.payment_method})` : ''}`,
+          method_type: abono.payment_method ?? null,
         });
       }
       if (ar.status === 'cancelled' || ar.status === 'written_off') {
