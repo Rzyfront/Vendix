@@ -7,6 +7,7 @@ import {
   Modal,
   StyleSheet,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/shared/components/icon/icon';
@@ -84,23 +85,39 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchNotifications = useCallback(async () => {
+    const [notifs, count] = await Promise.all([
+      NotificationsService.getNotifications(1, 20),
+      NotificationsService.getUnreadCount(),
+    ]);
+    setNotifications(notifs.data || []);
+    setUnreadCount(count);
+  }, []);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [notifs, count] = await Promise.all([
-        NotificationsService.getNotifications(1, 20),
-        NotificationsService.getUnreadCount(),
-      ]);
-      setNotifications(notifs.data || []);
-      setUnreadCount(count);
+      await fetchNotifications();
     } catch {
       setNotifications([]);
       setUnreadCount(0);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fetchNotifications]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchNotifications();
+    } catch {
+      // En pull-to-refresh se conserva la lista vieja si falla la red.
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchNotifications]);
 
   useEffect(() => {
     if (visible) {
@@ -171,6 +188,13 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
             <FlatList
               data={notifications}
               keyExtractor={(item) => item.id.toString()}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={colors.primary}
+                />
+              }
               renderItem={({ item }) => (
                 <Pressable
                   style={[styles.item, !item.is_read && styles.itemUnread]}
