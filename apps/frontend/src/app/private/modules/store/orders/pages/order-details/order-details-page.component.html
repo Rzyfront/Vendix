@@ -814,22 +814,33 @@
                            state badge. Renders only for items that were
                            actually fired to the kitchen. -->
                       @if (kitchenStateFor(item); as ks) {
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 cursor-pointer hover:opacity-80 transition-opacity"
-                          [class]="kitchenBadgeClass(ks)"
-                          [attr.title]="
-                            (ks.kitchen_ticket_id
-                              ? 'Ver ticket #' + ks.kitchen_ticket_id + ' en el KDS'
-                              : 'Ver en el KDS')
-                          "
-                          [disabled]="!ks.kitchen_ticket_id"
-                          (click)="openKdsTicket(ks)"
-                        >
-                          <app-icon name="flame" [size]="10" />
-                          Cocina: {{ kitchenStateLabel(ks) }}
-                          <app-icon name="arrow-right" [size]="10" />
-                        </button>
+                        @if (kitchenTicketPrint.isPhysicalKitchen()) {
+                          <!-- Cocina fisica: no hay KDS al que navegar. -->
+                          <span
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1"
+                            [class]="kitchenBadgeClass(ks)"
+                          >
+                            <app-icon name="flame" [size]="10" />
+                            Cocina: {{ kitchenStateLabel(ks) }}
+                          </span>
+                        } @else {
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 cursor-pointer hover:opacity-80 transition-opacity"
+                            [class]="kitchenBadgeClass(ks)"
+                            [attr.title]="
+                              (ks.kitchen_ticket_id
+                                ? 'Ver ticket #' + ks.kitchen_ticket_id + ' en el KDS'
+                                : 'Ver en el KDS')
+                            "
+                            [disabled]="!ks.kitchen_ticket_id"
+                            (click)="openKdsTicket(ks)"
+                          >
+                            <app-icon name="flame" [size]="10" />
+                            Cocina: {{ kitchenStateLabel(ks) }}
+                            <app-icon name="arrow-right" [size]="10" />
+                          </button>
+                        }
                         <!-- QUI-762 — reenviar a cocina un plato ya
                              disparado. Solo se ofrece cuando el ítem es
                              reenviable por el predicado del backend
@@ -1072,6 +1083,32 @@
                     Enviar a cocina
                   </app-button>
                 </div>
+              </div>
+            }
+            <!-- Cocina fisica: entrega manual en bloque y reimpresion de comanda. -->
+            @if (kitchenTicketPrint.isPhysicalKitchen() && (printableTicketIds().length > 0 || deliverableKitchenItems().length > 0)) {
+              <div class="mt-2 border-t border-border pt-2 flex flex-wrap items-center justify-end gap-1.5">
+                <app-button
+                  variant="outline"
+                  size="xsm"
+                  [disabled]="printableTicketIds().length === 0"
+                  (clicked)="printKitchenTickets()"
+                >
+                  <app-icon slot="icon" name="printer" [size]="14" />
+                  Imprimir comanda
+                </app-button>
+                @if (deliverableKitchenItems().length > 0) {
+                  <app-button
+                    variant="success"
+                    size="xsm"
+                    [loading]="deliveringAll()"
+                    [disabled]="deliveringAll()"
+                    (clicked)="deliverAllKitchenItems()"
+                  >
+                    <app-icon slot="icon" name="check" [size]="14" />
+                    Entregar todo
+                  </app-button>
+                }
               </div>
             }
 	            @if (appliedTierSummary().length > 0) {

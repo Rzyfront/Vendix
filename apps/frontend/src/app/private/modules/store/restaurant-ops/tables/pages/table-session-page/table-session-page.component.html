@@ -267,17 +267,30 @@
                 <h3 class="items-card-title">Comanda</h3>
                 <span class="items-count-badge">{{ items().length }}</span>
               </div>
-              <app-button
-                class="items-card-add"
-                variant="primary"
-                size="sm"
-                [disabled]="isClosed() || hasFinancialSplit()"
-                [attr.title]="hasFinancialSplit() ? splitLockedAddReason : null"
-                (clicked)="openAddItems()"
-              >
-                <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-                Agregar items
-              </app-button>
+              <div class="flex items-center gap-2">
+                @if (kitchenTicketPrint.isPhysicalKitchen()) {
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [disabled]="printableTicketIds().length === 0"
+                    (clicked)="printKitchenTickets()"
+                  >
+                    <app-icon slot="icon" name="printer" [size]="14"></app-icon>
+                    Imprimir comanda
+                  </app-button>
+                }
+                <app-button
+                  class="items-card-add"
+                  variant="primary"
+                  size="sm"
+                  [disabled]="isClosed() || hasFinancialSplit()"
+                  [attr.title]="hasFinancialSplit() ? splitLockedAddReason : null"
+                  (clicked)="openAddItems()"
+                >
+                  <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+                  Agregar items
+                </app-button>
+              </div>
             </div>
 
             @if (items().length === 0) {
