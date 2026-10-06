@@ -71,7 +71,7 @@ export type TooltipColor =
         opacity: 0;
         visibility: hidden;
         width: max-content;
-        max-width: min(18rem, calc(100vw - 24px));
+        max-width: min(18rem, calc(100vw - 32px));
         transition:
           opacity 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
           transform 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
@@ -113,6 +113,19 @@ export type TooltipColor =
         position: relative;
         overflow: visible;
         box-sizing: border-box;
+      }
+
+      @media (max-width: 480px) {
+        .tooltip-container {
+          max-width: calc(100vw - 32px);
+        }
+
+        .tooltip-content {
+          width: auto;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          white-space: normal;
+        }
       }
 
       .tooltip-content::before {
@@ -407,6 +420,10 @@ export class TooltipComponent implements AfterViewInit {
 
   private showTimeout: ReturnType<typeof setTimeout> | undefined;
   private positionFrame: number | undefined;
+  private isHovered = false;
+  private hasFocus = false;
+  private visualViewport: VisualViewport | null = null;
+  private readonly visualViewportChange = () => this.onViewportChange();
 
   constructor() {
     this.destroyRef.onDestroy(() => {
@@ -416,6 +433,8 @@ export class TooltipComponent implements AfterViewInit {
       if (this.positionFrame !== undefined) {
         cancelAnimationFrame(this.positionFrame);
       }
+      this.visualViewport?.removeEventListener('resize', this.visualViewportChange);
+      this.visualViewport?.removeEventListener('scroll', this.visualViewportChange);
       this.tooltipContainer()?.nativeElement.remove();
     });
 
@@ -437,6 +456,10 @@ export class TooltipComponent implements AfterViewInit {
   }
 
   ngAfterViewInit() {
+    this.visualViewport = window.visualViewport;
+    this.visualViewport?.addEventListener('resize', this.visualViewportChange);
+    this.visualViewport?.addEventListener('scroll', this.visualViewportChange);
+
     const tooltip = this.tooltipContainer()?.nativeElement;
     if (tooltip && tooltip.parentElement !== this.document.body) {
       this.document.body.appendChild(tooltip);
@@ -449,6 +472,7 @@ export class TooltipComponent implements AfterViewInit {
 
   @HostListener('mouseenter')
   onMouseEnter() {
+    this.isHovered = true;
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
     }
@@ -460,10 +484,28 @@ export class TooltipComponent implements AfterViewInit {
 
   @HostListener('mouseleave')
   onMouseLeave() {
+    this.isHovered = false;
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
     }
-    this._visible.set(false);
+    if (!this.hasFocus) this._visible.set(false);
+  }
+
+  @HostListener('focusin')
+  onFocusIn() {
+    this.hasFocus = true;
+    if (this.showTimeout) {
+      clearTimeout(this.showTimeout);
+      this.showTimeout = undefined;
+    }
+    this._visible.set(true);
+    this.schedulePositionUpdate();
+  }
+
+  @HostListener('focusout')
+  onFocusOut() {
+    this.hasFocus = false;
+    if (!this.isHovered) this._visible.set(false);
   }
 
   @HostListener('window:resize')
@@ -593,7 +635,7 @@ export class TooltipComponent implements AfterViewInit {
   ) {
     const gap = 8;
     const preferredMaxWidth = 288;
-    const minWidth = 64;
+    const minWidth = 0;
     let availableWidth = bounds.right - bounds.left;
 
     if (position === 'left') {
@@ -608,13 +650,18 @@ export class TooltipComponent implements AfterViewInit {
   }
 
   private getViewportBounds(): TooltipBounds {
-    const padding = 12;
+    const padding = 16;
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft ?? 0;
+    const top = viewport?.offsetTop ?? 0;
+    const width = viewport?.width ?? window.innerWidth;
+    const height = viewport?.height ?? window.innerHeight;
 
     return {
-      left: padding,
-      top: padding,
-      right: window.innerWidth - padding,
-      bottom: window.innerHeight - padding,
+      left: left + padding,
+      top: top + padding,
+      right: left + width - padding,
+      bottom: top + height - padding,
     };
   }
 
