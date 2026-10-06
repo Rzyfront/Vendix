@@ -23,6 +23,11 @@ export type TooltipColor =
   | 'accent'
   | 'destructive'
   | 'warning'
+  | 'order-pending'
+  | 'order-processing'
+  | 'order-ready'
+  | 'order-delivered'
+  | 'order-cancelled'
   | 'ai';
 
 @Component({
@@ -215,6 +220,17 @@ export type TooltipColor =
         color: white;
         border-color: var(--color-warning-500);
       }
+
+      .tooltip-container[data-color='order-pending'] { --tooltip-arrow-color: #f3f4f6; }
+      .tooltip-container[data-color='order-processing'] { --tooltip-arrow-color: #fef3c7; }
+      .tooltip-container[data-color='order-ready'] { --tooltip-arrow-color: #d1fae5; }
+      .tooltip-container[data-color='order-delivered'] { --tooltip-arrow-color: #e0f2fe; }
+      .tooltip-container[data-color='order-cancelled'] { --tooltip-arrow-color: #fee2e2; }
+      .tooltip-container[data-color='order-pending'] .tooltip-content { background: #f3f4f6; color: #374151; }
+      .tooltip-container[data-color='order-processing'] .tooltip-content { background: #fef3c7; color: #92400e; }
+      .tooltip-container[data-color='order-ready'] .tooltip-content { background: #d1fae5; color: #065f46; }
+      .tooltip-container[data-color='order-delivered'] .tooltip-content { background: #e0f2fe; color: #075985; }
+      .tooltip-container[data-color='order-cancelled'] .tooltip-content { background: #fee2e2; color: #b91c1c; }
 
       @keyframes ai-tooltip-shimmer {
         0% {

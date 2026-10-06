@@ -537,12 +537,19 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
    * por test para poder inspeccionar el `.create({})`.
    */
   const buildFireTxMock = (opts: { orderItemId?: number } = {}) => ({
+    orders: {
+      findFirst: jest.fn().mockResolvedValue({ id: 100, state: 'processing' }),
+    },
     kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
     kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
     store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     order_items: {
       update: jest.fn().mockResolvedValue({ id: opts.orderItemId ?? 10 }),
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      updateMany: jest.fn().mockImplementation(({ where }: any) =>
+        Promise.resolve({
+          count: Array.isArray(where?.id?.in) ? where.id.in.length : 1,
+        }),
+      ),
       findMany: jest.fn().mockResolvedValue([]),
     },
     kitchen_ticket_items: {
@@ -799,15 +806,18 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       };
     });
 
-    // $transaction executes the callback with a fake tx that supports
-    // order_items.update, kitchen_tickets.create (with nested items.create).
+    // $transaction executes the callback with a fake tx that supports the
+    // order_items conditional claim and kitchen_tickets.create.
     // CP-POLLO-ARABE-727 A.6 — `fireOrderItemsInTx` arranca resolviendo el KDS
     // por defecto (`tx.kds.findFirst`) y la sesión abierta por estación
     // (`tx.kds_sessions.findFirst`), y después lee la nota de cada item
     // (`tx.order_items.findMany`). El mock original sólo tenía
-    // `order_items.update`, así que la suite fallaba en esa cascada KDS
+    // `order_items.updateMany`, así que la suite fallaba en esa cascada KDS
     // (`tx.kds.findFirst is undefined`).
-    const orderItemUpdate = jest.fn().mockResolvedValue({ id: 10 });
+    const orderItemClaim = jest.fn().mockResolvedValue({ count: 1 });
+    const transactionalOrderRead = jest
+      .fn()
+      .mockResolvedValue({ id: 100, state: 'processing' });
     const ticketCreate = jest.fn().mockResolvedValue({
       id: 555,
       items: [
@@ -816,10 +826,13 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     });
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
       cb({
+        orders: {
+          findFirst: transactionalOrderRead,
+        },
         kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
         kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
         order_items: {
-          update: orderItemUpdate,
+          updateMany: orderItemClaim,
           findMany: jest.fn().mockResolvedValue([]),
         },
         store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -872,12 +885,26 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       4,
     );
 
-    // (d) Flag flipped on the prepared order_item only
-    expect(orderItemUpdate).toHaveBeenCalledTimes(1);
-    expect(orderItemUpdate).toHaveBeenCalledWith({
-      where: { id: 10 },
+    // (d) The idempotency flag is claimed before stock is consumed.
+    expect(orderItemClaim).toHaveBeenCalledWith({
+      where: {
+        id: { in: [10] },
+        order_id: 100,
+        inventory_consumed_at_fire: false,
+        cancelled_at: null,
+      },
       data: { inventory_consumed_at_fire: true },
     });
+    expect(orderItemClaim.mock.invocationCallOrder[0]).toBeLessThan(
+      stockLevelManager.updateStock.mock.invocationCallOrder[0],
+    );
+    expect(transactionalOrderRead).toHaveBeenCalledWith({
+      where: { id: 100, store_id: 1 },
+      select: { id: true, state: true },
+    });
+    expect(transactionalOrderRead.mock.invocationCallOrder[0]).toBeLessThan(
+      orderItemClaim.mock.invocationCallOrder[0],
+    );
 
     // (e) Ticket created with the nested items
     expect(ticketCreate).toHaveBeenCalledTimes(1);
@@ -945,6 +972,116 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
     expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a manual fire for skip_kds items before opening the transaction', async () => {
+    const item = { ...makeOrderItem(11, 51, 'prepared'), skip_kds: true };
+    setupFireableContext([item]);
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [11] }),
+    ).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_ELIGIBLE_001' });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it.each(['cancelled', 'refunded', 'shipped', 'delivered', 'finished'])(
+    'rejects a manual fire for a %s order before effects',
+    async (state) => {
+    setupFireableContext([makeVariantOrderItem(10, 50)]);
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 100,
+      store_id: 1,
+      state,
+      order_number: 'ORD-terminal',
+      order_items: [makeVariantOrderItem(10, 50)],
+    });
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [10] }),
+    ).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_ELIGIBLE_001' });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+    },
+  );
+
+  it('revalidates manual-fire order state in the transaction before claiming items', async () => {
+    setupFireableContext([makeVariantOrderItem(10, 50)]);
+    const claim = jest.fn().mockResolvedValue({ count: 1 });
+    const transactionalOrderRead = jest
+      .fn()
+      .mockResolvedValue({ id: 100, state: 'cancelled' });
+    prismaMock.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        ...buildFireTxMock({ orderItemId: 10 }),
+        orders: {
+          findFirst: transactionalOrderRead,
+        },
+        order_items: {
+          ...buildFireTxMock({ orderItemId: 10 }).order_items,
+          updateMany: claim,
+        },
+      }),
+    );
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [10] }),
+    ).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_ELIGIBLE_001' });
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(transactionalOrderRead).toHaveBeenCalledWith({
+      where: { id: 100, store_id: 1 },
+      select: { id: true, state: true },
+    });
+    expect(claim).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('unit coverage: allows only one request to proceed when the conditional claim loses', async () => {
+    setupFireableContext([makeVariantOrderItem(10, 50)]);
+    let claimed = false;
+    const claim = jest.fn().mockImplementation(async () => {
+      if (claimed) return { count: 0 };
+      claimed = true;
+      return { count: 1 };
+    });
+    const ticketCreate = jest
+      .fn()
+      .mockResolvedValue(makeTxTicket(555, 10, 50));
+    prismaMock.$transaction.mockImplementation(async (cb: any) => {
+      const tx = {
+        ...buildFireTxMock({ orderItemId: 10 }),
+        order_items: {
+          ...buildFireTxMock({ orderItemId: 10 }).order_items,
+          updateMany: claim,
+        },
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+        kitchen_tickets: {
+          create: ticketCreate,
+          count: jest.fn().mockResolvedValue(0),
+        },
+      };
+      return cb(tx);
+    });
+
+    const outcomes = await Promise.allSettled([
+      service.fireOrderItems({ order_id: 100, order_item_ids: [10] }),
+      service.fireOrderItems({ order_id: 100, order_item_ids: [10] }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected') as PromiseRejectedResult;
+    expect(rejected.reason).toMatchObject({ errorCode: 'KITCHEN_FIRE_ALL_ALREADY_CONSUMED' });
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+    expect(ticketCreate).toHaveBeenCalledTimes(1);
+    expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
   });
 
   // Orden #8513: una linea cancelada (`cancelled_at`) se disparo igual y

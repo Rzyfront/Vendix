@@ -1231,11 +1231,21 @@ export class OrdersService {
           order_items: {
             select: {
               id: true,
+              product_id: true,
               product_name: true,
               quantity: true,
+              skip_kds: true,
+              cancelled_at: true,
               inventory_committed: true,
               inventory_consumed_at_fire: true,
               delivered_at: true,
+              products: { select: { product_type: true } },
+              // Keep all real KDS attempts for this order line. Consumers
+              // prefer an in-flight attempt over an older terminal attempt.
+              kitchen_ticket_items: {
+                orderBy: { id: 'desc' },
+                select: { id: true, status: true, kitchen_ticket_id: true },
+              },
             },
           },
           // One relation projection for the whole page, never a query per row.

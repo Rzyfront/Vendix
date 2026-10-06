@@ -49,6 +49,13 @@ const POST_CANCEL_REMAKE_TYPES = new Set([
   'after_fire_reused', 'after_fire_waste',
   'delivered_restock', 'delivered_waste',
 ]);
+const TERMINAL_FIRE_ORDER_STATES = new Set([
+  'cancelled',
+  'refunded',
+  'shipped',
+  'delivered',
+  'finished',
+]);
 
 export function isPostCancelRemake(
   state: string | null | undefined,
@@ -164,6 +171,8 @@ export interface PreExplodedFireContext {
   order: {
     id: number;
     order_number: string;
+    /** Public manual fire only; internal POS/table/resend callers omit it. */
+    enforceManualEligibility?: boolean;
     /**
      * C.3 QUI-733 — id de la mesa de la sesión ABIERTA del pedido, si la hay.
      * Se resuelve ANTES de la transacción y se estampa en
@@ -486,6 +495,7 @@ export class KitchenFireService {
       select: {
         id: true,
         store_id: true,
+        state: true,
         order_number: true,
         // C.3 QUI-733 — la sesión de mesa ABIERTA (closed_at IS NULL) del pedido,
         // para estampar `kitchen_tickets.table_id` al fire. `orders` no tiene
@@ -538,10 +548,26 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ITEM_NOT_FOUND);
     }
 
+    // This public method is the manual fire endpoint. Internal callers such as
+    // POS auto-fire and explicit resend use fireOrderItemsInTx directly and
+    // retain their own eligibility rules.
+    if (TERMINAL_FIRE_ORDER_STATES.has(order.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_FIRE_NOT_ELIGIBLE_001,
+        `No se puede enviar a cocina una orden ${order.state}`,
+      );
+    }
+
     // 2. Partition items into fireable vs skipped.
     const firedItemIds: number[] = [];
     const skippedItemIds: number[] = [];
     for (const item of order.order_items) {
+      if (item.skip_kds) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_FIRE_NOT_ELIGIBLE_001,
+          `El item #${item.id} está marcado para omitir cocina`,
+        );
+      }
       if (item.inventory_consumed_at_fire) {
         skippedItemIds.push(item.id);
         continue;
@@ -745,6 +771,7 @@ export class KitchenFireService {
       order: {
         id: order.id,
         order_number: order.order_number,
+        enforceManualEligibility: true,
         table_id: order.table_sessions?.[0]?.table_id ?? null,
       },
       firedItemIds,
@@ -965,6 +992,47 @@ export class KitchenFireService {
     let cogsTotal = 0;
     let consumedLineCount = 0;
 
+    if (order.enforceManualEligibility) {
+      const currentOrder = await tx.orders.findFirst({
+        where: { id: order.id, store_id },
+        select: { id: true, state: true },
+      });
+      if (
+        !currentOrder ||
+        TERMINAL_FIRE_ORDER_STATES.has(currentOrder.state)
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_FIRE_NOT_ELIGIBLE_001,
+          'La orden ya no es elegible para enviar a cocina',
+        );
+      }
+    }
+
+    // Claim all requested fireable rows before any inventory/COGS/ticket
+    // writes. PostgreSQL rechecks this predicate after waiting for a concurrent
+    // UPDATE at READ COMMITTED, so exactly one transaction can claim each row.
+    // A partial claim is also rejected: throwing rolls back every row claimed
+    // by this transaction, including the rows that were still free.
+    const claimItemIds = [
+      ...preparedItems.map(({ orderItem }) => orderItem.id),
+      ...recipeLessItems.map((item) => item.id),
+    ];
+    const claim = await tx.order_items.updateMany({
+      where: {
+        id: { in: claimItemIds },
+        order_id: order.id,
+        inventory_consumed_at_fire: false,
+        cancelled_at: null,
+      },
+      data: { inventory_consumed_at_fire: true },
+    });
+    if (claim.count !== claimItemIds.length) {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_FIRE_ALL_ALREADY_CONSUMED,
+        'Uno o más items ya fueron enviados a cocina; actualice la orden',
+      );
+    }
+
     // ---------------------------------------------------------------- QUI-651
     // La estación destino se resuelve ANTES de consumir, no al crear el ticket,
     // porque el movimiento de inventario tiene que nacer firmado con la sesión
@@ -1140,12 +1208,6 @@ export class KitchenFireService {
         }
       }
 
-      // Flip the idempotency flag.
-      await tx.order_items.update({
-        where: { id: orderItem.id },
-        data: { inventory_consumed_at_fire: true },
-      });
-
       firedItemSnapshots.push({
         orderItemId: orderItem.id,
         productId: orderItem.product_id!,
@@ -1164,10 +1226,6 @@ export class KitchenFireService {
     for (const item of recipeLessItems) {
       const orderQty = Number(item.quantity || 0);
       if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
-      await tx.order_items.update({
-        where: { id: item.id },
-        data: { inventory_consumed_at_fire: true },
-      });
       firedItemSnapshots.push({
         orderItemId: item.id,
         productId: item.product_id!,
