@@ -237,9 +237,9 @@
               <div class="footer-actions-wrap relative">
                 <div class="footer-actions flex gap-2">
                   @if (actionsDisplay() === 'buttons') {
-                    <!-- First two visible actions -->
+                    <!-- First configured visible actions -->
                     @for (
-                      action of getVisibleActions(item).slice(0, 2);
+                      action of getVisibleActions(item).slice(0, directActionsCount());
                       track action
                     ) {
                       <button

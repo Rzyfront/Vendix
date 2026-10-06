@@ -492,7 +492,7 @@ export class OrdersListComponent {
       show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
     },
     {
-      label: 'Cancel Order',
+      label: 'Cancelar orden',
       icon: 'x-circle',
       action: (order: Order) => this.cancelOrder(order),
       variant: 'danger',
@@ -500,6 +500,13 @@ export class OrdersListComponent {
         order.cancellation_policy?.can_cancel === true,
     },
   ];
+
+  /** Keep desktop order unchanged; expose all three mobile actions directly. */
+  readonly mobileActions = computed<TableAction[]>(() => [
+    this.actions[0],
+    this.actions[1],
+    this.actions[2],
+  ]);
 
   // Card configuration for mobile
   // T10 B3 — cardConfig ahora es computed. detailKeys incluye Mesa solo

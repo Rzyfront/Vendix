@@ -3224,6 +3224,14 @@
       "sessions": 0,
       "memories": 2,
       "prompts": 0
+    },
+    {
+      "id": "69e3bda3",
+      "created_by": "dmin",
+      "created_at": "2026-10-06T06:57:46Z",
+      "sessions": 0,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }

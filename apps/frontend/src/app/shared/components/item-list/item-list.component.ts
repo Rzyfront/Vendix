@@ -37,6 +37,8 @@ export class ItemListComponent {
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');
   readonly actionsDisplay = input<ItemListActionsDisplay>('buttons');
+  /** Number of visible actions rendered directly before mobile overflow. */
+  readonly directActionsCount = input(2);
   readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
     () => undefined
   );
@@ -465,7 +467,7 @@ export class ItemListComponent {
     const visibleActions = this.getVisibleActions(item);
     return this.actionsDisplay() === 'dropdown'
       ? visibleActions
-      : visibleActions.slice(2);
+      : visibleActions.slice(this.directActionsCount());
   }
 
   getSizeClasses(): string {

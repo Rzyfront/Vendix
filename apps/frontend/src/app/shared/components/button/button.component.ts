@@ -28,6 +28,7 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
       [attr.form]="form()"
       [attr.aria-label]="ariaLabel() || null"
       [attr.title]="ariaLabel() || null"
+      [attr.aria-pressed]="ariaPressed() ?? null"
       [disabled]="disabled() || loading()"
       [class]="buttonClasses"
       (click)="handleClick($event)"
@@ -211,6 +212,8 @@ export class ButtonComponent {
    * BORRA el nombre accesible que el propio texto del botón ya daba.
    */
   readonly ariaLabel = input('');
+  /** Toggle state announced by assistive technology on the actual button. */
+  readonly ariaPressed = input<boolean | null>();
 
   readonly clicked = output<Event>();
 

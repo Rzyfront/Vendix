@@ -397,6 +397,9 @@ export class OrdersController {
     } catch (error) {
       // Dejar pasar el código tipado (y el HTTP 400 real) al filtro global.
       if (error instanceof VendixHttpException) throw error;
+      // CP-QUI-914: un fallo inesperado de cancelación debe llegar al filtro
+      // global; devolver el envelope aquí convertiría el rechazo en HTTP 200.
+      if (updateOrderDto.state === 'cancelled') throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar la orden',
         error.response?.message || error.message,

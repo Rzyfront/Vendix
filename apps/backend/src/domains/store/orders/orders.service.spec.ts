@@ -337,6 +337,39 @@ describe('OrdersService', () => {
     jest.useRealTimers();
   });
 
+  describe('getStats', () => {
+    it('returns separate counts for cancelled and refunded orders', async () => {
+      mockPrismaService.orders.count
+        .mockResolvedValueOnce(12)
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(2)
+        .mockResolvedValueOnce(4);
+      mockPrismaService.orders.aggregate.mockResolvedValue({
+        _sum: { grand_total: 900 },
+      });
+
+      await expect(service.getStats()).resolves.toEqual({
+        total_orders: 12,
+        total_revenue: 900,
+        pending_orders: 3,
+        completed_orders: 5,
+        cancelled_orders: 2,
+        refunded_orders: 4,
+        average_order_value: 75,
+      });
+
+      expect(mockPrismaService.orders.count).toHaveBeenNthCalledWith(4, {
+        where: { state: 'cancelled' },
+      });
+      expect(mockPrismaService.orders.count).toHaveBeenNthCalledWith(5, {
+        where: {
+          state: 'refunded',
+        },
+      });
+    });
+  });
+
   describe('remove — conserva evidencia financiera (E.4)', () => {
     let contextSpy: jest.SpyInstance;
 

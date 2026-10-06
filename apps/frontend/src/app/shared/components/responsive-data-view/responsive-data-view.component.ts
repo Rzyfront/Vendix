@@ -92,11 +92,12 @@ export type { ItemListCardConfig, ItemListSize };
         <app-item-list
           [data]="data()"
           [cardConfig]="cardConfig()"
-          [actions]="actions()"
+          [actions]="mobileActions() ?? actions()"
           [loading]="loading()"
           [emptyMessage]="emptyMessage()"
           [emptyIcon]="emptyIcon()"
           [size]="itemListSize()"
+          [directActionsCount]="mobileDirectActionsCount()"
           [actionsDisplay]="actionsDisplay()"
           [rowClass]="rowClass()"
           [selectable]="selectable()"
@@ -137,6 +138,10 @@ export class ResponsiveDataViewComponent {
 
   // Shared configuration
   readonly actions = input<TableAction[]>();
+  /** Optional actions for mobile cards; desktop always uses `actions`. */
+  readonly mobileActions = input<TableAction[]>();
+  /** Direct action count for mobile cards; the shared default remains two. */
+  readonly mobileDirectActionsCount = input(2);
   readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
     () => undefined
   );
