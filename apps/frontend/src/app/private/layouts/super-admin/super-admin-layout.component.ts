@@ -20,6 +20,7 @@ import { ActiveTenantContextService } from '../../../core/services/active-tenant
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { PullToRefreshDirective } from '../../../shared/directives/pull-to-refresh.directive';
 import { SupportService } from '../../modules/super-admin/support/services/support.service';
 import { timer } from 'rxjs';
 import { switchMap, filter } from 'rxjs/operators';
@@ -35,6 +36,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
     PaywallOutletComponent,
     FiscalGateOutletComponent,
     IconComponent,
+    PullToRefreshDirective,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -127,6 +129,8 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
         <!-- Page Content (Scrollable) -->
         <main
+          appPullToRefresh
+          (pullRefresh)="reloadPage()"
           class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
@@ -556,6 +560,10 @@ export class SuperAdminLayoutComponent {
     } else {
       this.sidebarCollapsed.update((v) => !v);
     }
+  }
+
+  reloadPage(): void {
+    window.location.reload();
   }
 
   private updateBreadcrumb(url: string): void {

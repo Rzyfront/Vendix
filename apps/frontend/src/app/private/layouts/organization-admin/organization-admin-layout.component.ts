@@ -43,6 +43,7 @@ import {
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { DialogService } from '../../../shared/components/dialog/dialog.service';
 import { ToastService } from '../../../shared/components/toast/toast.service';
+import { PullToRefreshDirective } from '../../../shared/directives/pull-to-refresh.directive';
 
 @Component({
   selector: 'app-organization-admin-layout',
@@ -55,6 +56,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     FiscalGateOutletComponent,
     FiscalObligationBannerComponent,
     VexiDockComponent,
+    PullToRefreshDirective,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -95,6 +97,8 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
 
         <!-- Page Content (Scrollable) -->
         <main
+          appPullToRefresh
+          (pullRefresh)="reloadPage()"
           class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
@@ -632,5 +636,9 @@ export class OrganizationAdminLayoutComponent {
     } else {
       this.sidebarCollapsed.update((v) => !v);
     }
+  }
+
+  reloadPage(): void {
+    window.location.reload();
   }
 }
