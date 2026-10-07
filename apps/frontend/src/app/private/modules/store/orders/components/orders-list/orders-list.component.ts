@@ -213,6 +213,18 @@ export class OrdersListComponent {
       this.canCreateKitchenFire(),
   );
 
+  readonly kitchenAction: TableAction = {
+    label: (order: Order) => this.kitchenActionLabel(order),
+    tooltip: (order: Order) => this.kitchenActionTooltip(order),
+    tooltipComponent: true,
+    tooltipColor: (order: Order) => this.kitchenTooltipColor(order),
+    icon: 'flame',
+    variant: (order: Order) => this.kitchenStatusColor(order),
+    show: (order: Order) =>
+      this.canShowKitchenFire() && this.kitchenSummary(order).eligibleItems.length > 0,
+    action: (order: Order) => this.firePendingKitchenItems(order),
+  };
+
   private kitchenSummary(order: Order) {
     return summarizeOrderKitchen(order.order_items ?? []);
   }
@@ -553,45 +565,45 @@ export class OrdersListComponent {
     return base;
   });
 
-  actions: TableAction[] = [
-    {
-      label: (order: Order) => this.kitchenActionLabel(order),
-      tooltip: (order: Order) => this.kitchenActionTooltip(order),
-      tooltipComponent: true,
-      tooltipColor: (order: Order) => this.kitchenTooltipColor(order),
-      icon: 'flame',
-      variant: (order: Order) => this.kitchenStatusColor(order),
-      show: (order: Order) =>
-        this.canShowKitchenFire() && this.kitchenSummary(order).eligibleItems.length > 0,
-      action: (order: Order) => this.firePendingKitchenItems(order),
-    },
-    {
-      label: 'View Details',
-      icon: 'eye',
-      action: (order: Order) => this.viewOrderDetails(order),
-      variant: 'secondary',
-    },
-    {
-      label: 'Imprimir',
-      icon: 'printer',
-      action: (order: Order) =>
-        this.printService.printOrder(order).catch(() => {
-          this.toastService.error(
-            'No se pudo imprimir la orden: reintenta; si persiste, revisa el Hub de formatos de impresión.',
-          );
-        }),
-      variant: 'info',
-      show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
-    },
-    {
-      label: 'Cancel Order',
-      icon: 'x-circle',
-      action: (order: Order) => this.cancelOrder(order),
-      variant: 'danger',
-      show: (order: Order) =>
-        order.cancellation_policy?.can_cancel === true,
-    },
-  ];
+  readonly viewAction: TableAction = {
+    label: 'View Details',
+    icon: 'eye',
+    action: (order: Order) => this.viewOrderDetails(order),
+    variant: 'secondary',
+  };
+
+  readonly printAction: TableAction = {
+    label: 'Imprimir',
+    icon: 'printer',
+    action: (order: Order) =>
+      this.printService.printOrder(order).catch(() => {
+        this.toastService.error(
+          'No se pudo imprimir la orden: reintenta; si persiste, revisa el Hub de formatos de impresión.',
+        );
+      }),
+    variant: 'info',
+    show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
+  };
+
+  readonly cancelAction: TableAction = {
+    label: 'Cancelar orden',
+    icon: 'x-circle',
+    action: (order: Order) => this.cancelOrder(order),
+    variant: 'danger',
+    show: (order: Order) =>
+      order.cancellation_policy?.can_cancel === true,
+  };
+
+  actions: TableAction[] = [this.viewAction, this.printAction, this.cancelAction];
+
+  /** Keep desktop configuration intact and mobile core actions ahead of extras. */
+  readonly mobileActions = computed<TableAction[]>(() => {
+    const core = [this.viewAction, this.printAction, this.cancelAction];
+    return [...core, ...this.actions.filter((action) => !core.includes(action))];
+  });
+  readonly mobileDirectActionsCount = computed(() =>
+    Math.min(4, this.mobileActions().length),
+  );
 
   private firePendingKitchenItems(order: Order): void {
     if (this.staleKitchenOrderIds().has(order.id)) {
@@ -725,6 +737,8 @@ export class OrdersListComponent {
   });
 
   constructor() {
+    this.actions = [this.kitchenAction, ...this.actions];
+
     // Persistencia de filtros vía URL query params (QUI-778 admin-orders-filters).
     // Patrón canónico: `org-invoice-list.component.ts:373-390`.
     //

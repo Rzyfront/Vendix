@@ -39,6 +39,8 @@ export class ItemListComponent {
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');
   readonly actionsDisplay = input<ItemListActionsDisplay>('buttons');
+  /** Number of visible actions rendered directly before mobile overflow. */
+  readonly directActionsCount = input(2);
   readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
     () => undefined
   );
@@ -469,11 +471,17 @@ export class ItemListComponent {
     return acts.filter((action) => this.isActionVisible(action, item));
   }
 
+  getDirectActions(item: any): TableAction[] {
+    return this.actionsDisplay() === 'dropdown'
+      ? []
+      : this.getVisibleActions(item).slice(0, this.directActionsCount());
+  }
+
   getMenuActions(item: any): TableAction[] {
     const visibleActions = this.getVisibleActions(item);
     return this.actionsDisplay() === 'dropdown'
       ? visibleActions
-      : visibleActions.slice(2);
+      : visibleActions.slice(this.directActionsCount());
   }
 
   getSizeClasses(): string {
