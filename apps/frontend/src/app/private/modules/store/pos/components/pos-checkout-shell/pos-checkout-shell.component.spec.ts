@@ -945,6 +945,62 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(fixture.debugElement.queryAll(By.directive(ShippingStub)).length).toBe(1);
   });
 
+  describe('chip compacto de cliente', () => {
+    const withCustomer = () => {
+      fixture.componentRef.setInput('cartState', {
+        customer: { id: 99, first_name: 'Camila', last_name: 'Torres', document_type: 'CC', document_number: '52123456' },
+        items: [{ id: 1, product: { name: 'Producto' } }],
+        summary: { total: 10 },
+      });
+      component.currentStep.set(1);
+      component.clienteSubStep.set(1);
+      fixture.detectChanges();
+    };
+    const selectorEl = () => fixture.nativeElement.querySelector('app-pos-customer-selector');
+    const chipBtn = (label: string) =>
+      fixture.nativeElement.querySelector(`.cliente-collapsed [aria-label="${label}"]`) as HTMLButtonElement;
+
+    it('con cliente en sub-paso 1 no hay selector y el chip muestra nombre y documento', () => {
+      withCustomer();
+      expect(selectorEl()).toBeNull();
+      const chip = fixture.nativeElement.querySelector('.cliente-collapsed') as HTMLElement;
+      expect(chip.textContent).toContain('Camila Torres');
+      expect(chip.textContent).toContain('CC 52123456');
+    });
+
+    it('"Cambiar cliente" muestra el selector', () => {
+      withCustomer();
+      chipBtn('Cambiar cliente').click();
+      fixture.detectChanges();
+      expect(component.customerPickerOpen()).toBeTrue();
+      expect(selectorEl()).not.toBeNull();
+    });
+
+    it('"Quitar cliente" ejecuta el flujo de limpieza y aparece el selector', () => {
+      withCustomer();
+      const cleared = jasmine.createSpy('cleared');
+      component.customerCleared.subscribe(cleared);
+      chipBtn('Quitar cliente').click();
+      fixture.componentRef.setInput('cartState', { customer: null, items: [{ id: 1, product: { name: 'Producto' } }], summary: { total: 10 } });
+      fixture.detectChanges();
+      expect(cleared).toHaveBeenCalledTimes(1);
+      expect(selectorEl()).not.toBeNull();
+    });
+
+    it('sin cliente el selector aparece', () => {
+      component.currentStep.set(1);
+      component.clienteSubStep.set(1);
+      fixture.detectChanges();
+      expect(selectorEl()).not.toBeNull();
+    });
+
+    it('al seleccionar un cliente el selector forzado vuelve a cerrarse', () => {
+      component.customerPickerOpen.set(true);
+      component.onSelectCustomerAndAdvance({ id: 99, first_name: 'Ana' } as any);
+      expect(component.customerPickerOpen()).toBeFalse();
+    });
+  });
+
   it('Entrega-llevar avanza; mesa sin mesa abre el picker sin avanzar', () => {
     const stub = TestBed.runInInjectionContext(() => new EntregaStub());
     Object.defineProperty(component, 'entregaStep', {
