@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, KeyboardAvoidingView, Platform, TextInput } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, KeyboardAvoidingView, Platform, TextInput, RefreshControl } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService, ProductService } from '@/features/store/services';
 import type { Location, Product, ProductVariant, Supplier, PurchaseOrderMode } from '@/features/store/types';
@@ -61,7 +61,7 @@ export default function PurchaseInventoryScreen() {
     queryFn: () => InventoryService.getLocations({ limit: 100 }),
   });
 
-  const { data: productsResponse, isLoading: productsLoading } = useQuery({
+  const { data: productsResponse, isLoading: productsLoading, refetch: refetchProducts, isRefetching: isRefetchingProducts } = useQuery({
     queryKey: ['purchase-products', search],
     queryFn: () =>
       ProductService.list({
@@ -247,6 +247,14 @@ export default function PurchaseInventoryScreen() {
         data={products}
         keyExtractor={(item) => String(item.id)}
         numColumns={2}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetchingProducts}
+            onRefresh={() => refetchProducts()}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
         columnWrapperStyle={styles.productColumns}
         ListHeaderComponent={
           <View>
