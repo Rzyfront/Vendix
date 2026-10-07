@@ -1051,7 +1051,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       order: { id: 100, order_number: 'ORD-100', enforceManualEligibility },
       firedItemIds: [10], skippedItemIds: [],
       preparedItems: [{ orderItem: { ...item, products: { ...item.products, kds_id: null } },
-        recipeId: 7, bomLines: [{ component_product_id: 201, quantity: 1, unit_cost: 10,
+        recipeId: 7, bomLines: [{ component_product_id: 201, quantity: 1,
           depth: 1, path_recipe_ids: [7] }] }],
       recipeLessItems: [], locationByProduct: new Map([[201, 1]]),
       businessDate: '2026-10-07', user_id: 42, allowIngredientOveruse: false,
