@@ -11,7 +11,9 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   countryCodeInList,
   geoNameInList,
+  geoNamesMatch,
   isUsableGeoName,
+  normalizeCountryCode,
   normalizeGeoName,
   postalCodeInList,
 } from 'src/common/utils/geo-name.util';
@@ -37,6 +39,20 @@ export interface AddressDTO {
   postal_code?: string;
   latitude?: number;
   longitude?: number;
+}
+
+/**
+ * Alcance geográfico de la dirección de entrega a domicilio de una tienda.
+ * `single_municipality` es no-null solo si TODA la cobertura de domicilio se
+ * reduce a exactamente un municipio (ver `resolveAddressScope`).
+ */
+export interface AddressScope {
+  single_municipality: {
+    country_code: string;
+    state_province: string;
+    city: string;
+  } | null;
+  postal_code_relevant: boolean;
 }
 
 export interface CartItemDTO {
@@ -806,6 +822,113 @@ export class ShippingCalculatorService {
     }
 
     return options;
+  }
+
+  /**
+   * Alcance de la dirección de entrega a domicilio de la tienda. Considera las
+   * zonas activas con al menos una tarifa activa de un método activo que no sea
+   * `pickup`. Fija un municipio solo si la unión normalizada de ciudades de esas
+   * zonas tiene exactamente un valor y ninguna zona deja la ciudad sin
+   * restringir. Usa la misma normalización que `resolveMatchingZones`, de modo
+   * que lo fijado siempre cotiza.
+   */
+  async resolveAddressScope(storeId: number): Promise<AddressScope> {
+    const zones = await this.prisma.shipping_zones.findMany({
+      where: { store_id: storeId, is_active: true },
+      include: {
+        shipping_rates: {
+          where: {
+            is_active: true,
+            shipping_method: {
+              is_active: true,
+              type: { not: 'pickup' as any },
+            },
+          },
+          include: {
+            shipping_method: { select: { type: true, is_active: true } },
+          },
+        },
+      },
+    });
+
+    const considered = (zones as any[]).filter((zone) =>
+      (zone.shipping_rates ?? []).some(
+        (rate: any) =>
+          rate.is_active !== false &&
+          rate.shipping_method?.is_active !== false &&
+          rate.shipping_method?.type !== 'pickup',
+      ),
+    );
+
+    const postal_code_relevant = considered.some((zone) =>
+      (zone.zip_codes ?? []).some(
+        (zip: string) => typeof zip === 'string' && zip.trim() !== '',
+      ),
+    );
+
+    const none: AddressScope = {
+      single_municipality: null,
+      postal_code_relevant,
+    };
+    if (considered.length === 0) return none;
+
+    // Ciudades: toda zona debe restringir ciudad con valores utilizables.
+    const cities = new Map<string, string>();
+    for (const zone of considered) {
+      const usable = ((zone.cities ?? []) as string[]).filter((c) =>
+        isUsableGeoName(c),
+      );
+      if (usable.length === 0) return none;
+      for (const c of usable) {
+        const key = normalizeGeoName(c);
+        if (!cities.has(key)) cities.set(key, c);
+      }
+    }
+    if (cities.size !== 1) return none;
+    const city = [...cities.values()][0];
+
+    // Departamento.
+    const regions = new Map<string, string>();
+    for (const zone of considered) {
+      for (const r of (zone.regions ?? []) as string[]) {
+        if (!isUsableGeoName(r)) continue;
+        const key = normalizeGeoName(r);
+        if (!regions.has(key)) regions.set(key, r);
+      }
+    }
+    if (regions.size > 1) return none;
+    let state_province: string | null = null;
+    if (regions.size === 1) {
+      state_province = [...regions.values()][0];
+    } else {
+      const storeAddresses = await this.prisma.addresses.findMany({
+        where: {
+          type: { in: ShippingCalculatorService.PICKUP_CAPABLE_ADDRESS_TYPES },
+        },
+        select: { id: true, city: true, state_province: true, type: true },
+      });
+      const match = storeAddresses.find(
+        (a) => geoNamesMatch(a.city, city) && isUsableGeoName(a.state_province),
+      );
+      state_province = match?.state_province ?? null;
+    }
+    if (!state_province) return none;
+
+    // País.
+    const countries = new Set<string>();
+    for (const zone of considered) {
+      for (const c of (zone.countries ?? []) as string[]) {
+        const code = normalizeCountryCode(c);
+        if (code) countries.add(code);
+      }
+    }
+    if (countries.size > 1) return none;
+    const country_code = countries.size === 1 ? [...countries][0] : 'CO';
+
+    return {
+      single_municipality: { country_code, state_province, city },
+      postal_code_relevant,
+    };
   }
 
   /**

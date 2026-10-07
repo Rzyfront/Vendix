@@ -42,6 +42,12 @@ export class ShippingController {
     private readonly responseService: ResponseService,
   ) {}
 
+  // Declarada antes de cualquier GET con parámetro para que nada la capture.
+  @Get('address-scope')
+  async getAddressScope(@CurrentStore() storeId: number) {
+    return this.calculatorService.resolveAddressScope(storeId);
+  }
+
   // --- METHODS ---
   @Get('methods')
   async getMethods(@CurrentStore() storeId: number) {

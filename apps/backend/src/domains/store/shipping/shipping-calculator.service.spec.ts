@@ -1086,4 +1086,131 @@ describe('ShippingCalculatorService', () => {
       expect(errors.some((error) => error.property === 'shipping_method_id')).toBe(true);
     });
   });
+
+  describe('resolveAddressScope', () => {
+    const delivery = [
+      {
+        is_active: true,
+        shipping_method: { type: 'own_fleet', is_active: true },
+      },
+    ];
+    const pickupRate = [
+      { is_active: true, shipping_method: { type: 'pickup', is_active: true } },
+    ];
+    const zone = (over: any = {}) => ({
+      id: 1,
+      store_id: 1,
+      countries: ['CO'],
+      regions: ['La Guajira'],
+      cities: ['Riohacha'],
+      zip_codes: [],
+      is_active: true,
+      shipping_rates: delivery,
+      ...over,
+    });
+
+    beforeEach(() => {
+      mockPrisma.addresses.findMany.mockResolvedValue([]);
+    });
+
+    it('1 municipio con región', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([zone()]);
+      await expect(service.resolveAddressScope(1)).resolves.toEqual({
+        single_municipality: {
+          country_code: 'CO',
+          state_province: 'La Guajira',
+          city: 'Riohacha',
+        },
+        postal_code_relevant: false,
+      });
+    });
+
+    it('1 municipio sin región usa la dirección de la tienda', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone({ regions: [] }),
+      ]);
+      mockPrisma.addresses.findMany.mockResolvedValue([
+        {
+          id: 1,
+          city: 'Bogotá',
+          state_province: 'Bogotá D.C.',
+          type: 'store_physical',
+        },
+        {
+          id: 2,
+          city: 'riohacha',
+          state_province: 'La Guajira',
+          type: 'store_physical',
+        },
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.single_municipality).toEqual({
+        country_code: 'CO',
+        state_province: 'La Guajira',
+        city: 'Riohacha',
+      });
+    });
+
+    it('1 municipio sin región y sin dirección de tienda => null', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone({ regions: [] }),
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.single_municipality).toBeNull();
+    });
+
+    it('2 municipios => null', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone(),
+        zone({ id: 2, cities: ['Maicao'] }),
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.single_municipality).toBeNull();
+    });
+
+    it('zona sin ciudades (nacional) => null', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone(),
+        zone({ id: 2, cities: [], regions: [] }),
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.single_municipality).toBeNull();
+    });
+
+    it('zona solo-pickup se ignora', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone({
+          id: 2,
+          cities: ['Bogotá'],
+          regions: ['Bogotá D.C.'],
+          shipping_rates: pickupRate,
+        }),
+        zone(),
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.single_municipality?.city).toBe('Riohacha');
+    });
+
+    it('zip_codes => postal_code_relevant true', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone({ zip_codes: ['440001'] }),
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.postal_code_relevant).toBe(true);
+      expect(r.single_municipality?.city).toBe('Riohacha');
+    });
+
+    it('misma ciudad con distinta tilde/mayúscula cuenta como 1', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone(),
+        zone({ id: 2, cities: ['RIOHACHA '] }),
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.single_municipality).toEqual({
+        country_code: 'CO',
+        state_province: 'La Guajira',
+        city: 'Riohacha',
+      });
+    });
+  });
 });

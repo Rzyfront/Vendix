@@ -65,6 +65,10 @@ import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
 import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
 import {
+  ShippingCalculatorService,
+  type AddressScope,
+} from '../../store/shipping/shipping-calculator.service';
+import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
 } from '../../store/shipping/utils/shipping-tax.util';
@@ -216,6 +220,10 @@ export class CheckoutService {
     // servidor al confirmar. `@Optional()` por el mismo motivo; sin él el
     // envío sale a precio de zona.
     @Optional() private readonly shippingDistance?: ShippingDistanceService,
+    // Alcance de dirección (un solo municipio). `@Optional()` por el mismo
+    // motivo; sin él devuelve "sin alcance fijo".
+    @Optional()
+    private readonly shippingCalculator?: ShippingCalculatorService,
   ) {}
 
   /**
@@ -731,6 +739,17 @@ export class CheckoutService {
    * `other`), con un método representativo por tipo. Sin precios ni zonas:
    * la cotización sigue viviendo en `POST /shipping/calculate`.
    */
+  async getAddressScope(): Promise<AddressScope> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!this.shippingCalculator) {
+      return { single_municipality: null, postal_code_relevant: false };
+    }
+    return this.shippingCalculator.resolveAddressScope(store_id);
+  }
+
   async getDeliveryOptions(): Promise<
     Array<{
       method_id: number;
