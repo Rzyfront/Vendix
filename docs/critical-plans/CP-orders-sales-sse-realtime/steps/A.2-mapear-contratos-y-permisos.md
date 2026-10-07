@@ -24,8 +24,8 @@ skills: [vendix-permissions, vendix-multi-tenant-context, vendix-error-handling,
   - curl -s -o /dev/null -w "%{http_code}" "$API/store/orders/stream?token=BAD" | grep -q 401
   - curl -s "$API/store/orders?page=1&limit=1" -H "Authorization: Bearer $JWT" | jq .data.pagination.total
 - **Acceptance checklist:**
-  - [ ] Stream sin token da 401 y sin permiso 403: curl bloqueado, dev apagado
-  - [ ] GET /:id otra tienda da 404/403: curl bloqueado, dev apagado
+  - [x] Stream sin token e inválido da 401; stream autenticado y lista de órdenes dan 200 → evidence/a2-matrix.log
+  - [ ] Token autenticado sin permiso da 403 y GET /:id de otra tienda da 404/403: no hay seed sin permiso disponible en esta ejecución
   - [x] Registros fb/db/err completos con Verification runnable → registry/
   - [x] ?token= raw en req.query; sin JWT en logs ni evidencia → a2-matrix.log
-- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-09-10 · codigo verificado por lectura; falta curl con dev arriba
+- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-10-05 · auth SSE/list comprobada en dev; falta usuario sin permiso y cross-store ID

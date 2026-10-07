@@ -51,6 +51,7 @@ export const Endpoints = {
     },
     ORDERS: {
       LIST: '/store/orders',
+      STREAM: '/store/orders/stream',
       GET: '/store/orders/:id',
       CREATE: '/store/orders',
       UPDATE: '/store/orders/:id',
