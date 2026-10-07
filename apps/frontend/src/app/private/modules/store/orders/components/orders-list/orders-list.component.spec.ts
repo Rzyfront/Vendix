@@ -8,6 +8,8 @@ import { OrdersListComponent } from './orders-list.component';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { OrderPrintService } from '../../services/order-print.service';
 import { OrdersListSseService } from '../../services/orders-list-sse.service';
+import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { TablesService } from '../../../restaurant-ops/tables/services/tables.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -38,6 +40,8 @@ describe('OrdersListComponent semantic mobile actions', () => {
         provideZonelessChangeDetection(),
         { provide: StoreOrdersService, useValue: service },
         { provide: OrderPrintService, useValue: print },
+        { provide: KitchenTicketsService, useValue: { fireOrderItems: jasmine.createSpy('fireOrderItems').and.returnValue(NEVER) } },
+        { provide: KitchenTicketPrintService, useValue: { printAfterFire: jasmine.createSpy('printAfterFire') } },
         { provide: DialogService, useValue: dialog }, { provide: ToastService, useValue: toast },
         { provide: CurrencyFormatService, useValue: { format: (value: number) => `$ ${value}` } },
         { provide: HttpClient, useValue: { get: () => of({ data: [] }) } },
@@ -46,7 +50,8 @@ describe('OrdersListComponent semantic mobile actions', () => {
         { provide: ActivatedRoute, useValue: { queryParamMap: NEVER } },
         { provide: Router, useValue: { navigate: jasmine.createSpy('navigate') } },
         { provide: OrdersListSseService, useValue: {
-          lastRelevantEvent: signal(null), lastCreatedEvent: signal(null), connect() {}, disconnect() {},
+          lastRelevantEvent: signal(null), lastCreatedEvent: signal(null),
+          hydrationEvents: signal([]), recoveredConnection: signal(0), connect() {}, disconnect() {},
         } },
       ],
     }).overrideComponent(OrdersListComponent, {
@@ -60,12 +65,21 @@ describe('OrdersListComponent semantic mobile actions', () => {
   function core(): TableAction[] { return [component.viewAction, component.printAction, component.cancelAction]; }
   async function render(): Promise<void> { component.orders.set([order()]); await fixture.whenStable(); }
 
-  it('desktop keeps the three named objects in its original order', () => {
-    expect(component.actions).toEqual(core());
-    component.actions.forEach((action, i) => expect(action).toBe(core()[i]));
+  it('desktop preserves named core order and identity alongside extras', () => {
+    const expectedCore = core();
+    const desktopCore = component.actions.filter((action) => expectedCore.includes(action));
+    expect(desktopCore).toEqual(expectedCore);
+    desktopCore.forEach((action, i) => expect(action).toBe(expectedCore[i]));
   });
-  it('mobile keeps all three core objects directly with count3', () => {
-    expect(component.mobileActions()).toEqual(core()); expect(component.mobileDirectActionsCount()).toBe(3);
+  it('mobile keeps named core first, preserves every extra and caps direct count', () => {
+    const expectedCore = core();
+    const extras = component.actions.filter((action) => !expectedCore.includes(action));
+    const mobile = component.mobileActions();
+    expect(mobile.slice(0, 3)).toEqual(expectedCore);
+    expectedCore.forEach((action, i) => expect(mobile[i]).toBe(action));
+    expect(mobile.slice(3)).toEqual(extras);
+    extras.forEach((action, i) => expect(mobile[i + 3]).toBe(action));
+    expect(component.mobileDirectActionsCount()).toBe(Math.min(4, mobile.length));
   });
   it('a prepended kitchen-shaped extra follows core without losing Cancelar', () => {
     const kitchen = extra(); component.actions = [kitchen, ...core()];
