@@ -239,6 +239,7 @@
                   <app-address-map-picker
                     hintPosition="top"
                     [center]="map_center()"
+                    [focusArea]="scope_focus()"
                     [delegateLocate]="true"
                     (located)="onMapLocated($event)"
                     (locateRequested)="onLocateRequested()"
@@ -311,6 +312,7 @@
               <app-address-map-picker
                 hintPosition="top"
                 [center]="map_center()"
+                [focusArea]="scope_focus()"
                 [delegateLocate]="true"
                 (located)="onMapLocated($event)"
                 (locateRequested)="onLocateRequested()"
@@ -319,6 +321,16 @@
               </div>
               </div>
               <form [formGroup]="address_form" class="address-form">
+                @if (scope_locked()) {
+                  <div class="scope-chip" role="note">
+                    <app-icon name="map-pin" [size]="18" class="scope-chip__icon"></app-icon>
+                    <div class="scope-chip__body">
+                      <strong class="scope-chip__title">Solo enviamos a {{ address_scope()?.single_municipality?.city }}, {{ address_scope()?.single_municipality?.state_province }}, Colombia</strong>
+                      <span class="scope-chip__text">Esta tienda únicamente realiza entregas en esta ubicación.</span>
+                    </div>
+                  </div>
+                }
+
                 <app-input
                   label="Direccion"
                   formControlName="address_line1"
@@ -346,72 +358,79 @@
                   [error]="getFieldError('address_line2')"
                 ></app-input>
 
-                <div class="form-row">
-                  <app-selector
-                    label="Pais"
-                    formControlName="country_code"
-                    [options]="countryOptions"
-                    placeholder="Selecciona un pais"
-                    [errorText]="getFieldError('country_code')"
-                    [required]="true"
-                  ></app-selector>
-
-                  @if (isColombia()) {
+                @if (!scope_locked()) {
+                  <div class="form-row">
                     <app-selector
-                      label="Departamento/Estado"
-                      formControlName="state_province"
-                      [options]="departmentOptions"
-                      [placeholder]="
-                        loading_departments()
-                          ? 'Cargando...'
-                          : 'Selecciona un departamento'
-                      "
-                      [errorText]="getFieldError('state_province')"
+                      label="Pais"
+                      formControlName="country_code"
+                      [options]="countryOptions"
+                      placeholder="Selecciona un pais"
+                      [errorText]="getFieldError('country_code')"
                       [required]="true"
                     ></app-selector>
-                  } @else {
-                    <app-input
-                      label="Departamento/Estado"
-                      formControlName="state_province"
-                      placeholder="Departamento o estado"
-                      [control]="address_form.get('state_province')"
-                      [error]="getFieldError('state_province')"
-                      [required]="true"
-                    ></app-input>
-                  }
-                </div>
 
-                <div class="form-row">
-                  @if (isColombia()) {
-                    <app-selector
-                      label="Ciudad"
-                      formControlName="city"
-                      [options]="cityOptions"
-                      [placeholder]="
-                        loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
-                      "
-                      [errorText]="getFieldError('city')"
-                      [required]="true"
-                    ></app-selector>
-                  } @else {
-                    <app-input
-                      label="Ciudad"
-                      formControlName="city"
-                      placeholder="Ciudad"
-                      [control]="address_form.get('city')"
-                      [error]="getFieldError('city')"
-                      [required]="true"
-                    ></app-input>
-                  }
+                    @if (isColombia()) {
+                      <app-selector
+                        label="Departamento/Estado"
+                        formControlName="state_province"
+                        [options]="departmentOptions"
+                        [placeholder]="
+                          loading_departments()
+                            ? 'Cargando...'
+                            : 'Selecciona un departamento'
+                        "
+                        [errorText]="getFieldError('state_province')"
+                        [required]="true"
+                      ></app-selector>
+                    } @else {
+                      <app-input
+                        label="Departamento/Estado"
+                        formControlName="state_province"
+                        placeholder="Departamento o estado"
+                        [control]="address_form.get('state_province')"
+                        [error]="getFieldError('state_province')"
+                        [required]="true"
+                      ></app-input>
+                    }
+                  </div>
+                }
 
-                  <app-input
-                    label="Codigo Postal"
-                    formControlName="postal_code"
-                    placeholder="Codigo postal"
-                    [control]="address_form.get('postal_code')"
-                    [error]="getFieldError('postal_code')"
-                  ></app-input>
-                </div>
+                @if (!scope_locked() || show_postal_code()) {
+                  <div class="form-row">
+                    @if (!scope_locked()) {
+                    @if (isColombia()) {
+                      <app-selector
+                        label="Ciudad"
+                        formControlName="city"
+                        [options]="cityOptions"
+                        [placeholder]="
+                          loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
+                        "
+                        [errorText]="getFieldError('city')"
+                        [required]="true"
+                      ></app-selector>
+                    } @else {
+                      <app-input
+                        label="Ciudad"
+                        formControlName="city"
+                        placeholder="Ciudad"
+                        [control]="address_form.get('city')"
+                        [error]="getFieldError('city')"
+                        [required]="true"
+                      ></app-input>
+                    }
+                    }
+                    @if (show_postal_code()) {
+                    <app-input
+                      label="Codigo Postal"
+                      formControlName="postal_code"
+                      placeholder="Codigo postal"
+                      [control]="address_form.get('postal_code')"
+                      [error]="getFieldError('postal_code')"
+                    ></app-input>
+                    }
+                  </div>
+                }
 
                 <!-- Save address checkbox -->
                 @if (is_authenticated()) {
@@ -627,6 +646,7 @@
                     <app-address-map-picker
                       hintPosition="top"
                       [center]="map_center()"
+                      [focusArea]="scope_focus()"
                       [delegateLocate]="true"
                       (located)="onMapLocated($event)"
                       (locateRequested)="onLocateRequested()"
@@ -693,6 +713,7 @@
                     <app-address-map-picker
                       hintPosition="top"
                       [center]="map_center()"
+                      [focusArea]="scope_focus()"
                       [delegateLocate]="true"
                       (located)="onMapLocated($event)"
                       (locateRequested)="onLocateRequested()"
@@ -700,6 +721,16 @@
                   </div>
                   </div>
                   <form [formGroup]="address_form" class="address-form">
+                    @if (scope_locked()) {
+                      <div class="scope-chip" role="note">
+                        <app-icon name="map-pin" [size]="18" class="scope-chip__icon"></app-icon>
+                        <div class="scope-chip__body">
+                          <strong class="scope-chip__title">Solo enviamos a {{ address_scope()?.single_municipality?.city }}, {{ address_scope()?.single_municipality?.state_province }}, Colombia</strong>
+                          <span class="scope-chip__text">Esta tienda únicamente realiza entregas en esta ubicación.</span>
+                        </div>
+                      </div>
+                    }
+
                     <app-input
                       label="Direccion"
                       formControlName="address_line1"
@@ -717,40 +748,42 @@
                       [error]="getFieldError('address_line2')"
                     ></app-input>
 
-                    <div class="form-row">
-                      <app-selector
-                        label="Pais"
-                        formControlName="country_code"
-                        [options]="countryOptions"
-                        placeholder="Selecciona un pais"
-                        [errorText]="getFieldError('country_code')"
-                        [required]="true"
-                      ></app-selector>
-
-                      @if (isColombia()) {
+                    @if (!scope_locked()) {
+                      <div class="form-row">
                         <app-selector
-                          label="Departamento/Estado"
-                          formControlName="state_province"
-                          [options]="departmentOptions"
-                          [placeholder]="
-                            loading_departments()
-                              ? 'Cargando...'
-                              : 'Selecciona un departamento'
-                          "
-                          [errorText]="getFieldError('state_province')"
+                          label="Pais"
+                          formControlName="country_code"
+                          [options]="countryOptions"
+                          placeholder="Selecciona un pais"
+                          [errorText]="getFieldError('country_code')"
                           [required]="true"
                         ></app-selector>
-                      } @else {
-                        <app-input
-                          label="Departamento/Estado"
-                          formControlName="state_province"
-                          placeholder="Departamento o estado"
-                          [control]="address_form.get('state_province')"
-                          [error]="getFieldError('state_province')"
-                          [required]="true"
-                        ></app-input>
-                      }
-                    </div>
+
+                        @if (isColombia()) {
+                          <app-selector
+                            label="Departamento/Estado"
+                            formControlName="state_province"
+                            [options]="departmentOptions"
+                            [placeholder]="
+                              loading_departments()
+                                ? 'Cargando...'
+                                : 'Selecciona un departamento'
+                            "
+                            [errorText]="getFieldError('state_province')"
+                            [required]="true"
+                          ></app-selector>
+                        } @else {
+                          <app-input
+                            label="Departamento/Estado"
+                            formControlName="state_province"
+                            placeholder="Departamento o estado"
+                            [control]="address_form.get('state_province')"
+                            [error]="getFieldError('state_province')"
+                            [required]="true"
+                          ></app-input>
+                        }
+                      </div>
+                    }
                   </form>
                 }
               </div>

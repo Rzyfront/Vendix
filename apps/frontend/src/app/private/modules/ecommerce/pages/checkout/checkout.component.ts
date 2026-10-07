@@ -36,6 +36,7 @@ import {
   WompiWidgetConfig,
   BankAccountOption,
   DeliveryOption,
+  AddressScope,
 } from '../../services/checkout.service';
 import { EcommerceBookingService } from '../../services/ecommerce-booking.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
@@ -545,6 +546,20 @@ export class CheckoutComponent implements OnInit {
   readonly loading_departments = signal(false);
   readonly loading_cities = signal(false);
 
+  /**
+   * Cobertura de municipio único (plan checkout-cobertura-ciudad-unica):
+   * alcance que expone el backend y estado de "dirección fijada".
+   * `scope_focus` es SOLO visual (encuadre del mapa): jamás alimenta
+   * `map_center`, latitude/longitude ni la cotización.
+   */
+  readonly address_scope = signal<AddressScope | null>(null);
+  readonly scope_locked = signal(false);
+  readonly scope_focus = signal<{ lat: number; lng: number } | null>(null);
+  readonly show_postal_code = computed(
+    () =>
+      !this.scope_locked() || !!this.address_scope()?.postal_code_relevant,
+  );
+
   private destroyRef = inject(DestroyRef);
   /** Host element, used by `focusFirstInvalid` to scroll/focus the first invalid field. */
   private readonly host = inject(ElementRef<HTMLElement>);
@@ -646,6 +661,18 @@ export class CheckoutComponent implements OnInit {
           if (this.currentAddressKey() !== key) return;
           void this.refreshShippingQuote(key);
         }, 600);
+      });
+    });
+
+    // Cobertura de municipio único: re-aplica la precarga al activar la
+    // dirección nueva (o al llegar el alcance). No toca direcciones guardadas.
+    effect(() => {
+      const scope = this.address_scope();
+      const fresh = this.use_new_address();
+      untracked(() => {
+        if (scope?.single_municipality && fresh) {
+          void this.applyAddressScope();
+        }
       });
     });
 
@@ -1361,6 +1388,91 @@ export class CheckoutComponent implements OnInit {
     if (this.cities().length > 0) ctrl?.enable({ emitEvent: false });
   }
 
+  private normalizeGeoName(value: string | null | undefined): string {
+    return (value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  /**
+   * Precarga país/departamento/ciudad cuando la tienda envía a un único
+   * municipio. Usa `emitEvent: false` para no disparar la cascada que limpia
+   * departamento/ciudad. Si algo no resuelve, el formulario queda como hoy.
+   */
+  private applyingScope = false;
+  private async applyAddressScope(): Promise<void> {
+    const muni = this.address_scope()?.single_municipality;
+    if (!muni || muni.country_code !== 'CO' || this.applyingScope) return;
+
+    const countryCtrl = this.address_form.get('country_code');
+    const depCtrl = this.address_form.get('state_province');
+    const cityCtrl = this.address_form.get('city');
+    if (this.scope_locked() && depCtrl?.value && cityCtrl?.value) return;
+
+    this.applyingScope = true;
+    try {
+      countryCtrl?.setValue('CO', { emitEvent: false });
+      this.selected_country_code.set('CO');
+      await this.loadDepartments();
+      const wantedState = this.normalizeGeoName(muni.state_province);
+      const department = this.departments().find(
+        (d) => this.normalizeGeoName(d.name) === wantedState,
+      );
+      if (!department) {
+        this.scope_locked.set(false);
+        return;
+      }
+      depCtrl?.setValue(department.id, { emitEvent: false });
+      await this.loadCities(department.id);
+      const wantedCity = this.normalizeGeoName(muni.city);
+      const city = this.cities().find(
+        (c) => this.normalizeGeoName(c.name) === wantedCity,
+      );
+      if (!city) {
+        this.scope_locked.set(false);
+        return;
+      }
+      cityCtrl?.setValue(city.id, { emitEvent: false });
+      this.addressFormValid.set(this.address_form.valid);
+      this.scope_locked.set(true);
+      void this.loadScopeFocus(muni);
+    } finally {
+      this.applyingScope = false;
+    }
+  }
+
+  /** Centroide del municipio SOLO para encuadrar el mapa (sin pin ni cotizar). */
+  private async loadScopeFocus(muni: {
+    state_province: string;
+    city: string;
+  }): Promise<void> {
+    if (this.scope_focus()) return;
+    try {
+      const res = await firstValueFrom(
+        this.geocoding.forward(
+          `${muni.city}, ${muni.state_province}, Colombia`,
+          { city: muni.city, state: muni.state_province },
+        ),
+      );
+      this.scope_focus.set(
+        res?.lat != null && res?.lng != null
+          ? { lat: res.lat, lng: res.lng }
+          : null,
+      );
+    } catch {
+      this.scope_focus.set(null);
+    }
+  }
+
+  private loadAddressScope(): void {
+    this.checkout_service
+      .getAddressScope()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((scope) => this.address_scope.set(scope));
+  }
+
   loadData(): void {
     this.is_loading.set(true);
     const isAuthenticated = this.auth_facade.isAuthenticated();
@@ -1394,6 +1506,7 @@ export class CheckoutComponent implements OnInit {
     // para "recoger" es lazy (la carga `preparePickupQuote` al elegir el
     // modo) para no pagar un HTTP que la mayoría no usa (auditoría D.3).
     this.loadDeliveryOptions();
+    this.loadAddressScope();
 
     if (!isAuthenticated) {
       this.is_loading.set(false);
