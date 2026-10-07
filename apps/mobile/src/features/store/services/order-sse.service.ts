@@ -13,6 +13,8 @@ export type OrderSseEvent = {
 
 const INITIAL_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 30_000;
+// Backend sends a message heartbeat every 30s; tolerate two missed heartbeats.
+const LIVENESS_TIMEOUT_MS = 90_000;
 
 function parseOrderEvent(raw: string): OrderSseEvent | null {
   try {
@@ -43,6 +45,7 @@ export function subscribeToOrderEvents(
   let closed = false;
   let source: EventSource<'message'> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let livenessTimer: ReturnType<typeof setTimeout> | null = null;
   let refreshInProgress = false;
   let connecting = false;
   let sessionRenewalPending = false;
@@ -67,7 +70,13 @@ export function subscribeToOrderEvents(
     retryTimer = null;
   };
 
+  const clearLiveness = () => {
+    if (livenessTimer !== null) clearTimeout(livenessTimer);
+    livenessTimer = null;
+  };
+
   const closeSource = () => {
+    clearLiveness();
     if (!source) return;
     const current = source;
     source = null;
@@ -97,6 +106,22 @@ export function subscribeToOrderEvents(
     const delay = retryDelay;
     retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
     scheduleReconnect(delay);
+  };
+
+  const armLiveness = (current: EventSource<'message'>) => {
+    clearLiveness();
+    const timer = setTimeout(() => {
+      // A cancelled timer can already be queued, even for the same source.
+      if (livenessTimer !== timer || source !== current) return;
+      livenessTimer = null;
+      if (!isCurrentSession()) {
+        stop();
+        return;
+      }
+      closeSource();
+      retryWithBackoff();
+    }, LIVENESS_TIMEOUT_MS);
+    livenessTimer = timer;
   };
 
   const renewSession = async () => {
@@ -141,12 +166,14 @@ export function subscribeToOrderEvents(
       const url = `${API_BASE_URL.replace(/\/$/, '')}${Endpoints.STORE.ORDERS.STREAM}?token=${encodeURIComponent(token)}`;
       const current = new EventSource<'message'>(url, { pollingInterval: 0 });
       source = current;
+      armLiveness(current); // Covers transports that never reach open, too.
       current.addEventListener('open', () => {
         if (source !== current) return;
         if (!isCurrentSession()) {
           stop();
           return;
         }
+        armLiveness(current);
         retryDelay = INITIAL_RETRY_MS;
         onOpen?.();
       });
@@ -156,6 +183,8 @@ export function subscribeToOrderEvents(
           stop();
           return;
         }
+        // Heartbeats/non-domain messages still prove the transport is alive.
+        armLiveness(current);
         if (!('data' in message) || !message.data) return;
         const event = parseOrderEvent(message.data);
         if (event) onEvent(event);
