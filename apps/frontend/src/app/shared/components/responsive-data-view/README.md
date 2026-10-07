@@ -41,7 +41,9 @@ Wrapper responsivo que muestra `app-table` en desktop (>=768px) y `app-item-list
 
 | Input          | Tipo            | Default                      | Descripcion       |
 | -------------- | --------------- | ---------------------------- | ----------------- |
-| `actions`      | `TableAction[]` | -                            | Acciones por fila |
+| `actions`      | `TableAction[]` | -                            | Acciones por fila para tabla y, por defecto, tarjetas |
+| `mobileActions` | `TableAction[]` | `actions`                    | Acciones opcionales exclusivas de tarjetas móviles; la tabla conserva `actions` |
+| `mobileDirectActionsCount` | `number` | `2`                     | Cantidad de acciones directas antes del menú de desbordamiento en tarjetas móviles |
 | `loading`      | `boolean`       | `false`                      | Estado de carga   |
 | `emptyMessage` | `string`        | `'No hay datos disponibles'` | Mensaje vacio     |
 | `rowLabelKey`  | `string \| null` | `null`                       | Clave que nombra la fila/tarjeta en el `aria-label` de los botones de accion (a11y). Se pasa igual a `app-table` y a `app-item-list` |

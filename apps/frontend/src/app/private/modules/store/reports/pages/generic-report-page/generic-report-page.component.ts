@@ -1,13 +1,17 @@
-import { Component, DestroyRef, inject } from '@angular/core';
+import { Component, DestroyRef, effect, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
+import { HttpClient } from '@angular/common/http';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ReportViewerComponent } from '../../components/report-viewer/report-viewer.component';
 import { ReportsActions } from '../../state/reports.actions';
 import { ReportsDataService } from '../../services/reports-data.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { getDefaultDateRange } from '../../state/reports.state';
+import { environment } from '../../../../../../../environments/environment';
+import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
@@ -24,6 +28,7 @@ import {
   selectTotalItems,
   selectItemsPerPage,
   selectDateRange,
+  selectDataFilters,
 } from '../../state/reports.selectors';
 
 @Component({
@@ -47,6 +52,9 @@ import {
       (exportClick)="onExport()"
       [enableRefresh]="true"
       (refreshClick)="onRefresh()"
+      [categoryOptions]="categoryOptions()"
+      [activeDataFilters]="activeDataFilters()"
+      (dataFiltersChange)="onDataFiltersChange($event)"
     />
   `,
 })
@@ -70,6 +78,14 @@ export class GenericReportPageComponent {
 
   private readonly vexiHosts = inject(VexiUiHostRegistry);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly http = inject(HttpClient);
+
+  /** Opciones del filtro de categoría (solo se cargan si el reporte lo declara). */
+  readonly categoryOptions = signal<SelectorOption[]>([]);
+  /** Filtros vigentes en el store: el viewer los adopta al nacer o volver. */
+  readonly activeDataFilters = toSignal(this.store.select(selectDataFilters), {
+    initialValue: {} as Record<string, string | null>,
+  });
 
   constructor() {
     this.vexiHosts.register(this.vexiHostAdapter);
@@ -81,6 +97,37 @@ export class GenericReportPageComponent {
     if (reportId) {
       this.store.dispatch(ReportsActions.selectReport({ reportId }));
     }
+
+    effect(() => {
+      const needsCategories = (this.report()?.dataFilters ?? []).some(
+        (f) => f.optionsSource === 'categories',
+      );
+      if (needsCategories) {
+        this.loadCategoryOptions();
+      } else if (this.categoryOptions().length > 0) {
+        this.categoryOptions.set([]);
+      }
+    });
+  }
+
+  private loadCategoryOptions(): void {
+    this.http
+      .get<{ data?: Array<{ id: number; name: string }> }>(
+        `${environment.apiUrl}/store/categories`,
+        { params: { limit: '200' } as any },
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.categoryOptions.set(
+            (res?.data ?? []).map((c) => ({
+              value: String(c.id),
+              label: c.name,
+            })),
+          );
+        },
+        error: () => this.categoryOptions.set([]),
+      });
   }
 
   // ── Host de Vexi (G8) ─────────────────────────────────────────────────
@@ -199,6 +246,11 @@ export class GenericReportPageComponent {
   onDateRangeChange(dateRange: any): void {
     this.dateRangeSync.setDateRange(dateRange);
     this.store.dispatch(ReportsActions.setDateRange({ dateRange }));
+    this.store.dispatch(ReportsActions.loadReportData());
+  }
+
+  onDataFiltersChange(filters: Record<string, string | null>): void {
+    this.store.dispatch(ReportsActions.setDataFilters({ filters }));
     this.store.dispatch(ReportsActions.loadReportData());
   }
 

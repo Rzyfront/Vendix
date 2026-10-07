@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { SalesAnalyticsService } from './services/sales-analytics.service';
-import { InventoryAnalyticsService } from './services/inventory-analytics.service';
+import { InventoryAnalyticsService, calculateLowStockTotals } from './services/inventory-analytics.service';
 import { ProductsAnalyticsService } from './services/products-analytics.service';
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
@@ -701,7 +701,40 @@ export class AnalyticsController {
       result.meta.pagination.total,
       result.meta.pagination.page,
       result.meta.pagination.limit,
+      undefined,
+      undefined,
+      { totals: result.meta.totals },
     );
+  }
+
+  @Get('inventory/low-stock/export')
+  @Permissions('store:analytics:read')
+  async exportLowStockAlerts(
+    @Query() query: InventoryAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const rows = await this.inventory_analytics_service.getLowStockForExport(query);
+    const tz = await this.resolveReportTz();
+    const columns: ReportColumn[] = [
+      { key: 'product_name', header: 'Producto', type: 'text', width: 36 },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'stock_quantity', header: 'Stock Actual', type: 'number' },
+      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
+      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency' },
+    ];
+    const displayRows = rows.map((row) => ({
+      ...row,
+      status: row.status === 'out_of_stock' ? 'Agotado' : 'Stock bajo',
+    }));
+    await this.emitReport(res, 'stock_bajo', tz, [
+      this.toSheet('Stock Bajo', columns, displayRows, tz, {
+        product_name: 'TOTAL',
+        ...calculateLowStockTotals(rows),
+      }),
+    ]);
   }
 
   @Get('inventory/movements')
@@ -1497,6 +1530,13 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('reviews/rating-trend')
+  @Permissions('store:analytics:read')
+  async getReviewsRatingTrend(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getRatingTrend(query);
+    return this.response_service.success(result);
+  }
+
   /**
    * QUI-548: reseñas agregadas por producto con promedio, distribución
    * de estrellas, conteo de verificadas/pendientes y fecha de la última.
@@ -1551,7 +1591,7 @@ export class AnalyticsController {
     @Res() res: Response,
   ): Promise<void> {
     const tz = await this.resolveReportTz();
-    const rows =
+    const { rows } =
       await this.reviews_analytics_service.getReviewsForExport(query);
 
     // The service returns rows keyed by their Spanish header labels; 'Fecha'

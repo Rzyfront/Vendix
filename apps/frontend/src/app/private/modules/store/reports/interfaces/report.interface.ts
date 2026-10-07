@@ -54,6 +54,7 @@ export interface ReportDefinition {
   summaryLayout?: SummaryLayoutConfig;
   stats?: ReportStatField[];
   serverPagination?: boolean;
+  dataFilters?: ReportDataFilter[];
 }
 
 export interface ReportAdaptedData {
@@ -61,6 +62,19 @@ export interface ReportAdaptedData {
   meta?: Record<string, any>;
   isSummary?: boolean;
   summaryData?: Record<string, any>;
+}
+
+/**
+ * Filtro extra declarado por un reporte y resuelto en cliente/servidor según
+ * el caso. `key: 'order'` usa el preset alfabético compartido
+ * (`buildAlphabeticalOrderFilter`); cualquier otra key con
+ * `optionsSource: 'categories'` se pinta como select de categorías.
+ */
+export interface ReportDataFilter {
+  key: string;
+  label: string;
+  placeholder?: string;
+  optionsSource?: 'categories';
 }
 
 export interface ReportColumn {

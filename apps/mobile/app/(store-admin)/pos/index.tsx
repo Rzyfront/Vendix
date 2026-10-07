@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Animated,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { getNextPageParam } from '@/core/api/pagination';
@@ -2471,6 +2472,8 @@ const PosScreen = () => {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    refetch: refetchProducts,
+    isRefetching: isRefetchingProducts,
   } = useInfiniteQuery({
     queryKey: ['pos-products', search, activeFilters],
     queryFn: ({ pageParam = 1 }) => {
@@ -3150,6 +3153,14 @@ const PosScreen = () => {
           data={productList}
           keyExtractor={(item) => item.id.toString()}
           numColumns={numColumns}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetchingProducts}
+              onRefresh={() => refetchProducts()}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
           columnWrapperStyle={{ gap: GRID_COLUMN_GAP }}
           contentContainerStyle={{
             paddingTop: spacing[3],

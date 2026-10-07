@@ -1,3 +1,4 @@
+import { signal, WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 
@@ -12,6 +13,8 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   AddToPopCartRequest,
   PopCartItem,
+  PopCartState,
+  PopProduct,
 } from '../interfaces/pop-cart.interface';
 
 /**
@@ -75,6 +78,9 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
             // toSignal con initialValue `[]` ⇒ fiscal inactivo ⇒ el preview
             // reactivo nunca dispara la llamada al backend.
             activeFiscalAreas: () => [],
+            // QUI-891: quitar la última línea llama a clearStorage() sync ⇒
+            // el mock necesita userStore como en producción (signal).
+            userStore: () => ({ id: 1 }),
           },
         },
       ],
@@ -355,7 +361,8 @@ describe('PopCartService — contrato de setShippingCostAllocation (T2/D.1)', ()
         },
         {
           provide: AuthFacade,
-          useValue: { activeFiscalAreas: () => [] },
+          // QUI-891: userStore como en producción (clearStorage sync al vaciar).
+          useValue: { activeFiscalAreas: () => [], userStore: () => ({ id: 1 }) },
         },
       ],
     });
@@ -411,7 +418,8 @@ describe('PopCartService — QUI-855 correcciones de auditoría', () => {
       providers: [
         PopCartService,
         { provide: WithholdingTaxService, useValue: { previewWithholding: () => of({ lines: [], total_withholding: 0 }) } },
-        { provide: AuthFacade, useValue: { activeFiscalAreas: () => [] } },
+        // QUI-891: userStore como en producción (clearStorage sync al vaciar).
+        { provide: AuthFacade, useValue: { activeFiscalAreas: () => [], userStore: () => ({ id: 1 }) } },
       ],
     });
     service = TestBed.inject(PopCartService);
@@ -498,5 +506,314 @@ describe('PopCartService — QUI-855 correcciones de auditoría', () => {
       expect(service.currentState.items[0].tax_error).toBeUndefined();
       expect(submitBlockMessage(service.currentState)).toBeNull();
     });
+  });
+});
+
+describe('PopCartService — QUI-891 la última línea eliminada no resucita', () => {
+  let service: PopCartService;
+  let userStore: WritableSignal<{ id: number } | null>;
+  let storage: Storage;
+  let removeStoredItem: (key: string) => void;
+  const STORE_ID = 7;
+  const KEY = `vendix_pop_cart_${STORE_ID}`;
+  const OTHER_KEY = `vendix_pop_cart_${STORE_ID + 1}`;
+  const product: PopProduct = { id: 1, name: 'P', code: 'P1', price: 1000, cost: 100, stock: 1, is_active: true };
+
+  beforeEach(() => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate(new Date());
+    storage = localStorage;
+    // Conservar el método nativo para limpiar incluso si un spec bloquea el
+    // getter o removeItem (Jasmine restaura los spies después del afterEach).
+    removeStoredItem = storage.removeItem.bind(storage);
+    removeStoredItem(KEY);
+    removeStoredItem(OTHER_KEY);
+    userStore = signal<{ id: number } | null>({ id: STORE_ID });
+    TestBed.configureTestingModule({
+      providers: [
+        PopCartService,
+        { provide: WithholdingTaxService, useValue: { previewWithholding: () => of({ lines: [], total_withholding: 0 }) } },
+        { provide: AuthFacade, useValue: { activeFiscalAreas: () => [], userStore } },
+      ],
+    });
+    service = TestBed.inject(PopCartService);
+  });
+
+  afterEach(() => {
+    try {
+      TestBed.resetTestingModule(); // destruir subscriptions antes de soltar el reloj
+      removeStoredItem(KEY);
+      removeStoredItem(OTHER_KEY);
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  function addOne(productId = product.id): PopCartItem {
+    service
+      .addToCart({ product: { ...product, id: productId }, quantity: 1, unit_cost: 100 })
+      .subscribe();
+    return service.currentState.items.find((item) => item.product.id === productId)!;
+  }
+
+  function writeSnapshot(
+    state = service.currentState,
+    storeId = STORE_ID,
+    savedAt = Date.now(),
+    key = KEY,
+  ): void {
+    storage.setItem(key, JSON.stringify({ state, savedAt, storeId }));
+  }
+
+  function seedStorageWithOneLine(): void {
+    addOne();
+    writeSnapshot();
+  }
+
+  function expectEmptyCart(): void {
+    expect(service.currentState.items.length).toBe(0);
+    expect(service.currentState.summary.subtotal).toBe(0);
+    expect(service.currentState.summary.total).toBe(0);
+    expect(service.currentState.summary.itemCount).toBe(0);
+    expect(service.currentState.summary.totalItems).toBe(0);
+  }
+
+  function flushPersistence(): void {
+    TestBed.flushEffects();
+    jasmine.clock().tick(300); // incluye el guardado debounced de 250 ms y el preview
+    TestBed.flushEffects();
+  }
+
+  function snapshotWithDelayedStore(): PopCartState {
+    userStore.set(null);
+    TestBed.flushEffects();
+    addOne();
+    const snapshot = service.currentState;
+    service.clearCart().subscribe();
+    TestBed.flushEffects();
+    return snapshot;
+  }
+
+  for (const operation of ['papelera', 'cantidad cero'] as const) {
+    function remove(itemId: string, error: jasmine.Spy): void {
+      const result$ = operation === 'papelera'
+        ? service.removeFromCart(itemId)
+        : service.updateCartItem({ itemId, quantity: 0 });
+      result$.subscribe({ error });
+    }
+
+    it(`${operation}: borra el snapshot síncronamente y no restaura la única línea`, () => {
+      seedStorageWithOneLine();
+      TestBed.flushEffects();
+      expect(storage.getItem(KEY)).not.toBeNull();
+      const error = jasmine.createSpy('error');
+
+      remove(service.currentState.items[0].id, error);
+      expectEmptyCart();
+      expect(storage.getItem(KEY)).toBeNull(); // antes de effects y debounce
+      expect(error).not.toHaveBeenCalled();
+
+      flushPersistence();
+      expectEmptyCart();
+      expect(storage.getItem(KEY)).toBeNull();
+    });
+
+    it(`${operation}: con dos líneas conserva la otra y su resumen`, () => {
+      const first = addOne();
+      const second = addOne(2);
+      TestBed.flushEffects();
+      const error = jasmine.createSpy('error');
+
+      remove(first.id, error);
+      expect(service.currentState.items.map((item) => item.id)).toEqual([second.id]);
+      expect(service.currentState.summary.subtotal).toBe(100);
+      expect(error).not.toHaveBeenCalled();
+      flushPersistence();
+      const saved = JSON.parse(storage.getItem(KEY)!);
+      expect(saved.state.items.map((item: PopCartItem) => item.id)).toEqual([second.id]);
+    });
+
+    it(`${operation}: removeItem bloqueado no falla ni resucita el snapshot`, () => {
+      seedStorageWithOneLine();
+      TestBed.flushEffects();
+      const snapshot = storage.getItem(KEY);
+      const error = jasmine.createSpy('error');
+      spyOn(Storage.prototype, 'removeItem').and.callFake(() => {
+        throw new DOMException('storage blocked', 'SecurityError');
+      });
+
+      remove(service.currentState.items[0].id, error);
+      expectEmptyCart();
+      expect(error).not.toHaveBeenCalled();
+      // El navegador impide borrar: no prometemos persistencia tras recargar.
+      expect(storage.getItem(KEY)).toBe(snapshot);
+      expect(flushPersistence).not.toThrow(); // saveToStorage(empty) también es seguro
+      expectEmptyCart();
+    });
+
+    it(`${operation}: el getter de localStorage bloqueado tampoco aborta`, () => {
+      seedStorageWithOneLine();
+      TestBed.flushEffects();
+      const error = jasmine.createSpy('error');
+      spyOnProperty(window, 'localStorage', 'get').and.callFake(() => {
+        throw new DOMException('storage access blocked', 'SecurityError');
+      });
+
+      remove(service.currentState.items[0].id, error);
+      expectEmptyCart();
+      expect(error).not.toHaveBeenCalled();
+      expect(flushPersistence).not.toThrow();
+      expectEmptyCart();
+    });
+  }
+
+  it('el guard no vuelve a leer un snapshot aunque sobreviva o se reescriba después del borrado', () => {
+    const getItem = spyOn(Storage.prototype, 'getItem').and.callThrough();
+    TestBed.flushEffects(); // marca la tienda, todavía sin líneas
+    expect(getItem).toHaveBeenCalledOnceWith(KEY);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const item = addOne();
+      const snapshot = service.currentState;
+      TestBed.flushEffects();
+      service.removeFromCart(item.id).subscribe();
+      writeSnapshot(snapshot); // aislar el guard del borrado síncrono
+      TestBed.flushEffects();
+      expectEmptyCart();
+      expect(getItem).toHaveBeenCalledTimes(1);
+      jasmine.clock().tick(300);
+      TestBed.flushEffects();
+      expectEmptyCart();
+    }
+  });
+
+  it('clearCart conserva la mutación en memoria si removeItem lanza', () => {
+    seedStorageWithOneLine();
+    TestBed.flushEffects();
+    spyOn(Storage.prototype, 'removeItem').and.throwError('storage blocked');
+    const error = jasmine.createSpy('error');
+    service.clearCart().subscribe({ error });
+
+    expectEmptyCart();
+    expect(error).not.toHaveBeenCalled();
+    expect(flushPersistence).not.toThrow();
+  });
+
+  it('un setItem rechazado no genera excepción en el guardado debounced', () => {
+    TestBed.flushEffects();
+    const item = addOne();
+    spyOn(Storage.prototype, 'setItem').and.throwError('quota exceeded');
+
+    expect(flushPersistence).not.toThrow();
+    expect(service.currentState.items[0].id).toBe(item.id);
+  });
+
+  it('getItem rechazado se intenta una sola vez en ese contexto', () => {
+    const getItem = spyOn(Storage.prototype, 'getItem').and.throwError('storage blocked');
+    expect(() => TestBed.flushEffects()).not.toThrow();
+    const item = addOne();
+    TestBed.flushEffects();
+    service.removeFromCart(item.id).subscribe();
+    flushPersistence();
+
+    expectEmptyCart();
+    expect(getItem).toHaveBeenCalledOnceWith(KEY);
+  });
+
+  it('el getter rechazado durante la primera hidratación no rompe el effect', () => {
+    const getter = spyOnProperty(window, 'localStorage', 'get').and.callFake(() => {
+      throw new DOMException('storage access blocked', 'SecurityError');
+    });
+    expect(() => TestBed.flushEffects()).not.toThrow();
+    getter.and.returnValue(storage);
+    const getItem = spyOn(Storage.prototype, 'getItem').and.callThrough();
+    addOne();
+    TestBed.flushEffects();
+    service.removeFromCart(service.currentState.items[0].id).subscribe();
+    flushPersistence();
+
+    expectEmptyCart();
+    expect(getItem).not.toHaveBeenCalled();
+  });
+
+  it('hidrata un snapshot válido cuando la tienda aparece tarde y no lo vuelve a leer', () => {
+    const snapshot = snapshotWithDelayedStore();
+    writeSnapshot(snapshot);
+    const getItem = spyOn(Storage.prototype, 'getItem').and.callThrough();
+    userStore.set({ id: STORE_ID });
+    TestBed.flushEffects();
+    expect(service.currentState.items[0].id).toBe(snapshot.items[0].id);
+    expect(service.currentState.orderDate instanceof Date).toBeTrue();
+    expect(getItem).toHaveBeenCalledOnceWith(KEY);
+
+    service.removeFromCart(snapshot.items[0].id).subscribe();
+    flushPersistence();
+    expectEmptyCart();
+    expect(getItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('un snapshot expirado se borra sin hidratar al aparecer la tienda', () => {
+    const snapshot = snapshotWithDelayedStore();
+    writeSnapshot(snapshot, STORE_ID, Date.now() - 4 * 60 * 60 * 1000 - 1);
+    userStore.set({ id: STORE_ID });
+    TestBed.flushEffects();
+
+    expectEmptyCart();
+    expect(storage.getItem(KEY)).toBeNull();
+    flushPersistence();
+  });
+
+  it('un snapshot expirado no se hidrata aunque el navegador rechace borrarlo', () => {
+    const snapshot = snapshotWithDelayedStore();
+    writeSnapshot(snapshot, STORE_ID, Date.now() - 4 * 60 * 60 * 1000 - 1);
+    spyOn(Storage.prototype, 'removeItem').and.throwError('storage blocked');
+    userStore.set({ id: STORE_ID });
+
+    expect(() => TestBed.flushEffects()).not.toThrow();
+    expectEmptyCart();
+    expect(flushPersistence).not.toThrow();
+  });
+
+  it('rechaza un snapshot de otra tienda y reevalúa cuando cambia el signal de contexto', () => {
+    const snapshot = snapshotWithDelayedStore();
+    writeSnapshot(snapshot, STORE_ID + 1); // payload ajeno bajo la clave activa
+    writeSnapshot(snapshot, STORE_ID + 1, Date.now(), OTHER_KEY);
+    const getItem = spyOn(Storage.prototype, 'getItem').and.callThrough();
+    userStore.set({ id: STORE_ID });
+    TestBed.flushEffects();
+    expectEmptyCart();
+
+    userStore.set({ id: STORE_ID + 1 });
+    TestBed.flushEffects();
+    expect(service.currentState.items[0].id).toBe(snapshot.items[0].id);
+    expect(getItem.calls.allArgs()).toEqual([[KEY], [OTHER_KEY]]);
+    flushPersistence();
+  });
+
+  it('puede hidratar de nuevo al regresar a una tienda después de visitar otra', () => {
+    const snapshot = snapshotWithDelayedStore();
+    const otherSnapshot: PopCartState = {
+      ...snapshot,
+      items: [{ ...snapshot.items[0], id: 'other-item', product: { ...product, id: 2 } }],
+    };
+    writeSnapshot(snapshot);
+    writeSnapshot(otherSnapshot, STORE_ID + 1, Date.now(), OTHER_KEY);
+    const getItem = spyOn(Storage.prototype, 'getItem').and.callThrough();
+    userStore.set({ id: STORE_ID });
+    TestBed.flushEffects();
+    expect(service.currentState.items[0].id).toBe(snapshot.items[0].id);
+
+    service.clearCart().subscribe();
+    writeSnapshot(snapshot); // snapshot disponible para la siguiente visita
+    userStore.set({ id: STORE_ID + 1 });
+    TestBed.flushEffects();
+    expect(service.currentState.items[0].id).toBe('other-item');
+
+    service.clearCart().subscribe();
+    userStore.set({ id: STORE_ID });
+    TestBed.flushEffects();
+    expect(service.currentState.items[0].id).toBe(snapshot.items[0].id);
+    expect(getItem.calls.allArgs()).toEqual([[KEY], [OTHER_KEY], [KEY]]);
+    flushPersistence();
   });
 });

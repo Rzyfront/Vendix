@@ -9,6 +9,8 @@ import {
 } from '@angular/core';
 import { NgClass, NgStyle } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
+import type { TooltipColor } from '../tooltip/tooltip.component';
 import {
   ItemListCardConfig,
   ItemListSize,
@@ -22,7 +24,7 @@ export type ItemListActionsDisplay = 'buttons' | 'dropdown';
   selector: 'app-item-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, NgStyle, IconComponent],
+  imports: [NgClass, NgStyle, IconComponent, TooltipComponent],
   templateUrl: './item-list.component.html',
   styleUrl: './item-list.component.scss',
 })
@@ -37,6 +39,8 @@ export class ItemListComponent {
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');
   readonly actionsDisplay = input<ItemListActionsDisplay>('buttons');
+  /** Number of visible actions rendered directly before mobile overflow. */
+  readonly directActionsCount = input(2);
   readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
     () => undefined
   );
@@ -433,6 +437,12 @@ export class ItemListComponent {
     return this.getActionLabel(action, item);
   }
 
+  getActionTooltipColor(action: TableAction, item: any): TooltipColor {
+    return typeof action.tooltipColor === 'function'
+      ? action.tooltipColor(item)
+      : action.tooltipColor ?? 'ai';
+  }
+
   getActionIcon(action: TableAction, item: any): string {
     const icon =
       typeof action.icon === 'function' ? action.icon(item) : action.icon;
@@ -461,11 +471,17 @@ export class ItemListComponent {
     return acts.filter((action) => this.isActionVisible(action, item));
   }
 
+  getDirectActions(item: any): TableAction[] {
+    return this.actionsDisplay() === 'dropdown'
+      ? []
+      : this.getVisibleActions(item).slice(0, this.directActionsCount());
+  }
+
   getMenuActions(item: any): TableAction[] {
     const visibleActions = this.getVisibleActions(item);
     return this.actionsDisplay() === 'dropdown'
       ? visibleActions
-      : visibleActions.slice(2);
+      : visibleActions.slice(this.directActionsCount());
   }
 
   getSizeClasses(): string {

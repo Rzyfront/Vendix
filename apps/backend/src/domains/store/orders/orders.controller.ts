@@ -17,7 +17,7 @@ import {
   MessageEvent,
 } from '@nestjs/common';
 import { Observable, defer, from, interval, merge } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, filter, map } from 'rxjs/operators';
 import { Request } from 'express';
 import { Logger } from '@nestjs/common';
 import { OrdersService } from './orders.service';
@@ -55,6 +55,28 @@ import { ReturnOrderQueryDto } from './return-orders/dto/return-order-query.dto'
 // el stream y discriminamos por `payload.data.order_id` en el cliente.
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { RequestContextService } from '@common/context/request-context.service';
+
+const ORDER_STREAM_TICKET_EVENTS = new Set([
+  'ticket.created', 'ticket.started', 'ticket.ready', 'ticket.updated',
+  'ticket.delivered', 'ticket.cancelled', 'ticket.reverted',
+]);
+
+function sanitizeOrdersStreamPayload(payload: any): unknown | null {
+  if (typeof payload?.type !== 'string' || !payload.type.startsWith('ticket.')) {
+    return payload;
+  }
+  const orderId = payload.ticket?.order_id;
+  if (!ORDER_STREAM_TICKET_EVENTS.has(payload.type) ||
+      !Number.isSafeInteger(orderId) || orderId <= 0) return null;
+  return {
+    type: payload.type,
+    ticket: { order_id: orderId },
+    ...(typeof payload.ts === 'string' ||
+    (typeof payload.ts === 'number' && Number.isFinite(payload.ts))
+      ? { ts: payload.ts }
+      : {}),
+  };
+}
 
 @Controller('store/orders')
 @UseGuards(PermissionsGuard)
@@ -289,11 +311,14 @@ export class OrdersController {
     // discrimina por `payload.data.order_id`.
     const live$ = subject.pipe(
       map(
-        (payload) =>
-          ({
-            data: JSON.stringify(payload),
-          }) as MessageEvent,
+        (payload) => {
+          const safePayload = sanitizeOrdersStreamPayload(payload);
+          return safePayload === null
+            ? null
+            : ({ data: JSON.stringify(safePayload) }) as MessageEvent;
+        },
       ),
+      filter((event): event is MessageEvent => event !== null),
     );
 
     // Heartbeat 30s para que EventSource / proxies vean el stream vivo.
@@ -397,6 +422,9 @@ export class OrdersController {
     } catch (error) {
       // Dejar pasar el código tipado (y el HTTP 400 real) al filtro global.
       if (error instanceof VendixHttpException) throw error;
+      // CP-QUI-914: un fallo inesperado de cancelación debe llegar al filtro
+      // global; devolver el envelope aquí convertiría el rechazo en HTTP 200.
+      if (updateOrderDto.state === 'cancelled') throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar la orden',
         error.response?.message || error.message,

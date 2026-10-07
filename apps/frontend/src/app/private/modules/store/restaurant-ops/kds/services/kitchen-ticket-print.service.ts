@@ -30,12 +30,15 @@ export class KitchenTicketPrintService {
   );
 
   /** Impresion automatica tras el envio a cocina. No-op si no es fisica. */
-  printAfterFire(ticketIds: number[] | null | undefined): void {
+  printAfterFire(
+    ticketIds: number[] | null | undefined,
+    onFailure?: (ticketId: number) => void,
+  ): void {
     if (!this.isPhysicalKitchen() || !ticketIds?.length) return;
     const fresh = Array.from(new Set(ticketIds)).filter(
       (id) => !this.isDuplicateAutoPrint(id),
     );
-    for (const id of fresh) this.enqueue(id, 'automatic');
+    for (const id of fresh) this.enqueue(id, 'automatic', onFailure);
   }
 
   /** Impresion manual (boton "Imprimir comanda"): siempre imprime. */
@@ -44,13 +47,21 @@ export class KitchenTicketPrintService {
     for (const id of Array.from(new Set(ticketIds))) this.enqueue(id, 'explicit');
   }
 
-  private enqueue(ticketId: number, trigger: PrintTrigger): void {
+  private enqueue(
+    ticketId: number,
+    trigger: PrintTrigger,
+    onFailure?: (ticketId: number) => void,
+  ): void {
     this.printChain = this.printChain
-      .then(() => this.printOne(ticketId, trigger))
+      .then(() => this.printOne(ticketId, trigger, onFailure))
       .catch(() => undefined);
   }
 
-  private async printOne(ticketId: number, trigger: PrintTrigger): Promise<void> {
+  private async printOne(
+    ticketId: number,
+    trigger: PrintTrigger,
+    onFailure?: (ticketId: number) => void,
+  ): Promise<void> {
     try {
       const result = await this.documentPrint.printViaGateway({
         formatType: 'kitchen_ticket',
@@ -61,11 +72,13 @@ export class KitchenTicketPrintService {
       // `null` = el gateway fallo o el formato esta inactivo (sin fallback).
       // Un resultado con documents 0 en 'automatic' = el comercio no auto-imprime.
       if (result === null) {
-        this.toast.error('No se pudo imprimir la comanda');
+        if (onFailure) onFailure(ticketId);
+        else this.toast.error('No se pudo imprimir la comanda');
       }
     } catch (err) {
       console.error('[KitchenTicketPrint] fallo la impresion', { ticketId, err });
-      this.toast.error('No se pudo imprimir la comanda');
+      if (onFailure) onFailure(ticketId);
+      else this.toast.error('No se pudo imprimir la comanda');
     }
   }
 

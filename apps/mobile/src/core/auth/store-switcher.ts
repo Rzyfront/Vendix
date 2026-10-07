@@ -29,6 +29,8 @@ export const STORE_AWARE_QUERY_KEYS: readonly (readonly string[])[] = [
   ['products-list'],
   ['customers-list'],
   ['orders-list'],
+  ['orders'],
+  ['order-stats'],
   ['dashboard-summary'],
   ['org-stats-summary'],
   ['unread-notifications-count'],

@@ -8,6 +8,7 @@
   <app-orders-list
     [reloadTrigger]="reloadTick()"
     [canBulkOperations]="canBulkOrderOperations()"
+    [canCreateKitchenFire]="canCreateKitchenFire()"
     (viewOrder)="viewOrderDetails($event)"
     (create)="createNewOrder()"
     (refresh)="refreshOrders()"

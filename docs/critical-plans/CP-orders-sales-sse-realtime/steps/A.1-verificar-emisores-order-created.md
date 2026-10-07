@@ -28,4 +28,4 @@ skills: [vendix-backend-api, vendix-notifications-system, vendix-multi-tenant-co
   - [x] onOrderCreated llama pushOrderEvent con kind order.created y extra acotado
   - [x] Subject indexado por store_id; spec confirma push con store/order correctos
   - [ ] Spec backend FULL en verde: 32/40; 8 fallos ORD_EDIT pre-existentes ajenos
-- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-09-10 · emisores OK; 8 fallos edit fuera de alcance (a1-backend-spec.log)
+- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-10-05 · emisores auditados; hub unit 2/2; spec OrdersService no compila por TS2694 sharp fuera de alcance

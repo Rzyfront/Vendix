@@ -1,10 +1,13 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   DestroyRef,
   effect,
   inject,
+  input,
   OnInit,
+  output,
   signal,
   untracked,
 } from '@angular/core';
@@ -14,6 +17,7 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { CheckoutService } from '../../services/checkout.service';
+import { AccountService } from '../../services/account.service';
 import { GuestOrderSseService } from '../../services/guest-order-sse.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
@@ -37,7 +41,7 @@ import { GuestOrderPrintService } from '../../services/guest-order-print.service
 // PAYLOAD CONTRACT — enriched guest order summary endpoint
 // ============================================================================
 
-interface GuestOrderItem {
+export interface GuestOrderItem {
   // CP-853-fix (paso 5): clave por línea para la cocina en vivo (aditivo).
   order_item_id?: number | null;
   product_name: string;
@@ -45,6 +49,7 @@ interface GuestOrderItem {
   variant_attributes?: string | null;
   quantity: number;
   unit_price: number;
+  product_type?: 'physical' | 'service' | 'prepared' | null;
   total_price: number;
   tax_amount_item?: number | null;
   image_url?: string | null;
@@ -60,7 +65,7 @@ interface GuestOrderItem {
   cancellation_reason?: string | null;
 }
 
-interface GuestOrderPromotion {
+export interface GuestOrderPromotion {
   name?: string | null;
   code?: string | null;
   type?: string | null;
@@ -69,7 +74,7 @@ interface GuestOrderPromotion {
   discount_amount: number;
 }
 
-interface GuestOrderCoupon {
+export interface GuestOrderCoupon {
   code: string;
   name?: string | null;
   discount_type?: string | null;
@@ -77,7 +82,7 @@ interface GuestOrderCoupon {
   discount_applied: number;
 }
 
-interface GuestOrderAddress {
+export interface GuestOrderAddress {
   address_line1?: string | null;
   address_line2?: string | null;
   city?: string | null;
@@ -87,7 +92,7 @@ interface GuestOrderAddress {
   phone_number?: string | null;
 }
 
-interface GuestOrderPayment {
+export interface GuestOrderPayment {
   // Paso 3 (roku-shop-checkout): `payment_id` identifica el pago para los
   // endpoints guest de comprobante (paso 9); `has_receipt` + content-type
   // alimentan el visor de comprobante.
@@ -96,16 +101,17 @@ interface GuestOrderPayment {
   amount?: number | null;
   paid_at?: string | null;
   method?: string | null;
+  method_type?: string | null;
   has_receipt?: boolean;
   receipt_content_type?: string | null;
 }
 
-interface GuestOrderInvoice {
+export interface GuestOrderInvoice {
   invoice_number: string;
   status: string;
 }
 
-interface GuestOrderData {
+export interface GuestOrderData {
   order_number: string | number;
   state: string;
   channel?: string | null;
@@ -130,7 +136,7 @@ interface GuestOrderData {
   invoice?: GuestOrderInvoice | null;
 }
 
-interface GuestOrderCustomer {
+export interface GuestOrderCustomer {
   first_name?: string;
   last_name?: string;
   document_type?: string;
@@ -139,7 +145,7 @@ interface GuestOrderCustomer {
   phone?: string;
 }
 
-interface GuestOrderStore {
+export interface GuestOrderStore {
   id?: number;
   name?: string;
   logo_url?: string;
@@ -156,7 +162,7 @@ interface GuestReceiptPreview {
   kind: 'image' | 'pdf';
 }
 
-interface GuestOrderSummary {
+export interface GuestOrderSummary {
   token: string;
   order: GuestOrderData;
   customer?: GuestOrderCustomer;
@@ -341,28 +347,51 @@ interface GuestOrderSummary {
                 <h2>Entrega</h2>
               </div>
               <div class="address-block">
-                @if (addr.address_line1) {
-                  <p class="addr-line strong">{{ addr.address_line1 }}</p>
-                }
-                @if (addr.address_line2) {
-                  <p class="addr-line">{{ addr.address_line2 }}</p>
-                }
-                <p class="addr-line muted">
-                  {{ addr.city
-                  }}@if (addr.state_province) {, {{ addr.state_province }}}@if (
-                    addr.country_code
-                  ) {
-                    · {{ addr.country_code }}}
-                </p>
-                @if (addr.postal_code) {
-                  <p class="addr-line muted">C.P. {{ addr.postal_code }}</p>
-                }
-                @if (addr.phone_number) {
-                  <p class="addr-line muted phone">
-                    <app-icon name="phone" [size]="13" />{{
-                      addr.phone_number
-                    }}
-                  </p>
+                <!-- Tarjeta estilo método de pago: cada parte separada -->
+                @if (hasAddressContent(addr)) {
+                  <div class="address-card">
+                    @if (addressStreet(addr)) {
+                      <div class="address-row">
+                        <span class="address-label">Dirección</span>
+                        <span class="address-value strong">{{
+                          addressStreet(addr)
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.city || addr.state_province) {
+                      <div class="address-row">
+                        <span class="address-label">Ciudad</span>
+                        <span class="address-value">{{
+                          addressCity(addr)
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.country_code) {
+                      <div class="address-row">
+                        <span class="address-label">País</span>
+                        <span class="address-value">{{
+                          addr.country_code
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.postal_code) {
+                      <div class="address-row">
+                        <span class="address-label">C.P.</span>
+                        <span class="address-value">{{
+                          addr.postal_code
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.phone_number) {
+                      <div class="address-row">
+                        <span class="address-label">Teléfono</span>
+                        <span class="address-value phone">
+                          <app-icon name="phone" [size]="13" />
+                          {{ addr.phone_number }}
+                        </span>
+                      </div>
+                    }
+                  </div>
                 }
               </div>
             </section>
@@ -466,6 +495,13 @@ interface GuestOrderSummary {
               }
             </div>
           </section>
+
+          <!-- Slot embebido: la cuenta proyecta su tarjeta de envío
+               justo debajo de Productos. En guest standalone no se
+               proyecta nada (vista intacta). -->
+          @if (embedded()) {
+            <ng-content select="[data-slot=after-products]" />
+          }
 
           <!-- MÉTODO DE PAGO (multipago ordenado peor-primero) -->
           @if (paymentsWorstFirst(data.order.payments); as payments) {
@@ -905,6 +941,50 @@ interface GuestOrderSummary {
         display: flex;
         flex-direction: column;
         gap: 0.2rem;
+      }
+
+      /* Tarjeta de dirección (mismo lenguaje que payment-block). */
+      .address-card {
+        display: flex;
+        flex-direction: column;
+        padding: 0.375rem 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-background);
+      }
+
+      .address-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.5rem 0;
+        font-size: var(--fs-sm);
+      }
+
+      .address-row + .address-row {
+        border-top: 1px solid var(--color-border);
+      }
+
+      .address-label {
+        flex-shrink: 0;
+        color: var(--color-text-secondary);
+      }
+
+      .address-value {
+        min-width: 0;
+        text-align: right;
+        color: var(--color-text-primary);
+      }
+
+      .address-value.strong {
+        font-weight: var(--fw-semibold);
+      }
+
+      .address-value.phone {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
       }
 
       .addr-line {
@@ -1370,6 +1450,7 @@ interface GuestOrderSummary {
 export class GuestOrderSummaryComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly checkoutService = inject(CheckoutService);
+  private readonly accountService = inject(AccountService);
   private readonly tenantFacade = inject(TenantFacade);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
@@ -1381,8 +1462,30 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   readonly loading = signal(true);
   readonly error = signal(false);
-  readonly summary = signal<GuestOrderSummary | null>(null);
-  readonly justPurchased = signal(false);
+  /**
+   * Modo embebido (detalle de cuenta): la orden ya viene cargada por el
+   * padre vía `summaryInput` — no hay token de ruta, fetch, SSE ni
+   * comprobantes (endpoints guest con token). En guest standalone ambos
+   * quedan en default y todo sigue igual.
+   */
+  readonly embedded = input(false);
+  readonly summaryInput = input<GuestOrderSummary | null>(null);
+  readonly physicalProgressAllowed = input(true);
+  readonly purchaseConfirmed = input<boolean | null>(null);
+  /**
+   * En embebido el padre es dueño de los datos: tras subir un
+   * comprobante se emite para que recargue la orden (en guest
+   * standalone se actualiza in-place sin refetch).
+   */
+  readonly receiptUploaded = output<number>();
+  private readonly fetchedSummary = signal<GuestOrderSummary | null>(null);
+  readonly summary = computed(
+    () => this.summaryInput() ?? this.fetchedSummary(),
+  );
+  private readonly routePurchaseConfirmed = signal(false);
+  readonly justPurchased = computed(() => this.embedded()
+    ? this.purchaseConfirmed() === true
+    : this.purchaseConfirmed() ?? this.routePurchaseConfirmed());
 
   // Paso 9 — visor de comprobante (patrón admin order-details).
   readonly receiptPreview = signal<GuestReceiptPreview | null>(null);
@@ -1418,6 +1521,8 @@ export class GuestOrderSummaryComponent implements OnInit {
     // vivos del servicio; `summary` se lee/escribe vía `untracked` para no
     // crear un loop (escribir summary no re-dispara el effect).
     effect(() => {
+      // Embebido: sin stream — nada que fusionar.
+      if (this.embedded()) return;
       // Deps deliberadas: cualquier evento vivo re-ejecuta la fusión.
       this.sse.orderState();
       this.sse.deliveryType();
@@ -1430,9 +1535,15 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
-    this.justPurchased.set(
+    this.routePurchaseConfirmed.set(
       this.route.snapshot.queryParamMap.get('success') === 'true',
     );
+
+    // Embebido: sin token de ruta ni fetch — el padre alimenta `summaryInput`.
+    if (this.embedded()) {
+      this.loading.set(false);
+      return;
+    }
 
     const token = this.route.snapshot.paramMap.get('token') || '';
     if (!token) {
@@ -1456,7 +1567,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.summary.set(response.data);
+          this.fetchedSummary.set(response.data);
           // El snapshot SSE pudo llegar ANTES que el REST: la fusión del
           // effect ya se saltó ese caso (summary null), así que se re-aplica
           // explícitamente sobre el summary recién llegado.
@@ -1482,7 +1593,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce
         ?.orders;
     this.voucherPrint.printVoucher(summary, {
-      hidePrepEta: orders?.hide_prep_eta === true,
+      hidePrepEta: !this.physicalProgressAllowed() || orders?.hide_prep_eta === true,
       hideTracking: orders?.hide_tracking_progress === true,
     });
   }
@@ -1667,7 +1778,40 @@ export class GuestOrderSummaryComponent implements OnInit {
    * Opt-out `ecommerce.orders.hide_prep_eta` (paso 7): ausente ⇒ visible,
    * se lee con `!== true`. Además exige al menos una fuente de ETA.
    */
+  /**
+   * Calle de la dirección fluida: línea1 + línea2 unidas por coma.
+   * Vacío si no hay ninguna (el template omite el separador).
+   */
+  addressStreet(addr: GuestOrderAddress): string {
+    return [addr.address_line1, addr.address_line2]
+      .filter((p) => !!p)
+      .join(', ');
+  }
+
+  /**
+   * Ciudad de la tarjeta de dirección: ciudad + dpto unidos por coma.
+   */
+  addressCity(addr: GuestOrderAddress): string {
+    return [addr.city, addr.state_province]
+      .filter((p) => !!p)
+      .join(', ');
+  }
+
+  /** La tarjeta solo se pinta si hay al menos un dato de dirección. */
+  hasAddressContent(addr: GuestOrderAddress): boolean {
+    return !!(
+      addr.address_line1 ||
+      addr.address_line2 ||
+      addr.city ||
+      addr.state_province ||
+      addr.country_code ||
+      addr.postal_code ||
+      addr.phone_number
+    );
+  }
+
   etaVisible(): boolean {
+    if (!this.physicalProgressAllowed()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
       return false;
@@ -1682,6 +1826,7 @@ export class GuestOrderSummaryComponent implements OnInit {
    * ausente ⇒ la barra se muestra, se lee con `!== true`.
    */
   trackingShown(): boolean {
+    if (!this.physicalProgressAllowed()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (
       config?.customConfig?.ecommerce?.orders?.hide_tracking_progress === true
@@ -1827,6 +1972,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   /** La pill solo existe mientras el stream está activo o reintentando. */
   sseLiveVisible(): boolean {
+    if (this.embedded()) return false;
     const state = this.sse.connectionState();
     return (
       state === 'open' ||
@@ -1918,7 +2064,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.markKitchenFlash(changed);
     }
 
-    this.summary.set({ ...current, order });
+    this.fetchedSummary.set({ ...current, order });
   }
 
   private markKitchenFlash(productNames: string[]): void {
@@ -1950,12 +2096,18 @@ export class GuestOrderSummaryComponent implements OnInit {
    */
   async viewReceipt(payment: GuestOrderPayment): Promise<void> {
     const paymentId = payment.payment_id;
-    if (paymentId == null || !this.token) return;
+    if (paymentId == null) return;
+    if (!this.embedded() && !this.token) return;
 
     this.loadingReceiptId.set(paymentId);
     try {
       const res = await firstValueFrom(
-        this.checkoutService.getGuestPaymentReceiptUrl(this.token, paymentId),
+        this.embedded()
+          ? this.accountService.getPaymentReceiptUrl(paymentId)
+          : this.checkoutService.getGuestPaymentReceiptUrl(
+              this.token,
+              paymentId,
+            ),
       );
       this.receiptPreview.set({
         url: res.data.url,
@@ -2001,10 +2153,16 @@ export class GuestOrderSummaryComponent implements OnInit {
     orderState: string,
     payment: GuestOrderPayment,
   ): boolean {
+    // Misma regla en guest y embebido (la cuenta tiene sus endpoints).
     const terminalOrder = ['cancelled', 'refunded', 'finished', 'delivered'];
     const terminalPayment = ['succeeded', 'captured', 'refunded', 'cancelled'];
     if (terminalOrder.includes(orderState)) return false;
     if (terminalPayment.includes(payment.state)) return false;
+    // Account payloads always provide canonical type; preserve legacy standalone
+    // payloads without that additive field, but never infer type from display_name.
+    if (this.embedded() || payment.method_type != null) {
+      return payment.method_type === 'bank_transfer' || payment.method_type === 'voucher';
+    }
     return true;
   }
 
@@ -2019,7 +2177,11 @@ export class GuestOrderSummaryComponent implements OnInit {
     file: File,
   ): Promise<void> {
     const paymentId = payment.payment_id;
-    if (paymentId == null || !this.token) return;
+    if (paymentId == null) return;
+    if (!this.embedded() && !this.token) return;
+    const order = this.summary()?.order;
+    const currentPayment = order?.payments?.find(p => p.payment_id === paymentId);
+    if (!order || !currentPayment || !this.receiptUploadAllowed(order.state, currentPayment) || this.uploadingReceiptId() !== null) return;
 
     if (file.size > this.RECEIPT_MAX_SIZE) {
       this.toast.error('El archivo supera los 5 MB permitidos.', 'Error');
@@ -2036,20 +2198,26 @@ export class GuestOrderSummaryComponent implements OnInit {
     this.uploadingReceiptId.set(paymentId);
     try {
       const res = await firstValueFrom(
-        this.checkoutService.uploadGuestPaymentReceipt(
-          this.token,
+        this.embedded()
+          ? this.accountService.uploadPaymentReceipt(paymentId, file)
+          : this.checkoutService.uploadGuestPaymentReceipt(
+              this.token,
+              paymentId,
+              file,
+            ),
+      );
+      if (this.embedded()) {
+        this.receiptUploaded.emit(paymentId);
+      } else {
+        this.refreshPaymentReceipt(
           paymentId,
-          file,
-        ),
-      );
-      this.refreshPaymentReceipt(
-        paymentId,
-        res.data.has_receipt,
-        res.data.receipt_content_type,
-      );
-      // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
-      // refleja también en el estado vivo para que la fusión no la revierta.
-      this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
+          res.data.has_receipt,
+          res.data.receipt_content_type,
+        );
+        // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
+        // refleja también en el estado vivo para que la fusión no la revierta.
+        this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
+      }
       this.toast.success(
         res.message ??
           'Comprobante recibido. La tienda lo revisará para confirmar tu pago.',
@@ -2073,7 +2241,7 @@ export class GuestOrderSummaryComponent implements OnInit {
   ): void {
     const current = this.summary();
     if (!current) return;
-    this.summary.set({
+    this.fetchedSummary.set({
       ...current,
       order: {
         ...current.order,
