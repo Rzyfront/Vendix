@@ -310,7 +310,7 @@ describe('KitchenFireService — remake consumption after D2 reuse', () => {
     products: { id: id + 100, kds_id: null }, product_variants: null,
   });
 
-  const harness = (items = [orderItem(7, 'after_fire_reused')]) => {
+  const harness = (items = [orderItem(7, 'after_fire_reused')], kitchenSettings: any = null) => {
     const order = { id: 100, store_id: 1, order_number: 'ORD-100', table_sessions: [], order_items: items };
     const tx: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 100 }]),
@@ -325,6 +325,7 @@ describe('KitchenFireService — remake consumption after D2 reuse', () => {
       stores: { findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }) },
       orders: { findFirst: jest.fn().mockResolvedValue(order), findUnique: jest.fn().mockResolvedValue({ state: 'cancelled' }) },
       kds: { findFirst: jest.fn().mockResolvedValue({ id: 5 }) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(kitchenSettings) },
       kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn((fn: (tx: any) => Promise<unknown>) => fn(tx)),
     };
@@ -412,6 +413,27 @@ describe('KitchenFireService — remake consumption after D2 reuse', () => {
         reason: 'lost_command',
       },
     });
+  });
+
+  it.each([
+    ['physical', { settings: { restaurant: { kitchen_mode: 'physical' } } }, 1],
+    ['virtual', null, 2],
+  ])('resend en modo %s con 2 productos de kds_id distintos crea %i ticket(s)', async (_mode, settings, expectedTickets) => {
+    const items = [orderItem(7, 'after_fire_reused'), orderItem(8, 'after_fire_reused')];
+    items[0].products.kds_id = 2 as any;
+    items[1].products.kds_id = 3 as any;
+    const { service, prisma, tx, fire } = harness(items, settings);
+    prisma.orders.findUnique.mockResolvedValue({ state: 'processing' });
+    prisma.kitchen_ticket_items = { findMany: jest.fn().mockResolvedValue([]) };
+    (service as any).orderHistoryService = { record: jest.fn().mockResolvedValue({ id: 1 }) };
+
+    await service.resendOrderItems({ order_id: 100, order_item_ids: [7, 8], reason: 'lost_command' });
+
+    expect(fire).not.toHaveBeenCalled();
+    expect(tx.kitchen_tickets.create).toHaveBeenCalledTimes(expectedTickets);
+    if (expectedTickets === 1) {
+      expect(tx.kitchen_tickets.create.mock.calls[0][0].data.kds_id).toBe(5);
+    }
   });
 
   it('rejects a replay after a post-cancel remake ticket without a second stock exit', async () => {
@@ -1347,6 +1369,33 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     const virtual = await run(null);
     expect(virtual.status).toBe('pending');
     expect(virtual.items.create[0].status).toBe('pending');
+  });
+
+  it.each([
+    ['physical', { settings: { restaurant: { kitchen_mode: 'physical' } } }, 1],
+    ['virtual', null, 2],
+  ])('fire en modo %s con 2 productos de kds_id distintos crea %i ticket(s)', async (_mode, settings, expectedTickets) => {
+    const itemA = makeVariantOrderItem(10, 50, { variantId: null, variantCount: 0 });
+    const itemB = makeVariantOrderItem(11, 51, { variantId: null, variantCount: 0 });
+    (itemA.products as any).kds_id = 2;
+    (itemB.products as any).kds_id = 3;
+    setupFireableContext([itemA, itemB]);
+    const ticketCreate = jest.fn().mockResolvedValue(makeTxTicket(555, 10, 50));
+    prismaMock.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        ...buildFireTxMock({ orderItemId: 10 }),
+        store_settings: { findFirst: jest.fn().mockResolvedValue(settings) },
+        kitchen_tickets: { create: ticketCreate, count: jest.fn().mockResolvedValue(0) },
+      }),
+    );
+
+    const result = await service.fireOrderItems({ order_id: 100, order_item_ids: [10, 11] });
+
+    expect(ticketCreate).toHaveBeenCalledTimes(expectedTickets);
+    expect(result.kitchen_ticket_ids.length).toBe(expectedTickets);
+    if (expectedTickets === 1) {
+      expect(ticketCreate.mock.calls[0][0].data.kds_id).toBe(1);
+    }
   });
 
   it('keeps product_variant_id and variant_label NULL for a product without variants', async () => {

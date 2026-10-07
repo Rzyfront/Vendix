@@ -1057,17 +1057,26 @@ export class KitchenFireService {
       );
     }
 
+    // Modo cocina fisico: no existen estaciones, una ronda = un ticket. Todo va
+    // al KDS por defecto e ignora `products.kds_id` (solo se ignora, no se toca).
+    const kitchenMode = await resolveKitchenMode(tx, store_id);
+    const isPhysicalKitchen = kitchenMode === 'physical';
+
     const kdsByProduct = new Map<number, number>();
     for (const ctxItem of preparedItems) {
       kdsByProduct.set(
         ctxItem.orderItem.product_id!,
-        ctxItem.orderItem.products?.kds_id ?? defaultKds.id,
+        isPhysicalKitchen
+          ? defaultKds.id
+          : (ctxItem.orderItem.products?.kds_id ?? defaultKds.id),
       );
     }
     for (const item of recipeLessItems) {
       kdsByProduct.set(
         item.product_id!,
-        item.products?.kds_id ?? defaultKds.id,
+        isPhysicalKitchen
+          ? defaultKds.id
+          : (item.products?.kds_id ?? defaultKds.id),
       );
     }
 
@@ -1296,7 +1305,6 @@ export class KitchenFireService {
     // Orden estable por kds_id: hace el resultado determinista entre corridas
     // y deja el ticket "primario" (el primero) siempre en la misma estacion.
     // Modo cocina fisico: sin tablero, el ticket nace en preparacion.
-    const kitchenMode = await resolveKitchenMode(tx, store_id);
     const bornStatus = kitchenMode === 'physical' ? 'in_preparation' : 'pending';
     for (const kdsId of [...snapshotsByKds.keys()].sort((a, b) => a - b)) {
       const snaps = snapshotsByKds.get(kdsId)!;
@@ -1667,12 +1675,18 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NO_DEFAULT_KDS);
     }
 
+    // Modo cocina fisico: sin estaciones, todo al KDS por defecto (un ticket).
+    const kitchenMode = await resolveKitchenMode(this.prisma, store_id);
+    const isPhysicalKitchen = kitchenMode === 'physical';
+
     const kdsByProduct = new Map<number, number>();
     for (const item of order.order_items) {
       if (item.product_id) {
         kdsByProduct.set(
           item.product_id,
-          item.products?.kds_id ?? defaultKds.id,
+          isPhysicalKitchen
+            ? defaultKds.id
+            : (item.products?.kds_id ?? defaultKds.id),
         );
       }
     }
@@ -1921,7 +1935,6 @@ export class KitchenFireService {
         }
 
         // Modo cocina fisico: el ticket reenviado nace en preparacion.
-        const kitchenMode = await resolveKitchenMode(tx, store_id);
         const bornStatus =
           kitchenMode === 'physical' ? 'in_preparation' : 'pending';
 
