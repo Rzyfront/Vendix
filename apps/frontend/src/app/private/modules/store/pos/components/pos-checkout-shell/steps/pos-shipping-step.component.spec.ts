@@ -170,7 +170,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       providers: [
         { provide: Router, useValue: { navigate: () => {} } },
         { provide: PosPaymentService, useValue: {} },
-        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quotePickupShipping: quotePickup, quoteManualShipping: manualQuote } },
+        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quotePickupShipping: quotePickup, quoteManualShipping: manualQuote, getAddressScope: () => of(null) } },
         { provide: CustomersService, useValue: customers },
         { provide: ToastService, useValue: { show: () => {} } },
         { provide: CurrencyFormatService, useValue: {
@@ -179,7 +179,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         } },
         { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]), getDefaultCountry: () => ({ code: 'CO' }) } },
         { provide: DianMunicipalityLookupService, useValue: municipalityLookup },
-        { provide: GeocodingService, useValue: { forward: () => of(null), reverse: () => of(null) } },
+        { provide: GeocodingService, useValue: { forward: () => of(null), reverse: () => of(null), municipalityCenter: () => of(null) } },
       ],
     });
     TestBed.overrideComponent(PosShippingStepComponent, { set: {
