@@ -84,7 +84,7 @@ import { PaymentInstructionsModalComponent } from '../../components/payment-inst
 import { LocationPermissionModalComponent } from '../../components/location-permission-modal/location-permission-modal.component';
 import { WhatsappFallbackModalComponent } from '../../components/whatsapp-fallback-modal/whatsapp-fallback-modal.component';
 import { AddressMapPickerComponent } from '../../components/address-map-picker/address-map-picker.component';
-import { GeolocationService } from '../../services/geolocation.service';
+import { GeolocationError, GeolocationService } from '../../services/geolocation.service';
 import { GeocodingService, GeocodePrecision } from '../../services/geocoding.service';
 
 const UNLOCATED_ADDRESS_WARNING =
@@ -599,6 +599,8 @@ export class CheckoutComponent implements OnInit {
    * Plain field, not a signal — nothing in the template reads it.
    */
   private autoMapFocusDone = false;
+  /** True once the automatic GPS request was attempted on this instance. */
+  private autoLocateAttempted = false;
   /** A geocode miss whose warning waits for the first auto-focus to show. */
   private pendingAddressWarning = false;
 
@@ -1214,6 +1216,44 @@ export class CheckoutComponent implements OnInit {
       this.pendingAddressWarning = true;
     }
     this.focusMapHint('auto');
+    void this.maybeAutoRequestLocation();
+  }
+
+  /**
+   * Owner directive: when the written address cannot be located, ask for the
+   * device location AT THE SAME TIME as the orange warning (the app should
+   * always ship geolocated). Acts only once per instance, for home delivery
+   * and once the minimal address is typed (never prompts on 2 letters).
+   * - `granted`/`prompt` → request GPS directly (native browser prompt, no
+   *   priming modal).
+   * - `denied`/`unsupported` → WhatsApp fallback when the store offers it and
+   *   the address has no resolved coords; otherwise nothing (the orange warning already guides the buyer).
+   */
+  private async maybeAutoRequestLocation(): Promise<void> {
+    if (this.autoLocateAttempted) return;
+    if (this.selected_delivery() !== 'home') return;
+    if (!this.autoMapFocusGateOpen()) return;
+    this.autoLocateAttempted = true;
+    const state = await this.geolocation.getPermissionState();
+    if (state === 'granted' || state === 'prompt') {
+      void this.requestGeolocation();
+    } else {
+      this.openWhatsappFallbackIfNeeded();
+    }
+  }
+
+  /**
+   * WhatsApp is the LAST resort: only when the location is unusable AND the
+   * address has no resolved coords (so the rate cannot be computed) AND the
+   * store offers the fallback. Callers invoke it only on the denied /
+   * unsupported / insecure-context paths. Returns true when the modal opened.
+   */
+  private openWhatsappFallbackIfNeeded(): boolean {
+    if (!this.canUseWhatsappFallback() || this.hasResolvedCoords()) {
+      return false;
+    }
+    this.show_whatsapp_fallback_modal.set(true);
+    return true;
   }
 
   /**
@@ -1594,8 +1634,9 @@ export class CheckoutComponent implements OnInit {
   // truth; it drives the map via forward-geocode, never the other way.
 
   /**
-   * The map's "Ubicarme" control was clicked. This is the ONLY place GPS may
-   * be requested — never automatically. Decides based on the current
+   * The map's "Ubicarme" control was clicked (manual GPS request). GPS is also
+   * requested automatically, once, when the written address cannot be located
+   * (see {@link maybeAutoRequestLocation}). Decides based on the current
    * permission state:
    * - `granted` → geolocate directly (no modal — already allowed).
    * - `denied`/`unsupported` → if the store offers the WhatsApp fallback,
@@ -1609,9 +1650,7 @@ export class CheckoutComponent implements OnInit {
     if (state === 'granted') {
       void this.requestGeolocation();
     } else if (state === 'denied' || state === 'unsupported') {
-      if (this.canUseWhatsappFallback()) {
-        this.show_whatsapp_fallback_modal.set(true);
-      } else {
+      if (!this.openWhatsappFallbackIfNeeded()) {
         this.toast.info(
           'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
           'Ubicación no disponible',
@@ -1633,17 +1672,33 @@ export class CheckoutComponent implements OnInit {
     this.show_location_modal.set(false);
   }
 
-  /** Requests the live GPS position and drops it on the map (coords only). */
+  /**
+   * Requests the live GPS position and drops it on the map (coords only).
+   * The WhatsApp fallback opens ONLY when geolocation is unusable by the
+   * customer's choice/environment (`permission_denied`, `unsupported`,
+   * `insecure_context`); a `timeout`/`position_unavailable` keeps the map and
+   * orange warning so the buyer can retry or pin manually.
+   */
   private async requestGeolocation(): Promise<void> {
     try {
       const coords = await this.geolocation.getPrecisePosition();
       this.onMapLocated(coords);
-    } catch {
-      // Permission denied / unsupported / timeout → offer the WhatsApp
-      // fallback when the store supports it; otherwise stay on the manual
-      // form with the usual toast.
-      if (this.canUseWhatsappFallback()) {
-        this.show_whatsapp_fallback_modal.set(true);
+    } catch (err) {
+      const reason = err instanceof GeolocationError ? err.reason : null;
+      if (reason === 'timeout' || reason === 'position_unavailable') {
+        this.toast.info(
+          'No pudimos obtener tu ubicación precisa. Inténtalo de nuevo o marca el punto en el mapa.',
+          'Ubicación no disponible',
+        );
+        return;
+      }
+      if (
+        (reason === 'permission_denied' ||
+          reason === 'unsupported' ||
+          reason === 'insecure_context') &&
+        this.openWhatsappFallbackIfNeeded()
+      ) {
+        // WhatsApp modal opened (location unusable and rate not computable).
       } else {
         this.toast.info(
           'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
