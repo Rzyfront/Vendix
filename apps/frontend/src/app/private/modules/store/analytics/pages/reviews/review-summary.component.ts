@@ -2,7 +2,7 @@ import { Component, DestroyRef, OnInit, inject, computed, signal  } from '@angul
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
-import { forkJoin } from 'rxjs';
+import { Subscription, defaultIfEmpty, take } from 'rxjs';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -58,7 +58,11 @@ import {
             </div>
           }
         </div>
-      } @else {
+      } @else if (summaryError()) {
+        <div role="alert" class="p-4 rounded-xl border border-border bg-surface text-[var(--color-text-secondary)]">
+          No se pudo cargar el resumen de reseñas. Intenta nuevamente desde los filtros.
+        </div>
+      } @else if (summary()) {
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           <app-stats
             title="Calificación promedio"
@@ -144,7 +148,9 @@ import {
               <div class="h-64 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
-            } @else {
+            } @else if (summaryError()) {
+              <p class="h-64 flex items-center justify-center text-sm text-[var(--color-text-secondary)]">Resumen no disponible.</p>
+            } @else if (summary()) {
               <app-chart [options]="ratingDistributionChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
@@ -166,7 +172,9 @@ import {
               <div class="h-64 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
-            } @else {
+            } @else if (summaryError()) {
+              <p class="h-64 flex items-center justify-center text-sm text-[var(--color-text-secondary)]">Resumen no disponible.</p>
+            } @else if (summary()) {
               <app-chart [options]="reviewsStatusChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
@@ -185,10 +193,14 @@ import {
           <span class="text-xs text-[var(--color-text-secondary)]">Solo aprobadas · por período local de la tienda</span>
         </div>
         <div class="p-4">
-          @if (loading()) {
+          @if (trendLoading()) {
             <div class="h-64 flex items-center justify-center">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
+          } @else if (trendError()) {
+            <p role="alert" class="h-64 flex items-center justify-center text-sm text-[var(--color-text-secondary)]">
+              No se pudo cargar la tendencia de calificaciones. Intenta nuevamente desde los filtros.
+            </p>
           } @else {
             <app-chart [options]="ratingTrendChartOptions()" size="large" [showLegend]="true"></app-chart>
           }
@@ -220,7 +232,13 @@ export class ReviewSummaryComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private readonly route = inject(ActivatedRoute);
 
+  private dataRequests = new Subscription();
+  private requestVersion = 0;
+
   loading = signal(true);
+  trendLoading = signal(true);
+  summaryError = signal(false);
+  trendError = signal(false);
   exporting = signal(false);
   summary = signal<ReviewsSummary | null>(null);
   ratingTrend = signal<RatingTrendPoint[]>([]);
@@ -260,32 +278,76 @@ export class ReviewSummaryComponent implements OnInit {
     this.loadData();
   }
 
-  loadData(): void {
-    this.loading.set(true);
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      this.requestVersion++;
+      this.dataRequests.unsubscribe();
+    });
+  }
 
-    forkJoin({
-      summary: this.analyticsService.getReviewsSummary({
-        date_range: this.dateRange(),
-      }),
-      trend: this.analyticsService.getRatingTrend({
-        date_range: this.dateRange(),
+  loadData(): void {
+    if (this.destroyRef.destroyed) return;
+    const version = ++this.requestVersion;
+    this.dataRequests.unsubscribe();
+    this.dataRequests = new Subscription();
+    const dateRange = { ...this.dateRange() };
+
+    this.loading.set(true);
+    this.trendLoading.set(true);
+    this.summaryError.set(false);
+    this.trendError.set(false);
+    this.summary.set(null);
+    this.ratingTrend.set([]);
+    this.ratingDistributionChartOptions.set({});
+    this.reviewsStatusChartOptions.set({});
+    this.ratingTrendChartOptions.set({});
+
+    this.dataRequests.add(
+      this.analyticsService.getReviewsSummary({ date_range: dateRange })
+        .pipe(take(1), defaultIfEmpty(null), takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response) => {
+            if (version !== this.requestVersion) return;
+            if (response?.data) {
+              this.summary.set(response.data);
+              this.updateSummaryCharts();
+            } else {
+              this.summaryError.set(true);
+            }
+            this.loading.set(false);
+          },
+          error: () => {
+            if (version !== this.requestVersion) return;
+            this.summaryError.set(true);
+            this.loading.set(false);
+          },
+        }),
+    );
+
+    this.dataRequests.add(
+      this.analyticsService.getRatingTrend({
+        date_range: dateRange,
         granularity: this.trendGranularity(),
-      }),
-    })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: ({ summary, trend }) => {
-          if (summary?.data) {
-            this.summary.set(summary.data);
-          }
-          this.ratingTrend.set(trend?.data ?? []);
-          this.updateCharts();
-          this.loading.set(false);
-        },
-        error: () => {
-          this.loading.set(false);
-        },
-      });
+      })
+        .pipe(take(1), defaultIfEmpty(null), takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response) => {
+            if (version !== this.requestVersion) return;
+            if (response?.data) {
+              this.ratingTrend.set(response.data);
+              this.updateTrendChart();
+            } else {
+              this.trendError.set(true);
+            }
+            this.trendLoading.set(false);
+          },
+          error: () => {
+            if (version !== this.requestVersion) return;
+            this.trendError.set(true);
+            this.trendLoading.set(false);
+          },
+        }),
+    );
   }
 
   exportReport(): void {
@@ -394,7 +456,7 @@ export class ReviewSummaryComponent implements OnInit {
     return `de ${approved} aprobadas`;
   });
 
-  private updateCharts(): void {
+  private updateSummaryCharts(): void {
     const style = getComputedStyle(document.documentElement);
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
@@ -539,6 +601,11 @@ export class ReviewSummaryComponent implements OnInit {
         },
       ],
     });
+  }
+
+  private updateTrendChart(): void {
+    const style = getComputedStyle(document.documentElement);
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     // Rating Trend Line Chart (solo aprobadas, período local)
     const points = this.ratingTrend();

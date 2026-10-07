@@ -259,6 +259,84 @@ describe('ReviewsAnalyticsService summary + trend (QUI-629)', () => {
     expect(result.total_reviews_growth).toBe(50);
   });
 
+  it.each([
+    { current: 0, previous: 0, expected: null },
+    { current: 0, previous: 3, expected: null },
+    { current: 2, previous: 0, expected: null },
+    { current: 2, previous: 3, expected: 25 },
+  ])('rating growth requires approved reviews in BOTH periods: $current / $previous', async ({ current, previous, expected }) => {
+    prisma.reviews.groupBy
+      .mockResolvedValueOnce([
+        { state: 'approved', _count: { _all: current } },
+        { state: 'pending', _count: { _all: 2 } },
+        { state: 'rejected', _count: { _all: 1 } },
+      ])
+      .mockResolvedValueOnce(current ? [{ rating: 5, _count: { _all: current } }] : []);
+    prisma.reviews.aggregate
+      .mockResolvedValueOnce({ _avg: { rating: current ? 5 : null } })
+      .mockResolvedValueOnce({ _sum: { helpful_count: 0 } })
+      .mockResolvedValueOnce({ _avg: { rating: previous ? 4 : null }, _count: { _all: previous } });
+    prisma.reviews.count.mockResolvedValueOnce(0).mockResolvedValueOnce(6);
+
+    const result = await service.getReviewsSummary(QUERY as any);
+
+    expect(result.average_rating_growth).toBe(expected);
+    expect(result.average_rating).toBe(current ? 5 : 0);
+    expect(result.total_reviews).toBe(current + 3);
+    expect(result.total_reviews_growth).toBe(((current + 3 - 6) / 6) * 100);
+  });
+
+  it('keeps -100% count growth when the current period is empty, without inventing rating growth', async () => {
+    prisma.reviews.groupBy.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    prisma.reviews.aggregate
+      .mockResolvedValueOnce({ _avg: { rating: null } })
+      .mockResolvedValueOnce({ _sum: { helpful_count: 0 } })
+      .mockResolvedValueOnce({ _avg: { rating: 4 }, _count: { _all: 3 } });
+    prisma.reviews.count.mockResolvedValueOnce(0).mockResolvedValueOnce(5);
+
+    const result = await service.getReviewsSummary(QUERY as any);
+
+    expect(result.total_reviews).toBe(0);
+    expect(result.total_reviews_growth).toBe(-100);
+    expect(result.average_rating_growth).toBeNull();
+    expect(result.verified_purchase_rate).toBeNull();
+  });
+
+  it.each([
+    { timezone: 'America/Bogota', start: '2026-07-08T05:00:00.000Z', end: '2026-07-09T04:59:59.999Z', previousStart: '2026-07-07T05:00:00.000Z', previousEnd: '2026-07-08T04:59:59.999Z' },
+    { timezone: 'America/New_York', start: '2026-07-08T04:00:00.000Z', end: '2026-07-09T03:59:59.999Z', previousStart: '2026-07-07T04:00:00.000Z', previousEnd: '2026-07-08T03:59:59.999Z' },
+  ])('uses the same store-local window and approved filter in both rating bases: $timezone', async ({ timezone, start, end, previousStart, previousEnd }) => {
+    prisma.store_settings.findFirst.mockResolvedValue({ stores: { timezone } });
+    prisma.reviews.groupBy
+      .mockResolvedValueOnce([{ state: 'approved', _count: { _all: 2 } }])
+      .mockResolvedValueOnce([{ rating: 5, _count: { _all: 2 } }]);
+    prisma.reviews.aggregate
+      .mockResolvedValueOnce({ _avg: { rating: 5 } })
+      .mockResolvedValueOnce({ _sum: { helpful_count: 0 } })
+      .mockResolvedValueOnce({ _avg: { rating: 4 }, _count: { _all: 2 } });
+    prisma.reviews.count.mockResolvedValueOnce(1).mockResolvedValueOnce(4);
+
+    await service.getReviewsSummary(QUERY as any);
+
+    const currentWindow = { gte: new Date(start), lte: new Date(end) };
+    const previousWindow = { gte: new Date(previousStart), lte: new Date(previousEnd) };
+    expect(prisma.reviews.groupBy.mock.calls[0][0].where).toEqual({ store_id: 10, created_at: currentWindow });
+    expect(prisma.reviews.groupBy.mock.calls[1][0].where).toEqual({ store_id: 10, state: 'approved', created_at: currentWindow });
+    expect(prisma.reviews.aggregate.mock.calls[0][0].where).toEqual({ store_id: 10, state: 'approved', created_at: currentWindow });
+    expect(prisma.reviews.aggregate.mock.calls[2][0].where).toEqual({ store_id: 10, state: 'approved', created_at: previousWindow });
+    expect(prisma.reviews.count.mock.calls[0][0].where).toEqual({ store_id: 10, state: 'approved', verified_purchase: true, created_at: currentWindow });
+    expect(prisma.reviews.count.mock.calls[1][0].where).toEqual({ store_id: 10, created_at: previousWindow });
+  });
+
+  it('rejects summary and trend without store context before accessing Prisma', async () => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(undefined as any);
+    await expect(service.getReviewsSummary(QUERY as any)).rejects.toThrow();
+    await expect(service.getRatingTrend(QUERY as any)).rejects.toThrow();
+    expect(prisma.store_settings.findFirst).not.toHaveBeenCalled();
+    expect(prisma.reviews.aggregate).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it('QUI-629: rating trend returns periods with average + count from raw aggregation', async () => {
     prisma.$queryRaw.mockResolvedValueOnce([
       { period: '2026-07-06', average_rating: '5.000', review_count: 2n },
@@ -277,5 +355,11 @@ describe('ReviewsAnalyticsService summary + trend (QUI-629)', () => {
     // `withoutScope()` + explicit `r.store_id` filter: the raw SQL never
     // relies on the scoped client to hide another tenant's reviews.
     expect(prisma.withoutScope).toHaveBeenCalled();
+    const [sql, , storeId, startDate, endDate] = prisma.$queryRaw.mock.calls[0];
+    expect(sql.join('')).toContain("AND r.state = 'approved'");
+    expect(sql.join('')).toContain('WHERE r.store_id =');
+    expect(storeId).toBe(10);
+    expect(startDate).toEqual(new Date('2026-07-08T05:00:00.000Z'));
+    expect(endDate).toEqual(new Date('2026-07-09T04:59:59.999Z'));
   });
 });

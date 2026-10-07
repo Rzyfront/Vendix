@@ -128,7 +128,10 @@ export class ReviewsAnalyticsService {
       total_reviews: totalReviews,
       total_reviews_growth: computeGrowth(totalReviews, prevTotal),
       average_rating: Math.round(averageRating * 10) / 10,
-      average_rating_growth: computeGrowth(averageRating, previousAverage),
+      average_rating_growth:
+        approvedReviews > 0 && previousApprovedReviews > 0
+          ? computeGrowth(averageRating, previousAverage)
+          : null,
       verified_purchases: verifiedApproved,
       verified_purchase_rate: verifiedPurchaseRate,
       pending_reviews: pendingReviews,
