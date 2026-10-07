@@ -62,6 +62,11 @@ export interface StandardPrintItem {
   notes?: string;
   modifiers?: string[];
   /**
+   * Rótulo de empaque por plato de la comanda de cocina ("ENVÍO" /
+   * "PARA LLEVAR"). Solo `kitchen_ticket` lo llena; vacío = consumo en mesa.
+   */
+  packaging_label?: string;
+  /**
    * CP-DTLP-20260827 (Phase B.4): cantidad despachada del ítem (logística).
    * Solo `dispatch_ticket` la usa hoy; los formatos comerciales siguen con
    * `quantity` como cant. pedida. OPCIONAL para no romper los otros nueve
@@ -140,6 +145,16 @@ export interface StandardPrintDataModel {
      * "Datos del Cliente" (`customer`), porque no es un cliente formal.
      */
     customer_alias?: string;
+    /**
+     * Campos opcionales exclusivos de la comanda de cocina (`kitchen_ticket`).
+     * `is_kitchen_ticket` es la marca con la que el compositor activa su
+     * render específico sin alterar los otros formatos.
+     */
+    is_kitchen_ticket?: boolean;
+    order_number?: string;
+    daily_number?: number;
+    customer_name?: string;
+    service_type_label?: string;
   };
   fiscal?: {
     cufe?: string;
