@@ -1191,9 +1191,18 @@ describe('ShippingCalculatorService', () => {
       expect(r.single_municipality?.city).toBe('Riohacha');
     });
 
-    it('zip_codes => postal_code_relevant true', async () => {
+    it('a single zip code across coverage => postal_code_relevant false', async () => {
       mockPrisma.shipping_zones.findMany.mockResolvedValue([
         zone({ zip_codes: ['440001'] }),
+      ]);
+      const r = await service.resolveAddressScope(1);
+      expect(r.postal_code_relevant).toBe(false);
+      expect(r.single_municipality?.city).toBe('Riohacha');
+    });
+
+    it('several distinct zip codes => postal_code_relevant true', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([
+        zone({ zip_codes: ['440001', '440002'] }),
       ]);
       const r = await service.resolveAddressScope(1);
       expect(r.postal_code_relevant).toBe(true);

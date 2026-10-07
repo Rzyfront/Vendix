@@ -860,11 +860,15 @@ export class ShippingCalculatorService {
       ),
     );
 
-    const postal_code_relevant = considered.some((zone) =>
-      (zone.zip_codes ?? []).some(
-        (zip: string) => typeof zip === 'string' && zip.trim() !== '',
-      ),
-    );
+    // Un único código postal en toda la cobertura no distingue tarifas (la
+    // zona ya coincide por ciudad): sólo es relevante si hay más de uno.
+    const zipCodes = new Set<string>();
+    for (const zone of considered) {
+      for (const zip of (zone.zip_codes ?? []) as string[]) {
+        if (typeof zip === 'string' && zip.trim() !== '') zipCodes.add(zip.trim());
+      }
+    }
+    const postal_code_relevant = zipCodes.size > 1;
 
     const none: AddressScope = {
       single_municipality: null,
