@@ -734,10 +734,9 @@ export class CheckoutService {
   }
 
   /**
-   * CP-tienda-checkout-whatsapp (C.2): tipos de entrega expuestos por la
-   * tienda, uno por `delivery_type` derivado (`pickup` / `home_delivery` /
-   * `other`), con un método representativo por tipo. Sin precios ni zonas:
-   * la cotización sigue viviendo en `POST /shipping/calculate`.
+   * Alcance de la dirección de entrega del storefront: si la tienda envía a
+   * domicilio a un único municipio, el checkout lo precarga y lo muestra como
+   * chip. Delega en `ShippingCalculatorService.resolveAddressScope`.
    */
   async getAddressScope(): Promise<AddressScope> {
     const store_id = RequestContextService.getStoreId();
@@ -750,6 +749,12 @@ export class CheckoutService {
     return this.shippingCalculator.resolveAddressScope(store_id);
   }
 
+  /**
+   * CP-tienda-checkout-whatsapp (C.2): tipos de entrega expuestos por la
+   * tienda, uno por `delivery_type` derivado (`pickup` / `home_delivery` /
+   * `other`), con un método representativo por tipo. Sin precios ni zonas:
+   * la cotización sigue viviendo en `POST /shipping/calculate`.
+   */
   async getDeliveryOptions(): Promise<
     Array<{
       method_id: number;
