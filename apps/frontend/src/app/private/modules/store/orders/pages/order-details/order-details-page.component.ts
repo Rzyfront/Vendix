@@ -1,6 +1,6 @@
 import { SplitAccountsPanelComponent } from '../../../restaurant-ops/tables/components/split-accounts-panel/split-accounts-panel.component';
-import type { SplitResult } from '../../../restaurant-ops/tables/interfaces';
-import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
+import type { SplitFinancialAccount, SplitResult } from '../../../restaurant-ops/tables/interfaces';
+import { Component, DestroyRef, Injector, afterNextRender, computed, effect, inject, signal } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../environments/environment';
@@ -30,6 +30,12 @@ import { OrdersService } from '../../services/orders.service';
 import { OrderDetailSseService } from '../../services/order-detail-sse.service';
 import { AddressPayload } from '../../../../../../shared/components';
 import { formatDateOnlyUTC, formatStoreDateTime } from '../../../../../../shared/utils/date.util';
+import {
+  InvoiceStatusCardComponent,
+  InvoiceCardData,
+  InvoiceCardEmitMode,
+} from '../../components/invoice-status-card/invoice-status-card.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
@@ -56,6 +62,7 @@ import {
   AssignShippingMethodDto,
   ReactivateOrderDto,
   OrderInvoiceSnapshot,
+  OrderAccountInvoice,
   OrderTableSession,
   Address,
   OrderAvailableAction,
@@ -69,7 +76,10 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
-import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import {
+  KitchenTicketsService,
+} from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
@@ -274,6 +284,11 @@ export function isManualPaymentPending(
     if (!system || system.processing_mode === 'ON_DELIVERY') return false;
     return !['wallet', 'wompi'].includes(system.type ?? '');
   });
+}
+
+/** Con división activa los importes quedan fijados (el backend responde 409 SPLIT_ACCOUNT_LOCKED al cambiarlos). */
+export function isOrderSplitLocked(order: { active_financial_split_id?: number | null } | null | undefined): boolean {
+  return !!order?.active_financial_split_id;
 }
 
 export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
@@ -719,6 +734,18 @@ type RefundState =
   | 'failed'
   | 'cancelled';
 
+/** Vista de una tarjeta de factura: datos de presentación + contexto de emisión. */
+export interface InvoiceCardView {
+  /** `order`, `order-new` (orden sin factura vigente) o `acc-<id>`. */
+  emitKey: string;
+  accountId: number | null;
+  accountInvoice: OrderAccountInvoice | null;
+  notes: RelatedNote[];
+  canCreditNote: boolean;
+  emitMode: InvoiceCardEmitMode;
+  data: InvoiceCardData;
+}
+
 @Component({
   selector: 'app-order-details-page',
   standalone: true,
@@ -744,6 +771,8 @@ type RefundState =
     CustomerModalComponent,
     ChangeTitularSearchModalComponent,
     InvoiceDetailComponent,
+    InvoiceStatusCardComponent,
+    SpinnerComponent,
     TimelineComponent,
     GenerateDispatchWizardComponent,
     DispatchMethodSelectorModalComponent,
@@ -757,6 +786,7 @@ type RefundState =
 })
 export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
+  private injector = inject(Injector);
   private vexiHosts = inject(VexiUiHostRegistry);
   orderId: string | null = null;
   order = signal<Order | null>(null);
@@ -810,7 +840,13 @@ export class OrderDetailsPageComponent {
   readonly fiscalAlert = computed<FiscalAlertEntry | null>(() => {
     const code = this.order()?.fiscal_alert_code;
     if (!code) return null;
-    return resolveFiscalAlert(code);
+    const alert = resolveFiscalAlert(code);
+    // Con división activa la orden principal es informativa: no se ofrece
+    // emitir su factura desde el banner.
+    if (this.order()?.active_financial_split_id && alert.action.kind === 'emit-invoice') {
+      return null;
+    }
+    return alert;
   });
   readonly appliedTierSummary = computed(() => {
     const order = this.order();
@@ -1723,7 +1759,12 @@ export class OrderDetailsPageComponent {
     const blockedByBackend = !!order.available_actions?.some(
       (a) => a.code === 'confirm_delivery' && a.reason === ORD_FINISH_UNPAID_BALANCE_CODE,
     );
-    const computedAmount = getUnpaidBalanceForFinish(order);
+    // Con división activa los pagos viven en las cuentas, no en la orden: el
+    // espejo local (`payments` vacío => saldo = total) esconde «Finalizar» aun
+    // con todas las cuentas cobradas. La única señal válida es la del backend.
+    const computedAmount = order.active_financial_split_id
+      ? 0
+      : getUnpaidBalanceForFinish(order);
     if (computedAmount > 0.01) return computedAmount;
     if (blockedByBackend) {
       return Number(order.remaining_balance) || Number(order.grand_total) || 0;
@@ -1736,6 +1777,7 @@ export class OrderDetailsPageComponent {
   /** Aviso de saldo (reemplaza Finalizar) en shipped/delivered/processing. */
   readonly showUnpaidBalanceNotice = computed(() => {
     const state = this.order()?.state;
+    if (this.order()?.active_financial_split_id) return false;
     return (
       this.hasUnpaidBalance() &&
       (state === 'shipped' || state === 'delivered' || state === 'processing')
@@ -1830,7 +1872,20 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    const buttons = [...buildOrderActionButtons(order)];
+    // Con división activa la orden principal es solo informativa: se ocultan
+    // las acciones de cobro/factura (el backend las rechaza con
+    // SPLIT_ACCOUNT_LOCKED); todo se cobra por las cuentas.
+    const SPLIT_HIDDEN_BUTTONS = new Set([
+      'pay',
+      'credit-payment',
+      'confirm-payment',
+      'cancel-payment',
+      'ship', // collect_payment ("Pasar a Cobro")
+      'cancel',
+    ]);
+    const buttons = buildOrderActionButtons(order).filter(
+      (b) => !(order.active_financial_split_id && SPLIT_HIDDEN_BUTTONS.has(b.id)),
+    );
 
     // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
     // reparto activo pero sí es elegible. El panel ya no se abre solo.
@@ -2231,6 +2286,7 @@ export class OrderDetailsPageComponent {
   // patch, or for online orders not auto-fireable, the operator can
   // dispatch them from this page).
   private kitchenTicketsService = inject(KitchenTicketsService);
+  protected readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private sanitizer = inject(DomSanitizer);
   // Carril B - B3: SSE del detalle. connect(orderId) en el init del page,
   // disconnect via DestroyRef cuando el componente se destruye. Un effect
@@ -2445,7 +2501,51 @@ export class OrderDetailsPageComponent {
     });
   }
 
+  /** Resumen de la división para la franja informativa de la orden principal. */
+  readonly splitSummary = signal<{ accounts: number; total: number; paid: number } | null>(null);
+
+  /**
+   * Scroll + foco al panel de cuentas (`#splitAccountsAnchor`), mismo patrón
+   * que `focusGestionEnvio`. Espera al siguiente render porque el panel se
+   * monta recién al fijar `showSplitConfig`.
+   */
+  focusSplitAccounts(): void {
+    afterNextRender(
+      () => {
+        const el = document.getElementById('splitAccountsAnchor');
+        if (!el) return;
+        const reduceMotion =
+          window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ??
+          false;
+        el.scrollIntoView({
+          behavior: reduceMotion ? 'auto' : 'smooth',
+          block: 'start',
+        });
+        window.setTimeout(
+          () => el.focus({ preventScroll: true }),
+          reduceMotion ? 0 : 350,
+        );
+      },
+      { injector: this.injector },
+    );
+  }
+
   onFinancialAccountsLoaded(result: SplitResult | null): void {
+    this.splitAccounts.set(result?.accounts ?? []);
+    if (result && result.split_group_id) {
+      const total = Number(result.original_total) || 0;
+      const pending = (result.accounts ?? []).reduce(
+        (sum, a) => sum + (Number(a.remaining_balance) || 0),
+        0,
+      );
+      this.splitSummary.set({
+        accounts: result.accounts?.length ?? 0,
+        total,
+        paid: Math.max(0, total - pending),
+      });
+    } else {
+      this.splitSummary.set(null);
+    }
     this.order.update((order) => order ? { ...order, active_financial_split_id: result?.split_group_id ?? null } : order);
   }
 
@@ -2671,6 +2771,7 @@ export class OrderDetailsPageComponent {
       case 'split-account':
         // QUI-885: abre la configuración de reparto bajo demanda.
         this.showSplitConfig.set(true);
+        this.focusSplitAccounts();
         break;
       case 'generate-dispatch':
         this.openDispatchModal();
@@ -4794,6 +4895,8 @@ export class OrderDetailsPageComponent {
    * clickear el badge "Cocina: <estado>" de un plato disparado a cocina.
    */
   openKdsTicket(ks: { kitchen_ticket_id?: number } | null): void {
+    // Cocina fisica: no hay pantalla KDS a la que navegar.
+    if (this.kitchenTicketPrint.isPhysicalKitchen()) return;
     if (!ks?.kitchen_ticket_id) return;
     void this.router.navigate(['/admin/restaurant-ops/kds'], {
       queryParams: { ticket: ks.kitchen_ticket_id },
@@ -4854,6 +4957,10 @@ export class OrderDetailsPageComponent {
           this.isFiringKitchen.set(false);
           this.clearKitchenSelection();
           this.toastService.success('Enviado a cocina');
+          // No-op en cocina virtual; en fisica imprime la comanda.
+          this.kitchenTicketPrint.printAfterFire(
+            res.kitchen_ticket_ids ?? [res.kitchen_ticket_id],
+          );
           if (res?.stock_warnings?.length) {
             this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
           }
@@ -5175,6 +5282,24 @@ export class OrderDetailsPageComponent {
   );
   readonly resendDisabledReason =
     'Solo un encargado puede reenviar platos a cocina';
+  /** Con división activa los importes quedan fijados: el backend rechaza (409 SPLIT_ACCOUNT_LOCKED) cancelar/reversar ítems y procesar la orden completa. */
+  readonly splitLocked = computed(() => isOrderSplitLocked(this.order()));
+
+  /**
+   * «Procesar orden completa» sigue bloqueado con división activa salvo que
+   * el backend lo ofrezca habilitado (`fast_track`) y todas las cuentas estén
+   * cobradas: entonces ya no hay dinero que mover, sólo cerrar el flujo.
+   */
+  readonly fastTrackSplitBlocked = computed(() => {
+    if (!this.splitLocked()) return false;
+    const entry = this.order()?.available_actions?.find((a) => a.code === 'fast_track');
+    const summary = this.splitSummary();
+    const fullyPaid = !!summary && summary.paid >= summary.total - 0.01;
+    return !(entry?.enabled === true && fullyPaid);
+  });
+  readonly splitLockedReason =
+    'Cuenta dividida: los productos y montos están fijados. Para cambiarlos, quita la división.';
+
   readonly canUseReverseDelivered = computed(() =>
     this.hasNamedPermission('store:orders:order_flow:cancel_delivered'),
   );
@@ -5282,6 +5407,62 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  /** Cocina fisica: items con estado de cocina no terminal, entregables a mano. */
+  readonly deliverableKitchenItems = computed<OrderItem[]>(() =>
+    (this.order()?.order_items ?? []).filter((it) => {
+      if (it.cancelled_at != null || it.delivered_at != null) return false;
+      const st = this.kitchenStateFor(it)?.status;
+      return st === 'pending' || st === 'in_preparation' || st === 'ready';
+    }),
+  );
+
+  readonly deliveringAll = signal(false);
+
+  /**
+   * Cocina fisica: entrega en secuencia cada plato con estado de cocina no
+   * terminal, reutilizando `deliverOrderItem` (misma llamada que `deliverItem`).
+   * Para en el primer error; un solo toast de exito y un solo refreshOrder.
+   */
+  async deliverAllKitchenItems(): Promise<void> {
+    const orderId = this.order()?.id;
+    const items = this.deliverableKitchenItems();
+    if (!orderId || items.length === 0 || this.deliveringAll()) return;
+    this.deliveringAll.set(true);
+    let delivered = 0;
+    try {
+      for (const item of items) {
+        await firstValueFrom(this.ordersFlowService.deliverOrderItem(orderId, item.id));
+        delivered++;
+      }
+      this.toastService.success(
+        delivered === 1 ? '1 plato entregado' : `${delivered} platos entregados`,
+      );
+    } catch (err: unknown) {
+      this.showDeliveryStockError(err, 'No se pudo marcar como entregado');
+      console.error('Deliver all failed', err);
+    } finally {
+      this.deliveringAll.set(false);
+      if (delivered > 0) this.refreshOrder();
+    }
+  }
+
+  /** Ids distintos de tickets de cocina no cancelados de la orden. */
+  readonly printableTicketIds = computed<number[]>(() => {
+    const ids = new Set<number>();
+    for (const it of this.order()?.order_items ?? []) {
+      for (const row of it.kitchen_ticket_items ?? []) {
+        if (row.status === 'cancelled' || row.kitchen_ticket?.status === 'cancelled') continue;
+        ids.add(row.kitchen_ticket_id);
+      }
+    }
+    return Array.from(ids);
+  });
+
+  /** Boton "Imprimir comanda" (solo cocina fisica). */
+  printKitchenTickets(): void {
+    this.kitchenTicketPrint.printTickets(this.printableTicketIds());
+  }
+
   /** Keep every short line visible and offer the first product's inventory settings. */
   private showDeliveryStockError(error: unknown, fallback: string): void {
     const raw = (error as { cause?: unknown } | null)?.cause ?? error;
@@ -5381,6 +5562,7 @@ export class OrderDetailsPageComponent {
    * ítems proyectados, igual que deliver — patrón de `deliverItem`).
    */
   cancelItem(item: OrderItem): void {
+    if (this.splitLocked()) return;
     if (this.cancellationBlockedByPayment()) return;
     if (!this.canCancelItem(item)) return;
     const orderId = this.order()?.id;
@@ -5479,6 +5661,7 @@ export class OrderDetailsPageComponent {
    * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
    */
   reverseDeliveredItem(item: OrderItem): void {
+    if (this.splitLocked()) return;
     if (this.cancellationBlockedByPayment()) return;
     if (!this.canReverseDeliveredItem(item) || !this.canUseReverseDelivered())
       return;
@@ -5826,7 +6009,12 @@ export class OrderDetailsPageComponent {
   readonly canEmitInvoice = computed(() => {
     const code = this.order()?.fiscal_alert_code;
     const emitAllowed = !code || resolveFiscalAlert(code).allowEmitInvoiceCta;
-    return this.reinvoiceable() && this.electronicEmissionLive() && emitAllowed;
+    return (
+      !this.order()?.active_financial_split_id &&
+      this.reinvoiceable() &&
+      this.electronicEmissionLive() &&
+      emitAllowed
+    );
   });
 
   /**
@@ -5864,8 +6052,55 @@ export class OrderDetailsPageComponent {
    * ver qué pasó.
    */
   readonly showElectronicInvoiceCard = computed(
-    () => this.acceptedInvoice() !== null || this.electronicEmissionLive(),
+    () =>
+      (this.acceptedInvoice() !== null ||
+        this.electronicEmissionLive() ||
+        this.accountInvoices().length > 0) &&
+      this.invoiceCards().length > 0,
   );
+
+  /** Facturas de las cuentas de la división (no de la orden). */
+  readonly accountInvoices = computed<OrderAccountInvoice[]>(
+    () => this.order()?.account_invoices ?? [],
+  );
+
+  accountInvoiceTotal(inv: OrderAccountInvoice): number {
+    return Number(inv.grand_total) || 0;
+  }
+
+  /** Estado en español de una factura de cuenta. */
+  accountInvoiceStatusLabel(inv: OrderAccountInvoice): string {
+    if (inv.dian_status === 'accepted') return 'Aceptada DIAN';
+    if (inv.dian_status === 'rejected') return 'Rechazada DIAN';
+    if (inv.dian_status === 'pending') return 'Pendiente DIAN';
+    switch (inv.status) {
+      case 'draft': return 'Borrador';
+      case 'validated': return 'Validada';
+      case 'sent': return 'Enviada';
+      case 'accepted': return 'Aceptada';
+      case 'rejected': return 'Rechazada';
+      default: return 'En proceso';
+    }
+  }
+
+  /** Abre el mismo modal de detalle sobre la factura de una cuenta. */
+  openAccountInvoice(inv: OrderAccountInvoice): void {
+    this.noteDetailStub.set({
+      id: inv.id,
+      organization_id: 0,
+      store_id: 0,
+      invoice_number: inv.invoice_number ?? '',
+      status: inv.status,
+      dian_status: inv.dian_status,
+      subtotal_amount: 0,
+      discount_amount: 0,
+      tax_amount: 0,
+      withholding_amount: 0,
+      total_amount: Number(inv.grand_total) || 0,
+    } as unknown as Invoice);
+    this.invoiceMutatedInModal.set(false);
+    this.showInvoiceDetailModal.set(true);
+  }
 
   /**
    * STUB de `Invoice` para alimentar `vendix-invoice-detail` y
@@ -5945,6 +6180,206 @@ export class OrderDetailsPageComponent {
       hint: null,
     };
   });
+
+  // ── Tarjetas compactas de factura (app-invoice-status-card) ──────────
+
+  /** Cuentas de la división tal como las reportó el panel (`loaded`). */
+  readonly splitAccounts = signal<SplitFinancialAccount[]>([]);
+
+  /** ¿Puede ofrecerse emitir? Mismo criterio que `canEmitInvoice`, sin
+   *  la parte de «orden sin división ni factura vigente». */
+  private readonly emitGate = computed(() => {
+    const code = this.order()?.fiscal_alert_code;
+    const emitAllowed = !code || resolveFiscalAlert(code).allowEmitInvoiceCta;
+    return this.electronicEmissionLive() && emitAllowed;
+  });
+
+  private cardEmitMode(
+    key: string,
+    invoiceId: number | null,
+    status: string | null,
+    dianStatus: string | null,
+  ): InvoiceCardEmitMode {
+    if (!this.emitGate()) return 'none';
+    if (this.emitErrors()[key] || dianStatus === 'error') return 'retry';
+    if (!invoiceId || status === 'draft') return 'emit';
+    return 'none';
+  }
+
+  readonly invoiceCards = computed<InvoiceCardView[]>(() => {
+    const order = this.order();
+    if (!order) return [];
+    const customer = this.customerDisplayName();
+
+    // ── Orden dividida: una tarjeta por cuenta ──
+    if (order.active_financial_split_id) {
+      const byAccount = new Map(
+        this.accountInvoices().map((i) => [i.financial_account_id, i]),
+      );
+      const accounts = this.splitAccounts().filter(
+        (a) => a.role === 'payable' && a.id != null,
+      );
+      const fromAccounts: InvoiceCardView[] = accounts.map((acc): InvoiceCardView => {
+        const accountId = acc.id as number;
+        const key = `acc-${accountId}`;
+        const known = byAccount.get(accountId);
+        const embedded = acc.invoice;
+        const inv: OrderAccountInvoice | null = known
+          ? known
+          : embedded
+            ? {
+                id: embedded.id,
+                invoice_number: embedded.invoice_number,
+                status: embedded.status,
+                dian_status: embedded.dian_status,
+                grand_total: String(embedded.grand_total),
+                financial_account_id: accountId,
+                account_label: acc.label,
+                customer_name: acc.customer_name ?? acc.customer_alias ?? null,
+              }
+            : null;
+        const paid = acc.payment_state === 'paid';
+        return {
+          emitKey: key,
+          accountId,
+          accountInvoice: inv,
+          notes: [],
+          canCreditNote: inv?.dian_status === 'accepted',
+          emitMode: inv
+            ? this.cardEmitMode(key, inv.id, inv.status, inv.dian_status)
+            : paid
+              ? this.cardEmitMode(key, null, null, null)
+              : 'none',
+          data: {
+            key,
+            invoiceId: inv?.id ?? null,
+            invoiceNumber: inv?.invoice_number ?? null,
+            status: inv?.status ?? null,
+            dianStatus: inv?.dian_status ?? null,
+            total: inv ? Number(inv.grand_total) || 0 : Number(acc.grand_total) || 0,
+            customerName:
+              inv?.customer_name ?? acc.customer_name ?? acc.customer_alias ?? null,
+            date: null,
+            accountLabel: acc.label || inv?.account_label || null,
+          },
+        };
+      });
+      if (fromAccounts.length > 0) return fromAccounts;
+      // El panel aún no reportó cuentas: se pintan al menos las facturadas.
+      return this.accountInvoices().map((inv): InvoiceCardView => {
+        const key = `acc-${inv.financial_account_id}`;
+        return {
+          emitKey: key,
+          accountId: inv.financial_account_id,
+          accountInvoice: inv,
+          notes: [],
+          canCreditNote: inv.dian_status === 'accepted',
+          emitMode: this.cardEmitMode(key, inv.id, inv.status, inv.dian_status),
+          data: {
+            key,
+            invoiceId: inv.id,
+            invoiceNumber: inv.invoice_number,
+            status: inv.status,
+            dianStatus: inv.dian_status,
+            total: Number(inv.grand_total) || 0,
+            customerName: inv.customer_name,
+            date: null,
+            accountLabel: inv.account_label,
+          },
+        };
+      });
+    }
+
+    // ── Orden simple: una tarjeta ──
+    const cards: InvoiceCardView[] = [];
+    const invoice = this.orderInvoice();
+    if (invoice) {
+      cards.push({
+        emitKey: 'order',
+        accountId: null,
+        accountInvoice: null,
+        notes: this.invoiceNotes(),
+        canCreditNote: invoice.dian_status === 'accepted',
+        emitMode: this.cardEmitMode(
+          'order',
+          invoice.id ?? null,
+          invoice.status ?? null,
+          invoice.dian_status ?? null,
+        ),
+        data: {
+          key: 'order',
+          invoiceId: invoice.id ?? null,
+          invoiceNumber: invoice.invoice_number,
+          status: invoice.status ?? null,
+          dianStatus: invoice.dian_status ?? null,
+          total: Number(order.grand_total) || 0,
+          customerName: customer,
+          date: invoice.issue_date ?? null,
+          accountLabel: null,
+        },
+      });
+    }
+    if (this.canEmitInvoice() && (!invoice || this.reinvoiceable())) {
+      cards.push({
+        emitKey: 'order-new',
+        accountId: null,
+        accountInvoice: null,
+        notes: [],
+        canCreditNote: false,
+        emitMode: this.emitErrors()['order'] ? 'retry' : 'emit',
+        data: {
+          key: 'order-new',
+          invoiceId: null,
+          invoiceNumber: null,
+          status: null,
+          dianStatus: null,
+          total: Number(order.grand_total) || 0,
+          customerName: customer,
+          date: null,
+          accountLabel: null,
+        },
+      });
+    }
+    return cards;
+  });
+
+  /** Resumen de la división: «2/2 cuentas facturadas · $138.500». */
+  readonly invoiceSplitSummary = computed(() => {
+    if (!this.order()?.active_financial_split_id) return null;
+    const cards = this.invoiceCards();
+    if (cards.length === 0) return null;
+    const invoiced = cards.filter((c) => c.data.invoiceId != null);
+    return {
+      invoiced: invoiced.length,
+      total: cards.length,
+      amount: invoiced.reduce((sum, c) => sum + c.data.total, 0),
+    };
+  });
+
+  /** El «Facturar» de la orden simple vuelve a mostrar el estado en vuelo
+   *  bajo la clave 'order' aunque la tarjeta sea la de «order-new». */
+  cardEmitting(card: InvoiceCardView): boolean {
+    return this.emittingKeys().has(card.emitKey === 'order-new' ? 'order' : card.emitKey);
+  }
+
+  cardError(card: InvoiceCardView): string | null {
+    return this.emitErrors()[card.emitKey === 'order-new' ? 'order' : card.emitKey] ?? null;
+  }
+
+  openCardDetail(card: InvoiceCardView): void {
+    if (card.accountInvoice) this.openAccountInvoice(card.accountInvoice);
+    else this.openInvoiceDetail();
+  }
+
+  downloadCardPdf(card: InvoiceCardView): void {
+    if (card.data.invoiceId) this.downloadPdfById(card.data.invoiceId);
+  }
+
+  printCard(card: InvoiceCardView): void {
+    if (card.data.invoiceId) {
+      this.printInvoiceById(card.data.invoiceId, card.data.invoiceNumber);
+    }
+  }
 
   /** Visibilidad del modal completo de detalle de factura reutilizado del
    *  módulo de facturación. */
@@ -6219,24 +6654,31 @@ export class OrderDetailsPageComponent {
     });
   }
 
-  readonly invoicePdfLoading = signal(false);
+  /** Id de la factura cuyo PDF se está pidiendo (una sola a la vez). */
+  readonly pdfBusyId = signal<number | null>(null);
+  readonly invoicePdfLoading = computed(() => this.pdfBusyId() !== null);
+
+  /** PDF de la factura de la orden (atajo histórico de la tarjeta). */
+  downloadInvoicePdf(): void {
+    // `invoiceStub()` y no `orderInvoice()`: es el que ya exigió el `id`.
+    const invoice = this.invoiceStub();
+    if (invoice) this.downloadPdfById(invoice.id);
+  }
 
   /**
    * Descarga directa del PDF desde la tarjeta, sin pasar por el modal. Mismo
    * endpoint que `InvoiceDetailComponent.downloadPdf()` (`GET :id/pdf`, URL
    * FIRMADA): `invoices.pdf_url` guarda la llave S3, no una URL abrible.
    */
-  downloadInvoicePdf(): void {
-    // `invoiceStub()` y no `orderInvoice()`: es el que ya exigió el `id`.
-    const invoice = this.invoiceStub();
-    if (!invoice || this.invoicePdfLoading()) return;
-    this.invoicePdfLoading.set(true);
+  downloadPdfById(invoiceId: number): void {
+    if (this.pdfBusyId() !== null) return;
+    this.pdfBusyId.set(invoiceId);
     this.invoicingService
-      .getInvoicePdfUrl(invoice.id)
+      .getInvoicePdfUrl(invoiceId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.invoicePdfLoading.set(false);
+          this.pdfBusyId.set(null);
           const url = response?.data?.url;
           if (!url) {
             this.toastService.error('El servidor no devolvió la URL del PDF');
@@ -6250,31 +6692,37 @@ export class OrderDetailsPageComponent {
           }
         },
         error: (err: unknown) => {
-          this.invoicePdfLoading.set(false);
+          this.pdfBusyId.set(null);
           this.toastService.error(parseApiError(err).userMessage);
         },
       });
   }
 
-  readonly invoicePrinting = signal(false);
+  /** Id de la factura que se está imprimiendo (una sola a la vez). */
+  readonly printBusyId = signal<number | null>(null);
+  readonly invoicePrinting = computed(() => this.printBusyId() !== null);
+
+  printInvoiceDocument(): void {
+    const invoice = this.invoiceStub();
+    if (invoice) this.printInvoiceById(invoice.id, invoice.invoice_number);
+  }
 
   /**
    * Imprime la factura por el Print Gateway. Mismo criterio que
    * `InvoiceDetailComponent.printInvoice()`: sin plantilla propia ni fallback
    * local — el servidor resuelve el snapshot fiscal congelado del documento.
    */
-  printInvoiceDocument(): void {
-    const invoice = this.invoiceStub();
-    if (!invoice || this.invoicePrinting()) return;
-    this.invoicePrinting.set(true);
+  printInvoiceById(invoiceId: number, title: string | null): void {
+    if (this.printBusyId() !== null) return;
+    this.printBusyId.set(invoiceId);
     void this.documentPrintService
       .printViaGateway({
         formatType: 'fiscal_electronic_invoice',
-        documentId: invoice.id,
-        title: invoice.invoice_number,
+        documentId: invoiceId,
+        title: title ?? '',
       })
       .then((result) => {
-        this.invoicePrinting.set(false);
+        this.printBusyId.set(null);
         if (!result) {
           this.toastService.error(
             'No se pudo imprimir: revisa el formato «Factura Electrónica (DIAN)» en el Hub de formatos de impresión.',
@@ -6282,12 +6730,34 @@ export class OrderDetailsPageComponent {
         }
       })
       .catch((err: unknown) => {
-        this.invoicePrinting.set(false);
+        this.printBusyId.set(null);
         this.toastService.error(parseApiError(err).userMessage);
       });
   }
 
-  isEmittingInvoice = signal(false);
+  /** Claves de tarjeta con una emisión en vuelo (anti doble clic). */
+  readonly emittingKeys = signal<ReadonlySet<string>>(new Set<string>());
+  /** Último error de emisión por tarjeta: activa «Reintentar». */
+  readonly emitErrors = signal<Readonly<Record<string, string>>>({});
+  readonly isEmittingInvoice = computed(() => this.emittingKeys().has('order'));
+
+  private setEmitting(key: string, on: boolean): void {
+    this.emittingKeys.update((current) => {
+      const next = new Set(current);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  private setEmitError(key: string, message: string | null): void {
+    this.emitErrors.update((current) => {
+      const next = { ...current };
+      if (message) next[key] = message;
+      else delete next[key];
+      return next;
+    });
+  }
 
   /**
    * B5 — La guarda de facturación rechazó por copia incoherente del impuesto
@@ -6301,47 +6771,78 @@ export class OrderDetailsPageComponent {
   readonly isRepairingShippingTax = signal(false);
 
   /**
-   * Emite la factura electrónica de venta a partir de ESTA orden.
+   * Emite la factura electrónica de venta de ESTA orden en un clic
+   * (`POST store/invoicing/orders/:id/emit`: crea, valida y envía).
    *
-   * `createFromOrder`, no `createFromSalesOrder`: son endpoints distintos sobre
-   * tablas distintas. `from-sales-order/:id` resuelve contra `sales_orders`
-   * —una tabla que en producto no tiene ningún camino de creación—, así que
-   * pasarle el id de una `orders` devolvía 404 en el mejor caso y, en el peor,
-   * facturaba un documento ajeno cuyo id coincidiera. El botón vive en el
-   * detalle de una ORDEN; el endpoint correcto es el de órdenes.
+   * Es el endpoint de orden, no `from-sales-order` (tabla `sales_orders` sin
+   * camino de creación en producto). Con división activa se factura por cuenta.
    */
   createInvoiceFromOrder(): void {
     if (this.order()?.active_financial_split_id) { this.toastService.info('Crea la factura desde cada cuenta independiente.'); return; }
-    if (!this.orderId || this.hasSalesInvoice() || this.isEmittingInvoice()) return;
-    this.isEmittingInvoice.set(true);
-    this.invoicingService
-      .createFromOrder(Number(this.orderId))
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.isEmittingInvoice.set(false);
-          // `success: false` con HTTP 2xx es un caso real de este backend:
-          // `responseService.error()` RETORNA el sobre en vez de lanzarlo, así
-          // que llega por `next`. Sin esta rama el spinner se apagaba y no
-          // pasaba absolutamente nada en pantalla.
-          if (!response?.success) {
-            this.toastService.error(
-              parseApiError(response).userMessage ||
-                'No se pudo emitir la factura de venta',
-            );
-            return;
-          }
-          this.toastService.success('Factura de venta emitida');
-          this.shippingTaxRepairNeeded.set(false);
-          this.loadData();
-        },
-        error: (err: unknown) => {
-          this.isEmittingInvoice.set(false);
-          // NO `err.message`: en un `HttpErrorResponse` esa propiedad es
-          // siempre la cadena sintética de Angular ("Http failure response
-          // for …: 500 Internal Server Error"), nunca el mensaje del backend.
-          const parsed = parseApiError(err);
-          const invoiceNumber = parsed.details?.invoice_number;
+    if (!this.orderId || this.hasSalesInvoice()) return;
+    this.runEmit('order', null);
+  }
+
+  /** Acción «Facturar» / «Reintentar» de una tarjeta de factura. */
+  emitFromCard(card: InvoiceCardView): void {
+    if (card.accountId == null && this.hasSalesInvoice()) return;
+    this.runEmit(card.emitKey === 'order-new' ? 'order' : card.emitKey, card.accountId);
+  }
+
+  /**
+   * Un solo camino para orden completa y cuenta de la división. El estado en
+   * vuelo vive por clave de tarjeta: dos clics seguidos no disparan dos
+   * emisiones y el botón conserva su tamaño (el spinner es el ícono).
+   */
+  private runEmit(key: string, accountId: number | null): void {
+    if (this.emittingKeys().has(key)) return;
+    const orderId = Number(this.orderId);
+    if (accountId == null && !orderId) return;
+    const request$ =
+      accountId != null
+        ? this.invoicingService.emitFinancialAccount(accountId)
+        : this.invoicingService.emitOrder(orderId);
+    this.setEmitting(key, true);
+    this.setEmitError(key, null);
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
+        this.setEmitting(key, false);
+        // `success: false` con HTTP 2xx es un caso real de este backend
+        // (`responseService.error()` RETORNA el sobre): llega por `next`.
+        if (!response?.success || !response.data) {
+          const message =
+            parseApiError(response).userMessage ||
+            'No se pudo emitir la factura de venta';
+          this.setEmitError(key, message);
+          this.toastService.error(message);
+          return;
+        }
+        const result = response.data;
+        if (result.state === 'issued') {
+          this.toastService.success(
+            result.invoice_number
+              ? `Factura ${result.invoice_number} emitida`
+              : 'Factura de venta emitida',
+          );
+          if (accountId == null) this.shippingTaxRepairNeeded.set(false);
+        } else if (result.state === 'pending') {
+          this.toastService.info(
+            result.message || 'La factura quedó en proceso ante la DIAN.',
+          );
+        } else {
+          const message = result.message || 'No se pudo emitir la factura';
+          this.setEmitError(key, message);
+          this.toastService.error(message);
+        }
+        // Issued / pending / failed pueden haber creado o movido el documento.
+        this.loadData();
+      },
+      error: (err: unknown) => {
+        this.setEmitting(key, false);
+        // NO `err.message`: en un `HttpErrorResponse` es la cadena sintética
+        // de Angular, nunca el mensaje del backend.
+        const parsed = parseApiError(err);
+        if (accountId == null) {
           // B5 — La guarda rechazó por copia incoherente del impuesto del
           // envío: ofrecer la reparación. Solo este rechazo la muestra.
           const guardDetail: unknown = parsed.details?.detail;
@@ -6351,6 +6852,7 @@ export class OrderDetailsPageComponent {
             guardDetail.startsWith('shipping_tax:');
           this.shippingTaxRepairNeeded.set(shippingTaxRejected);
           if (shippingTaxRejected) {
+            this.setEmitError(key, parsed.userMessage);
             this.toastService.show({
               description: parsed.userMessage,
               variant: 'error',
@@ -6362,13 +6864,15 @@ export class OrderDetailsPageComponent {
             });
             return;
           }
-          this.toastService.error(
-            invoiceNumber
-              ? `Esta orden ya tiene la factura ${invoiceNumber}. Anúlala antes de emitir otra.`
-              : parsed.userMessage,
-          );
-        },
-      });
+        }
+        const invoiceNumber = parsed.details?.invoice_number;
+        const message = invoiceNumber
+          ? `Esta orden ya tiene la factura ${invoiceNumber}. Anúlala antes de emitir otra.`
+          : parsed.userMessage;
+        this.setEmitError(key, message);
+        this.toastService.error(message);
+      },
+    });
   }
 
   /**

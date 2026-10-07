@@ -250,7 +250,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_HAS_RESERVATIONS_001:
     'Esta operación está bloqueada porque existen reservas de stock activas.',
   PROD_SKU_COLLISION_001:
-    'El SKU especificado ya existe en una variante de esta tienda.',
+    'El SKU ya lo usa otro producto activo o inactivo de esta tienda.',
   INV_VARIANT_TRACKING_001:
     'El valor de override de seguimiento de inventario no es válido.',
 

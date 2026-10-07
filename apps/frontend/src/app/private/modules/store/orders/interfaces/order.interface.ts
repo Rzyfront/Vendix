@@ -179,6 +179,11 @@ export interface Order {
    */
   invoices?: OrderInvoiceSnapshot[];
   /**
+   * Facturas de las cuentas de una división financiera (sin canceladas ni
+   * anuladas). `invoices` trae SOLO las de la orden.
+   */
+  account_invoices?: OrderAccountInvoice[];
+  /**
    * Release-854 follow-up: `sales_invoice` vigente de la orden, calculada
    * por el backend con el mismo filtro que la guarda de `update()`
    * (`orders.service.ts`, helper `findActiveSalesInvoice`). `null` = sin
@@ -299,6 +304,17 @@ export interface OrderInvoiceSnapshot {
   transmission_status?: OrderInvoiceTransmissionStatus;
   send_status?: OrderInvoiceSendStatus;
   issue_date?: string;
+}
+
+export interface OrderAccountInvoice {
+  id: number;
+  invoice_number: string | null;
+  status: string;
+  dian_status: string | null;
+  grand_total: string;
+  financial_account_id: number;
+  account_label: string | null;
+  customer_name: string | null;
 }
 
 export interface OrderTableSession {
@@ -535,6 +551,9 @@ export interface Payment {
   };
   created_at: string;
   updated_at: string;
+  /** Cuenta de la división financiera a la que pertenece el pago. */
+  financial_account_id?: number | null;
+  financial_account_label?: string | null;
   store_payment_method_id?: number;
   /**
    * Payment-method relation. This — not `gateway_response.metadata` — is where

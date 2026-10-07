@@ -323,6 +323,19 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       } as any);
     });
 
+    it('rejects with SPLIT_ACCOUNT_LOCKED and does not confirm when the order has an active financial split', async () => {
+      const locked = payment('pending', 0);
+      (locked.orders as any).active_financial_split_id = 4;
+      prismaMock.payments.findFirst.mockResolvedValue(locked);
+      prismaMock.payments.update.mockClear();
+
+      const error: any = await service.confirmPayment(sessionId, paymentId).catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    });
+
     it('projects a settled check only after the payment transaction commits', async () => {
       prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40));
       prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
@@ -2202,7 +2215,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         where: { order_id: ORDER_ID },
       }));
       expect(prismaMock.invoices.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { order_id: ORDER_ID, store_id: STORE_ID },
+        where: { order_id: ORDER_ID, store_id: STORE_ID, financial_account_id: null },
       }));
       expect(prismaMock.table_sessions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({

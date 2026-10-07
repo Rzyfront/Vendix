@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createCanvas, type Canvas } from '@napi-rs/canvas';
 import * as path from 'node:path';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 export interface ReceivedDocumentSourceFile {
   buffer: Buffer;

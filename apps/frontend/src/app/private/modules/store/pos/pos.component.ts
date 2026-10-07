@@ -62,7 +62,7 @@ import {
   deliveryTypeToEntregaChoice,
 } from './models/cart.model';
 import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
-import type { SplitSourceItem } from '../restaurant-ops/tables/interfaces';
+import type { SplitResult, SplitSourceItem } from '../restaurant-ops/tables/interfaces';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
 import { environment } from '../../../../../environments/environment';
@@ -93,6 +93,7 @@ import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
+import { KitchenTicketPrintService } from '../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../dispatch-ticket/models/dispatch-ticket-data.model';
 import {
@@ -215,7 +216,7 @@ export function resolvePosPaymentCustomerName(
           <app-button variant="outline" size="sm" (clicked)="showSplitAccounts.set(true)">Dividir / cobrar cuentas</app-button>
         </div>
       }
-      <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" />
+      <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" (splitCompleted)="onSplitAccountsCompleted($event)" />
 
       <!-- Main POS Interface: Two flush columns directly at root (Stitch favorite design) -->
       <div
@@ -363,6 +364,7 @@ export function resolvePosPaymentCustomerName(
             [isQuotationMode]="isQuotationMode()"
             [isLayawayMode]="isLayawayMode()"
             [readyToPayOrder]="readyToPayOrder()"
+            [hasFinancialSplit]="hasFinancialSplit()"
             [isCharging]="isCharging()"
             [cashRegisterEnabled]="cashRegisterEnabled()"
             (cashOpenClicked)="showSessionOpenModal.set(true)"
@@ -373,6 +375,7 @@ export function resolvePosPaymentCustomerName(
             (saveDraft)="onSaveDraft()"
             (checkout)="onCheckout()"
             (charge)="onCharge()"
+            (chargeAccounts)="showSplitAccounts.set(true)"
             (quote)="onQuote()"
             (layaway)="onLayaway()"
             (customerSelected)="onCustomerSelected($event)"
@@ -1029,6 +1032,19 @@ export class PosComponent {
     const rows = this.restaurantIntegration.currentTableSession()?.order?.order_items ?? this.editingOrder()?.order_items ?? this.readyToPayOrder()?.order_items ?? [];
     return rows.map((item) => ({ id: Number(item.id), product_name: item.product_name, quantity: Number(item.quantity), cancelled_at: item.cancelled_at ?? null }));
   });
+  /** Resultado de la última consulta de división de la orden (restaurante). */
+  private readonly splitProbe = signal<{ orderId: number; active: boolean } | null>(null);
+  /**
+   * La orden cargada/guardada tiene división financiera: la orden principal es
+   * solo informativa y se cobra únicamente por cuentas (el backend responde 409
+   * SPLIT_ACCOUNT_LOCKED al cobrarla), así que ningún camino del POS la cobra.
+   */
+  readonly hasFinancialSplit = computed(() => {
+    if (this.editingOrder()?.active_financial_split_id || this.readyToPayOrder()?.active_financial_split_id) return true;
+    const id = this.splitSourceOrderId();
+    const probe = this.splitProbe();
+    return !!id && probe?.orderId === id && probe.active;
+  });
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
   /**
@@ -1233,6 +1249,7 @@ export class PosComponent {
   protected restaurantIntegration = inject(PosRestaurantIntegrationService);
   // Phase D.3 — settings facade + payment catalog are read-only inputs here.
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private readonly paymentMethodsCatalogService = inject(
     PaymentMethodsCatalogService,
   );
@@ -1343,6 +1360,26 @@ export class PosComponent {
     // existed and simply had no producer; this is it. Pushed from an effect so
     // the snapshot is current at send time, and cleared on destroy because a
     // cart reported from a screen the user already left is worse than none.
+    // División financiera: el objeto de la orden no siempre trae
+    // `active_financial_split_id` (mesa abierta, orden guardada), así que se
+    // consulta una vez por orden y al abrir/cerrar el modal de cuentas.
+    effect(() => {
+      const orderId = this.splitSourceOrderId();
+      this.showSplitAccounts();
+      if (!orderId || !this.restaurantIntegration.isRestaurantMode()) return;
+      this.restaurantIntegration
+        .getFinancialSplit(orderId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (result) => {
+            if (this.splitSourceOrderId() === orderId) {
+              this.splitProbe.set({ orderId, active: !!result?.split_group_id });
+            }
+          },
+          error: () => undefined,
+        });
+    });
+
     effect(() => {
       const summary = this.cartSummary();
       const customer = this.selectedCustomer();
@@ -2234,6 +2271,9 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                this.kitchenTicketPrint.printAfterFire(
+                  fireResult.kitchen_ticket_ids ?? [fireResult.kitchen_ticket_id],
+                );
                 if (fireResult.stock_warnings?.length) {
                   this.toastService.warning(
                     formatStockWarningSummary(fireResult.stock_warnings),
@@ -2339,6 +2379,9 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                this.kitchenTicketPrint.printAfterFire(
+                  fireResult.kitchen_ticket_ids ?? [fireResult.kitchen_ticket_id],
+                );
                 if (fireResult.stock_warnings?.length) {
                   this.toastService.warning(
                     formatStockWarningSummary(fireResult.stock_warnings),
@@ -2431,7 +2474,17 @@ export class PosComponent {
     return 'llevar';
   }
 
+  onSplitAccountsCompleted(result: SplitResult): void {
+    const orderId = this.splitSourceOrderId();
+    if (orderId) this.splitProbe.set({ orderId, active: !!result?.split_group_id });
+  }
+
   onCheckout(): void {
+    if (this.hasFinancialSplit()) {
+      this.showCartModal.set(false);
+      this.showSplitAccounts.set(true);
+      return;
+    }
     if (!this.cartState() || this.isEmpty) return;
 
     // CP-POS-MODAL-SCOPE-001 / Phase A.4 — edit mode now opens the shell
@@ -2490,6 +2543,11 @@ export class PosComponent {
    * a stale method set. No navigation. No new modal definition.
    */
   onCharge(): void {
+    if (this.hasFinancialSplit()) {
+      this.showCartModal.set(false);
+      this.showSplitAccounts.set(true);
+      return;
+    }
     // CP-POS-MODAL-SCOPE-001 / Phase A.4 — when editing, route the Cobrar
     // CTA through the shell (mode='edit') so the cashier re-validates
     // cliente + payment before POST flow/pay. The shell still falls back to
@@ -2812,6 +2870,10 @@ export class PosComponent {
       if (fireInfo && Number(fireInfo.fired_count) > 0) {
         this.toastService.success(
           `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
+        );
+        this.kitchenTicketPrint.printAfterFire(
+          fireInfo.kitchen_ticket_ids ??
+            (fireInfo.kitchen_ticket_id != null ? [fireInfo.kitchen_ticket_id] : []),
         );
       }
 
@@ -3782,6 +3844,10 @@ export class PosComponent {
       if (fireInfo && Number(fireInfo.fired_count) > 0) {
         this.toastService.success(
           `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
+        );
+        this.kitchenTicketPrint.printAfterFire(
+          fireInfo.kitchen_ticket_ids ??
+            (fireInfo.kitchen_ticket_id != null ? [fireInfo.kitchen_ticket_id] : []),
         );
       }
 

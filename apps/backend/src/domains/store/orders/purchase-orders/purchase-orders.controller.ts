@@ -32,6 +32,7 @@ import { ConfigurePaymentPlanDto } from './dto/configure-payment-plan.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { CostPreviewDto } from './dto/cost-preview.dto';
+import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
 import {
   RevalidateInvoiceDto,
   REVALIDATE_CONSOLIDATED_MAX_BYTES,
@@ -536,6 +537,17 @@ export class PurchaseOrdersController {
   async getCostPreview(@Body() dto: CostPreviewDto) {
     const result = await this.purchaseOrdersService.getCostPreview(dto);
     return this.responseService.success(result, 'Preview de costos obtenido');
+  }
+
+  // Estática: declarada antes de cualquier `@Post(':id/...')`.
+  @Post('new-item-conflicts')
+  @Permissions('store:orders:purchase_orders:read')
+  async getNewItemConflicts(@Body() dto: NewItemConflictsDto) {
+    const result = await this.purchaseOrdersService.findNewItemConflicts(dto);
+    return this.responseService.success(
+      result,
+      'Conflictos de líneas nuevas obtenidos',
+    );
   }
 
   // ===== Sub-resource routes (BEFORE :id to avoid route conflicts) =====

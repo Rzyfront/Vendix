@@ -677,7 +677,7 @@ export class OrdersBulkService {
         // consulta— es lo que le permite exigirla en vez de tratar su ausencia
         // como "aceptada", que sería afirmar validación DIAN por defecto.
         invoices: {
-          where: { dian_status: 'accepted' },
+          where: { dian_status: 'accepted', financial_account_id: null },
           select: { invoice_number: true, cufe: true, dian_status: true },
           orderBy: { id: 'desc' },
           take: 1,

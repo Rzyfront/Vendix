@@ -26,7 +26,7 @@ import {
   CommitMemberResult,
 } from './dto/scan-roster.dto';
 import { UpsertMemberProfileDto } from './dto/upsert-member-profile.dto';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * MemberBulkScannerService — backend of the "Carga masiva de socios por IA"

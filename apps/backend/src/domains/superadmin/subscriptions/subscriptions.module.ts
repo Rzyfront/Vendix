@@ -26,6 +26,8 @@ import { SubscriptionsStatsService } from './services/stats.service';
 import { SubscriptionMetricsController } from './controllers/metrics.controller';
 import { SubscriptionMetricsService } from './services/subscription-metrics.service';
 import { ManualPaymentController } from './controllers/manual-payment.controller';
+import { StorePlanActivationController } from './controllers/store-plan-activation.controller';
+import { StorePlanActivationService } from './services/store-plan-activation.service';
 import { PlatformGatewayModule } from './gateway/gateway.module';
 import { SubscriptionFiscalModule } from './fiscal/subscription-fiscal.module';
 
@@ -51,6 +53,7 @@ import { SubscriptionFiscalModule } from './fiscal/subscription-fiscal.module';
     SubscriptionsStatsController,
     SubscriptionMetricsController,
     ManualPaymentController,
+    StorePlanActivationController,
   ],
   providers: [
     PlansService,
@@ -62,6 +65,7 @@ import { SubscriptionFiscalModule } from './fiscal/subscription-fiscal.module';
     EventsService,
     SubscriptionsStatsService,
     SubscriptionMetricsService,
+    StorePlanActivationService,
   ],
   exports: [
     PlansService,

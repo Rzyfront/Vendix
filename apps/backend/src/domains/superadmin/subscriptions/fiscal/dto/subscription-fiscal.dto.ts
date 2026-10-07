@@ -662,8 +662,11 @@ const MvpV1_OPERATION_TYPES = ['10', '09', '11', '12'] as const;
 export type MvpV1OperationType = (typeof MvpV1_OPERATION_TYPES)[number];
 
 /**
- * Roles de withholding: practiced (VENDIX retiene al cliente), suffered
- * (VENDIX sufre retención del cliente), self (auto-retención).
+ * Roles de withholding vistos desde la PLATAFORMA como EMISORA de la factura
+ * de venta: `suffered` = el adquiriente (cliente) le retiene a la plataforma
+ * (activo 1355xx; es la única que resta del NETO A PAGAR del cliente);
+ * `self` = autorretención de la plataforma (no resta del neto); `practiced` =
+ * la plataforma retiene a un proveedor (no aplica a una factura de venta).
  */
 const MvpV1_WITHHOLDING_ROLES = ['practiced', 'suffered', 'self'] as const;
 export type MvpV1WithholdingRole = (typeof MvpV1_WITHHOLDING_ROLES)[number];
@@ -815,8 +818,10 @@ export class MvpV1InvoiceLineTaxDto {
   @IsIn(MvpV1_TAX_TYPES as unknown as string[])
   tax_type!: MvpV1TaxType;
 
+  // Hasta 6 decimales: una tarifa por mil (ReteICA/ICA 9,66‰ = 0.00966) no
+  // cabe en 4 y daba un 400 de validación.
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 4 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   @Max(1, { message: 'rate debe ser fracción entre 0 y 1 (0.19 = 19%)' })
   rate!: number;

@@ -20,7 +20,7 @@ import {
   RouteSheetScanResult,
   RouteSheetScanStop,
 } from './dto/scan-route-sheet.dto';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * Route-sheet AI scanner.

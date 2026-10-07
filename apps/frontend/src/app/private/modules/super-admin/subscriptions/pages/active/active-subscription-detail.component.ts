@@ -11,6 +11,7 @@ import {
   BadgeComponent,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { ActivatePlanModalComponent } from '../../components/activate-plan-modal/activate-plan-modal.component';
 
 @Component({
   selector: 'app-active-subscription-detail',
@@ -23,6 +24,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
     BadgeComponent,
     CurrencyPipe,
     DatePipe,
+    ActivatePlanModalComponent,
   ],
   template: `
     <div class="w-full max-w-5xl mx-auto p-2 md:p-4 space-y-4">
@@ -36,14 +38,26 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
           <span>Volver</span>
         </button>
         @if (subscription()?.id) {
-          <app-button
-            variant="primary"
-            size="sm"
-            (clicked)="goToEvents()"
-          >
-            <app-icon slot="icon" name="activity" [size]="16"></app-icon>
-            Ver eventos
-          </app-button>
+          <div class="flex items-center gap-2">
+            @if (subscription()?.store_id) {
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="isActivateOpen.set(true)"
+              >
+                <app-icon slot="icon" name="credit-card" [size]="16"></app-icon>
+                Activar / cambiar plan
+              </app-button>
+            }
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="goToEvents()"
+            >
+              <app-icon slot="icon" name="activity" [size]="16"></app-icon>
+              Ver eventos
+            </app-button>
+          </div>
         }
       </div>
 
@@ -125,6 +139,15 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
         }
       }
     </div>
+
+    @if (subscription()?.store_id) {
+      <app-activate-plan-modal
+        [(isOpen)]="isActivateOpen"
+        [storeId]="subscription().store_id"
+        [storeName]="subscription().store?.name ?? ''"
+        (activated)="onPlanActivated()"
+      ></app-activate-plan-modal>
+    }
   `,
 })
 export class ActiveSubscriptionDetailComponent {
@@ -135,6 +158,7 @@ export class ActiveSubscriptionDetailComponent {
 
   readonly subscription = signal<any>(null);
   readonly loading = signal(true);
+  readonly isActivateOpen = signal(false);
 
   constructor() {
     const id = this.route.snapshot.paramMap.get('id');
@@ -157,6 +181,11 @@ export class ActiveSubscriptionDetailComponent {
         },
         error: () => this.loading.set(false),
       });
+  }
+
+  onPlanActivated(): void {
+    const id = this.subscription()?.id ?? this.route.snapshot.paramMap.get('id');
+    if (id) this.load(String(id));
   }
 
   goToEvents(): void {

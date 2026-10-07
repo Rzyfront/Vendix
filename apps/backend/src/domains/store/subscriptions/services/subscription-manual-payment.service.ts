@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { SubscriptionStateService } from './subscription-state.service';
 import { SubscriptionPaymentService } from './subscription-payment.service';
+import { SubscriptionResolverService } from './subscription-resolver.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
@@ -17,6 +18,7 @@ export class SubscriptionManualPaymentService {
     private readonly stateService: SubscriptionStateService,
     private readonly paymentService: SubscriptionPaymentService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly resolver: SubscriptionResolverService,
   ) {}
 
   async recordManualPayment(
@@ -26,6 +28,12 @@ export class SubscriptionManualPaymentService {
       paidAt: Date;
       amount: Prisma.Decimal;
       recordedByUserId: number;
+      /** Base period end handed to the reactivation seam (optional). */
+      periodEnd?: Date;
+      /** Plan whose billing cycle governs the derived period (optional). */
+      planId?: number;
+      /** Merged into payment metadata and the `manual_payment` event payload. */
+      extraMetadata?: Record<string, unknown>;
     },
   ): Promise<void> {
     const result = await this.prisma.$transaction(async (tx: any) => {
@@ -62,6 +70,7 @@ export class SubscriptionManualPaymentService {
             manual_payment: true,
             recorded_by_user_id: opts.recordedByUserId,
             bank_reference: opts.bankReference,
+            ...(opts.extraMetadata ?? {}),
             excess_amount: excess.greaterThan(DECIMAL_ZERO)
               ? excess.toFixed(2)
               : null,
@@ -102,24 +111,29 @@ export class SubscriptionManualPaymentService {
         );
       }
 
-      // Try promoting the subscription state (recovery from dunning etc.)
+      // Promote the subscription through the single reactivation seam. NO
+      // try/catch: if the store cannot be left operational the whole
+      // transaction (payment + invoice) must abort, never report a success on
+      // a store that stays blocked.
+      let operational: { finalState: string; path: string[] } | null = null;
+      const fromState: string | null =
+        invoice.store_subscription?.state ?? null;
       if (invoice.store_id) {
-        try {
-          await this.stateService.transitionInTx(
-            tx,
-            invoice.store_id,
-            'active',
-            {
-              reason: `manual_payment_invoice_${invoiceId}`,
-              triggeredByUserId: opts.recordedByUserId,
-              payload: { manual_payment: true, invoice_id: invoiceId },
+        operational = await this.stateService.ensureOperationalInTx(
+          tx,
+          invoice.store_id,
+          {
+            reason: `manual_payment_invoice_${invoiceId}`,
+            triggeredByUserId: opts.recordedByUserId,
+            periodEnd: opts.periodEnd,
+            planId: opts.planId,
+            payload: {
+              manual_payment: true,
+              invoice_id: invoiceId,
+              ...(opts.extraMetadata ?? {}),
             },
-          );
-        } catch (err) {
-          this.logger.warn(
-            `State promotion failed for manual payment invoice ${invoiceId}: ${(err as Error).message}`,
-          );
-        }
+          },
+        );
       }
 
       await tx.subscription_events.create({
@@ -133,16 +147,59 @@ export class SubscriptionManualPaymentService {
             amount: paidAmount.toFixed(2),
             excess: excess.greaterThan(DECIMAL_ZERO) ? excess.toFixed(2) : null,
             recorded_by_user_id: opts.recordedByUserId,
+            ...(opts.extraMetadata ?? {}),
           } as Prisma.InputJsonValue,
         },
       });
 
       return {
+        operational,
+        fromState,
         paymentId: payment.id,
         subscriptionId: invoice.store_subscription_id,
         storeId: invoice.store_id,
       };
     });
+
+    // Post-commit side effects of the reactivation (same pattern as
+    // `ensureOperational`): cache invalidation + state-changed event.
+    if (result.storeId && result.operational?.path.length) {
+      try {
+        await this.resolver.invalidate(result.storeId);
+      } catch (error) {
+        this.logger.warn(
+          `resolver.invalidate failed for manual payment invoice ${invoiceId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      try {
+        this.eventEmitter.emit('subscription.state.changed', {
+          storeId: result.storeId,
+          fromState: result.fromState,
+          toState: result.operational.finalState,
+          reason: `manual_payment_invoice_${invoiceId}`,
+          triggeredByUserId: opts.recordedByUserId,
+          path: result.operational.path,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `subscription.state.changed emit failed for manual payment invoice ${invoiceId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    try {
+      await this.paymentService.enqueueCommissionAccrualPostCommit(invoiceId);
+    } catch (error) {
+      this.logger.error(
+        `COMMISSION_ENQUEUE_FAILED manual payment invoice ${invoiceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
 
     try {
       this.eventEmitter.emit('subscription.payment.succeeded', {

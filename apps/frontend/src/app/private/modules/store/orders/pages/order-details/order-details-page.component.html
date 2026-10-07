@@ -1,4 +1,59 @@
 <div>
+  <!-- Primera carga (aún no hay orden): spinner centrado del sistema. Las
+       recargas con la orden visible NO insertan ni quitan bloques: se pinta un
+       overlay sobre el contenido (ver el final del bloque `order()`). -->
+  @if (isLoading() && !order()) {
+    <div class="flex min-h-64 items-center justify-center">
+      <app-spinner size="xl" text="Cargando orden…" />
+    </div>
+  }
+
+  <!-- Error State -->
+  @if (error) {
+    <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+      <div class="flex">
+        <div class="text-red-500 mr-3">
+          <app-icon
+            name="alert-triangle"
+            size="24"
+            class="text-red-500"
+          ></app-icon>
+        </div>
+        <div>
+          <h3 class="text-red-800 font-medium">Error</h3>
+          <p class="text-red-600">{{ error }}</p>
+          <app-button
+            variant="outline"
+            (clicked)="loadData()"
+            customClasses="mt-2 !text-red-700 !border-red-300 hover:!bg-red-50"
+          >
+            Intentar de nuevo
+          </app-button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Content when loaded -->
+  @if (order(); as orderData) {
+   <div class="relative" [attr.aria-busy]="isLoading()">
+    <!-- Sticky Header Component -->
+    <app-sticky-header
+      [title]="headerTitle()"
+      [subtitle]="headerSubtitle()"
+      icon="shopping-cart"
+      [showBackButton]="true"
+      backRoute="/admin/orders"
+      [badgeText]="headerBadgeText()"
+      [badgeColor]="headerBadgeColor()"
+      [backQueryParams]="listReturnQuery()"
+      [actions]="headerActions()"
+      (actionClicked)="onHeaderAction($event)"
+    ></app-sticky-header>
+
+    <!-- Avisos de la orden: DEBAJO del sticky header y dentro del contenido,
+         para que al aparecer/desaparecer no empujen el encabezado. -->
+    <div class="max-w-[1600px] mx-auto mt-3">
   <!-- C.9 CP-pos-exclusive-tax-double-charge — banner de alerta fiscal derivado
        del diccionario (`orders/utils/fiscal-alert-dictionary.ts`), nunca copy
        fijo: `fiscal_alert_code` lo fija el auto-envío del webhook cuando la
@@ -151,61 +206,15 @@
       </div>
     </div>
   }
-
-  <!-- Loading State -->
-  @if (isLoading()) {
-    <div class="flex justify-center items-center h-64">
-      <div
-        class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"
-      ></div>
     </div>
-  }
-
-  <!-- Error State -->
-  @if (error) {
-    <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-      <div class="flex">
-        <div class="text-red-500 mr-3">
-          <app-icon
-            name="alert-triangle"
-            size="24"
-            class="text-red-500"
-          ></app-icon>
-        </div>
-        <div>
-          <h3 class="text-red-800 font-medium">Error</h3>
-          <p class="text-red-600">{{ error }}</p>
-          <app-button
-            variant="outline"
-            (clicked)="loadData()"
-            customClasses="mt-2 !text-red-700 !border-red-300 hover:!bg-red-50"
-          >
-            Intentar de nuevo
-          </app-button>
-        </div>
-      </div>
-    </div>
-  }
-
-  <!-- Content when loaded -->
-  @if (order(); as orderData) {
-    <!-- Sticky Header Component -->
-    <app-sticky-header
-      [title]="headerTitle()"
-      [subtitle]="headerSubtitle()"
-      icon="shopping-cart"
-      [showBackButton]="true"
-      backRoute="/admin/orders"
-      [badgeText]="headerBadgeText()"
-      [badgeColor]="headerBadgeColor()"
-      [backQueryParams]="listReturnQuery()"
-      [actions]="headerActions()"
-      (actionClicked)="onHeaderAction($event)"
-    ></app-sticky-header>
 
     @if (orderData.active_financial_split_id || (showSplitConfig() && canCreateFinancialSplit())) {
-      <div class="max-w-[1600px] mx-auto mb-4">
-        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+      <div
+        id="splitAccountsAnchor"
+        tabindex="-1"
+        class="max-w-[1600px] mx-auto mb-4 outline-none scroll-mt-24"
+      >
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" [showCancel]="true" (cancelled)="showSplitConfig.set(false)" />
       </div>
     }
 
@@ -733,6 +742,15 @@
               </span>
             </div>
 
+            @if (splitLocked()) {
+              <p
+                class="mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                data-testid="split-locked-reason"
+              >
+                <app-icon name="split" [size]="14" class="mt-0.5 shrink-0" />
+                <span>{{ splitLockedReason }}</span>
+              </p>
+            }
             <div class="space-y-1 items-compact">
               @for (item of orderData.order_items; track item.id) {
                 <div
@@ -796,22 +814,33 @@
                            state badge. Renders only for items that were
                            actually fired to the kitchen. -->
                       @if (kitchenStateFor(item); as ks) {
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 cursor-pointer hover:opacity-80 transition-opacity"
-                          [class]="kitchenBadgeClass(ks)"
-                          [attr.title]="
-                            (ks.kitchen_ticket_id
-                              ? 'Ver ticket #' + ks.kitchen_ticket_id + ' en el KDS'
-                              : 'Ver en el KDS')
-                          "
-                          [disabled]="!ks.kitchen_ticket_id"
-                          (click)="openKdsTicket(ks)"
-                        >
-                          <app-icon name="flame" [size]="10" />
-                          Cocina: {{ kitchenStateLabel(ks) }}
-                          <app-icon name="arrow-right" [size]="10" />
-                        </button>
+                        @if (kitchenTicketPrint.isPhysicalKitchen()) {
+                          <!-- Cocina fisica: no hay KDS al que navegar. -->
+                          <span
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1"
+                            [class]="kitchenBadgeClass(ks)"
+                          >
+                            <app-icon name="flame" [size]="10" />
+                            Cocina: {{ kitchenStateLabel(ks) }}
+                          </span>
+                        } @else {
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 cursor-pointer hover:opacity-80 transition-opacity"
+                            [class]="kitchenBadgeClass(ks)"
+                            [attr.title]="
+                              (ks.kitchen_ticket_id
+                                ? 'Ver ticket #' + ks.kitchen_ticket_id + ' en el KDS'
+                                : 'Ver en el KDS')
+                            "
+                            [disabled]="!ks.kitchen_ticket_id"
+                            (click)="openKdsTicket(ks)"
+                          >
+                            <app-icon name="flame" [size]="10" />
+                            Cocina: {{ kitchenStateLabel(ks) }}
+                            <app-icon name="arrow-right" [size]="10" />
+                          </button>
+                        }
                         <!-- QUI-762 — reenviar a cocina un plato ya
                              disparado. Solo se ofrece cuando el ítem es
                              reenviable por el predicado del backend
@@ -909,8 +938,8 @@
                           variant="outline"
                           size="xsm"
                           customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-amber-50 text-amber-700 border border-amber-200 disabled:opacity-50"
-                          [attr.title]="canUseReverseDelivered() ? 'Reversar la entrega de este ítem (pide motivo y destino)' : reverseDisabledReason"
-                          [disabled]="!canUseReverseDelivered()"
+                          [attr.title]="splitLocked() ? splitLockedReason : canUseReverseDelivered() ? 'Reversar la entrega de este ítem (pide motivo y destino)' : reverseDisabledReason"
+                          [disabled]="!canUseReverseDelivered() || splitLocked()"
                           [loading]="reversingItemId() === item.id"
                           (clicked)="reverseDeliveredItem(item)"
                         >
@@ -918,7 +947,7 @@
                           Reversar
                         </app-button>
                       }
-                      @if ((item.delivered_at || !item.cancelled_at) && cancellationPaid() && lineHasRefundableBalance(item)) {
+                      @if ((item.delivered_at || !item.cancelled_at) && !splitLocked() && cancellationPaid() && lineHasRefundableBalance(item)) {
                         <span class="text-xs text-amber-700">
                           Orden cobrada: no se puede cancelar este plato.
                           <button type="button" class="underline font-semibold" (click)="openRefundModal()">
@@ -953,7 +982,8 @@
                           variant="outline-danger"
                           size="xsm"
                           customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 disabled:opacity-50"
-                          title="Cancelar este ítem del pedido (queda visible, se excluye del total)"
+                          [attr.title]="splitLocked() ? splitLockedReason : 'Cancelar este ítem del pedido (queda visible, se excluye del total)'"
+                          [disabled]="splitLocked()"
                           [loading]="cancellingItemId() === item.id"
                           (clicked)="cancelItem(item)"
                         >
@@ -1055,6 +1085,32 @@
                 </div>
               </div>
             }
+            <!-- Cocina fisica: entrega manual en bloque y reimpresion de comanda. -->
+            @if (kitchenTicketPrint.isPhysicalKitchen() && (printableTicketIds().length > 0 || deliverableKitchenItems().length > 0)) {
+              <div class="mt-2 border-t border-border pt-2 flex flex-wrap items-center justify-end gap-1.5">
+                <app-button
+                  variant="outline"
+                  size="xsm"
+                  [disabled]="printableTicketIds().length === 0"
+                  (clicked)="printKitchenTickets()"
+                >
+                  <app-icon slot="icon" name="printer" [size]="14" />
+                  Imprimir comanda
+                </app-button>
+                @if (deliverableKitchenItems().length > 0) {
+                  <app-button
+                    variant="success"
+                    size="xsm"
+                    [loading]="deliveringAll()"
+                    [disabled]="deliveringAll()"
+                    (clicked)="deliverAllKitchenItems()"
+                  >
+                    <app-icon slot="icon" name="check" [size]="14" />
+                    Entregar todo
+                  </app-button>
+                }
+              </div>
+            }
 	            @if (appliedTierSummary().length > 0) {
 	              <div class="mt-2 border-t border-border pt-2">
 	                <p class="text-[11px] font-bold uppercase tracking-wide text-gray-500 mb-1.5">
@@ -1129,7 +1185,7 @@
                   } @else {
                     @if (isLoadingShippingMethods()) {
                       <div class="flex justify-center py-3">
-                        <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600"></div>
+                        <app-spinner size="md" color="text-amber-600" />
                       </div>
                     } @else if (shippingMethods().length === 0) {
                       <p class="text-xs text-amber-600 italic py-2">
@@ -1170,7 +1226,7 @@
                     @if (selectedShippingMethod()) {
                       @if (isCalculatingRate()) {
                         <div class="flex items-center gap-2 py-2 mb-2 text-xs text-amber-700">
-                          <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-600"></div>
+                          <app-spinner size="sm" color="text-amber-600" />
                           Calculando tarifa para la direccion del cliente…
                         </div>
                       } @else if (calculatedRate(); as r) {
@@ -1753,164 +1809,40 @@
           @if (showElectronicInvoiceCard()) {
             <app-card shadow="sm" [responsivePadding]="true">
               <h2
-                class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+                class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-2 sm:mb-3"
               >
                 Factura Electrónica
               </h2>
-              @if (orderInvoice(); as invoice) {
-                <!--
-                  La factura ya existe: lo que el operador necesita acá no es que
-                  se lo cuenten, es el NÚMERO —para buscarla en Facturación— y el
-                  CUFE, que es lo que el adquiriente usa para verificarla en el
-                  portal de la DIAN. Los chips de estado (transmisión, DIAN,
-                  envío) dicen en qué va SIN que haya que abrir el modal para
-                  saberlo.
-                -->
-                <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <div class="flex items-start gap-2.5">
-                    <app-icon
-                      name="receipt"
-                      [size]="16"
-                      class="text-gray-500 shrink-0 mt-0.5"
-                    />
-                    <div class="min-w-0 flex-1">
-                      <p
-                        class="text-sm sm:text-base font-bold text-gray-900 break-all"
-                      >
-                        {{ invoice.invoice_number }}
-                      </p>
-                      @if (invoice.cufe) {
-                        <p
-                          class="text-[10px] font-mono text-gray-500 mt-1 break-all leading-snug"
-                          [title]="invoice.cufe"
-                        >
-                          <span class="font-sans font-semibold text-gray-600"
-                            >CUFE</span
-                          >
-                          {{ invoice.cufe }}
-                        </p>
-                      }
-                      @if (invoiceFiscalCells().length || invoiceStatusChip()) {
-                        <div class="flex flex-wrap gap-1.5 mt-2">
-                          @if (invoiceStatusChip(); as statusChip) {
-                            <span
-                              class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                              [class]="toneClasses(statusChip.tone)"
-                            >
-                              {{ statusChip.label }}: {{ statusChip.text }}
-                            </span>
-                          }
-                          @for (
-                            cell of invoiceFiscalCells();
-                            track cell.label
-                          ) {
-                            <span
-                              class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                              [class]="toneClasses(cell.tone)"
-                              [title]="cell.hint || ''"
-                            >
-                              {{ cell.label }}: {{ cell.text }}
-                            </span>
-                          }
-                        </div>
-                      }
-                    </div>
-                  </div>
-
-                  <!-- Los tres botones necesitan el `id` de la factura, que
-                       `invoiceStub()` es quien garantiza. Sin él se muestran
-                       número, CUFE y chips —que sí son legibles— y no botones
-                       que no harían nada. -->
-                  @if (invoiceStub()) {
-                    <div class="flex flex-wrap gap-2 mt-3">
-                      <app-button
-                        variant="outline"
-                        size="sm"
-                        (clicked)="openInvoiceDetail()"
-                      >
-                        <app-icon slot="icon" name="eye" [size]="14" />
-                        Ver detalle
-                      </app-button>
-                      <app-button
-                        variant="outline"
-                        size="sm"
-                        [loading]="invoicePdfLoading()"
-                        [disabled]="invoicePdfLoading()"
-                        (clicked)="downloadInvoicePdf()"
-                      >
-                        <app-icon slot="icon" name="download" [size]="14" />
-                        PDF
-                      </app-button>
-                      <app-button
-                        variant="outline"
-                        size="sm"
-                        [loading]="invoicePrinting()"
-                        [disabled]="invoicePrinting()"
-                        (clicked)="printInvoiceDocument()"
-                      >
-                        <app-icon slot="icon" name="printer" [size]="14" />
-                        Imprimir
-                      </app-button>
-                    </div>
-                  }
-                  <!-- B.2 — NC/ND de esta factura. Cada card abre el MISMO
-                       modal de detalle (openNoteDetail), nunca una copia. Sin
-                       notas la sección no existe. -->
-                  @if (invoiceNotes().length) {
-                    <div class="mt-3 border-t border-border pt-3">
-                      <p class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        Notas crédito / débito ({{ invoiceNotes().length }})
-                      </p>
-                      <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                        @for (note of invoiceNotes(); track note.id) {
-                          <button
-                            type="button"
-                            (click)="openNoteDetail(note)"
-                            class="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface-secondary/40 px-3 py-2 text-left hover:border-primary/50 transition-colors"
-                          >
-                            <span class="min-w-0">
-                              <span class="block text-xs font-semibold text-text-primary truncate">
-                                {{ noteKindLabel(note) }} {{ note.invoice_number }}
-                              </span>
-                              <span class="block text-[11px] text-text-secondary">
-                                {{ noteDate(note) }} · {{ note.total_amount | currency }}
-                              </span>
-                            </span>
-                            @if (noteStatusCell(note); as cell) {
-                              <span
-                                class="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                                [class]="toneClasses(cell.tone)"
-                              >
-                                {{ cell.text }}
-                              </span>
-                            }
-                          </button>
-                        }
-                      </div>
-                    </div>
-                  }
-                </div>
+              <!-- Orden dividida: resumen + una tarjeta por cuenta. Orden
+                   simple: una tarjeta. Cada tarjeta es `app-invoice-status-card`
+                   (número, estado, total, cliente, fecha y sólo íconos con
+                   tooltip); CUFE y chips fiscales viven en el modal de detalle. -->
+              @if (invoiceSplitSummary(); as summary) {
+                <p class="mb-2 text-xs font-semibold text-text-secondary">
+                  {{ summary.invoiced }}/{{ summary.total }} cuentas facturadas ·
+                  {{ summary.amount | currency }}
+                </p>
               }
-              <!-- El botón NO es el `@else` del bloque de arriba: una factura
-                   anulada o cancelada deja ver su registro Y habilita volver a
-                   emitir, que es justo lo que hace el backend
-                   (`assertNotAlreadyInvoiced` excluye `voided`/`cancelled`).
-                   Como `@else`, cancelar una factura equivocada dejaba la
-                   orden sin salida. -->
-              @if (canEmitInvoice()) {
-                <div [class.mt-3]="orderInvoice() !== null">
-                  <app-button
-                    variant="primary"
-                    size="md"
-                    [loading]="isEmittingInvoice()"
-                    [disabled]="isEmittingInvoice()"
-                    (clicked)="createInvoiceFromOrder()"
-                  >
-                    <app-icon slot="icon" name="receipt" [size]="14" />
-                    Emitir factura electrónica
-                  </app-button>
-                </div>
-              }
+              <div class="space-y-2">
+                @for (card of invoiceCards(); track card.emitKey) {
+                  <app-invoice-status-card
+                    [data]="card.data"
+                    [notes]="card.notes"
+                    [emitMode]="card.emitMode"
+                    [emitting]="cardEmitting(card)"
+                    [errorMessage]="cardError(card)"
+                    [canCreditNote]="card.canCreditNote"
+                    [pdfLoading]="card.data.invoiceId !== null && pdfBusyId() === card.data.invoiceId"
+                    [printing]="card.data.invoiceId !== null && printBusyId() === card.data.invoiceId"
+                    (viewDetail)="openCardDetail(card)"
+                    (downloadPdf)="downloadCardPdf(card)"
+                    (print)="printCard(card)"
+                    (creditNote)="openCardDetail(card)"
+                    (emitRequested)="emitFromCard(card)"
+                    (viewNote)="openNoteDetail($event)"
+                  />
+                }
+              </div>
             </app-card>
           }
 
@@ -2254,6 +2186,29 @@
               Acciones
             </h2>
 
+            @if (orderData.active_financial_split_id) {
+              <div
+                class="bg-info-light border border-info/30 rounded-lg p-3 mb-3 flex items-center justify-between gap-3 flex-wrap"
+              >
+                <p class="text-sm text-text-primary">
+                  @if (splitSummary(); as summary) {
+                    Cuenta dividida en {{ summary.accounts }} cuentas · Cobrado
+                    {{ summary.paid | currency }} de {{ summary.total | currency }}
+                  } @else {
+                    Cuenta dividida · Cobrado {{ (orderData.total_paid ?? 0) | currency }} de
+                    {{ orderData.grand_total | currency }}
+                  }
+                </p>
+                <button
+                  type="button"
+                  class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+                  (click)="focusSplitAccounts()"
+                >
+                  Ir a las cuentas
+                </button>
+              </div>
+            }
+
             @if (showUnpaidBalanceNotice()) {
               <div
                 role="alert"
@@ -2332,10 +2287,16 @@
 
             @if (canFastTrack()) {
               <div class="mt-4 pt-4 border-t border-border">
-                <label class="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-200 cursor-pointer">
+                <label
+                  class="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-200"
+                  [class.cursor-pointer]="!fastTrackSplitBlocked()"
+                  [class.opacity-60]="fastTrackSplitBlocked()"
+                  [attr.title]="fastTrackSplitBlocked() ? splitLockedReason : null"
+                >
                   <input
                     type="checkbox"
-                    [checked]="fastTrackEnabled()"
+                    [checked]="fastTrackEnabled() && !fastTrackSplitBlocked()"
+                    [disabled]="fastTrackSplitBlocked()"
                     (change)="fastTrackEnabled.set($any($event.target).checked)"
                     class="mt-0.5"
                   />
@@ -2348,7 +2309,7 @@
                   </div>
                 </label>
 
-                @if (fastTrackEnabled()) {
+                @if (fastTrackEnabled() && !fastTrackSplitBlocked()) {
                   <app-button
                     variant="outline-warning"
                     [fullWidth]="true"
@@ -2645,6 +2606,12 @@
                         {{ getPaymentStateLabel(payment.state) }}
                       </span>
                     </div>
+                    @if (payment.financial_account_label) {
+                      <span
+                        class="inline-block mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-md bg-gray-100 text-text-secondary"
+                        >Cuenta: {{ payment.financial_account_label }}</span
+                      >
+                    }
                     <!-- QUI-732 (B.5) — método de pago. Fallback chain
                          display_name → system.display_name → system.name → '—'.
                          El último eslabón cubre pagos huérfanos
@@ -3644,6 +3611,23 @@
         </app-button>
       </div>
     </app-modal>
+
+    <!-- Recarga con la orden visible: overlay sobre el contenido (sin quitar ni
+         insertar bloques => cero salto de layout). Bloquea clics mientras
+         carga; el spinner queda pegado en el viewport al hacer scroll. -->
+    @if (isLoading()) {
+      <div
+        class="absolute inset-0 z-50 backdrop-blur-sm"
+        style="background-color: color-mix(in srgb, var(--color-surface, #fff) 60%, transparent)"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="sticky top-1/3 flex justify-center pt-16">
+          <app-spinner size="xl" />
+        </div>
+      </div>
+    }
+   </div>
   }
 
   <!-- QUI-762 — reenviar un plato ya disparado a cocina desde el detalle

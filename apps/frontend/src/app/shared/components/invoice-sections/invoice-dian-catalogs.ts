@@ -32,7 +32,7 @@ export const UNIT_CODE_OPTIONS: SelectorOption[] = [
   { value: 'MTQ', label: 'Metro cúbico (MTQ)' },
   { value: 'HUR', label: 'Hora (HUR)' },
   { value: 'DAY', label: 'Día (DAY)' },
-  { value: 'MON', label: 'Mes (MON)' },
+  { value: 'LUN', label: 'Mes (LUN)' },
   { value: 'PR', label: 'Par (PR)' },
   { value: 'SET', label: 'Juego (SET)' },
   { value: 'BX', label: 'Caja (BX)' },

@@ -13,4 +13,5 @@ export const FinancialSplitErrors = {
   SPLIT_IDEMPOTENCY_CONFLICT: { code: 'SPLIT_IDEMPOTENCY_CONFLICT', httpStatus: 409, devMessage: 'La clave ya se usó con otra cuenta, importe o división.' },
   SPLIT_PAYMENT_METHOD: { code: 'SPLIT_PAYMENT_METHOD', httpStatus: 422, devMessage: 'El medio de pago no está disponible para esta cuenta.' },
   SPLIT_CANCEL_BLOCKED: { code: 'SPLIT_CANCEL_BLOCKED', httpStatus: 409, devMessage: 'No se puede cancelar un reparto con pagos nuevos o documentos vigentes.' },
+  SPLIT_ACCOUNT_UNPAID_INVOICE: { code: 'SPLIT_ACCOUNT_UNPAID_INVOICE', httpStatus: 409, devMessage: 'Cobra la cuenta completa antes de facturarla.' },
 } satisfies Record<string, ErrorCodeEntry>;

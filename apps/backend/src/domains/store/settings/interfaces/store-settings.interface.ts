@@ -1134,6 +1134,7 @@ export interface OperationsSettings {
 // ============================================================================
 // RESTAURANT - Restaurant suite behavior toggles
 // ============================================================================
+export type KitchenMode = 'virtual' | 'physical';
 export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
 
 export interface RestaurantSettings {
@@ -1157,6 +1158,12 @@ export interface RestaurantSettings {
    * draft until staff fires them.
    */
   qr_auto_fire: boolean;
+  /**
+   * Kitchen mode. `virtual` (default; absent/null => virtual) uses the KDS
+   * board. `physical`: no KDS screen — the ticket is printed on paper and
+   * dishes are marked delivered by hand.
+   */
+  kitchen_mode?: KitchenMode;
 }
 
 export interface FingerprintDeviceConfig {

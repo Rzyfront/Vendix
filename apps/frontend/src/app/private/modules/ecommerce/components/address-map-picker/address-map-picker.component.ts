@@ -12,6 +12,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { loadMaplibre } from '../../../../../shared/utils/maplibre-loader.util';
 
 /** Simple lat/lng pair used for map center and marker position. */
 interface LatLng {
@@ -199,8 +200,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
 
   async ngAfterViewInit(): Promise<void> {
     try {
-      const maplibreModule = await import('maplibre-gl');
-      this.maplibregl = (maplibreModule as any).default ?? maplibreModule;
+      // Shared loader: lazy chunk + v6 worker URL (ESM-only, no default export).
+      this.maplibregl = await loadMaplibre();
       // The center may change while the lazy MapLibre chunk downloads.
       const start = this.center();
 
@@ -286,6 +287,11 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       this.map.on('load', () => {
         this.mapLoaded = true;
         this.loading.set(false);
+        // A slow basemap can finish AFTER LOAD_TIMEOUT_MS already raised the
+        // "no se pudo cargar" placeholder. That placeholder is opaque and
+        // absolute over the canvas, so without this the map renders fine
+        // underneath but stays hidden for good. A real `load` wins.
+        this.error.set(false);
         this.clearLoadTimer();
         this.emitMapReady();
         // Let the OSM/OpenFreeMap credit flash briefly (~0.3s) on load so it is

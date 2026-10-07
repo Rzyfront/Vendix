@@ -8,7 +8,7 @@ import {
   TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../fiscal-document-requirements';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * One extracted field, already checked against the shape the DIAN actually

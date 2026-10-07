@@ -112,6 +112,9 @@ export class PlatformInvoicingService {
     transmission_status: string;
     dian_status: string;
     cufe: string | null;
+    accepted: boolean;
+    error_message: string | null;
+    idempotent_replay: boolean;
   }> {
     let tenant: any;
     if (args.dto.customer?.kind === 'external') {
@@ -276,10 +279,14 @@ document_type: args.dto.customer.document_type ?? '31',
         // El snapshot va anidado bajo `dian` porque esa es la forma que
         // `normalizeAndAssertProfileConfig` conoce; las claves planas que se
         // pasaban antes se habrian rechazado uno por uno como desconocidas.
-        // El cruce de nombres es deliberado y sigue a UBL:
-        //   · `payment_form` ('1' contado / '2' credito) es `cbc:PaymentMeansCode`
-        //   · `payment_means_code` ('10' efectivo)       es `cbc:PaymentMeansID`
-        // que el contrato nombra `payment_means_code` y `payment_method_code`.
+        // Contrato del perfil (no hay cruce de nombres):
+        //   · `dian.payment_means_code`  = MEDIO de pago ('10' efectivo, '42'
+        //     consignacion...), el `cbc:PaymentMeansCode` del XML
+        //   · `dian.payment_method_code` = FORMA de pago ('1' contado / '2'
+        //     credito), el `cbc:ID` de `cac:PaymentMeans`
+        // Aqui estaban invertidos: el perfil guardado salia con la forma donde
+        // va el medio y viceversa, y al aplicarlo la factura heredaba un medio
+        // de pago '1'/'2' que no existe en el catalogo.
         // `config` es el snapshot COMPLETO del documento fiscal — diez
         // secciones —, no las cuatro claves que la emisión conoce. Mandar sólo
         // `dian` lo hace rechazar por `config_version`,
@@ -304,8 +311,8 @@ document_type: args.dto.customer.document_type ?? '31',
             dian: {
               ...template.config.dian,
               resolution_id: args.dto.resolution_id ?? null,
-              payment_means_code: args.dto.payment_form ?? '1',
-              payment_method_code: args.dto.payment_means_code ?? '10',
+              payment_means_code: args.dto.payment_means_code ?? '10',
+              payment_method_code: args.dto.payment_form ?? '1',
               header_notes: args.dto.notes ? [args.dto.notes] : null,
             },
           },
@@ -325,6 +332,70 @@ document_type: args.dto.customer.document_type ?? '31',
       transmission_status: legacyResult.transmission_status,
       dian_status: legacyResult.dian_status,
       cufe: legacyResult.cufe,
+      // Estado REAL de la transmision: un documento rechazado por la DIAN
+      // responde 201 con el numero ya quemado, y el controller necesita estos
+      // dos campos para no anunciar «creada» / «aceptada» sobre un rechazo.
+      accepted: legacyResult.accepted,
+      error_message: legacyResult.error_message,
+      idempotent_replay: legacyResult.idempotent_replay ?? false,
+    };
+  }
+
+  /**
+   * Previsualización de totales de una factura de plataforma. PURA: usa el
+   * mismo cálculo con que se firma (`computePlatformInvoiceTotals`); no asigna
+   * consecutivo, no persiste, no firma ni llama a la DIAN.
+   */
+  previewSalesInvoice(dto: any) {
+    const items = (dto.items ?? []).map((line: any) => ({
+      description: line.description,
+      quantity: Number(line.quantity) || 1,
+      unit_price: Number(line.unit_price) || 0,
+      unit_code: line.unit_code ?? 'NIU',
+      discount_amount: line.discount_amount ?? 0,
+      account_code: line.account_code ?? undefined,
+      taxes: (line.taxes ?? []).map((t: any) => ({
+        tax_type: t.tax_type,
+        rate: t.rate,
+        is_inclusive: t.is_inclusive ?? false,
+      })),
+    }));
+    const computed = this.subscriptionFiscalService.computePlatformInvoiceTotals({
+      items,
+    } as any);
+
+    const lines = computed.lineItems.map((l, i) => {
+      const snap = computed.snapshotItems[i];
+      return {
+        position: i + 1,
+        description: l.description,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        discount_amount: l.discount_amount,
+        base: String(snap?.line_total ?? ''),
+        taxes: snap?.taxes ?? [],
+        tax_amount: l.tax_amount,
+        total: l.total_amount,
+      };
+    });
+
+    const withholdings = Array.isArray(dto.withholdings) ? dto.withholdings : [];
+    const withholdingsTotal = withholdings.reduce(
+      (acc: number, w: any) =>
+        acc + Math.round((Number(w.base_amount) || 0) * (Number(w.rate) || 0) * 100) / 100,
+      0,
+    );
+
+    return {
+      lines,
+      subtotal: computed.subtotal,
+      discount_total: computed.discountTotal,
+      tax_total: computed.taxTotal,
+      tax_breakdown: computed.taxBreakdown,
+      withholdings_total: withholdingsTotal.toFixed(2),
+      total: computed.payable,
+      payable: computed.payable,
+      net_after_withholdings: (Number(computed.payable) - withholdingsTotal).toFixed(2),
     };
   }
 
@@ -402,6 +473,8 @@ document_type: args.dto.customer.document_type ?? '31',
       cufe: transmission.cufe,
       fiscal_number: transmission.document_number,
       document_type: transmission.document_type,
+      accepted: transmission.transmission_status === 'accepted',
+      error_message: transmission.error_message ?? null,
     };
   }
 

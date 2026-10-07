@@ -75,7 +75,7 @@ import {
 } from './types/dispatch-note-direction.type';
 import { DispatchFulfillmentListener } from './listeners/dispatch-fulfillment.listener';
 import { POOL_PUBLISHABLE_ORDER_STATES } from '../carrier/carrier-pool.contract';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 const DISPATCH_NOTE_INCLUDE = {
   dispatch_note_items: {
@@ -588,7 +588,10 @@ export class DispatchNotesService {
       // 1 + 2 — SKU exact (variant first, then product).
       if (raw.sku) {
         const variant = await this.prisma.product_variants.findFirst({
-          where: { sku: { equals: raw.sku, mode: 'insensitive' } },
+          where: {
+            sku: { equals: raw.sku, mode: 'insensitive' },
+            products: { state: { not: 'archived' } },
+          },
           select: { id: true, product_id: true },
         });
         if (variant) {
@@ -600,7 +603,10 @@ export class DispatchNotesService {
           };
         }
         const product = await this.prisma.products.findFirst({
-          where: { sku: { equals: raw.sku, mode: 'insensitive' } },
+          where: {
+            sku: { equals: raw.sku, mode: 'insensitive' },
+            state: { not: 'archived' },
+          },
           select: { id: true },
         });
         if (product) {

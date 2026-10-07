@@ -24,6 +24,8 @@ import {
   SubscriptionPaymentRow,
   SubscriptionPaymentQuery,
   DunningStatsResponse,
+  ActivateStorePlanDto,
+  ActivateStorePlanResult,
 } from '../interfaces/subscription-admin.interface';
 
 export interface ApiResponse<T> {
@@ -352,6 +354,17 @@ export class SubscriptionAdminService {
       user_id: raw.triggered_by_user_id ? String(raw.triggered_by_user_id) : null,
       user_name: userFull ?? raw.triggered_by_job ?? null,
     };
+  }
+
+  /** Activa un plan en una tienda (pago por consignación directa, sin Wompi). */
+  activateStorePlan(
+    storeId: number,
+    body: ActivateStorePlanDto,
+  ): Observable<ApiResponse<ActivateStorePlanResult>> {
+    return this.http.post<ApiResponse<ActivateStorePlanResult>>(
+      `${this.apiUrl}/superadmin/subscriptions/stores/${storeId}/activate-plan`,
+      body,
+    );
   }
 
   getPlans(query?: { page?: number; limit?: number; search?: string; is_active?: boolean }): Observable<PaginatedResponse<SubscriptionPlan>> {

@@ -59,6 +59,7 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
       order_items: { findMany: jest.fn().mockResolvedValue([{ id: 77 }]) },
     };
     const prisma: any = {
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       kitchen_tickets: {
         findFirst: jest.fn().mockResolvedValue(ticket),
         findMany: jest.fn().mockResolvedValue([{ status: 'cancelled' }]),
@@ -316,6 +317,7 @@ describe('KitchenFireService — remake consumption after D2 reuse', () => {
       orders: { findFirst: jest.fn().mockResolvedValue({ id: 100, state: 'cancelled' }) },
       order_items: { findMany: jest.fn().mockResolvedValue(items), updateMany: jest.fn().mockResolvedValue({ count: items.length }) },
       kitchen_ticket_items: { findFirst: jest.fn().mockResolvedValue(null) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       kitchen_tickets: { count: jest.fn().mockResolvedValue(0), create: jest.fn().mockResolvedValue({ id: 55, items: [] }) },
     };
     const prisma: any = {
@@ -537,6 +539,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
   const buildFireTxMock = (opts: { orderItemId?: number } = {}) => ({
     kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
     kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+    store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     order_items: {
       update: jest.fn().mockResolvedValue({ id: opts.orderItemId ?? 10 }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -612,6 +615,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
       cb({
         ...buildFireTxMock({ orderItemId }),
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
         kitchen_tickets: {
           create: ticketCreate,
           count: jest.fn().mockResolvedValue(0),
@@ -669,6 +673,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
         findUnique: jest.fn().mockResolvedValue({
           settings: { general: { timezone: 'America/Bogota' } },
         }),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       $transaction: jest.fn(),
     };
@@ -817,6 +822,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
           update: orderItemUpdate,
           findMany: jest.fn().mockResolvedValue([]),
         },
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
         kitchen_tickets: {
           create: ticketCreate,
           count: jest.fn().mockResolvedValue(0),
@@ -1061,6 +1067,41 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       product_variant_id: 5,
       variant_label: 'Picante',
     });
+  });
+
+  it('kitchen_mode physical: ticket e items nacen in_preparation (virtual: pending)', async () => {
+    const run = async (settings: any) => {
+      setupFireableContext([
+        makeVariantOrderItem(10, 50, { variantId: null, variantCount: 0 }),
+      ]);
+      const ticketCreate = jest
+        .fn()
+        .mockResolvedValue(makeTxTicket(555, 10, 50));
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({
+          ...buildFireTxMock({ orderItemId: 10 }),
+          store_settings: {
+            findFirst: jest.fn().mockResolvedValue(settings),
+          },
+          kitchen_tickets: {
+            create: ticketCreate,
+            count: jest.fn().mockResolvedValue(0),
+          },
+        }),
+      );
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+      return ticketCreate.mock.calls[0][0].data;
+    };
+
+    const physical = await run({
+      settings: { restaurant: { kitchen_mode: 'physical' } },
+    });
+    expect(physical.status).toBe('in_preparation');
+    expect(physical.items.create[0].status).toBe('in_preparation');
+
+    const virtual = await run(null);
+    expect(virtual.status).toBe('pending');
+    expect(virtual.items.create[0].status).toBe('pending');
   });
 
   it('keeps product_variant_id and variant_label NULL for a product without variants', async () => {
@@ -1487,6 +1528,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     const setupStartTx = () => {
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
         cb({
+          store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
           kitchen_tickets: {
             update: jest.fn().mockResolvedValue({}),
           },
@@ -1600,6 +1642,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
         cb({
           $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
+          store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
           kitchen_tickets: {
             updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           },
@@ -1639,6 +1682,29 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
         makeTicket('pending', [makeTicketItem(11, 50)]),
       );
 
+      await expect(service.markDelivered(555)).rejects.toMatchObject({
+        errorCode: 'KITCHEN_TICKET_NOT_READY',
+      });
+    });
+
+    it('kitchen_mode physical: markDelivered sobre ticket pending NO lanza NOT_READY (virtual si)', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50)]),
+      );
+
+      prismaMock.store_settings.findFirst.mockResolvedValueOnce({
+        settings: { restaurant: { kitchen_mode: 'physical' } },
+      });
+      await expect(service.markDelivered(555)).resolves.toBeDefined();
+      // pasa por ready internamente y luego delivered
+      const statuses = prismaMock.kitchen_tickets.update.mock.calls.map(
+        (c: any[]) => c[0].data.status,
+      );
+      expect(statuses).toEqual(['ready', 'delivered']);
+
+      prismaMock.store_settings.findFirst.mockResolvedValueOnce({
+        settings: { restaurant: { kitchen_mode: 'virtual' } },
+      });
       await expect(service.markDelivered(555)).rejects.toMatchObject({
         errorCode: 'KITCHEN_TICKET_NOT_READY',
       });
@@ -1698,6 +1764,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
         cb({
           $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
+          store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
           kitchen_tickets: {
             updateMany: jest.fn().mockResolvedValue({ count: 1 }),
             // H2 — `findTicketConsumedLeaves` reads the ticket's own `fired_at`.
@@ -1896,6 +1963,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       };
       prismaMock.orders.findFirst.mockResolvedValue({ state: 'delivered' });
       tx = {
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
         kitchen_tickets: {
           update: jest.fn().mockImplementation(async ({ data }: any) => {
             ticketStatus = data.status;

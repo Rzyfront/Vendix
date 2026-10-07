@@ -132,6 +132,15 @@
     ></app-store-edit-modal>
   }
 
+  @if (activatePlanStore(); as planStore) {
+    <app-activate-plan-modal
+      [(isOpen)]="isActivatePlanOpen"
+      [storeId]="planStore.id"
+      [storeName]="planStore.name"
+      (activated)="onPlanActivated()"
+    ></app-activate-plan-modal>
+  }
+
   <!--
     Aquí vivía `<app-store-settings-modal>`. Su guardado apuntaba a
     `PATCH /superadmin/stores/:id/settings`, que el backend nunca publicó: el

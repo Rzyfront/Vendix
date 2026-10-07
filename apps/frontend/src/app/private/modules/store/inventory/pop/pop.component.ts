@@ -69,6 +69,8 @@ import {
   PopCostPreviewRequest,
   PopCostPreviewRequestItem,
   PopCostPreviewResponse,
+  NewItemConflict,
+  NewItemConflictRequestItem,
   PopShippingAllocation,
 } from './interfaces';
 import {
@@ -230,6 +232,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [costPreview]="costPreview()"
       [loadingCostPreview]="loadingCostPreview()"
       [costPreviewError]="costPreviewError()"
+      [newItemConflicts]="newItemConflicts()"
       [isProcessing]="isProcessingOrder()"
       [retryOrderRef]="retryOrderRef()"
       [orderResult]="orderResult()"
@@ -578,6 +581,8 @@ export class PopComponent implements OnInit, OnDestroy {
 
   costPreview = signal<PopCostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
+  /** Avisos informativos de líneas nuevas que chocan por SKU/código de barras. */
+  readonly newItemConflicts = signal<NewItemConflict[]>([]);
   /**
    * A.5 — motivo del fallo de la vista previa, para PINTARLO.
    *
@@ -1975,6 +1980,7 @@ export class PopComponent implements OnInit, OnDestroy {
     // Recepción pintaba el costo de otra orden como si fuera el de ésta.
     this.costPreview.set(null);
     this.costPreviewError.set(null);
+    this.newItemConflicts.set([]);
 
     this.pendingAction.set(null);
     this.showCartModal.set(false);
@@ -2117,6 +2123,7 @@ export class PopComponent implements OnInit, OnDestroy {
     this.costPreview.set(null);
     this.costPreviewError.set(null);
     this.loadingCostPreview.set(true);
+    this.loadNewItemConflicts();
 
     // A.5 — la vista previa recibe EXACTAMENTE las mismas entradas que la
     // creación y la recepción. Mandaba sólo bodega + (producto, cantidad,
@@ -2243,6 +2250,42 @@ export class PopComponent implements OnInit, OnDestroy {
         this.loadingCostPreview.set(false);
       },
     });
+  }
+
+  /**
+   * Consulta qué líneas NUEVAS chocan por SKU / código de barras con un
+   * producto existente (o entre sí). Solo informativo: un fallo nunca bloquea.
+   */
+  private loadNewItemConflicts(): void {
+    this.newItemConflicts.set([]);
+    const items: NewItemConflictRequestItem[] = [];
+    this.popCartService.currentState.items.forEach((item, line_index) => {
+      if (item.product?.id && !item.is_prebulk) return;
+      const sku = item.prebulk_data?.code?.trim();
+      const barcode = item.prebulk_data?.barcode?.trim();
+      if (!sku && !barcode) return;
+      items.push({
+        line_index,
+        ...(sku ? { sku } : {}),
+        ...(barcode ? { barcode } : {}),
+      });
+    });
+    if (items.length === 0) return;
+
+    this.purchaseOrdersService
+      .getNewItemConflicts(items)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.newItemConflicts.set(
+            response.success ? (response.data?.conflicts ?? []) : [],
+          );
+        },
+        error: (err) => {
+          console.warn('[POP] new-item-conflicts falló (no bloquea)', err);
+          this.newItemConflicts.set([]);
+        },
+      });
   }
 
   /**

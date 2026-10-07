@@ -150,14 +150,12 @@ export class PopCartService {
     effect(() => {
       const store = this.authFacade.userStore();
       const storeId = store?.id ?? null;
-      if (
-        storeId &&
-        this._cartState().items.length === 0 &&
-        this.lastHydratedStoreId !== storeId
-      ) {
+      if (storeId && this.lastHydratedStoreId !== storeId) {
         // Marcar ANTES de hidratar: el set() de abajo re-dispara el
-        // effect y sin esto entraría en bucle de hidratación.
+        // effect. También marcar si ya hay líneas: eliminarlas después
+        // no debe activar una primera hidratación tardía del snapshot.
         this.lastHydratedStoreId = storeId;
+        if (this._cartState().items.length > 0) return;
         const saved = this.loadFromStorage();
         if (saved && saved.items && saved.items.length > 0) {
           this._cartState.set(saved);
@@ -183,16 +181,16 @@ export class PopCartService {
   }
 
   private saveToStorage(state: PopCartState): void {
-    if (typeof localStorage === 'undefined') return;
-    const key = this.getStorageKey();
-    if (!key) return;
-
-    if (!state.items || state.items.length === 0) {
-      localStorage.removeItem(key);
-      return;
-    }
-
     try {
+      if (typeof localStorage === 'undefined') return;
+      const key = this.getStorageKey();
+      if (!key) return;
+
+      if (!state.items || state.items.length === 0) {
+        localStorage.removeItem(key);
+        return;
+      }
+
       const payload = {
         state,
         savedAt: Date.now(),
@@ -200,16 +198,15 @@ export class PopCartService {
       };
       localStorage.setItem(key, JSON.stringify(payload));
     } catch {
-      // Ignorar fallos de cuota o deserialización
+      // Persistencia best-effort: acceso, cuota y borrado pueden fallar.
     }
   }
 
   private loadFromStorage(): PopCartState | null {
-    if (typeof localStorage === 'undefined') return null;
-    const key = this.getStorageKey();
-    if (!key) return null;
-
     try {
+      if (typeof localStorage === 'undefined') return null;
+      const key = this.getStorageKey();
+      if (!key) return null;
       const raw = localStorage.getItem(key);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
@@ -240,10 +237,14 @@ export class PopCartService {
   }
 
   public clearStorage(): void {
-    if (typeof localStorage === 'undefined') return;
-    const key = this.getStorageKey();
-    if (key) {
-      localStorage.removeItem(key);
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const key = this.getStorageKey();
+      if (key) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // El almacenamiento opcional nunca debe impedir vaciar el carrito.
     }
   }
 
