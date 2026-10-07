@@ -3,6 +3,8 @@ import EventSource from 'react-native-sse';
 import { API_BASE_URL } from '@/core/api/endpoints';
 import { apiClient, Endpoints } from '@/core/api';
 import { getToken } from '@/core/auth/token.storage';
+import { useAuthStore } from '@/core/store/auth.store';
+import { useTenantStore } from '@/core/store/tenant.store';
 
 export type OrderSseEvent = {
   type: 'order.created' | 'order.status_changed';
@@ -42,87 +44,154 @@ export function subscribeToOrderEvents(
   let source: EventSource<'message'> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let refreshInProgress = false;
+  let connecting = false;
+  let sessionRenewalPending = false;
   let retryDelay = INITIAL_RETRY_MS;
+  const userId = useAuthStore.getState().user?.id;
+  const storeId = useTenantStore.getState().storeId;
+
+  const isCurrentSession = () => {
+    const auth = useAuthStore.getState();
+    return (
+      !closed &&
+      auth.isAuthenticated &&
+      userId !== undefined &&
+      auth.user?.id === userId &&
+      !!storeId &&
+      useTenantStore.getState().storeId === storeId
+    );
+  };
 
   const clearRetry = () => {
-    if (retryTimer) clearTimeout(retryTimer);
+    if (retryTimer !== null) clearTimeout(retryTimer);
     retryTimer = null;
   };
 
   const closeSource = () => {
     if (!source) return;
-    source.removeAllEventListeners();
-    source.close();
+    const current = source;
     source = null;
+    current.removeAllEventListeners();
+    current.close();
+  };
+
+  const stop = () => {
+    closed = true;
+    clearRetry();
+    closeSource();
   };
 
   const scheduleReconnect = (delay: number) => {
-    if (closed || retryTimer) return;
+    if (!isCurrentSession()) {
+      stop();
+      return;
+    }
+    if (retryTimer !== null) return;
     retryTimer = setTimeout(() => {
       retryTimer = null;
-      void connect();
+      void (sessionRenewalPending ? renewSession() : connect());
     }, delay);
   };
 
+  const retryWithBackoff = () => {
+    const delay = retryDelay;
+    retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+    scheduleReconnect(delay);
+  };
+
   const renewSession = async () => {
-    if (refreshInProgress || closed) return;
+    if (refreshInProgress || !isCurrentSession()) return;
     refreshInProgress = true;
     closeSource();
     try {
       // apiClient's 401 interceptor refreshes the JWT and logs out on failure.
       await apiClient.get(Endpoints.AUTH.ME);
-      if (!closed) {
-        retryDelay = INITIAL_RETRY_MS;
+      if (isCurrentSession()) {
+        sessionRenewalPending = false;
         scheduleReconnect(0);
       }
-    } catch {
-      // The API interceptor clears the invalid session; don't loop on stale JWT.
+    } catch (error: unknown) {
+      const status = Number(
+        (error as { response?: { status?: number } } | null)?.response?.status,
+      );
+      if (status === 401 || status === 403 || !isCurrentSession()) {
+        // Terminal auth is owned by the interceptor; never retry a logged-out session.
+        stop();
+      } else {
+        // Network/5xx can fail before the interceptor renews the JWT. Retry ME,
+        // not SSE with the token already rejected by the stream.
+        retryWithBackoff();
+      }
     } finally {
       refreshInProgress = false;
     }
   };
 
   const connect = async () => {
-    if (closed || source) return;
-    const token = await getToken();
-    if (closed) return;
-    if (!token) return;
-
-    const url = `${API_BASE_URL.replace(/\/$/, '')}${Endpoints.STORE.ORDERS.STREAM}?token=${encodeURIComponent(token)}`;
-    const current = new EventSource<'message'>(url, { pollingInterval: 0 });
-    source = current;
-    current.addEventListener('open', () => {
-      if (source === current) {
-        retryDelay = INITIAL_RETRY_MS;
-        onOpen?.();
-      }
-    });
-    current.addEventListener('message', (message) => {
-      if (closed || source !== current || !('data' in message) || !message.data) return;
-      const event = parseOrderEvent(message.data);
-      if (event) onEvent(event);
-    });
-    current.addEventListener('error', (error) => {
-      if (closed || source !== current) return;
-      const status = Number(
-        (error as { status?: number; xhrStatus?: number }).status ??
-          (error as { xhrStatus?: number }).xhrStatus,
-      );
-      closeSource();
-      if (status === 401) {
-        void renewSession();
+    if (!isCurrentSession() || source || connecting || refreshInProgress) return;
+    connecting = true;
+    try {
+      const token = await getToken();
+      if (!isCurrentSession()) return;
+      if (!token) {
+        retryWithBackoff();
         return;
       }
-      const delay = retryDelay;
-      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
-      scheduleReconnect(delay);
-    });
+
+      const url = `${API_BASE_URL.replace(/\/$/, '')}${Endpoints.STORE.ORDERS.STREAM}?token=${encodeURIComponent(token)}`;
+      const current = new EventSource<'message'>(url, { pollingInterval: 0 });
+      source = current;
+      current.addEventListener('open', () => {
+        if (source !== current) return;
+        if (!isCurrentSession()) {
+          stop();
+          return;
+        }
+        retryDelay = INITIAL_RETRY_MS;
+        onOpen?.();
+      });
+      current.addEventListener('message', (message) => {
+        if (source !== current) return;
+        if (!isCurrentSession()) {
+          stop();
+          return;
+        }
+        if (!('data' in message) || !message.data) return;
+        const event = parseOrderEvent(message.data);
+        if (event) onEvent(event);
+      });
+      current.addEventListener('error', (error) => {
+        if (source !== current) return;
+        if (!isCurrentSession()) {
+          stop();
+          return;
+        }
+        const status = Number(
+          (error as { status?: number; xhrStatus?: number }).status ??
+            (error as { xhrStatus?: number }).xhrStatus,
+        );
+        closeSource();
+        if (status === 401) {
+          sessionRenewalPending = true;
+          void renewSession();
+          return;
+        }
+        if (status === 403) {
+          stop();
+          return;
+        }
+        retryWithBackoff();
+      });
+    } catch {
+      // Secure storage and EventSource construction are optional transports.
+      // Their rejection must not escape the fire-and-forget connect promise.
+      closeSource();
+      if (isCurrentSession()) retryWithBackoff();
+    } finally {
+      connecting = false;
+    }
   };
 
   void connect();
-  return () => {
-    closed = true;
-    clearRetry();
-    closeSource();
-  };
+  return stop;
 }
