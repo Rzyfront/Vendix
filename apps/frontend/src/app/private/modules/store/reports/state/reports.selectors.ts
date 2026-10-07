@@ -29,6 +29,11 @@ export const selectFiscalPeriodId = createSelector(
   (state) => state.fiscalPeriodId,
 );
 
+export const selectDataFilters = createSelector(
+  selectReportsState,
+  (state) => state.dataFilters,
+);
+
 export const selectReportData = createSelector(
   selectReportsState,
   (state) => state.reportData,

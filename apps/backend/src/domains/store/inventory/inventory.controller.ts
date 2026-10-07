@@ -3,6 +3,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UseGuards } from '@nestjs/common';
 import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
 import { InventoryValidationService } from './services/inventory-validation.service';
+import { InventoryStatsService } from './services/inventory-stats.service';
 import { ResponseService } from '@common/responses/response.service';
 import { ValidateConsolidatedStockDto } from './dto/validate-consolidated-stock.dto';
 import { ValidateMultipleConsolidatedStockDto } from './dto/validate-multiple-consolidated-stock.dto';
@@ -21,8 +22,23 @@ import { ValidateMultipleConsolidatedStockDto } from './dto/validate-multiple-co
 export class InventoryController {
   constructor(
     private readonly inventoryValidationService: InventoryValidationService,
+    private readonly inventoryStatsService: InventoryStatsService,
     private readonly responseService: ResponseService,
   ) {}
+
+  /**
+   * Resumen del módulo Inventario. La ruta estática se declara antes que las
+   * parametrizadas a propósito (Nest resuelve por orden de declaración).
+   */
+  @Get('stats')
+  @Permissions('store:inventory:inventory:read')
+  async getStats() {
+    const result = await this.inventoryStatsService.getStats();
+    return this.responseService.success(
+      result,
+      'Resumen de inventario obtenido exitosamente',
+    );
+  }
 
   @Post('validate-consolidated-stock')
   @Permissions('store:inventory:inventory:create')
