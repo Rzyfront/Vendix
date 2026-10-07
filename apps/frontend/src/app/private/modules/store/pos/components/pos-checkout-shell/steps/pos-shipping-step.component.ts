@@ -49,7 +49,7 @@ import {
 } from '../../../../../ecommerce/services/geocoding.service';
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
-import { PosShippingService } from '../../../services/pos-shipping.service';
+import { PosShippingService, type AddressScope } from '../../../services/pos-shipping.service';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   CustomersService,
@@ -209,6 +209,8 @@ export class PosShippingStepComponent {
   readonly initialAddress = signal<AddressPayload | null>(null);
   readonly addressEditing = signal(false);
   private readonly addressForm = viewChild(AddressFormFieldsComponent);
+  /** Delivery coverage hint (single municipality locks the address form). */
+  readonly addressScope = signal<AddressScope | null>(null);
   private readonly shippingEdited = signal(false);
   private readonly freeAddressEdited = signal(false);
   private quoteGeneration = 0;
@@ -512,6 +514,10 @@ export class PosShippingStepComponent {
   constructor() {
     this.loadShippingMethods();
     this.currencyService.loadCurrency();
+    this.shippingService
+      .getAddressScope()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((scope) => this.addressScope.set(scope));
 
     // Hydration only depends on order identity/snapshot and customer identity.
     // Cart totals, navigation and asynchronous method responses must not reset edits.

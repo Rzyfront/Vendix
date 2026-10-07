@@ -28,6 +28,8 @@ interface LatLng {
  */
 const COLOMBIA_CENTER: LatLng = { lat: 4.0, lng: -73.0 };
 const COUNTRY_ZOOM = 5;
+/** Zoom used to frame a whole municipality (visual only, no marker). */
+const CITY_ZOOM = 12;
 /** Zoom used once an actual point exists, close enough to place the marker. */
 const POINT_ZOOM = 16;
 /** If the basemap has not loaded within this window, treat it as un-renderable. */
@@ -110,6 +112,12 @@ class LocateButtonControl {
 export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   /** Coordinate to center the map / marker on. Null → frame Colombia, no marker. */
   readonly center = input<LatLng | null>(null);
+  /**
+   * Visual-only framing (e.g. the centroid of the single covered municipality).
+   * Frames the map at `CITY_ZOOM` WITHOUT a marker and never emits `located`.
+   * Ignored whenever `center` is set.
+   */
+  readonly focusArea = input<LatLng | null>(null);
   /**
    * When `true`, the "locate me" control does NOT call
    * `navigator.geolocation` itself — it only emits `locateRequested` so the
@@ -196,6 +204,15 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         this.clearMarker();
       }
     });
+
+    // Visual framing only: never creates a marker nor emits a coordinate.
+    effect(() => {
+      const area = this.focusArea();
+      const point = this.center();
+      if (area && !point && this.mapLoaded && this.map) {
+        this.map.flyTo({ center: [area.lng, area.lat], zoom: CITY_ZOOM });
+      }
+    });
   }
 
   async ngAfterViewInit(): Promise<void> {
@@ -204,12 +221,17 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       this.maplibregl = await loadMaplibre();
       // The center may change while the lazy MapLibre chunk downloads.
       const start = this.center();
+      const area = start ? null : this.focusArea();
 
       this.map = new this.maplibregl.Map({
         container: this.mapContainer().nativeElement,
         style: BASEMAP_STYLE,
-        center: start ? [start.lng, start.lat] : [COLOMBIA_CENTER.lng, COLOMBIA_CENTER.lat],
-        zoom: start ? POINT_ZOOM : COUNTRY_ZOOM,
+        center: start
+          ? [start.lng, start.lat]
+          : area
+            ? [area.lng, area.lat]
+            : [COLOMBIA_CENTER.lng, COLOMBIA_CENTER.lat],
+        zoom: start ? POINT_ZOOM : area ? CITY_ZOOM : COUNTRY_ZOOM,
         locale: {
           'GeolocateControl.FindMyLocation': 'Usar mi ubicación actual',
           'GeolocateControl.LocationNotAvailable': 'Ubicación no disponible',
@@ -306,6 +328,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
           this.map.flyTo({ center: [c.lng, c.lat], zoom: POINT_ZOOM });
         } else {
           this.clearMarker();
+          const a = this.focusArea();
+          if (a) this.map.flyTo({ center: [a.lng, a.lat], zoom: CITY_ZOOM });
         }
         // Ensure correct sizing after the container transitions into view.
         this.map.resize();

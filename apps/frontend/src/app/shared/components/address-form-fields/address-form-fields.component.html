@@ -28,7 +28,8 @@
         [class.no-gps]="!allowGeolocation()"
         [class.map-wrapper--highlight]="mapHighlight()">
         <app-address-map-picker
-          [center]="coordsSignal() ?? mapCenterHint()"
+          [center]="coordsSignal()"
+          [focusArea]="focusArea()"
           (located)="onLocated($event)"
         />
       </div>
@@ -83,6 +84,12 @@
     ></app-input>
     }
 
+    @if (isLocked()) {
+      <div class="locked-location-chip" role="status">
+        <app-icon name="map-pin" [size]="16"></app-icon>
+        <span>{{ lockedLabel() }}</span>
+      </div>
+    } @else {
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div class="field-block">
         <app-selector
@@ -139,9 +146,11 @@
         }
       </div>
     </div>
+    }
 
     @if (showAdvanced()) {
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      @if (!isLocked()) {
       <!-- El país se mantiene como CO; por ahora Colombia es el único catálogo disponible. -->
       <app-selector
         label="País"
@@ -150,13 +159,16 @@
         [options]="countryOptions()"
         [required]="true"
       ></app-selector>
+      }
 
+      @if (!isLocked() || showPostalCode()) {
       <app-input
         label="Código postal"
         formControlName="postal_code"
         placeholder="Código postal"
         [control]="form.get('postal_code')!"
       ></app-input>
+      }
     </div>
     }
 

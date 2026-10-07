@@ -119,6 +119,8 @@
             [requirePhone]="true"
             [showErrors]="showAddressErrors()"
             [allowGeolocation]="true"
+            [lockedLocation]="addressScope()?.single_municipality ?? null"
+            [showPostalCode]="addressScope()?.postal_code_relevant ?? true"
             (addressChange)="onAddressChange($event, clientAddressForm.form.dirty)"
             (validChange)="onAddressValidChange($event)"
           ></app-address-form-fields>
@@ -283,6 +285,8 @@
                 [requirePhone]="true"
                 [showErrors]="showAddressErrors()"
                 [allowGeolocation]="true"
+                [lockedLocation]="addressScope()?.single_municipality ?? null"
+                [showPostalCode]="addressScope()?.postal_code_relevant ?? true"
                 (addressChange)="onAddressChange($event)"
                 (validChange)="onAddressValidChange($event)"
               ></app-address-form-fields>

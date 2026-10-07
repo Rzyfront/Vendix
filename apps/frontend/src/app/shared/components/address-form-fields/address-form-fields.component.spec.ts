@@ -190,6 +190,61 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
     expect(component.form.get('municipality_code')!.value).toBe('44001');
   });
 
+  it('ubicación fija resuelta: oculta selectores, muestra chip y el form es válido con dirección y teléfono', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    forward.and.returnValue(of({ lat: 11.54, lng: -72.9, precision: 'area' }));
+    fixture.componentRef.setInput('lockedLocation', {
+      country_code: 'CO', state_province: 'La Guajira', city: 'Riohacha',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    component.form.get('address_line1')!.setValue('Calle 1 # 2-3');
+    component.form.get('phone_number')!.setValue('3001234567');
+    fixture.detectChanges();
+
+    expect(resolveByName).toHaveBeenCalledWith('Riohacha', 'La Guajira');
+    expect(component.isLocked()).toBeTrue();
+    expect(component.form.get('municipality_code')!.value).toBe('44001');
+    expect(component.form.get('city')!.value).toBe('Riohacha');
+    expect(component.form.valid).toBeTrue();
+    expect(fixture.debugElement.query(By.css('.locked-location-chip'))).toBeTruthy();
+    expect(fixture.nativeElement.textContent).toContain('Riohacha, La Guajira · Colombia');
+    // País, departamento y ciudad ocultos.
+    expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(0);
+    // El centroide es solo visual: nunca llega a coordenadas ni a has_location.
+    expect(component.municipalityFocus()).toEqual({ lat: 11.54, lng: -72.9 });
+    expect(component.coordsSignal()).toBeNull();
+    expect(component.form.get('latitude')!.value).toBeNull();
+    expect(component.mapCenterHint()).toBeNull();
+  });
+
+  it('ubicación fija que no resuelve: los selectores siguen visibles', async () => {
+    resolveByName.and.returnValue(of(null));
+    fixture.componentRef.setInput('lockedLocation', {
+      country_code: 'CO', state_province: 'La Guajira', city: 'Inexistente',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.isLocked()).toBeFalse();
+    expect(fixture.debugElement.query(By.css('.locked-location-chip'))).toBeNull();
+    expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(3);
+    expect(forward).not.toHaveBeenCalled();
+  });
+
+  it('sin lockedLocation el comportamiento no cambia', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(resolveByName).not.toHaveBeenCalled();
+    expect(component.isLocked()).toBeFalse();
+    expect(fixture.debugElement.query(By.css('.locked-location-chip'))).toBeNull();
+    expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(3);
+  });
+
   it('ignora la lista tardía del departamento anterior', async () => {
     const guajiraList = new Subject<typeof riohacha[]>();
     const antioquiaList = new Subject<typeof riohacha[]>();

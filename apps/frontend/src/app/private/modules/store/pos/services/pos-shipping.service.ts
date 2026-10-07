@@ -6,6 +6,16 @@ import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import { PosManualShippingQuote, PosShippingMethod, PosShippingOption } from '../models/shipping.model';
 
+/** Delivery coverage hint: single covered municipality locks the address form. */
+export interface AddressScope {
+  single_municipality: {
+    country_code: string;
+    state_province: string;
+    city: string;
+  } | null;
+  postal_code_relevant: boolean;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -29,6 +39,13 @@ export class PosShippingService {
       catchError((error) => {
         return of([]);
       }),
+    );
+  }
+
+  getAddressScope(): Observable<AddressScope | null> {
+    return this.http.get<any>(`${this.apiUrl}/address-scope`).pipe(
+      map((response) => (response?.data ?? response ?? null) as AddressScope | null),
+      catchError(() => of(null)),
     );
   }
 
