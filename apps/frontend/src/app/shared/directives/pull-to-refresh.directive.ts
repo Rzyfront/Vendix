@@ -3,6 +3,7 @@ import {
   ElementRef,
   OnDestroy,
   OnInit,
+  effect,
   inject,
   input,
   output,
@@ -14,8 +15,9 @@ import {
  * El shell admin usa un scroller interno (`main` con `overflow-y-auto`, body
  * bloqueado), así que el gesto nativo del navegador no siempre se dispara
  * (y nunca en emulación DevTools con mouse). Esta directiva lo implementa a
- * mano sobre el host: sólo intercepta el gesto cuando el host está en
- * `scrollTop <= 0` y el dedo baja; cualquier otro scroll queda intacto.
+ * mano sobre el host: sólo intercepta el gesto cuando el host y los scrollers
+ * del recorrido táctil arrancan arriba y el dedo baja. El scroll anidado
+ * desplazado conserva el gesto completo, aunque llegue arriba durante él.
  *
  * No toca signals por movimiento (manipulación DOM directa): apto para
  * zoneless sin costo de change detection.
@@ -45,22 +47,31 @@ export class PullToRefreshDirective implements OnInit, OnDestroy {
   private badge: HTMLElement | null = null;
   private arrow: HTMLElement | null = null;
   private resetTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
+  private readonly disabledEffect = effect(() => {
+    if (this.ptrDisabled()) this.reset();
+  });
 
   private readonly onStart = (e: TouchEvent): void => {
-    if (this.refreshing || this.ptrDisabled() || e.touches.length !== 1) return;
-    if (this.el.nativeElement.scrollTop > 0) return;
+    if (this.destroyed || this.refreshing) return;
+    this.cancelTracking();
+    if (this.ptrDisabled() || e.touches.length !== 1 || !this.isAtScrollTop(e)) {
+      return;
+    }
     this.tracking = true;
     this.startY = e.touches[0].clientY;
     this.pull = 0;
   };
 
   private readonly onMove = (e: TouchEvent): void => {
-    if (!this.tracking || this.refreshing || this.ptrDisabled()) return;
-    const host = this.el.nativeElement;
+    if (this.destroyed || !this.tracking || this.refreshing) return;
+    if (this.ptrDisabled() || e.touches.length !== 1 || !this.isAtScrollTop(e)) {
+      this.cancelTracking();
+      return;
+    }
     const dy = e.touches[0].clientY - this.startY;
-    if (host.scrollTop > 0 || dy <= 0) {
-      this.tracking = false;
-      this.setPull(0);
+    if (dy <= 0) {
+      this.cancelTracking();
       return;
     }
     // Estamos arriba del todo y el dedo baja: reclamar el gesto.
@@ -68,19 +79,26 @@ export class PullToRefreshDirective implements OnInit, OnDestroy {
     this.setPull(Math.min(dy * 0.5, 110));
   };
 
-  private readonly onEnd = (): void => {
-    if (!this.tracking) return;
+  private readonly onEnd = (e: TouchEvent): void => {
+    if (this.destroyed || !this.tracking) return;
+    if (this.ptrDisabled() || e.touches.length > 0 || !this.isAtScrollTop(e)) {
+      this.cancelTracking();
+      return;
+    }
     this.tracking = false;
     if (this.pull >= this.threshold() && !this.refreshing) {
       this.refreshing = true;
       this.setPull(this.threshold());
-      this.pullRefresh.emit();
-      // Seguridad: si el consumidor no recarga, liberar el gesto.
+      // Programar antes de emitir: el consumidor puede destruir o resetear
+      // la directiva síncronamente y debe poder cancelar este timer también.
       this.resetTimer = setTimeout(() => this.reset(), 4000);
+      this.pullRefresh.emit();
     } else {
       this.setPull(0);
     }
   };
+
+  private readonly onCancel = (): void => this.cancelTracking();
 
   ngOnInit(): void {
     if (typeof window === 'undefined') return;
@@ -91,25 +109,70 @@ export class PullToRefreshDirective implements OnInit, OnDestroy {
     host.addEventListener('touchstart', this.onStart, { passive: true });
     host.addEventListener('touchmove', this.onMove, { passive: false });
     host.addEventListener('touchend', this.onEnd, { passive: true });
-    host.addEventListener('touchcancel', this.onEnd, { passive: true });
+    host.addEventListener('touchcancel', this.onCancel, { passive: true });
   }
 
   ngOnDestroy(): void {
+    this.destroyed = true;
+    this.disabledEffect.destroy();
+    this.reset();
     const host = this.el.nativeElement;
     host.removeEventListener('touchstart', this.onStart);
     host.removeEventListener('touchmove', this.onMove);
     host.removeEventListener('touchend', this.onEnd);
-    host.removeEventListener('touchcancel', this.onEnd);
-    if (this.resetTimer) clearTimeout(this.resetTimer);
+    host.removeEventListener('touchcancel', this.onCancel);
     this.badge?.remove();
     this.badge = null;
+    this.arrow = null;
   }
 
   /** Libera el estado de refresco (si el consumidor no recargó la página). */
   reset(): void {
+    if (this.resetTimer !== null) {
+      clearTimeout(this.resetTimer);
+      this.resetTimer = null;
+    }
     this.refreshing = false;
+    this.cancelTracking();
+  }
+
+  private cancelTracking(): void {
     this.tracking = false;
     this.setPull(0);
+  }
+
+  /** El host y todo scroller táctil anidado deben estar arriba al empezar. */
+  private isAtScrollTop(event: TouchEvent): boolean {
+    const host = this.el.nativeElement;
+    if (host.scrollTop > 0) return false;
+
+    // composedPath conserva los nodos internos de Shadow DOM y slots. Nunca
+    // inspeccionar ancestros externos: su scroll no pertenece a este host.
+    const path = event.composedPath();
+    const hostIndex = path.indexOf(host);
+    if (hostIndex >= 0) {
+      return !path.slice(0, hostIndex).some((node) => this.isScrolledContainer(node));
+    }
+
+    // Fallback para eventos sin recorrido compuesto; incluye targets Text.
+    let node: Node | null = event.target instanceof Node ? event.target : null;
+    while (node && node !== host) {
+      if (this.isScrolledContainer(node)) return false;
+      node = node.parentNode;
+    }
+    return node === host;
+  }
+
+  private isScrolledContainer(node: EventTarget): boolean {
+    if (
+      !(node instanceof Element) ||
+      node.scrollTop <= 0 ||
+      node.scrollHeight <= node.clientHeight
+    ) {
+      return false;
+    }
+    const overflowY = getComputedStyle(node).overflowY;
+    return overflowY === 'auto' || overflowY === 'scroll';
   }
 
   private ensureBadge(): void {

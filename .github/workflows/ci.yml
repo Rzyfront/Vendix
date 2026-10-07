@@ -406,6 +406,7 @@ jobs:
           --include='**/settings/shipping/components/method-zones-inline/method-zones-inline.component.spec.ts'
           --include='**/shared/components/payment-collector/payment-collector.component.spec.ts'
           --include='**/store/inventory/pop/**/*.spec.ts'
+          --include='**/shared/directives/pull-to-refresh.directive.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
