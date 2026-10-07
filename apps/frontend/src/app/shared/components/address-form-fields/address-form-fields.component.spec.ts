@@ -598,3 +598,103 @@ describe('AddressFormFieldsComponent — chip de carga sobre el mapa', () => {
     }
   });
 });
+
+describe('AddressFormFieldsComponent — mapa tras el debounce (compact vs completo)', () => {
+  let fixture: ComponentFixture<AddressFormFieldsComponent>;
+  let component: AddressFormFieldsComponent;
+  let forward: jasmine.Spy;
+
+  const riohacha = {
+    code: '44001', name: 'Riohacha', department_code: '44',
+    department_name: 'La Guajira', postal_code: '440001',
+  };
+
+  beforeEach(() => {
+    forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 11.54, lng: -72.91, precision: 'exact' }),
+    );
+    TestBed.configureTestingModule({
+      imports: [AddressFormFieldsComponent],
+      providers: [
+        {
+          provide: DianMunicipalityLookupService,
+          useValue: {
+            listDepartments: () => of(ADDRESS_TEST_DEPARTMENTS),
+            listByDepartment: () => of([riohacha]),
+            resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {},
+          },
+        },
+        {
+          provide: GeocodingService,
+          useValue: {
+            forward, reverse: () => of(null),
+            municipalityCenter: () => of({ lat: 11.54, lng: -72.91 }),
+          },
+        },
+        {
+          provide: CurrencyFormatService,
+          useValue: {
+            currencySymbol: signal('$'), currencyFormatStyle: () => 'comma_dot',
+            currencyDecimals: () => 0, loadCurrency: () => {}, format: (v: number) => `$${v}`,
+          },
+        },
+      ],
+    });
+    fixture = TestBed.createComponent(AddressFormFieldsComponent);
+    component = fixture.componentInstance;
+  });
+
+  async function typeLine1(text: string, ms: number): Promise<void> {
+    component.form.get('address_line1')!.setValue(text);
+    jasmine.clock().tick(ms);
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('compact sin dirección: sin mapa ni botón "Más detalles"', async () => {
+    fixture.componentRef.setInput('compact', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Más detalles');
+    expect(fixture.nativeElement.textContent).not.toContain('Abrir mapa');
+  });
+
+  it('compact: el mapa aparece solo tras el debounce, con el pin ubicado', async () => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      fixture.componentRef.setInput('compact', true);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+      component.onDepartmentChange('44');
+      component.onCityChange('44001');
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+      forward.calls.reset();
+
+      component.form.get('address_line1')!.setValue('Calle 5 # 6-7');
+      jasmine.clock().tick(100);
+      fixture.detectChanges();
+      expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeNull();
+
+      await typeLine1('Calle 5 # 6-7', 600);
+      expect(forward).toHaveBeenCalled();
+      expect(component.compactMapRevealed()).toBeTrue();
+      expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeTruthy();
+      expect(component.coordsSignal()).toEqual({ lat: 11.54, lng: -72.91 });
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  it('no compact: conserva el toggle "Abrir mapa" desde el inicio', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Abrir mapa');
+    expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeNull();
+  });
+});

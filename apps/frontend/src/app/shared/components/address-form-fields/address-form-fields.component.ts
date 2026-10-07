@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -139,6 +140,7 @@ const UNLOCATED_ADDRESS_WARNING =
     InputComponent,
     IconComponent,
     SelectorComponent,
+    NgTemplateOutlet,
   ],
   templateUrl: './address-form-fields.component.html',
   styleUrls: ['./address-form-fields.component.scss'],
@@ -150,16 +152,14 @@ export class AddressFormFieldsComponent {
   readonly initialAddress = input<AddressPayload | null>(null);
   /** POS opt-in: keep optional address fields behind a secondary action. */
   readonly compact = input<boolean>(false);
-  /** null follows prefilled data; once toggled, the cashier owns visibility. */
-  readonly advancedOverride = signal<boolean | null>(null);
-  readonly showAdvanced = computed<boolean>(() =>
-    !this.compact() || (this.advancedOverride() ?? (
-      !!this.initialAddress()?.address_line2 ||
-      !!this.initialAddress()?.postal_code ||
-      (this.initialAddress()?.country_code != null &&
-        this.initialAddress()?.country_code !== COLOMBIA_COUNTRY_CODE)
-    )),
-  );
+  /** Compact hides line2 / country / optional postal; non-compact shows everything. */
+  readonly showAdvanced = computed<boolean>(() => !this.compact());
+  /**
+   * Compact only: the map section stays out of the DOM until a forward-geocode
+   * resolves (it then renders AT THE END of the form, so it never shifts the
+   * field being typed).
+   */
+  readonly compactMapRevealed = signal(false);
   /** Optional map center coordinate (e.g. existing lat/lng or GPS fix). */
   readonly center = input<LatLng | null>(null);
   /**
@@ -771,6 +771,11 @@ export class AddressFormFieldsComponent {
       ? { lat: address.latitude!, lng: address.longitude! }
       : null);
     this.mapCenterHint.set(null);
+    // New address: reveal/open the map only when it already carries a point.
+    if (this.compact()) {
+      this.compactMapRevealed.set(hasValidCoords);
+      this.showMap.set(hasValidCoords);
+    }
     this.form.updateValueAndValidity({ emitEvent: true });
 
     // Fixed-location mode wins over whatever geography the address carried.
@@ -1060,6 +1065,12 @@ export class AddressFormFieldsComponent {
           this.precision.set(res.precision ?? null);
           this.geocodeLabel.set(res.label ?? null);
           this.emitAddressChange();
+          // Located (any precision): show the pin. In compact the map section
+          // sits at the END of the form, so revealing it shifts nothing.
+          if (this.compact()) {
+            this.compactMapRevealed.set(true);
+            this.showMap.set(true);
+          }
           // Low-precision hit: open the map — even in compact mode — so the
           // operator can confirm or drag the pin. Non-blocking: nothing here
           // gates `validChange`/submit.
@@ -1177,7 +1188,7 @@ export class AddressFormFieldsComponent {
       this.pendingAddressWarning = false;
     }
     this.showMap.set(true);
-    this.advancedOverride.set(true);
+    this.compactMapRevealed.set(true);
     this.mapHighlight.set(true);
     setTimeout(() => this.mapHighlight.set(false), 2000);
     this.scrollMapIntoView();

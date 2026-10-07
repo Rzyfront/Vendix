@@ -10,8 +10,8 @@
     </div>
   }
 
-  <!-- Collapsible map section -->
-  @if (showAdvanced()) {
+  <!-- Collapsible map section (shared template: top for full form, bottom for compact) -->
+  <ng-template #mapSection>
   <div class="map-section">
     <button
       type="button"
@@ -35,6 +35,10 @@
       </div>
     }
   </div>
+  </ng-template>
+
+  @if (!compact()) {
+    <ng-container [ngTemplateOutlet]="mapSection"></ng-container>
   }
 
   <!-- Non-blocking warning (forward-geocode failed, etc.) -->
@@ -148,9 +152,9 @@
     </div>
     }
 
-    @if (showAdvanced()) {
+    @if (showAdvanced() || (isLocked() && showPostalCode())) {
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      @if (!isLocked()) {
+      @if (showAdvanced() && !isLocked()) {
       <!-- El país se mantiene como CO; por ahora Colombia es el único catálogo disponible. -->
       <app-selector
         label="País"
@@ -161,7 +165,7 @@
       ></app-selector>
       }
 
-      @if (!isLocked() || showPostalCode()) {
+      @if (compact() ? (isLocked() && showPostalCode()) : (!isLocked() || showPostalCode())) {
       <app-input
         label="Código postal"
         formControlName="postal_code"
@@ -201,17 +205,7 @@
       }
     }
   </form>
-  @if (compact() && !showAdvanced()) {
-    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOverride.set(true)"
-      aria-label="Mostrar más detalles de dirección">
-      <app-icon name="plus" [size]="16"></app-icon>
-      <span>Más detalles de dirección</span>
-    </button>
-  } @else if (compact() && showAdvanced()) {
-    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOverride.set(false)"
-      aria-label="Ocultar detalles adicionales de dirección">
-      <app-icon name="minus" [size]="16"></app-icon>
-      <span>Menos detalles</span>
-    </button>
+  @if (compact() && compactMapRevealed()) {
+    <ng-container [ngTemplateOutlet]="mapSection"></ng-container>
   }
 </div>
