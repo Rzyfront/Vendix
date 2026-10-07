@@ -30,18 +30,9 @@
   <app-stats
     title="Canceladas"
     [value]="formatNumber(stats().cancelled_orders)"
-    smallText="Órdenes canceladas"
+    [smallText]="formatNumber(stats().refunded_orders) + ' reembolsadas'"
     iconName="x-circle"
     iconBgColor="bg-red-100"
     iconColor="text-red-500"
-  ></app-stats>
-
-  <app-stats
-    title="Reembolsadas"
-    [value]="formatNumber(stats().refunded_orders)"
-    smallText="Órdenes reembolsadas"
-    iconName="rotate-ccw"
-    iconBgColor="bg-orange-100"
-    iconColor="text-orange-500"
   ></app-stats>
 </ng-container>
