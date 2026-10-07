@@ -3250,6 +3250,14 @@
       "prompts": 0
     },
     {
+      "id": "d5f6e985",
+      "created_by": "dmin",
+      "created_at": "2026-10-06T05:11:14Z",
+      "sessions": 0,
+      "memories": 4,
+      "prompts": 0
+    },
+    {
       "id": "9943e875",
       "created_by": "rzy",
       "created_at": "2026-10-07T17:05:14Z",
@@ -3271,6 +3279,22 @@
       "created_at": "2026-10-07T17:27:33Z",
       "sessions": 0,
       "memories": 4,
+      "prompts": 0
+    },
+    {
+      "id": "c6896726",
+      "created_by": "rzy",
+      "created_at": "2026-10-07T17:47:14Z",
+      "sessions": 0,
+      "memories": 7,
+      "prompts": 0
+    },
+    {
+      "id": "14665c33",
+      "created_by": "rzy",
+      "created_at": "2026-10-07T18:00:32Z",
+      "sessions": 0,
+      "memories": 14,
       "prompts": 0
     }
   ]

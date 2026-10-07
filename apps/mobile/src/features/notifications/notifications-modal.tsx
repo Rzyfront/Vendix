@@ -109,6 +109,7 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
   }, [fetchNotifications]);
 
   const onRefresh = useCallback(async () => {
+    if (isLoading || refreshing) return;
     setRefreshing(true);
     try {
       await fetchNotifications();
@@ -117,7 +118,7 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
     } finally {
       setRefreshing(false);
     }
-  }, [fetchNotifications]);
+  }, [fetchNotifications, isLoading, refreshing]);
 
   useEffect(() => {
     if (visible) {
@@ -179,51 +180,53 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
             )}
           </View>
 
-          {/* List */}
-          {isLoading ? (
-            <View style={styles.loading}>
-              <Spinner size="md" />
-            </View>
-          ) : notifications.length > 0 ? (
-            <FlatList
-              data={notifications}
-              keyExtractor={(item) => item.id.toString()}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  tintColor={colors.primary}
-                  colors={[colors.primary]}
-                />
-              }
-              renderItem={({ item }) => (
-                <Pressable
-                  style={[styles.item, !item.is_read && styles.itemUnread]}
-                  onPress={() => handleNotificationPress(item)}
-                >
-                  <View style={[styles.itemIcon, { backgroundColor: getItemBgColor(item.type) }]}>
-                    <Icon name={getIconForType(item.type)} size={16} color={getItemIconColor(item.type)} />
-                  </View>
-                  <View style={styles.itemContent}>
-                    <Text style={styles.itemTitle} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.itemBody} numberOfLines={2}>
-                      {item.body}
-                    </Text>
-                    <Text style={styles.itemTime}>{formatTime(item.created_at)}</Text>
-                  </View>
-                  {!item.is_read && <View style={styles.unreadDot} />}
-                </Pressable>
-              )}
-              showsVerticalScrollIndicator={false}
-            />
-          ) : (
-            <View style={styles.empty}>
-              <Icon name="bell" size={32} color={colorScales.gray[300]} />
-              <Text style={styles.emptyText}>Sin notificaciones</Text>
-            </View>
-          )}
+          {/* La lista conserva el pull-to-refresh también vacía o tras error. */}
+          <FlatList
+            data={isLoading ? [] : notifications}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={styles.listContent}
+            alwaysBounceVertical
+            ListEmptyComponent={isLoading ? (
+              <View style={styles.loading}>
+                <Spinner size="md" />
+              </View>
+            ) : (
+              <View style={styles.empty}>
+                <Icon name="bell" size={32} color={colorScales.gray[300]} />
+                <Text style={styles.emptyText}>Sin notificaciones</Text>
+              </View>
+            )}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                enabled={!isLoading}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                style={[styles.item, !item.is_read && styles.itemUnread]}
+                onPress={() => handleNotificationPress(item)}
+              >
+                <View style={[styles.itemIcon, { backgroundColor: getItemBgColor(item.type) }]}>
+                  <Icon name={getIconForType(item.type)} size={16} color={getItemIconColor(item.type)} />
+                </View>
+                <View style={styles.itemContent}>
+                  <Text style={styles.itemTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.itemBody} numberOfLines={2}>
+                    {item.body}
+                  </Text>
+                  <Text style={styles.itemTime}>{formatTime(item.created_at)}</Text>
+                </View>
+                {!item.is_read && <View style={styles.unreadDot} />}
+              </Pressable>
+            )}
+            showsVerticalScrollIndicator={false}
+          />
         </View>
       </Pressable>
     </Modal>
@@ -305,6 +308,9 @@ const styles = StyleSheet.create({
   loading: {
     padding: spacing[8],
     alignItems: 'center',
+  },
+  listContent: {
+    flexGrow: 1,
   },
   item: {
     flexDirection: 'row',

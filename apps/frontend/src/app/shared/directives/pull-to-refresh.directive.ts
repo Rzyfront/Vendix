@@ -9,6 +9,9 @@ import {
   output,
 } from '@angular/core';
 
+const TOUCH_SLOP_PX = 8;
+const VERTICAL_DOMINANCE_RATIO = 1.2;
+
 /**
  * Pull-to-refresh táctil dentro de la app.
  *
@@ -16,7 +19,8 @@ import {
  * bloqueado), así que el gesto nativo del navegador no siempre se dispara
  * (y nunca en emulación DevTools con mouse). Esta directiva lo implementa a
  * mano sobre el host: sólo intercepta el gesto cuando el host y los scrollers
- * del recorrido táctil arrancan arriba y el dedo baja. El scroll anidado
+ * del recorrido táctil arrancan arriba y el dedo baja predominantemente.
+ * El jitter y los gestos horizontales quedan intactos. El scroll anidado
  * desplazado conserva el gesto completo, aunque llegue arriba durante él.
  *
  * No toca signals por movimiento (manipulación DOM directa): apto para
@@ -40,7 +44,9 @@ export class PullToRefreshDirective implements OnInit, OnDestroy {
   /** Se emite al soltar pasando el umbral. */
   readonly pullRefresh = output<void>();
 
+  private startX = 0;
   private startY = 0;
+  private verticalLocked = false;
   private tracking = false;
   private pull = 0;
   private refreshing = false;
@@ -59,6 +65,7 @@ export class PullToRefreshDirective implements OnInit, OnDestroy {
       return;
     }
     this.tracking = true;
+    this.startX = e.touches[0].clientX;
     this.startY = e.touches[0].clientY;
     this.pull = 0;
   };
@@ -69,7 +76,18 @@ export class PullToRefreshDirective implements OnInit, OnDestroy {
       this.cancelTracking();
       return;
     }
+    const dx = e.touches[0].clientX - this.startX;
     const dy = e.touches[0].clientY - this.startY;
+    if (!this.verticalLocked) {
+      // No reclamar jitter ni cambiar de eje después de que el navegador
+      // ya empezó un scroll horizontal/diagonal. La decisión dura el gesto.
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < TOUCH_SLOP_PX) return;
+      if (dy <= 0 || dy < Math.abs(dx) * VERTICAL_DOMINANCE_RATIO) {
+        this.cancelTracking();
+        return;
+      }
+      this.verticalLocked = true;
+    }
     if (dy <= 0) {
       this.cancelTracking();
       return;
@@ -138,6 +156,7 @@ export class PullToRefreshDirective implements OnInit, OnDestroy {
 
   private cancelTracking(): void {
     this.tracking = false;
+    this.verticalLocked = false;
     this.setPull(0);
   }
 

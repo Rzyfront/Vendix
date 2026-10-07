@@ -36,10 +36,11 @@ describe('PullToRefreshDirective — scroll ownership y cancelación', () => {
     count = type === 'touchend' || type === 'touchcancel' ? 0 : 1,
     path?: EventTarget[],
     reportedTarget?: EventTarget | null,
+    x = 100,
   ): Event {
     const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
     Object.defineProperty(event, 'touches', {
-      value: Array.from({ length: count }, (_, index) => ({ identifier: index, clientY: y })),
+      value: Array.from({ length: count }, (_, index) => ({ identifier: index, clientX: x, clientY: y })),
     });
     if (path !== undefined) Object.defineProperty(event, 'composedPath', { value: () => path });
     if (reportedTarget !== undefined) Object.defineProperty(event, 'target', { value: reportedTarget });
@@ -52,6 +53,10 @@ describe('PullToRefreshDirective — scroll ownership y cancelación', () => {
     const move = touch('touchmove', target, 100 + distance);
     touch('touchend', target);
     return move;
+  }
+
+  function moveBy(dx: number, dy: number, target: Node = host): Event {
+    return touch('touchmove', target, 100 + dy, 1, undefined, undefined, 100 + dx);
   }
 
   function badge(): HTMLElement | null {
@@ -112,6 +117,113 @@ describe('PullToRefreshDirective — scroll ownership y cancelación', () => {
     pull(host, 178);
     expect(refreshed).not.toHaveBeenCalled();
     pull(host, 180);
+    expect(refreshed).toHaveBeenCalledTimes(1);
+  });
+
+  for (const dx of [-200, 200]) {
+    it(`strip horizontal dx=${dx}/dy=10 mantiene su scroll nativo`, () => {
+      const strip = child('visible');
+      strip.style.overflowX = 'auto';
+      touch('touchstart', strip);
+      expect(moveBy(dx, 10, strip).defaultPrevented).toBeFalse();
+      touch('touchend', strip);
+      expect(refreshed).not.toHaveBeenCalled();
+      expect(badge()).toBeNull();
+    });
+  }
+
+  it('jitter bajo8px no reclama scroll ni crea badge al soltar', () => {
+    touch('touchstart');
+    expect(moveBy(3, 5).defaultPrevented).toBeFalse();
+    expect(moveBy(6, 7).defaultPrevented).toBeFalse();
+    touch('touchend');
+    expect(refreshed).not.toHaveBeenCalled();
+    expect(badge()).toBeNull();
+  });
+
+  it('un pequeño jitter ascendente antes del slop no cancela un pull vertical válido', () => {
+    touch('touchstart');
+    expect(moveBy(2, -3).defaultPrevented).toBeFalse();
+    expect(moveBy(4, 200).defaultPrevented).toBeTrue();
+    touch('touchend');
+    expect(refreshed).toHaveBeenCalledTimes(1);
+  });
+
+  it('la decisión vertical espera el slop y acepta su frontera exacta', () => {
+    touch('touchstart');
+    expect(moveBy(0, 7).defaultPrevented).toBeFalse();
+    expect(badge()).toBeNull();
+    expect(moveBy(0, 8).defaultPrevented).toBeTrue();
+    expect(moveBy(0, 200).defaultPrevented).toBeTrue();
+    touch('touchend');
+    expect(refreshed).toHaveBeenCalledTimes(1);
+  });
+
+  it('un gesto horizontal descartado no se convierte en refresh al girar después hacia abajo', () => {
+    touch('touchstart');
+    expect(moveBy(30, 12).defaultPrevented).toBeFalse();
+    expect(moveBy(30, 300).defaultPrevented).toBeFalse();
+    touch('touchend');
+    expect(refreshed).not.toHaveBeenCalled();
+    pull();
+    expect(refreshed).toHaveBeenCalledTimes(1);
+  });
+
+  it('diagonal ambigua100/100 se abandona sin reclasificación tardía', () => {
+    touch('touchstart');
+    expect(moveBy(100, 100).defaultPrevented).toBeFalse();
+    expect(moveBy(100, 300).defaultPrevented).toBeFalse();
+    touch('touchend');
+    expect(refreshed).not.toHaveBeenCalled();
+    expect(badge()).toBeNull();
+  });
+
+  it('diagonal claramente descendente60/160 sí permite refresh', () => {
+    touch('touchstart');
+    expect(moveBy(60, 160).defaultPrevented).toBeTrue();
+    touch('touchend');
+    expect(refreshed).toHaveBeenCalledTimes(1);
+  });
+
+  it('predominancia exige1.2x horizontal y acepta el límite exacto', () => {
+    touch('touchstart');
+    expect(moveBy(100, 119).defaultPrevented).toBeFalse();
+    touch('touchend');
+    expect(refreshed).not.toHaveBeenCalled();
+    touch('touchstart');
+    expect(moveBy(100, 120).defaultPrevented).toBeTrue();
+    expect(moveBy(100, 140).defaultPrevented).toBeTrue();
+    touch('touchend');
+    expect(refreshed).toHaveBeenCalledTimes(1);
+  });
+
+  it('el eje vertical confirmado no oscila por deriva lateral posterior', () => {
+    touch('touchstart');
+    expect(moveBy(2, 20).defaultPrevented).toBeTrue();
+    expect(moveBy(200, 160).defaultPrevented).toBeTrue();
+    touch('touchend');
+    expect(refreshed).toHaveBeenCalledTimes(1);
+  });
+
+  it('reset libera el axis lock para clasificar el siguiente gesto horizontal', () => {
+    pull();
+    directive.reset();
+    touch('touchstart');
+    expect(moveBy(200, 10).defaultPrevented).toBeFalse();
+    touch('touchend');
+    expect(refreshed).toHaveBeenCalledTimes(1);
+    pull();
+    expect(refreshed).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancelar un gesto pendiente bajo slop no deja lock ni emisiones', () => {
+    touch('touchstart');
+    expect(moveBy(3, 5).defaultPrevented).toBeFalse();
+    touch('touchcancel');
+    expect(moveBy(0, 300).defaultPrevented).toBeFalse();
+    touch('touchend');
+    expect(refreshed).not.toHaveBeenCalled();
+    pull();
     expect(refreshed).toHaveBeenCalledTimes(1);
   });
 
