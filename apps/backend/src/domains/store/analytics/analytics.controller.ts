@@ -1497,6 +1497,13 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('reviews/rating-trend')
+  @Permissions('store:analytics:read')
+  async getReviewsRatingTrend(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getRatingTrend(query);
+    return this.response_service.success(result);
+  }
+
   /**
    * QUI-548: reseñas agregadas por producto con promedio, distribución
    * de estrellas, conteo de verificadas/pendientes y fecha de la última.
@@ -1551,7 +1558,7 @@ export class AnalyticsController {
     @Res() res: Response,
   ): Promise<void> {
     const tz = await this.resolveReportTz();
-    const rows =
+    const { rows } =
       await this.reviews_analytics_service.getReviewsForExport(query);
 
     // The service returns rows keyed by their Spanish header labels; 'Fecha'
