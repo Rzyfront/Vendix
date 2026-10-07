@@ -35,7 +35,7 @@ export class KitchenTicketPrintService {
     onFailure?: (ticketId: number) => void,
   ): void {
     if (!this.isPhysicalKitchen() || !ticketIds?.length) return;
-    const fresh = Array.from(new Set(ticketIds)).filter(
+    const fresh = this.collapseForMode(ticketIds).filter(
       (id) => !this.isDuplicateAutoPrint(id),
     );
     for (const id of fresh) this.enqueue(id, 'automatic', onFailure);
@@ -44,7 +44,19 @@ export class KitchenTicketPrintService {
   /** Impresion manual (boton "Imprimir comanda"): siempre imprime. */
   printTickets(ticketIds: number[]): void {
     if (!ticketIds?.length) return;
-    for (const id of Array.from(new Set(ticketIds))) this.enqueue(id, 'explicit');
+    for (const id of this.collapseForMode(ticketIds)) this.enqueue(id, 'explicit');
+  }
+
+  /**
+   * En cocina fisica el backend devuelve, para cualquier ticket de la orden, una
+   * sola hoja con todos los items vivos: se manda un unico render (primer id
+   * valido). En virtual se conserva la lista deduplicada.
+   */
+  private collapseForMode(ticketIds: Array<number | null | undefined>): number[] {
+    const valid = Array.from(
+      new Set(ticketIds.filter((id): id is number => id != null)),
+    );
+    return this.isPhysicalKitchen() ? valid.slice(0, 1) : valid;
   }
 
   private enqueue(

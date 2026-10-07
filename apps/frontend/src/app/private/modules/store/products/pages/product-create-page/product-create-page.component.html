@@ -2487,7 +2487,7 @@
                 customWrapperClass="!mt-0"
               ></app-input>
 
-              @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+              @if (isPreparedProduct() && kdsStationOptions().length > 0 && !isPhysicalKitchen()) {
                 <app-selector
                   label="Estación de preparación"
                   formControlName="kds_id"
@@ -2508,7 +2508,7 @@
                 customWrapperClass="!mt-0"
               ></app-input>
 
-              @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+              @if (isPreparedProduct() && kdsStationOptions().length > 0 && !isPhysicalKitchen()) {
                 <app-selector
                   label="Estación de preparación"
                   formControlName="kds_id"
@@ -2862,7 +2862,7 @@
             es lo que hace que una tienda con una sola estación funcione sin
             configurar un solo plato.
           -->
-          @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+          @if (isPreparedProduct() && kdsStationOptions().length > 0 && !isPhysicalKitchen()) {
             <app-selector
               label="Estación de preparación"
               formControlName="kds_id"
@@ -2883,7 +2883,7 @@
             customWrapperClass="!mt-0"
           ></app-input>
 
-          @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+          @if (isPreparedProduct() && kdsStationOptions().length > 0 && !isPhysicalKitchen()) {
             <app-selector
               label="Estación de preparación"
               formControlName="kds_id"
