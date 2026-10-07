@@ -406,7 +406,7 @@
   transition: background-color 0.15s ease;
 
   &:hover:not(:disabled) {
-    background: rgba(var(--color-primary-rgb, 22, 163, 74), 0.08);
+    background: var(--color-primary-fade);
   }
 
   &:focus-visible {

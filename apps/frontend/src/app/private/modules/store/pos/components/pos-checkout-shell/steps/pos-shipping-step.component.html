@@ -393,9 +393,10 @@
 
             @if (isPickupMethod() && !shippingRateId() && !isCalculatingShipping() && !manualCostOverride()) {
               <div class="manual-cost-input">
-                <button type="button" class="no-methods-link"
+                <button type="button" class="custom-rate-btn"
                   [disabled]="!canUseCustomShippingRate()"
                   (click)="useCustomShippingRate()">
+                  <app-icon name="pencil" [size]="16"></app-icon>
                   Usar tarifa personalizada
                 </button>
                 @if (!canUseCustomShippingRate() && customShippingRateBlockReason()) {

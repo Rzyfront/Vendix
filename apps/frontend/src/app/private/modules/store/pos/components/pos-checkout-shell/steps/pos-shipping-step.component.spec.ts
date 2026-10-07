@@ -842,7 +842,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingCost()).toBe(4800);
     expect(component.canConfirm()).toBeTrue();
     expect(component.shippingCostPending()).toBeFalse();
-    const action = fixture.debugElement.query(By.css('.cost-card button.no-methods-link'));
+    const action = fixture.debugElement.query(By.css('.cost-card button.custom-rate-btn'));
     expect(action.nativeElement.textContent).toContain('Usar tarifa personalizada');
     action.triggerEventHandler('click', null);
     fixture.detectChanges();
