@@ -4,6 +4,7 @@ import {
   canCancelPaymentAsRole,
   canRefund,
   canCancel,
+  canConfirmPayment,
   canAssignShipping,
   canConfirmDelivery,
   canEditOrder,
@@ -267,8 +268,21 @@ describe('order-action-policy — canAssignShipping', () => {
 });
 
 describe('order-action-policy — canConfirmDelivery', () => {
-  it.each(['delivered', 'processing'])('enables on %s with no pending kitchen items', (state) =>
-    expect(canConfirmDelivery(order({ state }))).toEqual({ enabled: true }),
+  it.each(['delivered', 'processing'])('enables on %s with no pending kitchen items (paid)', (state) =>
+    expect(
+      canConfirmDelivery(order({ state, remaining_balance: 0, payments: [directPayment(100)] })),
+    ).toEqual({ enabled: true }),
+  );
+
+  it.each(['delivered', 'processing'])('disables on %s with an unpaid non-credit balance', (state) =>
+    expect(canConfirmDelivery(order({ state }))).toEqual({
+      enabled: false,
+      reason: 'ORD_FINISH_UNPAID_BALANCE_001',
+    }),
+  );
+
+  it('enables an unpaid credit sale (payment_form 2)', () =>
+    expect(canConfirmDelivery(order({ state: 'delivered', payment_form: '2' }))).toEqual({ enabled: true }),
   );
 
   it.each(['delivered', 'processing'])('disables on %s while kitchen items are still pending', (state) =>
@@ -308,6 +322,39 @@ describe('order-action-policy — canDeliverItem (B1b)', () => {
       enabled: false,
       reason: ITEM_NOT_DELIVERABLE,
     });
+  });
+
+  describe('kitchen_mode', () => {
+    it.each(['pending', 'in_preparation'])(
+      'physical + %s => enabled',
+      (latestKitchenStatus) =>
+        expect(
+          canDeliverItem(item({ kitchen_mode: 'physical', item_type: 'prepared', latestKitchenStatus })),
+        ).toEqual({ enabled: true }),
+    );
+
+    it.each(['pending', 'in_preparation'])('virtual + %s => disabled', (latestKitchenStatus) =>
+      expect(
+        canDeliverItem(item({ kitchen_mode: 'virtual', item_type: 'prepared', latestKitchenStatus })),
+      ).toEqual({ enabled: false, reason: ITEM_NOT_DELIVERABLE }),
+    );
+
+    it('ausente + in_preparation => disabled (igual que hoy)', () =>
+      expect(canDeliverItem(item({ item_type: 'prepared', latestKitchenStatus: 'in_preparation' }))).toEqual({
+        enabled: false,
+        reason: ITEM_NOT_DELIVERABLE,
+      }));
+
+    it('physical + estado de cocina terminal cancelled => sigue bloqueado', () =>
+      expect(
+        canDeliverItem(item({ kitchen_mode: 'physical', item_type: 'prepared', latestKitchenStatus: 'cancelled' })),
+      ).toEqual({ enabled: false, reason: ITEM_NOT_DELIVERABLE }));
+
+    it('physical + sin ticket de cocina => igual que hoy (prepared exige cocina)', () =>
+      expect(canDeliverItem(item({ kitchen_mode: 'physical', item_type: 'prepared' }))).toEqual({
+        enabled: false,
+        reason: ITEM_NOT_DELIVERABLE,
+      }));
   });
 
   it('allows a prepared item once ready', () => {
@@ -1009,5 +1056,71 @@ describe('order-action-policy — requiresPaymentRegistration (Fase 2 paso 6)', 
         requiresPaymentRegistration(order({ state, remaining_balance: 40, payments: [manualPending()] })),
       ).toBe(false);
     }
+  });
+});
+
+describe('order-action-policy — bloqueo por cuenta dividida (cobro de la orden principal)', () => {
+  it('canCancel queda deshabilitado con SPLIT_ACCOUNT_LOCKED si hay split activo', () => {
+    expect(canCancel(order({ state: 'created', active_financial_split_id: 5 }))).toEqual({
+      enabled: false,
+      reason: SPLIT_LOCKED,
+    });
+  });
+
+  it('canConfirmPayment: habilitado sin split, bloqueado con split', () => {
+    expect(canConfirmPayment(order({ state: 'pending_payment' }))).toEqual({ enabled: true });
+    expect(
+      canConfirmPayment(order({ state: 'pending_payment', active_financial_split_id: 5 })),
+    ).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+  });
+});
+
+describe('reparto financiero saldado — cierre de ciclo de vida habilitado, dinero bloqueado', () => {
+  const settledSplit = (
+    overrides: Partial<OrderActionSnapshot> & { remaining_balance?: number | null } = {},
+  ) =>
+    order({
+      state: 'processing',
+      grand_total: 100,
+      active_financial_split_id: 3,
+      remaining_balance: 0,
+      payments: [directPayment(60), directPayment(40)],
+      ...overrides,
+    });
+
+  it('happy: canConfirmDelivery habilitado en processing con split saldado', () => {
+    expect(canConfirmDelivery(settledSplit())).toEqual({ enabled: true });
+  });
+
+  it('happy: canFastTrack habilitado desde draft con split saldado', () => {
+    expect(
+      canFastTrack({
+        ...settledSplit({ state: 'draft' }),
+        delivery_type: 'dine_in',
+        hasOrderItems: true,
+      }),
+    ).toEqual({ enabled: true });
+  });
+
+  it('sad: split sin saldar mantiene confirm_delivery y fast_track bloqueados', () => {
+    const unsettled = settledSplit({ payments: [directPayment(60)], remaining_balance: 40 });
+    expect(canConfirmDelivery(unsettled)).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(
+      canFastTrack({ ...unsettled, state: 'draft', delivery_type: 'dine_in', hasOrderItems: true }),
+    ).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+  });
+
+  it('sad: con split saldado pay/cancel/edit/confirm_payment/credit_payment siguen bloqueados', () => {
+    const s = settledSplit({ state: 'created' });
+    expect(canPay(s)).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canCancel(s)).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canEditOrder(s, { roles: ['owner'] })).toMatchObject({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canConfirmPayment({ ...s, state: 'pending_payment' })).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+    expect(canCreditPayment({ state: 'finished', payment_form: '2', remaining_balance: 5, active_financial_split_id: 3 }))
+      .toEqual({ enabled: false, reason: SPLIT_LOCKED });
+  });
+
+  it('sin split el comportamiento de fast_track no cambia', () => {
+    expect(canFastTrack({ state: 'draft', delivery_type: 'dine_in', hasOrderItems: true })).toEqual({ enabled: true });
   });
 });

@@ -126,6 +126,176 @@ describe('AccountingEventsListener invoice.accepted routing', () => {
   });
 });
 
+describe('AccountingEventsListener purchase.vat_recognized contract', () => {
+  const baseContributionEvent = {
+    contribution_id: 901,
+    purchase_order_id: 41,
+    reception_id: 501,
+    organization_id: 7,
+    store_id: 3,
+    accounting_entity_id: 19,
+    iva_amount: 190,
+    user_id: 12,
+  };
+
+  const build = (overrides: any = {}) => {
+    const auto_entry_service = {
+      onPurchaseVatRecognized: jest.fn().mockResolvedValue({ id: 1 }),
+      onPurchaseVatContributionRecognized: jest
+        .fn()
+        .mockResolvedValue({ id: 2 }),
+      prisma: {
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ organization_id: 7 }),
+        },
+      },
+      ...overrides.auto_entry_service,
+    };
+    const fiscal_gate = {
+      isSubflowEnabled: jest.fn().mockResolvedValue(true),
+      ...overrides.fiscal_gate,
+    };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      fiscal_gate as any,
+      { getPlatformContext: jest.fn() } as any,
+      { recordSkip: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    return { listener, auto_entry_service, fiscal_gate };
+  };
+
+  it('routes a contribution-only event without invoice_id by contribution ID', async () => {
+    const { listener, auto_entry_service } = build();
+    const log = jest
+      .spyOn((listener as any).logger, 'log')
+      .mockImplementation(() => undefined);
+
+    await listener.handlePurchaseVatRecognized(baseContributionEvent);
+
+    expect(
+      auto_entry_service.onPurchaseVatContributionRecognized,
+    ).toHaveBeenCalledWith({
+      contribution_id: 901,
+      organization_id: 7,
+      accounting_entity_id: 19,
+      store_id: 3,
+      user_id: 12,
+    });
+    expect(auto_entry_service.onPurchaseVatRecognized).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('purchase VAT contribution #901'),
+    );
+    log.mockRestore();
+  });
+
+  it('does not fall back to invoice posting when contribution_id is malformed', async () => {
+    const { listener, auto_entry_service, fiscal_gate } = build();
+    const error = jest
+      .spyOn((listener as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    await listener.handlePurchaseVatRecognized({
+      ...baseContributionEvent,
+      contribution_id: undefined,
+      invoice_id: 88,
+    } as any);
+
+    expect(
+      auto_entry_service.onPurchaseVatContributionRecognized,
+    ).not.toHaveBeenCalled();
+    expect(auto_entry_service.onPurchaseVatRecognized).not.toHaveBeenCalled();
+    expect(fiscal_gate.isSubflowEnabled).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('contribution #undefined'),
+      expect.anything(),
+    );
+    error.mockRestore();
+  });
+
+  it('keeps the valid legacy invoice_id route intact', async () => {
+    const { listener, auto_entry_service } = build();
+    const log = jest
+      .spyOn((listener as any).logger, 'log')
+      .mockImplementation(() => undefined);
+    const { contribution_id: _contributionId, ...legacyEvent } = {
+      ...baseContributionEvent,
+      invoice_id: 88,
+    };
+    void _contributionId;
+
+    await listener.handlePurchaseVatRecognized(legacyEvent);
+
+    expect(auto_entry_service.onPurchaseVatRecognized).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice_id: 88, organization_id: 7 }),
+    );
+    expect(
+      auto_entry_service.onPurchaseVatContributionRecognized,
+    ).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('purchase.vat_recognized invoice #88'),
+    );
+    log.mockRestore();
+  });
+
+  it('rejects an invalid legacy invoice_id before posting', async () => {
+    const { listener, auto_entry_service, fiscal_gate } = build();
+
+    await listener.handlePurchaseVatRecognized({
+      purchase_order_id: 41,
+      reception_id: 501,
+      organization_id: 7,
+      store_id: 3,
+      accounting_entity_id: 19,
+      iva_amount: 190,
+      invoice_id: 0,
+    } as any);
+
+    expect(auto_entry_service.onPurchaseVatRecognized).not.toHaveBeenCalled();
+    expect(fiscal_gate.isSubflowEnabled).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['organization_id', { organization_id: undefined }],
+    ['accounting_entity_id', { accounting_entity_id: undefined }],
+    ['store_id', { store_id: undefined }],
+  ])('requires valid contribution scope (%s)', async (_field, override) => {
+    const { listener, auto_entry_service, fiscal_gate } = build();
+
+    await listener.handlePurchaseVatRecognized({
+      ...baseContributionEvent,
+      ...override,
+    } as any);
+
+    expect(
+      auto_entry_service.onPurchaseVatContributionRecognized,
+    ).not.toHaveBeenCalled();
+    expect(auto_entry_service.onPurchaseVatRecognized).not.toHaveBeenCalled();
+    expect(fiscal_gate.isSubflowEnabled).not.toHaveBeenCalled();
+  });
+
+  it('logs contribution posting failures against the contribution ID', async () => {
+    const { listener } = build({
+      auto_entry_service: {
+        onPurchaseVatContributionRecognized: jest
+          .fn()
+          .mockRejectedValue(new Error('posting failed')),
+      },
+    });
+    const error = jest
+      .spyOn((listener as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    await listener.handlePurchaseVatRecognized(baseContributionEvent);
+
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('contribution #901'),
+      expect.anything(),
+    );
+    error.mockRestore();
+  });
+});
+
 /**
  * CP-PURCHASE-TRANSPARENCY C.9 — los cuatro caminos de asiento omitido.
  *

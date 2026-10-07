@@ -19,6 +19,22 @@ export interface ExtractedSupplier {
   phone?: string;
 }
 
+/**
+ * QUI-855 — un impuesto tipado de la línea, ya normalizado. `tax_rate` es
+ * PORCENTAJE (19 = 19 %), a diferencia del campo legacy `tax_rate` de la línea
+ * que sigue siendo FRACCIÓN (0.19).
+ */
+export interface ExtractedLineTax {
+  tax_type: 'iva' | 'inc' | 'icui' | 'ibua';
+  /** Porcentaje (19), o null cuando el impuesto es un monto fijo por unidad. */
+  tax_rate: number | null;
+  calc_mode: 'percent' | 'fixed_per_unit';
+  fixed_amount_per_unit: number | null;
+  /** Monto de línea impreso en la factura (dinero), si lo hay. */
+  amount_override: number | null;
+  is_inclusive: boolean;
+}
+
 export interface ExtractedLineItem {
   description: string;
   quantity: number;
@@ -40,6 +56,11 @@ export interface ExtractedLineItem {
    * and (b) suggest a tax_category by rate match in `matchProducts`.
    */
   tax_rate?: number | null;
+  /**
+   * QUI-855 — impuestos tipados de la línea (IVA / INC / ICUI / IBUA), máx. 4,
+   * uno por tipo. `tax_rate` legacy = la fila IVA expresada en fracción.
+   */
+  taxes?: ExtractedLineTax[];
   /**
    * F3 IVA lifecycle: the ORIGINAL printed unit price as extracted from the
    * invoice (gross when the invoice was inclusive, net when exclusive).
@@ -72,6 +93,14 @@ export interface ExtractedLineItem {
    */
   discount_amount?: number | null;
   /**
+   * QUI-855 — descuento comercial de la línea BRUTO, tal como se imprimió (sin
+   * aplanar por IVA); undefined si no hay. El carrito multi-impuesto parte de
+   * `unit_price_gross` + `discount_amount_printed` y deja que el kernel despeje
+   * la base; `unit_price`/`discount_amount` (netos por IVA) quedan para el
+   * camino legacy.
+   */
+  discount_amount_printed?: number | null;
+  /**
    * QUI-661 hotfix — descuento comercial de la línea en PORCENTAJE (0-100),
    * tal como lo imprime la factura ("-20%", "Dcto 20%"). Es PROCEDENCIA: el
    * monto en `discount_amount` es la fuente de verdad y gana en `deriveLineTax`.
@@ -80,6 +109,16 @@ export interface ExtractedLineItem {
    * a la base (bruto o neto), por eso es el dato más robusto que la IA emite.
    */
   discount_percentage?: number | null;
+  /** OCR v2 — unidad en que la factura IMPRIMIÓ el descuento de la línea. */
+  discount_kind?: 'percent' | 'amount';
+  /** OCR v2 — tratamiento del IVA de la línea. */
+  tax_treatment?: 'gravado' | 'exento' | 'excluido';
+  /** OCR v2 — bonificación / obsequio a precio 0. */
+  is_bonus?: boolean;
+  /** OCR v2 — «Valor total» impreso de la línea, solo para cuadrar. */
+  printed_line_total?: number;
+  /** Cuadre determinístico de la línea contra su total impreso. */
+  reconcile?: { expected: number; printed: number; ok: boolean };
 }
 
 export interface InvoiceScanResult {
@@ -105,6 +144,11 @@ export interface InvoiceScanResult {
    */
   discount_amount?: number | null;
   /**
+   * QUI-855 — `discount_amount` tal como se imprimió (sin aplanar por IVA). Lo
+   * usa el carrito cuando las líneas viajan en bruto (camino multi-impuesto).
+   */
+  discount_amount_printed?: number | null;
+  /**
    * QUI-661 Fase 4 — descuento por PRONTO PAGO detectado en la factura
    * ("2% si paga antes de 10 días"). Se extrae para MOSTRARLO, no para
    * aplicarlo: es un descuento financiero, va a cuenta de resultado y se
@@ -122,6 +166,21 @@ export interface InvoiceScanResult {
    * user confirms.
    */
   scan_warnings?: string[];
+  /** OCR v2 — descuento de pie comercial en % tal como se imprimió (único). */
+  header_discount_percentage?: number;
+  header_discount_kind?: 'percent' | 'amount';
+  schema_version?: 1 | 2;
+  /**
+   * QUI-855 — documento escaneado guardado en S3 (KEY, no URL firmada). El
+   * frontend lo reenvía en `scan_attachment` al crear la OC. null si la subida
+   * falló (el escaneo no se rompe).
+   */
+  scan_attachment?: {
+    key: string;
+    file_name: string;
+    file_type: string;
+    file_size: number;
+  } | null;
 }
 
 // --- Interfaces for match response ---

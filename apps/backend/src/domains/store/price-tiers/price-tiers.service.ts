@@ -540,13 +540,26 @@ export class PriceTiersService {
           store_id: storeId,
           NOT: { product_id: productId, price_tier_id: tierId },
         },
-        select: { product_id: true },
+        select: {
+          product_id: true,
+          product: { select: { id: true, name: true, state: true } },
+        },
       });
       if (conflict) {
+        const owner = conflict.product;
+        const productArchived = owner?.state === 'archived';
         throw new VendixHttpException(
           ErrorCodes.PROD_BARCODE_DUP_001,
-          'El código de barras ya está en uso por otra presentación en esta tienda',
-          { barcode: normalized, conflict_type: 'presentation' },
+          productArchived
+            ? `El código de barras lo usa una presentación del producto archivado "${owner.name}"`
+            : `El código de barras ya está en uso por una presentación del producto "${owner?.name}"`,
+          {
+            barcode: normalized,
+            conflict_type: 'presentation',
+            product_id: owner?.id ?? conflict.product_id,
+            product_name: owner?.name ?? null,
+            product_archived: productArchived,
+          },
         );
       }
     }

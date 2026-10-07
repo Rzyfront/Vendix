@@ -15,6 +15,7 @@
  * base legal) y el reparto del flete por línea, no sólo los totales.
  */
 
+import type { PopLineTaxRequest } from './pop-order.interface';
 import {
   CostPreviewItem,
   CostPreviewResponse,
@@ -121,6 +122,8 @@ export interface PopCostPreviewRequestItem {
   tax_rate?: number;
   tax_type?: string;
   prices_include_tax?: boolean;
+  /** QUI-855 — multi-impuesto (espejo de `CostPreviewItemDto.taxes`). */
+  taxes?: PopLineTaxRequest[];
 }
 
 /**
@@ -138,4 +141,31 @@ export interface PopCostPreviewRequest {
   shipping_cost?: number;
   shipping_cost_allocation?: PopShippingAllocation;
   items: PopCostPreviewRequestItem[];
+}
+
+/** Línea NUEVA (sin product_id) enviada a `new-item-conflicts`. */
+export interface NewItemConflictRequestItem {
+  line_index: number;
+  sku?: string;
+  barcode?: string;
+}
+
+/**
+ * Conflicto de una línea nueva con un producto existente de la tienda o con
+ * otra línea de la misma orden. Informativo: no bloquea la confirmación.
+ */
+export interface NewItemConflict {
+  line_index: number;
+  kind: 'sku' | 'barcode' | 'duplicate_barcode_in_order';
+  sku?: string;
+  barcode?: string;
+  product_id?: number;
+  product_name?: string;
+  product_sku?: string;
+  product_state?: 'active' | 'inactive';
+  duplicate_of_line_index?: number;
+}
+
+export interface NewItemConflictsResponse {
+  conflicts: NewItemConflict[];
 }

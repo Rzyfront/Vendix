@@ -45,13 +45,21 @@
         @if (cartState()?.customer?.addresses?.length) {
           <div class="method-grid saved-addresses" aria-label="Direcciones guardadas del cliente">
             @for (saved of cartState()!.customer!.addresses!; track saved.id) {
-              <button type="button" class="method-card"
-                [class.selected]="addressId() === saved.id && !addressEditing()"
-                [attr.aria-pressed]="addressId() === saved.id && !addressEditing()"
-                (click)="selectSavedAddress(saved.id)">
-                <app-icon name="map-pin" [size]="18"></app-icon>
-                <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
-              </button>
+              <div class="saved-address-card">
+                <button type="button" class="saved-address-select"
+                  [class.selected]="addressId() === saved.id"
+                  [attr.aria-pressed]="addressId() === saved.id"
+                  (click)="selectSavedAddress(saved.id)">
+                  <app-icon name="map-pin" [size]="18"></app-icon>
+                  <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
+                </button>
+                <button type="button" class="saved-address-edit"
+                  [attr.aria-label]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                  [attr.title]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                  (click)="editSavedAddress(saved.id)">
+                  <app-icon name="edit" [size]="18"></app-icon>
+                </button>
+              </div>
             }
           </div>
         }
@@ -110,7 +118,7 @@
             [compact]="true"
             [requirePhone]="true"
             [showErrors]="showAddressErrors()"
-            [allowGeolocation]="false"
+            [allowGeolocation]="true"
             (addressChange)="onAddressChange($event, clientAddressForm.form.dirty)"
             (validChange)="onAddressValidChange($event)"
           ></app-address-form-fields>
@@ -237,11 +245,20 @@
             @if (cartState()?.customer?.addresses?.length) {
               <div class="method-grid" aria-label="Direcciones guardadas del cliente">
                 @for (saved of cartState()!.customer!.addresses!; track saved.id) {
-                  <button type="button" class="method-card"
-                    [class.selected]="addressId() === saved.id"
-                    (click)="selectSavedAddress(saved.id)">
-                    {{ saved.address_line1 }}, {{ saved.city }}
-                  </button>
+                  <div class="saved-address-card">
+                    <button type="button" class="saved-address-select"
+                      [class.selected]="addressId() === saved.id"
+                      [attr.aria-pressed]="addressId() === saved.id"
+                      (click)="selectSavedAddress(saved.id)">
+                      <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
+                    </button>
+                    <button type="button" class="saved-address-edit"
+                      [attr.aria-label]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                      [attr.title]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
+                      (click)="editSavedAddress(saved.id)">
+                      <app-icon name="edit" [size]="18"></app-icon>
+                    </button>
+                  </div>
                 }
               </div>
             }
@@ -265,7 +282,7 @@
                 [compact]="true"
                 [requirePhone]="true"
                 [showErrors]="showAddressErrors()"
-                [allowGeolocation]="false"
+                [allowGeolocation]="true"
                 (addressChange)="onAddressChange($event)"
                 (validChange)="onAddressValidChange($event)"
               ></app-address-form-fields>
@@ -285,24 +302,36 @@
       @if (isCostSubStep()) {
         @if (selectedShippingMethod()) {
           <!--
-            Requirement 3 (coordinator, 2026-09): a delivery method with no
-            resolved location/rate must show NEITHER a zone cost NOR the
-            manual-cost fallback — only this explicit block, so the cashier's
-            eye lands on "go mark the map" instead of a $0/blank cost row
-            that reads as if envío were free or already handled.
+            Requirement 3 (coordinator, 2026-09): a delivery method without a
+            resolved location cannot show a zone cost or enable custom pricing.
+            Once the location is valid, a cashier may explicitly choose the
+            no-rate custom-price path from this alert.
           -->
-          @if (requiresAddress() && !shippingRateId() && !isCalculatingShipping()) {
+          @if ((requiresAddress() && !shippingRateId() && !isCalculatingShipping() && !manualCostOverride()) ||
+              (isPickupMethod() && !!quoteError() && !manualCostOverride())) {
             <div class="no-methods-alert" role="alert">
               <app-icon name="map-pin" [size]="18" class="no-methods-icon"></app-icon>
               <div class="no-methods-body">
                 <span class="no-methods-title">
-                  {{ hasResolvedLocation()
-                    ? 'No hay tarifa de envío para esta ubicación'
-                    : 'Marca la ubicación en el mapa para calcular el envío' }}
+                  {{ isPickupMethod() ? quoteError() : (hasResolvedLocation()
+                    ? (quoteError() || 'No hay una tarifa disponible para el método seleccionado.')
+                    : 'Marca la ubicación en el mapa para calcular el envío') }}
                 </span>
                 <span class="no-methods-desc">
-                  No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.
+                  {{ isPickupMethod()
+                    ? 'Puedes usar una tarifa personalizada o configurar una tarifa para este método.'
+                    : (hasResolvedLocation()
+                      ? 'Revisa las tarifas y la cobertura de este método, o selecciona otro método de envío.'
+                      : 'No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.') }}
                 </span>
+                <button type="button" class="no-methods-link"
+                  [disabled]="!canUseCustomShippingRate()"
+                  (click)="useCustomShippingRate()">
+                  Usar tarifa personalizada
+                </button>
+                @if (!canUseCustomShippingRate() && customShippingRateBlockReason()) {
+                  <span class="no-methods-desc">{{ customShippingRateBlockReason() }}</span>
+                }
               </div>
             </div>
           } @else {
@@ -312,9 +341,13 @@
               <span class="cost-row-label"
                 >Costo de envío
                 @if (isPickupMethod()) {
-                  (sin costo)
+                  {{ manualCostOverride()
+                    ? '(tarifa personalizada)'
+                    : (shippingRateId() ? '(según tarifa configurada)' : '(sin tarifa configurada)') }}
                 } @else {
-                  {{ manualCostOverride() ? '(manual)' : '(automático)' }}
+                  {{ manualCostOverride()
+                    ? (shippingRateId() ? '(manual)' : '(tarifa personalizada)')
+                    : '(automático)' }}
                 }</span
               >
               @if (isCalculatingShipping()) {
@@ -341,7 +374,7 @@
               </div>
             }
 
-            @if (!isPickupMethod() && !manualCostOverride() && rateOptions().length > 1) {
+            @if (!manualCostOverride() && rateOptions().length > 1) {
               <div class="cost-divider"></div>
               <div class="rate-select" aria-label="Tarifas disponibles para este método">
                 <app-selector
@@ -350,6 +383,19 @@
                   (valueChange)="onRateSelected($event)"
                   size="sm"
                 ></app-selector>
+              </div>
+            }
+
+            @if (isPickupMethod() && !shippingRateId() && !isCalculatingShipping() && !manualCostOverride()) {
+              <div class="manual-cost-input">
+                <button type="button" class="no-methods-link"
+                  [disabled]="!canUseCustomShippingRate()"
+                  (click)="useCustomShippingRate()">
+                  Usar tarifa personalizada
+                </button>
+                @if (!canUseCustomShippingRate() && customShippingRateBlockReason()) {
+                  <span class="no-methods-desc">{{ customShippingRateBlockReason() }}</span>
+                }
               </div>
             }
 
@@ -365,14 +411,19 @@
               </div>
             }
 
-            @if (!isPickupMethod() && manualCostOverride()) {
+            @if (manualCostOverride() && (!isPickupMethod() || !shippingRateId())) {
               <div class="manual-cost-input">
+                <label class="cost-toggle-label" for="manual-shipping-price">
+                  {{ shippingRateId() ? 'Costo de envío manual' : 'Tarifa personalizada' }}
+                </label>
                 <div class="cash-input">
                   <span class="currency">{{ currencySymbol() }}</span>
                   <input
+                    id="manual-shipping-price"
                     appCurrencyInput
                     [ngModel]="manualShippingPrice()"
                     (ngModelChange)="onShippingCostChange($event)"
+                    [attr.aria-label]="shippingRateId() ? 'Costo de envío manual' : 'Tarifa personalizada'"
                     placeholder="0.00"
                   />
                 </div>
@@ -383,12 +434,17 @@
                       : 'incluye el impuesto de la tarifa seleccionada, si aplica.' }}
                   </p>
                 }
+                @if (!shippingRateId()) {
+                  <button type="button" class="no-methods-link" (click)="useAutomaticShippingRate()">
+                    Volver a tarifa automática
+                  </button>
+                }
               </div>
             }
 
             @if (manualTaxUnavailable()) {
               <p class="manual-tax-note" role="note">
-                No hay una tarifa aplicable; este costo manual se registrará sin impuesto de envío.
+                Sin tarifa configurada, este importe no incluye impuesto de envío.
               </p>
             }
           </div>
@@ -416,7 +472,7 @@
             </div>
             <div class="totals-row">
               <span class="totals-label">Envío</span>
-              @if (requiresAddress() && !shippingRateId()) {
+              @if (shippingCostPending()) {
                 <span class="totals-amount">Pendiente</span>
               } @else {
                 <span class="totals-amount">{{ shippingCost() | currency }}</span>

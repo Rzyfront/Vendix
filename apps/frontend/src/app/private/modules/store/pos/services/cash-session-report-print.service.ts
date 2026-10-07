@@ -4,7 +4,16 @@ import { DocumentPrintService } from '../../../../../shared/services/print';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
-import { cashMethodLabel } from '../components/cash-session-report.component';
+import {
+  CASH_OUTFLOW_LABELS,
+  cashBreakdownLines,
+  cashDiffLabel,
+  cashMethodLabel,
+  cashReportHasNew,
+  cashReportReturns,
+  cashReportSales,
+  cashReportTaxes,
+} from '../components/cash-session-report.component';
 import type { CashSessionCloseReport } from './pos-cash-register.service';
 
 const CURRENCY_WAIT_TIMEOUT_MS = 1_000;
@@ -19,6 +28,7 @@ const REPORT_PRINT_STYLES = `
   .csr table { width: 100%; border-collapse: collapse; }
   .csr td { vertical-align: top; padding: 1px 0; }
   .csr .amount { text-align: right; white-space: nowrap; padding-left: 6px; }
+  .csr .note { font-size: 11px; border: 1px solid #000; padding: 2px 4px; margin-top: 4px; }
   .csr .sub td:first-child { padding-left: 8px; }
   .csr .strong td { font-weight: bold; }
   .csr .empty { font-size: 11px; }
@@ -97,31 +107,60 @@ export class CashSessionReportPrintService {
         (diff != null ? row(diffLabel, fmt(Math.abs(diff)), 'strong') : ''),
     );
 
+    const tx = cashReportTaxes(r);
+    const sl = cashReportSales(r);
+    const cancelled = r.sales_summary?.cancelled;
     const sales = table(
-      row('Órdenes', String(r.sales.orders_count)) +
-        row('Pagos', String(r.sales.payments_count)) +
-        row('Subtotal', fmt(r.sales.subtotal)) +
-        row('Descuentos', fmt(r.sales.discounts)) +
-        row('Impuestos', fmt(r.sales.taxes)) +
-        row('Envíos', fmt(r.sales.shipping)) +
-        row('Propinas', fmt(r.sales.tips)) +
-        row('Total', fmt(r.sales.grand_total), 'strong') +
-        row('Ticket promedio', fmt(r.sales.average_ticket)),
+      row('Órdenes', String(sl.orders_count)) +
+        row('Pagos', String(sl.payments_count)) +
+        row('Subtotal', fmt(sl.subtotal)) +
+        row('Descuentos', fmt(sl.discounts)) +
+        row(tx.hasSplit ? 'Impuestos productos' : 'Impuestos', fmt(tx.product)) +
+        (tx.shipping > 0 ? row('Impuesto domicilios', fmt(tx.shipping)) : '') +
+        row('Envíos', fmt(sl.shipping)) +
+        row('Propinas', fmt(sl.tips)) +
+        row('Total cobrado', fmt(sl.grand_total), 'strong') +
+        row('Ticket promedio', fmt(sl.average_ticket)) +
+        (cancelled && cancelled.count > 0
+          ? row(`Canceladas / reembolsadas (${cancelled.count})`, fmt(cancelled.total))
+          : ''),
     );
 
-    const refundsRows =
-      row(`Total (${r.refunds.count})`, fmt(r.refunds.total), 'strong') +
-      r.refunds.by_method
-        .map((m) => row(`${cashMethodLabel(m.method)} (${m.count})`, fmt(m.total), 'sub'))
-        .join('') +
-      (r.refunds.payment_cancellations.count > 0
-        ? row(
-            `Anulaciones de pago (${r.refunds.payment_cancellations.count})`,
-            fmt(r.refunds.payment_cancellations.total),
-          )
-        : '');
-    const refunds =
-      table(refundsRows) + (r.refunds.by_method.length === 0 ? empty('Sin reembolsos') : '');
+    const ret = cashReportReturns(r);
+    const hasReturns =
+      ret.refundsCount > 0 || ret.refundsTotal > 0 || ret.refundsTax > 0 ||
+      ret.cancelledCount > 0 || ret.cancelledTotal > 0;
+    const returnsSection = hasReturns
+      ? section(
+          'Devoluciones',
+          table(
+            row(`Reembolsos (${ret.refundsCount})`, fmt(ret.refundsTotal)) +
+              r.refunds.by_method
+                .map((m) => row(`${cashMethodLabel(m.method)} (${m.count})`, fmt(m.total), 'sub'))
+                .join('') +
+              row('Impuesto reembolsado', fmt(ret.refundsTax)) +
+              row(`Pagos anulados (${ret.cancelledCount})`, fmt(ret.cancelledTotal)),
+          ),
+        )
+      : '';
+
+    const netSection = r.net
+      ? section(
+          'Neto',
+          table(
+            row('Ventas netas', fmt(r.net.net_sales), 'strong') +
+              row('Impuesto neto', fmt(r.net.net_taxes)),
+          ),
+        )
+      : '';
+
+    const pc = r.pending_collection;
+    const pendingSection =
+      pc && pc.count > 0
+        ? `<div class="notes"><b>${this.esc(
+            `${pc.count} ${pc.count === 1 ? 'orden entregada o despachada con saldo por cobrar' : 'órdenes entregadas o despachadas con saldo por cobrar'}: `,
+          )}${fmt(pc.total)}</b></div>`
+        : '';
 
     const d = r.discounts;
     const discountsRows =
@@ -143,13 +182,83 @@ export class CashSessionReportPrintService {
       `<div class="meta">Cerró: ${this.esc(s.closed_by?.name || '—')} · ${s.closed_at ? this.esc(formatStoreDateTime(s.closed_at, tz)) : '—'}</div>` +
       (s.closing_notes ? `<div class="notes">${this.esc(s.closing_notes)}</div>` : '');
 
+    const hasNew = cashReportHasNew(r);
+    let top: string;
+    if (hasNew) {
+      const c = r.consolidated!;
+      const b = r.cash_breakdown!;
+      const consolidated =
+        c.rows
+          .map((m) => {
+            const dif = m.difference;
+            return (
+              table(row(cashMethodLabel(m.method), fmt(m.expected), 'strong')) +
+              `<div class="empty">Entró ${fmt(m.entered)} · Salió ${fmt(m.exited)}</div>` +
+              (m.counted != null
+                ? `<div class="empty">Contado ${fmt(m.counted)}${dif != null ? ` · ${this.esc(cashDiffLabel(dif))} ${fmt(dif)}` : ''}</div>`
+                : '')
+            );
+          })
+          .join('') +
+        table(row('TOTAL', fmt(c.totals.expected), 'strong')) +
+        `<div class="empty">Entró ${fmt(c.totals.entered)} · Salió ${fmt(c.totals.exited)}</div>`;
+      const integrity =
+        r.integrity && !r.integrity.sales_match
+          ? `<div class="note">${(r.integrity.notes.length > 0
+              ? r.integrity.notes
+              : ['Las ventas no cuadran con los pagos de la sesión.']
+            )
+              .map((n) => this.esc(n))
+              .join('<br>')}</div>`
+          : '';
+      const lines = cashBreakdownLines(r)
+        .map((l) => row(`${l.sign} ${l.label}`, fmt(l.amount)))
+        .join('');
+      const breakdown = table(
+        lines +
+          row('= Debe tener', fmt(b.expected), 'strong') +
+          (b.counted != null ? row('Contado', fmt(b.counted), 'strong') : '') +
+          (b.difference != null ? row(cashDiffLabel(b.difference), fmt(b.difference), 'strong') : ''),
+      );
+      const outflows = r.outflows ?? [];
+      const outflowsHtml =
+        outflows.length > 0
+          ? outflows
+              .map((o) => {
+                const ord = o.order_number ? ` #${o.order_number}` : o.order_id ? ` #${o.order_id}` : '';
+                const detail = [o.reason, o.user_name].filter(Boolean).join(' · ');
+                return (
+                  table(
+                    row(
+                      `${formatStoreDateTime(o.at, tz)} ${CASH_OUTFLOW_LABELS[o.kind] ?? o.kind}${ord}`,
+                      fmt(o.amount),
+                    ),
+                  ) +
+                  `<div class="empty">${this.esc(cashMethodLabel(o.payment_method))}${detail ? ` · ${this.esc(detail)}` : ''}</div>`
+                );
+              })
+              .join('')
+          : empty('Sin salidas');
+      top =
+        section('Lo que debe haber', consolidated) +
+        integrity +
+        section('Cómo se llega al efectivo', breakdown) +
+        section('Salidas de la sesión', outflowsHtml) +
+        section('Ventas', sales);
+    } else {
+      top =
+        section('Métodos de pago', methods) +
+        section('Efectivo', cash) +
+        section('Ventas cobradas', sales) +
+        returnsSection +
+        netSection +
+        pendingSection;
+    }
+
     return (
       `<div class="csr">` +
       header +
-      section('Métodos de pago', methods) +
-      section('Efectivo', cash) +
-      section('Ventas', sales) +
-      section('Reembolsos', refunds) +
+      top +
       section('Descuentos', discounts) +
       `<div class="meta" style="margin-top:8px">Impreso: ${this.esc(printedAt)}${printedBy !== '' ? ` · ${this.esc(printedBy)}` : ''}</div>` +
       `<div class="sign"><div>Firma cajero</div><div>Firma supervisor</div></div>` +

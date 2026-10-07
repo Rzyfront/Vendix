@@ -570,12 +570,14 @@ describe('CatalogService featured fill cascade', () => {
     const fillerWhere = prisma.products.findMany.mock.calls[2][0].where;
 
     expect(featuredWhere.is_featured).toBe(true);
+    expect(featuredWhere.is_ingredient).toBe(false);
 
     for (const where of [bestSellerWhere, fillerWhere]) {
       expect(where.is_featured).toBeUndefined();
       expect(where.state).toBe('active');
       expect(where.available_for_ecommerce).toBe(true);
       expect(where.is_sellable).toBe(true);
+      expect(where.is_ingredient).toBe(false);
     }
     expect(fillerWhere.id).toEqual({ notIn: [1, 2] });
   });

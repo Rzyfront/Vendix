@@ -33,6 +33,11 @@ export class AIChatController {
     private readonly responseService: ResponseService,
   ) {}
 
+  // Gate de Vex (paso 3): cuando la conversación es de `agent_key='vex'` el
+  // servicio aplica rol owner/admin + `settings.vex.enabled` +
+  // `AiAccessGuard('vex_agent')` inline. No hay `@Roles` ni `VexEnabledGuard`
+  // acá a propósito: este controlador también sirve a Vexi y a los cajeros,
+  // y el gate solo existe para los turnos de Vex.
   @Post('conversations')
   @UseGuards(AiAccessGuard)
   @RequireAIFeature('conversations')
@@ -41,6 +46,9 @@ export class AIChatController {
     return this.responseService.success(conversation, 'Conversation created');
   }
 
+  // `?agent_key=` separa los hilos por agente (paso 4): Vex ve solo Vex,
+  // Vexi ve Vexi más los legacy sin `agent_key`, y el listado sin filtro
+  // excluye los hilos de Vex para que el dock nunca liste lo que no abre.
   @Get('conversations')
   async listConversations(@Query() query: ConversationQueryDto) {
     const result = await this.chatService.listConversations(query);

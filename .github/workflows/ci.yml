@@ -89,6 +89,7 @@ jobs:
               - 'apps/backend/**'
               - 'scripts/tz-audit.sh'
               - 'scripts/tenant-host-audit.sh'
+              - 'scripts/prisma-singleton-audit.sh'
               - 'scripts/industry-parity-audit.sh'
               - 'scripts/check-tools-no-prisma.sh'
 
@@ -167,6 +168,21 @@ jobs:
       - uses: actions/checkout@v4
       - run: chmod +x scripts/tenant-host-audit.sh
       - run: ./scripts/tenant-host-audit.sh
+
+  prisma-singleton-audit:
+    name: Prisma Singleton Audit
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    # Guard sobre el árbol (sin build ni deps; solo node): falla si algún *.module.ts
+    # declara Global/Organization/Store/EcommercePrismaService en providers/exports
+    # fuera de PrismaModule (@Global). Cada re-declaración crea un PrismaClient +
+    # pg.Pool nuevo (~68 MB de heap; en prod llegaron a 27 instancias).
+    # See scripts/prisma-singleton-audit.sh.
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x scripts/prisma-singleton-audit.sh
+      - run: ./scripts/prisma-singleton-audit.sh
 
   tools-no-prisma:
     name: Tools No-Prisma Gate
@@ -361,6 +377,10 @@ jobs:
         # entero; y el doble de `app-pos-payment-step` no declaraba el input
         # `takeawayOrder` que la plantilla enlaza (NG0303). Con las dos
         # reparaciones: 139 de 139 en verde con la lista completa.
+        #
+        # QUI-855: el POP (carrito multi-impuesto, escaner, adjunto y
+        # revalidacion IA) entra entero por glob: sus 142 specs pasan en verde
+        # local y las nuevas del modulo quedan gateadas sin otra linea.
         run: >-
           npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
           --progress=false
@@ -368,8 +388,16 @@ jobs:
           --include='**/pos/utils/document-format-hint.util.spec.ts'
           --include='**/pos/utils/phone-format-hint.util.spec.ts'
           --include='**/pos/services/pos-cart.service.spec.ts'
+          --include='**/pos/services/pos-payment.service.spec.ts'
+          --include='**/pos/services/pos-ticket.service.spec.ts'
+          --include='**/pos/components/pos-order-confirmation.component.spec.ts'
+          --include='**/shared/services/print/document-print.service.spec.ts'
           --include='**/analytics/config/analytics-registry.spec.ts'
           --include='**/orders/pages/order-details/can-resend.spec.ts'
+          --include='**/orders/components/order-payment-modal/order-payment-modal.component.spec.ts'
+          --include='**/orders/components/order-refund-modal/order-refund-modal.component.spec.ts'
+          --include='**/orders/pages/order-details/cancel-order-default-disposition.spec.ts'
+          --include='**/shared/components/item-cancellation-modal/item-cancellation-modal.component.spec.ts'
           --include='**/orders/utils/fiscal-alert-dictionary.spec.ts'
           --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
           --include='**/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts'
@@ -377,6 +405,7 @@ jobs:
           --include='**/settings/shipping/components/add-rate-wizard-modal/add-rate-wizard-modal.component.spec.ts'
           --include='**/settings/shipping/components/method-zones-inline/method-zones-inline.component.spec.ts'
           --include='**/shared/components/payment-collector/payment-collector.component.spec.ts'
+          --include='**/store/inventory/pop/**/*.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
@@ -415,6 +444,10 @@ jobs:
       # producción de abajo.
       - name: Typecheck de specs (buildcheck:types)
         working-directory: apps/backend
+        # El heap por defecto de Node ya no alcanza para src + specs (OOM
+        # "Ineffective mark-compacts", exit 134 en el PR #881); el runner tiene 16 GB.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run buildcheck:types
       # SALVEDAD (KG-9(a)) -- actualizado por F-161: el paso de arriba ya cierra
       # la mitad de este hueco, así que lo que sigue describe sólo lo que AÚN no
@@ -619,6 +652,14 @@ jobs:
           mkdir -p jest-logs
           set -o pipefail
           npm run test:path -- src/domains/store/invoicing 2>&1 | tee jest-logs/invoicing.log
+      # QUI-855: el kernel de dinero (`purchase-line-taxes` y sus hermanos) lo
+      # consumen compras y el frontend; sus 4 specs (59 tests) pasan en verde.
+      - name: jest — money-kernel
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/common/money-kernel 2>&1 | tee jest-logs/money-kernel.log
       # G5: artefacto de los logs de arriba. `if: always()` para que
       # quede subido incluso si un paso de jest falló. Acción fijada por
       # etiqueta (`@v4`), igual que `actions/checkout` y `actions/setup-node`
@@ -643,11 +684,11 @@ jobs:
           echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Corre 6 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\` + \`src/common/money-kernel\`." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | specs |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing src/common/money-kernel -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "El resto del backend **no se ejecuta en ningun job** salvo \`products\` (job aparte, ver \`Backend Tests (products)\`); \`backend-test\` sigue en \`if: false\`." >> "$GITHUB_STEP_SUMMARY"

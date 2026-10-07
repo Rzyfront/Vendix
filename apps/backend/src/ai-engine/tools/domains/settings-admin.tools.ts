@@ -241,7 +241,7 @@ export function createSettingsAdminTools(
       domain: 'settings-admin',
       readOnly: true,
       description:
-        'Lee la configuración de la tienda por secciones (general, checkout, pos, receipts, inventory, branding, panel_ui, restaurant, vexi, etc.). Acepta `sections` para devolver solo las pedidas; sin el parámetro devuelve todas. Branding es solo lectura por esta vía: Vexi no edita identidad visual. Úsala para "cómo está configurado X" o antes de explicar cualquier comportamiento de la tienda.',
+        'Lee la configuración de la tienda por secciones (general, checkout, pos, receipts, inventory, branding, panel_ui, restaurant, vexi, etc.). Acepta `sections` para devolver solo las pedidas; sin el parámetro devuelve todas. Branding es solo lectura por esta vía: el asistente no edita identidad visual. Úsala para "cómo está configurado X" o antes de explicar cualquier comportamiento de la tienda.',
       parameters: {
         type: 'object',
         properties: {
@@ -840,7 +840,7 @@ export function createSettingsAdminTools(
         if (nonStore.length > 0) {
           return previewError(
             `Rol ${role?.name ?? role_id}`,
-            `Rechazado: ${nonStore.map((id) => byId.get(id)?.name ?? id).join(', ')} no es store:*. Vexi nunca otorga superadmin:* ni permisos fuera del espacio de tienda.`,
+            `Rechazado: ${nonStore.map((id) => byId.get(id)?.name ?? id).join(', ')} no es store:*. Nunca se otorga superadmin:* ni permisos fuera del espacio de tienda.`,
             'settings-admin',
           );
         }

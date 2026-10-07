@@ -2066,6 +2066,87 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
   });
 
+  it('saldo tras cancelación: COD pendiente de 156000 queda en 38000 en la misma tx', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'pending_payment', payment_form: '1',
+        grand_total: new Prisma.Decimal(156000), remaining_balance: new Prisma.Decimal(156000),
+        payments: [{
+          id: 8556, state: 'pending', amount: new Prisma.Decimal(156000),
+          store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
+        }],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+
+    expect(txMock.orders.update).toHaveBeenCalledTimes(1);
+    expect(txMock.orders.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: expect.objectContaining({
+        grand_total: new Prisma.Decimal(38000),
+        remaining_balance: new Prisma.Decimal(38000),
+      }),
+    });
+    expect(txMock.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [8556] }, order_id: ORDER_ID, state: 'pending' },
+      data: expect.objectContaining({ amount: new Prisma.Decimal(38000) }),
+    });
+  });
+
+  it('saldo tras cancelación: no sobrescribe el saldo de una orden crédito', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'created', payment_form: '2',
+        remaining_balance: new Prisma.Decimal(156000), payments: [],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+
+    expect(txMock.orders.update).toHaveBeenCalledTimes(1);
+    expect(txMock.orders.update.mock.calls[0][0].data).not.toHaveProperty('remaining_balance');
+    expect(txMock.orders.update.mock.calls[0][0].data.grand_total).toEqual(new Prisma.Decimal(38000));
+  });
+
+  it('saldo tras cancelación: el recálculo aislado descuenta abonos con precisión Decimal', async () => {
+    const { service, txMock } = buildService({
+      activeItems: [{ total_price: 38000.01, order_item_taxes: [] }],
+    });
+
+    // El seam público rechaza cualquier pago liquidado; probar su aritmética
+    // por separado no habilita la cancelación de una orden ya cobrada.
+    await service['recalcOrderTotalsAfterItemCancelInTx'](txMock, {
+      payment_form: '1',
+      payments: [
+        { state: 'succeeded', amount: new Prisma.Decimal(10000.02) },
+        { state: 'pending', amount: new Prisma.Decimal(156000) },
+      ],
+    }, ORDER_ID);
+
+    expect(txMock.orders.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: expect.objectContaining({ remaining_balance: new Prisma.Decimal(27999.99) }),
+    });
+  });
+
+  it('saldo tras cancelación: el recálculo aislado nunca persiste saldo negativo', async () => {
+    const { service, txMock } = buildService({
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service['recalcOrderTotalsAfterItemCancelInTx'](txMock, {
+      payments: [{ state: 'captured', amount: new Prisma.Decimal(40000) }],
+    }, ORDER_ID);
+
+    expect(txMock.orders.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: expect.objectContaining({ remaining_balance: new Prisma.Decimal(0) }),
+    });
+  });
+
   it('409 si la orden tiene pago real succeeded, no un payment_status inexistente', async () => {
     const { service } = buildService({
       order: { id: ORDER_ID, state: 'created', payments: [{ state: 'succeeded' }] },
@@ -2446,6 +2527,10 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     };
     const prismaMock: any = {
       $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
+      // kitchen_mode (modo cocina fisica): sin ajustes => 'virtual'.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       order_items: {
         findFirst: jest
           .fn()
@@ -3713,11 +3798,11 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let prismaMock: PrismaMock;
   let settings: { getSettings: jest.Mock };
   let sessions: { getActiveSession: jest.Mock };
-  let movements: { createManualMovement: jest.Mock };
+  let movements: { recordCompensationCashMovementDurable: jest.Mock };
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
   let emitter: { emit: jest.Mock; emitAsync: jest.Mock };
-  let refundFlow: { recordCancellationPendingRefunds: jest.Mock; recordCancellationCashRefund: jest.Mock; completeCancellationCashRefund: jest.Mock; emitCancellationCashRefund: jest.Mock };
+  let refundFlow: { recordCancellationPendingRefunds: jest.Mock; recordCancellationCashRefund: jest.Mock; completeCancellationCashRefund: jest.Mock; emitCancellationCashRefund: jest.Mock; completeCancellationNonCashRefunds: jest.Mock };
 
   /** Orden cancelable (estado `processing`) con los pagos que se le pasen. */
   const cancelableOrder = (payments: any[]) =>
@@ -3777,7 +3862,9 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       getActiveSession: jest.fn().mockResolvedValue({ id: SESSION_ID }),
     };
     movements = {
-      createManualMovement: jest.fn().mockResolvedValue({ id: 31 }),
+      recordCompensationCashMovementDurable: jest
+        .fn()
+        .mockResolvedValue({ status: 'recorded', movement_id: 31 }),
     };
     audit = {
       log: jest.fn().mockResolvedValue(undefined),
@@ -3788,7 +3875,8 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     };
     emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     refundFlow = {
-      recordCancellationPendingRefunds: jest.fn().mockResolvedValue(undefined),
+      recordCancellationPendingRefunds: jest.fn().mockResolvedValue([]),
+      completeCancellationNonCashRefunds: jest.fn().mockResolvedValue(undefined),
       recordCancellationCashRefund: jest.fn().mockResolvedValue({
         refund: { id: 81, state: 'processing', amount: new Prisma.Decimal('59.50') },
         breakdown: { amount: new Prisma.Decimal('59.50') },
@@ -3878,10 +3966,17 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
 
     await service.cancelOrder(ORDER_ID, DTO);
 
-    expect(movements.createManualMovement).toHaveBeenCalledTimes(1);
-    const [sessionId, payload] = movements.createManualMovement.mock.calls[0];
-    expect(sessionId).toBe(SESSION_ID);
-    expect(payload.type).toBe('cash_out');
+    // Un movimiento refund/order_cancelled por pago en efectivo, con su payment_id.
+    expect(movements.recordCompensationCashMovementDurable).toHaveBeenCalledTimes(1);
+    const [payload] = movements.recordCompensationCashMovementDurable.mock.calls[0];
+    expect(payload).toMatchObject({
+      store_id: 100,
+      user_id: 7,
+      order_id: ORDER_ID,
+      payment_id: CASH_PAYMENT_ID,
+      reference: 'order_cancelled',
+      dedupe_key: `order_cancelled:${ORDER_ID}:${CASH_PAYMENT_ID}`,
+    });
     // Comparación en Decimal: `59.5 === 59.50` como float esconde justo el
     // error de escala que este caso persigue.
     expect(
@@ -3894,6 +3989,30 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     );
     expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
     expect(refundFlow.emitCancellationCashRefund).toHaveBeenCalledTimes(1);
+    // UN solo asiento de la salida de efectivo: `refund.completed` (vía
+    // emitCancellationCashRefund). El movimiento no emite `cash_register.movement`
+    // (antes el cash_out lo emitía y el efectivo se acreditaba dos veces).
+    expect(
+      emitter.emit.mock.calls.filter(([name]: [string]) => name === 'cash_register.movement'),
+    ).toHaveLength(0);
+  });
+
+  it('dos pagos en efectivo: un movimiento por pago, cada uno con su payment_id', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({ id: CASH_PAYMENT_ID, state: 'succeeded', store_payment_method_id: CASH_METHOD_ID, amount: new Prisma.Decimal('40.00') }),
+        buildPayment({ id: CASH_PAYMENT_ID + 1, state: 'succeeded', store_payment_method_id: CASH_METHOD_ID, amount: new Prisma.Decimal('19.50') }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('40.00') },
+      { id: CASH_PAYMENT_ID + 1, amount: new Prisma.Decimal('19.50') },
+    ]);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    const calls = movements.recordCompensationCashMovementDurable.mock.calls.map(([p]: [any]) => [p.payment_id, p.amount]);
+    expect(calls).toEqual([[CASH_PAYMENT_ID, 40], [CASH_PAYMENT_ID + 1, 19.5]]);
   });
 
   it('rechaza cobro mixto liquidado sin reversa de tarjeta; no sale efectivo', async () => {
@@ -3922,7 +4041,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       errorCode: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
     });
     expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
-    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(movements.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
     expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
@@ -3944,7 +4063,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.payments.update).not.toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
-    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(movements.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
     expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
@@ -3967,7 +4086,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
 
     await service.cancelOrder(ORDER_ID, DTO);
 
-    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(movements.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
     expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
@@ -3985,7 +4104,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     prismaMock.payments.findMany.mockResolvedValue([
       { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
     ]);
-    movements.createManualMovement.mockRejectedValue(
+    movements.recordCompensationCashMovementDurable.mockRejectedValue(
       new Error('caja no disponible'),
     );
 
@@ -4006,7 +4125,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(refundFlow.completeCancellationCashRefund).not.toHaveBeenCalled();
   });
 
-  it('sin sesión de caja abierta: no inventa el movimiento y escala la falla', async () => {
+  it('sin sesión de caja: el movimiento queda encolado (durable) y el refund se completa', async () => {
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(
       cancelableOrder([
         buildPayment({
@@ -4020,17 +4139,23 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     prismaMock.payments.findMany.mockResolvedValue([
       { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
     ]);
-    sessions.getActiveSession.mockResolvedValue(null);
+    movements.recordCompensationCashMovementDurable.mockResolvedValue({
+      status: 'pending', failure_id: 9, reason: 'no_open_cash_session',
+    });
 
     await service.cancelOrder(ORDER_ID, DTO);
 
-    expect(movements.createManualMovement).not.toHaveBeenCalled();
     expect(audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'order.cancel.cash_out_unrecorded',
-        metadata: expect.objectContaining({ cause: 'no_open_session' }),
+        action: 'order.cancel.cash_out_queued',
+        resourceId: ORDER_ID,
       }),
     );
+    expect(audit.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'order.cancel.cash_out_unrecorded' }),
+    );
+    expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
+    expect(refundFlow.emitCancellationCashRefund).toHaveBeenCalledTimes(1);
   });
 
   it('módulo de caja apagado: ni movimiento ni escalamiento', async () => {
@@ -4059,7 +4184,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     // escalar: la venta tampoco registró su `sale` al cobrar (mismo gate en
     // `recordPayOrderCashMovement`), así que escribir sólo el egreso
     // descuadraría una sesión que no existe.
-    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(movements.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
     expect(audit.log).not.toHaveBeenCalled();
   });
   it.each([false, true])('rechaza cancelar stock comprometido incluso force=%s', async (force) => {
@@ -4125,6 +4250,120 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.objectContaining({ old_state: 'processing' }));
     const write = prismaMock.orders.update.mock.calls[0][0];
     expect(JSON.parse(write.data.internal_notes)._flow_metadata.previous_state).toBe('processing');
+  });
+
+  it('ADR-13: pago por transferencia pasa a cancelled y su reembolso se completa tras el commit', async () => {
+    const TRANSFER_PAYMENT_ID = 7701;
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: TRANSFER_PAYMENT_ID,
+          state: 'succeeded',
+          amount: new Prisma.Decimal('60.00'),
+          store_payment_method: { system_payment_method: { type: 'bank_transfer', processing_mode: 'DIRECT' } },
+        }),
+      ]),
+    );
+    // 1ª consulta (efectivo): nada. 2ª (no efectivo): la transferencia.
+    prismaMock.payments.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: TRANSFER_PAYMENT_ID,
+          amount: new Prisma.Decimal('60.00'),
+          store_payment_method: { system_payment_method: { type: 'bank_transfer' } },
+        },
+      ]);
+    const created = [{ refund: { id: 382 }, breakdown: {}, leg: { payment_id: TRANSFER_PAYMENT_ID } }];
+    refundFlow.recordCancellationPendingRefunds.mockResolvedValue(created);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    expect(refundFlow.recordCancellationPendingRefunds).toHaveBeenCalledWith(
+      prismaMock,
+      expect.objectContaining({ id: ORDER_ID }),
+      [expect.objectContaining({ payment_id: TRANSFER_PAYMENT_ID, method_type: 'bank_transfer' })],
+      DTO.reason,
+      expect.anything(),
+    );
+    expect(prismaMock.payments.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: TRANSFER_PAYMENT_ID },
+        data: expect.objectContaining({ state: 'cancelled' }),
+      }),
+    );
+    expect(refundFlow.completeCancellationNonCashRefunds).toHaveBeenCalledTimes(1);
+    expect(refundFlow.completeCancellationNonCashRefunds).toHaveBeenCalledWith(
+      expect.objectContaining({ id: ORDER_ID }),
+      created,
+    );
+    // Sin salida de efectivo: la transferencia no toca el cajón.
+    expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
+  });
+
+  it('ADR-13: un fallo en el cierre post-commit no rompe la anulación', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: 7702,
+          state: 'succeeded',
+          store_payment_method: { system_payment_method: { type: 'bank_transfer', processing_mode: 'DIRECT' } },
+        }),
+      ]),
+    );
+    prismaMock.payments.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 7702,
+          amount: new Prisma.Decimal('10.00'),
+          store_payment_method: { system_payment_method: { type: 'bank_transfer' } },
+        },
+      ]);
+    refundFlow.recordCancellationPendingRefunds.mockResolvedValue([
+      { refund: { id: 9 }, breakdown: {}, leg: { payment_id: 7702 } },
+    ]);
+    refundFlow.completeCancellationNonCashRefunds.mockRejectedValue(new Error('boom'));
+
+    await expect(service.cancelOrder(ORDER_ID, DTO)).resolves.toMatchObject({ state: 'cancelled' });
+  });
+
+  it('ADR-13: cash_on_delivery viaja por el carril de efectivo, no como pierna no efectivo', async () => {
+    const COD_PAYMENT_ID = 7703;
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: COD_PAYMENT_ID,
+          state: 'succeeded',
+          amount: new Prisma.Decimal('59.50'),
+          store_payment_method: { system_payment_method: { type: 'cash_on_delivery', processing_mode: 'DIRECT' } },
+        }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockImplementation(async (args: any) => {
+      const typeFilter = args?.where?.store_payment_method?.system_payment_method?.type;
+      // Solo la consulta de efectivo (`type: { in: [...] }` sin NOT) lo trae.
+      return typeFilter?.in?.includes('cash_on_delivery') && !args.where.NOT
+        ? [{ id: COD_PAYMENT_ID, amount: new Prisma.Decimal('59.50') }]
+        : [];
+    });
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    const cashQuery = prismaMock.payments.findMany.mock.calls[0][0];
+    expect(cashQuery.where.store_payment_method.system_payment_method.type.in).toEqual(
+      expect.arrayContaining(['cash', 'cash_on_delivery']),
+    );
+    const nonCashQuery = prismaMock.payments.findMany.mock.calls[1][0];
+    expect(nonCashQuery.where.NOT.store_payment_method.system_payment_method.type.in).toEqual(
+      expect.arrayContaining(['cash', 'cash_on_delivery']),
+    );
+    expect(refundFlow.recordCancellationCashRefund).toHaveBeenCalledWith(
+      prismaMock, expect.objectContaining({ id: ORDER_ID }),
+      [COD_PAYMENT_ID], new Prisma.Decimal('59.50'), DTO.reason,
+    );
+    expect(refundFlow.recordCancellationPendingRefunds).not.toHaveBeenCalled();
+    expect(refundFlow.completeCancellationNonCashRefunds).not.toHaveBeenCalled();
   });
 
 });
@@ -4377,7 +4616,12 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
   let service: OrderFlowService;
   let prismaMock: PrismaMock;
   let sessionsService: { getActiveSession: jest.Mock };
-  let movementsService: { recordRefundMovement: jest.Mock };
+  let movementsService: {
+    recordRefundMovement: jest.Mock;
+    recordCompensationCashMovementDurable: jest.Mock;
+    resolveCompensationSessionId: jest.Mock;
+  };
+  let audit: { log: jest.Mock; logCustom: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -4389,7 +4633,14 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
     });
 
     sessionsService = { getActiveSession: jest.fn() };
-    movementsService = { recordRefundMovement: jest.fn().mockResolvedValue({ id: 999 }) };
+    movementsService = {
+      recordRefundMovement: jest.fn().mockResolvedValue({ id: 999 }),
+      recordCompensationCashMovementDurable: jest
+        .fn()
+        .mockResolvedValue({ status: 'recorded', movement_id: 999 }),
+      resolveCompensationSessionId: jest.fn().mockResolvedValue(null),
+    };
+    audit = { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn() };
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
@@ -4398,63 +4649,99 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
       sessionsService as any,
       movementsService as any,
       {} as any, {} as any, {} as any,
-      { log: jest.fn(), logCustom: jest.fn() } as any,
+      audit as any,
       undefined, undefined, undefined, undefined,
     );
   });
 
-  it('reversa en la sesión ORIGINAL del movimiento cuando sigue abierta, sin tocar la del operador', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue([
-      { session_id: 501, payment_id: 5001, amount: new Prisma.Decimal('59.50'), payment_method: 'cash' },
-    ]);
-    prismaMock.cash_register_sessions.findMany.mockResolvedValue([{ id: 501, status: 'open' }]);
+  const cashSale = (method = 'cash') => [
+    { session_id: 501, payment_id: 5001, amount: new Prisma.Decimal('59.50'), payment_method: method },
+  ];
+
+  it('efectivo: delega en la cola durable con reference payment_cancelled y dedupe por pago', async () => {
+    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
 
     await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
 
-    expect(sessionsService.getActiveSession).not.toHaveBeenCalled();
-    expect(movementsService.recordRefundMovement).toHaveBeenCalledWith(
-      501,
+    expect(movementsService.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
       expect.objectContaining({
         store_id: 100,
         user_id: 7,
-        amount: 59.5,
-        payment_method: 'cash',
         order_id: 9001,
         payment_id: 5001,
+        amount: 59.5,
         reference: 'payment_cancelled',
+        dedupe_key: 'payment_cancelled:5001',
       }),
     );
+    expect(audit.log).not.toHaveBeenCalled();
   });
 
-  it('cae a la sesión activa del operador cuando la original ya cerró', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue([
-      { session_id: 501, payment_id: 5001, amount: new Prisma.Decimal('59.50'), payment_method: 'cash' },
-    ]);
-    prismaMock.cash_register_sessions.findMany.mockResolvedValue([{ id: 501, status: 'closed' }]);
-    sessionsService.getActiveSession.mockResolvedValue({ id: 777 });
-
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
-
-    expect(sessionsService.getActiveSession).toHaveBeenCalledWith(7);
-    expect(movementsService.recordRefundMovement).toHaveBeenCalledWith(
-      777,
-      expect.objectContaining({ payment_id: 5001 }),
-    );
-  });
-
-  it('hace logger.warn explícito con order/payment cuando ni la original ni la del operador están abiertas (nunca en silencio)', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue([
-      { session_id: 501, payment_id: 5001, amount: new Prisma.Decimal('59.50'), payment_method: 'cash' },
-    ]);
-    prismaMock.cash_register_sessions.findMany.mockResolvedValue([{ id: 501, status: 'closed' }]);
-    sessionsService.getActiveSession.mockResolvedValue(null);
+  it('efectivo sin ninguna sesión: queda encolado, con warn y auditoría (nunca en silencio)', async () => {
+    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
+    movementsService.recordCompensationCashMovementDurable.mockResolvedValue({
+      status: 'pending', failure_id: 12, reason: 'no_open_cash_session',
+    });
     const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
 
     await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
 
-    expect(movementsService.recordRefundMovement).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('9001'));
     expect(warnSpy.mock.calls[0][0]).toEqual(expect.stringContaining('5001'));
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'payment.cancel.cash_reversal_issue',
+        resourceId: 9001,
+        metadata: expect.objectContaining({ cause: 'queued_no_open_cash_session', payment_ids: [5001] }),
+      }),
+    );
+  });
+
+  it('no efectivo con sesión destino: contra-movimiento directo en esa sesión', async () => {
+    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale('card'));
+    movementsService.resolveCompensationSessionId.mockResolvedValue(501);
+
+    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+
+    expect(movementsService.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
+    expect(movementsService.recordRefundMovement).toHaveBeenCalledWith(
+      501,
+      expect.objectContaining({ payment_method: 'card', payment_id: 5001, reference: 'payment_cancelled' }),
+    );
+  });
+
+  it('no efectivo sin sesión: se audita, NO se encola', async () => {
+    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale('card'));
+    movementsService.resolveCompensationSessionId.mockResolvedValue(null);
+
+    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+
+    expect(movementsService.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
+    expect(movementsService.recordRefundMovement).not.toHaveBeenCalled();
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'payment.cancel.cash_reversal_issue',
+        metadata: expect.objectContaining({ cause: 'no_open_session_non_cash' }),
+      }),
+    );
+  });
+
+  it('un fallo de escritura no rompe la anulación pero se loguea y audita (sin catch mudo)', async () => {
+    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
+    movementsService.recordCompensationCashMovementDurable.mockRejectedValue(new Error('db caída'));
+    const errSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+
+    await expect(
+      (service as any).reversePaymentCashMovements(100, 9001, [5001]),
+    ).resolves.toBeUndefined();
+
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('db caída'), expect.anything());
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'payment.cancel.cash_reversal_issue',
+        metadata: expect.objectContaining({ cause: 'movement_write_failed', error: 'db caída' }),
+      }),
+    );
   });
 });
 
@@ -4895,6 +5182,20 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
     return { service, prismaMock, eventEmitter, updateOrderState, cashMovement, project };
   };
 
+  it('rechaza el abono con SPLIT_ACCOUNT_LOCKED si la orden tiene cuentas independientes', async () => {
+    const h = harness(60, 40);
+    h.prismaMock.orders.findFirst.mockImplementationOnce(async () => ({
+      id: 1, state: 'processing', payment_form: '2', remaining_balance: 60,
+      active_financial_split_id: 9,
+    }));
+
+    const error = await h.service.registerCreditPayment(1, CREDIT_DTO).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
   it('projects the table session only when the credit is fully settled', async () => {
     const h = harness(60, 40);
 
@@ -5121,6 +5422,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
         amount: 60,
         payment_method: 'cash',
         user_id: USER_B,
+        payment_id: 501,
       }),
     );
   });
@@ -7375,5 +7677,260 @@ describe('OrderFlowService.confirmPayment — rechaza al personal sobre pago man
     );
     expect(flip).toBeDefined();
     expect(flip[0].where).toMatchObject({ id: 5010, state: 'pending' });
+  });
+
+  // Incidente orden 9117: pending_payment, 0 pagos, "Confirmar Pago" la movía a
+  // processing sin asentar dinero.
+  const unpaidOrder = (overrides: Record<string, unknown> = {}) => {
+    const grandTotal = new Prisma.Decimal('66000');
+    return buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      total_paid: new Prisma.Decimal('0'),
+      remaining_balance: grandTotal,
+      payments: [],
+      ...overrides,
+    });
+  };
+
+  it('personal + sin pago pending y saldo abierto → 409 ORD_CONFIRM_PAYMENT_NO_PAYMENT_001, sin escribir', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder());
+
+    const error: any = await service.confirmPayment(ORDER_ID).catch((failure: any) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_CONFIRM_PAYMENT_NO_PAYMENT_001');
+    expect(error.getStatus()).toBe(409);
+    expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('personal + pago succeeded parcial y sin pending → mismo 409', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder({
+      payments: [buildPayment({ id: 5011, state: 'succeeded', amount: new Prisma.Decimal('1000') })],
+    }));
+
+    const error: any = await service.confirmPayment(ORDER_ID).catch((failure: any) => failure);
+
+    expect(error.errorCode).toBe('ORD_CONFIRM_PAYMENT_NO_PAYMENT_001');
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('personal + orden ya saldada (succeeded = total) → confirma y pasa a processing', async () => {
+    const paid = unpaidOrder({
+      payments: [buildPayment({ id: 5012, state: 'succeeded', amount: new Prisma.Decimal('66000') })],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(paid);
+
+    const result: any = await service.confirmPayment(ORDER_ID);
+
+    expect(result.payment_confirmation_applied).toBe(true);
+    const claim = prismaMock.orders.updateMany.mock.calls.find(
+      (call: any[]) => call[0]?.data?.state === 'processing',
+    );
+    expect(claim).toBeDefined();
+  });
+
+  it('personal + venta a crédito (payment_form 2) sin pagos → no se bloquea', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder({ payment_form: '2' }));
+
+    const result: any = await service.confirmPayment(ORDER_ID);
+
+    expect(result.payment_confirmation_applied).toBe(true);
+  });
+
+  it('webhook + sin pago pending → no aplica la puerta de pago', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(unpaidOrder());
+
+    const result: any = await service.confirmPayment(ORDER_ID, { source: 'webhook' });
+
+    expect(result.payment_confirmation_applied).toBe(true);
+  });
+});
+
+/**
+ * Guard único de saldo (docs/plans/cierre-caja-impuestos-cod-plan.md paso 4):
+ * `updateOrderState('finished')` rechaza con ORD_FINISH_UNPAID_BALANCE_001
+ * cuando queda saldo por cobrar (salvo crédito, `payment_form === '2'`).
+ */
+describe('OrderFlowService — ORD_FINISH_UNPAID_BALANCE_001 (guard único de saldo)', () => {
+  const CODE = 'ORD_FINISH_UNPAID_BALANCE_001';
+
+  const codPending = {
+    state: 'delivered',
+    store_id: 4,
+    order_number: 'ORD-1',
+    grand_total: 100,
+    remaining_balance: 100,
+    payment_form: '1',
+    payments: [{ state: 'pending', amount: 100 }],
+    stores: { organization_id: 1 },
+  };
+
+  const build = (previous: any, orderOverrides: any = {}) => {
+    const emit = jest.fn();
+    const prisma: any = {
+      orders: {
+        findUnique: jest.fn().mockResolvedValue(previous),
+        findMany: jest.fn(),
+      },
+    };
+    prisma.$transaction = jest.fn().mockResolvedValue({
+      updated_order: { id: 1, store_id: 4, stores: { organization_id: 1 }, ...orderOverrides },
+      commit: { totalCost: 0 },
+    });
+    const service = new OrderFlowService(
+      prisma, { emit } as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any,
+    );
+    jest.spyOn(service as any, 'findLineAwaitingKitchenDelivery').mockResolvedValue(null);
+    return { service, prisma };
+  };
+
+  it('(a) forceOrderState/PATCH a finished con COD pendiente → ORD_FINISH_UNPAID_BALANCE_001', async () => {
+    const { service, prisma } = build(codPending);
+    await expect(
+      (service as any).updateOrderState(1, 'finished', {}, { source: 'forced' }),
+    ).rejects.toMatchObject({
+      errorCode: CODE,
+      response: expect.objectContaining({
+        details: { order_id: 1, remaining_balance: 100 },
+      }),
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('(a2) legacy: remaining_balance 0 por default y pago pending → usa grand_total', async () => {
+    const { service } = build({ ...codPending, remaining_balance: 0 });
+    await expect((service as any).updateOrderState(1, 'finished', {})).rejects.toMatchObject({
+      errorCode: CODE,
+    });
+  });
+
+  it('(a3) sin ningún pago → bloquea', async () => {
+    const { service } = build({ ...codPending, payments: [], remaining_balance: 0 });
+    await expect((service as any).updateOrderState(1, 'finished', {})).rejects.toMatchObject({
+      errorCode: CODE,
+    });
+  });
+
+  it('(b) confirmDelivery con saldo → mismo error (propaga desde updateOrderState)', async () => {
+    const { service } = build(codPending);
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({ id: 1, state: 'delivered' });
+    jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+    (service as any).prisma.kitchen_ticket_items = { findMany: jest.fn().mockResolvedValue([]) };
+    (service as any).prisma.order_items = { findMany: jest.fn().mockResolvedValue([]) };
+    await expect(service.confirmDelivery(1)).rejects.toMatchObject({ errorCode: CODE });
+  });
+
+  it('(c) venta a crédito con saldo → finaliza', async () => {
+    const { service, prisma } = build({ ...codPending, payment_form: '2', payments: [] });
+    await expect((service as any).updateOrderState(1, 'finished', {})).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('(d) orden pagada → finaliza', async () => {
+    const { service, prisma } = build({
+      ...codPending,
+      remaining_balance: 0,
+      payments: [{ state: 'succeeded', amount: 100 }],
+    });
+    await expect((service as any).updateOrderState(1, 'finished', {})).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('(d2) orden con total 0 (cupón 100 %) → finaliza', async () => {
+    const { service } = build({ ...codPending, grand_total: 0, remaining_balance: 0, payments: [] });
+    await expect((service as any).updateOrderState(1, 'finished', {})).resolves.toBeDefined();
+  });
+
+  it('(f) payOrder rama finished/COD: saldo liquidado en la MISMA escritura (metadata) → no dispara el guard', async () => {
+    const { service, prisma } = build(codPending);
+    // Mismo payload que `settledBalanceMetadata` de payOrder.
+    await expect(
+      (service as any).updateOrderState(
+        1,
+        'finished',
+        { paid_at: new Date(), finished_at: new Date(), total_paid: 100, remaining_balance: 0 },
+        { historyFromState: 'finished' },
+      ),
+    ).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('(g) venta POS directa (pago succeeded creado antes + metadata saldo 0) paga y finaliza', async () => {
+    const { service, prisma } = build({
+      ...codPending,
+      state: 'processing',
+      remaining_balance: 0,
+      payments: [{ state: 'succeeded', amount: 100 }],
+    });
+    await expect(
+      (service as any).updateOrderState(1, 'finished', {
+        paid_at: new Date(),
+        finished_at: new Date(),
+        total_paid: 100,
+        remaining_balance: 0,
+      }),
+    ).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  describe('(e) autoFinishDeliveredOrders', () => {
+    it('omite la orden con saldo sin lanzar y finaliza la pagada', async () => {
+      const { service, prisma } = build(codPending);
+      prisma.orders.findMany = jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 1 }, { id: 2 }]) // pase 1
+        .mockResolvedValueOnce([]) // pase 2
+        .mockResolvedValueOnce([
+          { id: 1, grand_total: 100, remaining_balance: 100, payment_form: '1', payments: [{ state: 'pending', amount: 100 }] },
+          { id: 2, grand_total: 50, remaining_balance: 0, payment_form: '1', payments: [{ state: 'succeeded', amount: 50 }] },
+        ]);
+      jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+      const update = jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({});
+      await expect(service.autoFinishDeliveredOrders()).resolves.toBe(1);
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith(2, 'finished', expect.anything(), { source: 'job' });
+    });
+  });
+});
+
+describe('getAvailableActions / canConfirmDelivery — saldo pendiente', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { canConfirmDelivery, getUnpaidBalanceForFinish } = require('./order-action-policy.util');
+
+  it('COD delivered con saldo → confirm_delivery deshabilitado con el código', () => {
+    const snap = {
+      state: 'delivered',
+      grand_total: 100,
+      remaining_balance: 100,
+      payment_form: '1',
+      payments: [{ state: 'pending', amount: 100 }],
+    };
+    expect(canConfirmDelivery(snap)).toEqual({
+      enabled: false,
+      reason: 'ORD_FINISH_UNPAID_BALANCE_001',
+    });
+  });
+
+  it('crédito y pagada siguen habilitadas; snapshot sin grand_total es permisivo', () => {
+    expect(
+      canConfirmDelivery({ state: 'delivered', grand_total: 100, remaining_balance: 100, payment_form: '2', payments: [] }),
+    ).toEqual({ enabled: true });
+    expect(
+      canConfirmDelivery({
+        state: 'delivered', grand_total: 100, remaining_balance: 0,
+        payments: [{ state: 'succeeded', amount: 100 }],
+      }),
+    ).toEqual({ enabled: true });
+    expect(canConfirmDelivery({ state: 'delivered' })).toEqual({ enabled: true });
+  });
+
+  it('el saldo resultante (override) manda sobre el previo', () => {
+    const order = { grand_total: 100, remaining_balance: 100, payment_form: '1', payments: [] as any[] };
+    expect(getUnpaidBalanceForFinish(order)).toBe(100);
+    expect(getUnpaidBalanceForFinish(order, 0)).toBe(0);
   });
 });

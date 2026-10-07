@@ -720,8 +720,9 @@ export class PosPaymentService {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
-    if (shippingData.manualCostOverride && shippingData.shippingRateId != null &&
-      (shippingData.manualShippingPrice == null || !Number.isFinite(shippingData.manualShippingPrice))) {
+    if (shippingData.manualCostOverride &&
+      (shippingData.manualShippingPrice == null ||
+        !Number.isFinite(shippingData.manualShippingPrice) || shippingData.manualShippingPrice < 0)) {
       return throwError(() => new Error('Calcula el costo manual de envío antes de cobrar.'));
     }
 
@@ -798,7 +799,7 @@ export class PosPaymentService {
       ...(paymentRequest?.idempotencyKey
         ? { idempotency_key: paymentRequest.idempotencyKey }
         : {}),
-      ...(shippingData.manualCostOverride && shippingData.shippingRateId != null
+      ...(shippingData.manualCostOverride
         ? { manual_shipping_price: shippingData.manualShippingPrice }
         : {}),
       // POS meta
@@ -1084,8 +1085,9 @@ export class PosPaymentService {
     shipping?: PosShippingSaleData | null,
   ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
-    if (shipping?.manualCostOverride && shipping.shippingRateId != null &&
-      (shipping.manualShippingPrice == null || !Number.isFinite(shipping.manualShippingPrice))) {
+    if (shipping?.manualCostOverride &&
+      (shipping.manualShippingPrice == null ||
+        !Number.isFinite(shipping.manualShippingPrice) || shipping.manualShippingPrice < 0)) {
       return throwError(() => new Error('Calcula el costo manual de envío antes de guardar.'));
     }
     const user_id = this.storeContextService.getUserId();
@@ -1140,7 +1142,7 @@ export class PosPaymentService {
             ...(posShippingRateIdForPayload(shipping) != null
               ? { shipping_rate_id: posShippingRateIdForPayload(shipping) }
               : {}),
-            ...(shipping.manualCostOverride && shipping.shippingRateId != null
+            ...(shipping.manualCostOverride
               ? { manual_shipping_price: shipping.manualShippingPrice }
               : {}),
           }

@@ -479,6 +479,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       enable_table_checkout: false,
       qr_scan_behavior: 'menu_only',
       qr_auto_fire: false,
+      kitchen_mode: 'virtual',
     },
 
     // Membership - gym/membership suite behavior toggles. Ambient access
@@ -536,6 +537,16 @@ export function getDefaultStoreSettings(): StoreSettings {
       // Ajustes → Vexi → Motor de voz, y si su config no es capaz de realtime
       // `VexiRealtimeService` lo dice en el error en vez de intentarlo.
       voice_engine: 'pipeline',
+    },
+
+    // Vex — off by default, same three-legged contract as `vexi` above: the
+    // guards refuse anything but an explicit `true`, and this default is the
+    // base of `mergeStoreSettingsWithDefaults`, so `true` here would hand Vex
+    // to every store that never persisted the block — and `updateSettings`
+    // would stamp it into the row on the next unrelated save. Vex and Vexi
+    // are independent: enabling one never enables the other.
+    vex: {
+      enabled: false,
     },
 
     // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI

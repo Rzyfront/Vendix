@@ -857,6 +857,7 @@ export function createInvoicingTools(
       },
       requiredPermissions: ['invoicing:write'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context): Promise<ToolPreview> => {
         const invoiceId = toPositiveInt(args.invoice_id);
         if (!invoiceId) {
@@ -982,6 +983,7 @@ export function createInvoicingTools(
       },
       requiredPermissions: ['invoicing:write'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context): Promise<ToolPreview> => {
         const invoiceId = toPositiveInt(args.invoice_id);
         if (!invoiceId) {
@@ -1165,6 +1167,7 @@ export function createInvoicingTools(
       name: 'create_invoice_from_order',
       version: '1',
       domain: 'invoicing',
+      irreversible: true,
       description:
         'Crea el borrador de factura de una orden de venta (excluye líneas canceladas para no romper la igualdad fiscal). Lee primero get_order para el estado de la orden; tras crear, el pre-vuelo es get_emit_readiness (F-32). Requiere order_id.',
       parameters: {
@@ -1313,6 +1316,7 @@ export function createInvoicingTools(
       name: 'promote_dian_to_production',
       version: '1',
       domain: 'invoicing',
+      irreversible: true,
       description:
         'IRREVERSIBLE: pasa una configuración DIAN de habilitación a producción (environment=production, enablement_status=enabled). El servicio exige el checklist completo: lee primero get_production_readiness (F-36) y get_dian_status (F-35). Requiere config_id.',
       parameters: {
@@ -1425,6 +1429,7 @@ export function createInvoicingTools(
       name: 'upload_dian_certificate',
       version: '1',
       domain: 'invoicing',
+      irreversible: true,
       description:
         'Sube y activa el certificado digital .p12 que firma los documentos DIAN de una configuración: valida el archivo (NIT, vigencia, contraseña) antes de guardar nada. La contraseña y el archivo nunca se devuelven ni se narran. Lee primero get_dian_status (F-35) para el estado del certificado actual. Requiere config_id, p12_base64 y password.',
       parameters: {

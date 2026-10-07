@@ -78,6 +78,11 @@ export const APP_MODULES: {
       description: 'Gesti\u00f3n de n\u00f3mina consolidada',
     },
     {
+      key: 'invoicing',
+      label: 'Facturaci\u00f3n',
+      description: 'Facturas emitidas y documentos recibidos de proveedores',
+    },
+    {
       key: 'fiscal_operations',
       label: 'Operaci\u00f3n fiscal',
       description: 'Obligaciones, declaraciones, evidencias y cierres',

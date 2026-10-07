@@ -344,14 +344,21 @@ export class PartnerPayoutsComponent {
 
   // Transformed payment rows for table compatibility
   readonly transformedPayments = computed(() => {
-    return this.payments().map((p) => ({
-      ...p,
-      store_name: p.invoice?.store?.name ?? '—',
-      organization_name: p.invoice?.organization?.name ?? '—',
-      plan_name: p.invoice?.plan?.name ?? '—',
-      invoice_number: p.invoice?.invoice_number ?? `#${p.invoice_id}`,
-      payment_date: p.paid_at || p.created_at,
-    }));
+    return this.payments().map((p) => {
+      const sub = p.invoice?.store_subscription;
+      const meta = p.metadata ?? {};
+      const processor = meta['provider'] ?? meta['processor'];
+      return {
+        ...p,
+        store_name: sub?.store?.name ?? '—',
+        organization_name: sub?.store?.organizations?.name ?? '—',
+        plan_name: sub?.plan?.name ?? '—',
+        provider: (typeof processor === 'string' && processor) || p.payment_method || '—',
+        provider_reference: p.gateway_reference || (typeof meta['reference'] === 'string' ? meta['reference'] : null) || '—',
+        invoice_number: p.invoice?.invoice_number ?? `#${p.invoice_id}`,
+        payment_date: p.paid_at || p.created_at,
+      };
+    });
   });
 
   paymentColumns: TableColumn[] = [
@@ -389,7 +396,7 @@ export class PartnerPayoutsComponent {
       icon: 'copy',
       variant: 'secondary',
       action: (item: any) => {
-        if (item.provider_reference) {
+        if (item.provider_reference && item.provider_reference !== '—') {
           navigator.clipboard.writeText(item.provider_reference);
           this.toast.success('Referencia copiada al portapapeles');
         }
@@ -412,9 +419,10 @@ export class PartnerPayoutsComponent {
       },
     },
     detailKeys: [
+      { key: 'plan_name', label: 'Plan' },
       { key: 'amount', label: 'Monto' },
       { key: 'provider', label: 'Pasarela' },
-      { key: 'provider_reference', label: 'Ref.' },
+      { key: 'provider_reference', label: 'Referencia' },
       { key: 'payment_date', label: 'Fecha' },
     ],
   };

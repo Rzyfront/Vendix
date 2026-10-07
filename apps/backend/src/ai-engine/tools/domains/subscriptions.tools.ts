@@ -630,6 +630,7 @@ export function createSubscriptionTools(
       },
       requiredPermissions: [SUBSCRIPTIONS_WRITE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (
         args,
         context: ToolExecutionContext,
@@ -947,6 +948,7 @@ export function createSubscriptionTools(
       },
       requiredPermissions: [SUBSCRIPTIONS_WRITE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (
         args,
         context: ToolExecutionContext,

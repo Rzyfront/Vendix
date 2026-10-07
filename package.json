@@ -38,6 +38,7 @@
     "format": "npm run format -ws",
     "zoneless:audit": "bash apps/frontend/scripts/zoneless-audit.sh",
     "tz:audit": "bash scripts/tz-audit.sh",
+    "prisma-singleton:audit": "bash scripts/prisma-singleton-audit.sh",
     "state-refresh:audit": "bash scripts/state-refresh-audit.sh",
     "industries:audit": "bash scripts/industry-parity-audit.sh",
     "symbols:audit": "node scripts/assert-imported-symbols.js",
@@ -58,5 +59,26 @@
   },
   "dependencies": {
     "@shopify/react-native-skia": "^2.6.2"
+  },
+  "overrides": {
+    "multer": "^2.3.0",
+    "mysql2": "^3.23.1",
+    "fflate": "^0.8.3",
+    "exceljs": {
+      "uuid": "^11.1.1"
+    },
+    "engine.io": {
+      "ws": "^8.21.0"
+    },
+    "socket.io-adapter": {
+      "ws": "^8.21.0"
+    },
+    "@angular/build": {
+      "piscina": "^5.3.2"
+    },
+    "deepmerge-ts": "^8.0.2",
+    "xcode": {
+      "uuid": "^11.1.1"
+    }
   }
 }

@@ -20,7 +20,9 @@ import {
   FiscalInvoiceThresholdService,
   POS_EQUIVALENT_DOCUMENT_UVT_LIMIT,
 } from '@common/services/fiscal-invoice-threshold.service';
-import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { VendixHttpException, ErrorCodes, FinancialSplitErrors } from 'src/common/errors';
+import type { EmitReadinessFinding } from './invoice-flow/emit-readiness.contract';
+import { exceptionToFinding } from './utils/exception-to-finding.util';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { InvoiceEmissionGateService } from './services/invoice-emission-gate.service';
@@ -2254,12 +2256,21 @@ export class InvoicingService {
    *   cerrado, perfil inactivo, régimen AIU contradictorio, cliente de otro
    *   tenant, aritmética imposible: todo eso LANZA, con el mismo
    *   `VendixHttpException` y el mismo texto que devolvería «Crear factura».
-   *   Convertirlos en hallazgos exigiría un catálogo de códigos paralelo que se
-   *   desincronizaría del mensaje real.
+   *   Quien las convierte en hallazgos es `InvoiceFlowService.getDraftEmitReadiness`
+   *   (`exceptionToFinding`: código → campo/target/cta, con el mensaje real), no
+   *   esta función. Lo que SÍ recolecta aquí, sin lanzar, va en
+   *   `collected_findings`: DV del NIT, producto en línea y retenciones.
    */
   async buildDraftProjection(dto: CreateInvoiceDto): Promise<{
     invoice: any;
     resolution_secret: StoredTechnicalKey | null;
+    /**
+     * Rechazos de `create()` que NO impiden proyectar el documento y que el
+     * motor único de prevalidación recolecta en vez de lanzar: NIT con DV
+     * incoherente, producto en línea sin implementar y retenciones
+     * declaradas inválidas (`INVOICING_WITHHOLDING_002/003`).
+     */
+    collected_findings: EmitReadinessFinding[];
   }> {
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
@@ -2369,6 +2380,16 @@ export class InvoicingService {
       customer,
     );
 
+    // HUECO 3 — comprobaciones que `create()` ejecuta DESPUÉS de este bloque y
+    // que, lanzadas acá, esconderían todo lo demás que falta. Se corren en modo
+    // RECOLECTAR: la misma regla (`splitInvoiceCustomerNitDv`, el rechazo de
+    // `inline_product`, las dos puertas de retención), traducida a hallazgo.
+    const collected_findings = await this.collectDraftOnlyFindings(dto, {
+      customer: draft_customer_snapshot,
+      support_supplier,
+      organization_id: Number(context.organization_id),
+    });
+
     const split_line_taxes = this.needsPersistedLineTaxes(
       calculated.header_taxes,
       calculated.lines,
@@ -2470,6 +2491,10 @@ export class InvoicingService {
       issue_date,
       due_date: this.resolveDueDate(dto, issue_date),
       exchange_rate: exchange_rate ?? null,
+      // La divisa pactada viaja en la proyección para que la puerta de emisión
+      // juzgue la TRM (`INVOICING_TRM_001`) con la misma regla que `send()`.
+      foreign_currency: dto.foreign_currency ?? null,
+      exchange_rate_date: dto.exchange_rate_date ?? null,
       subtotal_amount: new Prisma.Decimal(calculated.totals.total_before_tax),
       discount_amount: new Prisma.Decimal(calculated.totals.discount_amount),
       tax_amount: new Prisma.Decimal(calculated.totals.tax_amount),
@@ -2490,7 +2515,134 @@ export class InvoicingService {
       invoice_taxes: projected_taxes,
     };
 
-    return { invoice, resolution_secret };
+    return { invoice, resolution_secret, collected_findings };
+  }
+
+  /**
+   * HUECO 3 de `validate-draft`, en modo RECOLECTAR.
+   *
+   * Cada comprobación lanza `VendixHttpException` en `create()`; acá se atrapa
+   * y se traduce con `exceptionToFinding`. Un error que no sea una excepción
+   * conocida se relanza.
+   */
+  private async collectDraftOnlyFindings(
+    dto: CreateInvoiceDto,
+    ctx: {
+      customer: Record<string, any> | null | undefined;
+      support_supplier: any;
+      organization_id: number;
+    },
+  ): Promise<EmitReadinessFinding[]> {
+    const findings: EmitReadinessFinding[] = [];
+    const collect = (error: unknown): void => {
+      const finding = exceptionToFinding(error, {
+        customer_id: dto.customer_id ?? null,
+      });
+      if (!finding) throw error;
+      findings.push(finding);
+    };
+
+    // NIT con DV pegado o incoherente. Mismos valores EFECTIVOS que `create()`.
+    try {
+      this.splitInvoiceCustomerNitDv({
+        document_type:
+          dto.customer_document_type ??
+          ctx.customer?.customer_document_type ??
+          ctx.support_supplier?.document_type ??
+          null,
+        document_number:
+          dto.customer_tax_id ??
+          ctx.customer?.customer_tax_id ??
+          ctx.support_supplier?.tax_id ??
+          null,
+        verification_digit:
+          dto.customer_verification_digit ??
+          ctx.customer?.customer_verification_digit ??
+          ctx.support_supplier?.verification_digit ??
+          null,
+      });
+    } catch (error) {
+      collect(error);
+    }
+
+    // Producto en línea: `create()` lo rechaza siempre que no traiga `product_id`.
+    const inline_index = dto.items.findIndex(
+      (it) => it.inline_product && !it.product_id,
+    );
+    if (inline_index >= 0) {
+      collect(
+        new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'La creación inline de productos desde la factura aún no está implementada. Crea el producto primero en el módulo de productos y luego agrégalo por product_id.',
+          { field: `items[${inline_index}].product_id`, line_index: inline_index },
+        ),
+      );
+    }
+
+    // Retenciones declaradas: existencia del concepto y aritmética. Réplica de
+    // las dos puertas de `applyClientDeclaredWithholdings`, que además PERSISTE
+    // y por eso no se puede invocar desde una previsualización.
+    if (dto.withholdings && dto.withholdings.length > 0) {
+      try {
+        await this.assertDeclaredWithholdingsValid(
+          dto.withholdings,
+          ctx.organization_id,
+        );
+      } catch (error) {
+        collect(error);
+      }
+    }
+
+    return findings;
+  }
+
+  /**
+   * Sólo VALIDA (no persiste) las retenciones declaradas. Mismos códigos,
+   * mismos umbrales y mismo truncado que `applyClientDeclaredWithholdings`.
+   */
+  private async assertDeclaredWithholdingsValid(
+    declared: InvoiceWithholdingInputDto[],
+    organization_id: number,
+  ): Promise<void> {
+    const conceptIds = [...new Set(declared.map((w) => w.concept_id))];
+    const concepts = await this.prisma.withholding_concepts.findMany({
+      where: {
+        id: { in: conceptIds },
+        organization_id,
+        is_active: true,
+      },
+      select: { id: true, code: true, name: true },
+    });
+    const byId = new Map<number, { id: number; code: string; name: string }>(
+      concepts.map((c: any) => [c.id, c]),
+    );
+    const missing = conceptIds.filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_WITHHOLDING_002,
+        `Las siguientes retenciones referencian conceptos que no existen, están inactivos o pertenecen a otra tienda: ${missing.join(', ')}. Revisa la lista de conceptos en Contabilidad → Retenciones.`,
+        { missing_concept_ids: missing },
+      );
+    }
+    for (const w of declared) {
+      if (w.amount == null) continue;
+      const concept = byId.get(w.concept_id)!;
+      const rate = new Prisma.Decimal(w.rate);
+      const base = new Prisma.Decimal(w.base_amount);
+      const computed = base.times(rate).toDP(2, Prisma.Decimal.ROUND_DOWN);
+      const declared_amount = new Prisma.Decimal(w.amount);
+      if (!declared_amount.minus(computed).abs().lessThanOrEqualTo('0.01')) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_WITHHOLDING_003,
+          `La retención del concepto «${concept.code}» (${concept.name}) declara ${declared_amount.toFixed(2)} sobre una base de ${base.toFixed(2)} al ${rate.times(100).toFixed(2)} %, pero esa base y esa tarifa dan ${computed.toFixed(2)}. La diferencia mayor a 1 centavo ya no es truncado: revisa la captura.`,
+          {
+            concept_id: concept.id,
+            declared: declared_amount.toFixed(2),
+            computed: computed.toFixed(2),
+          },
+        );
+      }
+    }
   }
 
   /**
@@ -2837,6 +2989,9 @@ export class InvoicingService {
     const existing = await this.prisma.invoices.findFirst({
       where: {
         ...where,
+        // Las facturas de cuenta (reparto financiero) cuelgan de la orden por
+        // `order_id` pero no son «la factura de la orden».
+        financial_account_id: null,
         invoice_type: 'sales_invoice',
         status: { notIn: ['voided', 'cancelled'] },
       },
@@ -3627,7 +3782,37 @@ export class InvoicingService {
         throw new VendixHttpException(ErrorCodes.INVOICING_CREATE_003, 'La cuenta cambió; recarga antes de facturar.');
       }
       const existing = await tx.invoices.findFirst({ where: { financial_account_id: accountId, invoice_type: 'sales_invoice', status: { notIn: ['voided', 'cancelled'] }, store_id: context.store_id }, include: INVOICE_INCLUDE });
-      if (existing) return existing;
+      // Documento ya numerado/transmitido (o rechazado): se devuelve tal cual.
+      // Sólo un documento AÚN NO EMITIDO (`draft`/`validated`) se somete otra
+      // vez a la regla de pago, para que un borrador viejo creado antes de la
+      // guarda no la esquive.
+      if (existing && !['draft', 'validated'].includes(existing.status)) {
+        return existing;
+      }
+      // Una cuenta se factura DESPUÉS de cobrarse completa (también la retenida
+      // «paid_original»: solo se exime si ya está pagada).
+      if (paid.lt(account.grand_total)) {
+        throw new VendixHttpException(FinancialSplitErrors.SPLIT_ACCOUNT_UNPAID_INVOICE);
+      }
+      if (existing) {
+        // Borrador sin emitir y cuenta ya cobrada: se refresca forma/medio de
+        // pago (un borrador viejo pudo nacer a crédito, payment_form=2). Es lo
+        // menos invasivo: no se cancela ni se recrea, así no se duplica fila.
+        if (
+          existing.payment_form !== means.payment_form ||
+          existing.payment_means_code !== means.payment_means_code
+        ) {
+          await tx.invoices.update({
+            where: { id: existing.id },
+            data: {
+              payment_form: means.payment_form,
+              payment_means_code: means.payment_means_code,
+            },
+          });
+          return tx.invoices.findFirstOrThrow({ where: { id: existing.id, store_id: context.store_id }, include: INVOICE_INCLUDE });
+        }
+        return existing;
+      }
       const created = await tx.invoices.create({
         data: {
           organization_id: context.organization_id,

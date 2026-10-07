@@ -38,6 +38,8 @@ interface ReceiveLineItem {
   requires_serial: boolean;
   product_id: number;
   product_variant_id: number | null;
+  /** QUI-855 — motivo de faltante/avería de la línea (viaja como `note`). */
+  note: string;
 }
 
 @Component({
@@ -110,6 +112,14 @@ interface ReceiveLineItem {
                            Soft validation: capturing fewer serials than the
                            received quantity is allowed (backend fills the rest
                            with placeholders); we show a warning badge. -->
+                      <!-- QUI-855: motivo por línea (faltante/avería). Opcional;
+                           se persiste en la recepción y no bloquea. -->
+                      <input
+                        type="text"
+                        class="mt-1 w-36 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                        placeholder="Motivo (faltante, avería…)"
+                        [(ngModel)]="item.note"
+                      >
                       @if (item.requires_serial && item.receive_quantity > 0) {
                         <button
                           type="button"
@@ -307,6 +317,7 @@ export class PoReceiveModalComponent {
           requires_serial: !!product?.requires_serial_numbers,
           product_id: item.product_id ?? product?.id ?? 0,
           product_variant_id: item.product_variant_id ?? item.product_variants?.id ?? null,
+          note: '',
         };
       })
     );
@@ -341,6 +352,11 @@ export class PoReceiveModalComponent {
           id: i.id,
           quantity_received: Math.min(i.receive_quantity, i.pending),
         };
+        // QUI-855: motivo de la línea (faltante/avería). Vacío ⇒ sin motivo.
+        const lineNote = i.note?.trim();
+        if (lineNote) {
+          dto.note = lineNote;
+        }
         // QUI-431: only attach serials for serialized lines that captured any.
         // Cap to quantity_received; backend auto-generates the remainder.
         if (i.requires_serial) {

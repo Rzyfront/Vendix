@@ -1,52 +1,42 @@
 /**
- * PlatformDeliveryService — reenvío por correo de facturas del riel plataforma.
+ * PlatformDeliveryService — envío por correo de facturas del riel plataforma.
  *
- * ## Por qué servicio paralelo y no delegación a InvoiceDeliveryService tienda
+ * Las facturas de plataforma NO viven en `invoices`: viven en
+ * `fiscal_transmissions` (source_type='platform_invoice') con su snapshot en
+ * `fiscal_evidences`. Por eso este servicio es paralelo a `InvoiceDeliveryService`
+ * de tienda (que lee `StorePrismaService.invoices`).
  *
- * El servicio tienda vive en `domains/store/invoicing/delivery/` y depende de
- * `StorePrismaService.invoices.findFirst()` que el scoping extension decora con
- * `store_id` del contexto JWT. Para plataforma, la organización NO tiene
- * store — emitir contra el servicio tienda con un contexto sintetizado
- * `store_id: undefined` haría que Prisma OMITA el filtro de tienda
- * (`undefined` = "skip this filter" en cláusulas where), exponiendo todas las
- * facturas de la organización plataforma. IDOR unacceptable para multi-tenant.
- *
- * Mismo argumento que `PlatformCreditNotesService` (C.2): servicio paralelo
- * con `GlobalPrismaService.withoutScope()` y filtros `organization_id`
- * explícitos. Validación de pertenencia (related invoice = org plataforma) +
- * validación de email (IsEmail) + reutilización del writer compartido
- * (`writeInvoiceDeliveryEvent`).
- *
- * ## Lo que NO hace este slice
- *
- * - NO arma el ZIP + PDF + XML para el correo: eso es trabajo de
- *   `InvoiceDeliveryService` (500+ líneas con la lógica del Anexo Técnico
- *   1.9 §9.1 — asunto, AttachedDocument). Para C.3 minimo viable: el
- *   endpoint valida y registra el evento de auditoría, marcando que el
- *   reenvío fue solicitado. La pieza de correo/S3/ZIP es C.3.5 — siguiente
- *   slice cuando la DB vuelva, verificable por live curl.
- *
- * ## Lo que sí hace
- *
- * - Valida email con `class-validator.isEmail` (mismo helper que usa el
- *   servicio tienda — misma regla, mismo mensaje ERR-07).
- * - Valida que la factura existe y pertenece a la organización plataforma.
- * - Escribe una fila en `invoice_delivery_events` con `status='queued'`
- *   (la pieza de correo C.3.5 la actualizará a `sent`/`failed`).
+ * - Resuelve la transmisión por id (filtrando organización plataforma).
+ * - Exige `dian_status='accepted'`.
+ * - Destinatario: el explícito, o el email del `platform_acquirer_snapshot`.
+ * - Adjuntos: ZIP con XML firmado + PDF (PlatformInvoicePdfService).
+ * - NO persiste en `invoice_delivery_events` (FK a `invoices`); deja
+ *   `delivered_at/delivered_to` en `fiscal_transmissions.provider_response`
+ *   sin pisar el resto.
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { isEmail } from 'class-validator';
+import AdmZip = require('adm-zip');
 
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
-import { writeInvoiceDeliveryEvent } from '../../../store/invoicing/delivery/invoice-delivery-events.writer';
+import { EmailService } from '../../../../email/email.service';
+import { EmailAttachment } from '../../../../email/interfaces/email.interface';
+import {
+  generateInvoiceEmailHtml,
+  generateInvoiceEmailText,
+  InvoiceEmailData,
+} from '../../../../email/templates/invoice-email.template';
+import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
 
 export interface PlatformDeliverResult {
   invoice_id: number;
+  invoice_number: string;
   recipient: string;
-  zip_name: string;
-  status: 'queued';
+  zip_name: string | null;
+  status: 'sent';
+  message_id?: string;
 }
 
 @Injectable()
@@ -56,53 +46,33 @@ export class PlatformDeliveryService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly platformOrg: PlatformOrgService,
+    private readonly email_service: EmailService,
+    private readonly pdf_service: PlatformInvoicePdfService,
   ) {}
 
   /**
-   * Reenvía una factura plataforma a un correo arbitrario.
-   *
-   * @param invoice_id id de la factura plataforma
-   * @param recipient correo destino — debe pasar `class-validator.isEmail`
-   * @param actor_user_id usuario que solicita el reenvío (auditoría)
+   * @param invoice_id id de la transmisión (`fiscal_transmissions.id`) de la factura plataforma
+   * @param recipient correo destino; si viene vacío se usa el del snapshot del adquiriente
+   * @param actor_user_id usuario que solicita el envío (log)
    */
   async deliverInvoice(
     invoice_id: number,
-    recipient: string,
+    recipient: string | null | undefined,
     actor_user_id: number,
   ): Promise<PlatformDeliverResult> {
-    // 1. Validar el correo con el mismo helper que el servicio tienda.
-    //    `isEmail` de class-validator es el mismo que el DTO usa para
-    //    validar — misma regla, mismo ERR-07.
-    if (!recipient || !isEmail(recipient)) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_DELIVERY_001,
-        `Correo inválido: "${recipient}". Debe ser una dirección de email válida.`,
-        { recipient },
-      );
-    }
-
-    // 2. Resolver ámbito plataforma.
     const ctx = await this.platformOrg.requirePlatformContext();
     const platformOrgId = ctx.organization_id;
 
-    // 3. Validar la factura existe y pertenece a la plataforma.
-    const invoice = await this.prisma.withoutScope().invoices.findFirst({
-      where: {
-        id: invoice_id,
-        organization_id: platformOrgId,
-      },
-      select: {
-        id: true,
-        invoice_number: true,
-        invoice_type: true,
-        status: true,
-        cufe: true,
-        pdf_url: true,
-        xml_document: true,
-        accounting_entity_id: true,
-      },
-    });
-    if (!invoice) {
+    const transmission = await this.prisma
+      .withoutScope()
+      .fiscal_transmissions.findFirst({
+        where: {
+          id: invoice_id,
+          organization_id: platformOrgId,
+          source_type: 'platform_invoice',
+        },
+      });
+    if (!transmission) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_FIND_001,
         `La factura ${invoice_id} no pertenece a la organización plataforma ${platformOrgId}.`,
@@ -110,33 +80,156 @@ export class PlatformDeliveryService {
       );
     }
 
-    // 4. Construir nombre del ZIP de salida (mismo patrón que el servicio
-    //    tienda, con prefijo Factura-QA y el número del documento).
-    const zip_name = `Factura-${invoice.invoice_number}.zip`;
+    if (transmission.dian_status !== 'accepted') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DELIVERY_002,
+        `La factura ${transmission.document_number} no está aceptada por la DIAN (estado: ${transmission.dian_status}); no se puede enviar por correo.`,
+        { invoice_id, dian_status: transmission.dian_status },
+      );
+    }
 
-    // 5. Escribir la fila de auditoría en `invoice_delivery_events` con
-    //    `store_id: null` (H2: ya nullable) y `status: 'queued'`. La pieza
-    //    C.3.5 de correo+S3 actualizará el status al resultado real.
-    await writeInvoiceDeliveryEvent(this.prisma.withoutScope() as any, {
-      invoice_id: invoice.id,
-      organization_id: platformOrgId,
-      store_id: null,
-      channel: 'email',
-      recipient,
-      zip_name,
-      status: 'queued',
-      created_by: actor_user_id,
-    });
+    const evidences = await this.prisma
+      .withoutScope()
+      .fiscal_evidences.findMany({
+        where: {
+          fiscal_transmission_id: transmission.id,
+          evidence_type: 'manual_support',
+        },
+        orderBy: { created_at: 'desc' },
+        select: { metadata: true },
+      });
+    const metas = (evidences as Array<{ metadata: unknown }>).map(
+      (e) => (e.metadata ?? {}) as Record<string, any>,
+    );
+    const acquirer = metas.find((m) => m.kind === 'platform_acquirer_snapshot');
+    const invoiceSnap = metas.find((m) => m.kind === 'platform_invoice_snapshot');
+
+    const to = (recipient || acquirer?.email || '').trim();
+    if (!to || !isEmail(to)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DELIVERY_001,
+        `Correo inválido o ausente: "${to}". Indique una dirección de email válida.`,
+        { recipient: to },
+      );
+    }
+
+    const number = transmission.document_number;
+    const zip = new AdmZip();
+    let has_content = false;
+
+    let pdf_buffer: Buffer | undefined;
+    try {
+      pdf_buffer = await this.pdf_service.previewPdf(transmission.id);
+      zip.addFile(`Factura-${number}.pdf`, pdf_buffer);
+      has_content = true;
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo generar el PDF de la factura plataforma ${number}: ${(error as Error)?.message ?? error}`,
+      );
+    }
+    if (transmission.xml_document) {
+      zip.addFile(
+        `Factura-${number}.xml`,
+        Buffer.from(transmission.xml_document, 'utf-8'),
+      );
+      has_content = true;
+    }
+
+    const zip_name = has_content ? `Factura-${number}.zip` : null;
+    const attachments: EmailAttachment[] = has_content
+      ? [
+          {
+            filename: zip_name as string,
+            content: zip.toBuffer(),
+            contentType: 'application/zip',
+          },
+        ]
+      : [];
+
+    const totals = (invoiceSnap?.totals ?? {}) as Record<string, number>;
+    const email_data: InvoiceEmailData = {
+      invoice_number: number,
+      invoice_type: 'sales_invoice',
+      customer_name: acquirer?.legal_name ?? 'Cliente',
+      issue_date: (invoiceSnap?.issue_date as string) ??
+        (transmission.created_at
+          ? transmission.created_at.toISOString().slice(0, 10)
+          : ''),
+      items: ((invoiceSnap?.items ?? []) as Array<Record<string, any>>).map(
+        (i) => ({
+          description: String(i.description ?? ''),
+          quantity: Number(i.quantity ?? 0),
+          unit_price: Number(i.unit_price ?? 0),
+          tax_amount: Number(i.tax_amount ?? 0),
+          total_amount: Number(i.total_amount ?? i.line_total ?? 0),
+        }),
+      ),
+      subtotal: Number(totals.subtotal ?? 0),
+      discount: Number(invoiceSnap?.global_discount_amount ?? 0),
+      tax: Number(totals.tax_amount ?? 0),
+      withholding: 0,
+      total: Number(totals.total ?? 0),
+      currency: (invoiceSnap?.currency as string) ?? 'COP',
+      cufe: transmission.cufe ?? undefined,
+      store_name: 'Vendix',
+    };
+    const html = generateInvoiceEmailHtml(email_data);
+    const text = generateInvoiceEmailText(email_data);
+    const subject = `Factura ${number} - Vendix`;
+
+    const result = attachments.length
+      ? await this.email_service.sendEmailWithAttachments(
+          to,
+          subject,
+          html,
+          attachments,
+          text,
+        )
+      : await this.email_service.sendEmail(to, subject, html, text);
+
+    if (!result.success) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DELIVERY_003,
+        `El proveedor de correo no pudo enviar la factura ${number}: ${result.error || 'error desconocido'}.`,
+        { invoice_id, email: to, provider_error: result.error },
+      );
+    }
+
+    // Trazabilidad ligera: merge en provider_response sin pisar lo existente.
+    try {
+      const prev =
+        transmission.provider_response &&
+        typeof transmission.provider_response === 'object' &&
+        !Array.isArray(transmission.provider_response)
+          ? (transmission.provider_response as Record<string, unknown>)
+          : {};
+      await this.prisma.withoutScope().fiscal_transmissions.update({
+        where: { id: transmission.id },
+        data: {
+          provider_response: {
+            ...prev,
+            delivered_at: new Date().toISOString(),
+            delivered_to: to,
+          } as any,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo registrar delivered_at en la transmisión ${transmission.id}: ${(error as Error)?.message ?? error}`,
+      );
+    }
 
     this.logger.log(
-      `Platform delivery queued: invoice=${invoice.invoice_number} → ${recipient}`,
+      `Platform delivery sent: invoice=${number} → ${to} (actor=${actor_user_id})`,
     );
 
     return {
-      invoice_id: invoice.id,
-      recipient,
+      invoice_id: transmission.id,
+      invoice_number: number,
+      recipient: to,
       zip_name,
-      status: 'queued',
+      status: 'sent',
+      message_id: result.messageId,
     };
   }
 }

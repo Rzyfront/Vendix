@@ -483,10 +483,11 @@ export const stage02Catalog: Stage = {
         ? Number(((p.basePrice - p.costPrice) / p.costPrice * 100).toFixed(2))
         : 0;
 
-      const product = await prisma.products.upsert({
-        where: { store_id_sku: { store_id: storeId, sku: productSku } },
-        update: {},
-        create: {
+      const existingProduct = await prisma.products.findFirst({
+        where: { store_id: storeId, sku: productSku, state: { not: 'archived' as any } },
+      });
+      const product = existingProduct ?? await prisma.products.create({
+        data: {
           store_id: storeId,
           brand_id: brand.id,
           name: p.name,

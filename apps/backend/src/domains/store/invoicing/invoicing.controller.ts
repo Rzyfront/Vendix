@@ -19,6 +19,7 @@ import {
   RequireModuleFlow,
 } from '../../../common/guards/module-flow.guard';
 import { InvoicingService } from './invoicing.service';
+import { OneShotEmissionService } from './one-shot-emission.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
@@ -64,6 +65,7 @@ export class InvoicingController {
     private readonly invoice_pdf_service: InvoicePdfService,
     private readonly dian_events_service: DianEventsService,
     private readonly response_service: ResponseService,
+    private readonly one_shot_emission: OneShotEmissionService,
   ) {}
 
   @Get()
@@ -180,13 +182,30 @@ export class InvoicingController {
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
   async validateDraft(@Body() create_dto: CreateInvoiceDto) {
-    const { invoice, resolution_secret } =
-      await this.invoicing_service.buildDraftProjection(create_dto);
-    const result = await this.invoice_flow_service.getDraftEmitReadiness(
-      invoice,
-      { resolution_secret },
+    // La proyección se pasa COMO FUNCIÓN: `getDraftEmitReadiness` atrapa los
+    // rechazos de las puertas de datos y los devuelve como hallazgos.
+    const result = await this.invoice_flow_service.getDraftEmitReadiness(() =>
+      this.invoicing_service.buildDraftProjection(create_dto),
     );
     return this.response_service.success(result);
+  }
+
+  /** Crear + prevalidar + emitir a la DIAN en una sola llamada (cualquier canal). */
+  @Post('orders/:orderId/emit')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async emitOrder(@Param('orderId', ParseIntPipe) order_id: number) {
+    const result = await this.one_shot_emission.emitOrder(order_id);
+    return this.response_service.success(result, result.message ?? undefined);
+  }
+
+  /** Igual que `orders/:orderId/emit`, para una cuenta del reparto financiero. */
+  @Post('financial-accounts/:accountId/emit')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async emitFinancialAccount(@Param('accountId', ParseIntPipe) account_id: number) {
+    const result = await this.one_shot_emission.emitFinancialAccount(account_id);
+    return this.response_service.success(result, result.message ?? undefined);
   }
 
   @Post('from-order/:orderId')

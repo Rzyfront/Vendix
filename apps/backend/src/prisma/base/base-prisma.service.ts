@@ -15,7 +15,9 @@ export abstract class BasePrismaService implements OnModuleInit {
 
   constructor() {
     const connectionString = process.env.DATABASE_URL!;
-    const pool = new Pool({ connectionString });
+    const parsedMax = parseInt(process.env.DATABASE_POOL_MAX ?? '', 10);
+    const max = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : 20;
+    const pool = new Pool({ connectionString, max });
     const adapter = new PrismaPg(pool);
 
     this.baseClient = new PrismaClient({

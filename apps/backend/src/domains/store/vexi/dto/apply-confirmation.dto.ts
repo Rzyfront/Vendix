@@ -61,4 +61,18 @@ export class ApplyConfirmationDto {
   @IsOptional()
   @IsBoolean()
   speak?: boolean;
+
+  /**
+   * The write plan this step belongs to (`POST /store/vex/plans/:id/approve`).
+   *
+   * Vex-only and required there: the plan token's fingerprint binds
+   * (user, plan, ordered hashes), so redeem must name WHICH plan id the
+   * token has to carry — the server re-resolves nothing from the thread
+   * (the internal task plan and the write plan are different systems).
+   * Vexi's single-use circuit ignores it. Hallazgo live E2E-1 (2026-10-01).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  plan_id?: string;
 }

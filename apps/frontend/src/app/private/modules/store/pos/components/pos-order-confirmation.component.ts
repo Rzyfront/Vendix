@@ -10,6 +10,7 @@ import {
   viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 import { firstValueFrom, switchMap } from 'rxjs';
 
 
@@ -35,11 +36,19 @@ import {
 import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invoicing-not-configured/invoicing-not-configured.component';
 import { PosFiscalStatusComponent } from './pos-fiscal-status.component';
 import { PosFiscalStatus } from '../services/pos-fiscal.service';
+import { SaveRequirementsModalComponent } from '../../../../../shared/components/save-requirements-modal/save-requirements-modal.component';
+import { SaveRequirement } from '../../../../../shared/components/save-requirements-modal/save-requirements.interface';
+import { toEmitRequirements } from '../../invoicing/utils/invoice-emit-requirements';
+import {
+  EmitReadinessVerdict,
+  InvoiceEmitReadinessFinding,
+} from '../../invoicing/services/invoice-emit-readiness.service';
 import { DispatchTicketPrintService } from '../../dispatch-ticket/services/dispatch-ticket-print.service';
 import {
   shouldAutoPrintDispatchTicket,
   type ShouldAutoPrintDispatchTicketContext,
 } from '../../../../../shared/services/print/dispatch-ticket-autoprint';
+import type { PrintTrigger } from '../../../../../shared/services/print';
 import { DispatchTicketData } from '../../dispatch-ticket/models/dispatch-ticket-data.model';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import {
@@ -66,6 +75,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
     IconComponent,
     InvoicingNotConfiguredComponent,
     PosFiscalStatusComponent,
+    SaveRequirementsModalComponent,
     DispatchMethodSelectorModalComponent,
     CourierNameModalComponent,
     GenerateDispatchWizardComponent,
@@ -287,7 +297,42 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
           [orderId]="isOpen() && orderId ? +orderId : null"
           (statusChanged)="onFiscalStatus($event)"
         ></app-pos-fiscal-status>
+
+        @if (fiscalRequirements().length > 0) {
+          <div class="confirm-contingency" role="alert" data-testid="fiscal-requirements">
+            <div class="confirm-contingency-body">
+              <app-icon name="alert-triangle" [size]="16" class="confirm-contingency-icon"></app-icon>
+              <div>
+                <span class="confirm-contingency-title">Para emitir la factura falta:</span>
+                <ul>
+                  @for (req of fiscalRequirements(); track req.id) {
+                    <li>
+                      <strong>{{ req.label }}</strong>
+                      <span> {{ req.reason }}</span>
+                      @if (req.action?.kind === 'navigate') {
+                        <app-button variant="ghost" size="sm" (clicked)="onRequirementAction(req)">
+                          {{ req.action?.label }}
+                        </app-button>
+                      }
+                    </li>
+                  }
+                </ul>
+                <app-button variant="outline" size="sm" (clicked)="showRequirementsModal.set(true)">
+                  Ver qué falta
+                </app-button>
+              </div>
+            </div>
+          </div>
+        }
       </div>
+
+      @if (showRequirementsModal()) {
+        <app-save-requirements-modal
+          [(isOpen)]="showRequirementsModal"
+          [requirements]="fiscalRequirements()"
+          (action)="onRequirementAction($event)"
+        ></app-save-requirements-modal>
+      }
 
       <div slot="footer" class="confirm-footer">
         <!-- CTA Primario: full-width, prominente -->
@@ -394,8 +439,9 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
       ></app-shipping-address-modal>
     }
 
-    <!-- Aquí NO hay modal de requisitos fiscales, y es deliberado.
-         Ver la nota "SIN MODAL DE REQUISITOS FISCALES" en la clase. -->
+    <!-- Aquí NO hay modal de requisitos fiscales ligado al singleton, y es
+         deliberado. El modal local de «Ver qué falta» sólo se monta a pedido
+         del cajero (showRequirementsModal). Ver la nota "SIN MODAL DE REQUISITOS FISCALES" en la clase. -->
     `,
   styles: [
     `
@@ -738,6 +784,8 @@ export class PosOrderConfirmationComponent {
   readonly orderData = input<any>(null);
   readonly closed = output<void>();
   readonly newSale = output<void>();
+  private readonly router = inject(Router);
+  readonly showRequirementsModal = signal(false);
   readonly viewDetail = output<string>();
 
   printing = false;
@@ -1049,22 +1097,7 @@ private authFacade = inject(AuthFacade);
    */
   readonly printsVatBreakdown = this.authFacade.printsVatBreakdown;
 
-  // ── CP-DTLP Phase E.1/E.2 — disparador POS del tiquete de despacho ─────
-  //
-  // Defaults copiados del `GeneralSettingsStore` (route-scoped, no inyectable
-  // desde acá). Default true/false para que tiendas nuevas puedan imprimirlo
-  // manual sin tocar settings, y auto-with-POS opt-in por admin.
-
-  /** Habilita el tiquete de despacho globalmente. Default true (ADR-7). */
-  readonly printDispatchTicketEnabled = computed<boolean>(
-    () => this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true,
-  );
-
-  /** Auto-imprime el tiquete junto con POS/factura cuando hay envío. Default false. */
-  readonly printDispatchTicketAutoWithPos = computed<boolean>(
-    () => this.settingsFacade.receipts()?.print_dispatch_ticket_auto_with_pos ?? false,
-  );
-
+  // ── CP-DTLP Phase E.1/E.2 — elegibilidad del tiquete de despacho POS ────
   /**
    * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
    * de despacho funcione como tiquete de reclamo en ventas de mostrador,
@@ -1159,7 +1192,7 @@ private authFacade = inject(AuthFacade);
         // ExpressionChangedAfterItHasBeenCheckedError en el modal).
         untracked(() => {
           this.resetStaleInvoiceState(data);
-          this.maybeAutoPrint();
+          void this.maybeAutoPrint();
         });
       }
     });
@@ -1167,13 +1200,12 @@ private authFacade = inject(AuthFacade);
   }
 
   /**
-   * Honours `pos.auto_print_receipt`, which until now was stored and editable
-   * but never read at runtime, so the toggle did nothing.
-   *
-   * Guarded per order id: the effect re-runs on any signal it reads, and a
-   * second run would send the same ticket to the printer again.
+   * Automatic printing is authorized by the shared print service for the
+   * resolved POS document/format, not by the local settings snapshot.
    */
   private autoPrintedOrderId: string | null = null;
+  /** Prevents overlapping server preflights while the signal effect re-runs. */
+  private autoPrintPreflightOrderId: string | null = null;
 
   /**
    * La FE ya auto-impresa para la orden (tras `issued`). Guard por orden:
@@ -1206,6 +1238,7 @@ private authFacade = inject(AuthFacade);
       this.awaitingManualEmit = false;
       this.creatingInvoice.set(false);
       this.autoPrintedFeOrderId = null;
+      this.autoPrintPreflightOrderId = null;
     }
     // Mirrors still useful for the print path (see `printReceipt`). Misma
     // precedencia que los `derived*`: snapshot fiscal primero (F-048/F-017).
@@ -1264,7 +1297,7 @@ private authFacade = inject(AuthFacade);
     return Boolean(autoEmit);
   }
 
-  private maybeAutoPrint(): void {
+  private async maybeAutoPrint(): Promise<void> {
     if (!this.isOpen()) return;
     // CP-POS-MODAL-SCOPE-001 / Phase F.15 — only PAID orders emit a
     // POS receipt. Drafts (`Guardar`) MUST NOT trigger the printer:
@@ -1274,62 +1307,83 @@ private authFacade = inject(AuthFacade);
     // produced an unwanted receipt every time the cashier clicked
     // `Guardar`.
     if (!this.derivedIsPaid()) return;
-    if (!this.ticketService.shouldAutoPrint()) return;
-    if (!this.orderId || this.autoPrintedOrderId === this.orderId) return;
+    const orderId = this.orderId;
+    const documentId = Number(orderId);
+    if (
+      !orderId ||
+      !Number.isInteger(documentId) ||
+      documentId <= 0 ||
+      this.autoPrintedOrderId === orderId ||
+      this.autoPrintPreflightOrderId === orderId
+    ) return;
 
-    // CP-POS-FE-AUTOPRINT — Si la tienda emite FE de forma automática, encolar
-    // la impresión para que salga la factura electrónica oficial en lugar de
-    // un tiquete de venta prematuro ("COPIA INFORMATIVA").
-    if (this.shouldWaitForFiscalEmission()) {
-      const currentFiscalState = this.fiscalStatus()?.state;
-      if (currentFiscalState === 'issued') {
-        this.autoPrintedOrderId = this.orderId;
-        const invoiceNumber = this.fiscalStatus()?.invoice_number;
-        this.toastService.success(
-          invoiceNumber
-            ? `Factura ${invoiceNumber} aceptada por la DIAN`
-            : 'Factura aceptada por la DIAN',
-        );
-        this.printReceipt();
-        void this.printDispatchTicketIfNeeded('automatic');
-        return;
-      }
-      if (currentFiscalState === 'contingency') {
-        this.autoPrintedOrderId = this.orderId;
-        // Contingencia ≠ aceptación: la DIAN no estaba disponible, el
-        // documento se expidió bajo contingencia y se transmitirá solo.
-        this.toastService.warning(
-          this.fiscalStatus()?.message || 'Documento expedido bajo contingencia.',
-        );
-        this.printReceipt();
-        void this.printDispatchTicketIfNeeded('automatic');
-        return;
-      }
-      if (currentFiscalState === 'failed') {
-        this.autoPrintedOrderId = this.orderId;
-        const reason = this.fiscalStatus()?.message || 'Error en validación DIAN';
-        const msg = `No se pudo emitir la factura electrónica (${reason}). Se imprimió ticket de venta como comprobante de contingencia.`;
-        this.fiscalFallbackNotice.set(msg);
-        this.toastService.warning(msg);
-        this.printReceipt();
-        void this.printDispatchTicketIfNeeded('automatic');
+    this.autoPrintPreflightOrderId = orderId;
+    try {
+      if (!(await this.ticketService.shouldAutoPrint(documentId))) return;
+
+      // The shared server gate is async. Do not act on a stale response if the
+      // cashier closed the modal, opened another order, or the order ceased to
+      // be paid while that request was in flight.
+      if (
+        !this.isOpen() ||
+        this.orderId !== orderId ||
+        !this.derivedIsPaid() ||
+        this.autoPrintedOrderId === orderId
+      ) return;
+
+      // CP-POS-FE-AUTOPRINT — If the store emits FE automatically, wait for its
+      // final status so the ticket does not precede the official document.
+      if (this.shouldWaitForFiscalEmission()) {
+        const currentFiscalState = this.fiscalStatus()?.state;
+        if (currentFiscalState === 'issued') {
+          this.autoPrintedOrderId = orderId;
+          const invoiceNumber = this.fiscalStatus()?.invoice_number;
+          this.toastService.success(
+            invoiceNumber
+              ? `Factura ${invoiceNumber} aceptada por la DIAN`
+              : 'Factura aceptada por la DIAN',
+          );
+          this.printReceipt('automatic');
+          void this.printDispatchTicketIfNeeded('automatic');
+          return;
+        }
+        if (currentFiscalState === 'contingency') {
+          this.autoPrintedOrderId = orderId;
+          this.toastService.warning(
+            this.fiscalStatus()?.message || 'Documento expedido bajo contingencia.',
+          );
+          this.printReceipt('automatic');
+          void this.printDispatchTicketIfNeeded('automatic');
+          return;
+        }
+        if (currentFiscalState === 'failed') {
+          this.autoPrintedOrderId = orderId;
+          const reason = this.fiscalStatus()?.message || 'Error en validación DIAN';
+          const msg = `No se pudo emitir la factura electrónica (${reason}). El comprobante de contingencia está disponible para imprimir.`;
+          this.fiscalFallbackNotice.set(msg);
+          this.toastService.warning(msg);
+          this.printReceipt('automatic');
+          void this.printDispatchTicketIfNeeded('automatic');
+          return;
+        }
+
+        this.awaitingFiscalPrint.set(true);
+        this.startFiscalPrintTimeout();
         return;
       }
 
-      this.awaitingFiscalPrint.set(true);
-      this.startFiscalPrintTimeout();
-      return;
+      this.autoPrintedOrderId = orderId;
+      this.printReceipt('automatic');
+      void this.printDispatchTicketIfNeeded('automatic');
+    } catch (error) {
+      // The gate is fail-closed. A permission/config lookup failure is not a
+      // reason to fall back to legacy settings and print automatically.
+      console.warn('[POS auto-print] No se pudo validar la impresión automática:', error);
+    } finally {
+      if (this.autoPrintPreflightOrderId === orderId) {
+        this.autoPrintPreflightOrderId = null;
+      }
     }
-
-    this.autoPrintedOrderId = this.orderId;
-    this.printReceipt();
-    // CP-DTLP Phase E.1 — encadenar tiquete de despacho con trigger
-    // `'automatic'` junto al POS auto. La guard (incluye
-    // `print_dispatch_ticket_auto_with_pos` + envío + `direct_delivery`)
-    // vive en `printDispatchTicketIfNeeded`. `printReceipt` ya encadena
-    // su propio `'explicit'`, pero lo salta cuando `autoPrintedOrderId`
-    // coincide con `orderId` para no imprimir el despacho dos veces.
-    void this.printDispatchTicketIfNeeded('automatic');
   }
 
   private startFiscalPrintTimeout(): void {
@@ -1344,10 +1398,10 @@ private authFacade = inject(AuthFacade);
         this.awaitingFiscalPrint.set(false);
         this.autoPrintedOrderId = this.orderId;
         const msg =
-          'La DIAN tardó más de lo esperado en responder. Se imprimió ticket de venta como comprobante de contingencia.';
+          'La DIAN tardó más de lo esperado en responder. El comprobante de contingencia está disponible para imprimir.';
         this.fiscalFallbackNotice.set(msg);
         this.toastService.warning(msg);
-        this.printReceipt();
+        this.printReceipt('automatic');
         void this.printDispatchTicketIfNeeded('automatic');
       }
     }, PosOrderConfirmationComponent.FISCAL_PRINT_TIMEOUT_MS);
@@ -1369,7 +1423,7 @@ private authFacade = inject(AuthFacade);
     this.closed.emit();
   }
 
-  printReceipt(): void {
+  printReceipt(trigger: PrintTrigger = 'explicit'): void {
     if (!this.orderData() || this.printing) return;
 
     this.printing = true;
@@ -1445,20 +1499,18 @@ private authFacade = inject(AuthFacade);
       invoiceDataQrUrl: this.derivedInvoiceDataQrUrl(),
       electronicInvoice: this.electronicInvoice() ?? undefined };
 
-    this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({
+    this.ticketService.printTicket(ticketData, { printReceipt: true, trigger }).subscribe({
       next: (success: boolean) => {
         this.printing = false;
         if (success) {
           this.toastService.success('Ticket enviado a impresión');
-        } else {
+        } else if (trigger === 'explicit') {
           this.toastService.error('Error al imprimir ticket');
         }
-        // CP-DTLP Phase E.2 — encadenar tiquete de despacho manual con
-        // `'explicit'`. Se salta cuando `maybeAutoPrint` nos invocó
-        // (autoPrintedOrderId ya seteado): en ese caso E.1 encadena el
-        // `'automatic'` por su lado y no queremos imprimir dos veces.
+        // El documento de despacho mantiene el trigger POS. Se salta cuando
+        // el carril automático ya encadenó el suyo.
         if (this.autoPrintedOrderId !== this.orderId) {
-          void this.printDispatchTicketIfNeeded('explicit');
+          void this.printDispatchTicketIfNeeded(trigger);
         }
       },
       error: (error: any) => {
@@ -1467,7 +1519,7 @@ private authFacade = inject(AuthFacade);
         this.toastService.error('Error al imprimir ticket');
         // Misma lógica en el path de error — no perdemos el intento.
         if (this.autoPrintedOrderId !== this.orderId) {
-          void this.printDispatchTicketIfNeeded('explicit');
+          void this.printDispatchTicketIfNeeded(trigger);
         }
       } });
   }
@@ -1872,7 +1924,7 @@ private authFacade = inject(AuthFacade);
             ? `Factura ${status.invoice_number} aceptada por la DIAN`
             : 'Factura aceptada por la DIAN',
         );
-        this.printReceipt();
+        this.printReceipt('automatic');
         void this.printDispatchTicketIfNeeded('automatic');
       } else if (status.state === 'contingency') {
         this.cleanupFiscalPrintTimeout();
@@ -1882,23 +1934,23 @@ private authFacade = inject(AuthFacade);
         // Contingencia ≠ aceptación: se imprime el documento de contingencia
         // y se avisa con el mensaje real del backend, no con éxito DIAN.
         this.toastService.warning(status.message);
-        this.printReceipt();
+        this.printReceipt('automatic');
         void this.printDispatchTicketIfNeeded('automatic');
       } else if (status.state === 'failed') {
         this.cleanupFiscalPrintTimeout();
         this.awaitingFiscalPrint.set(false);
         this.autoPrintedOrderId = this.orderId;
         const reason = status.message || 'Error en validación DIAN';
-        const msg = `No se pudo emitir la factura electrónica (${reason}). Se imprimió ticket de venta como comprobante de contingencia.`;
+        const msg = `No se pudo emitir la factura electrónica (${reason}). El comprobante de contingencia está disponible para imprimir.`;
         this.fiscalFallbackNotice.set(msg);
         this.toastService.warning(msg);
-        this.printReceipt();
+        this.printReceipt('automatic');
         void this.printDispatchTicketIfNeeded('automatic');
       } else if (status.state === 'not_applicable') {
         this.cleanupFiscalPrintTimeout();
         this.awaitingFiscalPrint.set(false);
         this.autoPrintedOrderId = this.orderId;
-        this.printReceipt();
+        this.printReceipt('automatic');
         void this.printDispatchTicketIfNeeded('automatic');
       }
     }
@@ -1919,13 +1971,8 @@ private authFacade = inject(AuthFacade);
         // (revisión PR789): no se exige que el ticket ya haya salido solo para
         // no dejar sin papel una FE manual cuando el auto-print no disparó.
         // El guard `autoPrintedFeOrderId` evita la doble impresión en todo caso:
-        if (
-          this.orderId &&
-          this.autoPrintedFeOrderId !== this.orderId &&
-          this.ticketService.shouldAutoPrint()
-        ) {
-          this.autoPrintedFeOrderId = this.orderId;
-          this.printReceipt();
+        if (this.orderId && this.autoPrintedFeOrderId !== this.orderId) {
+          void this.autoPrintManualInvoice(this.orderId);
         }
         break;
       case 'contingency':
@@ -1944,6 +1991,84 @@ private authFacade = inject(AuthFacade);
         this.toastService.info(
           'El documento electrónico va en camino. La venta ya está registrada.',
         );
+    }
+  }
+
+  private async autoPrintManualInvoice(orderId: string): Promise<void> {
+    const documentId = Number(orderId);
+    if (
+      !Number.isInteger(documentId) ||
+      documentId <= 0 ||
+      !this.derivedIsPaid() ||
+      this.autoPrintedFeOrderId === orderId
+    ) return;
+    try {
+      if (!(await this.ticketService.shouldAutoPrint(documentId))) return;
+      if (
+        !this.isOpen() ||
+        this.orderId !== orderId ||
+        !this.derivedIsPaid() ||
+        this.autoPrintedFeOrderId === orderId
+      ) return;
+
+      this.autoPrintedFeOrderId = orderId;
+      this.printReceipt('automatic');
+    } catch (error) {
+      console.warn('[POS auto-print FE] No se pudo validar la impresión automática:', error);
+    }
+  }
+
+  /** Lo que falta para emitir, ya traducido a filas accionables. */
+  readonly fiscalRequirements = computed<SaveRequirement[]>(() => {
+    const status = this.fiscalStatus();
+    if (!status || status.state === 'issued' || status.state === 'not_applicable') {
+      return [];
+    }
+    const findings = status.requirements ?? [];
+    if (findings.length === 0) return [];
+    const isCustomer = (f: InvoiceEmitReadinessFinding) =>
+      /^(customer[_.]|acquirer)/.test(f.field ?? '');
+    const blockers = findings.filter((f) => f.severity === 'blocker');
+    const identity = blockers.filter(isCustomer);
+    const document = blockers.filter((f) => !isCustomer(f));
+    const verdict = {
+      emittable: false,
+      findings: blockers,
+      blockers,
+      warnings: [],
+      has_items: true,
+      identity: {
+        emittable: identity.length === 0,
+        mode: 'nominative',
+        findings: identity,
+        blockers: identity,
+        warnings: [],
+        normalized: null,
+      },
+      fiscal_document: {
+        emittable: document.length === 0,
+        document_type: '',
+        findings: document,
+        blockers: document,
+        warnings: [],
+        computed: {},
+      },
+    } as unknown as EmitReadinessVerdict;
+    return toEmitRequirements(verdict);
+  });
+
+  /**
+   * Acción de una fila de requisito. En el POS sólo se navega: la venta ya está
+   * cobrada y no hay formulario de factura donde hacer foco; los datos del
+   * cliente con ficha llegan como `target: 'config'` + `cta` a esa ficha.
+   */
+  onRequirementAction(req: SaveRequirement): void {
+    const action = req.action;
+    if (!action) return;
+    this.showRequirementsModal.set(false);
+    if (action.kind === 'navigate' && action.target) {
+      this.onModalClosed();
+      void this.router.navigateByUrl(action.target);
     }
   }
 
@@ -2024,28 +2149,23 @@ private authFacade = inject(AuthFacade);
   }
 
   /**
-   * Encadena el tiquete de despacho si la guard pasa. Disparador único del
-   * POS: lo invocan `maybeAutoPrint()` (E.1, trigger `'automatic'`) y
-   * `printReceipt()` (E.2, trigger `'explicit'`), más los hooks de
-   * `pos.component.ts`.
-   *
-   * Con `trigger === 'automatic'`, exige además `print_dispatch_ticket_auto_with_pos`
-   * (opt-in por admin). Con `trigger === 'explicit'`, sólo exige el switch
-   * global. Sin el opt-in de mostrador, `direct_delivery` no autoimprime;
-   * con él, Para llevar sí puede generar el tiquete de reclamo.
+   * Encadena el tiquete de despacho si la elegibilidad de entrega pasa. La
+   * configuración fresca de formato y auto-print se consulta en el servicio
+   * central; este predicado conserva las reglas de counter/delivery.
    */
   private async printDispatchTicketIfNeeded(
     trigger: 'automatic' | 'explicit',
   ): Promise<void> {
     const order = this.orderData();
     if (!order) return;
-    // Construye el contexto UNA vez y delega la cadena de guards al predicado
-    // compartido con el detalle de orden. Mismo flag, misma lógica,
-    // misma fuente (settings.receipts).
+    // El helper compartido todavía protege elegibilidad de mostrador/envío.
+    // La configuración se pasa abierta: el gateway central autoriza el
+    // auto-print según el formato y los settings frescos.
     const context: ShouldAutoPrintDispatchTicketContext = {
-      printDispatchTicketEnabled: this.printDispatchTicketEnabled(),
-      printDispatchTicketAuto:
-        trigger === 'automatic' ? this.printDispatchTicketAutoWithPos() : undefined,
+      // The shared print service is now authoritative for fresh settings;
+      // these context fields only pass eligibility through the legacy helper.
+      printDispatchTicketEnabled: true,
+      printDispatchTicketAuto: trigger === 'automatic' ? true : undefined,
       // Decisión del usuario 2026-08-31: tiquete de reclamo para mostrador
       // (incluido Para llevar) y pickup real. Mismo flag que el detalle.
       counterEnabled: this.printDispatchTicketOnCounter(),

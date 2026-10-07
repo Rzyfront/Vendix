@@ -1,0 +1,68 @@
+
+event: ai-chunk
+id: 1
+data: {"type":"tool_call","tool":{"id":"call_ad9f77e2ad6143ddb3e772e1a3a1d91c","name":"find_product","arguments":{"query":"E2E2A-vex"}}}
+
+event: ai-chunk
+id: 2
+data: {"type":"tool_result","tool":{"id":"call_ad9f77e2ad6143ddb3e772e1a3a1d91c","name":"find_product","summary":"{\"query\":\"E2E2A-vex\",\"match_count\":0,\"products\":[],\"next_step\":\"Ningún producto coincide. Si tienes semantic_search disponible y el usuario lo describió de forma indirecta, pruébala; si no, pídele el SKU o el código de barras. No inventes un product_id.\"}"}}
+
+event: ai-chunk
+id: 3
+data: {"type":"tool_call","tool":{"id":"call_a64b971571fe4ead99eab46cc05a5916","name":"find_product","arguments":{"query":"E2E2B-vex"}}}
+
+event: ai-chunk
+id: 4
+data: {"type":"tool_result","tool":{"id":"call_a64b971571fe4ead99eab46cc05a5916","name":"find_product","summary":"{\"query\":\"E2E2B-vex\",\"match_count\":0,\"products\":[],\"next_step\":\"Ningún producto coincide. Si tienes semantic_search disponible y el usuario lo describió de forma indirecta, pruébala; si no, pídele el SKU o el código de barras. No inventes un product_id.\"}"}}
+
+event: ai-chunk
+id: 5
+data: {"type":"tool_call","tool":{"id":"call_a9b2c3db989347b992a17b965b79f584","name":"find_product","arguments":{"query":"E2E2Z-sacrificial"}}}
+
+event: ai-chunk
+id: 6
+data: {"type":"tool_result","tool":{"id":"call_a9b2c3db989347b992a17b965b79f584","name":"find_product","summary":"{\"query\":\"E2E2Z-sacrificial\",\"matched_by\":\"nombre\",\"match_count\":1,\"ambiguous\":false,\"currency\":\"COP\",\"products\":[{\"product_id\":2513,\"name\":\"E2E2Z-sacrificial\",\"sku\":null,\"barcode\":null,\"brand\":null,\"state\":\"active\",\"product_type\":\"physical\",\"is_sellable\":true,\"requires_booking\":false,\"stock_unit\":n"}}
+
+event: ai-chunk
+id: 7
+data: {"type":"tool_call","tool":{"id":"call_01a0f89a08b9729ca9f87ec6","name":"create_product","arguments":{"name":"E2E2A-vex","base_price":1000}}}
+
+event: ai-chunk
+id: 8
+data: {"type":"tool_result","tool":{"id":"call_01a0f89a08b9729ca9f87ec6","name":"create_product","summary":"Paso 1 registrado en el plan."}}
+
+event: ai-chunk
+id: 9
+data: {"type":"tool_call","tool":{"id":"call_01a0f89a090c7193b337f096","name":"create_product","arguments":{"name":"E2E2B-vex","base_price":2000}}}
+
+event: ai-chunk
+id: 10
+data: {"type":"tool_result","tool":{"id":"call_01a0f89a090c7193b337f096","name":"create_product","summary":"Paso 2 registrado en el plan."}}
+
+event: ai-chunk
+id: 11
+data: {"type":"tool_call","tool":{"id":"call_01a0f89a0975735ebf8e5da1","name":"preview_archive_product","arguments":{"product_id":2513}}}
+
+event: ai-chunk
+id: 12
+data: {"type":"tool_result","tool":{"id":"call_01a0f89a0975735ebf8e5da1","name":"preview_archive_product","summary":"{\"product\":{\"product_id\":2513,\"name\":\"E2E2Z-sacrificial\",\"state\":\"active\"},\"requires_confirmation\":false,\"confirmed_total_units\":0,\"confirmed_total_value\":0,\"total_units\":0,\"total_value\":0,\"zero_cost_units\":0,\"lines\":[],\"out_of_scope_units\":0,\"out_of_scope\":[],\"has_active_reservations\":false,\"archiv"}}
+
+event: ai-chunk
+id: 13
+data: {"type":"tool_call","tool":{"id":"call_01a0f89a0dac7368b8d0d651","name":"archive_product","arguments":{"product_id":2513,"confirmed_total_units":0,"confirmed_total_value":0}}}
+
+event: ai-chunk
+id: 14
+data: {"type":"tool_result","tool":{"id":"call_01a0f89a0dac7368b8d0d651","name":"archive_product","summary":"Paso 3 registrado en el plan."}}
+
+event: ai-chunk
+id: 15
+data: {"type":"plan_approval","plan_approval":{"plan_id":"44826ba2-4a02-481c-9631-e59c7beb5010","steps":[{"step_id":"s1","order":1,"tool":"create_product","arguments":{"name":"E2E2A-vex","base_price":1000},"preview":{"status":"ok","target":"E2E2A-vex","changes":[{"field":"name","label":"Nombre","from":null,"to":"E2E2A-vex"},{"field":"base_price","label":"Precio base (sin impuestos)","from":null,"to":1000},{"field":"product_type","label":"Tipo","from":null,"to":"physical"}],"message":"El producto se crea activo y sin impuestos asignados; revisa sus impuestos en el módulo de productos.","domain":"products"},"irreversible":false},{"step_id":"s2","order":2,"tool":"create_product","arguments":{"name":"E2E2B-vex","base_price":2000},"preview":{"status":"ok","target":"E2E2B-vex","changes":[{"field":"name","label":"Nombre","from":null,"to":"E2E2B-vex"},{"field":"base_price","label":"Precio base (sin impuestos)","from":null,"to":2000},{"field":"product_type","label":"Tipo","from":null,"to":"physical"}],"message":"El producto se crea activo y sin impuestos asignados; revisa sus impuestos en el módulo de productos.","domain":"products"},"irreversible":false},{"step_id":"s3","order":3,"tool":"archive_product","arguments":{"product_id":2513,"confirmed_total_units":0,"confirmed_total_value":0},"preview":{"status":"warning","target":"E2E2Z-sacrificial","changes":[{"field":"state","label":"Estado","from":"active","to":"archived"},{"field":"stock_write_off_units","label":"Unidades dadas de baja","from":0,"to":0},{"field":"stock_write_off_value","label":"Valor dado de baja","from":0,"to":0}],"message":"Archivado IRREVERSIBLE: da de baja 0 unidades por 0 en 0 ubicación(es).","domain":"products"},"irreversible":true}],"covered_steps":[1,2],"reconfirm_steps":[3]}}
+
+event: ai-chunk
+id: 16
+data: {"type":"text","content":"Tengo listo un plan con 3 pasos: 1. E2E2A-vex; 2. E2E2B-vex; 3. E2E2Z-sacrificial. 1 necesita su propia confirmación por ser irreversible. Todavía no apliqué nada: revísalo y apruébalo de una vez."}
+
+event: ai-chunk
+id: 17
+data: {"type":"done","usage":{"promptTokens":0,"completionTokens":0,"totalTokens":393871}}

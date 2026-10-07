@@ -1,4 +1,5 @@
 import { RequestContextService } from '@common/context/request-context.service';
+import { BadRequestException } from '@nestjs/common';
 import { TaxDeclarationDraftService } from './tax-declaration-draft.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
 
@@ -48,6 +49,10 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
       },
     };
     const prisma = {
+      received_documents: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
       invoices: {
         findMany: jest.fn().mockResolvedValue([
           {
@@ -62,7 +67,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
             customer_tax_id: '900111222',
             subtotal_amount: 1000,
             issue_date: new Date('2026-03-10T10:00:00.000Z'),
-            invoice_taxes: [{ tax_amount: 190 }],
+            invoice_taxes: [{ id: 101, tax_type: 'iva', taxable_amount: 1000, tax_amount: 190 }],
             supplier: null,
           },
           {
@@ -77,7 +82,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
             customer_tax_id: '900333444',
             subtotal_amount: 1000,
             issue_date: new Date('2026-03-11T10:00:00.000Z'),
-            invoice_taxes: [{ tax_amount: 190 }],
+            invoice_taxes: [{ id: 102, tax_type: 'iva', taxable_amount: 1000, tax_amount: 190 }],
             supplier: null,
           },
           {
@@ -92,13 +97,17 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
             customer_tax_id: null,
             subtotal_amount: 500,
             issue_date: new Date('2026-03-12T10:00:00.000Z'),
-            invoice_taxes: [{ tax_amount: 95 }],
+            invoice_taxes: [{ id: 103, tax_type: 'iva', taxable_amount: 500, tax_amount: 95 }],
             supplier: { name: 'Proveedor Uno', tax_id: '123456789' },
           },
         ]),
       },
       fiscal_rule_sets: { findFirst: jest.fn().mockResolvedValue(null) },
-      tax_declaration_drafts: { findFirst: jest.fn().mockResolvedValue(null) },
+      fiscal_obligations: { findFirst: jest.fn().mockResolvedValue(null) },
+      tax_declaration_drafts: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn(),
+      },
       $transaction: jest.fn((callback) => callback(tx)),
     };
     const audit = { logForResource: jest.fn() };
@@ -136,6 +145,8 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
       ),
       prisma,
       tx,
+      audit,
+      eventEmitter,
       getDraftData: () => draftData,
       getCreatedLines: () => createdLines,
     };
@@ -157,6 +168,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
     expect(draft.deductible_tax_amount).toBe(95);
     expect(draft.balance_due).toBe(95);
     expect(draft.total_payable).toBe(95);
+    expect(draft.status).toBe('ready');
     expect(draft.source_snapshot).toMatchObject({
       invoice_count: 3,
       counted_invoice_ids: [1, 3],
@@ -169,9 +181,1056 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
           invoice_id: 2,
           dian_status: 'pending',
         }),
+        { code: 'SOURCE_COVERAGE_UNKNOWN' },
       ],
     });
     expect(getCreatedLines()).toHaveLength(2);
+  });
+
+  it('uses typed IVA row bases, isolates INC, and sums decimal rows without float residuals', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 20,
+      invoice_type: 'sales_invoice',
+      invoice_number: 'FV-DECIMAL',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: null,
+      customer_id: 12,
+      customer_name: 'Cliente',
+      customer_tax_id: '900123456',
+      // Deliberately differs from the actual taxable IVA base.
+      subtotal_amount: '9999.99',
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [
+        { id: 201, tax_type: 'iva', taxable_amount: '0.10', tax_amount: '0.10' },
+        { id: 202, tax_type: 'iva', taxable_amount: '0.20', tax_amount: '0.20' },
+        { id: 203, tax_type: 'inc', taxable_amount: '50.00', tax_amount: '4.00' },
+      ],
+      supplier: null,
+    }]);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.totals).toMatchObject({
+      gross_base_amount: 0.3,
+      taxable_base_amount: 0.3,
+      generated_tax_amount: 0.3,
+      deductible_tax_amount: 0,
+    });
+    expect(preview.lines).toHaveLength(1);
+    expect(preview.lines[0]).toMatchObject({ base_amount: 0.3, tax_amount: 0.3 });
+    expect(prisma.invoices.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ organization_id: context.organization_id }),
+    }));
+  });
+
+  it('blocks unclassified tax rows and prevents approval or VAT settlement emission', async () => {
+    const { service, prisma, getDraftData, tx, audit, eventEmitter } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 21,
+      invoice_type: 'sales_invoice',
+      invoice_number: 'FV-UNTYPED',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: null,
+      customer_id: 13,
+      customer_name: 'Cliente',
+      customer_tax_id: '900123456',
+      subtotal_amount: '100.00',
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [
+        { id: 211, tax_type: null, taxable_amount: '100.00', tax_amount: '19.00' },
+        { id: 212, tax_type: 'unclassified' as any, taxable_amount: '100.00', tax_amount: '19.00' },
+      ],
+      supplier: null,
+    }]);
+
+    await RequestContextService.run(requestContext, () => service.createDraft(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    }));
+
+    expect(getDraftData().status).toBe('needs_review');
+    expect(getDraftData().generated_tax_amount).toBe(0);
+    expect(getDraftData().validation_summary.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'UNCLASSIFIED_INVOICE_TAX', invoice_id: 21, tax_id: 211 }),
+      expect.objectContaining({ code: 'UNCLASSIFIED_INVOICE_TAX', invoice_id: 21, tax_id: 212 }),
+    ]));
+    expect(getDraftData().source_snapshot.skipped_tax_ids).toEqual([211, 212]);
+    expect(tx.tax_declaration_lines.createMany).not.toHaveBeenCalled();
+
+    audit.logForResource.mockClear();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce({
+      ...getDraftData(), status: 'needs_review',
+    });
+    await expect(service.approveDraft([context], getDraftData().id)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce({
+      ...getDraftData(), status: 'approved',
+    });
+    await expect(service.approveDraft([context], getDraftData().id)).resolves.toMatchObject({
+      status: 'approved',
+    });
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'not-a-number'])('blocks IVA rows with missing or invalid taxable bases (%s)', async (base) => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 22,
+      invoice_type: 'purchase_invoice',
+      invoice_number: 'FV-BAD-BASE',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: 50,
+      customer_id: null,
+      customer_name: null,
+      customer_tax_id: null,
+      subtotal_amount: '100.00',
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 221, tax_type: 'iva', taxable_amount: base, tax_amount: '19.00' }],
+      supplier: { name: 'Proveedor', tax_id: '900123456' },
+    }]);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(preview.lines).toHaveLength(0);
+    expect(preview.validation_summary).toMatchObject({
+      errors: [expect.objectContaining({ code: 'INVALID_INVOICE_TAX_BASE', invoice_id: 22, tax_id: 221 })],
+    });
+    expect(preview.source_snapshot.skipped_tax_ids).toEqual([221]);
+  });
+
+  it('blocks IVA rows with invalid tax amounts instead of persisting a NaN', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 24,
+      invoice_type: 'purchase_invoice',
+      invoice_number: 'FV-BAD-AMOUNT',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: 50,
+      customer_id: null,
+      customer_name: null,
+      customer_tax_id: null,
+      subtotal_amount: '100.00',
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 241, tax_type: 'iva', taxable_amount: '100.00', tax_amount: 'invalid' }],
+      supplier: { name: 'Proveedor', tax_id: '900123456' },
+    }]);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(preview.lines).toHaveLength(0);
+    expect(preview.validation_summary).toMatchObject({
+      errors: [expect.objectContaining({ code: 'INVALID_INVOICE_TAX_AMOUNT', invoice_id: 24, tax_id: 241 })],
+    });
+    expect(preview.source_snapshot.skipped_tax_ids).toEqual([241]);
+  });
+
+  it('does not count a pending export invoice without DIAN acceptance', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 23,
+      invoice_type: 'export_invoice',
+      invoice_number: 'EXP-PENDING',
+      status: 'validated',
+      dian_status: 'pending',
+      supplier_id: null,
+      customer_id: 14,
+      customer_name: 'Export customer',
+      customer_tax_id: null,
+      subtotal_amount: '100.00',
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 231, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+      supplier: null,
+    }]);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(preview.lines).toHaveLength(0);
+    expect(preview.source_snapshot.skipped_invoice_ids).toEqual([23]);
+    expect(preview.validation_summary).toMatchObject({
+      warnings: [expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 23 }), { code: 'SOURCE_COVERAGE_UNKNOWN' }],
+      errors: [],
+    });
+  });
+
+  it('counts POS equivalents only when the invoice is accepted and DIAN accepted', async () => {
+    const { service, prisma } = createService();
+    const posInvoice = (id: number, status: string, dian_status: string) => ({
+      id,
+      invoice_type: 'pos_equivalent_document',
+      invoice_number: `POS-${id}`,
+      status,
+      dian_status,
+      supplier_id: null,
+      customer_id: 80 + id,
+      customer_name: 'Cliente POS',
+      customer_tax_id: null,
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{
+        id: id * 10,
+        tax_type: 'iva',
+        taxable_amount: '100.00',
+        tax_amount: '19.00',
+      }],
+      supplier: null,
+    });
+    prisma.invoices.findMany.mockResolvedValueOnce([
+      posInvoice(31, 'accepted', 'accepted'),
+      posInvoice(32, 'draft', 'accepted'),
+      posInvoice(33, 'accepted', 'not_applicable'),
+      posInvoice(34, 'cancelled', 'accepted'),
+      posInvoice(35, 'voided', 'accepted'),
+    ] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.totals).toMatchObject({
+      generated_tax_amount: 19,
+      deductible_tax_amount: 0,
+      balance_due: 19,
+    });
+    expect(preview.source_snapshot).toMatchObject({
+      counted_invoice_ids: [31],
+      skipped_invoice_ids: [32, 33, 34, 35],
+    });
+    expect(preview.validation_summary).toMatchObject({
+      warnings: [
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 32 }),
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 33 }),
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 34 }),
+        expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 35 }),
+        { code: 'SOURCE_COVERAGE_UNKNOWN' },
+      ],
+      errors: [],
+    });
+    expect(prisma.invoices.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          { invoice_type: 'pos_equivalent_document' },
+        ]),
+      }),
+    }));
+  });
+
+  it('blocks accepted equivalent adjustments until a reliable 93/94 direction exists', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 41,
+      invoice_type: 'equivalent_adjustment_note',
+      invoice_number: 'AE-93-94-UNKNOWN',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: null,
+      customer_id: 14,
+      customer_name: 'Cliente POS',
+      customer_tax_id: null,
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 411, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+      supplier: null,
+    }] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.lines).toHaveLength(0);
+    expect(preview.totals).toMatchObject({ generated_tax_amount: 0, deductible_tax_amount: 0 });
+    expect(preview.source_snapshot.skipped_invoice_ids).toEqual([41]);
+    expect(preview.validation_summary).toMatchObject({
+      errors: [expect.objectContaining({
+        code: 'UNSUPPORTED_EQUIVALENT_ADJUSTMENT_DIRECTION',
+        invoice_id: 41,
+      })],
+    });
+  });
+
+  it.each(['draft', 'validated'])(
+    'does not block an unaccepted equivalent adjustment in %s status',
+    async (status) => {
+      const { service, prisma } = createService();
+      prisma.invoices.findMany.mockResolvedValueOnce([{
+        id: 44,
+        invoice_type: 'equivalent_adjustment_note',
+        invoice_number: 'AE-PENDING-44',
+        status,
+        dian_status: 'not_applicable',
+        supplier_id: null,
+        customer_id: 14,
+        customer_name: 'Cliente POS',
+        customer_tax_id: null,
+        issue_date: new Date('2026-03-15T10:00:00.000Z'),
+        invoice_taxes: [{ id: 441, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+        supplier: null,
+      }] as any);
+
+      const preview = await service.preview(context, {
+        declaration_type: 'vat', period_year: 2026, period_month: 3,
+      });
+
+      expect(preview.lines).toHaveLength(0);
+      expect(preview.source_snapshot.skipped_invoice_ids).toEqual([44]);
+      expect(preview.validation_summary).toMatchObject({
+        warnings: [expect.objectContaining({
+          code: 'DIAN_NOT_ACCEPTED',
+          invoice_id: 44,
+          invoice_type: 'equivalent_adjustment_note',
+        }), { code: 'SOURCE_COVERAGE_UNKNOWN' }],
+        errors: [],
+      });
+    },
+  );
+
+  it('blocks unknown invoice types instead of defaulting them to deductible IVA', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 42,
+      invoice_type: 'future_unknown_invoice_type',
+      invoice_number: 'UNKNOWN-42',
+      status: 'accepted',
+      dian_status: 'accepted',
+      supplier_id: null,
+      customer_id: null,
+      customer_name: null,
+      customer_tax_id: null,
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 421, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+      supplier: null,
+    }] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.lines).toHaveLength(0);
+    expect(preview.source_snapshot.skipped_invoice_ids).toEqual([42]);
+    expect(preview.validation_summary).toMatchObject({
+      errors: [expect.objectContaining({ code: 'UNSUPPORTED_VAT_DOCUMENT_TYPE', invoice_id: 42 })],
+    });
+  });
+
+  it('keeps the PO-materialized support_document deductible with not_applicable DIAN status', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findMany.mockResolvedValueOnce([{
+      id: 43,
+      invoice_type: 'support_document',
+      invoice_number: 'PO-SUPPORT-43',
+      status: 'validated',
+      dian_status: 'not_applicable',
+      supplier_id: 50,
+      customer_id: null,
+      customer_name: 'Proveedor',
+      customer_tax_id: '900123456',
+      issue_date: new Date('2026-03-15T10:00:00.000Z'),
+      invoice_taxes: [{ id: 431, tax_type: 'iva', taxable_amount: '100.00', tax_amount: '19.00' }],
+      supplier: { name: 'Proveedor', tax_id: '900123456' },
+    }] as any);
+
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+
+    expect(preview.totals).toMatchObject({
+      generated_tax_amount: 0,
+      deductible_tax_amount: 19,
+      balance_favor: 19,
+    });
+    expect(preview.source_snapshot).toMatchObject({
+      counted_invoice_ids: [43],
+      skipped_invoice_ids: [],
+    });
+    expect(preview.validation_summary.errors).toEqual([]);
+  });
+
+  it('previews VAT through the same calculation without persistence or events', async () => {
+    const {
+      service,
+      prisma,
+      tx,
+      audit,
+      eventEmitter,
+      getDraftData,
+      getCreatedLines,
+    } = createService();
+    const dto = {
+      declaration_type: 'vat' as const,
+      period_year: 2026,
+      period_month: 3,
+    };
+
+    const preview = await service.preview(context, dto);
+    const repeated = await service.preview(context, dto);
+
+    expect(repeated).toEqual(preview);
+    expect(preview).toMatchObject({
+      declaration_type: 'vat',
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      period_year: 2026,
+      period_month: 3,
+      period_quarter: null,
+      period_start: new Date('2026-03-01T00:00:00.000Z'),
+      period_end: new Date('2026-03-31T00:00:00.000Z'),
+      periodicity: null,
+      jurisdiction_key: 'CO-DIAN',
+      is_estimate: true,
+      label:
+        'Estimación preliminar; el motor fiscal completo está pendiente. No apta para presentar a DIAN.',
+    });
+    expect(preview.totals).toMatchObject({
+      generated_tax_amount: 190,
+      deductible_tax_amount: 95,
+      balance_due: 95,
+      total_payable: 95,
+    });
+    expect(preview.lines).toHaveLength(2);
+    expect(
+      preview.lines.every((line) => !('declaration_id' in line)),
+    ).toBe(true);
+    expect(preview.source_snapshot).toMatchObject({
+      counted_invoice_ids: [1, 3],
+      skipped_invoice_ids: [2],
+    });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_lines.deleteMany).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_lines.createMany).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+    expect(eventEmitter.emitAsync).not.toHaveBeenCalled();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, dto),
+    );
+    const draft = getDraftData();
+    expect(preview.totals).toEqual({
+      gross_base_amount: draft.gross_base_amount,
+      taxable_base_amount: draft.taxable_base_amount,
+      generated_tax_amount: draft.generated_tax_amount,
+      deductible_tax_amount: draft.deductible_tax_amount,
+      balance_due: draft.balance_due,
+      balance_favor: draft.balance_favor,
+      total_payable: draft.total_payable,
+    });
+    expect(preview.rules_snapshot).toEqual(draft.rules_snapshot);
+    expect(preview.source_snapshot).toEqual(draft.source_snapshot);
+    expect(preview.validation_summary).toEqual(draft.validation_summary);
+    expect(preview.lines).toEqual(
+      getCreatedLines().map((line: any) => {
+        const { declaration_id, ...previewLine } = line;
+        expect(declaration_id).toBe(draft.id);
+        return previewLine;
+      }),
+    );
+  });
+
+  it('tracks received IVA coverage conservatively without changing legacy VAT totals', async () => {
+    const { service, prisma, tx, getDraftData } = createService();
+    prisma.received_documents.findMany.mockResolvedValue([
+      {
+        id: 501, version: 3, source_hash: 'hash-501', document_type: 'invoice', processing_status: 'ready',
+        validation_status: 'valid', review_status: 'approved', fiscal_status: 'accepted',
+        issue_date: new Date('2026-03-05T00:00:00.000Z'),
+        taxes: [
+          { id: 601, tax_type: 'iva', amount: '19.00', treatment: 'deductible' },
+          { id: 602, tax_type: 'inc', amount: '8.00', treatment: 'pending' },
+          { id: 603, tax_type: null, amount: '2.00', treatment: 'excluded' },
+          { id: 604, tax_type: 'iva', amount: '0.00', treatment: 'pending' },
+        ],
+      },
+    ] as any);
+    const dto = { declaration_type: 'vat' as const, period_year: 2026, period_month: 3 };
+
+    const preview = await service.preview(context, dto);
+    expect(preview.source_snapshot.received_vat_coverage).toEqual({
+      version: 1,
+      state: 'unknown',
+      definitive_payable: null,
+      counted_received_tax_ids: [],
+      in_period_received_document_ids: [501],
+      in_period_received_sources: [{
+        id: 501, version: 3, source_hash: 'hash-501', document_type: 'invoice',
+        validation_status: 'valid', fiscal_status: 'accepted',
+      }],
+      undated_received_document_count: 0,
+      pending_or_unclassified_positive_tax_ids: [601, 603],
+    });
+    expect(preview.validation_summary.errors).toEqual([
+      expect.objectContaining({
+        code: 'RECEIVED_VAT_QUALIFICATION_PENDING',
+        received_document_id: 501,
+        received_tax_ids: [601, 603],
+      }),
+    ]);
+    expect(preview.validation_summary.warnings).toContainEqual({ code: 'SOURCE_COVERAGE_UNKNOWN' });
+    expect(preview.totals).toMatchObject({ generated_tax_amount: 190, deductible_tax_amount: 95 });
+    expect(prisma.received_documents.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        issue_date: { gte: new Date('2026-03-01T00:00:00.000Z'), lt: new Date('2026-04-01T00:00:00.000Z') },
+      },
+      select: expect.objectContaining({ id: true, version: true, taxes: expect.any(Object) }),
+    }));
+    expect(prisma.received_documents.count).toHaveBeenCalledWith({
+      where: { organization_id: context.organization_id, accounting_entity_id: context.accounting_entity_id, issue_date: null },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_lines.createMany).not.toHaveBeenCalled();
+
+    await RequestContextService.run(requestContext, () => service.createDraft(context, dto));
+    expect(getDraftData().status).toBe('needs_review');
+    expect(preview.source_snapshot).toEqual(getDraftData().source_snapshot);
+    expect(preview.validation_summary).toEqual(getDraftData().validation_summary);
+  });
+
+  it('warns for undated received documents and leaves an empty inbox unknown without blocking', async () => {
+    const { service, prisma } = createService();
+    prisma.received_documents.count.mockResolvedValueOnce(2);
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(preview.source_snapshot.received_vat_coverage).toMatchObject({
+      state: 'unknown', definitive_payable: null, counted_received_tax_ids: [],
+      in_period_received_document_ids: [], undated_received_document_count: 2,
+    });
+    expect(preview.validation_summary.errors).toEqual([]);
+    expect(preview.validation_summary.warnings).toEqual(expect.arrayContaining([
+      { code: 'SOURCE_COVERAGE_UNKNOWN' },
+      { code: 'SOURCE_COVERAGE_UNDATED', undated_received_document_count: 2 },
+    ]));
+    prisma.received_documents.count.mockResolvedValueOnce(0);
+    const empty = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(empty.source_snapshot.received_vat_coverage).toMatchObject({ state: 'unknown' });
+    expect(empty.validation_summary.errors).toEqual([]);
+  });
+
+  it('blocks received documents with unexplained header tax and invalid or negative IVA rows', async () => {
+    const { service, prisma } = createService();
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      {
+        id: 701, version: 1, source_hash: null, document_type: 'invoice',
+        processing_status: 'ready', validation_status: 'pending', review_status: 'pending',
+        fiscal_status: 'pending', issue_date: new Date('2026-03-04T00:00:00.000Z'),
+        tax_amount: '10.00', taxes: [],
+      },
+      {
+        id: 702, version: 1, source_hash: null, document_type: 'invoice',
+        processing_status: 'ready', validation_status: 'pending', review_status: 'pending',
+        fiscal_status: 'pending', issue_date: new Date('2026-03-05T00:00:00.000Z'),
+        tax_amount: '-3.00', taxes: [
+          { id: 703, tax_type: 'iva', amount: '-3.00', treatment: 'pending' },
+          { id: 704, tax_type: 'iva', amount: 'invalid', treatment: 'pending' },
+        ],
+      },
+    ] as any);
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(preview.validation_summary.errors).toEqual([
+      expect.objectContaining({
+        code: 'RECEIVED_VAT_QUALIFICATION_PENDING', received_document_id: 701,
+        received_tax_ids: [], has_unrepresented_positive_header_tax: true,
+      }),
+      expect.objectContaining({
+        code: 'RECEIVED_VAT_QUALIFICATION_PENDING', received_document_id: 702,
+        received_tax_ids: [703, 704], has_unrepresented_positive_header_tax: false,
+      }),
+    ]);
+    expect(preview.source_snapshot.received_vat_coverage).toMatchObject({
+      counted_received_tax_ids: [],
+      pending_or_unclassified_positive_tax_ids: [],
+    });
+  });
+
+  const approvalDraft = (overrides: Record<string, unknown> = {}) => ({
+    id: 801,
+    status: 'ready',
+    declaration_type: 'vat',
+    organization_id: context.organization_id,
+    accounting_entity_id: context.accounting_entity_id,
+    period_start: new Date('2026-03-01T00:00:00.000Z'),
+    period_end: new Date('2026-03-31T00:00:00.000Z'),
+    source_snapshot: {
+      received_vat_coverage: {
+        version: 1,
+        in_period_received_sources: [{ id: 901, version: 2, source_hash: 'source-hash' }],
+        undated_received_document_count: 0,
+      },
+    },
+    ...overrides,
+  });
+
+  it('approves VAT when its received-source snapshot is unchanged', async () => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    const draft = approvalDraft();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(draft as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      { id: 901, version: 2, source_hash: 'source-hash' },
+    ] as any);
+    prisma.tax_declaration_drafts.update.mockResolvedValueOnce({
+      ...draft, status: 'approved', generated_tax_amount: 0, deductible_tax_amount: 0,
+    } as any);
+
+    await expect(service.approveDraft([context], 801)).resolves.toMatchObject({ status: 'approved' });
+    expect(prisma.received_documents.findMany).toHaveBeenCalledWith({
+      where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        issue_date: { gte: new Date('2026-03-01T00:00:00.000Z'), lt: new Date('2026-04-01T00:00:00.000Z') },
+      },
+      select: { id: true, version: true, source_hash: true },
+    });
+    expect(prisma.received_documents.count).toHaveBeenCalledWith({
+      where: { organization_id: context.organization_id, accounting_entity_id: context.accounting_entity_id, issue_date: null },
+    });
+    expect(audit.logForResource).toHaveBeenCalledTimes(1);
+    expect(eventEmitter.emit).toHaveBeenCalledWith('vat.declaration.approved', expect.any(Object));
+  });
+
+  it.each([
+    ['new document', [{ id: 901, version: 2, source_hash: 'source-hash' }, { id: 902, version: 1, source_hash: null }]],
+    ['version drift', [{ id: 901, version: 3, source_hash: 'source-hash' }]],
+    ['hash drift', [{ id: 901, version: 2, source_hash: 'changed-hash' }]],
+  ])('blocks VAT approval for %s in the in-period received sources', async (_label, currentSources) => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(approvalDraft() as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce(currentSources as any);
+    await expect(service.approveDraft([context], 801)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('blocks VAT approval when the scoped undated received-document count changed', async () => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(approvalDraft() as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      { id: 901, version: 2, source_hash: 'source-hash' },
+    ] as any);
+    prisma.received_documents.count.mockResolvedValueOnce(1);
+    await expect(service.approveDraft([context], 801)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('does not see received documents from another fiscal entity during approval', async () => {
+    const { service, prisma } = createService();
+    const draft = approvalDraft();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(draft as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      { id: 901, version: 2, source_hash: 'source-hash' },
+    ] as any);
+    prisma.tax_declaration_drafts.update.mockResolvedValueOnce({
+      ...draft, status: 'approved', generated_tax_amount: 0, deductible_tax_amount: 0,
+    } as any);
+    await service.approveDraft([context], 801);
+    expect(prisma.received_documents.findMany.mock.calls[0][0].where).toEqual({
+      organization_id: context.organization_id,
+      accounting_entity_id: context.accounting_entity_id,
+      issue_date: { gte: new Date('2026-03-01T00:00:00.000Z'), lt: new Date('2026-04-01T00:00:00.000Z') },
+    });
+  });
+
+  it('requires a received-source snapshot for legacy VAT drafts and propagates read failures', async () => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(
+      approvalDraft({ source_snapshot: { invoice_count: 2 } }) as any,
+    );
+    await expect(service.approveDraft([context], 801)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.received_documents.findMany).not.toHaveBeenCalled();
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(approvalDraft() as any);
+    prisma.received_documents.findMany.mockRejectedValueOnce(new Error('received source read failed'));
+    await expect(service.approveDraft([context], 801)).rejects.toThrow('received source read failed');
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('does not require received VAT coverage for non-VAT declarations or already-approved VAT drafts', async () => {
+    const { service, prisma, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(
+      approvalDraft({ declaration_type: 'inc', source_snapshot: {} }) as any,
+    );
+    prisma.tax_declaration_drafts.update.mockResolvedValueOnce({ status: 'approved', declaration_type: 'inc' } as any);
+    await service.approveDraft([context], 801);
+    expect(prisma.received_documents.findMany).not.toHaveBeenCalled();
+    expect(prisma.received_documents.count).not.toHaveBeenCalled();
+
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(
+      approvalDraft({ status: 'approved', source_snapshot: {} }) as any,
+    );
+    await service.approveDraft([context], 801);
+    expect(prisma.received_documents.findMany).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('validates invalid periods and foreign linked obligations before writes in preview', async () => {
+    const { service, prisma, tx } = createService();
+
+    await expect(
+      service.preview(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 2,
+        period_quarter: 1,
+        periodicity: 'monthly',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.fiscal_obligations.findFirst).not.toHaveBeenCalled();
+
+    await expect(
+      service.preview(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 3,
+        obligation_id: 899,
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.fiscal_obligations.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 899,
+        organization_id: 1,
+        accounting_entity_id: 77,
+        jurisdiction_key: 'CO-DIAN',
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+  });
+
+  it('persists a bimonthly declaration range and its periodicity', async () => {
+    const { service, getDraftData } = createService();
+    const dto = {
+      declaration_type: 'vat' as const,
+      period_year: 2024,
+      period_month: 2,
+      periodicity: 'bimonthly' as const,
+    };
+    const preview = await service.preview(context, dto);
+    expect(preview).toMatchObject({
+      period_year: 2024,
+      period_month: 2,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+    });
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, dto),
+    );
+
+    expect(getDraftData()).toMatchObject({
+      period_year: 2024,
+      period_month: 2,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+      jurisdiction_key: 'CO-DIAN',
+    });
+  });
+
+  it('persists a four-month declaration range and its periodicity', async () => {
+    const { service, getDraftData } = createService();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 5,
+        periodicity: 'four_monthly',
+      }),
+    );
+
+    expect(getDraftData()).toMatchObject({
+      period_year: 2026,
+      period_month: 8,
+      period_start: new Date('2026-05-01T00:00:00.000Z'),
+      period_end: new Date('2026-08-31T00:00:00.000Z'),
+      periodicity: 'four_monthly',
+    });
+  });
+
+  it('does not reuse a monthly declaration draft for the same closing month as bimonthly', async () => {
+    const { service, prisma, tx } = createService();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 2,
+        periodicity: 'monthly',
+      }),
+    );
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 2,
+        periodicity: 'bimonthly',
+      }),
+    );
+
+    expect(tx.tax_declaration_drafts.create).toHaveBeenCalledTimes(2);
+    expect(
+      prisma.tax_declaration_drafts.findFirst.mock.calls.map(
+        (call) => call[0].where,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        periodicity: 'monthly',
+        jurisdiction_key: 'CO-DIAN',
+        status: { notIn: ['approved', 'submitted', 'accepted', 'paid', 'voided'] },
+      }),
+      expect.objectContaining({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        periodicity: 'bimonthly',
+        jurisdiction_key: 'CO-DIAN',
+        status: { notIn: ['approved', 'submitted', 'accepted', 'paid', 'voided'] },
+      }),
+    ]);
+  });
+
+  it('recalculates a stored bimonthly draft using the same range', async () => {
+    const { service, prisma, tx } = createService();
+    const storedDraft = {
+      id: 33,
+      status: 'ready',
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      declaration_type: 'vat',
+      period_year: 2024,
+      period_month: 2,
+      period_quarter: null,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+      obligation_id: null,
+    };
+    prisma.tax_declaration_drafts.findFirst
+      .mockImplementationOnce(async () => storedDraft)
+      .mockImplementationOnce(async () => null);
+
+    await RequestContextService.run(requestContext, () =>
+      service.recalculateDraft([context], storedDraft.id),
+    );
+
+    expect(tx.tax_declaration_drafts.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          period_start: new Date('2024-01-01T00:00:00.000Z'),
+          period_end: new Date('2024-02-29T00:00:00.000Z'),
+          periodicity: 'bimonthly',
+        }),
+      }),
+    );
+  });
+
+  it('rejects malformed persisted periodicity rather than silently recalculating', async () => {
+    const { service, prisma, tx } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValue({
+      id: 34,
+      status: 'ready',
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      declaration_type: 'vat',
+      period_year: 2026,
+      period_month: 2,
+      period_quarter: null,
+      periodicity: 'quarterly',
+      obligation_id: null,
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.recalculateDraft([context], 34),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid period before any database access', async () => {
+    const { service, prisma, tx } = createService();
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 13,
+          periodicity: 'monthly',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.fiscal_obligations.findFirst).not.toHaveBeenCalled();
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+    expect(prisma.tax_declaration_drafts.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('inherits periodicity from a same-entity linked obligation', async () => {
+    const { service, prisma, getDraftData } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 88,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'vat_return',
+      period_year: 2024,
+      period_month: 2,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+    });
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'vat',
+        period_year: 2024,
+        period_month: 2,
+        obligation_id: 88,
+      }),
+    );
+
+    expect(prisma.fiscal_obligations.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 88,
+        organization_id: 1,
+        accounting_entity_id: 77,
+        jurisdiction_key: 'CO-DIAN',
+      },
+    });
+    expect(getDraftData()).toMatchObject({
+      obligation_id: 88,
+      periodicity: 'bimonthly',
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+    });
+  });
+
+  it('rejects a cross-entity linked obligation before calculation or mutation', async () => {
+    const { service, prisma, tx } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue(null);
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 3,
+          obligation_id: 99,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an obligation with a mismatched declaration type or period', async () => {
+    const { service, prisma } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 89,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'inc_return',
+      period_start: new Date('2026-03-01T00:00:00.000Z'),
+      period_end: new Date('2026-03-31T00:00:00.000Z'),
+      periodicity: 'monthly',
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 3,
+          periodicity: 'monthly',
+          obligation_id: 89,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an obligation date range that differs from the declaration period', async () => {
+    const { service, prisma } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 90,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'vat_return',
+      period_start: new Date('2026-01-01T00:00:00.000Z'),
+      period_end: new Date('2026-02-28T00:00:00.000Z'),
+      periodicity: 'monthly',
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 3,
+          periodicity: 'monthly',
+          obligation_id: 90,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an explicit periodicity that conflicts with its obligation', async () => {
+    const { service, prisma } = createService();
+    prisma.fiscal_obligations.findFirst.mockResolvedValue({
+      id: 91,
+      organization_id: 1,
+      accounting_entity_id: 77,
+      type: 'vat_return',
+      period_start: new Date('2026-01-01T00:00:00.000Z'),
+      period_end: new Date('2026-02-28T00:00:00.000Z'),
+      periodicity: 'monthly',
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () =>
+        service.createDraft(context, {
+          declaration_type: 'vat',
+          period_year: 2026,
+          period_month: 2,
+          periodicity: 'bimonthly',
+          obligation_id: 91,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invoices.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -633,6 +1692,8 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
       ),
       prisma,
       fiscalRules,
+      audit,
+      eventEmitter,
       getDraftData: () => draftData,
       getCreatedLines: () => createdLines,
     };
@@ -645,6 +1706,71 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
         period_year: 2026,
       }),
     );
+
+  it('previews income preclose with the same totals and snapshots as draft creation', async () => {
+    const {
+      service,
+      prisma,
+      audit,
+      eventEmitter,
+      getDraftData,
+      getCreatedLines,
+    } = createService({
+        accountingLines: [revenueLine(1, 100_000_000), expenseLine(2, 60_000_000)],
+        sufferedCalculations: [
+          { id: 250, withholding_type: 'retefuente', withholding_amount: 5_000_000 },
+        ],
+      });
+    const dto = {
+      declaration_type: 'income_tax_precierre' as const,
+      period_year: 2026,
+    };
+
+    const preview = await service.preview(context, dto);
+    expect(preview).toMatchObject({
+      declaration_type: 'income_tax_precierre',
+      organization_id: 1,
+      store_id: null,
+      accounting_entity_id: 77,
+      period_start: new Date('2026-01-01T00:00:00.000Z'),
+      period_end: new Date('2026-12-31T00:00:00.000Z'),
+      period_month: null,
+      period_quarter: null,
+      periodicity: null,
+      jurisdiction_key: 'CO-DIAN',
+      is_estimate: true,
+    });
+    expect(
+      preview.lines.every((line) => !('declaration_id' in line)),
+    ).toBe(true);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, dto),
+    );
+    const draft = getDraftData();
+    expect(preview.totals).toEqual({
+      gross_base_amount: draft.gross_base_amount,
+      taxable_base_amount: draft.taxable_base_amount,
+      generated_tax_amount: draft.generated_tax_amount,
+      withholding_amount: draft.withholding_amount,
+      balance_due: draft.balance_due,
+      balance_favor: draft.balance_favor,
+      total_payable: draft.total_payable,
+    });
+    expect(preview.rules_snapshot).toEqual(draft.rules_snapshot);
+    expect(preview.source_snapshot).toEqual(draft.source_snapshot);
+    expect(preview.validation_summary).toEqual(draft.validation_summary);
+    expect(preview.lines).toEqual(
+      getCreatedLines().map((line: any) => {
+        const { declaration_id, ...previewLine } = line;
+        expect(declaration_id).toBe(draft.id);
+        return previewLine;
+      }),
+    );
+  });
 
   it('estimates income tax with the effective rate and suffered withholdings as credit', async () => {
     const { service, fiscalRules, getDraftData, getCreatedLines } =
@@ -713,7 +1839,7 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
     });
   });
 
-  it('reports zero tax, negative-base warning, and full credit in favor on accounting loss', async () => {
+  it('reports an accounting loss without crediting untyped suffered withholding', async () => {
     const { service, getDraftData } = createService({
       accountingLines: [revenueLine(1, 10_000_000), expenseLine(2, 20_000_000)],
       sufferedCalculations: [
@@ -732,13 +1858,80 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
     expect(draft.taxable_base_amount).toBe(-10_000_000);
     expect(draft.generated_tax_amount).toBe(0);
     expect(draft.balance_due).toBe(0);
-    expect(draft.balance_favor).toBe(5_000_000);
+    expect(draft.withholding_amount).toBe(0);
+    expect(draft.balance_favor).toBe(0);
     expect(draft.total_payable).toBe(0);
     expect(draft.validation_summary).toMatchObject({
       warnings: [
         { code: 'INCOME_TAX_PRECLOSE_ESTIMATE' },
         { code: 'NEGATIVE_TAXABLE_BASE' },
+        {
+          code: 'UNCLASSIFIED_SUFFERED_WITHHOLDING',
+          withholding_calculation_ids: [201],
+          excluded_amount: 5_000_000,
+        },
       ],
+    });
+    expect(draft.source_snapshot).toMatchObject({
+      suffered_calculation_ids: [201],
+      income_tax_credit_calculation_ids: [],
+      excluded_suffered_calculation_ids: [201],
+      unclassified_suffered_calculation_ids: [201],
+      unclassified_suffered_withholding_amount: 5_000_000,
+    });
+  });
+
+  it('credits only suffered retefuente and reports untyped rows requiring classification', async () => {
+    const { service, prisma, getDraftData, getCreatedLines } = createService({
+      accountingLines: [revenueLine(1, 100_000_000), expenseLine(2, 60_000_000)],
+      sufferedCalculations: [
+        { id: 301, withholding_type: 'retefuente', withholding_amount: 50 },
+        { id: 302, withholding_type: 'reteiva', withholding_amount: 30 },
+        { id: 303, withholding_type: 'reteica', withholding_amount: 20 },
+        { id: 304, withholding_type: null, withholding_amount: 25 },
+      ],
+    });
+
+    await runPreclose(service);
+
+    const draft = getDraftData();
+    expect(draft.generated_tax_amount).toBe(14_000_000);
+    expect(draft.withholding_amount).toBe(50);
+    expect(draft.balance_due).toBe(13_999_950);
+    expect(draft.source_snapshot).toMatchObject({
+      suffered_calculation_ids: [301, 302, 303, 304],
+      income_tax_credit_calculation_ids: [301],
+      excluded_suffered_calculation_ids: [302, 303, 304],
+      unclassified_suffered_calculation_ids: [304],
+      unclassified_suffered_withholding_amount: 25,
+    });
+    expect(draft.validation_summary).toMatchObject({
+      warnings: [
+        { code: 'INCOME_TAX_PRECLOSE_ESTIMATE' },
+        {
+          code: 'UNCLASSIFIED_SUFFERED_WITHHOLDING',
+          withholding_calculation_ids: [304],
+          excluded_amount: 25,
+        },
+      ],
+    });
+    expect(
+      getCreatedLines().filter(
+        (line: any) => line.line_type === 'withholding_suffered_credit',
+      ),
+    ).toMatchObject([
+      {
+        withholding_amount: 50,
+        metadata: { withholding_type: 'retefuente', calculation_count: 1 },
+      },
+    ]);
+    expect(prisma.withholding_calculations.findMany).toHaveBeenCalledWith({
+      where: {
+        organization_id: 1,
+        accounting_entity_id: 77,
+        role: 'suffered',
+        year: 2026,
+      },
     });
   });
 
@@ -751,6 +1944,7 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
 
     expect(prisma.withholding_calculations.findMany).toHaveBeenCalledWith({
       where: {
+        organization_id: 1,
         accounting_entity_id: 77,
         role: 'suffered',
         year: 2026,

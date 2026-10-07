@@ -3,6 +3,7 @@ import {
   RECOGNIZED_EXPENSE_STATES,
   PURCHASE_COMMITTED_STATES,
   computeOperatingRevenue,
+  computeNetVatPosition,
   OPERATING_REVENUE_SQL,
   computeGrowth,
   round2,
@@ -51,6 +52,28 @@ import {
  * when the `backend-test` job is disabled via `.github/workflows/ci.yml`.
  */
 describe('Analytics-metrics contract (Anchor regression)', () => {
+  describe('computeNetVatPosition — IVA-only estimate', () => {
+    it('subtracts only deductible IVA and suffered reteIVA', () => {
+      expect(
+        computeNetVatPosition({
+          iva_generado: 190,
+          iva_descontable: 95,
+          reteiva_sufrida: 15,
+        }),
+      ).toBe(80);
+    });
+
+    it('can return a negative favor balance', () => {
+      expect(
+        computeNetVatPosition({
+          iva_generado: 50,
+          iva_descontable: 100,
+          reteiva_sufrida: 10,
+        }),
+      ).toBe(-60);
+    });
+  });
+
   describe('Devengo (accrual) constants', () => {
     it('exports COMPLETED_SALE_STATES as the canonical sale-completion tuple', () => {
       expect(COMPLETED_SALE_STATES).toEqual(['delivered', 'finished']);

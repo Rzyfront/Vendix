@@ -1,0 +1,37 @@
+success: True
+keys: ['block_id', 'kind', 'version', 'spec', 'data']
+rows: 5
+{
+ "rows": [
+  {
+   "ingresos": 3299000,
+   "unidades": 1,
+   "categoria": "Televisores",
+   "participacion": "42,8 %"
+  },
+  {
+   "ingresos": 2302000,
+   "unidades": 61,
+   "categoria": "Alimentos",
+   "participacion": "29,8 %"
+  },
+  {
+   "ingresos": 2280000,
+   "unidades": 60,
+   "categoria": "Aceites",
+   "participacion": "29,5 %"
+  },
+  {
+   "ingresos": 2114805,
+   "unidades": 2132,
+   "categoria": "Sin categoría",
+   "participacion": "27,4 %"
+  },
+  {
+   "ingresos": 22000,
+   "unidades": 1,
+   "categoria": "Orgánicos",
+   "participacion": "0,3 %"
+  }
+ ]
+}

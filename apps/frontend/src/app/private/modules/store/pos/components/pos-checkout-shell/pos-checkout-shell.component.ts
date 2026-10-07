@@ -52,6 +52,7 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 
@@ -156,6 +157,7 @@ export class PosCheckoutShellComponent {
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly integration = inject(PosRestaurantIntegrationService);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   // CP-POS-MODAL-SCOPE-001 / Phase A.2 — orderService for PUT /editor
   // (mode='edit') and for any future order-level operations.
   private readonly ordersService = inject(StoreOrdersService);
@@ -509,7 +511,10 @@ export class PosCheckoutShellComponent {
    * no signal needed); only written inside `untracked()`.
    */
   private wasOpen = false;
-  private openedOrderId: number | null = null;
+  private initializedFlowKey: string | null | undefined = undefined;
+  private initializedTableId: number | null | undefined = undefined;
+  private lastCartWasEmpty: boolean | null = null;
+  private emptyCartBoundary = false;
 
   /** La venta sale con factura electrónica automática (misma regla que la confirmación POS). */
   readonly requiresElectronicInvoicing = computed<boolean>(() => {
@@ -835,37 +840,61 @@ export class PosCheckoutShellComponent {
       });
     });
 
-    // CP-pos-checkout-enter-focus (step A.1) — al abrir el modal (transición
-    // isOpen false→true) llevar el foco al panel del paso activo. Sin esto, el
-    // foco queda en el botón de fondo que abrió el modal y el primer Enter se
-    // pierde fuera del wizard. Preselecciona initialEntrega() respetando QUI-482.
+    // Separa el foco por apertura del inicio de checkout: cerrar el modal no
+    // reinicia el flujo, pero abrir una identidad nueva sí vuelve a sembrarlo.
     effect(() => {
       const open = this.isOpen();
-      const orderId = this.editingOrderId();
+      const flowKey = this.checkoutFlowIdentity();
+      const cart = this.cartState();
+      const cartIsEmpty = !cart || cart.items.length === 0;
+      const initialEntrega = this.initialEntrega();
+      const tableId = this.tableId();
       untracked(() => {
-        if (open && (!this.wasOpen || orderId !== this.openedOrderId)) {
-          this.openedOrderId = orderId;
-          // F-FLETE — la apertura reinicia los dos testigos de intervención:
-          // lo que traiga `initialEntrega()` es la naturaleza de la orden, no
-          // una decisión del cajero. `seededEntrega` guarda ese valor para que
-          // el effect de detección no lo confunda con un click.
-          const hasTable =
-            this.tableId() != null ||
-            (typeof this.integration?.hasOpenTableSession === 'function'
-              ? this.integration.hasOpenTableSession()
-              : this.integration?.currentTableSession?.() != null);
-          const defaultEntrega =
-            this.initialEntrega() === 'enviar'
-              ? 'enviar'
-              : hasTable && this.initialEntrega() === 'llevar'
-                ? 'mesa'
-                : this.initialEntrega();
-          this.seededEntrega = defaultEntrega;
-          this.entregaChoice.set(this.seededEntrega);
-          this.entregaTouched.set(false);
+        const opened = open && !this.wasOpen;
+        const hadPreviousFlow = this.initializedFlowKey !== undefined;
+        const enteredEmptyCart = this.lastCartWasEmpty === false && cartIsEmpty &&
+          hadPreviousFlow && !flowKey?.startsWith('order:');
+        if (enteredEmptyCart) {
+          // clearCart/remove-last-item is a fresh-flow boundary even when a
+          // legacy free cart keeps the same createdAt or has no timestamp.
+          this.emptyCartBoundary = true;
+          this.initializedFlowKey = undefined;
+        }
+
+        const promotionDuringOpenFlow = open && !opened && hadPreviousFlow &&
+          !this.emptyCartBoundary && !cartIsEmpty;
+        const promotedCartToOrder = promotionDuringOpenFlow && !this.editingOrderId() &&
+          cart?.linkedOrderId != null && this.lastCartWasEmpty === false &&
+          !this.initializedFlowKey?.startsWith('order:');
+        const promotedTableSession = promotionDuringOpenFlow && this.lastCartWasEmpty === false &&
+          this.initializedTableId === null && tableId != null &&
+          !flowKey?.startsWith('order:');
+        if (promotedCartToOrder || promotedTableSession) {
+          // Adopting the current in-progress cart/session is a continuation,
+          // not a new checkout; remember its durable identity for next reopen.
+          this.initializedFlowKey = flowKey;
+          this.initializedTableId = tableId;
+        }
+
+        const tableChanged = !promotedTableSession && this.initializedTableId !== undefined &&
+          tableId !== this.initializedTableId && !flowKey?.startsWith('order:');
+        const identityChanged = !promotedCartToOrder && !promotedTableSession &&
+          this.initializedFlowKey !== undefined &&
+          flowKey !== this.initializedFlowKey;
+        const shouldInitialize = open && (
+          (opened && this.initializedFlowKey === undefined) ||
+          identityChanged || this.emptyCartBoundary || tableChanged
+        );
+        if (shouldInitialize) {
+          if (hadPreviousFlow || this.emptyCartBoundary || tableChanged) this.resetState();
+          this.initializeCheckoutFlow(flowKey, initialEntrega, tableId);
+          this.emptyCartBoundary = false;
+        }
+        if (opened || shouldInitialize) {
           this.focusActiveStepSoon();
         }
         this.wasOpen = open;
+        this.lastCartWasEmpty = cartIsEmpty;
       });
     });
 
@@ -949,14 +978,45 @@ export class PosCheckoutShellComponent {
     this.saleMode.set(anon ? 'anonymous' : 'customer');
   }
 
-  /**
-   * Restore every shell signal to its declared initial value. Invoked ONLY after
-   * a successful finalization (direct sale → {@link onCheckoutCompleted}, delivery
-   * → {@link onShippingCompleted}) so the NEXT open starts pristine. It is NOT tied
-   * to open/close or step navigation (QUI-482): a mid-checkout close preserves
-   * state because nothing here runs on reopen. The final `syncAnonymousSaleState()`
-   * re-applies the config-driven "Venta Anónima" default for the next sale.
-   */
+  private checkoutFlowIdentity(): string | null {
+    const cart = this.cartState();
+    const orderId = this.editingOrderId() ?? cart?.linkedOrderId ?? cart?.shippingContext?.orderId;
+    if (orderId != null) return `order:${String(orderId)}`;
+
+    const createdAt = cart?.createdAt;
+    const timestamp = createdAt instanceof Date
+      ? createdAt.getTime()
+      : createdAt != null ? new Date(String(createdAt)).getTime() : Number.NaN;
+    if (!Number.isFinite(timestamp)) return null;
+    return `cart:${timestamp}:table:${this.tableId() ?? ''}`;
+  }
+
+  private initializeCheckoutFlow(
+    flowKey: string | null,
+    initialEntrega: EntregaChoice,
+    tableId: number | null,
+  ): void {
+    const hasTable =
+      tableId != null ||
+      (typeof this.integration?.hasOpenTableSession === 'function'
+        ? this.integration.hasOpenTableSession()
+        : this.integration?.currentTableSession?.() != null);
+    const defaultEntrega = initialEntrega === 'enviar'
+      ? 'enviar'
+      : hasTable && initialEntrega === 'llevar'
+        ? 'mesa'
+        : initialEntrega;
+
+    this.currentStep.set(0);
+    this.clienteSubStep.set(0);
+    this.seededEntrega = defaultEntrega;
+    this.entregaChoice.set(defaultEntrega);
+    this.entregaTouched.set(false);
+    this.initializedFlowKey = flowKey;
+    this.initializedTableId = tableId;
+  }
+
+  /** Resets child/shell state after success or when a genuinely new checkout replaces the current one. */
   private resetState(): void {
     this.currentStep.set(0);
     this.clienteSubStep.set(0);
@@ -978,6 +1038,9 @@ export class PosCheckoutShellComponent {
     // Remount the projected content so the child components (collector,
     // shipping-step, consumo-step) drop their internal state for the next sale.
     this.contentEpoch.update((n) => n + 1);
+    this.initializedFlowKey = undefined;
+    this.initializedTableId = undefined;
+    this.emptyCartBoundary = false;
   }
 
   // ── Stepper navigation (non-blocking) ────────────────────────────────────
@@ -1480,11 +1543,15 @@ export class PosCheckoutShellComponent {
         return {
           payload: {
             delivery_type: context.deliveryType,
-            shipping_address_id: context.shippingAddressId ?? undefined,
+            ...(context.shippingAddressId != null
+              ? { shipping_address_id: context.shippingAddressId }
+              : {}),
             shipping_method_id: context.shippingMethodId,
-            shipping_rate_id: context.shippingRateId ?? undefined,
+            ...(context.shippingRateId != null
+              ? { shipping_rate_id: context.shippingRateId }
+              : {}),
             shipping_cost: context.shippingCost,
-            ...(context.manualCostOverride && context.shippingRateId != null
+            ...(context.manualCostOverride && context.manualShippingPrice != null
               ? { manual_shipping_price: context.manualShippingPrice }
               : {}),
           },
@@ -2280,6 +2347,10 @@ export class PosCheckoutShellComponent {
           const fired = !!fireRes && fireRes.fired_item_ids.length > 0;
           if (fired) {
             this.toastService.success('Orden creada y enviada a cocina');
+            this.kitchenTicketPrint.printAfterFire(
+              fireRes?.kitchen_ticket_ids ??
+                (fireRes ? [fireRes.kitchen_ticket_id] : []),
+            );
           } else {
             this.toastService.success('Orden creada');
           }

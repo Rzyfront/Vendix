@@ -43,6 +43,7 @@ export class PosShippingService {
       country_code: string;
       state_province?: string;
       city?: string;
+      municipality_code?: string;
       address_line1?: string;
       postal_code?: string;
       latitude?: number;
@@ -55,6 +56,21 @@ export class PosShippingService {
       .post<any>(`${this.apiUrl}/calculate?store_id=${storeId}`, {
         items,
         address,
+      })
+      .pipe(
+        map((response) => {
+          const options = response.data || response;
+          return Array.isArray(options) ? options : [];
+        }),
+        catchError((error) => throwError(() => error)),
+      );
+  }
+
+  /** Cotiza la tarifa de recogida en tienda sin exigir dirección ni coordenadas. */
+  quotePickupShipping(shippingMethodId: number): Observable<PosShippingOption[]> {
+    return this.http
+      .post<any>(`${this.apiUrl}/pickup-quote`, {
+        shipping_method_id: shippingMethodId,
       })
       .pipe(
         map((response) => {

@@ -205,3 +205,15 @@ describe('resolveInvoiceControl', () => {
     expect(() => resolveInvoiceControl(r, TZ, r.valid_to)).not.toThrow();
   });
 });
+
+describe('tryResolveInvoiceControl', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { tryResolveInvoiceControl } = require('./invoice-control.helper');
+
+  it('sin resolución devuelve el error tipado en vez de lanzar', () => {
+    const r = tryResolveInvoiceControl(null, 'America/Bogota');
+    expect(r.control).toBeNull();
+    expect(r.error).toBeDefined();
+    expect(r.error.errorCode ?? r.error.getResponse?.().error_code).toBeTruthy();
+  });
+});

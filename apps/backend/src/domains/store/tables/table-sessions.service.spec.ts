@@ -106,7 +106,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     };
     const notificationsSseService = { push: jest.fn() };
     const eventEmitter = { emit: jest.fn() };
-    const cashRegisterSessionsService = { getActiveSession: jest.fn() };
+    const cashRegisterSessionsService = {
+      getActiveSession: jest.fn(),
+      assertSessionForSales: jest.fn().mockResolvedValue(undefined),
+    };
     const cashRegisterMovementsService = { recordSaleMovement: jest.fn() };
     const kitchenFireService = {
       cancelTicketInTx: jest.fn(),
@@ -318,6 +321,19 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         order_id: orderId,
         closed_at: null,
       } as any);
+    });
+
+    it('rejects with SPLIT_ACCOUNT_LOCKED and does not confirm when the order has an active financial split', async () => {
+      const locked = payment('pending', 0);
+      (locked.orders as any).active_financial_split_id = 4;
+      prismaMock.payments.findFirst.mockResolvedValue(locked);
+      prismaMock.payments.update.mockClear();
+
+      const error: any = await service.confirmPayment(sessionId, paymentId).catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+      expect(prismaMock.payments.update).not.toHaveBeenCalled();
     });
 
     it('projects a settled check only after the payment transaction commits', async () => {
@@ -2199,7 +2215,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         where: { order_id: ORDER_ID },
       }));
       expect(prismaMock.invoices.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { order_id: ORDER_ID, store_id: STORE_ID },
+        where: { order_id: ORDER_ID, store_id: STORE_ID, financial_account_id: null },
       }));
       expect(prismaMock.table_sessions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({

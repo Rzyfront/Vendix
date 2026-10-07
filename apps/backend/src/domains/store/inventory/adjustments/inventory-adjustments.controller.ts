@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import {
   ApiTags,
   ApiOperation,
@@ -27,6 +28,7 @@ import {
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.service';
 import { InventoryCountScannerService } from './inventory-count-scanner.service';
+import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
 import {
   CreateAdjustmentDto,
   AdjustmentQueryDto,
@@ -48,6 +50,7 @@ export class InventoryAdjustmentsController {
     private readonly adjustmentsService: InventoryAdjustmentsService,
     private readonly bulkService: InventoryAdjustmentsBulkService,
     private readonly inventoryCountScanner: InventoryCountScannerService,
+    private readonly aiScanJobs: AiScanJobService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -208,6 +211,9 @@ export class InventoryAdjustmentsController {
     );
   }
 
+  /**
+   * @deprecated Usar `POST scan/async` (504 tras 60 s de proxy).
+   */
   @Post('scan')
   @ApiOperation({ summary: 'Scan inventory count sheet with AI' })
   @ApiResponse({ status: 201, description: 'Count sheet scanned successfully' })
@@ -231,6 +237,40 @@ export class InventoryAdjustmentsController {
       result,
       'Hoja de reconteo escaneada exitosamente',
     );
+  }
+
+  @Post('scan/async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Enqueue inventory count sheet AI scan (async job)' })
+  @ApiResponse({ status: 202, description: 'Scan enqueued, returns job_id' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 15 * 1024 * 1024 },
+    }),
+  )
+  async scanCountAsync(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('location_id') location_id: string,
+  ) {
+    const scanFile = file
+      ? this.inventoryCountScanner.toScanFile(file)
+      : undefined;
+    this.inventoryCountScanner.assertValidScanFile(scanFile);
+    // El endpoint sincrono no valida pertenencia de la location a la tienda
+    // (matchProducts consulta via StorePrismaService, scoped); aqui solo se
+    // exige entero positivo.
+    const locationId = Number(location_id);
+    if (!location_id || !Number.isInteger(locationId) || locationId <= 0) {
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+    }
+    const { job_id } = await this.aiScanJobs.enqueue(
+      'inventory_count',
+      [scanFile],
+      { location_id: locationId },
+    );
+    return this.responseService.success({ job_id }, 'Escaneo encolado');
   }
 
   @Post('reservations/release-by-product')

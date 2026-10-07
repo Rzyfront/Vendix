@@ -1,0 +1,28 @@
+
+event: ai-chunk
+id: 1
+data: {"type":"tool_call","tool":{"id":"call_01a0f89c517d71659990ee4e","name":"vex_block_read","arguments":{"block_id":"f5eddd9e-8403-4724-b2d4-a43a68bd2dbe","page":1,"page_size":50}}}
+
+event: ai-chunk
+id: 2
+data: {"type":"tool_result","tool":{"id":"call_01a0f89c517d71659990ee4e","name":"vex_block_read","summary":"{\"tool\":\"vex_block_read\",\"version\":\"1\",\"data\":{\"block_id\":\"f5eddd9e-8403-4724-b2d4-a43a68bd2dbe\",\"kind\":\"table\",\"version\":1,\"page\":1,\"page_size\":50,\"total_rows\":5,\"rows\":[{\"ingresos\":3299000,\"unidades\":1,\"categoria\":\"Televisores\",\"participacion\":\"42,8 %\"},{\"ingresos\":2302000,\"unidades\":61,\"categoria"}}
+
+event: ai-chunk
+id: 3
+data: {"type":"tool_call","tool":{"id":"call_01a0f89c5418723787e8f7b7","name":"vex_render_kpi","arguments":{"label":"Ingresos de las filas seleccionadas","value":"5.601.000 COP","hint":"Televisores (3.299.000) + Alimentos (2.302.000) · septiembre 2026"}}}
+
+event: ai-chunk
+id: 4
+data: {"type":"tool_result","tool":{"id":"call_01a0f89c5418723787e8f7b7","name":"vex_render_kpi","summary":"{\"tool\":\"vex_render_kpi\",\"version\":\"1\",\"data\":{\"block_id\":\"1f8042e8-528c-4556-b95e-e2712378aa97\",\"kind\":\"kpi\",\"version\":1,\"block\":{\"block_id\":\"1f8042e8-528c-4556-b95e-e2712378aa97\",\"kind\":\"kpi\",\"version\":1,\"spec\":{\"kind\":\"kpi\",\"label\":\"Ingresos de las filas seleccionadas\"},\"data\":{\"value\":\"5.601.000"}}
+
+event: ai-chunk
+id: 5
+data: {"type":"ui_block","ui_block":{"block_id":"1f8042e8-528c-4556-b95e-e2712378aa97","kind":"kpi","version":1,"spec":{"kind":"kpi","label":"Ingresos de las filas seleccionadas"},"data":{"value":"5.601.000 COP","hint":"Televisores (3.299.000) + Alimentos (2.302.000) · septiembre 2026"}}}
+
+event: ai-chunk
+id: 6
+data: {"type":"text","content":"La suma de las dos filas seleccionadas es **5.601.000 COP**:\n\n| Categoría | Ingresos (COP) |\n|---|---|\n| Televisores | 3.299.000 |\n| Alimentos | 2.302.000 |\n| **Total** | **5.601.000** |\n\nEso equivale al **72,0 %** del total facturado en septiembre (7.776.331 COP). Recuerda que las categorías se solapan —un producto puede estar en varias—, así que esta suma es la de esas dos filas, no un subconjunto exclusivo de la facturación."}
+
+event: ai-chunk
+id: 7
+data: {"type":"done","usage":{"promptTokens":0,"completionTokens":0,"totalTokens":235048}}

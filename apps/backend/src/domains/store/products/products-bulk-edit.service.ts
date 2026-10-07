@@ -91,7 +91,7 @@ interface ArchiveConstraints {
 const TERMINAL_ORDER_STATES = ['finished', 'cancelled', 'refunded'] as const;
 
 /**
- * Las 34 claves escalares de `BulkEditableChangesDto`, en el orden del DTO.
+ * Las 35 claves escalares de `BulkEditableChangesDto`, en el orden del DTO.
  *
  * El diff se calcula EXCLUSIVAMENTE sobre esta lista, no sobre las claves del
  * payload efectivo, porque `sanitizeIngredientPayload()` inyecta dos campos que
@@ -115,6 +115,7 @@ const BULK_EDITABLE_FIELDS: readonly string[] = [
   'is_combo',
   'is_batch_produced',
   'track_inventory',
+  'min_stock_level',
   'requires_serial_numbers',
   'base_price',
   'cost_price',
@@ -1088,7 +1089,23 @@ export class ProductsBulkEditService {
     payload: Record<string, any>,
   ): EffectiveChanges {
     const isPure = !!payload.is_ingredient && payload.is_sellable === false;
-    if (!isPure) return { payload, neutralized: false };
+    if (!isPure) {
+      // Regla del dueño: todo insumo (vendible o no) queda fuera de ecommerce.
+      // Las filas que YA son insumo y el lote no marca como tal las cubre
+      // ProductsService.update() (que lee is_ingredient del producto existente);
+      // aquí solo se refleja el caso del lote que deja is_ingredient=true.
+      if (payload.is_ingredient === true) {
+        return {
+          payload: {
+            ...payload,
+            available_for_ecommerce: false,
+            is_featured: false,
+          },
+          neutralized: false,
+        };
+      }
+      return { payload, neutralized: false };
+    }
     return {
       payload: {
         ...payload,
@@ -1135,9 +1152,10 @@ export class ProductsBulkEditService {
    * original — de ahí el clon previo en `preview()`.
    *
    * Solo se replican los campos que existen en `BulkEditableChangesDto`: los de
-   * stock (`stock_quantity`, `min_stock_level`, `reorder_point`, …) y
-   * `requires_batch_tracking` están excluidos del contrato de edición masiva, así
-   * que forzarlos aquí no cambiaría nada.
+   * stock (`stock_quantity`, `reorder_point`, …) y `requires_batch_tracking`
+   * están excluidos del contrato de edición masiva, así que forzarlos aquí no
+   * cambiaría nada. La excepción es `min_stock_level`, que sí es editable y por
+   * eso se descarta explícitamente para servicios.
    */
   private validateByProductType(payload: Record<string, any>): void {
     if (payload.product_type !== ProductType.SERVICE) return;
@@ -1151,7 +1169,10 @@ export class ProductsBulkEditService {
 
     // Inventario forzado a off para servicios. `track_inventory: false` se
     // PERSISTE aunque el usuario no lo haya pedido, así que entra al diff.
+    // `min_stock_level` se descarta: el consumo de stock salta los servicios,
+    // así que un umbral nunca dispararía.
     payload.track_inventory = false;
+    payload.min_stock_level = undefined;
     payload.weight = undefined;
     payload.dimensions = undefined;
     payload.requires_serial_numbers = undefined;

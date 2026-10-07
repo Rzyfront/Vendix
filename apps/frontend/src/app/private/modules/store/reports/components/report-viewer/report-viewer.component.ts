@@ -1,4 +1,5 @@
 import { Component, input, output, computed, signal, effect } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { ReportColumn, ReportDefinition } from '../../interfaces/report.interface';
 import { NestedReportComponent } from '../nested-report/nested-report.component';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
@@ -93,6 +94,24 @@ function formatCellValue(value: any, type?: string, key?: string): string {
   return num.toLocaleString('es-CO');
 }
 
+/**
+ * Formatea una FRACCION (0.08) como porcentaje de pantalla ("8,0%").
+ * La API de tasas devuelve fracciones (el XLSX `percent` las necesita asi);
+ * el tipo 'percentage' de `formatCellValue` espera unidades 0-100, por eso las
+ * columnas de fraccion usan este helper via `transform`.
+ */
+export function formatPercentFromFraction(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const num = Number(value);
+  if (isNaN(num)) return '—';
+  return (
+    (num * 100).toLocaleString('es-CO', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }) + '%'
+  );
+}
+
 function toTableColumns(columns: ReportColumn[]): TableColumn[] {
   return columns.map((col) => ({
     key: col.key,
@@ -150,6 +169,7 @@ function formatStatValue(value: any, type: string): string | number {
     CardComponent,
     ResponsiveDataViewComponent,
     IconComponent,
+    RouterLink,
     OptionsDropdownComponent,
   ],
   template: `
@@ -168,6 +188,25 @@ function formatStatValue(value: any, type: string): string | number {
             />
           }
         </div>
+      }
+
+      @if (report()?.id === 'tax-summary') {
+        <aside
+          class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          role="note"
+          aria-label="Alcance preliminar del resumen operativo de impuestos"
+          data-testid="tax-summary-preliminary-note"
+        >
+          <p class="font-semibold">Resumen operativo preliminar; no determina el total a pagar a la DIAN.</p>
+          <p class="mt-1">
+            “Neto registrado” es el impuesto registrado o recaudado menos los reembolsos; no equivale al saldo de una declaración.
+            La elegibilidad de documentos recibidos, anticipos, arrastres o saldos a favor y otras jurisdicciones tributarias
+            no se resuelve en este reporte.
+            <a routerLink="/admin/fiscal/declarations" class="font-semibold underline underline-offset-2">
+              Revisa el módulo de declaraciones fiscales.
+            </a>
+          </p>
+        </aside>
       }
 
       <!--

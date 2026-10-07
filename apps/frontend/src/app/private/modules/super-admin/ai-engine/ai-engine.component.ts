@@ -554,6 +554,13 @@ export class AIEngineComponent implements OnInit {
         value && value.length ? `${value.length} tools` : 'Sin filtro',
     },
     {
+      key: 'denied_tools',
+      label: 'Denegadas',
+      priority: 3,
+      transform: (value: string[]) =>
+        value && value.length ? `${value.length} denegadas` : '—',
+    },
+    {
       key: 'max_iterations',
       label: 'Max iter.',
       priority: 3,
@@ -584,6 +591,12 @@ export class AIEngineComponent implements OnInit {
         transform: (value: string | null) => value || '—',
       },
       { key: 'description', label: 'Descripcion' },
+      {
+        key: 'denied_tools',
+        label: 'Denegadas',
+        transform: (value: string[]) =>
+          value && value.length ? `${value.length} denegadas` : '—',
+      },
     ],
   };
 
@@ -661,13 +674,14 @@ export class AIEngineComponent implements OnInit {
       this.loadApps();
       this.loadAppStats();
     }
-    if (tab === 'tools' && this.tools().length === 0) {
-      this.loadTools();
+    if (tab === 'tools') {
+      this.ensureToolCatalog();
     }
     if (tab === 'jobs' && this.queues().length === 0) {
       this.loadQueues();
     }
     if (tab === 'agents') {
+      this.ensureToolCatalog();
       if (this.agents().length === 0) {
         this.loadAgents();
       }
@@ -1104,6 +1118,12 @@ export class AIEngineComponent implements OnInit {
       });
   }
 
+  private ensureToolCatalog(): void {
+    if (this.tools().length === 0 && !this.isLoadingTools()) {
+      this.loadTools();
+    }
+  }
+
   onToolSearchChange(searchTerm: string): void {
     this.toolSearch.set(searchTerm);
   }
@@ -1249,11 +1269,13 @@ export class AIEngineComponent implements OnInit {
   }
 
   openCreateAgentModal(): void {
+    this.ensureToolCatalog();
     this.selectedAgent.set(null);
     this.showAgentModal.set(true);
   }
 
   editAgent(agent: AIAgent): void {
+    this.ensureToolCatalog();
     this.selectedAgent.set(agent);
     this.showAgentModal.set(true);
   }

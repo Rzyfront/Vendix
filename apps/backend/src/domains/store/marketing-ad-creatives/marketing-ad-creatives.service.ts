@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger, MessageEvent } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import Redis from 'ioredis';
-import { Observable } from 'rxjs';
-import sharp = require('sharp');
+import { Observable, interval } from 'rxjs';
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { ImageContext } from '../../../common/config/image-presets';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -18,6 +18,38 @@ import {
   SuggestMarketingAdPromptDto,
   UpdateMarketingAdCreativeDetailsDto,
 } from './dto';
+
+/** Intervalo del heartbeat SSE; debe ser menor al proxy_read_timeout de nginx (60 s). */
+export const SSE_HEARTBEAT_INTERVAL_MS = 15000;
+
+/**
+ * Mezcla un heartbeat periodico con el stream principal para que nginx no
+ * corte la conexion por inactividad. El heartbeat se detiene cuando el stream
+ * principal completa, falla o el suscriptor se desuscribe. Los clientes
+ * (web/mobile) ignoran `type: 'heartbeat'` porque solo ramifican por tipos conocidos.
+ */
+export function withSseHeartbeat(
+  source$: Observable<MessageEvent>,
+  intervalMs: number = SSE_HEARTBEAT_INTERVAL_MS,
+): Observable<MessageEvent> {
+  return new Observable<MessageEvent>((subscriber) => {
+    const heartbeat = interval(intervalMs).subscribe(() => {
+      subscriber.next({
+        type: 'ai-chunk',
+        data: JSON.stringify({ type: 'heartbeat' }),
+      } as MessageEvent);
+    });
+    const source = source$.subscribe({
+      next: (value) => subscriber.next(value),
+      error: (err) => subscriber.error(err),
+      complete: () => subscriber.complete(),
+    });
+    return () => {
+      heartbeat.unsubscribe();
+      source.unsubscribe();
+    };
+  });
+}
 
 type AdFormat = 'square' | 'story' | 'landscape';
 type ReferenceImageInput = NonNullable<
@@ -458,6 +490,16 @@ export class MarketingAdCreativesService {
   }
 
   streamGenerate(
+    id: number,
+    requestId?: string,
+    correction?: string,
+  ): Observable<MessageEvent> {
+    return withSseHeartbeat(
+      this.buildGenerateStream(id, requestId, correction),
+    );
+  }
+
+  private buildGenerateStream(
     id: number,
     requestId?: string,
     correction?: string,

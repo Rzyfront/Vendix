@@ -2,6 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { EmbeddingService } from '../../embeddings/embedding.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { AIEmbeddingJob } from '../interfaces/ai-queue.interface';
 
 @Processor('ai-embedding')
@@ -43,13 +44,25 @@ export class AIEmbeddingProcessor extends WorkerHost {
       `Processing embedding for ${data.entity_type}:${data.entity_id}`,
     );
 
-    await this.embeddingService.storeEmbedding({
-      store_id: data.store_id,
-      organization_id: data.organization_id,
-      entity_type: data.entity_type,
-      entity_id: data.entity_id,
-      content: data.content,
-    });
+    // Re-establish the tenant context so AIEngineService can consume the
+    // subscription quota (it reads store_id/request_id from AsyncLocalStorage).
+    await RequestContextService.run(
+      {
+        is_super_admin: false,
+        is_owner: false,
+        store_id: data.store_id,
+        organization_id: data.organization_id,
+        request_id: `embedding:${data.entity_type}:${data.entity_id}:${job.id}`,
+      },
+      () =>
+        this.embeddingService.storeEmbedding({
+          store_id: data.store_id,
+          organization_id: data.organization_id,
+          entity_type: data.entity_type,
+          entity_id: data.entity_id,
+          content: data.content,
+        }),
+    );
 
     this.logger.log(
       `Embedding stored for ${data.entity_type}:${data.entity_id}`,

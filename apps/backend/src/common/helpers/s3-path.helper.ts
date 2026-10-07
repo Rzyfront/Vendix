@@ -153,6 +153,27 @@ export class S3PathHelper {
   }
 
   /**
+   * QUI-855 — documentos de factura de compra escaneados con IA (antes de que
+   * exista la orden de compra que los liga).
+   * @returns {storePath}/purchase-orders/scans
+   */
+  buildPurchaseOrderScanPath(org: S3OrgContext, store: S3StoreContext): string {
+    return `${this.buildStorePath(org, store)}/purchase-orders/scans`;
+  }
+
+  /**
+   * QUI-855 — adjuntos de una orden de compra.
+   * @returns {storePath}/purchase-orders/attachments/{poId}
+   */
+  buildPurchaseOrderAttachmentPath(
+    org: S3OrgContext,
+    store: S3StoreContext,
+    purchaseOrderId: number,
+  ): string {
+    return `${this.buildStorePath(org, store)}/purchase-orders/attachments/${purchaseOrderId}`;
+  }
+
+  /**
    * Builds the path for bank account logo uploads
    * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/bank-account-logos
    */

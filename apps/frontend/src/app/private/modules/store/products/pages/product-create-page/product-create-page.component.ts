@@ -569,7 +569,54 @@ export class ProductCreatePageComponent {
    * faltaba, ocultando "Plato preparado" en tiendas restaurante.
    */
   private readonly storeSettings = toSignal(this.authFacade.storeSettings$, {
-    initialValue: null as { general?: { industries?: string[] } } | null,
+    initialValue: null as {
+      general?: { industries?: string[] };
+      inventory?: { low_stock_threshold?: number };
+    } | null,
+  });
+
+  readonly defaultLowStockThreshold = computed<number>(() => {
+    const threshold = this.storeSettings()?.inventory?.low_stock_threshold;
+    return typeof threshold === 'number' && threshold >= 0 ? threshold : 10;
+  });
+
+  readonly defaultLowStockThresholdPlaceholder = computed<string>(() => {
+    return `Por defecto de la tienda (${this.defaultLowStockThreshold()})`;
+  });
+
+  readonly effectiveProductLowStockThreshold = computed<number>(() => {
+    const formVal = this.minStockFormValue();
+    const num = Number(formVal);
+    if (
+      formVal !== null &&
+      formVal !== undefined &&
+      formVal !== '' &&
+      Number.isFinite(num) &&
+      num > 0
+    ) {
+      return num;
+    }
+    const prodVal = Number(this.productMinStockLevel());
+    if (Number.isFinite(prodVal) && prodVal > 0) {
+      return prodVal;
+    }
+    return this.defaultLowStockThreshold();
+  });
+
+  readonly isCustomLowStockThreshold = computed<boolean>(() => {
+    const formVal = this.minStockFormValue();
+    const num = Number(formVal);
+    if (
+      formVal !== null &&
+      formVal !== undefined &&
+      formVal !== '' &&
+      Number.isFinite(num) &&
+      num > 0
+    ) {
+      return true;
+    }
+    const prodVal = Number(this.productMinStockLevel());
+    return Number.isFinite(prodVal) && prodVal > 0;
   });
   private readonly loginIndustries = toSignal(this.authFacade.userIndustries$, {
     initialValue: [] as string[],
@@ -919,6 +966,17 @@ export class ProductCreatePageComponent {
   readonly requiresBookingSig = signal(false);
 
   productForm: FormGroup = this.createForm();
+
+  /** Valor del control `min_stock_level` como señal (los computed no ven FormControl). */
+  private readonly minStockFormValue = toSignal(
+    this.productForm.get('min_stock_level')!.valueChanges.pipe(
+      startWith(this.productForm.get('min_stock_level')!.value),
+    ),
+    { initialValue: this.productForm.get('min_stock_level')!.value },
+  );
+
+  /** `min_stock_level` del producto cargado/guardado, espejo en señal de `product`. */
+  private readonly productMinStockLevel = signal<number | null>(null);
 
   /**
    * Cuenta PUC del producto, leída como señal.
@@ -1466,6 +1524,12 @@ export class ProductCreatePageComponent {
     // we touch it for an explicit dependency on every form change.
     this.formUpdateTrigger();
     const pure = this.isPureIngredient();
+    // Un insumo (puro o no) nunca se publica ni se destaca en la tienda.
+    const anyIngredient = !!form.get('is_ingredient')?.value;
+    const ingredientBlocked = new Set([
+      'available_for_ecommerce',
+      'is_featured',
+    ]);
     const controls: Array<[string, unknown]> = [
       ['base_price', 0],
       ['is_on_sale', false],
@@ -1477,7 +1541,8 @@ export class ProductCreatePageComponent {
     for (const [name, neutral] of controls) {
       const ctrl = form.get(name);
       if (!ctrl) continue;
-      if (pure) {
+      const block = ingredientBlocked.has(name) ? anyIngredient : pure;
+      if (block) {
         if (ctrl.enabled) ctrl.disable({ emitEvent: false });
         // Reset to neutral so persisted payload never carries sale data.
         ctrl.reset(neutral, { emitEvent: false });
@@ -1749,6 +1814,7 @@ export class ProductCreatePageComponent {
       base_price: draft.base_price || 0,
       stock_quantity: draft.stock_quantity || 0,
       track_inventory: draft.track_inventory ?? true,
+      min_stock_level: draft.min_stock_level ?? null,
       allow_pos_price_override: draft.allow_pos_price_override ?? false,
       sku: draft.sku || '',
       barcode: draft.barcode || '',
@@ -1822,6 +1888,7 @@ export class ProductCreatePageComponent {
         } as Product;
 
         this.product = updatedProduct;
+        this.productMinStockLevel.set(updatedProduct?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(updatedProduct);
         this.toastService.success('Link y QR de compra online generados');
         this.isGeneratingOnlinePurchaseLink.set(false);
@@ -1960,6 +2027,7 @@ export class ProductCreatePageComponent {
         barcode: ['', [Validators.maxLength(64)]],
         stock_quantity: [0, [Validators.min(0)]],
         track_inventory: [true],
+        min_stock_level: [null, [Validators.min(0)]],
         requires_serial_numbers: [false],
         category_ids: [[] as number[]],
         brand_ids: [[]],
@@ -2213,6 +2281,7 @@ export class ProductCreatePageComponent {
     this.productsService.getProductById(id).subscribe({
       next: (product: Product) => {
         this.product = product;
+        this.productMinStockLevel.set(product?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
         // Form ya poblado → render con `is_ingredient` resuelto (sin flash).
@@ -2248,6 +2317,12 @@ export class ProductCreatePageComponent {
       ? ProductUtils.generateSlug(product.slug)
       : '';
 
+    // Sincronizar los snapshots de exclusividad con lo guardado ANTES del
+    // patch: patchValue emite valueChanges de forma síncrona y, sin esto, la
+    // carga se leería como "el usuario acaba de encender Es insumo".
+    this.lastIngredientFlag = !!product.is_ingredient;
+    this.lastSellableFlag = product.is_sellable !== false;
+
     this.productForm.patchValue({
       name: product.name,
       // QUI-504: normalizamos el slug heredado al cargar. Los productos
@@ -2275,6 +2350,7 @@ export class ProductCreatePageComponent {
       barcode: product.barcode,
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
+      min_stock_level: product.min_stock_level ?? null,
       requires_serial_numbers: product.requires_serial_numbers ?? false,
       category_ids: categoryIds,
       brand_ids: product.brand?.id
@@ -4213,6 +4289,8 @@ export class ProductCreatePageComponent {
     // coherent regardless of UI state.
     const isPureIngredient = !!formValue.is_ingredient && !formValue.is_sellable;
     const neutral = (v: any, fallback: any) => (isPureIngredient ? fallback : v);
+    // Un insumo nunca se publica ni se destaca, sea o no vendible.
+    const isIngredientAny = !!formValue.is_ingredient;
 
     // F-008: ids efectivos (F4 ya aplicado) para filtrar el mapa inclusivo.
     const effectiveTaxIds = this.sanitizeTaxCategoryIds(
@@ -4229,18 +4307,24 @@ export class ProductCreatePageComponent {
       base_price: Number(neutral(formValue.base_price, 0)),
       is_on_sale: !!neutral(formValue.is_on_sale, false),
       sale_price: Number(neutral(formValue.sale_price, 0)),
-      available_for_ecommerce: !!neutral(formValue.available_for_ecommerce, false),
-      is_featured: !!neutral(formValue.is_featured, false),
+      available_for_ecommerce:
+        !isIngredientAny && !!neutral(formValue.available_for_ecommerce, false),
+      is_featured: !isIngredientAny && !!neutral(formValue.is_featured, false),
       allow_pos_price_override: !!neutral(formValue.allow_pos_price_override, false),
       sku: formValue.sku || undefined,
       barcode: formValue.barcode || undefined,
-      track_inventory: isServiceType ? false : !!formValue.track_inventory,
+      track_inventory: !!formValue.track_inventory,
       requires_serial_numbers: !!formValue.requires_serial_numbers,
-      stock_quantity: isServiceType
+      stock_quantity: formValue.track_inventory
+        ? Number(formValue.stock_quantity)
+        : undefined,
+      min_stock_level: !formValue.track_inventory
         ? undefined
-        : formValue.track_inventory
-          ? Number(formValue.stock_quantity)
-          : undefined,
+        : formValue.min_stock_level !== null &&
+          formValue.min_stock_level !== undefined &&
+          formValue.min_stock_level !== ''
+          ? Number(formValue.min_stock_level)
+          : null,
       category_ids: formValue.category_ids || [],
       // F4 — filtro defensivo de ids IVA cuando el comercio no es responsable.
       tax_category_ids: effectiveTaxIds,
@@ -4484,6 +4568,7 @@ export class ProductCreatePageComponent {
               // El producto YA existe aunque veníamos de crear: sin promover a
               // modo edición, reintentar guardaría un duplicado del producto.
               this.product = savedProduct;
+              this.productMinStockLevel.set(savedProduct?.min_stock_level ?? null);
               this.productId = savedProduct.id;
               this.isEditMode.set(true);
               this.toastService.error(

@@ -27,6 +27,33 @@ export const VEXI_SNAPSHOT_KEYS = [
 
 export type VexiSnapshot = Record<(typeof VEXI_SNAPSHOT_KEYS)[number], string>;
 
+/**
+ * Keys of the Vex snapshot. Same sections as Vexi EXCEPT `ui_context` — Vex
+ * never drives the browser, so screen state would only invite it to narrate
+ * navigation it cannot do — plus `vex_blocks`, the live blocks of the
+ * conversation the turn may keep reading and transforming.
+ */
+export const VEX_SNAPSHOT_KEYS = [
+  'store_profile',
+  'business_metrics',
+  'active_modules',
+  'subscription_state',
+  'user_identity',
+  'current_datetime',
+  'turn_attachments',
+  'vex_blocks',
+] as const;
+
+export type VexSnapshot = Record<(typeof VEX_SNAPSHOT_KEYS)[number], string>;
+
+export interface VexBlockSummary {
+  block_id: string;
+  kind: string;
+  version: number;
+  title?: string;
+  rows?: number;
+}
+
 const UNAVAILABLE = 'No disponible en este momento.';
 
 /**
@@ -93,6 +120,69 @@ export class VexiContextService {
       ui_context: this.buildUiContext(options?.uiContext),
       turn_attachments: turnAttachments,
     };
+  }
+
+  /**
+   * Vex's snapshot: the Vexi sections minus `ui_context`, plus `vex_blocks`.
+   *
+   * The block summaries arrive pre-fetched (the caller lists them from
+   * `VexBlockService`) because this module cannot import the Vex domain —
+   * `VexModule` already imports `VexiModule`, so the reverse edge would close
+   * a DI cycle. Same failure isolation per section as `buildSnapshot`.
+   */
+  async buildVexSnapshot(options?: {
+    attachmentIds?: string[];
+    vexBlocks?: VexBlockSummary[];
+  }): Promise<VexSnapshot> {
+    const [
+      storeProfile,
+      businessMetrics,
+      activeModules,
+      subscriptionState,
+      currentDatetime,
+      turnAttachments,
+    ] = await Promise.all([
+      this.section('store_profile', () => this.buildStoreProfile()),
+      this.section('business_metrics', () => this.buildBusinessMetrics()),
+      this.section('active_modules', () => this.buildActiveModules()),
+      this.section('subscription_state', () => this.buildSubscriptionState()),
+      this.section('current_datetime', () => this.buildCurrentDatetime()),
+      this.section('turn_attachments', () =>
+        this.buildTurnAttachments(options?.attachmentIds),
+      ),
+    ]);
+
+    return {
+      store_profile: storeProfile,
+      business_metrics: businessMetrics,
+      active_modules: activeModules,
+      subscription_state: subscriptionState,
+      user_identity: this.buildUserIdentity(),
+      current_datetime: currentDatetime,
+      turn_attachments: turnAttachments,
+      vex_blocks: this.buildVexBlocks(options?.vexBlocks),
+    };
+  }
+
+  /**
+   * Live blocks of the conversation, as the model needs them: id + kind +
+   * version to read or transform further, row count to decide whether paging
+   * is worth it. Titles are the agent's own, so no trust boundary is crossed.
+   */
+  private buildVexBlocks(blocks?: VexBlockSummary[]): string {
+    if (!blocks?.length) {
+      return 'Esta conversación aún no tiene bloques. Cuando muestres datos con vex_render_* recuerda su block_id para seguir trabajando con ellos.';
+    }
+    const lines = blocks.map((b) => {
+      const bits = [`\`${b.block_id}\``, b.kind, `v${b.version}`];
+      if (b.title) bits.push(`"${b.title}"`);
+      if (typeof b.rows === 'number') bits.push(`${b.rows} filas`);
+      return `- ${bits.join(' · ')}`;
+    });
+    return [
+      'Bloques vivos de esta conversación (léelos con vex_block_read, transfórmalos con vex_block_transform):',
+      ...lines,
+    ].join('\n');
   }
 
   // ── Sections ────────────────────────────────────────────────────────────

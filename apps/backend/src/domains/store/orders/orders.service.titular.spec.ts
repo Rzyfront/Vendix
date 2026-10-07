@@ -30,7 +30,10 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     },
     store_users: { findFirst: jest.fn() },
     // Release-853 paso 10 — gate titular vs factura.
-    invoices: { findFirst: jest.fn() },
+    invoices: { findFirst: jest.fn(), findMany: jest.fn() },
+    // findOne: division financiera + modo cocina (kitchen_mode).
+    order_financial_accounts: { findMany: jest.fn() },
+    store_settings: { findFirst: jest.fn() },
     accounts_receivable: { findFirst: jest.fn() },
   };
   const orderFlow = { forceOrderState: jest.fn(), cancelOrder: jest.fn() };
@@ -59,6 +62,9 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     // Default: orden sin factura (los casos con factura lo sobrescriben).
     prisma.invoices.findFirst.mockResolvedValue(null);
     prisma.accounts_receivable.findFirst.mockResolvedValue(null);
+    prisma.invoices.findMany.mockResolvedValue([]);
+    prisma.order_financial_accounts.findMany.mockResolvedValue([]);
+    prisma.store_settings.findFirst.mockResolvedValue(null);
   });
 
   const draftOrder = {

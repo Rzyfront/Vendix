@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
@@ -61,7 +60,5 @@ import { OrgAccountsPayableModule } from './accounts-payable/org-accounts-payabl
     OrgAccountsReceivableModule,
     OrgAccountsPayableModule,
   ],
-  providers: [OrganizationPrismaService],
-  exports: [OrganizationPrismaService],
 })
 export class OrganizationDomainModule {}

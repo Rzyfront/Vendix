@@ -14,6 +14,32 @@ export interface ExtractedSupplier {
   phone?: string;
 }
 
+/**
+ * QUI-855 — un impuesto de una línea, tal como lo emite el backend del scan.
+ * `tax_rate` es PORCENTAJE (19 = 19 %), a diferencia del `tax_rate` legacy de
+ * la línea, que es FRACCIÓN (0.19).
+ */
+export interface ScanLineTax {
+  tax_type: 'iva' | 'inc' | 'icui' | 'ibua';
+  tax_rate: number | null;
+  calc_mode: 'percent' | 'fixed_per_unit';
+  fixed_amount_per_unit: number | null;
+  amount_override: number | null;
+  /** Undefined ⇒ hereda el modo de la línea (sólo lo deja así el editor del modal). */
+  is_inclusive?: boolean;
+  /** Los fija el editor del modal (el backend no los emite). */
+  base_mode?: 'net' | 'net_plus_prior';
+  add_to_cost?: boolean;
+}
+
+/** Adjunto del escaneo: la factura ya subida a S3 por el backend. */
+export interface ScanAttachmentInfo {
+  key: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+}
+
 export interface ExtractedLineItem {
   description: string;
   quantity: number;
@@ -56,6 +82,21 @@ export interface ExtractedLineItem {
    */
   discount_percentage?: number | null;
   /**
+   * QUI-855 — N impuestos de la línea (camino multi-impuesto). Cuando trae
+   * elementos la línea se trabaja en BRUTO (`unit_price_gross` +
+   * `discount_amount_printed`) y el kernel deriva el neto; `unit_price`,
+   * `tax_rate` y `discount_amount` son el camino legacy (aplanado sólo por IVA).
+   */
+  taxes?: ScanLineTax[] | null;
+  /** QUI-855 — descuento impreso en la factura (BRUTO, sin aplanar por IVA). */
+  discount_amount_printed?: number | null;
+  /**
+   * QUI-855 — modo de precios de ESTA línea cuando difiere del de la factura.
+   * Lo fija el modal al pasar una línea legacy (neta) al camino multi-impuesto;
+   * el backend nunca lo emite. Undefined ⇒ hereda `prices_include_tax` del scan.
+   */
+  prices_include_tax?: boolean;
+  /**
    * Fase 4: pistas de unidad de medida emitidas por el perfil
    * `invoice_ocr_ingredient`. El perfil retail (`invoice_ocr`) no las
    * emite, por eso son opcionales. `uom_hint` es un código de unidad
@@ -65,6 +106,16 @@ export interface ExtractedLineItem {
   presentation?: string | null;
   pack_size?: number | null;
   uom_hint?: string | null;
+  /** Escaneo v2 — unidad en que la factura IMPRIMIO el descuento de la linea. */
+  discount_kind?: 'percent' | 'amount';
+  /** Escaneo v2 — tratamiento del IVA de la linea. */
+  tax_treatment?: 'gravado' | 'exento' | 'excluido';
+  /** Escaneo v2 — linea bonificada (precio 0, sin descuento). */
+  is_bonus?: boolean;
+  /** Escaneo v2 — total de la linea tal como lo imprimio la factura. */
+  printed_line_total?: number;
+  /** Escaneo v2 — cuadre determinista de la linea contra el total impreso. */
+  reconcile?: { expected: number; printed: number; ok: boolean };
 }
 
 export interface InvoiceScanResult {
@@ -79,6 +130,10 @@ export interface InvoiceScanResult {
    */
   prices_include_tax?: boolean;
   line_items: ExtractedLineItem[];
+  /**
+   * QUI-855 — la factura subida por el scan. Se adjunta a la OC al crearla.
+   */
+  scan_attachment?: ScanAttachmentInfo | null;
   subtotal: number;
   tax_amount: number;
   /**
@@ -88,6 +143,11 @@ export interface InvoiceScanResult {
    */
   discount_amount?: number | null;
   /**
+   * QUI-855 — el mismo descuento SIN aplanar (tal como se imprimió). Se usa
+   * cuando las líneas entran al carrito en bruto (camino multi-impuesto).
+   */
+  discount_amount_printed?: number | null;
+  /**
    * QUI-661 Fase 4 — descuento por PRONTO PAGO detectado en la factura. Se
    * muestra, NO se aplica: es financiero, va a cuenta de resultado y se decide
    * al registrar el pago (QUI-647). Nunca entra al costo del inventario.
@@ -95,6 +155,10 @@ export interface InvoiceScanResult {
   early_payment_discount?: number | null;
   total: number;
   confidence: number;
+  /** Escaneo v2 — % comercial de cabecera y la unidad en que se imprimio. */
+  header_discount_percentage?: number;
+  header_discount_kind?: 'percent' | 'amount';
+  schema_version?: 1 | 2;
 }
 
 // ============================================================================
@@ -166,6 +230,14 @@ export interface MatchedLineItem extends ExtractedLineItem {
    * al lado de 3 × 12.000.
    */
   quantity_adjustment?: QuantityAdjustment;
+  /**
+   * QUI-855 paso 8b — marca que deja la revalidación con IA en la línea (sólo
+   * UI, vive hasta el cierre del modal):
+   *  - `changed`: la revalidación cambió algún valor numérico/fiscal.
+   *  - `new`: la IA la encontró en el documento y no estaba en la precarga.
+   *  - `missing`: la revalidación no la encontró en el documento.
+   */
+  revalidation?: 'changed' | 'new' | 'missing';
 }
 
 /** Motivo tipado de `MatchedLineItem.match_reason`. */
@@ -234,4 +306,78 @@ export interface ConfirmScannedInvoiceDto {
   discount_amount?: number;
   notes?: string;
   save_attachment?: boolean;
+}
+
+// ============================================================================
+// Revalidación con IA (QUI-855 paso 8b) — espejo de
+// `purchase-orders/interfaces/invoice-revalidate-job.interface.ts`
+// ============================================================================
+
+export type InvoiceRevalidateJobState =
+  | 'waiting'
+  | 'active'
+  | 'completed'
+  | 'failed'
+  | 'delayed';
+
+export interface InvoiceRevalidateFinding {
+  severity: 'info' | 'warning';
+  message: string;
+}
+
+export interface InvoiceRevalidateRedFlag {
+  message: string;
+  line_index: number | null;
+}
+
+export interface InvoiceRevalidateDivergence {
+  line_index: number | null;
+  field: string;
+  consolidated_value: unknown;
+  document_value: unknown;
+  revalidated_value: unknown;
+  reason: string;
+}
+
+export interface InvoiceRevalidateReport {
+  summary: string;
+  confidence: 'high' | 'medium' | 'low';
+  findings: InvoiceRevalidateFinding[];
+  red_flags: InvoiceRevalidateRedFlag[];
+  divergences: InvoiceRevalidateDivergence[];
+}
+
+export interface InvoiceRevalidateResult {
+  /** Misma forma que el resultado de `POST scan` (sin `scan_attachment`). */
+  consolidated: Omit<InvoiceScanResult, 'scan_attachment'>;
+  report: InvoiceRevalidateReport;
+}
+
+export type InvoiceScanJobState =
+  | 'waiting'
+  | 'active'
+  | 'completed'
+  | 'failed'
+  | 'delayed'
+  | 'unknown';
+
+/** `GET scan/async/:jobId` — SIN envelope de ResponseService. */
+export interface InvoiceScanJobStatus {
+  status: InvoiceScanJobState;
+  result?: InvoiceScanResult;
+  error?: string;
+}
+
+/** `GET scan/revalidate/:jobId` — SIN envelope de ResponseService. */
+export interface InvoiceRevalidateJobStatus {
+  status: InvoiceRevalidateJobState;
+  result?: InvoiceRevalidateResult;
+  error?: string;
+}
+
+export interface InvoiceRevalidateRequest {
+  scan_attachment_key: string;
+  order_type?: 'retail' | 'ingredient';
+  consolidated: Omit<InvoiceScanResult, 'scan_attachment'>;
+  note?: string;
 }

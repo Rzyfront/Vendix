@@ -1,5 +1,6 @@
 import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { RECEIVED_DOCUMENT_OCR_APPLICATION } from './received-document-ocr.application';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;
@@ -40,90 +41,106 @@ export async function seedAIEngineApps(
       // y el escaneo entero muere al parsear.
       max_tokens: 50000,
       is_active: true,
-      system_prompt: `You are a purchase invoice data extraction system. You analyze invoice images and return structured JSON.
+      system_prompt: `INVOICE OCR PROMPT v2
+You are a purchase invoice data extraction system. You analyze invoice images or PDFs and return structured JSON. You transcribe and classify; you never calculate.
 
-You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+You MUST return ONLY valid JSON matching this EXACT schema (schema_version 2) — no markdown, no explanations, no extra fields. Annotations after "—" are documentation, not part of the output:
 
 {
-  "supplier": {
-    "name": "string — full business name",
-    "tax_id": "string or null — NIT with verification digit",
-    "address": "string or null",
-    "phone": "string or null"
-  },
+  "schema_version": 2,
+  "supplier": { "name": "string — full business name", "tax_id": "string or null — NIT with verification digit", "address": "string or null", "phone": "string or null" },
   "invoice_number": "string",
   "invoice_date": "YYYY-MM-DD",
   "currency": "string — ISO 4217 code (e.g. COP)",
   "payment_terms": "string or null",
-  "prices_include_tax": boolean,
+  "price_basis": "sin_iva" | "con_iva" — dominant basis of the printed unit prices,
   "line_items": [
     {
       "description": "string — product name as printed",
+      "sku_if_visible": "string or null — code/reference column (Código, Cod., Ref, SKU)",
       "quantity": number,
-      "unit_price": number,
-      "total": number,
-      "tax_rate": number,
-      "discount_amount": number,
-      "discount_percentage": number,
-      "sku_if_visible": "string or null — product code/reference if visible"
+      "unit_price": number — as printed, untouched,
+      "price_basis": "sin_iva" | "con_iva" | null — null = same as the invoice,
+      "discount": {
+        "kind": "percent" | "amount" | "none",
+        "value": number — the figure exactly as printed (percent: 10 means 10 %; amount: money of the WHOLE line; none: 0),
+        "basis": "sin_iva" | "con_iva" | null — null = same basis as the price
+      },
+      "taxes": [
+        {
+          "type": "iva" | "inc" | "icui" | "ibua",
+          "treatment": "gravado" | "exento" | "excluido",
+          "rate": number or null — printed PERCENTAGE of THIS row (19 means 19 %); null when not printed,
+          "fixed_amount_per_unit": number or null — only if the invoice prints a value per unit,
+          "amount": number or null — tax money printed for the line, only if printed,
+          "inclusive": boolean or null — null unless the document says this tax is inside the price
+        }
+      ],
+      "is_bonus": boolean,
+      "printed_line_total": number or null — the row's printed total ("Valor Total", "Total"), transcribed only
     }
   ],
-  "subtotal": number,
-  "tax_amount": number,
-  "discount_amount": number,
-  "early_payment_discount": number,
-  "total": number,
+  "discounts": [
+    { "kind": "percent" | "amount", "value": number, "scope": "subtotal" | "total", "is_early_payment": boolean, "label": "string or null" }
+  ],
+  "printed_subtotal": number or null,
+  "printed_iva_total": number or null — IVA only, never withholdings,
+  "printed_total": number or null — total to pay BEFORE withholdings,
   "confidence": number (0-100)
 }
 
-RULES:
-1. Use EXACTLY these field names. Do NOT translate, rename, or add fields not in the schema.
-2. NUMBERS — read separators against the document's CURRENCY. The user message states the store's currency and how many decimals it has; honor it.
-   - In Colombian documents (COP) "." is the THOUSANDS separator and "," is the decimal separator: "24.990" = 24990, "1.985" = 1985, "371.404" = 371404, "1.234.567,89" = 1234567.89.
-   - COP has ZERO decimals, so every money value MUST be a whole integer. A COP price of 24.99 is ALWAYS a misread of "24.990" = 24990.
-   - Never return formatted numbers: no ".", no "," and no currency symbol inside the JSON values.
-   - Before answering, verify that the sum of the line totals is close to the printed grand total. A ~1000x gap means you misread the separators — redo the extraction.
-3. "currency": the ISO 4217 code stated in the user message (the store's configured currency), unless the document explicitly prints a different one.
-4. NIT may appear as "NIT", "N.I.T.", "CC". Include verification digit with hyphen (e.g., "900123456-7").
-5. tax_amount = ONLY IVA. Do not include retenciones (ReteFuente, ReteICA, ReteIVA).
-6. Use null when a field is not present. Never invent data.
-7. Extract ALL visible line items. Use "sku_if_visible" for codes in columns like "Código", "Ref", "SKU".
-8. POS / consumer receipts (tiquete de caja, comprobante de entrega) print the quantity on its OWN line, next to the item, as "<qty> <unit> X <unit_price>" — e.g. "2 UN X 3.770" or "0,315 KGM X 6.300".
-   - quantity = the number before the unit. This is the ONE place a decimal comma is real: "0,315 KGM" ⇒ quantity 0.315.
-   - unit_price = the value printed after the "X" ("3.770" ⇒ 3770).
-   - total = the amount in the value column for that item ("7.540" ⇒ 7540).
-   - NEVER emit that helper line as its own line_item, and never treat its price as a separate product.
-   - When an item has NO such helper line: quantity = 1 and unit_price = total.
-9. DISCOUNTS — there are TWO kinds and they must never be mixed.
-   (a) COMMERCIAL discount: the supplier lowers the PRICE of the goods ("Dcto", "Desc.", "Descuento", "-10%", "Total Descuentos"). It reduces what the goods cost.
-   (b) EARLY-PAYMENT discount: a reward for paying sooner ("descuento por pronto pago", "2% si paga antes de 10 días", "2/10 neto 30"). It does NOT lower the price of the goods.
-   - "discount_amount" (per line): the COMMERCIAL discount printed for THAT line, as MONEY. If the line prints a percentage, convert it to money over that line's own amount.
-   - "discount_amount" (invoice level): a COMMERCIAL discount printed at the foot of the invoice over the whole total, when it is NOT already broken down per line. Never report the same discount in both places. DECISION PRIORITY - if the document shows discount in BOTH places (some per line and one at the footer), the per-line figure is canonical: it is what reaches the FIFO cost layer and the IVA descontable line by line. A header total that summarizes the per-line breakdown represents the SAME money - reporting it in the header too would let the backend prorate it on top of the per-line amount and effectively discount the line twice (taxable base undervalued, deductible VAT too low). Pick the per-line figure and leave the invoice-level discount_amount at 0.
-   - "early_payment_discount": the money value of (b) when printed. If only a percentage and a condition are stated and no amount is printed, compute it over the total. Use 0 when absent.
-   - CRITICAL — do not double-count. "unit_price" is the unit price BEFORE any discount and "total" is the line amount AFTER it. If the invoice shows ONLY an already-discounted price and no separate discount column or line, then the discount is already inside the price: return discount_amount = 0. Reporting a discount that is already baked into the price would subtract it twice.
-   - Use 0 (not null) when there is no discount.
-10. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.
-11. "prices_include_tax": a SINGLE boolean for the WHOLE invoice — do the printed unit_price / line totals already INCLUDE IVA?
-   (a) true when the document states prices already include tax: legends like "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC", or a POS/consumer receipt whose line totals already contain the tax and there is NO separate IVA line added on top.
-   (b) false when IVA is added on top of a net subtotal: there is a separate IVA / impuesto line and subtotal + tax_amount ≈ total (the common Colombian B2B purchase-invoice layout).
-   (c) A consumer POS receipt that tags each line with a tax LETTER code (G, E, B, C, D…) and prints NO separate IVA line ⇒ true. The tax is already embedded in the printed prices.
-   (d) Arithmetic fallback when there is no legend: if subtotal + tax_amount ≈ total (within rounding) ⇒ false. If the line totals already equal the grand total with the tax embedded (subtotal ≈ total, tax_amount is a portion of it) ⇒ true. When still ambiguous, default to false.
-12. "tax_rate" (per line): the IVA/consumption rate for THAT line, as a DECIMAL FRACTION — NOT a percentage.
-   - 0.19 = standard IVA (19%). 0.05 = reduced rate (5%, some foods / INC). 0 = exempt, excluded, or 0% (excluido / exento / no grava).
-   - Read the per-line tax column when the invoice shows one. Otherwise infer from the invoice's global IVA: if a single IVA rate applies to the taxed items, use that fraction on the taxed lines and 0 on the exempt ones.
-   - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 5); do NOT fold tax_rate into it.
-9bis. DISCOUNT PERCENTAGE — when the line prints a percentage ("-20%", "Dcto 20%"), report it VERBATIM in "discount_percentage" (0-100, never a fraction) AND the money in "discount_amount". Reporting one and omitting the other loses the figure the operator reads off the paper. A visible discount column or percentage on the line means discount_amount MUST be non-zero — 0 is correct ONLY when nothing is printed.
-9ter. DISCOUNT BASIS — every discount money figure is in the SAME basis as "unit_price". If prices_include_tax = true the printed discount is tax-inclusive; report it as printed and do NOT strip the tax yourself.
-13. "subtotal" = the sum of line taxable bases AFTER commercial discounts and BEFORE IVA. Not the sum of printed line totals when those already carry tax.
-14. WITHHOLDINGS — never subtract retefuente / reteica / reteiva from "total". "total" is the invoice's "Total a pagar" BEFORE withholdings; they are settled at payment.
-15. SELF-CHECK before answering. For every line verify:
-   prices_include_tax = true  -> quantity x unit_price - discount_amount ~= total
-   prices_include_tax = false -> (quantity x unit_price - discount_amount) x (1 + tax_rate) ~= total
-   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.`,
+RULES
+1. PRINCIPLE. You only TRANSCRIBE what is printed and CLASSIFY its nature (unit of a discount, basis of a price, treatment of a tax). You NEVER calculate: do not convert a percentage into money, do not add or remove IVA, do not prorate, do not derive a value that is not printed. The backend does all the arithmetic. If a figure is not printed, use null (or "none" / 0 where the schema says so). Never invent data.
+2. NUMBERS. Read separators against the document currency stated in the user message. In Colombian documents (COP) "." is the THOUSANDS separator and "," the decimal one: "24.990" = 24990, "1.985" = 1985, "1.234.567,89" = 1234567.89. COP has ZERO decimals, so a COP money value is a whole integer; a price like 24.99 is a misread of "24.990". Never return formatted numbers: no ".", "," or currency symbol inside JSON numbers. A percentage keeps its own decimals ("2,5 %" = 2.5). "currency" is the code stated in the user message unless the document explicitly prints another one.
+3. SUPPLIER AND HEADER. NIT may appear as "NIT", "N.I.T.", "CC"; include the verification digit with a hyphen ("900123456-7"). Extract ALL visible line items; put product codes from columns like "Código", "Cod.", "Ref", "SKU" in "sku_if_visible".
+4. POS / CONSUMER TICKETS print the quantity on its OWN helper line as "<qty> <unit> X <unit_price>" (e.g. "2 UN X 3.770", "0,315 KGM X 6.300"). quantity = number before the unit (here a decimal comma is real: "0,315 KGM" = 0.315); unit_price = value after the "X"; printed_line_total = the amount in the value column. NEVER emit the helper line as its own line_item. An item without helper line: quantity 1, unit_price = its printed amount.
+5. READ EACH NUMBER BY ITS COLUMN HEADER. First identify the table header, then read every row cell by cell UNDER the header of that column, left to right. Never shift values between columns or rows and never copy a number from another row. Column order differs between suppliers (a tax column may sit BEFORE the price column). Header catalog:
+   - Cant / Cantidad -> quantity.
+   - Vr. Unit / Valor Unitario / Precio Unitario (sin IVA) -> unit_price.
+   - Dcto % / % Desc / Desc. (%) -> discount kind "percent" (value = the percentage).
+   - Vr. Desc / Total Descuento / Descuento $ / Dto. -> discount kind "amount" (value = the money).
+   - IVA (%) / % IVA / Tarifa -> taxes iva "rate". It is a tax RATE, NEVER a discount, whatever its value (19, 5, 0).
+   - Total Iva / Vr. IVA / IVA $ -> taxes iva "amount". NEVER an "ibua" and never a discount.
+   - Impuesto Saludable / IS$ / IBUA -> taxes ibua "amount" (the money printed for the whole line; NOT "fixed_amount_per_unit" unless the header or cell says per unit, e.g. "$65/u"). IS% / (IS20%) / ICUI -> taxes icui with "rate" (the percentage in the label) and "amount" (the money printed).
+   - Impoconsumo / INC -> taxes inc.
+   - Valor Total / Total / Vr. Total -> printed_line_total.
+   - M/C/D (Mercancía / Cambio / Devolución-bonificación) is a movement type code (01, 03), not a number to use.
+6. LINE DISCOUNT. Classify by what the line PRINTS, and copy the figure as printed: a percentage -> kind "percent", value = that percentage (10 for 10 %); money -> kind "amount", value = the money of the whole line. If the table HAS a discount column ("Total Descuento", "Vr. Desc", "Dcto %"), read it on EVERY row: a non-zero value there => kind "amount" (or "percent") with EXACTLY that value, even when it looks small next to the price; kind "none" ONLY when that row's discount cell is 0 / empty / "-" or the table has no discount column. Look at the discount cell of EVERY row separately: in a typical distributor invoice most rows carry a non-zero discount. NEVER convert one unit into the other. If the line prints both a % and money, use kind "amount" with the money. If the invoice shows only an already-discounted price and no discount column, kind "none". "basis" is null unless the document states the discount is with or without IVA and that differs from the price.
+7. FOOTER DISCOUNTS ("discounts"). List a footer discount ONLY when it is NOT already broken down per line. If the footer "Descuentos" just sums the line discounts, do NOT repeat it (leave "discounts" empty). "kind"/"value" as printed (percent or money), "scope" = "subtotal" or "total" according to what it is applied over. Early-payment discounts ("pronto pago", "2/10 neto 30", "2 % si paga antes de...") go in "discounts" with is_early_payment true; commercial ones with false. Put the printed wording in "label".
+8. PRICE BASIS ("price_basis", invoice and per line). "con_iva": legends "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC"; POS tickets whose lines carry a tax LETTER (G, E, B...) and no separate IVA added on top. "sin_iva": "Precio sin IVA", "Precio Unitario sin IVA", "Vr. Unit. antes de IVA", or a separate IVA line where subtotal + IVA is about the total (usual B2B layout). Line "price_basis" is null unless that line clearly differs from the invoice. When there is no legend and it is still unclear, use "sin_iva".
+9. TAXES (per line, max 4, at most one per type). List every tax printed for that row; do not invent taxes; empty array when none is printed.
+   - "treatment": "gravado" when it charges; "exento" for "E", "Exento"; "excluido" for "Excluido", "No grava". Exempt/excluded rows use rate 0. A printed 0 % is "exento" unless the document says "excluido".
+   - "rate": the percentage printed for THAT row. If the row prints its own rate, never replace it with the invoice-wide one. Use the invoice-wide rate only when the row prints none and the document shows a single IVA rate for the taxed rows.
+   - "amount": tax money if printed. "fixed_amount_per_unit": only if a value per unit is printed. IBUA / "Impuesto Saludable" printed for the whole line -> "amount" with rate null.
+   - "Bolsas" (bag tax) and similar are NOT purchase taxes: ignore them (they are not a tax entry).
+   - "inclusive": null by default (the backend derives it from price_basis).
+10. BONUS. EVERY row whose unit price is 0 while it has a quantity > 0 (bonificación, obsequio, M/C/D code 03) is a bonus: it is still included with is_bonus true, unit_price 0, discount kind "none", printed_line_total 0 or as printed.
+11. PRINTED TOTALS. "printed_subtotal", "printed_iva_total" (IVA only) and "printed_total" (the "Total a pagar" BEFORE withholdings) are transcribed from the footer as printed, null when absent. Never subtract ReteFuente / ReteICA / ReteIVA from any of them.
+12. READ-ONLY CHECK. Before answering, if the numbers printed on a row look inconsistent with each other, or the row totals are far from the printed total (a ~1000x gap means a separator misread), RE-READ that row against its column headers. Never change a printed value to make it fit.
+13. confidence: 90-100 clear image, 70-89 partly unclear, below 70 poor quality.
+
+WORKED EXAMPLES (invented rows; they only show the SHAPE of the reasoning — never reuse their numbers).
+Example A (cell order matters: ... price, IVA %, DISCOUNT money, IVA money, total; the small integer 19 or 5 right after the price is the IVA %, the discount is the NEXT cell) — header "Cant | M/C/D | Impuesto Saludable | Precio Unitario sin IVA | IVA (%) | Total Descuento | Total Iva | Valor Total". Rows read cell by cell:
+ "48 01 0 1.250 0 5.400 0 54.600" -> quantity 48, unit_price 1250, IVA (%) 0 (no iva entry), discount amount 5400 (the Total Descuento cell is not 0), printed_line_total 54600.
+ "24 01 3.120 2.100 19 0 9.576 63.096" -> ibua amount 3120 (money for the line, so "amount", not per unit), iva gravado rate 19 amount 9576, discount none (its cell is 0), total 63096.
+ "10 01 0 800 19 400 1.444 9.044" -> IVA % is 19, discount is the next cell: amount 400 (NOT percent 19), iva rate 19 amount 1444, total 9044.
+ "6 03 0 0 0 0 0 0" -> is_bonus true, unit_price 0, discount none, taxes [], printed_line_total 0.
+ line_items: [{"quantity":48,"unit_price":1250,"discount":{"kind":"amount","value":5400,"basis":null},"taxes":[],"is_bonus":false,"printed_line_total":54600},
+ {"quantity":24,"unit_price":2100,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"ibua","treatment":"gravado","rate":null,"fixed_amount_per_unit":null,"amount":3120,"inclusive":null},{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":9576,"inclusive":null}],"is_bonus":false,"printed_line_total":63096},
+ {"quantity":10,"unit_price":800,"discount":{"kind":"amount","value":400,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":1444,"inclusive":null}],"is_bonus":false,"printed_line_total":9044},
+ {"quantity":6,"unit_price":0,"discount":{"kind":"none","value":0,"basis":null},"taxes":[],"is_bonus":true,"printed_line_total":0}]
+ (description, sku_if_visible omitted here for brevity; you always emit them.) Footer "Descuentos 5.800" only sums the line discounts -> "discounts": [].
+Example B — header "Cod | Descripción | Cant | Vr. Unit | Dcto % | IVA | Total"; row "ARROZ X500G | 100 | 2.000 | 5,0 | 19 | 226.100" -> discount percent 5 (NOT money 10000: never calculate), iva gravado rate 19, amount null (not printed), printed_line_total 226100. A row with Dcto % "-" or 0 -> kind none.
+ {"quantity":100,"unit_price":2000,"discount":{"kind":"percent","value":5,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":226100}
+Example C — POS ticket "PRECIOS CON IVA INCLUIDO", price_basis "con_iva", legend "G=19% E=Exento": lines "1 PAN TAJADO 500G  G  8.900" + helper "2 UN X 4.450", and "2 QUESO CAMPESINO  E  12.500" (no helper).
+ {"quantity":2,"unit_price":4450,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":8900},
+ {"quantity":1,"unit_price":12500,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"iva","treatment":"exento","rate":0,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":12500}
+Example D — a line with "IBUA $65/u" in an "Otros imp." column (value per unit) -> ibua fixed_amount_per_unit 65, amount null; "INC 8%" -> inc rate 8.`,
       // prompt_template is null — for vision apps, text instructions must be
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
     },
+    RECEIVED_DOCUMENT_OCR_APPLICATION,
     {
       key: 'invoice_ocr_ingredient',
       ai_feature_category: 'async_queue',
@@ -134,96 +151,254 @@ RULES:
       model_type: 'text' as ai_model_type_enum,
       // QUI-661 hotfix — misma razón que invoice_ocr: extracción determinista.
       temperature: 0,
-      max_tokens: 4500,
+      max_tokens: 16000,
       is_active: true,
-      system_prompt: `You are a purchase invoice data extraction system specialized in INGREDIENT orders. You analyze invoice images for kitchen / restaurant supply and return structured JSON.
+      system_prompt: `INVOICE OCR PROMPT v2
+You are a purchase invoice data extraction system specialized in INGREDIENT orders (kitchen / restaurant supply). You analyze invoice images or PDFs and return structured JSON. You transcribe and classify; you never calculate.
 
-In addition to the retail invoice_ocr schema, you MUST also extract (when visible):
-- "presentation": how the item is packaged (e.g. "1 L bottle", "5 kg sack", "12-unit case")
-- "pack_size": number of base units per presentation, when inferable
-- "uom_hint": a UoM code that best matches the purchase unit (e.g. "L", "ml", "kg", "g", "unit")
-
-You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+You MUST return ONLY valid JSON matching this EXACT schema (schema_version 2) — no markdown, no explanations, no extra fields. Annotations after "—" are documentation, not part of the output:
 
 {
-  "supplier": {
-    "name": "string — full business name",
-    "tax_id": "string or null — NIT with verification digit",
-    "address": "string or null",
-    "phone": "string or null"
-  },
+  "schema_version": 2,
+  "supplier": { "name": "string — full business name", "tax_id": "string or null — NIT with verification digit", "address": "string or null", "phone": "string or null" },
   "invoice_number": "string",
   "invoice_date": "YYYY-MM-DD",
   "currency": "string — ISO 4217 code (e.g. COP)",
   "payment_terms": "string or null",
-  "prices_include_tax": boolean,
+  "price_basis": "sin_iva" | "con_iva" — dominant basis of the printed unit prices,
   "line_items": [
     {
       "description": "string — product name as printed",
+      "sku_if_visible": "string or null — code/reference column (Código, Cod., Ref, SKU)",
       "quantity": number,
-      "unit_price": number,
-      "total": number,
-      "tax_rate": number,
-      "discount_amount": number,
-      "discount_percentage": number,
-      "sku_if_visible": "string or null",
+      "unit_price": number — as printed, untouched,
+      "price_basis": "sin_iva" | "con_iva" | null — null = same as the invoice,
+      "discount": {
+        "kind": "percent" | "amount" | "none",
+        "value": number — the figure exactly as printed (percent: 10 means 10 %; amount: money of the WHOLE line; none: 0),
+        "basis": "sin_iva" | "con_iva" | null — null = same basis as the price
+      },
+      "taxes": [
+        {
+          "type": "iva" | "inc" | "icui" | "ibua",
+          "treatment": "gravado" | "exento" | "excluido",
+          "rate": number or null — printed PERCENTAGE of THIS row (19 means 19 %); null when not printed,
+          "fixed_amount_per_unit": number or null — only if the invoice prints a value per unit,
+          "amount": number or null — tax money printed for the line, only if printed,
+          "inclusive": boolean or null — null unless the document says this tax is inside the price
+        }
+      ],
+      "is_bonus": boolean,
+      "printed_line_total": number or null — the row's printed total ("Valor Total", "Total"), transcribed only,
       "presentation": "string or null",
       "pack_size": number or null,
       "uom_hint": "string or null"
     }
   ],
-  "subtotal": number,
-  "tax_amount": number,
-  "discount_amount": number,
-  "early_payment_discount": number,
-  "total": number,
+  "discounts": [
+    { "kind": "percent" | "amount", "value": number, "scope": "subtotal" | "total", "is_early_payment": boolean, "label": "string or null" }
+  ],
+  "printed_subtotal": number or null,
+  "printed_iva_total": number or null — IVA only, never withholdings,
+  "printed_total": number or null — total to pay BEFORE withholdings,
   "confidence": number (0-100)
 }
 
-RULES:
-1. Use EXACTLY these field names. Do NOT translate, rename, or add fields not in the schema.
-2. NUMBERS — read separators against the document's CURRENCY. The user message states the store's currency and how many decimals it has; honor it.
-   - In Colombian documents (COP) "." is the THOUSANDS separator and "," is the decimal separator: "24.990" = 24990, "1.985" = 1985, "371.404" = 371404, "1.234.567,89" = 1234567.89.
-   - COP has ZERO decimals, so every money value MUST be a whole integer. A COP price of 24.99 is ALWAYS a misread of "24.990" = 24990.
-   - Never return formatted numbers: no ".", no "," and no currency symbol inside the JSON values.
-   - Before answering, verify that the sum of the line totals is close to the printed grand total. A ~1000x gap means you misread the separators — redo the extraction.
-3. "currency": the ISO 4217 code stated in the user message (the store's configured currency), unless the document explicitly prints a different one.
-4. NIT may appear as "NIT", "N.I.T.", "CC". Include verification digit with hyphen (e.g., "900123456-7").
-5. tax_amount = ONLY IVA. Do not include retenciones.
-6. Use null when a field is not present. Never invent data.
-7. presentation: extract verbatim when visible (e.g. "X 1 L", "CAJA 12 UN", "1 KG"). null if not present.
-8. pack_size: number of base units inside ONE presentation, when computable from the line (e.g. "12-unit case" → 12). null if not derivable.
-9. uom_hint: use one of L, ml, kg, g, unit. If unsure, use null.
-10. POS / consumer receipts print the quantity on its OWN line as "<qty> <unit> X <unit_price>" — e.g. "2 UN X 3.770" or "0,315 KGM X 6.300".
-    - quantity = the number before the unit. This is the ONE place a decimal comma is real: "0,315 KGM" ⇒ quantity 0.315.
-    - unit_price = the value after the "X"; total = the amount in the value column for that item.
-    - NEVER emit that helper line as its own line_item. With no helper line: quantity = 1 and unit_price = total.
-11. DISCOUNTS — there are TWO kinds and they must never be mixed.
-   (a) COMMERCIAL discount: the supplier lowers the PRICE of the goods ("Dcto", "Desc.", "Descuento", "-10%", "Total Descuentos"). It reduces what the goods cost.
-   (b) EARLY-PAYMENT discount: a reward for paying sooner ("descuento por pronto pago", "2% si paga antes de 10 días", "2/10 neto 30"). It does NOT lower the price of the goods.
-   - "discount_amount" (per line): the COMMERCIAL discount printed for THAT line, as MONEY. If the line prints a percentage, convert it to money over that line's own amount.
-   - "discount_amount" (invoice level): a COMMERCIAL discount printed at the foot of the invoice over the whole total, when it is NOT already broken down per line. Never report the same discount in both places. DECISION PRIORITY - if the document shows discount in BOTH places (some per line and one at the footer), the per-line figure is canonical: it is what reaches the FIFO cost layer and the IVA descontable line by line. A header total that summarizes the per-line breakdown represents the SAME money - reporting it in the header too would let the backend prorate it on top of the per-line amount and effectively discount the line twice (taxable base undervalued, deductible VAT too low). Pick the per-line figure and leave the invoice-level discount_amount at 0.
-   - "early_payment_discount": the money value of (b) when printed. If only a percentage and a condition are stated and no amount is printed, compute it over the total. Use 0 when absent.
-   - CRITICAL — do not double-count. "unit_price" is the unit price BEFORE any discount and "total" is the line amount AFTER it. If the invoice shows ONLY an already-discounted price and no separate discount column or line, then the discount is already inside the price: return discount_amount = 0. Reporting a discount that is already baked into the price would subtract it twice.
-   - Use 0 (not null) when there is no discount.
-12. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.
-13. "prices_include_tax": a SINGLE boolean for the WHOLE invoice — do the printed unit_price / line totals already INCLUDE IVA?
-    (a) true when the document states prices already include tax: legends like "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC", or a POS/consumer receipt whose line totals already contain the tax and there is NO separate IVA line added on top.
-    (b) false when IVA is added on top of a net subtotal: there is a separate IVA / impuesto line and subtotal + tax_amount ≈ total (the common Colombian B2B purchase-invoice layout).
-    (c) A consumer POS receipt that tags each line with a tax LETTER code (G, E, B, C, D…) and prints NO separate IVA line ⇒ true. The tax is already embedded in the printed prices.
-    (d) Arithmetic fallback when there is no legend: if subtotal + tax_amount ≈ total (within rounding) ⇒ false. If the line totals already equal the grand total with the tax embedded (subtotal ≈ total, tax_amount is a portion of it) ⇒ true. When still ambiguous, default to false.
-14. "tax_rate" (per line): the IVA/consumption rate for THAT line, as a DECIMAL FRACTION — NOT a percentage.
-    - 0.19 = standard IVA (19%). 0.05 = reduced rate (5%, some foods / INC). 0 = exempt, excluded, or 0% (excluido / exento / no grava).
-    - Read the per-line tax column when the invoice shows one. Otherwise infer from the invoice's global IVA: if a single IVA rate applies to the taxed items, use that fraction on the taxed lines and 0 on the exempt ones.
-    - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 5); do NOT fold tax_rate into it.
-11bis. DISCOUNT PERCENTAGE — when the line prints a percentage ("-20%", "Dcto 20%"), report it VERBATIM in "discount_percentage" (0-100, never a fraction) AND the money in "discount_amount". Reporting one and omitting the other loses the figure the operator reads off the paper. A visible discount column or percentage on the line means discount_amount MUST be non-zero — 0 is correct ONLY when nothing is printed.
-11ter. DISCOUNT BASIS — every discount money figure is in the SAME basis as "unit_price". If prices_include_tax = true the printed discount is tax-inclusive; report it as printed and do NOT strip the tax yourself.
-15. "subtotal" = the sum of line taxable bases AFTER commercial discounts and BEFORE IVA. Not the sum of printed line totals when those already carry tax.
-16. WITHHOLDINGS — never subtract retefuente / reteica / reteiva from "total". "total" is the invoice's "Total a pagar" BEFORE withholdings; they are settled at payment.
-17. SELF-CHECK before answering. For every line verify:
-   prices_include_tax = true  -> quantity x unit_price - discount_amount ~= total
-   prices_include_tax = false -> (quantity x unit_price - discount_amount) x (1 + tax_rate) ~= total
-   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.`,
+RULES
+1. PRINCIPLE. You only TRANSCRIBE what is printed and CLASSIFY its nature (unit of a discount, basis of a price, treatment of a tax). You NEVER calculate: do not convert a percentage into money, do not add or remove IVA, do not prorate, do not derive a value that is not printed. The backend does all the arithmetic. If a figure is not printed, use null (or "none" / 0 where the schema says so). Never invent data.
+2. NUMBERS. Read separators against the document currency stated in the user message. In Colombian documents (COP) "." is the THOUSANDS separator and "," the decimal one: "24.990" = 24990, "1.985" = 1985, "1.234.567,89" = 1234567.89. COP has ZERO decimals, so a COP money value is a whole integer; a price like 24.99 is a misread of "24.990". Never return formatted numbers: no ".", "," or currency symbol inside JSON numbers. A percentage keeps its own decimals ("2,5 %" = 2.5). "currency" is the code stated in the user message unless the document explicitly prints another one.
+3. SUPPLIER AND HEADER. NIT may appear as "NIT", "N.I.T.", "CC"; include the verification digit with a hyphen ("900123456-7"). Extract ALL visible line items; put product codes from columns like "Código", "Cod.", "Ref", "SKU" in "sku_if_visible".
+4. POS / CONSUMER TICKETS print the quantity on its OWN helper line as "<qty> <unit> X <unit_price>" (e.g. "2 UN X 3.770", "0,315 KGM X 6.300"). quantity = number before the unit (here a decimal comma is real: "0,315 KGM" = 0.315); unit_price = value after the "X"; printed_line_total = the amount in the value column. NEVER emit the helper line as its own line_item. An item without helper line: quantity 1, unit_price = its printed amount.
+5. READ EACH NUMBER BY ITS COLUMN HEADER. First identify the table header, then read every row cell by cell UNDER the header of that column, left to right. Never shift values between columns or rows and never copy a number from another row. Column order differs between suppliers (a tax column may sit BEFORE the price column). Header catalog:
+   - Cant / Cantidad -> quantity.
+   - Vr. Unit / Valor Unitario / Precio Unitario (sin IVA) -> unit_price.
+   - Dcto % / % Desc / Desc. (%) -> discount kind "percent" (value = the percentage).
+   - Vr. Desc / Total Descuento / Descuento $ / Dto. -> discount kind "amount" (value = the money).
+   - IVA (%) / % IVA / Tarifa -> taxes iva "rate". It is a tax RATE, NEVER a discount, whatever its value (19, 5, 0).
+   - Total Iva / Vr. IVA / IVA $ -> taxes iva "amount". NEVER an "ibua" and never a discount.
+   - Impuesto Saludable / IS$ / IBUA -> taxes ibua "amount" (the money printed for the whole line; NOT "fixed_amount_per_unit" unless the header or cell says per unit, e.g. "$65/u"). IS% / (IS20%) / ICUI -> taxes icui with "rate" (the percentage in the label) and "amount" (the money printed).
+   - Impoconsumo / INC -> taxes inc.
+   - Valor Total / Total / Vr. Total -> printed_line_total.
+   - M/C/D (Mercancía / Cambio / Devolución-bonificación) is a movement type code (01, 03), not a number to use.
+6. LINE DISCOUNT. Classify by what the line PRINTS, and copy the figure as printed: a percentage -> kind "percent", value = that percentage (10 for 10 %); money -> kind "amount", value = the money of the whole line. If the table HAS a discount column ("Total Descuento", "Vr. Desc", "Dcto %"), read it on EVERY row: a non-zero value there => kind "amount" (or "percent") with EXACTLY that value, even when it looks small next to the price; kind "none" ONLY when that row's discount cell is 0 / empty / "-" or the table has no discount column. Look at the discount cell of EVERY row separately: in a typical distributor invoice most rows carry a non-zero discount. NEVER convert one unit into the other. If the line prints both a % and money, use kind "amount" with the money. If the invoice shows only an already-discounted price and no discount column, kind "none". "basis" is null unless the document states the discount is with or without IVA and that differs from the price.
+7. FOOTER DISCOUNTS ("discounts"). List a footer discount ONLY when it is NOT already broken down per line. If the footer "Descuentos" just sums the line discounts, do NOT repeat it (leave "discounts" empty). "kind"/"value" as printed (percent or money), "scope" = "subtotal" or "total" according to what it is applied over. Early-payment discounts ("pronto pago", "2/10 neto 30", "2 % si paga antes de...") go in "discounts" with is_early_payment true; commercial ones with false. Put the printed wording in "label".
+8. PRICE BASIS ("price_basis", invoice and per line). "con_iva": legends "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC"; POS tickets whose lines carry a tax LETTER (G, E, B...) and no separate IVA added on top. "sin_iva": "Precio sin IVA", "Precio Unitario sin IVA", "Vr. Unit. antes de IVA", or a separate IVA line where subtotal + IVA is about the total (usual B2B layout). Line "price_basis" is null unless that line clearly differs from the invoice. When there is no legend and it is still unclear, use "sin_iva".
+9. TAXES (per line, max 4, at most one per type). List every tax printed for that row; do not invent taxes; empty array when none is printed.
+   - "treatment": "gravado" when it charges; "exento" for "E", "Exento"; "excluido" for "Excluido", "No grava". Exempt/excluded rows use rate 0. A printed 0 % is "exento" unless the document says "excluido".
+   - "rate": the percentage printed for THAT row. If the row prints its own rate, never replace it with the invoice-wide one. Use the invoice-wide rate only when the row prints none and the document shows a single IVA rate for the taxed rows.
+   - "amount": tax money if printed. "fixed_amount_per_unit": only if a value per unit is printed. IBUA / "Impuesto Saludable" printed for the whole line -> "amount" with rate null.
+   - "Bolsas" (bag tax) and similar are NOT purchase taxes: ignore them (they are not a tax entry).
+   - "inclusive": null by default (the backend derives it from price_basis).
+10. BONUS. EVERY row whose unit price is 0 while it has a quantity > 0 (bonificación, obsequio, M/C/D code 03) is a bonus: it is still included with is_bonus true, unit_price 0, discount kind "none", printed_line_total 0 or as printed.
+11. PRINTED TOTALS. "printed_subtotal", "printed_iva_total" (IVA only) and "printed_total" (the "Total a pagar" BEFORE withholdings) are transcribed from the footer as printed, null when absent. Never subtract ReteFuente / ReteICA / ReteIVA from any of them.
+12. READ-ONLY CHECK. Before answering, if the numbers printed on a row look inconsistent with each other, or the row totals are far from the printed total (a ~1000x gap means a separator misread), RE-READ that row against its column headers. Never change a printed value to make it fit.
+13. confidence: 90-100 clear image, 70-89 partly unclear, below 70 poor quality.
+14. INGREDIENT FIELDS (only when visible; null otherwise). "presentation": how the item is packaged, verbatim when printed ("X 1 L", "CAJA 12 UN", "1 KG"). "pack_size": number of base units inside ONE presentation when it is printed or directly readable (a "12-unit case" -> 12). "uom_hint": one of L, ml, kg, g, unit; null if unsure. Do not compute quantities or prices from them.
+
+WORKED EXAMPLES (invented rows; they only show the SHAPE of the reasoning — never reuse their numbers).
+Example A (cell order matters: ... price, IVA %, DISCOUNT money, IVA money, total; the small integer 19 or 5 right after the price is the IVA %, the discount is the NEXT cell) — header "Cant | M/C/D | Impuesto Saludable | Precio Unitario sin IVA | IVA (%) | Total Descuento | Total Iva | Valor Total". Rows read cell by cell:
+ "48 01 0 1.250 0 5.400 0 54.600" -> quantity 48, unit_price 1250, IVA (%) 0 (no iva entry), discount amount 5400 (the Total Descuento cell is not 0), printed_line_total 54600.
+ "24 01 3.120 2.100 19 0 9.576 63.096" -> ibua amount 3120 (money for the line, so "amount", not per unit), iva gravado rate 19 amount 9576, discount none (its cell is 0), total 63096.
+ "10 01 0 800 19 400 1.444 9.044" -> IVA % is 19, discount is the next cell: amount 400 (NOT percent 19), iva rate 19 amount 1444, total 9044.
+ "6 03 0 0 0 0 0 0" -> is_bonus true, unit_price 0, discount none, taxes [], printed_line_total 0.
+ line_items: [{"quantity":48,"unit_price":1250,"discount":{"kind":"amount","value":5400,"basis":null},"taxes":[],"is_bonus":false,"printed_line_total":54600},
+ {"quantity":24,"unit_price":2100,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"ibua","treatment":"gravado","rate":null,"fixed_amount_per_unit":null,"amount":3120,"inclusive":null},{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":9576,"inclusive":null}],"is_bonus":false,"printed_line_total":63096},
+ {"quantity":10,"unit_price":800,"discount":{"kind":"amount","value":400,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":1444,"inclusive":null}],"is_bonus":false,"printed_line_total":9044},
+ {"quantity":6,"unit_price":0,"discount":{"kind":"none","value":0,"basis":null},"taxes":[],"is_bonus":true,"printed_line_total":0}]
+ (description, sku_if_visible, presentation, pack_size, uom_hint omitted here for brevity; you always emit them.) Footer "Descuentos 5.800" only sums the line discounts -> "discounts": [].
+Example B — header "Cod | Descripción | Cant | Vr. Unit | Dcto % | IVA | Total"; row "ARROZ X500G | 100 | 2.000 | 5,0 | 19 | 226.100" -> discount percent 5 (NOT money 10000: never calculate), iva gravado rate 19, amount null (not printed), printed_line_total 226100. A row with Dcto % "-" or 0 -> kind none.
+ {"quantity":100,"unit_price":2000,"discount":{"kind":"percent","value":5,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":226100}
+Example C — POS ticket "PRECIOS CON IVA INCLUIDO", price_basis "con_iva", legend "G=19% E=Exento": lines "1 PAN TAJADO 500G  G  8.900" + helper "2 UN X 4.450", and "2 QUESO CAMPESINO  E  12.500" (no helper).
+ {"quantity":2,"unit_price":4450,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":8900},
+ {"quantity":1,"unit_price":12500,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"iva","treatment":"exento","rate":0,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":12500}
+Example D — a line with "IBUA $65/u" in an "Otros imp." column (value per unit) -> ibua fixed_amount_per_unit 65, amount null; "INC 8%" -> inc rate 8.`,
+      prompt_template: null,
+    },
+    {
+      // QUI-855 paso 8a - Revalidacion con IA de la precarga de compras. Relee el
+      // documento original (S3) y lo compara contra los datos consolidados y la
+      // nota del usuario. Consumida por el processor async invoice-revalidate.
+      key: 'invoice_ocr_revalidate',
+      ai_feature_category: 'async_queue',
+      name: 'Revalidacion de Factura de Compra (IA)',
+      description:
+        'Relee el documento original de una factura de compra, lo compara contra los datos consolidados por el usuario y su nota, y devuelve datos re-consolidados + informe de divergencias',
+      output_format: 'json',
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0,
+      max_tokens: 50000,
+      is_active: true,
+      system_prompt: `INVOICE OCR PROMPT v2
+You are a purchase-invoice REVALIDATION system. You receive the ORIGINAL supplier invoice (image or PDF) plus the CONSOLIDATED JSON: the data the user currently has on screen after the first AI extraction and the user's own edits. Re-read the document, compare it against the consolidated data line by line and field by field, and return a corrected consolidated JSON together with an audit report. You transcribe and classify; you never calculate.
+
+INPUTS
+- The document: attached to the user message.
+- CONSOLIDATED JSON (current data, schema_version 2, same schema as the invoice scanner):
+{{consolidated_json}}
+- USER NOTE (free text from the user, may be empty):
+{{user_note}}
+
+You MUST return ONLY valid JSON matching this EXACT envelope — no markdown, no explanations, no extra keys. Annotations after "—" are documentation, not part of the output:
+
+{
+  "consolidated": {
+    "schema_version": 2,
+    "supplier": { "name": "string — full business name", "tax_id": "string or null — NIT with verification digit", "address": "string or null", "phone": "string or null" },
+    "invoice_number": "string",
+    "invoice_date": "YYYY-MM-DD",
+    "currency": "string — ISO 4217 code (e.g. COP)",
+    "payment_terms": "string or null",
+    "price_basis": "sin_iva" | "con_iva" — dominant basis of the printed unit prices,
+    "line_items": [
+      {
+        "description": "string — product name as printed",
+        "sku_if_visible": "string or null — code/reference column (Código, Cod., Ref, SKU)",
+        "quantity": number,
+        "unit_price": number — as printed, untouched,
+        "price_basis": "sin_iva" | "con_iva" | null — null = same as the invoice,
+        "discount": {
+          "kind": "percent" | "amount" | "none",
+          "value": number — the figure exactly as printed (percent: 10 means 10 %; amount: money of the WHOLE line; none: 0),
+          "basis": "sin_iva" | "con_iva" | null — null = same basis as the price
+        },
+        "taxes": [
+          {
+            "type": "iva" | "inc" | "icui" | "ibua",
+            "treatment": "gravado" | "exento" | "excluido",
+            "rate": number or null — printed PERCENTAGE of THIS row (19 means 19 %); null when not printed,
+            "fixed_amount_per_unit": number or null — only if the invoice prints a value per unit,
+            "amount": number or null — tax money printed for the line, only if printed,
+            "inclusive": boolean or null — null unless the document says this tax is inside the price
+          }
+        ],
+        "is_bonus": boolean,
+        "printed_line_total": number or null — the row's printed total ("Valor Total", "Total"), transcribed only
+      }
+    ],
+    "discounts": [
+      { "kind": "percent" | "amount", "value": number, "scope": "subtotal" | "total", "is_early_payment": boolean, "label": "string or null" }
+    ],
+    "printed_subtotal": number or null,
+    "printed_iva_total": number or null — IVA only, never withholdings,
+    "printed_total": number or null — total to pay BEFORE withholdings,
+    "confidence": number (0-100)
+  },
+  "report": {
+    "summary": "string — 2 to 4 sentences, in Spanish",
+    "confidence": "high" | "medium" | "low",
+    "findings": [{ "severity": "info" | "warning", "message": "string in Spanish" }],
+    "red_flags": [{ "message": "string in Spanish", "line_index": number or null }],
+    "divergences": [{
+      "line_index": number or null,
+      "field": "string — field name, e.g. quantity, unit_price, discount, taxes, price_basis, printed_line_total, supplier.name",
+      "consolidated_value": any,
+      "document_value": any,
+      "revalidated_value": any,
+      "reason": "string in Spanish"
+    }]
+  }
+}
+
+EXTRACTION RULES (same semantics as the invoice scanner)
+1. PRINCIPLE. You only TRANSCRIBE what is printed and CLASSIFY its nature (unit of a discount, basis of a price, treatment of a tax). You NEVER calculate: do not convert a percentage into money, do not add or remove IVA, do not prorate, do not derive a value that is not printed. The backend does all the arithmetic. If a figure is not printed, use null (or "none" / 0 where the schema says so). Never invent data.
+2. NUMBERS. Read separators against the document currency stated in the user message. In Colombian documents (COP) "." is the THOUSANDS separator and "," the decimal one: "24.990" = 24990, "1.985" = 1985, "1.234.567,89" = 1234567.89. COP has ZERO decimals, so a COP money value is a whole integer; a price like 24.99 is a misread of "24.990". Never return formatted numbers: no ".", "," or currency symbol inside JSON numbers. A percentage keeps its own decimals ("2,5 %" = 2.5). "currency" is the code stated in the user message unless the document explicitly prints another one.
+3. SUPPLIER AND HEADER. NIT may appear as "NIT", "N.I.T.", "CC"; include the verification digit with a hyphen ("900123456-7"). Extract ALL visible line items; put product codes from columns like "Código", "Cod.", "Ref", "SKU" in "sku_if_visible".
+4. POS / CONSUMER TICKETS print the quantity on its OWN helper line as "<qty> <unit> X <unit_price>" (e.g. "2 UN X 3.770", "0,315 KGM X 6.300"). quantity = number before the unit (here a decimal comma is real: "0,315 KGM" = 0.315); unit_price = value after the "X"; printed_line_total = the amount in the value column. NEVER emit the helper line as its own line_item. An item without helper line: quantity 1, unit_price = its printed amount.
+5. READ EACH NUMBER BY ITS COLUMN HEADER. First identify the table header, then read every row cell by cell UNDER the header of that column, left to right. Never shift values between columns or rows and never copy a number from another row. Column order differs between suppliers (a tax column may sit BEFORE the price column). Header catalog:
+   - Cant / Cantidad -> quantity.
+   - Vr. Unit / Valor Unitario / Precio Unitario (sin IVA) -> unit_price.
+   - Dcto % / % Desc / Desc. (%) -> discount kind "percent" (value = the percentage).
+   - Vr. Desc / Total Descuento / Descuento $ / Dto. -> discount kind "amount" (value = the money).
+   - IVA (%) / % IVA / Tarifa -> taxes iva "rate". It is a tax RATE, NEVER a discount, whatever its value (19, 5, 0).
+   - Total Iva / Vr. IVA / IVA $ -> taxes iva "amount". NEVER an "ibua" and never a discount.
+   - Impuesto Saludable / IS$ / IBUA -> taxes ibua "amount" (the money printed for the whole line; NOT "fixed_amount_per_unit" unless the header or cell says per unit, e.g. "$65/u"). IS% / (IS20%) / ICUI -> taxes icui with "rate" (the percentage in the label) and "amount" (the money printed).
+   - Impoconsumo / INC -> taxes inc.
+   - Valor Total / Total / Vr. Total -> printed_line_total.
+   - M/C/D (Mercancía / Cambio / Devolución-bonificación) is a movement type code (01, 03), not a number to use.
+6. LINE DISCOUNT. Classify by what the line PRINTS, and copy the figure as printed: a percentage -> kind "percent", value = that percentage (10 for 10 %); money -> kind "amount", value = the money of the whole line. If the table HAS a discount column ("Total Descuento", "Vr. Desc", "Dcto %"), read it on EVERY row: a non-zero value there => kind "amount" (or "percent") with EXACTLY that value, even when it looks small next to the price; kind "none" ONLY when that row's discount cell is 0 / empty / "-" or the table has no discount column. Look at the discount cell of EVERY row separately: in a typical distributor invoice most rows carry a non-zero discount. NEVER convert one unit into the other. If the line prints both a % and money, use kind "amount" with the money. If the invoice shows only an already-discounted price and no discount column, kind "none". "basis" is null unless the document states the discount is with or without IVA and that differs from the price.
+7. FOOTER DISCOUNTS ("discounts"). List a footer discount ONLY when it is NOT already broken down per line. If the footer "Descuentos" just sums the line discounts, do NOT repeat it (leave "discounts" empty). "kind"/"value" as printed (percent or money), "scope" = "subtotal" or "total" according to what it is applied over. Early-payment discounts ("pronto pago", "2/10 neto 30", "2 % si paga antes de...") go in "discounts" with is_early_payment true; commercial ones with false. Put the printed wording in "label".
+8. PRICE BASIS ("price_basis", invoice and per line). "con_iva": legends "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC"; POS tickets whose lines carry a tax LETTER (G, E, B...) and no separate IVA added on top. "sin_iva": "Precio sin IVA", "Precio Unitario sin IVA", "Vr. Unit. antes de IVA", or a separate IVA line where subtotal + IVA is about the total (usual B2B layout). Line "price_basis" is null unless that line clearly differs from the invoice. When there is no legend and it is still unclear, use "sin_iva".
+9. TAXES (per line, max 4, at most one per type). List every tax printed for that row; do not invent taxes; empty array when none is printed.
+   - "treatment": "gravado" when it charges; "exento" for "E", "Exento"; "excluido" for "Excluido", "No grava". Exempt/excluded rows use rate 0. A printed 0 % is "exento" unless the document says "excluido".
+   - "rate": the percentage printed for THAT row. If the row prints its own rate, never replace it with the invoice-wide one. Use the invoice-wide rate only when the row prints none and the document shows a single IVA rate for the taxed rows.
+   - "amount": tax money if printed. "fixed_amount_per_unit": only if a value per unit is printed. IBUA / "Impuesto Saludable" printed for the whole line -> "amount" with rate null.
+   - "Bolsas" (bag tax) and similar are NOT purchase taxes: ignore them (they are not a tax entry).
+   - "inclusive": null by default (the backend derives it from price_basis).
+10. BONUS. EVERY row whose unit price is 0 while it has a quantity > 0 (bonificación, obsequio, M/C/D code 03) is a bonus: it is still included with is_bonus true, unit_price 0, discount kind "none", printed_line_total 0 or as printed.
+11. PRINTED TOTALS. "printed_subtotal", "printed_iva_total" (IVA only) and "printed_total" (the "Total a pagar" BEFORE withholdings) are transcribed from the footer as printed, null when absent. Never subtract ReteFuente / ReteICA / ReteIVA from any of them.
+12. READ-ONLY CHECK. Before answering, if the numbers printed on a row look inconsistent with each other, or the row totals are far from the printed total (a ~1000x gap means a separator misread), RE-READ that row against its column headers. Never change a printed value to make it fit.
+
+WORKED EXAMPLES (invented rows; they only show the SHAPE of the reasoning — never reuse their numbers). The JSON shown is what "consolidated.line_items" must contain after re-reading the document.
+Example A (cell order matters: ... price, IVA %, DISCOUNT money, IVA money, total; the small integer 19 or 5 right after the price is the IVA %, the discount is the NEXT cell) — header "Cant | M/C/D | Impuesto Saludable | Precio Unitario sin IVA | IVA (%) | Total Descuento | Total Iva | Valor Total". Rows read cell by cell:
+ "48 01 0 1.250 0 5.400 0 54.600" -> quantity 48, unit_price 1250, IVA (%) 0 (no iva entry), discount amount 5400 (the Total Descuento cell is not 0), printed_line_total 54600.
+ "24 01 3.120 2.100 19 0 9.576 63.096" -> ibua amount 3120 (money for the line, so "amount", not per unit), iva gravado rate 19 amount 9576, discount none (its cell is 0), total 63096.
+ "10 01 0 800 19 400 1.444 9.044" -> IVA % is 19, discount is the next cell: amount 400 (NOT percent 19), iva rate 19 amount 1444, total 9044.
+ "6 03 0 0 0 0 0 0" -> is_bonus true, unit_price 0, discount none, taxes [], printed_line_total 0.
+ line_items: [{"quantity":48,"unit_price":1250,"discount":{"kind":"amount","value":5400,"basis":null},"taxes":[],"is_bonus":false,"printed_line_total":54600},
+ {"quantity":24,"unit_price":2100,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"ibua","treatment":"gravado","rate":null,"fixed_amount_per_unit":null,"amount":3120,"inclusive":null},{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":9576,"inclusive":null}],"is_bonus":false,"printed_line_total":63096},
+ {"quantity":10,"unit_price":800,"discount":{"kind":"amount","value":400,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":1444,"inclusive":null}],"is_bonus":false,"printed_line_total":9044},
+ {"quantity":6,"unit_price":0,"discount":{"kind":"none","value":0,"basis":null},"taxes":[],"is_bonus":true,"printed_line_total":0}]
+ (description, sku_if_visible omitted here for brevity; you always emit them.) Footer "Descuentos 5.800" only sums the line discounts -> "discounts": [].
+Example B — header "Cod | Descripción | Cant | Vr. Unit | Dcto % | IVA | Total"; row "ARROZ X500G | 100 | 2.000 | 5,0 | 19 | 226.100" -> discount percent 5 (NOT money 10000: never calculate), iva gravado rate 19, amount null (not printed), printed_line_total 226100. A row with Dcto % "-" or 0 -> kind none.
+ {"quantity":100,"unit_price":2000,"discount":{"kind":"percent","value":5,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":226100}
+Example C — POS ticket "PRECIOS CON IVA INCLUIDO", price_basis "con_iva", legend "G=19% E=Exento": lines "1 PAN TAJADO 500G  G  8.900" + helper "2 UN X 4.450", and "2 QUESO CAMPESINO  E  12.500" (no helper).
+ {"quantity":2,"unit_price":4450,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"iva","treatment":"gravado","rate":19,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":8900},
+ {"quantity":1,"unit_price":12500,"discount":{"kind":"none","value":0,"basis":null},"taxes":[{"type":"iva","treatment":"exento","rate":0,"fixed_amount_per_unit":null,"amount":null,"inclusive":null}],"is_bonus":false,"printed_line_total":12500}
+Example D — a line with "IBUA $65/u" in an "Otros imp." column (value per unit) -> ibua fixed_amount_per_unit 65, amount null; "INC 8%" -> inc rate 8.
+Example E — consolidated has line 0 = {"quantity":48,"unit_price":1250,"discount":{"kind":"none","value":0}} but the document row "48 01 0 1.250 0 5.400 0 54.600" prints discount money 5.400 -> real divergence: {"line_index":0,"field":"discount","consolidated_value":"none 0","document_value":"amount 5400","revalidated_value":"amount 5400","reason":"El documento imprime un descuento de $5.400 en la línea."}, and the returned consolidated line 0 uses kind "amount", value 5400. Do NOT compute anything to decide it: only compare printed cells.
+
+REVALIDATION RULES
+R1. Verify EVERY line and EVERY header field against the document. The document is the source of truth for what is printed; the consolidated JSON is the source of truth for what the user decided.
+R2. USER DECISIONS — if the USER NOTE explicitly says a value was changed on purpose (a different price, a discount added or removed, a tax edited, a line adjusted), KEEP the consolidated value, do NOT count it as an error, and report it as a divergence whose "reason" starts with "user_override:" followed by a short Spanish explanation. Never overwrite a value the note defends.
+R3. Any other difference between the consolidated value and the document is a real divergence: put the value read from the document in "revalidated_value" and use it in the returned "consolidated". Also fill "consolidated_value" (what the user had) and "document_value" (what the document prints). Compare the printed figures and their classification (discount kind, price_basis, tax treatment), never recomputed money.
+R4. NEVER invent data. If a value is not visible in the document, keep the consolidated value and, when it matters, add a "warning" finding saying it could not be verified. Do not add lines that are not in the document and do not drop lines that are.
+R5. Keep the SAME order and number of line_items as the consolidated JSON, unless the document clearly shows a line that is missing or duplicated; explain it in a divergence (line_index null for a missing line) and a red flag. Keep "schema_version": 2 in the returned consolidated.
+R6. "line_index" is the 0-based position in the CONSOLIDATED line_items array, or null when the item is not a line (header fields, missing lines).
+R7. Return "divergences" empty when everything matches. Report at most 100; if there are more, report the most costly ones and mention the rest in the summary.
+R8. "red_flags" are serious problems that should stop the user from confirming: printed totals that clearly disagree with the transcribed rows, an amount misread by 1000x, a tax that clearly does not apply, a document that does not look like the consolidated invoice (different supplier or invoice number), an illegible document. Empty array when none.
+R9. "findings": "info" for neutral notes (for example user overrides respected) and "warning" for things the user should double check.
+R10. "report.confidence": high when the document is clear and every field was verified, medium when part of it was unclear, low when the document is hard to read or barely matches. "consolidated.confidence" is a number 0-100.
+R11. Every human-readable string in "report" MUST be written in Spanish. Field names and enum values stay exactly as specified. Return ONLY the JSON object.`,
       prompt_template: null,
     },
     {
@@ -1514,6 +1689,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
           is_active: app.is_active,
           system_prompt: app.system_prompt,
           prompt_template: app.prompt_template,
+          retry_config: (app as any).retry_config ?? undefined,
           ai_feature_category: (app as any).ai_feature_category ?? null,
           metadata: (app as any).metadata ?? undefined,
         },
@@ -1530,7 +1706,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'received_document_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1704,7 +1880,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'received_document_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

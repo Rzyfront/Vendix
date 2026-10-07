@@ -980,6 +980,7 @@ export function createVariantTools(deps: VariantToolDeps): RegisteredTool[] {
       version: '1',
       domain: 'products',
       requiresConfirmation: true,
+      irreversible: true,
       description:
         'Elimina una variante de forma definitiva (no se puede deshacer). Solo procede si la variante NO tiene existencias ni reservas activas: con stock, la eliminación se bloquea (PROD_VARIANT_HAS_STOCK_001) y hay que ajustar a 0 primero con adjust_stock. Requiere product_variant_id: obtenlo con get_product.',
       parameters: {

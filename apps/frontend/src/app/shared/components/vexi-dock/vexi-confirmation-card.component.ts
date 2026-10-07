@@ -51,11 +51,13 @@ interface DiffRow {
   template: `
     <section
       class="vexi-card"
+      [class.vexi-card--embedded]="embedded()"
       [class.vexi-card--warning]="status() === 'warning'"
       [class.vexi-card--error]="status() === 'error'"
       role="group"
-      aria-label="Cambio propuesto por Vexi"
+      [attr.aria-label]="'Cambio propuesto por ' + agentLabel()"
     >
+      @if (!embedded()) {
       <header class="vexi-card__header">
         <span class="vexi-card__badge" aria-hidden="true">
           @switch (status()) {
@@ -71,10 +73,11 @@ interface DiffRow {
           }
         </span>
         <span class="vexi-card__heading">
-          <strong class="vexi-card__title">Vexi propone un cambio</strong>
+          <strong class="vexi-card__title">{{ agentLabel() }} propone un cambio</strong>
           <span class="vexi-card__target">{{ target() }}</span>
         </span>
       </header>
+      }
 
       @if (message()) {
         <p class="vexi-card__message">{{ message() }}</p>
@@ -97,7 +100,7 @@ interface DiffRow {
         </dl>
       } @else {
         <p class="vexi-card__message">
-          Vexi no pudo detallar el cambio campo a campo. Revisa la conversación
+          {{ agentLabel() }} no pudo detallar el cambio campo a campo. Revisa la conversación
           antes de aprobar.
         </p>
       }
@@ -105,7 +108,10 @@ interface DiffRow {
       <!-- Two explicit actions of the same size and the same adjacency: there
            is no default, no timeout and no "approve on inactivity". Neither
            button is autofocused, so an Enter pressed out of habit in the
-           composer can never approve a write. -->
+           composer can never approve a write. Vex plan steps reuse this card
+           as a diff-only block ('hideFooter'), with the approval living on
+           the plan footer or the step's own card instead. -->
+      @if (!hideFooter()) {
       <footer class="vexi-card__actions">
         <button
           type="button"
@@ -131,10 +137,11 @@ interface DiffRow {
           }
         </button>
       </footer>
+      }
 
       @if (status() === 'error') {
         <p class="vexi-card__blocked">
-          Este cambio no se puede aplicar tal como está. Pídele a Vexi que lo
+          Este cambio no se puede aplicar tal como está. Pídele a {{ agentLabel() }} que lo
           corrija.
         </p>
       }
@@ -155,6 +162,14 @@ interface DiffRow {
         border-radius: 14px;
         background: var(--color-surface, #fff);
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+      }
+
+      .vexi-card--embedded {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
       }
 
       .vexi-card--warning {
@@ -338,6 +353,12 @@ export class VexiConfirmationCardComponent {
   private readonly auth = inject(AuthFacade);
 
   readonly proposal = input.required<VexiProposal>();
+  /** Hides the approve/reject footer, rendering the card as a diff-only block. */
+  readonly hideFooter = input<boolean>(false);
+  /** Agent name shown in the card copy. Default keeps the Vexi dock unchanged. */
+  readonly agentLabel = input<string>('Vexi');
+  /** Renders only the diff (no header, border or padding), for hosts that frame it. */
+  readonly embedded = input<boolean>(false);
   readonly approve = output<void>();
   readonly reject = output<void>();
 

@@ -111,3 +111,11 @@ export class QuoteManualShippingDto {
   @Min(0)
   manual_shipping_price: number;
 }
+
+/** Rates for a store-pickup method, quoted without a buyer address. */
+export class QuotePickupShippingDto {
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  shipping_method_id: number;
+}

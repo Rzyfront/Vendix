@@ -19,6 +19,7 @@ import { InvoiceEmissionGateService } from './services/invoice-emission-gate.ser
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
+import { FiscalScanHandlersRegistrar } from './fiscal-scan-handlers.registrar';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
@@ -39,11 +40,15 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
+import { OneShotEmissionService } from './one-shot-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
 import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
+import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
+import { StoreReceivedDocumentsController } from '../../received-documents/store-received-documents.controller';
+import { StoreDocumentReceptionConnectionsController } from '../../received-documents/store-document-reception-connections.controller';
 
 @Module({
   imports: [
@@ -61,6 +66,7 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     // Proveedores de los perfiles de facturación. Su CONTROLLER va en el array
     // de abajo, no acá: ver la nota de `profiles.module.ts`.
     ProfilesModule,
+    SharedReceivedDocumentsModule,
     // E.6 — reenvío de facturas a otro correo. A diferencia de `ProfilesModule`,
     // SÍ declara su propio controller (ver `invoice-delivery.controller.ts`):
     // su ruta de 4 segmentos no colisiona con el `:id` de `InvoicingController`.
@@ -81,6 +87,12 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     // cadena «profiles». Express resuelve por orden de registro y el orden es la
     // posición en ESTE array. No lo muevas debajo.
     ProfilesController,
+    // Keep the more-specific received-document prefix ahead of InvoicingController
+    // (`GET :id`), which otherwise captures `received-documents` as an invoice id.
+    // The nested `connections` collection must precede the parent
+    // `received-documents/:id` route for the same Express registration-order reason.
+    StoreDocumentReceptionConnectionsController,
+    StoreReceivedDocumentsController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva
     // `@RequireModuleFlow('invoicing')`, porque el indicador del cajero tiene
@@ -104,6 +116,7 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     ResolutionsService,
     ResolutionScannerService,
     DianHabilitationScannerService,
+    FiscalScanHandlersRegistrar,
     InvoiceNumberGenerator,
     // Motor aritmético único del documento, puerta de identidad fiscal del
     // adquiriente y prevalidador DIAN del documento. Los tres son PUROS —sin
@@ -140,6 +153,7 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     // Carril del POS: emisión desacoplada del cobro + el oyente que la dispara
     // después del commit de la venta.
     PosFiscalEmissionService,
+    OneShotEmissionService,
     PosSaleCompletedListener,
   ],
   exports: [

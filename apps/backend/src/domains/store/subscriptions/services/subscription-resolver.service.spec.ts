@@ -72,6 +72,27 @@ describe('SubscriptionResolverService', () => {
     };
   }
 
+  function makeSubscriptionWithTools(
+    toolsAllowed: string[] | undefined,
+    overrides: any = {},
+  ) {
+    const subscription = makeSubscription(overrides);
+    return {
+      ...subscription,
+      paid_plan: {
+        ...subscription.paid_plan,
+        ai_feature_flags: {
+          ...baseAIFlags,
+          tool_agents: {
+            enabled: true,
+            degradation: 'warn',
+            ...(toolsAllowed !== undefined && { tools_allowed: toolsAllowed }),
+          },
+        },
+      },
+    };
+  }
+
   it('base plan only → returns plan.ai_feature_flags verbatim', async () => {
     prismaMock.store_subscriptions.findUnique.mockResolvedValue(
       makeSubscription(),
@@ -152,6 +173,76 @@ describe('SubscriptionResolverService', () => {
     expect(resolved.features.text_generation?.monthly_tokens_cap).toBe(200000);
   });
 
+  it('partner restricts wildcard tool scope to the requested domains', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(['*'], {
+        partner_override: {
+          organization_id: 42,
+          updated_at: new Date(),
+          feature_overrides: {
+            tool_agents: { enabled: true, tools_allowed: ['orders'] },
+          },
+          base_plan: {},
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['orders']);
+  });
+
+  it('partner wildcard does not widen a domain or empty base scope', async () => {
+    for (const baseScope of [['orders'], []]) {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValueOnce(
+        makeSubscriptionWithTools(baseScope, {
+          partner_override: {
+            organization_id: 42,
+            updated_at: new Date(),
+            feature_overrides: {
+              tool_agents: { enabled: true, tools_allowed: ['*'] },
+            },
+            base_plan: {},
+          },
+        }),
+      );
+      const resolved = await service.resolveSubscription(10);
+      expect(resolved.features.tool_agents?.tools_allowed).toEqual(baseScope);
+    }
+  });
+
+  it('wildcard base with wildcard partner override stays wildcard', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(['*'], {
+        partner_override: {
+          organization_id: 42,
+          updated_at: new Date(),
+          feature_overrides: {
+            tool_agents: { enabled: true, tools_allowed: ['*'] },
+          },
+          base_plan: {},
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['*']);
+  });
+
+  it('partner can restrict a base plan with no declared tool list', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(undefined, {
+        partner_override: {
+          organization_id: 42,
+          updated_at: new Date(),
+          feature_overrides: {
+            tool_agents: { enabled: true, tools_allowed: ['orders'] },
+          },
+          base_plan: {},
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['orders']);
+  });
+
   it('active promo overlay → union-of-max', async () => {
     const now = new Date();
     const appliedAt = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000); // 5 days ago
@@ -183,6 +274,40 @@ describe('SubscriptionResolverService', () => {
     const tools = resolved.features.tool_agents?.tools_allowed ?? [];
     expect(tools).toContain('x');
     expect(tools).toContain('y');
+  });
+
+  it('promo wildcard expands a restricted scope without losing the wildcard', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools(['orders'], {
+        promotional_applied_at: new Date(),
+        promotional_plan: {
+          ai_feature_flags: {
+            tool_agents: { enabled: true, tools_allowed: ['*'] },
+          },
+          promo_rules: { duration_days: 30 },
+          updated_at: new Date(),
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual(['*']);
+  });
+
+  it('promo preserves an explicit empty tool scope', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      makeSubscriptionWithTools([], {
+        promotional_applied_at: new Date(),
+        promotional_plan: {
+          ai_feature_flags: {
+            tool_agents: { enabled: true, tools_allowed: [] },
+          },
+          promo_rules: { duration_days: 30 },
+          updated_at: new Date(),
+        },
+      }),
+    );
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.tool_agents?.tools_allowed).toEqual([]);
   });
 
   it('expired promo (applied_at + duration_days < now) → overlay ignored', async () => {
@@ -265,5 +390,85 @@ describe('SubscriptionResolverService', () => {
     const resolved = await service.resolveSubscription(10);
     expect(resolved.planCode).toBe('core-free');
     expect(prismaMock.store_subscriptions.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('vex_agent resolves with its caps verbatim from the base plan', async () => {
+    const subscription = makeSubscription();
+    subscription.paid_plan = {
+      ...subscription.paid_plan,
+      ai_feature_flags: {
+        ...baseAIFlags,
+        vex_agent: {
+          enabled: true,
+          monthly_tokens_cap: 1000000,
+          daily_messages_cap: 100,
+          monthly_tool_calls_cap: 5000,
+        },
+      },
+    };
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(subscription);
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.vex_agent).toEqual({
+      enabled: true,
+      monthly_tokens_cap: 1000000,
+      daily_messages_cap: 100,
+      monthly_tool_calls_cap: 5000,
+    });
+  });
+
+  it('partner override keeps vex_agent caps at min instead of dropping them', async () => {
+    const subscription = makeSubscription({
+      partner_override: {
+        organization_id: 42,
+        updated_at: new Date('2026-04-15T00:00:00Z'),
+        feature_overrides: {
+          vex_agent: { enabled: true, monthly_tool_calls_cap: 1000 },
+        },
+        base_plan: {},
+      },
+    });
+    subscription.paid_plan = {
+      ...subscription.paid_plan,
+      ai_feature_flags: {
+        ...baseAIFlags,
+        vex_agent: {
+          enabled: true,
+          daily_messages_cap: 100,
+          monthly_tool_calls_cap: 5000,
+        },
+      },
+    };
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(subscription);
+    const resolved = await service.resolveSubscription(10);
+    // Sin `monthly_tool_calls_cap` en la lista de caps, el merge lo borraba
+    // y el gate quedaba con `enabled` pero sin presupuesto.
+    expect(resolved.features.vex_agent?.enabled).toBe(true);
+    expect(resolved.features.vex_agent?.monthly_tool_calls_cap).toBe(1000);
+    expect(resolved.features.vex_agent?.daily_messages_cap).toBe(100);
+  });
+
+  it('promo overlay keeps the higher vex_agent tool budget', async () => {
+    const now = new Date();
+    const subscription = makeSubscription({
+      promotional_applied_at: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
+      promotional_plan: {
+        ai_feature_flags: {
+          vex_agent: { enabled: true, monthly_tool_calls_cap: 9000 },
+        },
+        promo_rules: { duration_days: 30 },
+        updated_at: new Date('2026-04-20T00:00:00Z'),
+      },
+    });
+    subscription.paid_plan = {
+      ...subscription.paid_plan,
+      ai_feature_flags: {
+        ...baseAIFlags,
+        vex_agent: { enabled: true, monthly_tool_calls_cap: 5000 },
+      },
+    };
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(subscription);
+    const resolved = await service.resolveSubscription(10);
+    expect(resolved.features.vex_agent?.enabled).toBe(true);
+    expect(resolved.features.vex_agent?.monthly_tool_calls_cap).toBe(9000);
   });
 });

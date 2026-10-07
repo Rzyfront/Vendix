@@ -79,6 +79,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a menu entry to the store module catalog | `vendix-panel-ui` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
+| Adding a new AI scan kind to the generic ai-scan queue | `vendix-ai-queue` |
 | Adding a new RUT responsibility code to forms, scanners or seeds | `vendix-dian-issuer-identity` |
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
@@ -90,6 +91,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding backend permissions | `vendix-permissions` |
 | Adding bulk operations to a module (orders, purchases, products) | `vendix-bulk-operations` |
 | Adding chat features | `vendix-ai-chat` |
+| Adding denied_tools to an AI agent row | `vendix-vex-agent` |
 | Adding dependencies to apps/mobile/package.json | `mobile-dev` |
 | Adding feature gates or paywalls backed by subscription state | `vendix-subscription-gate` |
 | Adding frontend routes | `vendix-frontend-routing` |
@@ -111,6 +113,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding or changing a frontend analytics cache key | `vendix-analytics-metrics` |
 | Adding or changing report columns, headers, number formats or totals | `vendix-report-xlsx` |
 | Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
+| Adding or editing Vex UI blocks (vex_render_*, vex_block_*) | `vendix-vex-agent` |
 | Adding or editing a customer shipping address | `vendix-address-geocoding` |
 | Adding or editing per-industry module rules | `vendix-panel-ui` |
 | Adding or modifying notification types | `vendix-notifications-system` |
@@ -143,6 +146,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
+| Changing whole-plan approval or plan tokens (PlanApprovalService) | `vendix-vex-agent` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Checking current development app status | `buildcheck-dev` |
 | Checking if a Vendix Linear issue already exists | `linear-issues` |
@@ -172,6 +176,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring the Vendix Linear API key | `linear-connect` |
 | Confirming a production fix matches its requirement or reporting defects | `verify-ticket-prod` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
+| Consuming an ai-scan job from the frontend with AiScanJobService.enqueueAndWait | `vendix-ai-queue` |
 | Consuming tool_call or tool_result stream frames | `vendix-ai-streaming` |
 | Converting a client price list or product catalog into an official import template | `product-catalog-normalizer` |
 | Creating AI queue processors | `vendix-ai-queue` |
@@ -211,6 +216,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
 | Debugging INV_STOCK_INSUFFICIENT_LINES or INV_STOCK_002 | `vendix-inventory-stock` |
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
+| Debugging a Vex turn, plan approval, or block interaction | `vendix-vex-agent` |
 | Debugging a Vexi answer that claims a UI change it never confirmed | `vendix-vexi-agent` |
 | Debugging a fire/resend/production block on insufficient tracked ingredient (INV_STOCK_INSUFFICIENT_LINES kind:'ingredient') | `vendix-restaurant-ops` |
 | Debugging a metric that disagrees between two screens | `vendix-analytics-metrics` |
@@ -222,6 +228,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging an invoice that declares an obligation the merchant does not have | `vendix-dian-issuer-identity` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
+| Debugging high backend heap or Reached heap limit | `vendix-prisma-scopes` |
 | Debugging inaccurate or inconsistent distance-based shipping cost | `vendix-shipping-distance-pricing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
 | Debugging over-quota bypass or double-count on provider retries | `vendix-redis-quota` |
@@ -234,6 +241,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Deciding which order or expense states count for a period | `vendix-analytics-metrics` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
+| Declaring or providing a scoped Prisma service in a module | `vendix-prisma-scopes` |
 | Depurando un rate limit que bloquea a todos los usuarios a la vez | `vendix-trust-proxy-chain` |
 | Depurando un rate limit que no frena a un atacante | `vendix-trust-proxy-chain` |
 | Depurar un error cuyo síntoma no señala su causa | `vendix-known-errors` |
@@ -279,6 +287,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing, fixing or improving an existing analytics view or dashboard card | `vendix-analytics-metrics` |
 | Editing, fixing or improving an existing report | `vendix-report-xlsx` |
 | El dev server cae en bucle o el dist queda inconsistente | `vendix-known-errors` |
+| Enabling or configuring Vex for a store (Agentes IA settings) | `vendix-vex-agent` |
 | Escribir o revisar una migración de base de datos | `vendix-known-errors` |
 | Explaining why a module is not visible to a user | `vendix-panel-ui` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
@@ -293,6 +302,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Fixing report dates, timezone, formatting or wrong/incomplete data | `vendix-report-xlsx` |
 | Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag()) | `vendix-zoneless-signals` |
 | Formatting chart axis labels with dates | `vendix-date-timezone` |
+| Gating a feature behind the vex_agent subscription feature | `vendix-vex-agent` |
 | Gating a printed or displayed fiscal figure (POS ticket, receipt, invoice copy) by fiscal state | `vendix-fiscal-scope` |
 | General Development | `how-to-dev` |
 | Generating an XLSX file from a backend service | `vendix-report-xlsx` |
@@ -324,6 +334,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Linking a PR to its Linear issue when opening a PR to develop | `git-workflow` |
 | Linking a Vexi attachment to the record it originated | `vendix-vexi-agent` |
 | Listing Vendix issues in Linear | `linear-issues` |
+| Making an AI scanner or AI generation endpoint async (anything that can exceed 60 s) | `vendix-ai-queue` |
 | Making search accent-insensitive (cafe finds Café) | `vendix-smart-search` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
@@ -528,6 +539,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
 | Working with store_settings.inventory.allow_negative_stock or allow_ingredient_overuse | `vendix-inventory-stock` |
+| Working with the Vex full-screen business agent (/admin/vex) | `vendix-vex-agent` |
 | Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend) | `vendix-report-xlsx` |
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Working with withholding_breakdown per stop (retefuente/reteiva/reteica) | `vendix-dispatch-routes` |

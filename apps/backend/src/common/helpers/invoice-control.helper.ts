@@ -257,3 +257,35 @@ export function resolveInvoiceControl(
     range_to: String(resolution.range_to),
   };
 }
+
+/**
+ * Variante NO-THROW de {@link resolveInvoiceControl}, para las superficies que
+ * RECOLECTAN lo que falta (la prevalidación `validate-draft`) en lugar de
+ * abortar en el primer defecto.
+ *
+ * No duplica ninguna regla: ejecuta el resolvedor estricto y atrapa su
+ * `VendixHttpException`, de modo que la lista de requisitos y la emisión real no
+ * pueden divergir. Cualquier otro error (un bug, no un dato incompleto) SE
+ * RELANZA: convertirlo en un `error` silencioso escondería un 500.
+ *
+ * @returns `{ control, error: null }` si la resolución sirve para emitir hoy;
+ *   `{ control: null, error }` con la excepción tipada si no.
+ */
+export function tryResolveInvoiceControl(
+  resolution: InvoiceControlSource | null | undefined,
+  timezone: string,
+  now: Date = new Date(),
+  ctx?: InvoiceControlContext,
+):
+  | { control: DianInvoiceControl; error: null }
+  | { control: null; error: VendixHttpException } {
+  try {
+    return {
+      control: resolveInvoiceControl(resolution, timezone, now, ctx),
+      error: null,
+    };
+  } catch (error) {
+    if (error instanceof VendixHttpException) return { control: null, error };
+    throw error;
+  }
+}

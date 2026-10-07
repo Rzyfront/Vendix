@@ -24,6 +24,8 @@ export const DIAN_SOAP_ACTIONS = {
   SendTestSetAsync:
     'http://wcf.dian.colombia/IWcfDianCustomerServices/SendTestSetAsync',
   GetStatus: 'http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatus',
+  GetStatusEvent:
+    'http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatusEvent',
   GetStatusZip:
     'http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatusZip',
   SendNominaSync:

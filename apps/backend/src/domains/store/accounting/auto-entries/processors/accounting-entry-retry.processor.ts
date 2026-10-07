@@ -72,6 +72,62 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
     );
 
     try {
+      if (payload.source_type === 'purchase_vat_contribution') {
+        const scope = this.validatePurchaseVatContributionScope(payload);
+        const entry = await RequestContextService.run(
+          {
+            is_super_admin: false,
+            is_owner: false,
+            store_id: scope.store_id,
+            organization_id: scope.organization_id,
+            user_id: payload.user_id,
+            request_id: `accounting-retry-${failure_id}`,
+          },
+          async () => {
+            // Reconcile first: an earlier attempt may have posted the journal
+            // but failed before linking it to its VAT contribution.
+            const existing =
+              await this.auto_entry_service.reconcilePurchaseVatContributionEntry(
+                scope,
+              );
+            if (existing) {
+              this.assertPurchaseVatContributionEntry(existing, scope);
+              return existing;
+            }
+
+            const posted = await this.auto_entry_service.postAutoEntry(payload);
+            if (!posted) return null;
+
+            const linked =
+              await this.auto_entry_service.reconcilePurchaseVatContributionEntry(
+                scope,
+                posted.id,
+              );
+            if (!linked) {
+              throw new Error(
+                `Could not link posted journal entry #${posted.id} to purchase VAT contribution #${scope.contribution_id}`,
+              );
+            }
+            this.assertPurchaseVatContributionEntry(linked, scope, posted.id);
+            return linked;
+          },
+        );
+
+        if (!entry) {
+          this.logger.warn(
+            `Retry of auto-entry failure #${failure_id} produced NO entry ` +
+              `(${payload.source_type}#${payload.source_id}); leaving it unresolved.`,
+          );
+          return;
+        }
+        await this.failure_service.markResolved(failure_id);
+        this.logger.log(
+          `Auto-entry failure #${failure_id} resolved on retry ` +
+            `(${payload.source_type}#${payload.source_id})`,
+        );
+        return;
+      }
+
       const entry = await RequestContextService.run(
         {
           is_super_admin: false,
@@ -121,5 +177,67 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
       return { ...payload, entry_date: new Date(raw.entry_date) };
     }
     return payload;
+  }
+
+  private validatePurchaseVatContributionScope(payload: AutoEntryEventData): {
+    contribution_id: number;
+    organization_id: number;
+    accounting_entity_id: number;
+    store_id: number;
+  } {
+    const values = {
+      contribution_id: payload.source_id,
+      organization_id: payload.organization_id,
+      accounting_entity_id: payload.accounting_entity_id,
+      store_id: payload.store_id,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+        throw new Error(
+          `Invalid ${key} on purchase VAT contribution retry payload`,
+        );
+      }
+    }
+    return values as {
+      contribution_id: number;
+      organization_id: number;
+      accounting_entity_id: number;
+      store_id: number;
+    };
+  }
+
+  private assertPurchaseVatContributionEntry(
+    entry: {
+      id?: unknown;
+      status?: unknown;
+      source_type?: unknown;
+      source_id?: unknown;
+      organization_id?: unknown;
+      accounting_entity_id?: unknown;
+      store_id?: unknown;
+    },
+    scope: {
+      contribution_id: number;
+      organization_id: number;
+      accounting_entity_id: number;
+      store_id: number;
+    },
+    expected_entry_id?: number,
+  ): void {
+    if (
+      !Number.isSafeInteger(entry?.id) ||
+      (entry.id as number) <= 0 ||
+      (expected_entry_id !== undefined && entry.id !== expected_entry_id) ||
+      entry.status !== 'posted' ||
+      entry.source_type !== 'purchase_vat_contribution' ||
+      entry.source_id !== scope.contribution_id ||
+      entry.organization_id !== scope.organization_id ||
+      entry.accounting_entity_id !== scope.accounting_entity_id ||
+      entry.store_id !== scope.store_id
+    ) {
+      throw new Error(
+        `Purchase VAT contribution #${scope.contribution_id} did not resolve to the expected posted journal entry`,
+      );
+    }
   }
 }

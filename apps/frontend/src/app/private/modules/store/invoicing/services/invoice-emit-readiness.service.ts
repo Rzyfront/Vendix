@@ -48,6 +48,14 @@ export interface InvoiceEmitReadinessFinding {
   problem: string;
   fix: string;
   details?: Record<string, unknown>;
+  /**
+   * Dónde se arregla: `form` = un campo de la pantalla de captura; `config` =
+   * otra pantalla (resoluciones, wizard fiscal, config DIAN, ficha del cliente).
+   * Opcional: un backend anterior no lo envía.
+   */
+  target?: 'form' | 'config';
+  /** Ruta del frontend a la que lleva el hallazgo cuando `target === 'config'`. */
+  cta?: string;
 }
 
 /**

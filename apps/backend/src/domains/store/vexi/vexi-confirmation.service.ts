@@ -34,7 +34,12 @@ return 1
  * it here too keeps the proposal and the apply — which crossed a JSON round
  * trip in between — hashing to the same string.
  */
-function canonicalJson(value: unknown): string {
+/**
+ * Exported for plan approval: the whole-plan token MUST hash step arguments
+ * with this exact function, so a step approved in a bundle and a step
+ * re-proposed alone fingerprint identically. Import it — do not duplicate it.
+ */
+export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value ?? null);
   }

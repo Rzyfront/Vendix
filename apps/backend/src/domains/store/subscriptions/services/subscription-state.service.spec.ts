@@ -3,6 +3,7 @@ import {
   LOCK_REASON_PLAN_RETIRED,
   LOCK_REASON_PAST_DUE,
 } from './subscription-state.service';
+import { FREE_PLAN_LAPSE_REASON } from '../contracts/free-plan-lapse.contract';
 
 /**
  * Unit tests for SubscriptionStateService.
@@ -474,6 +475,161 @@ describe('SubscriptionStateService', () => {
       const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
       expect(evtArg.data.to_state).toBe('cancelled');
       expect(evtArg.data.triggered_by_job).toBe('subscription-state-engine');
+    });
+  });
+
+  describe('free plan lapse at period end', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    function freePlanSub(opts: {
+      daysPastPeriodEnd: number;
+      isPromotional: boolean;
+      effectivePrice?: string;
+      autoRenew?: boolean;
+    }) {
+      return {
+        id: 1,
+        store_id: 10,
+        plan_id: 7,
+        state: 'active',
+        lock_reason: null,
+        metadata: null,
+        trial_ends_at: null,
+        cancelled_at: null,
+        updated_at: new Date(),
+        effective_price: opts.effectivePrice ?? '0',
+        partner_margin_amount: null,
+        auto_renew: opts.autoRenew ?? true,
+        current_period_end: new Date(Date.now() - opts.daysPastPeriodEnd * DAY),
+        promotional_plan_id: null,
+        promotional_plan: null,
+        plan: {
+          state: 'active',
+          archived_at: null,
+          is_promotional: opts.isPromotional,
+          grace_period_soft_days: 3,
+          grace_period_hard_days: 7,
+          suspension_day: 14,
+          cancellation_day: 30,
+        },
+      };
+    }
+
+    it('active + promo plan price 0 + period ended → transition expired (free_plan_period_ended)', async () => {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+        freePlanSub({ daysPastPeriodEnd: 2, isPromotional: true }),
+      );
+      const transitionSpy = jest
+        .spyOn(service, 'transition')
+        .mockResolvedValue({ id: 1, state: 'expired' } as any);
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(transitionSpy).toHaveBeenCalledTimes(1);
+      const [storeId, toState, opts] = transitionSpy.mock.calls[0];
+      expect(storeId).toBe(10);
+      expect(toState).toBe('expired');
+      expect(opts.reason).toBe('free_plan_period_ended');
+      expect(opts.triggeredByJob).toBe('subscription-state-engine');
+      expect(opts.payload).toMatchObject({
+        plan_id: 7,
+        is_promotional: true,
+        auto_renew: true,
+      });
+    });
+
+    it('promo expired 12 h ago → within grace day, no transition at all', async () => {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+        freePlanSub({ daysPastPeriodEnd: 0.5, isPromotional: true }),
+      );
+      const transitionSpy = jest
+        .spyOn(service, 'transition')
+        .mockResolvedValue({} as any);
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(transitionSpy).not.toHaveBeenCalledWith(
+        10,
+        'expired',
+        expect.anything(),
+      );
+      expect(transitionSpy).not.toHaveBeenCalledWith(
+        10,
+        'grace_soft',
+        expect.anything(),
+      );
+      expect(transitionSpy).not.toHaveBeenCalled();
+    });
+
+    it('promo expired 25 h ago → expired with grace_deadline in payload', async () => {
+      const sub = freePlanSub({
+        daysPastPeriodEnd: 25 / 24,
+        isPromotional: true,
+      });
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(sub);
+      const transitionSpy = jest
+        .spyOn(service, 'transition')
+        .mockResolvedValue({ id: 1, state: 'expired' } as any);
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(transitionSpy).toHaveBeenCalledTimes(1);
+      const [, toState, opts] = transitionSpy.mock.calls[0];
+      expect(toState).toBe('expired');
+      expect(opts.reason).toBe(FREE_PLAN_LAPSE_REASON);
+      expect(opts.payload).toMatchObject({
+        grace_deadline: new Date(
+          sub.current_period_end.getTime() + DAY,
+        ).toISOString(),
+      });
+    });
+
+    it('auto_renew=false + price 0 expired 12 h ago → no transition', async () => {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+        freePlanSub({
+          daysPastPeriodEnd: 0.5,
+          isPromotional: false,
+          autoRenew: false,
+        }),
+      );
+      const transitionSpy = jest
+        .spyOn(service, 'transition')
+        .mockResolvedValue({} as any);
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(transitionSpy).not.toHaveBeenCalled();
+    });
+
+    it('active + promo plan price 0 + period NOT ended → no transition', async () => {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+        freePlanSub({ daysPastPeriodEnd: -5, isPromotional: true }),
+      );
+      const transitionSpy = jest
+        .spyOn(service, 'transition')
+        .mockResolvedValue({} as any);
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(transitionSpy).not.toHaveBeenCalled();
+    });
+
+    it('paid plan 6 days past period end → still dunning grace_soft', async () => {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+        freePlanSub({
+          daysPastPeriodEnd: 6,
+          isPromotional: false,
+          effectivePrice: '100',
+        }),
+      );
+      const transitionSpy = jest
+        .spyOn(service, 'transition')
+        .mockResolvedValue({} as any);
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(transitionSpy).toHaveBeenCalledTimes(1);
+      expect(transitionSpy.mock.calls[0][1]).toBe('grace_soft');
     });
   });
 

@@ -64,6 +64,15 @@ export const invoicingRoutes: Routes = [
             ),
     },
     {
+        // The detail paints its own header; keep it outside the tabs shell.
+        path: 'received-documents/:id',
+        data: { receivedDocumentsScope: 'store' },
+        loadComponent: () =>
+            import('./received-documents/received-document-detail.component').then(
+                (m) => m.ReceivedDocumentDetailComponent,
+            ),
+    },
+    {
         path: '',
         component: ModuleTabsShellComponent,
         // Centralized module: sub-sections render as internal sticky-header
@@ -80,6 +89,13 @@ export const invoicingRoutes: Routes = [
                         'Facturas de venta, notas crédito y débito emitidas por la tienda, con su estado ante la DIAN.',
                     icon: 'receipt',
                     route: '/admin/invoicing/invoices',
+                },
+                {
+                    id: 'received-documents',
+                    label: 'Documentos recibidos',
+                    description: 'Documentos de proveedores pendientes de revisión, conciliación y reconocimiento fiscal.',
+                    icon: 'inbox',
+                    route: '/admin/invoicing/received-documents',
                 },
                 {
                     id: 'support-documents',
@@ -150,6 +166,14 @@ export const invoicingRoutes: Routes = [
                 path: 'invoices',
                 loadComponent: () =>
                     import('./invoicing.component').then((c) => c.InvoicingComponent),
+            },
+            {
+                path: 'received-documents',
+                data: { receivedDocumentsScope: 'store' },
+                loadComponent: () =>
+                    import('./received-documents/received-documents-page.component').then(
+                        (m) => m.ReceivedDocumentsPageComponent,
+                    ),
             },
             {
                 // QUI-682: pestaña dedicada a documentos soporte. Lazy

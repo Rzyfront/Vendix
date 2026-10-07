@@ -14,6 +14,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
+import { memoryStorage } from 'multer';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { ResolutionsService } from './resolutions.service';
 import { ResolutionScannerService } from './resolution-scanner.service';
@@ -48,6 +50,7 @@ export class ResolutionsController {
     private readonly resolutions_service: ResolutionsService,
     private readonly response_service: ResponseService,
     private readonly resolution_scanner_service: ResolutionScannerService,
+    private readonly ai_scan_job_service: AiScanJobService,
   ) {}
 
   @Get()
@@ -79,6 +82,9 @@ export class ResolutionsController {
    * nothing: the user reviews the result and then calls `POST /` or
    * `PATCH /:id` explicitly, so a mis-read never lands in the numbering table.
    */
+  /**
+   * @deprecated Usar POST store/invoicing/resolutions/scan/async (el síncrono muere en 504 tras 60 s de proxy).
+   */
   @Post('scan')
   @Permissions('invoicing:write')
   @UseInterceptors(FileInterceptor('file'))
@@ -96,6 +102,25 @@ export class ResolutionsController {
       result,
       'Resolución escaneada exitosamente',
     );
+  }
+
+  @Post('scan/async')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } }))
+  async scanAsync(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_NO_FILE);
+    }
+    if (!SCAN_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_INVALID_FILE);
+    }
+    await this.resolution_scanner_service.assertReady();
+    const { job_id } = await this.ai_scan_job_service.enqueue(
+      'dian_resolution',
+      [file],
+    );
+    return this.response_service.success({ job_id }, 'Escaneo encolado');
   }
 
   @Post()

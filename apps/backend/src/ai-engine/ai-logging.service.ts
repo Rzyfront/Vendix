@@ -9,6 +9,17 @@ import {
   TenantUsageStats,
 } from './interfaces/ai-log.interface';
 
+/**
+ * Measured prompt cache (remediation step 8): cache token counts carried
+ * alongside {@link AILogEntry}. Kept here so `logRequest()` stays callable
+ * with a plain `AILogEntry` — callers that do not know about caching keep
+ * compiling and their rows default to 0.
+ */
+export interface AICacheLogFields {
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+}
+
 @Injectable()
 export class AILoggingService {
   private readonly logger = new Logger(AILoggingService.name);
@@ -18,7 +29,7 @@ export class AILoggingService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  async logRequest(entry: AILogEntry): Promise<void> {
+  async logRequest(entry: AILogEntry & AICacheLogFields): Promise<void> {
     try {
       await this.prisma.ai_engine_logs.create({
         data: {
@@ -30,6 +41,8 @@ export class AILoggingService {
           model: entry.model,
           prompt_tokens: entry.prompt_tokens,
           completion_tokens: entry.completion_tokens,
+          cache_read_tokens: entry.cache_read_tokens ?? 0,
+          cache_creation_tokens: entry.cache_creation_tokens ?? 0,
           cost_usd: entry.cost_usd,
           latency_ms: entry.latency_ms,
           status: entry.status,
@@ -46,17 +59,33 @@ export class AILoggingService {
     configSettings: Record<string, any> | undefined,
     promptTokens: number,
     completionTokens: number,
+    cacheReadTokens = 0,
+    cacheCreationTokens = 0,
   ): number {
     const pricing = configSettings?.pricing as
-      | { input_per_1k?: number; output_per_1k?: number }
+      | {
+          input_per_1k?: number;
+          output_per_1k?: number;
+          cache_read_per_1k?: number;
+          cache_creation_per_1k?: number;
+        }
       | undefined;
 
     if (!pricing) return 0;
 
     const inputCost = (promptTokens / 1000) * (pricing.input_per_1k ?? 0);
     const outputCost = (completionTokens / 1000) * (pricing.output_per_1k ?? 0);
+    // Provider cache rate applies only when configured; otherwise the cache
+    // tokens are recorded by logRequest() but leave the cost unchanged
+    // (count-only).
+    const cacheReadCost =
+      (cacheReadTokens / 1000) * (pricing.cache_read_per_1k ?? 0);
+    const cacheCreationCost =
+      (cacheCreationTokens / 1000) * (pricing.cache_creation_per_1k ?? 0);
 
-    return Number((inputCost + outputCost).toFixed(8));
+    return Number(
+      (inputCost + outputCost + cacheReadCost + cacheCreationCost).toFixed(8),
+    );
   }
 
   async getUsageStats(filter: AIUsageStatsFilter): Promise<AIUsageStats> {

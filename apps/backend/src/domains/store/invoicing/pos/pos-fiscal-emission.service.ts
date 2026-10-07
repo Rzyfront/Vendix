@@ -7,6 +7,7 @@ import { InvoicingService } from '../invoicing.service';
 import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalDocumentFinding } from '../validators/fiscal-document.validator';
+import type { EmitReadinessFinding } from '../invoice-flow/emit-readiness.contract';
 import { PosFiscalState, PosFiscalStatus } from './pos-fiscal-status.interface';
 import { INVOICE_AUTO_SEND_FAILED_ALERT } from './presential-pos-sale';
 // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
@@ -112,6 +113,43 @@ export class PosFiscalEmissionService {
       await this.recordInvoiceIssued(order_id, status);
     }
     return status;
+  }
+
+  /**
+   * Emisión de un solo paso de la factura de UNA cuenta de reparto financiero:
+   * crear (con guarda de pago) + prevalidar + transmitir. Idempotente: con un
+   * documento existente lo reintenta sin crear otro ni consumir otro número.
+   * Devuelve siempre un estado, salvo cuenta inexistente o SIN COBRAR
+   * (`SPLIT_ACCOUNT_UNPAID_INVOICE`), que se lanzan con su código.
+   */
+  async emitForFinancialAccount(account_id: number): Promise<PosFiscalStatus> {
+    const account = await this.prisma.order_financial_accounts.findFirst({
+      where: { id: account_id },
+      select: { id: true, split: { select: { source_order_id: true } } },
+    });
+    if (!account) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_FIND_003,
+        `No se encontró la cuenta #${account_id} en esta tienda.`,
+        { account_id },
+      );
+    }
+    const order_id = account.split.source_order_id;
+    const status = await this.runEmission(order_id, account_id);
+    if (status.state === 'failed' && status.invoice_id !== null) {
+      return this.registerFailure(status, order_id);
+    }
+    return status;
+  }
+
+  private errorCodeOf(error: unknown): string | null {
+    if (!(error instanceof VendixHttpException)) return null;
+    const body = error.getResponse();
+    const code =
+      body && typeof body === 'object'
+        ? (body as { error_code?: unknown }).error_code
+        : null;
+    return typeof code === 'string' ? code : null;
   }
 
   /**
@@ -234,10 +272,16 @@ export class PosFiscalEmissionService {
     }
   }
 
-  private async runEmission(order_id: number): Promise<PosFiscalStatus> {
+  private async runEmission(
+    order_id: number,
+    account_id: number | null = null,
+  ): Promise<PosFiscalStatus> {
+    // Con `account_id` el documento es la factura de ESA cuenta del reparto;
+    // sin él, la factura de la orden. Mismo flujo, distinto «cuál es la fila».
+    const find = () => this.findLatestSalesInvoice(order_id, account_id);
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
-      select: { id: true },
+      select: { id: true, active_financial_split_id: true },
     });
 
     // El cliente scoped ya filtra por tienda: un pedido de otro tenant no
@@ -251,7 +295,16 @@ export class PosFiscalEmissionService {
       );
     }
 
-    const existing = await this.findLatestSalesInvoice(order_id);
+    // Orden con reparto financiero activo: se factura por cuenta, no por orden.
+    // Nada de crear/validar/transmitir aquí.
+    if (account_id === null && order.active_financial_split_id) {
+      return this.notApplicable(
+        order_id,
+        'La orden tiene un reparto de cuentas activo: cada cuenta se factura por separado, una vez cobrada.',
+      );
+    }
+
+    const existing = await find();
 
     // Ya aceptado: no hay nada que hacer y volver a transmitir sería emitir dos
     // veces el mismo hecho económico.
@@ -261,18 +314,31 @@ export class PosFiscalEmissionService {
 
     let invoice = existing;
 
-    if (!invoice) {
-      const eligibility =
-        await this.invoicing.getElectronicEmissionEligibility();
-      if (!eligibility.eligible) {
-        return this.notApplicable(order_id, eligibility.reason);
+    // Cuenta de reparto con borrador/validado sin emitir: `createFromFinancialAccount`
+    // vuelve a evaluar el pago y refresca forma/medio de pago (idempotente, no
+    // crea otra fila ni consume número).
+    const refresh_account_draft =
+      account_id !== null &&
+      !!invoice &&
+      ['draft', 'validated'].includes(invoice.status);
+
+    if (!invoice || refresh_account_draft) {
+      if (!invoice) {
+        const eligibility =
+          await this.invoicing.getElectronicEmissionEligibility();
+        if (!eligibility.eligible) {
+          return this.notApplicable(order_id, eligibility.reason);
+        }
       }
 
       try {
         // AQUÍ se consume el consecutivo. Todo lo que pudiera impedir la
         // emisión y sea barato de comprobar ya se comprobó arriba.
-        const created = await this.invoicing.createFromOrder(order_id);
-        invoice = await this.findLatestSalesInvoice(order_id);
+        const created =
+          account_id === null
+            ? await this.invoicing.createFromOrder(order_id)
+            : await this.invoicing.createFromFinancialAccount(account_id);
+        invoice = await find();
         if (!invoice) {
           // Defensivo: `createFromOrder` acaba de escribir la fila, así que no
           // encontrarla sólo puede ser un problema de alcance. Se reporta como
@@ -284,9 +350,14 @@ export class PosFiscalEmissionService {
           );
         }
       } catch (error) {
+        // Cuenta sin cobrar: no es un fallo de emisión sino una precondición
+        // de negocio; se propaga con su código para que el cliente la pinte.
+        if (account_id !== null && this.errorCodeOf(error) === 'SPLIT_ACCOUNT_UNPAID_INVOICE') {
+          throw error;
+        }
         return this.failed(
           order_id,
-          null,
+          refresh_account_draft ? invoice : null,
           this.describe(error),
           this.blockersOf(error),
         );
@@ -301,7 +372,7 @@ export class PosFiscalEmissionService {
       const draft = invoice;
       try {
         await this.invoice_flow.validate(draft.id);
-        const revalidated = await this.findLatestSalesInvoice(order_id);
+        const revalidated = await find();
         if (!revalidated) {
           return this.failed(
             order_id,
@@ -319,6 +390,7 @@ export class PosFiscalEmissionService {
           draft,
           this.describe(error),
           this.blockersOf(error),
+          this.blockersOf(error),
         );
       }
     }
@@ -327,6 +399,24 @@ export class PosFiscalEmissionService {
     // transmisible porque la máquina de estados lo permite (rejected → sent)
     // una vez corregida la causa.
     if (invoice.status === 'validated' || invoice.status === 'rejected') {
+      // MISMO veredicto que la factura manual (`emit-readiness`): incluye los
+      // hallazgos del emisor (config DIAN, certificado, resolución). Si hay
+      // bloqueantes NO se transmite: sería un rechazo con consecutivo gastado.
+      // Si la consulta misma falla, se sigue con el flujo de siempre
+      // (`validate()` ya corrió): es red de seguridad, no un nuevo punto de falla.
+      const readiness_blockers = await this.readinessBlockers(invoice.id);
+      if (readiness_blockers && readiness_blockers.length > 0) {
+        this.logger.warn(
+          `POS: la factura #${invoice.id} del pedido #${order_id} no es emitible: ${readiness_blockers[0].problem}`,
+        );
+        return this.failed(
+          order_id,
+          invoice,
+          readiness_blockers[0].problem,
+          [],
+          readiness_blockers,
+        );
+      }
       try {
         await this.invoice_flow.send(invoice.id);
       } catch (error) {
@@ -337,12 +427,12 @@ export class PosFiscalEmissionService {
         this.logger.warn(
           `POS: la transmisión de la factura #${invoice.id} (pedido #${order_id}) falló: ${this.describe(error)}`,
         );
-        const after = await this.findLatestSalesInvoice(order_id);
+        const after = await find();
         return this.buildStatus(order_id, after, [], this.describe(error));
       }
     }
 
-    return this.buildStatus(order_id, await this.findLatestSalesInvoice(order_id), []);
+    return this.buildStatus(order_id, await find(), []);
   }
 
   /**
@@ -394,7 +484,35 @@ export class PosFiscalEmissionService {
       };
     }
 
-    return this.buildStatus(order_id, invoice, []);
+    const status = await this.buildStatus(order_id, invoice, []);
+    // Sólo en `failed` por prevalidación (documento aún sin transmitir): en
+    // `pending`/`issued` no se hace ninguna llamada extra.
+    if (
+      status.state === 'failed' &&
+      (invoice.status === 'draft' || invoice.status === 'validated')
+    ) {
+      const requirements = await this.readinessBlockers(invoice.id);
+      if (requirements) status.requirements = requirements;
+    }
+    return status;
+  }
+
+  /**
+   * Bloqueantes del veredicto de emisión, o `null` si no se pudo consultar.
+   * Nunca lanza: corre en la ruta de una venta ya cobrada.
+   */
+  private async readinessBlockers(
+    invoice_id: number,
+  ): Promise<EmitReadinessFinding[] | null> {
+    try {
+      const readiness = await this.invoice_flow.getEmitReadiness(invoice_id);
+      return readiness.blockers ?? [];
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo consultar emit-readiness de la factura #${invoice_id}: ${this.describe(error)}`,
+      );
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -407,9 +525,19 @@ export class PosFiscalEmissionService {
    * `orders.id` no es único en `invoices.order_id`: una conversión a factura
    * nominativa deja la original más la nueva. La reciente es la vigente.
    */
-  private async findLatestSalesInvoice(order_id: number) {
+  private async findLatestSalesInvoice(
+    order_id: number,
+    account_id: number | null = null,
+  ) {
     return this.prisma.invoices.findFirst({
-      where: { order_id, invoice_type: 'sales_invoice' },
+      where:
+        account_id === null
+          ? { order_id, financial_account_id: null, invoice_type: 'sales_invoice' }
+          : {
+              financial_account_id: account_id,
+              invoice_type: 'sales_invoice',
+              status: { notIn: DELIBERATELY_VOIDED_INVOICE_STATUSES },
+            },
       orderBy: { created_at: 'desc' },
       select: {
         id: true,
@@ -634,6 +762,7 @@ export class PosFiscalEmissionService {
     invoice: { id: number; invoice_number: string; status: string } | null,
     message: string,
     blockers: FiscalDocumentFinding[] = [],
+    requirements?: EmitReadinessFinding[],
   ): PosFiscalStatus {
     return {
       ...this.emptyStatus(order_id),
@@ -643,6 +772,7 @@ export class PosFiscalEmissionService {
       invoice_number: invoice?.invoice_number ?? null,
       invoice_status: invoice?.status ?? null,
       blockers,
+      ...(requirements && requirements.length > 0 ? { requirements } : {}),
     };
   }
 

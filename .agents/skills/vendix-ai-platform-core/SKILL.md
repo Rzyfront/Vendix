@@ -8,7 +8,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Working with AIEngineService core methods"
@@ -40,12 +40,15 @@ metadata:
 
 ## Providers
 
-Backend `SdkType` is currently only:
+Backend `SdkType` currently has three members:
 
 - `openai_compatible`
 - `anthropic_compatible`
+- `minimax_t2a` — MiniMax Text-to-Audio v2, implemented by `MinimaxSpeechProvider` (`apps/backend/src/ai-engine/providers/minimax-speech.provider.ts`)
 
 Other provider names like DeepSeek, Groq, Mistral, Ollama, Azure, or Google are presets/custom base URLs through OpenAI-compatible config, not separate backend provider classes.
+
+`minimax_t2a` exists as a separate class (not a branch in `OpenAICompatibleProvider`) because MiniMax differs on all three protocol axes: path `/v1/t2a_v2` (unknown to `toApiRootBaseUrl`), nested `voice_setting`/`audio_setting` body, and a JSON response with the audio hex-encoded in `data.audio` plus a `base_resp` envelope that reports failure with HTTP 200. It backs the Vexi voice pipeline (`vexi_voice_tts`) and the realtime service; speed is clamped to 0.5–2 (default 1) because MiniMax rejects out-of-range values instead of clamping.
 
 API key resolution uses `api_key_ref` when configured; otherwise env key `AI_${PROVIDER}_API_KEY`.
 
@@ -109,7 +112,7 @@ Frontend panel currently:
 
 ## Adding Providers
 
-Only add a provider when OpenAI-compatible or Anthropic-compatible cannot support the SDK/protocol.
+Only add a provider when OpenAI-compatible or Anthropic-compatible cannot support the SDK/protocol. `minimax_t2a` is the bar: a separate class was justified only because path, body shape, and response envelope all differ.
 
 Required steps:
 

@@ -1,0 +1,13 @@
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/ai-engine/tools/domains/[22m[1mreporting.tools.spec.ts[22m ([0m[1m[41m18.337 s[49m[22m[0m)
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/ai-engine/tools/domains/[22m[1mvariants.tools.spec.ts[22m ([0m[1m[41m19.318 s[49m[22m[0m)
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/ai-engine/tools/domains/[22m[1mcash-register.tools.spec.ts[22m ([0m[1m[41m21.888 s[49m[22m[0m)
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/ai-engine/providers/[22m[1manthropic-compatible.provider.spec.ts[22m ([0m[1m[41m21.25 s[49m[22m[0m)
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/ai-engine/tools/domains/[22m[1mvex-blocks.tools.spec.ts[22m ([0m[1m[41m22.145 s[49m[22m[0m)
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/ai-engine/tools/domains/[22m[1mproducts.tools.spec.ts[22m ([0m[1m[41m23.364 s[49m[22m[0m)
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/ai-engine/tools/domains/[22m[1msubscriptions.tools.spec.ts[22m ([0m[1m[41m21.519 s[49m[22m[0m)
+
+[1mTest Suites: [22m[1m[32m7 passed[39m[22m, 7 total
+[1mTests:       [22m[1m[32m195 passed[39m[22m, 195 total
+[1mSnapshots:   [22m0 total
+[1mTime:[22m        153.171 s, estimated 236 s
+[2mRan all test suites[22m[2m matching [22m/src\/ai-engine\/providers\/anthropic-compatible.provider.spec.ts|src\/ai-engine\/tools\/domains\/vex-blocks.tools.spec.ts|src\/ai-engine\/tools\/domains\/reporting.tools.spec.ts|src\/ai-engine\/tools\/domains\/cash-register.tools.spec.ts|src\/ai-engine\/tools\/domains\/products.tools.spec.ts|src\/ai-engine\/tools\/domains\/variants.tools.spec.ts|src\/ai-engine\/tools\/domains\/subscriptions.tools.spec.ts/i[2m.[22m

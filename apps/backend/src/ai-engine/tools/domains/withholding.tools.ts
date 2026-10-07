@@ -1143,7 +1143,7 @@ export function createWithholdingTools(
             target: 'Generar reporte exógeno',
             changes: [],
             message:
-              'format_code inválido: Vexi solo genera 1001 (practicadas) y 1003 (sufridas). Para otros formatos usa el módulo de exógena.',
+              'format_code inválido: Solo se generan 1001 (practicadas) y 1003 (sufridas). Para otros formatos usa el módulo de exógena.',
           };
         }
         const validated = toValidatedDto(GenerateReportDto, {
@@ -1214,7 +1214,7 @@ export function createWithholdingTools(
       handler: async (args, _context: ToolExecutionContext) => {
         if (!VEXI_EXOGENOUS_FORMATS.includes(args.format_code)) {
           return writeToolError(
-            'format_code inválido: Vexi solo genera 1001 y 1003.',
+            'format_code inválido: solo se generan 1001 y 1003.',
             'Para otros formatos usa el módulo de exógena.',
           );
         }
@@ -1273,6 +1273,7 @@ export function createWithholdingTools(
       },
       requiredPermissions: ['exogenous:write'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context): Promise<ToolPreview> => {
         const reportId = toPositiveInt(args.report_id);
         if (!reportId) {
@@ -1455,7 +1456,7 @@ export function createWithholdingTools(
       version: '1',
       domain: 'withholding',
       description:
-        'Crea una categoría de impuesto con su tarifa. El tax_type es OBLIGATORIO (iva, inc, ica, withholding, reteiva, reteica): Vexi nunca asume IVA por defecto, porque una categoría INC mal tipada se declararía como un IVA del 8 % que no existe. La tasa (rate) va en porcentaje 0-100. Lee primero list_tax_categories (F-47). Requiere name, type, rate y tax_type.',
+        'Crea una categoría de impuesto con su tarifa. El tax_type es OBLIGATORIO (iva, inc, ica, withholding, reteiva, reteica): nunca se asume IVA por defecto, porque una categoría INC mal tipada se declararía como un IVA del 8 % que no existe. La tasa (rate) va en porcentaje 0-100. Lee primero list_tax_categories (F-47). Requiere name, type, rate y tax_type.',
       parameters: {
         type: 'object',
         properties: {
@@ -1518,7 +1519,7 @@ export function createWithholdingTools(
             target: 'Crear categoría de impuesto',
             changes: [],
             message:
-              'tax_type es obligatorio (iva, inc, ica, withholding, reteiva o reteica): Vexi nunca asume IVA. Indica a qué impuesto pertenece la categoría.',
+              'tax_type es obligatorio (iva, inc, ica, withholding, reteiva o reteica): nunca se asume IVA. Indica a qué impuesto pertenece la categoría.',
           };
         }
         if (!isTaxCalcType(args.type)) {
@@ -1580,7 +1581,7 @@ export function createWithholdingTools(
         if (!isTaxFiscalType(args.tax_type)) {
           return writeToolError(
             'tax_type es obligatorio: iva, inc, ica, withholding, reteiva o reteica.',
-            'Indica a qué impuesto pertenece la categoría; Vexi nunca asume IVA.',
+            'Indica a qué impuesto pertenece la categoría; nunca se asume IVA.',
           );
         }
         if (!isTaxCalcType(args.type)) {

@@ -1,8 +1,9 @@
-import {Component, input, output, signal, computed, effect, viewChild, DestroyRef, inject} from '@angular/core';
+import {Component, input, output, signal, computed, effect, viewChild, DestroyRef, Injector, afterNextRender, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { switchMap, catchError, of, Subject } from 'rxjs';
+import { switchMap, catchError, of, Subject, Subscription } from 'rxjs';
 
 import { AiReviewAckComponent } from '../../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import {
@@ -16,11 +17,14 @@ import { SpinnerComponent } from '../../../../../../../shared/components/spinner
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { TextareaComponent } from '../../../../../../../shared/components/textarea/textarea.component';
 import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
 import { StepsLineComponent } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
-import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { buildDivergenceView, DivergenceView } from '../../utils/revalidate-divergence-format.util';
+import { LineTaxesEditorComponent, taxTypeLabel } from '../line-taxes-editor/line-taxes-editor.component';
 
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
 import { UomService, UnitOfMeasure } from '../../../services/uom.service';
@@ -33,9 +37,27 @@ import {
   InvoiceMatchResult,
   MatchedLineItem,
   ProductCandidate,
+  InvoiceRevalidateResult,
+  ScanAttachmentInfo,
+  ScanLineTax,
 } from '../../interfaces/invoice-scanner.interface';
+import type { PopLineTax } from '../../interfaces/pop-cart.interface';
+import {
+  mapScanTaxesToPopLineTaxes,
+  popLineTaxesToScanTaxes,
+  scanLineHasTaxes,
+} from '../../utils/scan-line-to-cart.util';
+import {
+  buildRevalidateConsolidated,
+  mergeRevalidatedLines,
+} from '../../utils/revalidate-merge.util';
+import {
+  editedHeaderDiscountFields,
+  seedHeaderDiscount,
+} from '../../utils/scan-header-discount.util';
 import {
   deriveLineTax,
+  deriveLineTaxes,
   derivePurchaseTotals,
   prorateHeaderDiscount,
   PurchaseLineTaxInput,
@@ -54,12 +76,14 @@ import {
     IconComponent,
     InputComponent,
     ToggleComponent,
+    TextareaComponent,
     InputsearchComponent,
     StepsLineComponent,
     CurrencyPipe,
     PopSupplierQuickCreateComponent,
     AiReviewAckComponent,
     AiDiscardToggleComponent,
+    LineTaxesEditorComponent,
   ],
   template: `
     <app-modal
@@ -237,12 +261,18 @@ import {
             <p class="text-sm text-text-secondary text-center">
               Extrayendo datos y buscando coincidencias con tus productos...
             </p>
+            @if (scanStalled()) {
+              <p class="text-sm text-text-secondary text-center">
+                Esto puede tardar unos minutos. No cierres la ventana.
+              </p>
+            }
           </div>
         </div>
       }
 
       <!-- Step 3: Review & Confirm -->
       @if (currentStep() === 3 && matchResult()) {
+       @if (revalidateView() === 'review') {
         <div class="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
           <!-- Punto 2: proveedor con paridad (preseleccionado + editable). -->
           <div class="bg-muted/30 rounded-lg p-4 border border-border">
@@ -360,7 +390,7 @@ import {
           }
 
           <!-- Line items table -->
-          <div>
+          <div id="pop-scan-lines" tabindex="-1" class="outline-none">
             <h4 class="text-sm font-semibold text-text-primary mb-3">
               Productos ({{ editableItems().length }})
             </h4>
@@ -379,7 +409,7 @@ import {
                       del papel — esa se pinta debajo del input cuando la
                       factura venía con IVA incluido.
                     -->
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-28">P. Unit. neto</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-28">P. Unit.</th>
                     <!--
                       Espejo del backend: P. Neto Unit. = unit_price_net
                       que deriva deriveLineTax (util compartido). Es el precio
@@ -404,7 +434,7 @@ import {
                       confirmar, o se queda arrastrando el error hasta anular
                       la orden.
                     -->
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-16">% IVA</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-44">Impuestos</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Subtotal</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Total</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-20">Estado</th>
@@ -421,7 +451,9 @@ import {
                       se equivocó, y una fila que se esfuma parece un borrado.
                     -->
                     <tr class="border-b border-border/50 hover:bg-muted/20"
-                        [class]="isDiscarded(i) ? discardedRowClasses : ''">
+                        [class]="isDiscarded(i) ? discardedRowClasses : ''"
+                        [class.bg-primary/5]="item.revalidation === 'changed'"
+                        [class.bg-amber-50]="item.revalidation === 'missing'">
                       <td class="py-2 pr-3">
                         <span class="text-text-primary line-clamp-1" [title]="item.description">
                           {{ item.description }}
@@ -439,6 +471,14 @@ import {
                         @if (quantityNote(item); as note) {
                           <span class="block text-[11px] text-text-secondary leading-snug">{{ note }}</span>
                         }
+                        <ng-container
+                          [ngTemplateOutlet]="revalidationTag"
+                          [ngTemplateOutletContext]="{ item: item }"
+                        ></ng-container>
+                        <ng-container
+                          [ngTemplateOutlet]="lineScanTags"
+                          [ngTemplateOutletContext]="{ item: item }"
+                        ></ng-container>
                       </td>
                       <td class="py-2 px-3">
                         <input
@@ -453,7 +493,7 @@ import {
                       <td class="py-2 px-3">
                         <input
                           type="number"
-                          [value]="item.unit_price"
+                          [value]="linePrice(item)"
                           (change)="updateItemPrice(i, $event)"
                           class="w-24 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                           min="0"
@@ -465,7 +505,7 @@ import {
                           se edita arriba. En facturas con IVA por fuera los dos
                           números son el mismo y pintarlo sería ruido.
                         -->
-                        @if (invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
+                        @if (!isGrossLine(item) && invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
                           <span class="block mt-0.5 text-[10px] text-text-secondary">
                             impreso {{ item.unit_price_gross | currency: 0 }}
                           </span>
@@ -481,7 +521,7 @@ import {
                       -->
                       @if (
                         lineTaxRows()[i]?.unit_price_net != null &&
-                        lineTaxRows()[i]!.unit_price_net < item.unit_price
+                        lineTaxRows()[i]!.unit_price_net < linePrice(item)
                       ) {
                         <td class="py-2 px-3 text-text-primary">
                           {{ lineTaxRows()[i]!.unit_price_net | currency: 0 }}
@@ -497,19 +537,10 @@ import {
                         corregirlo después implica anular la orden.
                       -->
                       <td class="py-2 px-3">
-                        <div class="flex items-center gap-1">
-                          <input
-                            type="number"
-                            [value]="linePercentDiscount(item)"
-                            (change)="updateItemDiscountPercent(i, $event)"
-                            class="w-16 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                            min="0"
-                            max="100"
-                            step="1"
-                            aria-label="Descuento en porcentaje"
-                          />
-                          <span class="text-[10px] text-text-secondary">%</span>
-                        </div>
+                        <ng-container
+                          [ngTemplateOutlet]="discountCell"
+                          [ngTemplateOutletContext]="{ i: i, item: item, compact: false }"
+                        ></ng-container>
                       </td>
                       <!--
                         Tasa de IVA: el scanner la emite como fracción (0.19);
@@ -517,16 +548,10 @@ import {
                         piensa el operador. El handler convierte al guardar.
                       -->
                       <td class="py-2 px-3">
-                        <input
-                          type="number"
-                          [value]="displayPercent((item.tax_rate ?? 0) * 100)"
-                          (change)="updateItemTaxRate(i, $event)"
-                          class="w-14 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                          min="0"
-                          max="100"
-                          step="1"
-                          aria-label="Porcentaje de IVA"
-                        />
+                        <ng-container
+                          [ngTemplateOutlet]="taxChipsButton"
+                          [ngTemplateOutletContext]="{ i: i }"
+                        ></ng-container>
                       </td>
                       <!-- Subtotal = base gravable de la línea (neto tras descuento,
                            prorrateo de cabecera aplicado). Espejo del backend. -->
@@ -561,6 +586,16 @@ import {
                         ></app-ai-discard-toggle>
                       </td>
                     </tr>
+                    @if (expandedTaxRow() === i) {
+                      <tr class="border-b border-border/50 bg-muted/10">
+                        <td colspan="11" class="px-3 py-3">
+                          <ng-container
+                            [ngTemplateOutlet]="taxPanel"
+                            [ngTemplateOutletContext]="{ i: i }"
+                          ></ng-container>
+                        </td>
+                      </tr>
+                    }
                   }
                 </tbody>
               </table>
@@ -570,7 +605,10 @@ import {
             <div class="sm:hidden space-y-3">
               @for (item of editableItems(); track $index; let i = $index) {
                 <div class="bg-surface border border-border rounded-lg p-3 space-y-2"
-                     [class]="isDiscarded(i) ? discardedRowClasses : ''">
+                     [class]="isDiscarded(i) ? discardedRowClasses : ''"
+                     [class.border-l-4]="!!item.revalidation"
+                     [class.border-l-primary]="item.revalidation === 'changed' || item.revalidation === 'new'"
+                     [class.border-l-amber-500]="item.revalidation === 'missing'">
                   <div class="flex items-start justify-between gap-2">
                     <span class="text-sm font-medium text-text-primary line-clamp-2 flex-1">
                       {{ item.description }}
@@ -594,6 +632,14 @@ import {
                   @if (quantityNote(item); as note) {
                     <p class="text-[11px] text-text-secondary leading-snug">{{ note }}</p>
                   }
+                  <ng-container
+                    [ngTemplateOutlet]="revalidationTag"
+                    [ngTemplateOutletContext]="{ item: item }"
+                  ></ng-container>
+                  <ng-container
+                    [ngTemplateOutlet]="lineScanTags"
+                    [ngTemplateOutletContext]="{ item: item }"
+                  ></ng-container>
                   <div class="grid grid-cols-2 gap-2">
                     <div>
                       <label class="text-[10px] text-text-secondary">Cant.</label>
@@ -606,16 +652,16 @@ import {
                       />
                     </div>
                     <div>
-                      <label class="text-[10px] text-text-secondary">P. Unit. neto</label>
+                      <label class="text-[10px] text-text-secondary">{{ isGrossLine(item) ? 'P. Unit.' : 'P. Unit. neto' }}</label>
                       <input
                         type="number"
-                        [value]="item.unit_price"
+                        [value]="linePrice(item)"
                         (change)="updateItemPrice(i, $event)"
                         class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
                         min="0"
                         step="0.01"
                       />
-                      @if (invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
+                      @if (!isGrossLine(item) && invoicePrintedWithTax() && (item.unit_price_gross ?? 0) > 0) {
                         <span class="block mt-0.5 text-[10px] text-text-secondary">
                           impreso {{ item.unit_price_gross | currency: 0 }}
                         </span>
@@ -625,32 +671,26 @@ import {
                          tasa de IVA, editables. Sin ellos el operador móvil no
                          puede corregir lo que la IA asignó antes de confirmar. -->
                     <div>
-                      <label class="text-[10px] text-text-secondary">Dcto %</label>
-                      <input
-                        type="number"
-                        [value]="linePercentDiscount(item)"
-                        (change)="updateItemDiscountPercent(i, $event)"
-                        class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
-                        min="0"
-                        max="100"
-                        step="1"
-                        aria-label="Descuento en porcentaje"
-                      />
+                      <label class="text-[10px] text-text-secondary">Descuento</label>
+                      <ng-container
+                        [ngTemplateOutlet]="discountCell"
+                        [ngTemplateOutletContext]="{ i: i, item: item, compact: true }"
+                      ></ng-container>
                     </div>
                     <div>
-                      <label class="text-[10px] text-text-secondary">% IVA</label>
-                      <input
-                        type="number"
-                        [value]="displayPercent((item.tax_rate ?? 0) * 100)"
-                        (change)="updateItemTaxRate(i, $event)"
-                        class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
-                        min="0"
-                        max="100"
-                        step="1"
-                        aria-label="Porcentaje de IVA"
-                      />
+                      <label class="text-[10px] text-text-secondary">Impuestos</label>
+                      <ng-container
+                        [ngTemplateOutlet]="taxChipsButton"
+                        [ngTemplateOutletContext]="{ i: i }"
+                      ></ng-container>
                     </div>
                   </div>
+                  @if (expandedTaxRow() === i) {
+                    <ng-container
+                      [ngTemplateOutlet]="taxPanel"
+                      [ngTemplateOutletContext]="{ i: i }"
+                    ></ng-container>
+                  }
                   <!-- Desglose: subtotal / IVA / total, derivado igual que
                        desktop. Reemplaza al qty × unit_price que ignoraba
                        descuento e IVA en móvil. -->
@@ -672,7 +712,7 @@ import {
                     @if (
                       (item.quantity || 0) > 0 &&
                       lineTaxRows()[i]?.unit_price_net != null &&
-                      lineTaxRows()[i]!.unit_price_net < item.unit_price
+                      lineTaxRows()[i]!.unit_price_net < linePrice(item)
                     ) {
                       <div class="flex justify-between">
                         <span class="text-text-secondary">P. Neto Unit.</span>
@@ -682,7 +722,7 @@ import {
                       </div>
                     }
                     <div class="flex justify-between">
-                      <span class="text-text-secondary">IVA</span>
+                      <span class="text-text-secondary">Impuestos</span>
                       <span class="text-text-primary">
                         {{ lineTaxRows()[i]?.tax_amount || 0 | currency: 0 }}
                       </span>
@@ -765,9 +805,19 @@ import {
               <div class="flex justify-between">
                 <span class="text-text-secondary">(+) IVA</span>
                 <span class="text-text-primary">
-                  {{ purchaseTotals().tax_amount | currency: 0 }}
+                  {{ taxBreakdown().iva | currency: 0 }}
                 </span>
               </div>
+              @if (taxBreakdown().other > 0) {
+                <div class="flex justify-between" data-testid="other-taxes-row">
+                  <span class="text-text-secondary">
+                    (+) Otros impuestos ({{ taxBreakdown().otherLabel }})
+                  </span>
+                  <span class="text-text-primary">
+                    {{ taxBreakdown().other | currency: 0 }}
+                  </span>
+                </div>
+              }
               <div class="flex justify-between border-t border-border pt-2">
                 <span class="text-text-primary font-semibold">Total</span>
                 <span class="text-text-primary font-bold text-base">
@@ -868,6 +918,129 @@ import {
             </div>
           }
 
+          <!--
+            QUI-855: resumen compacto de impuestos por línea. Sustituye a la
+            columna «% IVA»: una línea puede llevar IVA + INC / ICUI / IBUA y un
+            solo input no los expresa. El clic expande el editor completo.
+          -->
+          <ng-template #taxChipsButton let-i="i">
+            <button
+              type="button"
+              class="flex w-full flex-wrap items-center gap-1 rounded-md border border-border px-1.5 py-1 text-left hover:border-primary hover:bg-primary/5"
+              (click)="toggleTaxPanel(i)"
+              [attr.aria-expanded]="expandedTaxRow() === i"
+              aria-label="Editar impuestos de la línea"
+            >
+              @for (chip of taxChips()[i]; track chip.key) {
+                <span
+                  class="inline-flex whitespace-nowrap rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                >
+                  {{ chip.label }}
+                  @if (chip.fixed !== null) {
+                    @if (chip.fixed > 0) {
+                      &nbsp;{{ chip.fixed | currency: 0 }}/u
+                    } @else if (chip.lineAmount !== null) {
+                      <span [attr.title]="chip.perUnit !== null ? (chip.perUnit | currency: 0) + '/u' : null">
+                        &nbsp;{{ chip.lineAmount | currency: 0 }}
+                      </span>
+                    } @else {
+                      &nbsp;{{ chip.fixed | currency: 0 }}/u
+                    }
+                  }
+                </span>
+              }
+              <app-icon
+                [name]="expandedTaxRow() === i ? 'chevron-up' : 'chevron-down'"
+                [size]="12"
+                class="ml-auto text-text-secondary"
+              ></app-icon>
+            </button>
+          </ng-template>
+
+          <!-- Descuento de la línea: selector de unidad % o $ + input. La unidad
+               sólo cambia cómo se muestra y edita; el descuento efectivo es el
+               mismo. Debajo, el equivalente en la otra unidad. -->
+          <ng-template #discountCell let-i="i" let-item="item" let-compact="compact">
+            <div class="flex flex-col gap-0.5">
+              <div class="flex items-center gap-1">
+                <div
+                  class="inline-flex rounded border border-border overflow-hidden text-[10px] leading-none shrink-0"
+                  role="group"
+                  aria-label="Unidad del descuento"
+                >
+                  <button
+                    type="button"
+                    class="px-1.5 py-1"
+                    [disabled]="!!item.is_bonus"
+                    [class]="discountUnit(i, item) === 'pct' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
+                    [attr.aria-pressed]="discountUnit(i, item) === 'pct'"
+                    (click)="setDiscountUnit(i, 'pct')"
+                  >
+                    %
+                  </button>
+                  <button
+                    type="button"
+                    class="px-1.5 py-1"
+                    [disabled]="!!item.is_bonus"
+                    [class]="discountUnit(i, item) === 'amount' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
+                    [attr.aria-pressed]="discountUnit(i, item) === 'amount'"
+                    (click)="setDiscountUnit(i, 'amount')"
+                  >
+                    $
+                  </button>
+                </div>
+                @if (discountUnit(i, item) === 'amount') {
+                  <input
+                    type="number"
+                    [value]="discountInputValue(i, item)"
+                    (change)="updateItemDiscountAmount(i, $event)"
+                    [class]="compact ? 'w-full min-w-0' : 'w-24'"
+                    class="px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                    min="0"
+                    step="0.01"
+                    aria-label="Descuento en dinero"
+                    [disabled]="!!item.is_bonus"
+                  />
+                } @else {
+                  <input
+                    type="number"
+                    [value]="discountInputValue(i, item)"
+                    (change)="updateItemDiscountPercent(i, $event)"
+                    [class]="compact ? 'w-full min-w-0' : 'w-16'"
+                    class="px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    aria-label="Descuento en porcentaje"
+                    [disabled]="!!item.is_bonus"
+                  />
+                }
+              </div>
+              @if (discountUnit(i, item) === 'amount') {
+                <span class="text-[10px] text-text-secondary">= {{ formatPercent(linePercentDiscount(item)) }} %</span>
+              } @else {
+                <span class="text-[10px] text-text-secondary">= {{ ownDiscountMoney(item) | currency: 0 }}</span>
+              }
+            </div>
+          </ng-template>
+
+          <!-- QUI-855: panel expandido de una línea (editor de impuestos). El descuento vive en la celda de la tabla. -->
+          <ng-template #taxPanel let-i="i">
+            @if (taxPanelData()[i]; as d) {
+              <div class="flex flex-col gap-2">
+                <app-line-taxes-editor
+                  [taxes]="d.rows"
+                  [unitPrice]="d.unit_price"
+                  [quantity]="d.quantity"
+                  [discountAmount]="d.discount_money"
+                  [pricesIncludeTax]="d.include"
+                  (taxesChange)="onLineTaxesChange(i, $event)"
+                  (pricesIncludeTaxChange)="onLineIncludeChange(i, $event)"
+                ></app-line-taxes-editor>
+              </div>
+            }
+          </ng-template>
+
           <!-- Punto 3+4: picker de producto por línea, SIEMPRE editable.
                Une candidatos sugeridos + búsqueda de catálogo server-side +
                "Producto nuevo". Reutilizado en desktop y mobile. -->
@@ -954,20 +1127,246 @@ import {
             </div>
           </ng-template>
 
-          <!-- Verificación obligatoria de los datos precargados por la IA -->
-          <app-ai-review-ack
-            #ackBlock
-            [(acknowledged)]="aiAck"
-            [itemCount]="editableItems().length"
-            entityLabel="ítems de la factura"
-          ></app-ai-review-ack>
+          <!-- Marcas del escaneo v2 por linea: bonificacion y cuadre con el total impreso. -->
+          <ng-template #lineScanTags let-item="item">
+            @if (item.is_bonus) {
+              <span class="mt-0.5 inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+                Bonificación
+              </span>
+            }
+            @if (item.reconcile && item.reconcile.ok === false) {
+              <span class="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-amber-700">
+                <app-icon name="alert-circle" [size]="12" class="mt-0.5 shrink-0"></app-icon>
+                <span>No cuadra: calculado {{ item.reconcile.expected | currency: 0 }} vs impreso {{ item.reconcile.printed | currency: 0 }}</span>
+              </span>
+            }
+          </ng-template>
+
+          <!-- QUI-855 paso 8b: etiqueta de la línea tras revalidar con IA. -->
+          <ng-template #revalidationTag let-item="item">
+            @if (item.revalidation === 'changed') {
+              <span class="mt-0.5 inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                <app-icon name="sparkles" [size]="10"></app-icon>
+                Revalidado
+              </span>
+            } @else if (item.revalidation === 'new') {
+              <span class="mt-0.5 inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                <app-icon name="plus" [size]="10"></app-icon>
+                Nueva (revalidación)
+              </span>
+            } @else if (item.revalidation === 'missing') {
+              <span class="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                <app-icon name="alert-triangle" [size]="10"></app-icon>
+                No encontrada en el documento
+              </span>
+            }
+          </ng-template>
+
+          <!-- QUI-855 paso 8b: revalidación opcional con IA contra el documento original. -->
+          <div class="flex items-start justify-between gap-3 p-3 rounded-lg border border-border bg-muted/20">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-text-primary">
+                Revalidar datos consolidados con IA
+              </p>
+              @if (canRevalidate()) {
+                <p class="text-xs text-text-secondary mt-0.5">
+                  La IA releerá el documento original y lo comparará con lo que
+                  ves en pantalla. Podrás decidir qué conservar.
+                </p>
+              } @else {
+                <p class="text-xs text-amber-700 mt-0.5" data-testid="revalidate-disabled-hint">
+                  El documento original no se guardó; no se puede revalidar
+                </p>
+              }
+            </div>
+            <app-toggle
+              [checked]="revalidateChecked()"
+              [disabled]="!canRevalidate()"
+              (changed)="onRevalidateToggle($event)"
+              ariaLabel="Revalidar datos consolidados con IA"
+            ></app-toggle>
+          </div>
+
+          <!-- Verificación obligatoria de los datos precargados por la IA
+               (se exige tras revalidar o al agregar sin revalidar). -->
+          @if (!revalidateChecked()) {
+            <app-ai-review-ack
+              #ackBlock
+              [(acknowledged)]="aiAck"
+              [itemCount]="editableItems().length"
+              entityLabel="ítems de la factura"
+            ></app-ai-review-ack>
+          }
         </div>
+       } @else {
+        <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-1" data-testid="revalidate-panel">
+          @switch (revalidateView()) {
+            @case ('summary') {
+              <div class="rounded-lg border border-border bg-muted/30 p-4 space-y-2 text-sm">
+                <h4 class="text-sm font-semibold text-text-primary">Se enviará a revalidar</h4>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Líneas</span>
+                  <span class="text-text-primary font-medium" data-testid="revalidate-summary-lines">{{ keptCount() }}</span>
+                </div>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Total consolidado</span>
+                  <span class="text-text-primary font-medium">{{ purchaseTotals().total | currency: 0 }}</span>
+                </div>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Documento</span>
+                  <span class="text-text-primary font-medium truncate" data-testid="revalidate-summary-file">{{ scanResult()?.scan_attachment?.file_name }}</span>
+                </div>
+              </div>
+              <app-textarea
+                label="Nota para la IA (opcional)"
+                placeholder="Ej: la cantidad de la línea 3 es 12 cajas, no 12 unidades"
+                [rows]="4"
+                [ngModel]="revalidateNote()"
+                (ngModelChange)="onRevalidateNoteChange($event)"
+                name="revalidateNote"
+              ></app-textarea>
+              <p class="text-[11px] text-text-secondary text-right">
+                {{ revalidateNote().length }} / {{ REVALIDATE_NOTE_MAX }}
+              </p>
+            }
+            @case ('loading') {
+              <div class="flex flex-col items-center justify-center gap-4 min-h-[240px]" data-testid="revalidate-loading">
+                <app-spinner size="lg"></app-spinner>
+                <p class="text-sm text-text-secondary text-center">
+                  La IA está releyendo el documento original…
+                </p>
+              </div>
+            }
+            @case ('error') {
+              <div class="rounded-lg border border-red-200 bg-red-50 p-4 flex items-start gap-3" data-testid="revalidate-error">
+                <app-icon name="alert-circle" [size]="20" class="text-red-600 shrink-0"></app-icon>
+                <div>
+                  <p class="text-sm font-semibold text-red-800">No se pudo revalidar</p>
+                  <p class="text-xs text-red-700 mt-1">{{ revalidateError() }}</p>
+                </div>
+              </div>
+            }
+            @case ('result') {
+              @if (revalidateResult(); as res) {
+                <div class="rounded-lg border border-border bg-muted/30 p-4 space-y-2" data-testid="revalidate-result">
+                  <div class="flex items-center justify-between gap-2">
+                    <h4 class="text-sm font-semibold text-text-primary">Resultado de la revalidación</h4>
+                    <app-badge [variant]="confidenceVariant(res.report.confidence)" size="xsm">
+                      {{ confidenceLabel(res.report.confidence) }}
+                    </app-badge>
+                  </div>
+                  <p class="text-sm text-text-primary">{{ res.report.summary }}</p>
+                </div>
+
+                @if (res.report.red_flags.length > 0) {
+                  <div class="rounded-lg border border-red-300 bg-red-50 p-3 space-y-1.5" data-testid="revalidate-red-flags">
+                    <p class="text-xs font-semibold text-red-800 flex items-center gap-1">
+                      <app-icon name="alert-triangle" [size]="14"></app-icon>
+                      Alertas
+                    </p>
+                    @for (flag of res.report.red_flags; track $index) {
+                      <p class="text-xs text-red-700">
+                        @if (flag.line_index !== null) {
+                          <span class="font-semibold">Línea {{ lineNumber(flag.line_index) }}:</span>
+                        }
+                        {{ flag.message }}
+                      </p>
+                    }
+                  </div>
+                }
+
+                @if (res.report.findings.length > 0) {
+                  <div class="rounded-lg border border-border p-3 space-y-1.5" data-testid="revalidate-findings">
+                    <p class="text-xs font-semibold text-text-primary">Hallazgos</p>
+                    @for (f of res.report.findings; track $index) {
+                      <p class="text-xs flex items-start gap-1.5" [class]="f.severity === 'warning' ? 'text-amber-700' : 'text-text-secondary'">
+                        <app-icon [name]="f.severity === 'warning' ? 'alert-triangle' : 'info'" [size]="12" class="mt-0.5 shrink-0"></app-icon>
+                        <span>{{ f.message }}</span>
+                      </p>
+                    }
+                  </div>
+                }
+
+                <div data-testid="revalidate-divergences">
+                  <h4 class="text-sm font-semibold text-text-primary mb-2">
+                    Divergencias ({{ divergenceView().rows.length }})
+                  </h4>
+                  @if (divergenceView().rows.length === 0) {
+                    <p class="text-xs text-text-secondary">
+                      La IA no encontró diferencias con los datos consolidados.
+                    </p>
+                  } @else {
+                    <div class="hidden sm:block overflow-x-auto">
+                      <table class="w-full text-xs">
+                        <thead>
+                          <tr class="border-b border-border text-left text-text-secondary">
+                            <th class="pb-2 pr-3 font-medium">Línea</th>
+                            <th class="pb-2 px-3 font-medium">Campo</th>
+                            <th class="pb-2 px-3 font-medium">Consolidado</th>
+                            <th class="pb-2 px-3 font-medium">En el documento</th>
+                            <th class="pb-2 px-3 font-medium">Revalidado</th>
+                            <th class="pb-2 pl-3 font-medium">Motivo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (d of divergenceView().rows; track $index) {
+                            <tr class="border-b border-border/50 bg-amber-50/60">
+                              <td class="py-2 pr-3 font-semibold">{{ d.lineIndex === null ? '—' : lineNumber(d.lineIndex) }}</td>
+                              <td class="py-2 px-3">{{ d.fieldLabel }}</td>
+                              <td class="py-2 px-3 text-text-secondary">{{ d.consolidated }}</td>
+                              <td class="py-2 px-3 text-text-secondary">{{ d.document }}</td>
+                              <td class="py-2 px-3" [class]="d.differs ? 'font-semibold text-primary' : 'text-text-primary'">{{ d.revalidated }}</td>
+                              <td class="py-2 pl-3 text-text-secondary">
+                                @if (d.isUserDecision) {
+                                  <span class="font-medium text-text-primary">Decisión del usuario:</span>
+                                }
+                                {{ d.reason }}
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                    <div class="sm:hidden space-y-2">
+                      @for (d of divergenceView().rows; track $index) {
+                        <div class="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1 text-xs">
+                          <p class="font-semibold text-text-primary">
+                            {{ d.lineIndex === null ? 'General' : 'Línea ' + lineNumber(d.lineIndex) }} · {{ d.fieldLabel }}
+                          </p>
+                          <p><span class="text-text-secondary">Consolidado:</span> {{ d.consolidated }}</p>
+                          <p><span class="text-text-secondary">En el documento:</span> {{ d.document }}</p>
+                          <p>
+                            <span class="text-text-secondary">Revalidado:</span>
+                            <span [class]="d.differs ? 'font-semibold text-primary' : 'text-text-primary'">{{ d.revalidated }}</span>
+                          </p>
+                          <p class="text-text-secondary">
+                            @if (d.isUserDecision) {
+                              <span class="font-medium text-text-primary">Decisión del usuario:</span>
+                            }
+                            {{ d.reason }}
+                          </p>
+                        </div>
+                      }
+                    </div>
+                  }
+                  @if (divergenceView().hiddenCount > 0) {
+                    <p class="text-xs text-text-secondary mt-2" data-testid="revalidate-divergences-hidden">
+                      {{ divergenceView().hiddenCount }}
+                      {{ divergenceView().hiddenCount === 1 ? 'campo verificado sin diferencias' : 'campos verificados sin diferencias' }}
+                    </p>
+                  }
+                </div>
+              }
+            }
+          }
+        </div>
+       }
       }
 
       <!-- Footer Actions -->
       <div slot="footer" class="flex justify-between gap-3">
         <div>
-          @if (currentStep() === 3) {
+          @if (currentStep() === 3 && revalidateView() === 'review') {
             <app-button variant="outline" (clicked)="resetWizard()">
               Escanear otra
             </app-button>
@@ -986,7 +1385,43 @@ import {
               Analizar Factura
             </app-button>
           }
-          @if (currentStep() === 3) {
+          @if (currentStep() === 3 && revalidateView() === 'summary') {
+            <app-button variant="outline" (clicked)="backToReview()">
+              Volver
+            </app-button>
+            <app-button variant="primary" (clicked)="sendRevalidate()">
+              Enviar a revalidar
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'error') {
+            <app-button variant="outline" (clicked)="backToReview()">
+              Volver a la precarga
+            </app-button>
+            <app-button variant="primary" (clicked)="sendRevalidate()">
+              Reintentar
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'result') {
+            <app-button variant="outline" (clicked)="editManually()">
+              Editar manualmente
+            </app-button>
+            <app-button variant="outline" (clicked)="keepPreload()">
+              Mantener precarga
+            </app-button>
+            <app-button variant="primary" (clicked)="useRevalidation()">
+              Usar revalidación
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'review' && revalidateChecked()) {
+            <app-button
+              variant="primary"
+              [disabled]="editableItems().length === 0 || allDiscarded() || !canRevalidate()"
+              (clicked)="openRevalidateSummary()"
+            >
+              Revalidar
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'review' && !revalidateChecked()) {
             <!--
               QUI-644: el contador refleja SOLO los activos, y el botón se
               deshabilita si todo quedó descartado — confirmar una carga vacía
@@ -1036,6 +1471,7 @@ import {
 })
 export class InvoiceScannerModalComponent {
   private destroyRef = inject(DestroyRef);
+  private injector = inject(Injector);
   readonly isOpen = input(false);
   /**
    * Fase 4: scan profile selector. Defaults to `retail`. The parent
@@ -1059,6 +1495,8 @@ export class InvoiceScannerModalComponent {
     invoiceNumber?: string;
     invoiceDate?: string;
     supplierId?: number | null;
+    /** QUI-855: la factura subida por el scan (null si no se pudo subir). */
+    scanAttachment?: ScanAttachmentInfo | null;
   }>();
 
   // Wizard state
@@ -1171,11 +1609,235 @@ export class InvoiceScannerModalComponent {
   readonly allDiscarded = computed(
     () => this.editableItems().length > 0 && this.keptCount() === 0,
   );
+
+  // ===== QUI-855 paso 8b: revalidación con IA =====
+  readonly REVALIDATE_NOTE_MAX = 2000;
+  /** Checkbox «Revalidar datos consolidados con IA» de la vista de revisión. */
+  readonly revalidateChecked = signal(false);
+  /** Vista del paso 3: la precarga o alguna etapa de la revalidación. */
+  readonly revalidateView = signal<
+    'review' | 'summary' | 'loading' | 'error' | 'result'
+  >('review');
+  readonly revalidateNote = signal('');
+  readonly revalidateResult = signal<InvoiceRevalidateResult | null>(null);
+  readonly revalidateError = signal<string | null>(null);
+  private revalidateSub: Subscription | null = null;
+  private scanSub: Subscription | null = null;
+  /** Posición en `editableItems()` de cada línea enviada (las no descartadas). */
+  private revalidateSentIndexes: number[] = [];
+
+  /** Sin `scan_attachment` (la subida a S3 falló) no hay documento que releer. */
+  readonly canRevalidate = computed(
+    () => !!this.scanResult()?.scan_attachment?.key,
+  );
+
+  onRevalidateToggle(value: boolean): void {
+    if (value && !this.canRevalidate()) return;
+    this.revalidateChecked.set(value);
+  }
+
+  onRevalidateNoteChange(value: string | null): void {
+    this.revalidateNote.set((value ?? '').slice(0, this.REVALIDATE_NOTE_MAX));
+  }
+
+  openRevalidateSummary(): void {
+    if (!this.canRevalidate() || this.keptCount() === 0) return;
+    this.revalidateView.set('summary');
+  }
+
+  backToReview(): void {
+    this.cancelRevalidateRequest();
+    this.revalidateError.set(null);
+    this.revalidateView.set('review');
+  }
+
+  /** Estado EDITADO actual → consolidado → cola de revalidación → polling. */
+  sendRevalidate(): void {
+    const scan = this.scanResult();
+    const key = scan?.scan_attachment?.key;
+    if (!scan || !key) return;
+
+    const items = this.editableItems();
+    const discarded = this.discardedIndexes();
+    const indexes = items.map((_, i) => i).filter((i) => !discarded.has(i));
+    if (indexes.length === 0) return;
+    this.revalidateSentIndexes = indexes;
+
+    const rows = this.lineTaxRows();
+    const totals = this.purchaseTotals();
+    const consolidated = buildRevalidateConsolidated({
+      scan,
+      items: indexes.map((i) => items[i]),
+      invoiceNumber: this.editInvoiceNumber,
+      invoiceDate: this.editInvoiceDate,
+      headerDiscount: this.headerDiscount(),
+      headerDiscountGross: this.headerDiscountGross(),
+      totals: {
+        subtotal: totals.subtotal,
+        tax_amount: totals.tax_amount,
+        total: totals.total,
+      },
+      lineTotals: indexes.map((i) => rows[i]?.total_line ?? 0),
+    });
+    const note = this.revalidateNote().trim();
+
+    this.cancelRevalidateRequest();
+    this.revalidateError.set(null);
+    this.revalidateView.set('loading');
+    this.revalidateSub = this.invoiceScannerService
+      .revalidateAndWait({
+        scan_attachment_key: key,
+        order_type: this.scanProfile(),
+        consolidated,
+        ...(note ? { note } : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.revalidateResult.set(result);
+          this.revalidateView.set('result');
+        },
+        error: (err: unknown) => {
+          this.revalidateError.set(
+            (err as Error)?.message || 'No se pudo revalidar la factura.',
+          );
+          this.revalidateView.set('error');
+        },
+      });
+  }
+
+  /** Aplica la revalidación (líneas por índice + cabecera) y vuelve a revisión. */
+  useRevalidation(): void {
+    const res = this.revalidateResult();
+    if (!res) return;
+    const items = this.editableItems();
+    const indexes = this.revalidateSentIndexes;
+    const sent = indexes.map((i) => items[i]).filter(Boolean);
+    const c = res.consolidated;
+    const merged = mergeRevalidatedLines(
+      sent,
+      c.line_items ?? [],
+      c.prices_include_tax,
+    );
+    const next = [...items];
+    indexes.forEach((editableIdx, k) => {
+      if (merged.items[k]) next[editableIdx] = merged.items[k];
+    });
+    next.push(...merged.items.slice(sent.length));
+    this.editableItems.set(next);
+
+    const scan = this.scanResult();
+    if (scan) {
+      this.scanResult.set({
+        ...scan,
+        prices_include_tax: c.prices_include_tax ?? scan.prices_include_tax,
+        subtotal: c.subtotal ?? scan.subtotal,
+        tax_amount: c.tax_amount ?? scan.tax_amount,
+        total: c.total ?? scan.total,
+        ...(c.discount_amount != null || c.discount_amount_printed != null
+          ? {
+              discount_amount: c.discount_amount ?? null,
+              discount_amount_printed: c.discount_amount_printed ?? null,
+            }
+          : {}),
+      });
+    }
+    if (c.invoice_number) this.editInvoiceNumber = c.invoice_number;
+    if (c.invoice_date) this.editInvoiceDate = c.invoice_date;
+    if (c.discount_amount != null || c.discount_amount_printed != null) {
+      // Misma regla de unidad que en la siembra, sobre las líneas ya fusionadas.
+      const discarded = this.discardedIndexes();
+      const seeded = seedHeaderDiscount(
+        c,
+        next.filter((_, i) => !discarded.has(i)),
+      );
+      this.headerDiscount.set(seeded.value);
+      this.headerDiscountGross.set(seeded.gross);
+      this.headerDiscountSeed = seeded.value;
+    }
+    this.finishRevalidation(false);
+  }
+
+  keepPreload(): void {
+    this.finishRevalidation(false);
+  }
+
+  editManually(): void {
+    this.finishRevalidation(true);
+  }
+
+  /**
+   * Cierre común de los tres caminos: se desmarca el checkbox, se RESETEA el
+   * ack (el flujo termina en el único ack existente) y se vuelve a revisión.
+   */
+  private finishRevalidation(focusLines: boolean): void {
+    this.cancelRevalidateRequest();
+    this.revalidateResult.set(null);
+    this.revalidateError.set(null);
+    this.revalidateNote.set('');
+    this.revalidateChecked.set(false);
+    this.aiAck.set(false);
+    this.revalidateView.set('review');
+    if (focusLines) {
+      afterNextRender(
+        () => {
+          const el = document.getElementById('pop-scan-lines');
+          el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+          el?.focus?.({ preventScroll: true });
+        },
+        { injector: this.injector },
+      );
+    }
+  }
+
+  private cancelScanRequest(): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.scanStalled.set(false);
+  }
+
+  private cancelRevalidateRequest(): void {
+    this.revalidateSub?.unsubscribe();
+    this.revalidateSub = null;
+  }
+
+  /** Nº de línea (base 1) tal como la ve el operador en la tabla. */
+  lineNumber(index: number | null): number | string {
+    if (index === null || index === undefined) return '—';
+    const mapped = this.revalidateSentIndexes[index];
+    return (mapped ?? index) + 1;
+  }
+
+  confidenceLabel(c: 'high' | 'medium' | 'low'): string {
+    return c === 'high'
+      ? 'Confianza alta'
+      : c === 'medium'
+        ? 'Confianza media'
+        : 'Confianza baja';
+  }
+
+  confidenceVariant(c: 'high' | 'medium' | 'low'): 'success' | 'warning' | 'error' {
+    return c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'error';
+  }
+
+  private readonly currencyFormat = inject(CurrencyFormatService);
+
+  /**
+   * Divergencias legibles y sin ruido. Lee la moneda dentro del computed, así
+   * que se recalcula sola cuando el servicio termina de resolverla.
+   */
+  readonly divergenceView = computed<DivergenceView>(() => {
+    const res = this.revalidateResult();
+    if (!res) return { rows: [], hiddenCount: 0 };
+    return buildDivergenceView(res.report.divergences, (n) => this.currencyFormat.format(n));
+  });
+
   selectedFile = signal<File | null>(null);
   filePreviewUrl = signal<string | null>(null);
   fileError = signal<string | null>(null);
   isDragging = signal(false);
   isScanning = signal(false);
+  readonly scanStalled = signal(false);
   isProcessingFile = signal(false);
 
   readonly isImageFile = computed(() => {
@@ -1291,6 +1953,17 @@ export class InvoiceScannerModalComponent {
   readonly headerDiscount = signal(0);
 
   /**
+   * Unidad del descuento general: BRUTO (impreso) cuando hay líneas
+   * multi-impuesto y la factura trae el impreso; NETO si no (ver
+   * `scan-header-discount.util`). Se fija al sembrar / al usar la
+   * revalidación, y `onConfirm` emite la cifra editada en ESA unidad.
+   */
+  readonly headerDiscountGross = signal(false);
+
+  /** Cifra con que se sembró el descuento (para saber si hubo edición). */
+  private headerDiscountSeed = 0;
+
+  /**
    * Descuento por PRONTO PAGO — sólo se muestra, NO se aplica. Es financiero:
    * va a cuenta de resultado y se decide al registrar el pago (QUI-647).
    * Nunca entra al costo del inventario ni al prorrateo.
@@ -1307,7 +1980,10 @@ export class InvoiceScannerModalComponent {
    * facturó el proveedor.
    */
   private readonly keptHeaderShares = computed(() =>
-    prorateHeaderDiscount(this.keptItems(), this.headerDiscount()),
+    prorateHeaderDiscount(
+      this.keptItems().map((i) => this.toTaxUtilItem(i)),
+      this.headerDiscount(),
+    ),
   );
 
   /**
@@ -1324,12 +2000,279 @@ export class InvoiceScannerModalComponent {
    * aplica dejaría de ser el que el operador ve y edita en el input. El monto
    * de la IA ya se convirtió a porcentaje una sola vez, al recibir el escaneo.
    */
-  private toTaxUtilItem = (item: MatchedLineItem): PurchaseLineTaxInput => ({
-    unit_price: item.unit_price,
-    quantity: item.quantity,
-    tax_rate: (Number(item.tax_rate ?? 0) || 0) * 100,
-    discount_percentage: item.discount_percentage,
-  });
+  private toTaxUtilItem = (item: MatchedLineItem): PurchaseLineTaxInput => {
+    // QUI-855 — camino multi-impuesto: la línea se trabaja en BRUTO (precio y
+    // descuento impresos), con el modo de precios de la línea y sus filas; el
+    // kernel deriva el neto. Aquí el monto SÍ viaja (gana por precedencia): el
+    // editor lo escribe y limpia el % cuando el operador teclea uno.
+    if (scanLineHasTaxes(item)) {
+      const printed = Number(item.discount_amount_printed) || 0;
+      return {
+        unit_price: this.linePrice(item),
+        quantity: item.quantity,
+        discount_percentage: item.discount_percentage,
+        ...(printed > 0 ? { discount_amount: printed } : {}),
+        prices_include_tax: this.lineInclude(item),
+        taxes: mapScanTaxesToPopLineTaxes(item.taxes!),
+      };
+    }
+    return {
+      unit_price: item.unit_price,
+      quantity: item.quantity,
+      tax_rate: (Number(item.tax_rate ?? 0) || 0) * 100,
+      discount_percentage: item.discount_percentage,
+    };
+  };
+
+  // ============================================================
+  // QUI-855: multi-impuesto por línea
+  // ============================================================
+
+  /** ¿La línea trabaja en bruto con sus filas de impuestos? */
+  isGrossLine(item: MatchedLineItem): boolean {
+    return scanLineHasTaxes(item);
+  }
+
+  /** Precio unitario que el operador edita: bruto impreso o neto legacy. */
+  linePrice(item: MatchedLineItem): number {
+    return this.isGrossLine(item)
+      ? Number(item.unit_price_gross ?? item.unit_price) || 0
+      : item.unit_price;
+  }
+
+  /** Modo de precios de la línea. Legacy: siempre neto (ya aplanado). */
+  private lineInclude(item: MatchedLineItem): boolean {
+    if (!this.isGrossLine(item)) return false;
+    return item.prices_include_tax ?? this.scanResult()?.prices_include_tax === true;
+  }
+
+  /** Descuento propio de la línea en DINERO (el monto gana sobre el %). */
+  ownDiscountMoney(item: MatchedLineItem): number {
+    const gross = this.linePrice(item) * (Number(item.quantity) || 0);
+    if (this.isGrossLine(item)) {
+      const printed = Number(item.discount_amount_printed) || 0;
+      if (printed > 0) return this.round2(Math.min(printed, gross));
+    }
+    const pct = Math.min(100, Math.max(0, Number(item.discount_percentage) || 0));
+    return this.round2(gross * (pct / 100));
+  }
+
+  private round2(n: number): number {
+    return Math.round(n * 100) / 100;
+  }
+
+  /** Filas del editor: las de la línea o, si es legacy, su IVA (tasa ×100). */
+  private taxRowsOf(item: MatchedLineItem): PopLineTax[] {
+    if (this.isGrossLine(item)) return mapScanTaxesToPopLineTaxes(item.taxes!);
+    return [
+      {
+        tax_type: 'iva',
+        tax_rate: this.displayPercent((Number(item.tax_rate ?? 0) || 0) * 100),
+        calc_mode: 'percent',
+        add_to_cost: false,
+      },
+    ];
+  }
+
+  /** Línea del expandido: estable hasta que cambia una línea (no recrea el editor). */
+  readonly taxPanelData = computed(() =>
+    this.editableItems().map((item) => ({
+      rows: this.taxRowsOf(item),
+      unit_price: this.linePrice(item),
+      quantity: item.quantity,
+      discount_money: this.ownDiscountMoney(item),
+      include: this.lineInclude(item),
+    })),
+  );
+
+  /**
+   * «Exento» / «Excluido» en lugar de «IVA 0 %» cuando el escaneo lo clasifico
+   * asi y el IVA de la fila sigue en 0 (si el operador le pone tasa, se pinta la tasa).
+   */
+  private untaxedLabel(item: MatchedLineItem, t: PopLineTax): string | null {
+    if (t.tax_type !== 'iva' || this.displayPercent(t.tax_rate) !== 0) return null;
+    if (item.tax_treatment === 'exento') return 'Exento';
+    if (item.tax_treatment === 'excluido') return 'Excluido';
+    return null;
+  }
+
+  /** Chips del resumen: «IVA 19 %», «ICUI 20 %», «IBUA $68/u». */
+  readonly taxChips = computed(() =>
+    this.editableItems().map((item) =>
+      this.taxRowsOf(item).map((t) => {
+        const fixed =
+          t.calc_mode === 'fixed_per_unit'
+            ? Number(t.fixed_amount_per_unit) || 0
+            : null;
+        // Impuesto fijo que llega como monto de línea (sin valor por unidad):
+        // se muestra el monto, no «$0/u».
+        const amount = Number(t.amount_override) || 0;
+        const qty = Number(item.quantity) || 0;
+        const lineAmount = fixed === 0 && amount > 0 && qty > 0 ? amount : null;
+        return {
+        lineAmount,
+        perUnit: lineAmount !== null ? lineAmount / qty : null,
+        key: t.tax_type,
+        label:
+          t.calc_mode === 'fixed_per_unit'
+            ? taxTypeLabel(t.tax_type)
+            : this.untaxedLabel(item, t) ??
+              `${taxTypeLabel(t.tax_type)} ${this.displayPercent(t.tax_rate)} %`,
+        fixed,
+        };
+      }),
+    ),
+  );
+
+  /** Línea con su panel de impuestos abierto (una a la vez). */
+  readonly expandedTaxRow = signal<number | null>(null);
+
+  toggleTaxPanel(index: number): void {
+    this.expandedTaxRow.update((cur) => (cur === index ? null : index));
+  }
+
+  /**
+   * El editor emitió las filas de la línea. Una línea legacy (neta) que sólo
+   * cambió la tasa del IVA sigue en el camino legacy; con cualquier otra cosa
+   * (otro impuesto, monto fijo, modo incluido, al costo…) pasa al camino
+   * multi-impuesto, conservando el precio neto como su base.
+   */
+  onLineTaxesChange(index: number, rows: PopLineTax[]): void {
+    const items = [...this.editableItems()];
+    const item = items[index];
+    if (!item) return;
+    if (this.isGrossLine(item)) {
+      items[index] = { ...item, taxes: popLineTaxesToScanTaxes(rows) };
+    } else if (this.isSimpleIvaRow(rows)) {
+      const pct = Math.min(100, Math.max(0, Number(rows[0].tax_rate) || 0));
+      items[index] = { ...item, tax_rate: pct / 100 };
+    } else {
+      items[index] = this.toGrossLine(item, popLineTaxesToScanTaxes(rows), false);
+    }
+    this.editableItems.set(items);
+  }
+
+  /** Toggle de modo (incluido/agregado) de LA LÍNEA; las filas vuelven a heredarlo. */
+  onLineIncludeChange(index: number, value: boolean): void {
+    const items = [...this.editableItems()];
+    const item = items[index];
+    if (!item) return;
+    if (this.isGrossLine(item)) {
+      items[index] = {
+        ...item,
+        prices_include_tax: value,
+        taxes: item.taxes!.map((t) => ({ ...t, is_inclusive: undefined })),
+      };
+    } else {
+      // Legacy ya es «agregado»: sólo «incluido» cambia algo.
+      if (!value) return;
+      items[index] = this.toGrossLine(
+        item,
+        popLineTaxesToScanTaxes(this.taxRowsOf(item)),
+        true,
+      );
+    }
+    this.editableItems.set(items);
+  }
+
+  private isSimpleIvaRow(rows: PopLineTax[]): boolean {
+    if (rows.length !== 1) return false;
+    const r = rows[0];
+    return (
+      r.tax_type === 'iva' &&
+      r.calc_mode !== 'fixed_per_unit' &&
+      r.amount_override == null &&
+      !r.add_to_cost &&
+      r.is_inclusive === undefined &&
+      r.base_mode === undefined
+    );
+  }
+
+  /** Pasa una línea neta legacy al camino multi-impuesto (su neto es su base). */
+  private toGrossLine(
+    item: MatchedLineItem,
+    taxes: ScanLineTax[],
+    include: boolean,
+  ): MatchedLineItem {
+    return {
+      ...item,
+      taxes,
+      unit_price_gross: item.unit_price,
+      prices_include_tax: include,
+      discount_amount_printed: null,
+    };
+  }
+
+  /**
+   * Unidad en que se muestra/edita el descuento de cada línea, por índice.
+   * Se siembra al recibir el escaneo (monto impreso => '$'); sin entrada se
+   * cae al default de `discountUnit`. Las líneas nunca se borran ni reordenan
+   * (sólo se descartan), así que el índice es estable; se reinicia por escaneo.
+   */
+  readonly discountUnits = signal<Record<number, 'pct' | 'amount'>>({});
+
+  /** Unidad vigente de la línea: la elegida, o '$' si trae monto y '%' si no. */
+  discountUnit(index: number, item: MatchedLineItem): 'pct' | 'amount' {
+    const chosen = this.discountUnits()[index];
+    if (chosen) return chosen;
+    return this.initialDiscountUnit(item);
+  }
+
+  /**
+   * Unidad inicial del descuento: si el escaneo trae `discount_kind` (la unidad
+   * en que la factura lo IMPRIMIO) manda; si no, la deduccion: '$' si trae
+   * monto y '%' si no.
+   */
+  private initialDiscountUnit(item: MatchedLineItem): 'pct' | 'amount' {
+    if (item.discount_kind === 'percent') return 'pct';
+    if (item.discount_kind === 'amount') return 'amount';
+    const hasMoney =
+      (Number(item.discount_amount_printed) || 0) > 0 ||
+      (Number(item.discount_amount) || 0) > 0;
+    return hasMoney ? 'amount' : 'pct';
+  }
+
+  /** Cambia sólo la unidad de edición; el descuento efectivo no se toca. */
+  setDiscountUnit(index: number, unit: 'pct' | 'amount'): void {
+    this.discountUnits.update((m) => ({ ...m, [index]: unit }));
+  }
+
+  /** Valor del input según la unidad: monto (2 decimales) o %. */
+  discountInputValue(index: number, item: MatchedLineItem): number {
+    return this.discountUnit(index, item) === 'amount'
+      ? this.ownDiscountMoney(item)
+      : this.linePercentDiscount(item);
+  }
+
+  /** Porcentaje legible en es-CO, hasta 2 decimales (0,66). */
+  formatPercent(value: number): string {
+    return this.displayPercent(value).toLocaleString('es-CO', {
+      maximumFractionDigits: 2,
+    });
+  }
+
+  /**
+   * Descuento en DINERO tecleado. Sincroniza el %: línea multi-impuesto guarda
+   * el monto impreso (gana en el carrito y el backend); legacy sólo guarda el %.
+   */
+  updateItemDiscountAmount(index: number, event: Event): void {
+    const raw = Number((event.target as HTMLInputElement).value);
+    const items = [...this.editableItems()];
+    const item = items[index];
+    if (!item) return;
+    const gross = this.linePrice(item) * (Number(item.quantity) || 0);
+    const money = Math.min(Math.max(0, Number.isFinite(raw) ? raw : 0), gross);
+    const pct = gross > 0 ? Math.min(100, (money / gross) * 100) : 0;
+    items[index] = this.isGrossLine(item)
+      ? {
+          ...item,
+          discount_amount_printed: money > 0 ? money : null,
+          discount_percentage: pct,
+          discount_amount: null,
+        }
+      : { ...item, discount_percentage: pct, discount_amount: null };
+    this.editableItems.set(items);
+  }
 
   /**
    * Porcentaje para pintar en pantalla. Los porcentajes se muestran en ENTERO
@@ -1345,23 +2288,57 @@ export class InvoiceScannerModalComponent {
   }
 
   /**
-   * Porcentaje de descuento con el que arranca una línea recién escaneada.
+   * % inicial de descuento a partir de lo que la IA leyó (% y/o monto).
    *
-   * Prefiere el porcentaje que la IA leyó del papel: es la cifra impresa y es
-   * invariante a la base (un 20% es 20% con IVA o sin él). Sólo cuando no hay
-   * porcentaje se deriva del monto, contra el bruto de la línea. Con bruto 0
-   * (línea bonificada) no hay porcentaje posible y queda en 0 — dividir por
-   * cero pintaría NaN en el input.
+   * Regla: el MONTO gana sobre el %, como en el kernel compartido
+   * (`resolvePurchaseLineDiscount`). Si la línea trae monto > 0 y también %,
+   * y el % aplicado al bruto difiere del monto en más de 1 peso Y en más de
+   * 0,5 puntos porcentuales, el % se deriva del monto (típico: la IA leyó el
+   * IVA, 19, como descuento). Las dos tolerancias juntas absorben el redondeo
+   * de un % impreso con 2 decimales. Sólo % => se usa el %; sólo monto => se
+   * deriva. Con bruto 0 no hay % posible y se usa el % impreso o 0.
    */
-  private resolveLineDiscountPercent(item: MatchedLineItem): number {
-    const printedPct = Number(item.discount_percentage);
-    if (Number.isFinite(printedPct) && printedPct > 0) {
-      return Math.min(100, printedPct);
+  private resolveDiscountPercent(
+    printedPctRaw: unknown,
+    moneyRaw: unknown,
+    gross: number,
+  ): number {
+    const pctNum = Number(printedPctRaw);
+    const pct = Number.isFinite(pctNum) && pctNum > 0 ? Math.min(100, pctNum) : 0;
+    const money = Number(moneyRaw) || 0;
+    if (money > 0 && gross > 0) {
+      const derived = Math.min(100, (money / gross) * 100);
+      if (pct <= 0) return derived;
+      const pesosOff = Math.abs((gross * pct) / 100 - money);
+      const pointsOff = Math.abs(derived - pct);
+      return pesosOff > 1 && pointsOff > 0.5 ? derived : pct;
     }
-    const money = Number(item.discount_amount) || 0;
+    return pct;
+  }
+
+  /** % inicial de una línea legacy (neta). El monto gana sobre el %. */
+  private resolveLineDiscountPercent(item: MatchedLineItem): number {
     const gross = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
-    if (money > 0 && gross > 0) return Math.min(100, (money / gross) * 100);
-    return 0;
+    return this.resolveDiscountPercent(
+      item.discount_percentage,
+      item.discount_amount,
+      gross,
+    );
+  }
+
+  /**
+   * QUI-855 — % inicial de una línea multi-impuesto: contra el bruto impreso y
+   * el monto BRUTO impreso. El monto gana sobre el %.
+   */
+  private resolveGrossDiscountPercent(item: MatchedLineItem): number {
+    const gross =
+      (Number(item.quantity) || 0) *
+      (Number(item.unit_price_gross ?? item.unit_price) || 0);
+    return this.resolveDiscountPercent(
+      item.discount_percentage,
+      item.discount_amount_printed,
+      gross,
+    );
   }
 
   /**
@@ -1411,6 +2388,37 @@ export class InvoiceScannerModalComponent {
   );
 
   /**
+   * Impuestos del pie separados por tipo (misma derivación por línea que
+   * `purchaseTotals`): IVA solo IVA; INC/ICUI/IBUA en «otros». La suma de ambos
+   * es `purchaseTotals().tax_amount`, así que el total no cambia.
+   */
+  readonly taxBreakdown = computed(() => {
+    const items = this.keptItems().map((i) => this.toTaxUtilItem(i));
+    const header = this.invoiceHeader();
+    const shares = prorateHeaderDiscount(items, this.headerDiscount());
+    let iva = 0;
+    const others = new Map<string, number>();
+    items.forEach((item, i) => {
+      for (const t of deriveLineTaxes(item, header, shares[i]).taxes) {
+        if (t.tax_type === 'iva') iva += t.tax_amount;
+        else others.set(t.tax_type, (others.get(t.tax_type) ?? 0) + t.tax_amount);
+      }
+    });
+    const other = this.round2([...others.values()].reduce((a, b) => a + b, 0));
+    const order = ['inc', 'icui', 'ibua'];
+    const types = [...others.entries()]
+      .filter(([, v]) => v > 0)
+      .map(([k]) => k)
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+      .map((k) => k.toUpperCase());
+    return {
+      iva: this.round2(iva),
+      other,
+      otherLabel: types.join(', '),
+    };
+  });
+
+  /**
    * Cotejo contra el papel: lo DERIVADO frente a lo IMPRESO por la factura.
    *
    * `scanResult.subtotal` y `scanResult.tax_amount` ya llegaban del OCR y la UI
@@ -1435,9 +2443,9 @@ export class InvoiceScannerModalComponent {
       },
       {
         label: 'IVA',
-        derived: derived.tax_amount,
+        derived: this.taxBreakdown().iva,
         printed: printedTax,
-        diff: derived.tax_amount - printedTax,
+        diff: this.taxBreakdown().iva - printedTax,
         hasPrinted: printedTax > 0,
       },
       {
@@ -1748,31 +2756,36 @@ export class InvoiceScannerModalComponent {
     // El servicio cachea, así que estará listo al construir editableItems.
     this.loadUomCatalog();
 
-    this.invoiceScannerService
-      .scanInvoice(file, this.scanProfile())
+    this.cancelScanRequest();
+    this.scanStalled.set(false);
+    this.scanSub = this.invoiceScannerService
+      .scanInvoiceAndWait(file, this.scanProfile(), {
+        onStall: () => this.scanStalled.set(true),
+      })
       .pipe(
-        switchMap((scanResponse) => {
-          if (!scanResponse.success || !scanResponse.data) {
-            throw new Error(
-              scanResponse.message || 'Error al escanear la factura',
-            );
-          }
-          this.scanResult.set(scanResponse.data);
-          return this.invoiceScannerService.matchProducts(scanResponse.data);
+        switchMap((scan) => {
+          this.scanResult.set(scan);
+          return this.invoiceScannerService.matchProducts(scan);
         }),
         catchError((err) => {
           // El `message` del backend es el devMessage en inglés
           // («AI OCR response parsed but is missing required fields»), que
           // llegaba tal cual al toast. parseApiError aplica la aduana de
           // idioma y cae al copy curado por `error_code`.
-          this.toastService.error(parseApiError(err).userMessage);
+          this.toastService.error(
+            err instanceof HttpErrorResponse
+              ? parseApiError(err).userMessage
+              : (err as Error)?.message || 'No se pudo escanear la factura',
+          );
           this.currentStep.set(1);
           this.isScanning.set(false);
+          this.scanStalled.set(false);
           return of(null);
         }),
       )
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((matchResponse) => {
         this.isScanning.set(false);
+        this.scanStalled.set(false);
         if (!matchResponse) return;
 
         if (matchResponse.success && matchResponse.data) {
@@ -1788,15 +2801,34 @@ export class InvoiceScannerModalComponent {
           );
           // Create editable copy of items. Fase 4: en flujo ingredient,
           // resolvemos uom_hint → purchase/stock UoM como preselección.
+          // Unidad inicial del descuento por línea: '$' si la factura trae
+          // monto, '%' si no. Se siembra antes de que el monto se normalice.
+          const seededUnits: Record<number, 'pct' | 'amount'> = {};
+          matchResponse.data.items.forEach((it, idx) => {
+            seededUnits[idx] = this.initialDiscountUnit(it);
+          });
+          this.discountUnits.set(seededUnits);
           this.editableItems.set(
             matchResponse.data.items.map((item) => {
               const { purchase_uom_id, stock_uom_id } = this.resolveUomForHint(
                 item.uom_hint,
               );
+              const hasTaxes = scanLineHasTaxes(item);
               return {
                 ...item,
                 purchase_uom_id,
                 stock_uom_id,
+                // QUI-855: la línea multi-impuesto conserva el bruto impreso y
+                // el descuento impreso (no se aplanan por IVA).
+                ...(hasTaxes
+                  ? {
+                      unit_price_gross: item.unit_price_gross ?? item.unit_price,
+                      discount_amount_printed:
+                        Number(item.discount_amount_printed) > 0
+                          ? Number(item.discount_amount_printed)
+                          : null,
+                    }
+                  : {}),
                 // Única conversión monto → porcentaje de todo el flujo, y ocurre
                 // acá: al recibir el escaneo, una sola vez. De aquí en adelante
                 // el descuento es un porcentaje y nada más — se pinta así, se
@@ -1805,7 +2837,9 @@ export class InvoiceScannerModalComponent {
                 // Hay facturas que sólo imprimen la rebaja en pesos, sin el "%"
                 // al lado. Si no se normalizara, esa rebaja no tendría cómo
                 // expresarse y desaparecería de la orden sin aviso.
-                discount_percentage: this.resolveLineDiscountPercent(item),
+                discount_percentage: hasTaxes
+                  ? this.resolveGrossDiscountPercent(item)
+                  : this.resolveLineDiscountPercent(item),
                 // El monto se descarta a propósito: gana por precedencia en
                 // `deriveLineTax`, así que dejarlo vivo haría que el porcentaje
                 // que el operador ve y edita no fuera el que se aplica.
@@ -1822,7 +2856,16 @@ export class InvoiceScannerModalComponent {
             // hay que sembrarla explícitamente en cada escaneo: si se dejara
             // al valor anterior, el segundo escaneo heredaría el descuento del
             // primero (el contenido proyectado en `app-modal` no se destruye).
-            this.headerDiscount.set(Number(scan.discount_amount ?? 0) || 0);
+            // QUI-855: en la unidad de las líneas (bruto impreso si hay líneas
+            // multi-impuesto y la factura trae el impreso; neto si no).
+            const discarded = this.discardedIndexes();
+            const seeded = seedHeaderDiscount(
+              scan,
+              this.editableItems().filter((_, i) => !discarded.has(i)),
+            );
+            this.headerDiscount.set(seeded.value);
+            this.headerDiscountGross.set(seeded.gross);
+            this.headerDiscountSeed = seeded.value;
           }
           this.currentStep.set(3);
         } else {
@@ -1866,6 +2909,9 @@ export class InvoiceScannerModalComponent {
       ...items[index],
       discount_percentage: pct,
       discount_amount: null,
+      // QUI-855: el monto impreso gana por precedencia; al teclear un %
+      // se limpia para que el % sea el que se aplica.
+      discount_amount_printed: null,
     };
     this.editableItems.set(items);
   }
@@ -1903,7 +2949,9 @@ export class InvoiceScannerModalComponent {
     const value = Number((event.target as HTMLInputElement).value);
     if (value < 0) return;
     const items = [...this.editableItems()];
-    items[index] = { ...items[index], unit_price: value };
+    items[index] = this.isGrossLine(items[index])
+      ? { ...items[index], unit_price_gross: value }
+      : { ...items[index], unit_price: value };
     this.editableItems.set(items);
   }
 
@@ -2107,13 +3155,26 @@ export class InvoiceScannerModalComponent {
       // carrito, así que emitir el `scan` crudo descartaría en silencio la
       // corrección que el operador acaba de hacer en la precarga — y con ella
       // el prorrateo por línea que el backend aplica sobre esa cifra.
-      scanResult: { ...scan, discount_amount: this.headerDiscount() },
+      //
+      // QUI-855: se emite en el campo de SU unidad (bruto ⇒ `_printed`; neto ⇒
+      // `discount_amount` y `_printed` null) para que `pop.component`
+      // (`resolveCartHeaderDiscount`) entregue al carrito lo que el operador ve.
+      scanResult: {
+        ...scan,
+        ...editedHeaderDiscountFields(
+          scan,
+          this.headerDiscount(),
+          this.headerDiscountGross(),
+          this.headerDiscountSeed,
+        ),
+      },
       matchResult: match,
       editedItems: kept,
       invoiceNumber: this.editInvoiceNumber || undefined,
       invoiceDate: this.editInvoiceDate || undefined,
       // Punto 2: proveedor elegido por el usuario (null = no cambiar).
       supplierId: this.selectedSupplierId(),
+      scanAttachment: scan.scan_attachment ?? null,
     });
 
     this.closeAndReset();
@@ -2140,15 +3201,20 @@ export class InvoiceScannerModalComponent {
     this.filePreviewUrl.set(null);
     this.fileError.set(null);
     this.isProcessingFile.set(false);
+    this.cancelScanRequest();
     this.isScanning.set(false);
     this.scanResult.set(null);
     this.matchResult.set(null);
     this.editableItems.set([]);
+    this.expandedTaxRow.set(null);
     this.headerDiscount.set(0);
+    this.headerDiscountGross.set(false);
+    this.headerDiscountSeed = 0;
     // QUI-644: obligatorio. El contenido proyectado en `app-modal` no se
     // destruye al cerrar (QUI-438), así que sin esto el descarte del escaneo
     // anterior se aplicaría a las líneas del siguiente.
     this.discardedIndexes.set(new Set());
+    this.discountUnits.set({});
     this.editInvoiceNumber = '';
     this.editInvoiceDate = '';
     // Punto 2 + 3/4: limpia estado de proveedor y del picker de productos.
@@ -2169,6 +3235,14 @@ export class InvoiceScannerModalComponent {
     // cerrar, así que sin este reset la segunda apertura traería el check ya
     // marcado y el guard quedaría anulado.
     this.aiAck.set(false);
+    // QUI-855 paso 8b: el estado de la revalidación tampoco sobrevive al cierre.
+    this.cancelRevalidateRequest();
+    this.revalidateChecked.set(false);
+    this.revalidateView.set('review');
+    this.revalidateNote.set('');
+    this.revalidateResult.set(null);
+    this.revalidateError.set(null);
+    this.revalidateSentIndexes = [];
   }
 
   private closeAndReset(): void {

@@ -755,24 +755,26 @@ function isMultiTokenQuery(query: string): boolean {
                 </div>
                 <!-- Product Info -->
                 <div class="p-3 flex flex-col justify-between flex-1">
-                  <!-- Name & Description/SKU slot -->
-                  <div class="h-10 overflow-hidden flex flex-col justify-start">
+                  <!-- Name & Description/SKU slot: columna con wrap y alto fijo.
+                       Si el nombre ocupa 2 líneas, la descripción/SKU no cabe,
+                       salta a una segunda columna y queda oculta entera. -->
+                  <div class="h-10 overflow-hidden flex flex-col flex-wrap content-start">
                     <h3
-                      class="font-bold text-xs sm:text-sm text-slate-800 group-hover:text-primary transition-colors line-clamp-2 leading-tight"
+                      class="w-full shrink-0 font-bold text-xs sm:text-sm text-slate-800 group-hover:text-primary transition-colors line-clamp-2 leading-tight"
                       [title]="product.name"
                     >
                       {{ product.name }}
                     </h3>
                     @if (product.description) {
                       <p
-                        class="text-[11px] text-slate-400 mt-0.5 truncate leading-tight"
+                        class="w-full shrink-0 text-[11px] text-slate-400 mt-0.5 truncate leading-tight"
                         [title]="product.description"
                       >
                         {{ product.description }}
                       </p>
                     } @else if (product.sku) {
                       <p
-                        class="text-[11px] text-slate-400 font-mono mt-0.5 truncate leading-tight"
+                        class="w-full shrink-0 text-[11px] text-slate-400 font-mono mt-0.5 truncate leading-tight"
                         [title]="'SKU: ' + product.sku"
                       >
                         SKU: {{ product.sku }}

@@ -206,7 +206,7 @@ describe('order-actions-parity — processing (web ids: finish|dispatch-order+di
   });
 
   it('confirm_delivery ("finish"): enabled unless F2 pending-kitchen guard trips — mirrors the web\'s `finish` push for a non-dispatch order', () => {
-    const order = baseOrder({ state: 'processing' });
+    const order = baseOrder({ state: 'processing', payments: [directPayment(100)] });
     expect(canConfirmDelivery(order)).toEqual({ enabled: true });
     expect(canConfirmDelivery({ ...order, hasPendingKitchen: true })).toEqual({
       enabled: false,
@@ -267,8 +267,14 @@ describe('order-actions-parity — shipped (web ids: pay | deliver)', () => {
 });
 
 describe('order-actions-parity — delivered (web ids: finish, pay|cancel-payment[privileged], refund?)', () => {
-  it('confirm_delivery ("finish"): always offered, matching the web\'s unconditional push', () => {
-    expect(canConfirmDelivery(baseOrder({ state: 'delivered' }))).toEqual({ enabled: true });
+  it('confirm_delivery ("finish"): offered once paid; an unpaid non-credit balance blocks it (ORD_FINISH_UNPAID_BALANCE_001) and `pay` is offered instead', () => {
+    expect(
+      canConfirmDelivery(baseOrder({ state: 'delivered', payments: [directPayment(100)] })),
+    ).toEqual({ enabled: true });
+    expect(canConfirmDelivery(baseOrder({ state: 'delivered' }))).toEqual({
+      enabled: false,
+      reason: 'ORD_FINISH_UNPAID_BALANCE_001',
+    });
   });
 
   it('unpaid: pay enabled (COD delivered-but-unpaid) — matches web\'s `if (!hasPaid) push pay`', () => {

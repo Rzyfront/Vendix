@@ -64,6 +64,7 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
     }
     expect(where.OR).toBeUndefined();
     expect(where.stock_levels).toEqual({ some: { location_id: 7 } });
+    expect(where.state).toEqual({ not: 'archived' });
     // Empate total ⇒ tiebreak id DESC (contrato compareSearchRank).
     expect(result.map((r: any) => r.id)).toEqual([2, 1]);
   });
@@ -104,6 +105,7 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
       { sku: { contains: 'cafe tubo', mode: 'insensitive' } },
     ]);
     expect(args.where.stock_levels).toEqual({ some: { location_id: 7 } });
+    expect(args.where.state).toEqual({ not: 'archived' });
     expect(args.take).toBe(10);
   });
 

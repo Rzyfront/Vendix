@@ -26,11 +26,12 @@ export type AIFeatureKey =
   | 'tool_agents'
   | 'rag_embeddings'
   | 'async_queue'
-  | 'realtime_voice';
+  | 'realtime_voice'
+  | 'vex_agent';
 
 /**
  * The runtime mirror of the union. Anything that needs to walk every feature
- * reads this instead of hand-listing keys, so adding the eighth feature is one
+ * reads this instead of hand-listing keys, so adding the next feature is one
  * edit rather than a hunt through `raw['x'] || raw['y']` chains.
  */
 export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
@@ -41,6 +42,7 @@ export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
   'rag_embeddings',
   'async_queue',
   'realtime_voice',
+  'vex_agent',
 ] as const;
 
 export type AIFeatureDegradation = 'warn' | 'block';
@@ -49,6 +51,13 @@ export interface AIFeatureConfig {
   enabled: boolean;
   monthly_tokens_cap?: number | null;
   daily_messages_cap?: number | null;
+  /**
+   * Monthly tool-execution budget for the agent features (`tool_agents`,
+   * `vex_agent`). Consumed 1 unit per successful `tool_result` by the agent
+   * loop; absent/zero reads as unlimited. Mirrors `FeatureConfig` in
+   * `apps/backend/src/domains/store/subscriptions/types/access.types.ts`.
+   */
+  monthly_tool_calls_cap?: number | null;
   retention_days?: number | null;
   tools_allowed?: string[];
   /**
@@ -240,33 +249,38 @@ export interface StoreSubscription {
 export interface SubscriptionPaymentRow {
   id: number;
   invoice_id: number;
-  amount: number;
+  amount: number | string;
   currency: string;
-  state: 'pending' | 'succeeded' | 'failed' | 'refunded';
-  provider: string;
-  provider_reference: string | null;
-  payment_method_type: string | null;
+  state: 'pending' | 'succeeded' | 'failed' | 'refunded' | 'partial_refund';
+  /** wompi | manual | zero (written by backend subscription payment services) */
+  payment_method: string | null;
+  /** Gateway transaction id / bank reference; null while the payment is pending */
+  gateway_reference: string | null;
+  metadata?: Record<string, any> | null;
   paid_at: string | null;
   created_at: string;
   invoice?: {
     id: number;
     invoice_number: string;
-    total: number;
-    currency: string;
+    total: number | string;
     state: string;
-    store?: {
+    due_at?: string | null;
+    store_subscription?: {
       id: number;
-      name: string;
-    };
-    organization?: {
-      id: number;
-      name: string;
-    };
-    plan?: {
-      id: number;
-      name: string;
-      code: string;
-    };
+      store_id: number;
+      plan?: {
+        id: number;
+        name: string;
+        code: string;
+        billing_cycle: string;
+      } | null;
+      store?: {
+        id: number;
+        name: string;
+        organization_id: number;
+        organizations?: { id: number; name: string } | null;
+      } | null;
+    } | null;
   };
 }
 
@@ -498,4 +512,34 @@ export interface DunningPreviewResponse {
   target_state: DunningPreviewTargetState;
   side_effects: DunningPreviewSideEffects;
   warnings: string[];
+}
+
+// ─── Activar plan por consignación directa ───
+
+export type ActivatePlanPaymentMethod =
+  | 'consignacion'
+  | 'transferencia'
+  | 'efectivo'
+  | 'otro';
+
+export interface ActivateStorePlanDto {
+  plan_id: number;
+  amount?: string;
+  payment_method?: ActivatePlanPaymentMethod;
+  reference?: string;
+  /** YYYY-MM-DD */
+  paid_at?: string;
+  notes?: string;
+}
+
+export interface ActivateStorePlanResult {
+  store_id: number;
+  subscription_id: number;
+  plan_id: number;
+  plan_name: string;
+  state: string;
+  invoice_id: number | null;
+  invoice_number: string | null;
+  payment_id: number | null;
+  amount_paid: string | null;
 }

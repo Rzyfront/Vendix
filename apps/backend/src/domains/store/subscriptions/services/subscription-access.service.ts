@@ -10,14 +10,22 @@ import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import {
   AccessCheckResult,
+  AIExtraQuotaCounter,
   AIFeatureKey,
   AI_FEATURE_KEYS,
+  ExtraQuotaStatus,
+  FEATURE_EXTRA_QUOTA_CONFIG,
   FEATURE_QUOTA_CONFIG,
   FeatureConfig,
   isAIFeatureKey,
   ResolvedSubscription,
 } from '../types/access.types';
 import { SubscriptionResolverService } from './subscription-resolver.service';
+import {
+  AI_USAGE_GROUPS,
+  AiUsageGroup,
+  resolveUsageGroup,
+} from '../contracts/ai-usage-groups.contract';
 import { AutoRenewWarningState } from '../renewal-eligibility.contract';
 
 export interface DunningOverdueInvoice {
@@ -422,6 +430,106 @@ export class SubscriptionAccessService {
         `consumeAIQuota failed for store=${storeId} feature=${feature} requestId=${requestId}: ${(err as Error).message}`,
       );
     }
+  }
+
+  /**
+   * R3-A — estado de un contador adicional (`daily_messages`,
+   * `monthly_tokens`) de una feature frente a su cap. Solo lectura.
+   *
+   * Nunca lanza: ante fallo de resolver/Redis devuelve `exceeded: false`
+   * (fail-open, con warn) para que el metering no rompa el turno. El que
+   * decide bloquear es el llamador, según `degradation`.
+   */
+  async checkExtraQuota(
+    storeId: number,
+    feature: AIFeatureKey,
+    counter: AIExtraQuotaCounter,
+  ): Promise<ExtraQuotaStatus> {
+    const open: ExtraQuotaStatus = {
+      exceeded: false,
+      cap: null,
+      used: 0,
+      degradation: 'warn',
+    };
+    const cfg = FEATURE_EXTRA_QUOTA_CONFIG[feature]?.[counter];
+    if (!cfg) return open;
+    if (!Number.isInteger(storeId) || storeId <= 0) return open;
+    try {
+      const resolved = await this.resolver.resolveSubscription(storeId);
+      const featureConfig = resolved.features?.[feature];
+      if (!featureConfig) return open;
+      const degradation =
+        featureConfig.degradation === 'block' ? 'block' : 'warn';
+      const capRaw = featureConfig[cfg.capField];
+      if (typeof capRaw !== 'number' || capRaw <= 0) {
+        return { ...open, degradation };
+      }
+      const used = await this.getQuotaUsed(
+        this.extraQuotaKey(storeId, feature, counter, cfg.period),
+      );
+      return {
+        exceeded: used >= capRaw,
+        cap: capRaw,
+        used,
+        degradation,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `checkExtraQuota failed for store=${storeId} feature=${feature} counter=${counter}: ${(err as Error).message}`,
+      );
+      return open;
+    }
+  }
+
+  /**
+   * R3-A — suma `units` a un contador adicional con el mismo patrón Lua
+   * (dedup por `requestId` + INCRBY + EXPIRE) que `consumeAIQuota`. Mismo
+   * contrato: `requestId` obligatorio; errores de Redis se registran y se
+   * tragan.
+   */
+  async consumeExtraQuota(
+    storeId: number,
+    feature: AIFeatureKey,
+    counter: AIExtraQuotaCounter,
+    units: number,
+    requestId: string,
+  ): Promise<void> {
+    if (typeof requestId !== 'string' || requestId.trim().length === 0) {
+      throw new InternalServerErrorException(
+        'consumeExtraQuota requires a non-empty requestId for atomic dedup.',
+      );
+    }
+    if (!Number.isInteger(storeId) || storeId <= 0) return;
+    const cfg = FEATURE_EXTRA_QUOTA_CONFIG[feature]?.[counter];
+    if (!cfg) return;
+    if (!Number.isFinite(units) || units <= 0) return;
+
+    const quotaKey = this.extraQuotaKey(storeId, feature, counter, cfg.period);
+    const dedupKey = quotaKey.replace('ai:quota:', 'ai:quota:dedup:');
+    try {
+      await this.redis.eval(
+        this.consumeQuotaLua,
+        2,
+        quotaKey,
+        dedupKey,
+        requestId,
+        Math.floor(units),
+        this.ttlForPeriod(cfg.period),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `consumeExtraQuota failed for store=${storeId} feature=${feature} counter=${counter} requestId=${requestId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private extraQuotaKey(
+    storeId: number,
+    feature: AIFeatureKey,
+    counter: AIExtraQuotaCounter,
+    period: 'daily' | 'monthly',
+  ): string {
+    return `ai:quota:${storeId}:${feature}:${counter}:${this.periodKey(period)}`;
   }
 
   /**
@@ -985,6 +1093,57 @@ export class SubscriptionAccessService {
     }
 
     return snapshot;
+  }
+
+  /**
+   * Consumo IA real por grupo visible, leido de `ai_engine_logs` (fuente de
+   * verdad; los contadores Redis no reciben Chat/Vex). Solo llamadas
+   * exitosas de la tienda en [from, to]. Siempre devuelve los 6 grupos.
+   */
+  async getAIConsumptionByGroup(
+    storeId: number,
+    from: Date,
+    to: Date,
+  ): Promise<Record<AiUsageGroup, { calls: number; tokens: number }>> {
+    const result = Object.fromEntries(
+      AI_USAGE_GROUPS.map((g) => [g, { calls: 0, tokens: 0 }]),
+    ) as Record<AiUsageGroup, { calls: number; tokens: number }>;
+
+    const rows = await this.prisma.ai_engine_logs.groupBy({
+      by: ['app_key'],
+      where: {
+        store_id: storeId,
+        status: 'success',
+        created_at: { gte: from, lte: to },
+      },
+      _count: { _all: true },
+      _sum: { prompt_tokens: true, completion_tokens: true },
+    });
+    if (rows.length === 0) return result;
+
+    const appKeys = rows
+      .map((r) => r.app_key)
+      .filter((k): k is string => typeof k === 'string');
+    const apps = appKeys.length
+      ? await this.prisma.ai_engine_applications.findMany({
+          where: { key: { in: appKeys } },
+          select: { key: true, ai_feature_category: true },
+        })
+      : [];
+    const categoryByKey = new Map(
+      apps.map((a) => [a.key, a.ai_feature_category]),
+    );
+
+    for (const row of rows) {
+      const group = resolveUsageGroup(
+        row.app_key,
+        row.app_key ? (categoryByKey.get(row.app_key) ?? null) : null,
+      );
+      result[group].calls += row._count._all;
+      result[group].tokens +=
+        (row._sum.prompt_tokens ?? 0) + (row._sum.completion_tokens ?? 0);
+    }
+    return result;
   }
 
   /**

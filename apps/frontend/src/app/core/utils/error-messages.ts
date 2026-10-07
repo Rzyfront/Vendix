@@ -250,7 +250,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_HAS_RESERVATIONS_001:
     'Esta operación está bloqueada porque existen reservas de stock activas.',
   PROD_SKU_COLLISION_001:
-    'El SKU especificado ya existe en una variante de esta tienda.',
+    'El SKU ya lo usa otro producto activo o inactivo de esta tienda.',
   INV_VARIANT_TRACKING_001:
     'El valor de override de seguimiento de inventario no es válido.',
 
@@ -278,6 +278,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta cuenta pertenece a una mesa abierta. Cierra o cobra la cuenta desde Mesas antes de cancelar la orden.',
   ORD_CANCEL_CREDIT_NOTE_REQUIRED_001:
     'Esta orden tiene una factura electrónica aceptada por la DIAN. Emite primero la nota crédito correspondiente y luego cancela la orden.',
+  ORD_CONFIRM_PAYMENT_NO_PAYMENT_001:
+    'Esta orden no tiene un pago registrado. Usa Registrar pago con el monto y método recibidos.',
+  INVOICING_ORDER_UNPAID_001:
+    'La orden tiene saldo pendiente; registra el pago antes de emitir la factura, o márcala como venta a crédito.',
   ORD_ITEM_CANCEL_PAID_001:
     'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
   ORD_ITEM_CANCEL_STATE_001:
@@ -801,6 +805,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   RESOLUTION_SCAN_AI_FAIL:
     'La IA no pudo leer la resolución. Intenta con una foto más nítida o escribe los datos a mano.',
   RESOLUTION_SCAN_PARSE_FAIL:
+    'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  RUT_SCAN_NO_FILE: 'Sube una foto o un PDF del RUT.',
+  RUT_SCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+  RUT_SCAN_AI_FAIL:
+    'La IA no pudo leer el RUT. Intenta con una foto más nítida o escribe los datos a mano.',
+  RUT_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
   // Escáner IA de la habilitación DIAN (software + set de pruebas + resolución
   // de pruebas). Mismo contrato: no persiste nada, así que un fallo solo

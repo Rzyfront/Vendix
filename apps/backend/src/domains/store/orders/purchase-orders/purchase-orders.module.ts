@@ -4,9 +4,12 @@ import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { createPurchasingTools } from '../../../../ai-engine/tools/domains/purchasing.tools';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
 import { SuppliersService } from '../../inventory/suppliers/suppliers.service';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { PaymentReceiptScanProcessor } from './payment-receipt-scan.processor';
+import { InvoiceRevalidateProcessor } from './invoice-revalidate.processor';
+import { InvoiceScanProcessor } from './invoice-scan.processor';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { InventoryModule } from '../../inventory/inventory.module';
@@ -29,12 +32,20 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
     // expenses `expense-scan`). El root BullMQ ya está configurado
     // globalmente por AIQueueModule; aquí solo registramos la cola del dominio.
     BullModule.registerQueue({ name: 'payment-receipt-scan' }),
+    // QUI-855 paso 8a — cola dedicada `invoice-revalidate` (revalidación con IA
+    // de la precarga de compras; 202 + job_id + poll con IDOR por tienda).
+    BullModule.registerQueue({ name: 'invoice-revalidate' }),
+    // Escaneo IA async de facturas de compra (202 + job_id + poll con IDOR).
+    BullModule.registerQueue({ name: 'invoice-scan' }),
   ],
   controllers: [PurchaseOrdersController],
   providers: [
     PurchaseOrdersService,
+    PurchaseVatContributionService,
     InvoiceScannerService,
     PaymentReceiptScanProcessor,
+    InvoiceRevalidateProcessor,
+    InvoiceScanProcessor,
   ],
   exports: [PurchaseOrdersService],
 })

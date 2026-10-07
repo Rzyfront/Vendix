@@ -1554,6 +1554,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
       },
       requiredPermissions: ['store:orders:order_flow:create'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context): Promise<ToolPreview> => {
         if (!context.store_id) {
           return {
@@ -1947,6 +1948,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
       },
       requiredPermissions: ['store:orders:order_flow:create'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context): Promise<ToolPreview> => {
         if (!context.store_id) {
           return {
@@ -2294,6 +2296,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
       },
       requiredPermissions: ['store:orders:order_flow:create'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context): Promise<ToolPreview> => {
         if (!context.store_id) {
           return {
@@ -3049,6 +3052,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
       },
       requiredPermissions: ['store:orders:bulk_update'],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context): Promise<ToolPreview> => {
         if (!context.store_id) {
           return {

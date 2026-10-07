@@ -65,6 +65,8 @@ const INVOICE_PDF_INCLUDE = {
       store_settings: { select: { settings: true } },
     },
   },
+  // Solo la propina (informativa en el PDF); sin query extra.
+  order: { select: { tip_amount: true } },
   customer: {
     select: {
       id: true,
@@ -297,6 +299,13 @@ export class InvoicePdfService {
       tax_amount: Number(invoice.tax_amount),
       withholding_amount: Number(invoice.withholding_amount),
       total_amount: Number(invoice.total_amount),
+      // Propina voluntaria de la orden origen: solo facturas de venta.
+      tip_amount:
+        (invoice.invoice_type === 'sales_invoice' ||
+          invoice.invoice_type === 'pos_equivalent_document') &&
+        invoice.order
+          ? Number(invoice.order.tip_amount) || 0
+          : 0,
 
       // DIAN
       cufe: invoice.cufe || undefined,

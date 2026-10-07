@@ -21,12 +21,17 @@ import {
   PopCartItem,
   PopCartSummary,
   PopCartState,
+  PopLineTax,
+  PopScanAttachment,
+  PopTaxGroup,
   AddToPopCartRequest,
   UpdatePopCartItemRequest,
 } from '../interfaces/pop-cart.interface';
 import {
-  deriveLineTax,
+  deriveLineTaxes,
   derivePurchaseTotals,
+  prorateHeaderDiscount,
+  PurchaseLineTaxInput,
 } from '../utils/purchase-line-tax.util';
 import { PurchaseOrder } from '../../interfaces';
 import { WithholdingTaxService } from '../../../withholding-tax/services/withholding-tax.service';
@@ -36,18 +41,45 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 /**
  * Lot/Batch information for purchase order items (extended for service use)
  */
+/** Tipos de impuesto que el carrito conserva tal cual en una línea. */
+export const POP_LINE_TAX_TYPES = ['iva', 'inc', 'icui', 'ibua'] as const;
+
+/** `tax_type` de la línea si es uno conocido; si no, 'iva' (sin reclasificar). */
+export function normalizePopLineTaxType(
+  value: string | null | undefined,
+): string {
+  return (POP_LINE_TAX_TYPES as readonly string[]).includes(value ?? '')
+    ? (value as string)
+    : 'iva';
+}
+
+/**
+ * Líneas que bloquean el envío de la OC: con «¿Esta compra tiene IVA?»
+ * encendido, las que tienen el impuesto sin confirmar (`tax_needs_review`) o
+ * que el kernel no pudo calcular (`tax_error`). Con `has_vat` apagado no hay
+ * impuesto que confirmar y no bloquea.
+ */
+export function countLinesBlockingSubmit(
+  state: Pick<PopCartState, 'has_vat' | 'items'>,
+): number {
+  if (!state.has_vat) return 0;
+  return state.items.filter((i) => i.tax_needs_review || i.tax_error).length;
+}
+
+/** Mensaje de bloqueo del envío («Confirma el impuesto de N línea(s)»), o null. */
+export function submitBlockMessage(
+  state: Pick<PopCartState, 'has_vat' | 'items'>,
+): string | null {
+  const n = countLinesBlockingSubmit(state);
+  if (n === 0) return null;
+  return `Confirma el impuesto de ${n} ${n === 1 ? 'línea' : 'líneas'}`;
+}
+
 export interface PopCartItemLotInfo {
   batch_number?: string;
   manufacturing_date?: Date;
   expiration_date?: Date;
 }
-
-/**
- * IVA cycle (F1): default tax rate (%) seeded on NEW cart lines. Standard
- * Colombian IVA is 19%. Fully editable per line (0 for exempt). Named so the
- * default is trivial to change / wire to a store setting later.
- */
-const DEFAULT_PURCHASE_TAX_RATE = 19;
 
 const INITIAL_STATE: PopCartState = {
   items: [],
@@ -486,7 +518,7 @@ export class PopCartService {
 
   /**
    * CP-ORC-POP-MODAL-DISCOUNT-001 — normalize a discount percentage to a safe
-   * integer in 0..100. Rejects `null`/`undefined`/`NaN`/`±Infinity` by
+   * percentage in 0..100 (up to `decimals` decimals, 2 in the POP). Rejects `null`/`undefined`/`NaN`/`±Infinity` by
    * returning 0; otherwise rounds and clamps the value.
    *
    * Used both at the cart-write seam (`setItemDiscount`) and at the entry
@@ -494,7 +526,10 @@ export class PopCartService {
    * divergence between the modal that edits an existing line and the
    * scanner that adds a new one with a discount already in the payload.
    */
-  private normalizeDiscount(value: number | null | undefined): number {
+  private normalizeDiscount(
+    value: number | null | undefined,
+    decimals = 0,
+  ): number {
     if (
       value === null ||
       value === undefined ||
@@ -502,7 +537,11 @@ export class PopCartService {
     ) {
       return 0;
     }
-    return Math.min(100, Math.max(0, Math.round(Number(value))));
+    const factor = 10 ** decimals;
+    return Math.min(
+      100,
+      Math.max(0, Math.round(Number(value) * factor) / factor),
+    );
   }
 
   /**
@@ -531,7 +570,9 @@ export class PopCartService {
     ) {
       return;
     }
-    const pct = this.normalizeDiscount(discountPercentage);
+    // Con 2 decimales (la columna es Decimal(5,2) y el DTO acepta decimales):
+    // 1,5 % debe quedarse en 1,5 %, no saltar a 2 %.
+    const pct = this.normalizeDiscount(discountPercentage, 2);
     const items = this.currentState.items.map((item) =>
       item.id === itemId
         ? { ...item, discount: pct, discount_amount: undefined }
@@ -591,6 +632,15 @@ export class PopCartService {
    */
   setNotes(notes: string) {
     this.updateState({ notes: notes.trim() });
+  }
+
+  /**
+   * QUI-855 — adjunta (o quita, con `null`) la factura escaneada. Una por OC:
+   * un nuevo adjunto REEMPLAZA al anterior. El estado completo se persiste en
+   * localStorage, así que sobrevive a recargar.
+   */
+  setScanAttachment(attachment: PopScanAttachment | null): void {
+    this.updateState({ scan_attachment: attachment ?? undefined });
   }
 
   /**
@@ -734,17 +784,23 @@ export class PopCartService {
         unit_cost: request.unit_cost,
         // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
         // descuento; el alta manual sigue en 0. La normalización
-        // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
-        discount: this.normalizeDiscount(request.discount),
+        // (porcentaje 0..100 con hasta 2 decimales, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
+        discount: this.normalizeDiscount(request.discount, 2),
         // Paridad escáner: el MONTO viaja crudo. No pasa por
         // `normalizeDiscount` porque ese helper es el contrato del PORCENTAJE
-        // entero 0-100; aplicarlo a pesos truncaría la cifra de la factura.
+        // 0..100 con hasta 2 decimales; aplicarlo a pesos truncaría la cifra de la factura.
         discount_amount: request.discount_amount,
         // IVA cycle (F1/F3): defaults sembrados salvo override del request
         // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
-        tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
+        // Sin tasa en el request (ni catálogo ni escáner) NO se siembra un 19
+        // silencioso: queda null y la línea pide confirmar el impuesto.
+        tax_rate: request.tax_rate ?? null,
+        tax_needs_review:
+          !!request.tax_needs_review ||
+          this.needsTaxReview(request.tax_rate, request.taxes),
         tax_type: request.tax_type ?? 'iva',
         prices_include_tax: request.prices_include_tax,
+        taxes: request.taxes,
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -808,7 +864,7 @@ export class PopCartService {
         // pise el descuento de la línea con un 0 silencioso.
         discount:
           request.discount !== undefined
-            ? this.normalizeDiscount(request.discount)
+            ? this.normalizeDiscount(request.discount, 2)
             : existingItem.discount,
         // Paridad escáner: el descuento en DINERO sigue exactamente el mismo
         // patrón que `discount` / `unit_cost` / `tax_rate`. Sin esta línea el
@@ -820,11 +876,20 @@ export class PopCartService {
             ? request.discount_amount
             : existingItem.discount_amount,
         tax_rate: request.tax_rate ?? existingItem.tax_rate,
+        // La revisión sólo sigue pendiente si ni el request ni la línea
+        // previa traían una tasa.
+        tax_needs_review: request.tax_needs_review
+          ? true
+          : request.tax_rate != null || (request.taxes?.length ?? 0) > 0
+            ? false
+            : existingItem.tax_needs_review,
         tax_type: request.tax_type ?? existingItem.tax_type,
         prices_include_tax:
           request.prices_include_tax !== undefined
             ? request.prices_include_tax
             : existingItem.prices_include_tax,
+        // QUI-855: último escaneo gana también para multi-impuesto.
+        taxes: request.taxes !== undefined ? request.taxes : existingItem.taxes,
         lot_info: request.lot_info || existingItem.lot_info,
         notes: request.notes || existingItem.notes,
         contentPerPackage:
@@ -845,14 +910,20 @@ export class PopCartService {
         unit_cost: request.unit_cost,
         // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
         // descuento; el alta manual sigue en 0. La normalización
-        // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
-        discount: this.normalizeDiscount(request.discount),
+        // (porcentaje 0..100 con hasta 2 decimales, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
+        discount: this.normalizeDiscount(request.discount, 2),
         // Paridad escáner: el MONTO en pesos viaja crudo (ver rama prebulk).
         discount_amount: request.discount_amount,
         // IVA cycle (F1/F3): defaults salvo override del request (escáner).
-        tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
+        // Sin tasa en el request (ni catálogo ni escáner) NO se siembra un 19
+        // silencioso: queda null y la línea pide confirmar el impuesto.
+        tax_rate: request.tax_rate ?? null,
+        tax_needs_review:
+          !!request.tax_needs_review ||
+          this.needsTaxReview(request.tax_rate, request.taxes),
         tax_type: request.tax_type ?? 'iva',
         prices_include_tax: request.prices_include_tax,
+        taxes: request.taxes,
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -948,19 +1019,49 @@ export class PopCartService {
       ...currentState,
       items: updatedItems,
       summary: this.calculateSummary(updatedItems),
+      // La factura escaneada pertenece a las líneas que trajo: sin líneas no
+      // hay orden a la que adjuntarla (igual que `clearCart`).
+      ...(updatedItems.length === 0 ? { scan_attachment: undefined } : {}),
       updatedAt: new Date(),
     };
   }
 
   /**
-   * IVA cycle (F1): recalculate a line's NET subtotal / IVA / total using the
-   * util espejo del backend (`deriveLineTax`). El backend es la única autoridad
-   * sobre lo que se persiste; aquí solo es preview.
-   *
-   * Maestro "¿Esta compra tiene IVA?" apagado ⇒ pasamos `tax_rate: 0` al util
-   * para que la línea salga sin impuesto (independiente del modo include/added)
-   * — comportamiento que antes vivía aquí y que el util respeta con sólo
-   * entregarle una tasa 0 (la rama `r > 0` cortocircuita a neto puro).
+   * La línea necesita que el operador confirme el impuesto: no llegó ninguna
+   * tasa ni filas `taxes` con la que sembrarla.
+   */
+  private needsTaxReview(
+    taxRate: number | null | undefined,
+    taxes: PopLineTax[] | undefined,
+  ): boolean {
+    return taxRate == null && (taxes?.length ?? 0) === 0;
+  }
+
+  /**
+   * Entrada del util para una línea del carrito. El maestro "¿Esta compra tiene
+   * IVA?" apagado ⇒ línea sin impuesto (tasa 0 y sin filas), igual en la fila,
+   * el pie y el payload. Una tasa `null` (sin confirmar) vale 0.
+   */
+  private toTaxInput(item: PopCartItem, hasVat: boolean): PurchaseLineTaxInput {
+    return {
+      unit_cost: item.unit_cost,
+      quantity: item.quantity,
+      // Se entregan LOS DOS y el util resuelve la precedencia (monto > 0
+      // gana), como en el backend.
+      discount_percentage: item.discount,
+      discount_amount: item.discount_amount,
+      tax_rate: hasVat ? Number(item.tax_rate) || 0 : 0,
+      tax_type: item.tax_type,
+      prices_include_tax: item.prices_include_tax ?? undefined,
+      taxes: hasVat ? item.taxes : undefined,
+    };
+  }
+
+  /**
+   * IVA cycle (F1) + QUI-855: recalcula el neto / impuestos / total de una
+   * línea con el util, que delega en el kernel `resolvePurchaseLineTaxes`.
+   * El backend es la única autoridad sobre lo que se persiste; aquí sólo es
+   * preview.
    *
    * El prorrateo del descuento de cabecera se hace en `calculateSummary`, no
    * aquí: por línea el util recibe `proratedHeaderDiscount = 0` porque la línea
@@ -971,27 +1072,18 @@ export class PopCartService {
     headerPricesIncludeTax: boolean,
     hasVat: boolean,
   ): void {
-    const safeTaxRate = hasVat ? Number(item.tax_rate) || 0 : 0;
-    const result = deriveLineTax(
-      {
-        unit_cost: item.unit_cost,
-        quantity: item.quantity,
-        // Se entregan LOS DOS y el util resuelve la precedencia (monto > 0
-        // gana), exactamente como lo hace `deriveLineTax` en el backend. Pasar
-        // sólo el porcentaje era lo que degradaba el descuento del escáner: la
-        // cifra en pesos de la factura no tenía por dónde entrar al preview.
-        discount_percentage: item.discount,
-        discount_amount: item.discount_amount,
-        tax_rate: safeTaxRate,
-        prices_include_tax: item.prices_include_tax ?? undefined,
-      },
+    const result = deriveLineTaxes(
+      this.toTaxInput(item, hasVat),
       { prices_include_tax: headerPricesIncludeTax },
       0, // prorrateo del descuento de cabecera: vive en calculateSummary
     );
 
     item.subtotal = result.net_line; // NET line subtotal
-    item.tax_amount = result.tax_amount; // IVA for the line
+    item.tax_amount = result.tax_amount; // impuestos de la línea
     item.total = result.total_line;
+    // QUI-855 — combinación que el kernel rechaza: la línea queda inválida y
+    // `countLinesBlockingSubmit` bloquea el envío (undefined la limpia).
+    item.tax_error = result.tax_error;
   }
 
   /**
@@ -1026,13 +1118,24 @@ export class PopCartService {
   }
 
   /**
-   * IVA cycle (F1): set a line's tax rate (%). Clamps to a non-negative
-   * finite number and recomputes the line against the current header mode.
+   * IVA cycle (F1): set a line's IVA rate (%). Clamps to a non-negative finite
+   * number and recomputes the line against the current header mode. Si la línea
+   * ya tiene filas multi-impuesto, la tasa va a la fila IVA (se crea si falta):
+   * `taxes` reemplaza al par legacy en el cálculo y no puede quedar desfasado.
    */
   setItemTaxRate(itemId: string, rate: number): void {
     const safe = Number.isFinite(Number(rate)) && Number(rate) >= 0 ? Number(rate) : 0;
     this.mutateItem(itemId, (item) => {
       item.tax_rate = safe;
+      item.tax_needs_review = false;
+      if (item.taxes && item.taxes.length > 0) {
+        const hasIva = item.taxes.some((t) => t.tax_type === 'iva');
+        item.taxes = hasIva
+          ? item.taxes.map((t) =>
+              t.tax_type === 'iva' ? { ...t, tax_rate: safe } : t,
+            )
+          : ([{ tax_type: 'iva', tax_rate: safe }, ...item.taxes] as PopLineTax[]).slice(0, 4);
+      }
     });
   }
 
@@ -1040,6 +1143,41 @@ export class PopCartService {
   setItemTaxType(itemId: string, taxType: string): void {
     this.mutateItem(itemId, (item) => {
       item.tax_type = taxType || 'iva';
+    });
+  }
+
+  /**
+   * QUI-855: reemplaza el multi-impuesto de la línea (máx. 4 filas, uno por
+   * `tax_type`, como el backend). Vacío/undefined ⇒ la línea queda sin
+   * impuestos (tasa 0). El par legacy `tax_rate`/`tax_type` se mantiene como la
+   * fila IVA (o 0 si no hay IVA) para los lectores viejos.
+   */
+  setItemTaxes(itemId: string, taxes: PopLineTax[] | undefined): void {
+    const seen = new Set<string>();
+    const safe: PopLineTax[] = [];
+    for (const t of taxes ?? []) {
+      if (!t || !t.tax_type || seen.has(t.tax_type)) continue;
+      seen.add(t.tax_type);
+      const isFixed = t.calc_mode === 'fixed_per_unit' || t.tax_type === 'ibua';
+      const nonNeg = (v: number | null | undefined): number =>
+        Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0;
+      safe.push({
+        ...t,
+        calc_mode: isFixed ? 'fixed_per_unit' : (t.calc_mode ?? 'percent'),
+        tax_rate: isFixed ? null : nonNeg(t.tax_rate),
+        fixed_amount_per_unit: isFixed ? nonNeg(t.fixed_amount_per_unit) : null,
+        add_to_cost:
+          t.tax_type === 'iva' ? !!t.add_to_cost : true,
+      });
+      if (safe.length === 4) break;
+    }
+    this.mutateItem(itemId, (item) => {
+      item.taxes = safe.length > 0 ? safe : undefined;
+      const iva = safe.find((t) => t.tax_type === 'iva');
+      item.tax_rate = iva ? Number(iva.tax_rate) || 0 : 0;
+      // No se reclasifica al editar: una línea legacy 'inc' sigue siendo 'inc'.
+      item.tax_type = normalizePopLineTaxType(item.tax_type);
+      item.tax_needs_review = false;
     });
   }
 
@@ -1110,25 +1248,13 @@ export class PopCartService {
       0,
     );
 
+    // Entradas del util espejo (una sola construcción: totales y desglose
+    // usan EXACTAMENTE la misma base para no contradecirse).
+    // El maestro `has_vat` se aplica AQUÍ (y en `recalculateItemTotals`) por la
+    // misma función: el pie nunca cobra impuestos que las filas muestran en 0.
+    const taxInputs = items.map((item) => this.toTaxInput(item, state.has_vat));
     const totals = derivePurchaseTotals(
-      items.map((item) => ({
-        unit_cost: item.unit_cost,
-        quantity: item.quantity,
-        // `discount` es porcentaje en el carrito; el util lo lee como
-        // `discount_percentage` (10 = 10%). `discount_amount` (pesos) viaja al
-        // lado y GANA cuando es > 0 — misma precedencia que el backend, para
-        // que el pie del carrito no contradiga a sus propias filas.
-        discount_percentage: item.discount,
-        discount_amount: item.discount_amount,
-        // IVA efectivo por línea. El maestro `has_vat` se aplica AQUÍ, no en la
-        // línea: `recalculateItemTotals` calcula su tasa efectiva en una
-        // variable local y nunca la escribe en `item.tax_rate`, así que la línea
-        // sigue guardando su 19 aunque el maestro esté apagado. Leerla cruda
-        // hacía que el pie cobrara IVA mientras cada fila mostraba cero — y el
-        // total del carrito dejaba de ser el que el operador estaba aprobando.
-        tax_rate: state.has_vat ? item.tax_rate : 0,
-        prices_include_tax: item.prices_include_tax ?? undefined,
-      })),
+      taxInputs,
       { prices_include_tax: state.prices_include_tax },
       Number(state.discountAmount) || 0,
       Number(state.shippingCost) || 0,
@@ -1144,7 +1270,59 @@ export class PopCartService {
       totalItems: 0,
       withholding_amount: previousSummary?.withholding_amount ?? 0,
       withholding_lines: previousSummary?.withholding_lines,
+      tax_groups: this.buildTaxGroups(
+        taxInputs,
+        state.prices_include_tax,
+        Number(state.discountAmount) || 0,
+      ),
     };
+  }
+
+  /**
+   * QUI-855 — desglose por impuesto para el resumen. Deriva cada línea con
+   * `deriveLineTaxes` (normaliza el legacy a una fila: números idénticos) y
+   * agrupa por tipo + tasa + al-costo. El prorrateo de cabecera es el mismo
+   * que usa `derivePurchaseTotals`, así que la suma por grupo cuadra con el
+   * `tax_amount` del pie.
+   */
+  private buildTaxGroups(
+    taxInputs: PurchaseLineTaxInput[],
+    headerPricesIncludeTax: boolean,
+    headerDiscount: number,
+  ): PopTaxGroup[] {
+    const round2 = (n: number): number => Math.round(n * 100) / 100;
+    const shares = prorateHeaderDiscount(taxInputs, headerDiscount);
+    const groups = new Map<string, PopTaxGroup>();
+    taxInputs.forEach((input, i) => {
+      const derived = deriveLineTaxes(
+        input,
+        { prices_include_tax: headerPricesIncludeTax },
+        shares[i] ?? 0,
+      );
+      for (const t of derived.taxes) {
+        // Tasa 0 sin monto no dice nada: una línea exenta no es un grupo.
+        if (!(t.tax_rate > 0) && !(t.tax_amount > 0)) continue;
+        const key = `${t.tax_type}|${t.tax_rate}|${t.fixed_amount_per_unit ?? ''}|${t.add_to_cost}`;
+        const existing = groups.get(key);
+        if (existing) {
+          existing.taxable_amount = round2(
+            existing.taxable_amount + t.taxable_amount,
+          );
+          existing.tax_amount = round2(existing.tax_amount + t.tax_amount);
+        } else {
+          groups.set(key, {
+            tax_type: t.tax_type,
+            tax_rate: t.tax_rate,
+            calc_mode: t.calc_mode,
+            fixed_amount_per_unit: t.fixed_amount_per_unit,
+            taxable_amount: round2(t.taxable_amount),
+            tax_amount: round2(t.tax_amount),
+            add_to_cost: t.add_to_cost,
+          });
+        }
+      }
+    });
+    return [...groups.values()];
   }
 
   /**
@@ -1223,6 +1401,32 @@ export class PopCartService {
         };
       }
 
+      // QUI-855: filas multi-impuesto persistidas. Vacío ⇒ undefined para
+      // que el carrito derive del par legacy tasa/tipo (misma rama que nuevo).
+      const restoredTaxes: PopLineTax[] = (
+        (item as any).purchase_order_item_taxes ?? []
+      )
+        .map((t: any): PopLineTax => {
+          const isFixed = t.calc_mode === 'fixed_per_unit';
+          return {
+            tax_type: t.tax_type ?? 'iva',
+            tax_rate_id: t.tax_rate_id ?? undefined,
+            tax_name: t.tax_name ?? undefined,
+            tax_rate: isFixed ? null : Number(t.tax_rate) || 0,
+            calc_mode: isFixed ? 'fixed_per_unit' : 'percent',
+            fixed_amount_per_unit: isFixed
+              ? Number(t.fixed_amount_per_unit) || 0
+              : null,
+            base_mode: t.base_mode ?? undefined,
+            sequence: t.sequence ?? undefined,
+            is_inclusive: t.is_inclusive ?? undefined,
+            add_to_cost: !!t.add_to_cost,
+            amount_override:
+              t.amount_override != null ? Number(t.amount_override) : null,
+          };
+        })
+        .slice(0, 4);
+
       const cartItem: PopCartItem = {
         id: this.generateItemId(),
         product: popProduct,
@@ -1230,7 +1434,7 @@ export class PopCartService {
         quantity: item.quantity_ordered || item.quantity,
         unit_cost: item.unit_cost || item.unit_price,
         // Toda lectura de `discount_percentage` desde DB pasa por
-        // `normalizeDiscount` para garantizar el contrato entero 0-100
+        // `normalizeDiscount` para garantizar el contrato porcentaje 0..100 (hasta 2 decimales)
         // (regression: loadOrder bypass — antes leía `item.discount_percentage
         // || 0` directo, propagando la fracción al backend que la interpretaba
         // como 0.X% en vez del 20% que el operador creía haber tipeado).
@@ -1241,7 +1445,7 @@ export class PopCartService {
         // 0.20 != 20%, así que NO estamos perdiendo valor real, sólo
         // bloqueando que el bug se propague. Si el operador quiere mantener
         // el descuento, lo retipea explícito en el modal y se persiste como 20.
-        discount: this.normalizeDiscount(Number(item.discount_percentage)),
+        discount: this.normalizeDiscount(Number(item.discount_percentage), 2),
         // Paridad escáner: la OC persistida guarda el descuento de línea en
         // DINERO (`purchase_order_items.discount_amount`) y es la cifra que el
         // backend prefiere al recalcular. Hidratarla es lo que hace que una OC
@@ -1256,6 +1460,9 @@ export class PopCartService {
         // IVA cycle (F1): restore tax classification and per-line override.
         tax_type: (item as any).tax_type ?? 'iva',
         prices_include_tax: (item as any).prices_include_tax ?? undefined,
+        // QUI-855: restaura las filas multi-impuesto persistidas para que
+        // reabrir la orden reproduzca las mismas cifras.
+        taxes: restoredTaxes.length > 0 ? restoredTaxes : undefined,
         subtotal: ((item.quantity_ordered || item.quantity) * (item.unit_cost || item.unit_price)),
         tax_amount: 0,
         total: 0,

@@ -151,6 +151,83 @@ describe('SubscriptionBillingService', () => {
       expect(eventArg.data.payload.skipped_reason).toBe('zero_price');
     });
 
+    describe('free plan lapse', () => {
+      function freeSub(overrides: any = {}, planOverrides: any = {}) {
+        return subFixture({
+          effective_price: new Prisma.Decimal(0),
+          auto_renew: true,
+          plan: {
+            id: 1,
+            code: 'free',
+            base_price: new Prisma.Decimal(0),
+            max_partner_margin_pct: null,
+            billing_cycle: 'monthly',
+            is_promotional: false,
+            ...planOverrides,
+          },
+          ...overrides,
+        });
+      }
+
+      beforeEach(() => {
+        prismaMock.$queryRaw.mockResolvedValue([{ id: 1 }]);
+      });
+
+      it('promo plan price 0, renewal → null, no update, no renewed event', async () => {
+        prismaMock.store_subscriptions.findUniqueOrThrow = jest
+          .fn()
+          .mockResolvedValue(freeSub({}, { is_promotional: true }));
+
+        const result = await service.issueInvoice(1);
+
+        expect(result).toBeNull();
+        expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
+        expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+        expect(prismaMock.subscription_invoices.create).not.toHaveBeenCalled();
+      });
+
+      it('base free plan with auto_renew=true → advances period and writes renewed', async () => {
+        prismaMock.store_subscriptions.findUniqueOrThrow = jest
+          .fn()
+          .mockResolvedValue(freeSub({ auto_renew: true }));
+
+        const result = await service.issueInvoice(1);
+
+        expect(result).toBeNull();
+        expect(prismaMock.store_subscriptions.update).toHaveBeenCalled();
+        const eventArg = prismaMock.subscription_events.create.mock.calls[0][0];
+        expect(eventArg.data.type).toBe('renewed');
+        expect(eventArg.data.payload.skipped_reason).toBe('zero_price');
+      });
+
+      it('base free plan with auto_renew=false → null, no update', async () => {
+        prismaMock.store_subscriptions.findUniqueOrThrow = jest
+          .fn()
+          .mockResolvedValue(freeSub({ auto_renew: false }));
+
+        const result = await service.issueInvoice(1);
+
+        expect(result).toBeNull();
+        expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
+        expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+      });
+
+      it("changeKind='resubscribe' to a free promo plan → still opens its period", async () => {
+        prismaMock.store_subscriptions.findUniqueOrThrow = jest
+          .fn()
+          .mockResolvedValue(freeSub({}, { is_promotional: true }));
+
+        const result = await service.issueInvoice(1, {
+          changeKind: 'resubscribe',
+        });
+
+        expect(result).toBeNull();
+        expect(prismaMock.store_subscriptions.update).toHaveBeenCalled();
+        const eventArg = prismaMock.subscription_events.create.mock.calls[0][0];
+        expect(eventArg.data.type).toBe('renewed');
+      });
+    });
+
     it('pending_credit > subtotal → applied capped at subtotal, remainder rolled over to metadata', async () => {
       prismaMock.$queryRaw
         .mockResolvedValueOnce([{ id: 1 }]) // FOR UPDATE

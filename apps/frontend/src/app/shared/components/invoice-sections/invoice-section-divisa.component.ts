@@ -62,6 +62,7 @@ export interface DivisaSectionPaths {
 
         <app-selector
           label="Divisa"
+          data-control-name="foreign_currency"
           [formControl]="currencyCodeControl()"
           [options]="currencyOptions()"
           size="sm"
@@ -96,7 +97,8 @@ export interface DivisaSectionPaths {
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
           <app-selector
             label="Divisa"
-            [formControl]="currencyCodeControl()"
+            data-control-name="foreign_currency"
+          [formControl]="currencyCodeControl()"
             [options]="currencyOptions()"
             [errorText]="errors().currency_code ?? ''"
             [required]="true"
@@ -106,6 +108,7 @@ export interface DivisaSectionPaths {
           <app-input
             label="Tasa del día (COP por unidad)"
             type="number"
+            data-control-name="exchange_rate"
             [formControl]="exchangeRateControl()!"
             [control]="exchangeRateControl()"
             [error]="errors().exchange_rate"
@@ -117,6 +120,7 @@ export interface DivisaSectionPaths {
           <app-input
             label="Fecha de la TRM"
             type="date"
+            data-control-name="exchange_rate_date"
             [formControl]="exchangeRateDateControl()!"
             [control]="exchangeRateDateControl()"
             [error]="errors().exchange_rate_date"

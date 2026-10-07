@@ -22,6 +22,15 @@ export class ReceiveItemDto {
   quantity_received: number;
 
   /**
+   * QUI-855 — shortage/damage motive for this received line (e.g. "3 unidades
+   * averiadas", "faltante del proveedor"). Persisted on the reception item;
+   * empty when the line arrived complete.
+   */
+  @IsOptional()
+  @IsString()
+  note?: string;
+
+  /**
    * QUI-431 — serial numbers captured for this received line. Only meaningful
    * for products with `requires_serial_numbers = true`. Free text is accepted;
    * each entry becomes a real `in_stock` pool row. When fewer serials than

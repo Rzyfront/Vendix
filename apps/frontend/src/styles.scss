@@ -2127,3 +2127,25 @@ body.kds-fullscreen {
     display: none !important;
   }
 }
+
+/* Shell admin privado: el layout (store/org/super admin) agrega esta clase a
+   <html> mientras vive; solo su contenedor interno scrollea. Las paginas
+   publicas/ecommerce no la llevan y conservan el scroll de body. Los overlays
+   (position: fixed) no se recortan por overflow hidden en html/body. */
+html.vx-admin-shell-lock,
+html.vx-admin-shell-lock body {
+  overflow: hidden;
+  height: 100%;
+}
+
+/* Widget de Wompi: cuelga su `.waybox-modal` de <body> con `position: absolute`,
+   le fija la altura del contenido y hace `body.style.height = alto + 80px`,
+   contando con que el DOCUMENTO haga scroll. Con el lock del shell (y el
+   `overflow: hidden` inline que pone app-modal) en un telefono el formulario
+   queda bajo el pliegue sin forma de alcanzarlo: se ve pero no se usa. Mientras
+   el widget esta abierto (Wompi pone `hidden` al cerrar) se suelta el lock. */
+html:has(body > .waybox-modal:not([hidden])),
+html:has(body > .waybox-modal:not([hidden])) body {
+  overflow: auto !important;
+  height: auto !important;
+}

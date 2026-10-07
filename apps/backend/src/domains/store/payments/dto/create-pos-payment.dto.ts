@@ -536,7 +536,11 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   shipping_cost?: number;
 
-  /** Gross for inclusive rates; taxable base for additive rates. Server derives shipping_cost. */
+  /**
+   * With a selected rate: gross for inclusive rates / taxable base for
+   * additive rates, and the server derives shipping_cost. Without a rate: an
+   * explicit POS custom price (including 0), treated as gross with no tax.
+   */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)

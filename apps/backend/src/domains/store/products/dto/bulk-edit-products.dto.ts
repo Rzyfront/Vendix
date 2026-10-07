@@ -293,6 +293,12 @@ export class BulkEditableChangesDto {
   track_inventory?: boolean;
 
   @IsOptional()
+  @IsInt({ message: 'El stock mínimo debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El stock mínimo no puede ser negativo' })
+  min_stock_level?: number | null;
+
+  @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   requires_serial_numbers?: boolean;

@@ -576,7 +576,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       domain: 'payroll',
       readOnly: true,
       description:
-        'Estado DIAN (DSPNE) de una nómina enviada: consulta con el CUNE almacenado y devuelve el estado actual más la respuesta del proveedor. Solo lectura desde Vexi (misma lectura que GET :id/dian-status; si la DIAN ya respondió, el service dueño sincroniza sent→accepted/rejected como en el HTTP). Habilita send_payroll_dian junto con F-51.',
+        'Estado DIAN (DSPNE) de una nómina enviada: consulta con el CUNE almacenado y devuelve el estado actual más la respuesta del proveedor. Solo lectura (misma lectura que GET :id/dian-status; si la DIAN ya respondió, el service dueño sincroniza sent→accepted/rejected como en el HTTP). Habilita send_payroll_dian junto con F-51.',
       parameters: {
         type: 'object',
         properties: {
@@ -758,6 +758,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       name: 'approve_payroll',
       version: '1',
       domain: 'payroll',
+      irreversible: true,
       description:
         'Aprueba una nómina calculada (calculated → approved): estampa aprobador y fecha. Cadena: exige get_payroll_run (F-51) en calculated; la transición la valida el flow service.',
       parameters: {
@@ -869,6 +870,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PAYROLL_RUNS_MANAGE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args): Promise<ToolPreview> => {
         const runId = toPositiveInt(args.payroll_run_id);
         if (!runId) {
@@ -966,6 +968,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PAYROLL_RUNS_MANAGE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args): Promise<ToolPreview> => {
         const runId = toPositiveInt(args.payroll_run_id);
         if (!runId) {
@@ -1081,6 +1084,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       name: 'export_payroll_ach',
       version: '1',
       domain: 'payroll',
+      irreversible: true,
       readOnly: true,
       description:
         'Genera el archivo plano ACH de dispersión bancaria de una nómina aprobada/pagada (Bancolombia/Davivienda): valida los datos bancarios de cada empleado y devuelve la URL de descarga. Solo lectura de dominio (genera un archivo como un reporte; el service dueño lo sube al storage, igual que POST :id/export-ach).',
@@ -1257,7 +1261,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       domain: 'payroll',
       readOnly: true,
       description:
-        'Perfil fiscal del empleado (art. 387 ET): dependientes, deducciones mensuales (vivienda, medicina prepagada, pensión voluntaria, AFC) y procedimiento de retención. Solo lectura desde Vexi (misma lectura que GET :id/fiscal-profile; si no existe, el service dueño crea el perfil vacío por defecto como en el HTTP).',
+        'Perfil fiscal del empleado (art. 387 ET): dependientes, deducciones mensuales (vivienda, medicina prepagada, pensión voluntaria, AFC) y procedimiento de retención. Solo lectura (misma lectura que GET :id/fiscal-profile; si no existe, el service dueño crea el perfil vacío por defecto como en el HTTP).',
       parameters: {
         type: 'object',
         properties: {
@@ -1940,6 +1944,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       name: 'approve_settlement',
       version: '1',
       domain: 'payroll',
+      irreversible: true,
       description:
         'Aprueba una liquidación calculada (calculated → approved). Cadena: la liquidación debe estar calculada y el contrato/motivo verificados vía get_employee (F-59); la transición la valida el flow service.',
       parameters: {
@@ -2075,6 +2080,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [SETTLEMENTS_MANAGE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args): Promise<ToolPreview> => {
         const settlementId = toPositiveInt(args.settlement_id);
         if (!settlementId) {
@@ -2168,7 +2174,7 @@ export function createPayrollTools(deps: PayrollToolDeps): RegisteredTool[] {
       domain: 'payroll',
       readOnly: true,
       description:
-        'Archivo plano PILA del período (Res. 2388/2016): devuelve filename, contenido de ancho fijo y n.º de cotizantes. Solo lectura desde Vexi (misma generación que GET flat-file; el service dueño registra la exportación en pila_submissions como en el HTTP). Advierte que el layout no está validado contra un operador certificado.',
+        'Archivo plano PILA del período (Res. 2388/2016): devuelve filename, contenido de ancho fijo y n.º de cotizantes. Solo lectura (misma generación que GET flat-file; el service dueño registra la exportación en pila_submissions como en el HTTP). Advierte que el layout no está validado contra un operador certificado.',
       parameters: {
         type: 'object',
         properties: {

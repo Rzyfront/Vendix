@@ -3,12 +3,11 @@ import { CurrenciesController } from './currencies.controller';
 import { PublicCurrenciesController } from './public-currencies.controller';
 import { CurrenciesService } from './currencies.service';
 import { ResponseModule } from '../../../common/responses/response.module';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 
 @Module({
   imports: [ResponseModule],
   controllers: [CurrenciesController, PublicCurrenciesController],
-  providers: [CurrenciesService, GlobalPrismaService],
+  providers: [CurrenciesService],
   exports: [CurrenciesService],
 })
 export class CurrenciesModule {}

@@ -16,7 +16,6 @@ import { CustomersBulkController } from './customers-bulk.controller';
 import { CustomerHistoryController } from './history/customer-history.controller';
 import { CustomerHistoryService } from './history/customer-history.service';
 import { CustomerEmailListener } from './customer-email.listener';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { MetadataModule } from '../metadata/metadata.module';
 import { EmailModule } from '../../../email/email.module';
@@ -40,7 +39,6 @@ import { EmailModule } from '../../../email/email.module';
     CustomersBulkService,
     CustomerHistoryService,
     CustomerEmailListener,
-    StorePrismaService,
   ],
   exports: [CustomersService, CustomerLookupService, CustomerHistoryService],
 })

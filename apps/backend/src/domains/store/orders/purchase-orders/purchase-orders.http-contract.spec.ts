@@ -13,6 +13,8 @@ import * as request from 'supertest';
 
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
+
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { ResponseService } from '@common/responses/response.service';
 import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
@@ -63,6 +65,12 @@ import { VatResponsibilityService } from '@common/helpers/vat-responsibility.hel
  *    pintaba «OC #undefined» y un botón Imprimir operativo. Aquí se mide el
  *    404 con `PO_FIND_001`.
  */
+
+const purchaseVatContributionProvider = () => ({
+  provide: PurchaseVatContributionService,
+  useValue: { reserve: jest.fn().mockResolvedValue({ id: 1 }) },
+});
+
 describe('purchase-orders — contrato HTTP (pipe + filtro globales reales)', () => {
   let app: INestApplication;
   let prisma: any;
@@ -82,10 +90,13 @@ describe('purchase-orders — contrato HTTP (pipe + filtro globales reales)', ()
       controllers: [PurchaseOrdersController],
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         ResponseService,
         VatResponsibilityService,
         { provide: InvoiceScannerService, useValue: {} },
         { provide: getQueueToken('payment-receipt-scan'), useValue: {} },
+        { provide: getQueueToken('invoice-revalidate'), useValue: {} },
+        { provide: getQueueToken('invoice-scan'), useValue: {} },
         { provide: StorePrismaService, useValue: prisma },
         { provide: StockLevelManager, useValue: {} },
         { provide: CostingService, useValue: {} },

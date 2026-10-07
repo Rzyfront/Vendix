@@ -19,18 +19,28 @@ import { FiscalRulesService } from './services/fiscal-rules.service';
 import { FiscalAuditService } from './services/fiscal-audit.service';
 import { FiscalConfigChecklistService } from './services/fiscal-config-checklist.service';
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
+import { FiscalTaxCalendarService } from './services/fiscal-tax-calendar.service';
 import { InvoicingModule } from '../store/invoicing/invoicing.module';
 import { InvoicingService } from '../store/invoicing/invoicing.service';
+import { FiscalTaxCreditAvailabilityService } from './services/fiscal-tax-credit-availability.service';
+import { StoreFiscalTaxCreditAvailabilityController } from './store-fiscal-tax-credit-availability.controller';
+import { OrganizationFiscalTaxCreditAvailabilityController } from './organization-fiscal-tax-credit-availability.controller';
 
 @Module({
   // InvoicingModule solo por `InvoicingService` (F-27 `list_invoices`): el
   // árbol de invoicing no importa este módulo, así que no hay ciclo DI.
   imports: [PrismaModule, ResponseModule, ExogenousModule, InvoicingModule],
-  controllers: [StoreFiscalController, OrganizationFiscalController],
+  controllers: [
+    StoreFiscalController,
+    OrganizationFiscalController,
+    StoreFiscalTaxCreditAvailabilityController,
+    OrganizationFiscalTaxCreditAvailabilityController,
+  ],
   providers: [
     FiscalContextResolverService,
     FiscalFlowStateService,
     FiscalObligationService,
+    FiscalTaxCalendarService,
     TaxDeclarationDraftService,
     FiscalCloseService,
     FiscalEvidenceService,
@@ -38,6 +48,7 @@ import { InvoicingService } from '../store/invoicing/invoicing.service';
     FiscalAuditService,
     FiscalStatusService,
     FiscalConfigChecklistService,
+    FiscalTaxCreditAvailabilityService,
   ],
   exports: [
     FiscalContextResolverService,
@@ -49,6 +60,7 @@ import { InvoicingService } from '../store/invoicing/invoicing.service';
     FiscalRulesService,
     FiscalAuditService,
     FiscalConfigChecklistService,
+    FiscalTaxCreditAvailabilityService,
   ],
 })
 export class FiscalOperationsModule implements OnModuleInit {

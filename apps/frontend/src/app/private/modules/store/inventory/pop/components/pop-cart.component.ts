@@ -1,4 +1,4 @@
-import { Component, computed, output, inject, DestroyRef } from '@angular/core';
+import { Component, computed, output, inject, DestroyRef, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Observable } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -8,8 +8,15 @@ import {
   PopCartState,
   PopCartItem,
   PopCartSummary,
+  normalizePopLineTaxType,
+  submitBlockMessage,
 } from '../services/pop-cart.service';
-import { deriveLineTax } from '../utils/purchase-line-tax.util';
+import type { PopLineTax } from '../interfaces/pop-cart.interface';
+import { LineTaxesEditorComponent } from './line-taxes-editor/line-taxes-editor.component';
+import {
+  deriveLineTaxes,
+  PurchaseLineTaxInput,
+} from '../utils/purchase-line-tax.util';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -35,6 +42,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     FormsModule,
     QuantityControlComponent,
     ToggleComponent,
+    LineTaxesEditorComponent,
   ],
   template: `
     <div
@@ -87,6 +95,28 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           ></app-toggle>
         </div>
 
+        <!-- QUI-855: factura escaneada adjunta a la OC (una por orden). -->
+        @if (cartState()?.scan_attachment; as attachment) {
+          <div
+            class="px-5 py-2 border-b border-border/50 flex items-center justify-between gap-3 text-xs"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <app-icon name="paperclip" [size]="14" class="text-primary"></app-icon>
+              <span class="truncate text-text-primary">
+                Factura adjunta: {{ attachment.file_name }}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 text-text-secondary hover:text-destructive"
+              (click)="removeScanAttachment()"
+              aria-label="Quitar factura adjunta"
+            >
+              <app-icon name="trash" [size]="14"></app-icon>
+            </button>
+          </div>
+        }
+
         <!-- Totals Row (High Contrast) -->
         <div class="px-5 py-4 bg-muted/20">
           <div class="space-y-1.5 mb-4">
@@ -123,7 +153,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             </div>
             @if (hasVat()) {
               <div class="flex justify-between text-xs text-text-secondary">
-                <span>IVA</span>
+                <!-- Suma TODAS las filas (IVA + INC/ICUI/IBUA), no sólo el IVA. -->
+                <span>Impuestos</span>
                 <span class="font-medium">{{
                   formatCurrency(summary()?.tax_amount || 0)
                 }}</span>
@@ -171,6 +202,15 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 "
                 class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
               ></app-tooltip>
+              @if (submitBlock(); as blockMsg) {
+                <p
+                  class="mb-2 text-xs font-medium text-warning"
+                  role="alert"
+                  data-testid="pop-submit-block"
+                >
+                  {{ blockMsg }}
+                </p>
+              }
               <div class="grid grid-cols-2 gap-2">
                 <!-- Secondary CTAs (top row) -->
                 <app-button
@@ -178,7 +218,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   size="sm"
                   [fullWidth]="true"
                   (clicked)="onSaveDraft()"
-                  [disabled]="actionState.loading || actionState.isEmpty"
+                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock()"
                   customClasses="!h-10 !font-semibold !border-border !text-text-primary !bg-surface hover:!bg-muted/30 hover:!text-text-primary"
                 >
                   Borrador
@@ -188,7 +228,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   size="sm"
                   [fullWidth]="true"
                   (clicked)="onSubmitOrder()"
-                  [disabled]="actionState.loading || actionState.isEmpty"
+                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock()"
                   customClasses="!h-10 !font-semibold"
                 >
                   <app-icon name="file-text" [size]="18" slot="icon" ></app-icon>
@@ -201,7 +241,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   size="md"
                   [fullWidth]="true"
                   (clicked)="onCreateAndReceive()"
-                  [disabled]="actionState.loading || actionState.isEmpty"
+                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock()"
                   customClasses="!h-11 !font-semibold !shadow-sm"
                 >
                   Crear + Recibir
@@ -334,27 +374,66 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                         ></app-input>
                       </div>
                       <!--
-                        QUI-661 — Descuento comercial de ESTA línea, en %.
-                        Baja el costo unitario ANTES de derivar el IVA, así que
-                        reduce la base gravable y el costo que se capitaliza al
-                        inventario. No es lo mismo que teclear un costo menor:
-                        el descuento queda registrado como tal.
+                        QUI-661 — Descuento comercial de ESTA línea, en % o en $.
+                        Baja el costo unitario ANTES de derivar los impuestos, así
+                        que reduce la base gravable y el costo que se capitaliza al
+                        inventario. Teclear en un modo limpia el otro (nunca
+                        coexisten con valor).
                       -->
                       <div class="flex flex-col">
-                        <span
-                          class="text-[10px] text-text-secondary uppercase mb-1"
-                          >Desc. %</span
-                        >
-                        <app-input
-                          type="number"
-                          size="sm"
-                          [ngModel]="item.discount"
-                          (ngModelChange)="updateDiscount(item.id, $event)"
-                          customInputClass="text-right !h-7 !py-0"
-                          customWrapperClass="!mt-0"
-                          min="0"
-                          max="100"
-                        ></app-input>
+                        <div class="flex items-center gap-1 mb-1">
+                          <span class="text-[10px] text-text-secondary uppercase"
+                            >Desc.</span
+                          >
+                          <div
+                            class="inline-flex rounded border border-border overflow-hidden text-[10px] leading-none"
+                            role="group"
+                            aria-label="Modo del descuento"
+                          >
+                            <button
+                              type="button"
+                              class="px-1.5 py-0.5"
+                              [class]="discountMode(item) === 'pct' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
+                              [attr.aria-pressed]="discountMode(item) === 'pct'"
+                              (click)="setDiscountMode(item, 'pct')"
+                            >
+                              %
+                            </button>
+                            <button
+                              type="button"
+                              class="px-1.5 py-0.5"
+                              [class]="discountMode(item) === 'amount' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
+                              [attr.aria-pressed]="discountMode(item) === 'amount'"
+                              (click)="setDiscountMode(item, 'amount')"
+                            >
+                              $
+                            </button>
+                          </div>
+                        </div>
+                        @if (discountMode(item) === 'amount') {
+                          <app-input
+                            type="number"
+                            size="sm"
+                            [ngModel]="item.discount_amount ?? 0"
+                            (ngModelChange)="updateDiscountAmount(item.id, $event)"
+                            customInputClass="text-right !h-7 !py-0"
+                            customWrapperClass="!mt-0"
+                            min="0"
+                            step="0.01"
+                          ></app-input>
+                        } @else {
+                          <app-input
+                            type="number"
+                            size="sm"
+                            [ngModel]="item.discount"
+                            (ngModelChange)="updateDiscount(item.id, $event)"
+                            customInputClass="text-right !h-7 !py-0"
+                            customWrapperClass="!mt-0"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                          ></app-input>
+                        }
                       </div>
                       <div class="flex flex-col items-end">
                         <span
@@ -406,7 +485,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                           </span>
                         } @else {
                           <span class="text-text-secondary">
-                            (-{{ item.discount | number: '1.0-0' }}%)
+                            (-{{ item.discount | number: '1.0-2' }}%)
                           </span>
                         }
                       </div>
@@ -478,48 +557,22 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                     ></app-quantity-control>
                   }
                 </div>
-                <!-- IVA per-line: rate (%) + type + include/added override.
+                <!-- QUI-855: editor multi-impuesto por línea. La fila 1 es siempre
+                     el IVA visible (el tax_rate legacy se convierte en fila IVA);
+                     hasta 4 filas, una por tipo (IVA / INC / ICUI / IBUA).
                      Solo visible cuando la orden marca IVA (maestro). -->
                 @if (hasVat()) {
-                  <div
-                    class="flex flex-wrap items-center gap-2 pt-2 border-t border-border/50 text-[10px]"
-                  >
-                    <span
-                      class="uppercase tracking-wider font-bold text-text-secondary/60"
-                    >
-                      IVA
-                    </span>
-                    <div class="flex items-center gap-1">
-                      <app-input
-                        type="number"
-                        size="sm"
-                        [ngModel]="item.tax_rate"
-                        (ngModelChange)="updateTaxRate(item.id, $event)"
-                        customInputClass="text-right !h-7 !py-0 !w-14"
-                        customWrapperClass="!mt-0"
-                        min="0"
-                        step="1"
-                      ></app-input>
-                      <span class="text-text-secondary">%</span>
-                    </div>
-                    <select
-                      class="h-7 text-[10px] px-1.5 py-0 border border-border rounded bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
-                      [value]="item.tax_type || 'iva'"
-                      (change)="onTaxTypeChange(item.id, $event)"
-                    >
-                      <option value="iva">IVA</option>
-                      <option value="inc">INC</option>
-                    </select>
-                    <div class="ml-auto flex items-center gap-1.5">
-                      <span class="text-text-secondary">
-                        {{ itemEffectiveInclude(item) ? 'Incluido' : 'Agregado' }}
-                      </span>
-                      <app-toggle
-                        [checked]="itemEffectiveInclude(item)"
-                        (changed)="onItemIncludeToggle(item, $event)"
-                        ariaLabel="Precio con IVA incluido para esta línea"
-                      ></app-toggle>
-                    </div>
+                  <div class="pt-2 border-t border-border/50">
+                    <app-line-taxes-editor
+                      [taxes]="taxEditorRows(item)"
+                      [unitPrice]="item.unit_cost"
+                      [quantity]="item.quantity"
+                      [discountAmount]="itemOwnDiscount(item)"
+                      [pricesIncludeTax]="itemEffectiveInclude(item)"
+                      [needsReview]="!!item.tax_needs_review"
+                      (taxesChange)="onItemTaxesChange(item, $event)"
+                      (pricesIncludeTaxChange)="onItemIncludeToggle(item, $event)"
+                    ></app-line-taxes-editor>
                   </div>
                 }
                 <!-- Config Trigger (Variants / Lot / Unit) -->
@@ -655,6 +708,16 @@ export class PopCartComponent {
     return this.cartState()?.has_vat ?? false;
   }
 
+  /**
+   * «Confirma el impuesto de N línea(s)» mientras alguna línea siga sin
+   * impuesto confirmado (o el kernel no la pudo calcular) con IVA encendido.
+   * Deshabilita «Borrador» / «Crear orden» / «Crear + Recibir».
+   */
+  readonly submitBlock = computed(() => {
+    const st = this.cartState();
+    return st ? submitBlockMessage(st) : null;
+  });
+
   /** Encender/apagar el IVA de toda la orden (recomputa todas las líneas). */
   onHasVatToggle(value: boolean): void {
     this.cartService.setHasVat(value);
@@ -675,18 +738,6 @@ export class PopCartComponent {
     this.cartService.setPricesIncludeTax(value);
   }
 
-  /** Update a line's tax rate (%). */
-  updateTaxRate(itemId: string, rate: number | string): void {
-    const parsed = Number(rate);
-    this.cartService.setItemTaxRate(itemId, Number.isFinite(parsed) ? parsed : 0);
-  }
-
-  /** Update a line's tax classification from the native <select>. */
-  onTaxTypeChange(itemId: string, event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
-    this.cartService.setItemTaxType(itemId, value);
-  }
-
   /**
    * Toggle a line's include/added mode. When the new value matches the header
    * the override is CLEARED so the line follows the header again; otherwise
@@ -698,6 +749,117 @@ export class PopCartComponent {
       item.id,
       value === header ? undefined : value,
     );
+    // Las filas con modo propio pisarían el de la línea: al mover el toggle de
+    // la línea todas vuelven a heredarlo.
+    if (item.taxes?.some((t) => t.is_inclusive !== undefined)) {
+      this.cartService.setItemTaxes(
+        item.id,
+        item.taxes.map((t) => ({ ...t, is_inclusive: undefined })),
+      );
+    }
+  }
+
+  // ============================================================
+  // QUI-855: multi-impuesto por línea (IVA + INC / ICUI / IBUA)
+  // ============================================================
+
+  /** Modo del descuento elegido por línea; sin elección, lo dicta el dato. */
+  private readonly discountModes = signal<Record<string, 'pct' | 'amount'>>({});
+
+  /**
+   * Filas del editor. Con `taxes` son esas; sin ellas, la fila 1 es el IVA
+   * legacy (`tax_rate`): se convierte en fila al abrir el editor para no
+   * perderlo nunca al agregar otro impuesto. Un `tax_rate` sin capturar (null)
+   * se ve vacío y la línea avisa «Confirma el impuesto».
+   */
+  taxEditorRows(item: PopCartItem): PopLineTax[] {
+    if (item.taxes && item.taxes.length > 0) return item.taxes;
+    return [
+      {
+        tax_type: normalizePopLineTaxType(item.tax_type) as PopLineTax['tax_type'],
+        tax_rate: item.tax_rate,
+        calc_mode: 'percent',
+        add_to_cost: false,
+      },
+    ];
+  }
+
+  /** Descuento propio de la línea en DINERO (el monto gana sobre el %). */
+  itemOwnDiscount(item: PopCartItem): number {
+    const amount = Number(item.discount_amount) || 0;
+    if (amount > 0) return amount;
+    const gross = (Number(item.unit_cost) || 0) * (Number(item.quantity) || 0);
+    return Math.round(gross * ((Number(item.discount) || 0) / 100) * 100) / 100;
+  }
+
+  /** Quita la factura escaneada adjunta (la OC se crea sin ella). */
+  removeScanAttachment(): void {
+    this.cartService.setScanAttachment(null);
+  }
+
+  /** El editor emitió las filas nuevas de la línea. */
+  onItemTaxesChange(item: PopCartItem, taxes: PopLineTax[]): void {
+    this.cartService.setItemTaxes(item.id, taxes);
+  }
+
+  /** Entrada del util para derivar la línea con lo que el carrito guarda. */
+  private lineTaxInput(item: PopCartItem): PurchaseLineTaxInput {
+    return {
+      unit_cost: item.unit_cost,
+      quantity: item.quantity,
+      discount_percentage: item.discount,
+      discount_amount: item.discount_amount,
+      tax_rate: this.hasVat() ? Number(item.tax_rate) || 0 : 0,
+      tax_type: item.tax_type,
+      prices_include_tax: item.prices_include_tax ?? undefined,
+      taxes: this.hasVat() ? item.taxes : undefined,
+    };
+  }
+
+  /** Línea derivada por el kernel (montos por impuesto, neto, al costo). */
+  itemDerived(item: PopCartItem) {
+    return deriveLineTaxes(
+      this.lineTaxInput(item),
+      { prices_include_tax: this.headerIncludeTax() },
+      0,
+    );
+  }
+
+  // ============================================================
+  // Descuento por línea: modo % | $
+  // ============================================================
+
+  discountMode(item: PopCartItem): 'pct' | 'amount' {
+    return (
+      this.discountModes()[item.id] ??
+      ((item.discount_amount ?? 0) > 0 ? 'amount' : 'pct')
+    );
+  }
+
+  /**
+   * Cambia el modo del descuento. Si la línea ya tenía un descuento, se
+   * convierte a la otra unidad para que lo que se ve sea lo que se aplica
+   * (al pasar a % se redondea a 2 decimales: $1.500 sobre 100.000 ⇒ 1,5 %).
+   */
+  setDiscountMode(item: PopCartItem, mode: 'pct' | 'amount'): void {
+    if (this.discountMode(item) === mode) return;
+    this.discountModes.update((m) => ({ ...m, [item.id]: mode }));
+    const derived = this.itemDerived(item);
+    if (mode === 'amount') {
+      if (derived.discount_total > 0) {
+        this.cartService.setItemDiscountAmount(item.id, derived.discount_total);
+      }
+    } else if (derived.discount_total > 0 && derived.gross_line > 0) {
+      this.cartService.setItemDiscount(
+        item.id,
+        Math.round((derived.discount_total / derived.gross_line) * 10000) / 100,
+      );
+    }
+  }
+
+  /** Descuento de la línea en DINERO (limpia el %). */
+  updateDiscountAmount(itemId: string, amount: number | string): void {
+    this.cartService.setItemDiscountAmount(itemId, Number(amount));
   }
 
   /**
@@ -867,7 +1029,7 @@ export class PopCartComponent {
    * Alimenta la visualización "Precio neto" del carrito cuando la línea trae
    * descuento comercial > 0: lo que el operador ve tachado es el `unit_cost`
    * capturado, y al lado aparece el neto que la fórmula ya aplicó. Sale del
-   * mismo `deriveLineTax` que usa el servicio para `recalculateItemTotals`, de
+   * mismo util (`deriveLineTaxes`) que usa el servicio para `recalculateItemTotals`, de
    * modo que el template y el resumen se mueven juntos — nunca hay un neto
    * distinto en la fila y en el pie.
    *
@@ -882,20 +1044,7 @@ export class PopCartComponent {
    * había descontado.
    */
   lineNetUnit(item: PopCartItem): number {
-    const safeTaxRate = this.hasVat() ? Number(item.tax_rate) || 0 : 0;
-    const result = deriveLineTax(
-      {
-        unit_cost: item.unit_cost,
-        quantity: item.quantity,
-        discount_percentage: item.discount,
-        discount_amount: item.discount_amount,
-        tax_rate: safeTaxRate,
-        prices_include_tax: item.prices_include_tax ?? undefined,
-      },
-      { prices_include_tax: this.headerIncludeTax() },
-      0,
-    );
-    return result.unit_price_net;
+    return this.itemDerived(item).unit_price_net;
   }
 
   formatCurrency(amount: number): string {

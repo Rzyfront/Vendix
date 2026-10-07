@@ -1,4 +1,4 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { Prisma, payments_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomUUID } from 'crypto';
@@ -34,6 +34,8 @@ const money = (value: unknown) => new Prisma.Decimal(String(value ?? 0));
  */
 @Injectable()
 export class SplitAccountPaymentService {
+  private readonly logger = new Logger(SplitAccountPaymentService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     @Inject(forwardRef(() => PaymentGatewayService))
@@ -314,6 +316,39 @@ export class SplitAccountPaymentService {
             'El monto excede el saldo disponible de la cuenta.',
             'SPLIT_PAYMENT_AMOUNT',
           );
+        // Stock pre-check on the LAST open account of a draft source order:
+        // settling it promotes draft -> created and reserves stock, which can
+        // fail. Reject BEFORE any money is registered. Intermediate accounts
+        // are not validated (another account is still open).
+        if (order.state === 'draft') {
+          const otherPayables = await tx.order_financial_accounts.findMany({
+            where: {
+              split_id: account.split_id,
+              store_id,
+              state: 'active',
+              role: 'payable',
+              id: { not: accountId },
+            },
+          });
+          const otherStillOpen = otherPayables.some((other: any) =>
+            money(other.paid_snapshot)
+              .plus(
+                total(
+                  payments.filter(
+                    (p: any) => p.financial_account_id === other.id,
+                  ),
+                ),
+              )
+              .lt(money(other.grand_total)),
+          );
+          if (!otherStillOpen) {
+            await this.orderFlow.assertSplitSourceSettleable(
+              orderId,
+              store_id,
+              tx,
+            );
+          }
+        }
         const payment = await tx.payments.create({
           data: {
             order_id: orderId,
@@ -331,11 +366,7 @@ export class SplitAccountPaymentService {
                 created_by_user_id: user_id,
                 authorized_store_id: store_id,
                 request_hash: requestHash,
-                cash_session_id:
-                  cashSession &&
-                  (type === 'cash' || registerSettings?.track_non_cash_payments)
-                    ? cashSession.id
-                    : null,
+                cash_session_id: cashSession ? cashSession.id : null,
                 payment_reference: dto.payment_reference ?? null,
                 amount_received: dto.amount_received ?? null,
                 wompi_payment_method: dto.wompi_payment_method ?? null,
@@ -391,7 +422,7 @@ export class SplitAccountPaymentService {
         }
       }
     }
-    await this.reconcilePayment(reserved.payment.id);
+    await this.reconcileAfterRegistered(reserved.payment.id);
     return this.response(orderId, reserved.payment.id);
   }
 
@@ -440,8 +471,24 @@ export class SplitAccountPaymentService {
         },
       });
     });
-    await this.reconcilePayment(paymentId);
+    await this.reconcileAfterRegistered(paymentId);
     return this.response(orderId, paymentId);
+  }
+
+  /**
+   * The money is already registered: a failure closing the effects (e.g. the
+   * settle stock promotion) must NOT surface as an HTTP error that invites a
+   * second charge. The payment keeps `financial_effects_recorded_at = null`
+   * and `/split/reconcile` retries.
+   */
+  private async reconcileAfterRegistered(paymentId: number): Promise<void> {
+    try {
+      await this.reconcilePayment(paymentId);
+    } catch (err) {
+      this.logger.error(
+        `[split pay] payment=${paymentId} registered but effects pending: ${(err as Error).message}`,
+      );
+    }
   }
 
   /** Also called by the financial-account webhook bridge after provider commit. */

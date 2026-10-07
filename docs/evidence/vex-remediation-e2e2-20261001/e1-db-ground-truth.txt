@@ -1,0 +1,7 @@
+  id  |       name        | base_price |  state   
+------+-------------------+------------+----------
+ 2513 | E2E2Z-sacrificial |     500.00 | archived
+ 2514 | E2E2A-vex         |    1000.00 | active
+ 2515 | E2E2B-vex         |    2000.00 | active
+(3 rows)
+

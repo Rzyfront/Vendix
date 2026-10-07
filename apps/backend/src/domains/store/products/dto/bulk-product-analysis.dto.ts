@@ -24,7 +24,7 @@ export class BulkProductAnalysisItemDto {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   has_multiple_price_tiers?: boolean;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'reactivate';
   existing_product_id?: number;
   status: 'ready' | 'warning' | 'error';
   warnings: (string | BulkValidationMessage)[];

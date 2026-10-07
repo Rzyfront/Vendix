@@ -9,6 +9,8 @@ import {
   hasNonDirectSettledPayment,
   OrderCancellationSnapshot,
 } from './order-cancellation-policy.util';
+import type { KitchenMode } from '../../settings/interfaces/store-settings.interface';
+import { isFinancialSplitSettled } from '../shared/financial-split-policy';
 import {
   getSettledOrderAmount,
   isOrderFullyPaid,
@@ -50,6 +52,10 @@ export interface OrderActionResult {
 export interface OrderActionSnapshot extends OrderCancellationSnapshot {
   active_financial_split_id?: number | null;
   grand_total?: Prisma.Decimal | number | string | null;
+  /** Persisted `orders.remaining_balance` and `orders.payment_form`; used by
+   * {@link getUnpaidBalanceForFinish}. Absent means "not loaded" (permissive). */
+  remaining_balance?: Prisma.Decimal | number | string | null;
+  payment_form?: string | null;
   payments?: ReadonlyArray<
     NonNullable<OrderCancellationSnapshot['payments']>[number] & {
       amount?: Prisma.Decimal | number | string;
@@ -230,10 +236,22 @@ export function canRefund(order: OrderActionSnapshot): OrderActionResult {
  * lives in `order-cancellation-policy.util.ts` (owned by the pre-existing
  * B-series work), not duplicated here. */
 export function canCancel(order: OrderActionSnapshot): OrderActionResult {
+  if (isFinancialSplitLocked(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
   const policy = getOrderCancellationPolicy(order);
   return policy.can_cancel
     ? { enabled: true }
     : { enabled: false, ...(policy.reason_code ? { reason: policy.reason_code } : {}) };
+}
+
+/** `confirm_payment` — un clic que confirma el cobro de la orden completa; con
+ * cuentas independientes activas el único cobro válido es por cuenta. */
+export function canConfirmPayment(order: OrderActionSnapshot): OrderActionResult {
+  if (isFinancialSplitLocked(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
+  return { enabled: true };
 }
 
 /** `assign_shipping` — a method may be assigned whenever the order has none
@@ -245,6 +263,49 @@ export function canAssignShipping(order: OrderActionSnapshot): OrderActionResult
   return { enabled: !hasMethod && !isDirectDelivery };
 }
 
+/**
+ * Unpaid balance that blocks finishing an order (`ORD_FINISH_UNPAID_BALANCE_001`).
+ * Single predicate shared by the write guard (`OrderFlowService.updateOrderState`)
+ * and the read path (`canConfirmDelivery` / `getAvailableActions`).
+ *
+ * Returns 0 (never blocks) when:
+ *  - the order is a credit sale (`payment_form === '2'`, same predicate as
+ *    `registerCreditPayment`; its balance is collected through CxC), or
+ *  - `grand_total` is absent or not > 0 (coupon 100 %, not loaded), or
+ *  - an override says the balance settles in this very write.
+ *
+ * Expression (confirmed against the code): `remaining_balance` is only
+ * reliable once a payment exists. Checkout persists `remaining_balance =
+ * grand_total` for COD/WhatsApp, but POS orders are born with the schema
+ * default 0 while their payment is still `pending`. So:
+ *  - no settled payment (succeeded/captured/partially_refunded/refunded):
+ *    balance = grand_total - 0 = grand_total;
+ *  - otherwise balance = remaining_balance, forced to 0 when the settled sum
+ *    already covers grand_total (stale-balance safety).
+ * `resultingRemaining` (the `remaining_balance` the same write persists, e.g.
+ * payOrder's `settledBalanceMetadata`) takes precedence over everything: the
+ * guard judges the RESULTING balance, not the previous one.
+ */
+export function getUnpaidBalanceForFinish(
+  order: Pick<OrderActionSnapshot, 'grand_total' | 'remaining_balance' | 'payment_form' | 'payments'>,
+  resultingRemaining?: Prisma.Decimal | number | string | null,
+): number {
+  if (order.payment_form === '2') return 0;
+  if (order.grand_total === undefined || order.grand_total === null) return 0;
+  const grand = Number(order.grand_total);
+  if (!(grand > 0)) return 0;
+  if (resultingRemaining !== undefined && resultingRemaining !== null) {
+    return Math.max(0, Number(resultingRemaining));
+  }
+  const settled = (order.payments ?? [])
+    .filter((p) => SETTLED_PAYMENT_STATES.has(p.state))
+    .reduce((sum, p) => sum + Number((p as any).amount ?? 0), 0);
+  const hasSettled = (order.payments ?? []).some((p) => SETTLED_PAYMENT_STATES.has(p.state));
+  if (!hasSettled) return grand;
+  if (settled >= grand - 0.01) return 0;
+  return Math.max(0, Number(order.remaining_balance ?? 0));
+}
+
 /** `confirm_delivery` — accepts `delivered`/`processing` (mirrors
  * `OrderFlowService.confirmDelivery`'s transition guard). `hasPendingKitchen`
  * is optional: when the caller does not resolve it (to avoid an extra query
@@ -254,8 +315,18 @@ export function canConfirmDelivery(order: OrderActionSnapshot): OrderActionResul
   if (order.state !== 'delivered' && order.state !== 'processing') {
     return { enabled: false };
   }
+  // Reparto financiero activo: solo se puede cerrar cuando todas las cuentas
+  // estan pagadas (cierre de ciclo de vida, no mutacion de dinero).
+  if (isFinancialSplitLocked(order) && !isFinancialSplitSettled(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
   if (order.hasPendingKitchen) {
     return { enabled: false, reason: 'ORDER_HAS_PENDING_KITCHEN_ITEMS' };
+  }
+  // Mirror of the `updateOrderState` finish guard: an order with an unpaid
+  // (non-credit) balance cannot be finished; `pay` is the offered action.
+  if (getUnpaidBalanceForFinish(order) > 0.01) {
+    return { enabled: false, reason: ErrorCodes.ORD_FINISH_UNPAID_BALANCE_001.code };
   }
   return { enabled: true };
 }
@@ -306,6 +377,12 @@ export function canReactivateAsRole(
  * (mirrors the web's `canFastTrack`'s `order_items.length > 0`). */
 export interface FastTrackSnapshot {
   state: string;
+  /** Reparto financiero: sin saldar mantiene fast_track bloqueado; saldado lo
+   * habilita (el cobro se omite, solo avanza el ciclo de vida). */
+  active_financial_split_id?: number | null;
+  grand_total?: Prisma.Decimal | number | string | null;
+  payments?: ReadonlyArray<{ state: string; amount?: Prisma.Decimal | number | string }>;
+  refunds?: ReadonlyArray<{ state?: string | null; amount?: Prisma.Decimal | number | string }>;
   delivery_type?: string | null;
   shipping_method_id?: number | null;
   hasOrderItems?: boolean;
@@ -325,6 +402,9 @@ export function canFastTrack(order: FastTrackSnapshot): OrderActionResult {
     !order.shipping_method_id
   ) {
     return { enabled: false, reason: ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001.code };
+  }
+  if (order.active_financial_split_id && !isFinancialSplitSettled(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
   }
   if (!order.hasOrderItems) return { enabled: false };
   return { enabled: true };
@@ -641,6 +721,9 @@ export interface OrderItemActionSnapshot {
    * when the caller resolves it AND the line has no kitchen ticket yet.
    * Defaults to `true` (historic behavior) when unresolved. */
   isRestaurant?: boolean;
+  /** Modo cocina de la tienda. `physical`: sin KDS, un plato con ticket
+   * `pending`/`in_preparation` es entregable. Ausente/`virtual`: exige `ready`. */
+  kitchen_mode?: KitchenMode;
 }
 
 const ITEM_UNDELIVERABLE_ORDER_STATES = new Set(['cancelled', 'refunded']);
@@ -673,7 +756,15 @@ export function canDeliverItem(item: OrderItemActionSnapshot): OrderActionResult
     item.latestKitchenStatus != null ||
     (isRestaurant &&
       (item.item_type === 'prepared' || (item.product_type === 'prepared' && !item.skip_kds)));
-  if (requiresKitchen && item.latestKitchenStatus !== 'ready') {
+  const physicalDeliverable =
+    item.kitchen_mode === 'physical' &&
+    (item.latestKitchenStatus === 'pending' ||
+      item.latestKitchenStatus === 'in_preparation');
+  if (
+    requiresKitchen &&
+    item.latestKitchenStatus !== 'ready' &&
+    !physicalDeliverable
+  ) {
     return { enabled: false, reason: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code };
   }
   return { enabled: true };

@@ -7,7 +7,8 @@ import {
   isWellFormedTechnicalKey,
   TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../fiscal-document-requirements';
-import sharp = require('sharp');
+import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * One extracted field, already checked against the shape the DIAN actually
@@ -101,15 +102,35 @@ export class ResolutionScannerService {
   async scanResolutionDocument(
     file: Express.Multer.File,
   ): Promise<DianResolutionScanResult> {
+    return this.scanResolutionFromFiles([
+      {
+        buffer: file.buffer,
+        mimeType: file.mimetype,
+        originalName: file.originalname,
+        size: file.size,
+      },
+    ]);
+  }
+
+  /** Validación previa a la IA; el controller async la llama ANTES de encolar. */
+  async assertReady(): Promise<void> {
+    await this.aiEngine.assertVisionModelLinked('dian_resolution_scanner');
+  }
+
+  /** Núcleo del escaneo: recibe buffer+mime (handler de la cola `ai-scan`). */
+  async scanResolutionFromFiles(
+    files: AiScanFile[],
+  ): Promise<DianResolutionScanResult> {
+    const file = files[0];
     this.logger.debug(
-      `[ResolutionScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+      `[ResolutionScan] File: mimetype=${file.mimeType}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
     );
 
     // Antes de gastar la llamada: sin modelo de visión enlazado, `run()` cae al
     // config de texto por defecto y devuelve JSON inventado con pinta de válido.
     // En una resolución DIAN eso sería un rango falso que la numeración legal
     // acabaría usando.
-    await this.aiEngine.assertVisionModelLinked('dian_resolution_scanner');
+    await this.assertReady();
 
     const { base64, mimeType } = await this.preprocessImage(file);
     const dataUri = `data:${mimeType};base64,${base64}`;
@@ -172,7 +193,7 @@ export class ResolutionScannerService {
    * reaches the vision model untouched instead of failing the request.
    */
   private async preprocessImage(
-    file: Express.Multer.File,
+    file: AiScanFile,
   ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
@@ -206,7 +227,7 @@ export class ResolutionScannerService {
       );
       return {
         base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
+        mimeType: file.mimeType,
       };
     }
   }
