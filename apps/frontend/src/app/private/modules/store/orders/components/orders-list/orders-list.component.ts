@@ -225,6 +225,63 @@ export class OrdersListComponent {
     action: (order: Order) => this.firePendingKitchenItems(order),
   };
 
+  private firePendingKitchenItems(order: Order): void {
+    if (this.staleKitchenOrderIds().has(order.id)) {
+      this.hydrationRetries.set(order.id, 0);
+      this.queueKitchenHydration(order.id);
+      this.toastService.info('Actualizando el estado de cocina…');
+      return;
+    }
+    const summary = this.kitchenSummary(order);
+    if (this.firingOrderIds().has(order.id)) return;
+    if (this.hasKitchenFireStarted(order) || summary.pendingItemIds.length === 0) {
+      return;
+    }
+
+    this.firingOrderIds.update((current) => new Set(current).add(order.id));
+    this.kitchenTicketsService
+      .fireOrderItems({ order_id: order.id, order_item_ids: summary.pendingItemIds })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.firedKitchenOrderIds.update((current) => new Set(current).add(order.id));
+          this.firingOrderIds.update((current) => {
+            const next = new Set(current);
+            next.delete(order.id);
+            return next;
+          });
+          this.toastService.success(`Platos de ${order.order_number} enviados a cocina`);
+          let printFailureReported = false;
+          this.kitchenTicketPrint.printAfterFire(
+            result.kitchen_ticket_ids ?? [result.kitchen_ticket_id],
+            () => {
+              if (printFailureReported) return;
+              printFailureReported = true;
+              this.toastService.warning(
+                `${order.order_number} ya fue enviada a cocina. Abre el detalle de la orden e imprime la comanda; no vuelvas a enviarla.`,
+              );
+            },
+          );
+          if (result.stock_warnings?.length) {
+            this.toastService.warning('La cocina recibió la orden, pero hay advertencias de inventario.');
+          }
+          this.queueKitchenHydration(order.id);
+        },
+        error: (error: unknown) => {
+          this.firingOrderIds.update((current) => {
+            const next = new Set(current);
+            next.delete(order.id);
+            return next;
+          });
+          this.toastService.error(
+            extractApiErrorMessage(error) || 'No se pudo enviar a cocina',
+          );
+          // Reconcile potentially stale row state after conflicts or validation errors.
+          this.queueKitchenHydration(order.id);
+        },
+      });
+  }
+
   private kitchenSummary(order: Order) {
     return summarizeOrderKitchen(order.order_items ?? []);
   }
@@ -604,63 +661,6 @@ export class OrdersListComponent {
   readonly mobileDirectActionsCount = computed(() =>
     Math.min(4, this.mobileActions().length),
   );
-
-  private firePendingKitchenItems(order: Order): void {
-    if (this.staleKitchenOrderIds().has(order.id)) {
-      this.hydrationRetries.set(order.id, 0);
-      this.queueKitchenHydration(order.id);
-      this.toastService.info('Actualizando el estado de cocina…');
-      return;
-    }
-    const summary = this.kitchenSummary(order);
-    if (this.firingOrderIds().has(order.id)) return;
-    if (this.hasKitchenFireStarted(order) || summary.pendingItemIds.length === 0) {
-      return;
-    }
-
-    this.firingOrderIds.update((current) => new Set(current).add(order.id));
-    this.kitchenTicketsService
-      .fireOrderItems({ order_id: order.id, order_item_ids: summary.pendingItemIds })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.firedKitchenOrderIds.update((current) => new Set(current).add(order.id));
-          this.firingOrderIds.update((current) => {
-            const next = new Set(current);
-            next.delete(order.id);
-            return next;
-          });
-          this.toastService.success(`Platos de ${order.order_number} enviados a cocina`);
-          let printFailureReported = false;
-          this.kitchenTicketPrint.printAfterFire(
-            result.kitchen_ticket_ids ?? [result.kitchen_ticket_id],
-            () => {
-              if (printFailureReported) return;
-              printFailureReported = true;
-              this.toastService.warning(
-                `${order.order_number} ya fue enviada a cocina. Abre el detalle de la orden e imprime la comanda; no vuelvas a enviarla.`,
-              );
-            },
-          );
-          if (result.stock_warnings?.length) {
-            this.toastService.warning('La cocina recibió la orden, pero hay advertencias de inventario.');
-          }
-          this.queueKitchenHydration(order.id);
-        },
-        error: (error: unknown) => {
-          this.firingOrderIds.update((current) => {
-            const next = new Set(current);
-            next.delete(order.id);
-            return next;
-          });
-          this.toastService.error(
-            extractApiErrorMessage(error) || 'No se pudo enviar a cocina',
-          );
-          // Reconcile potentially stale row state after conflicts or validation errors.
-          this.queueKitchenHydration(order.id);
-        },
-      });
-  }
 
   // Card configuration for mobile
   // T10 B3 — cardConfig ahora es computed. detailKeys incluye Mesa solo
