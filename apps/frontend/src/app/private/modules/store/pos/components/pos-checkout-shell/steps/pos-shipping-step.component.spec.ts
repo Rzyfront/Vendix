@@ -853,7 +853,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingCostPending()).toBeFalse();
   });
 
-  it('rejects custom price when location is unresolved, amount invalid, or method inactive', () => {
+  it('rejects custom price when address is invalid, amount invalid, or method inactive', () => {
     const state = cart();
     state.shippingContext = undefined;
     state.linkedOrderId = null;
@@ -862,6 +862,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         state_province: 'Huila', country_code: 'CO', is_primary: true, type: 'shipping' },
     ] };
     mount(state);
+    component.addressValid.set(false);
     component.useCustomShippingRate();
     expect(component.manualCostOverride()).toBeFalse();
     expect(component.canConfirm()).toBeFalse();
@@ -1511,13 +1512,53 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       component.goToShipSubStep(2);
       fixture.detectChanges();
       const alert = fixture.debugElement.query(By.css('.no-methods-alert'));
-      expect(alert.nativeElement.textContent).toContain('Marca la ubicación en el mapa para calcular el envío');
-      expect(alert.nativeElement.textContent).toContain('No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.');
+      expect(alert.nativeElement.textContent).toContain('No pudimos ubicar la dirección en el mapa');
+      expect(alert.nativeElement.textContent).toContain('Marca la ubicación en el mapa para calcular la tarifa automática, o usa una tarifa personalizada.');
       expect(alert.nativeElement.textContent).not.toContain('Revisa las tarifas y la cobertura');
       expect(fixture.debugElement.query(By.css('.cost-card'))).toBeNull();
     });
 
-    it('a manually typed cost cannot bypass the no-coordinates block', () => {
+    it('custom rate button is enabled with a valid address and no coordinates, and activates the override', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [
+        { id: 5, address_line1: 'Calle sin geocodificar 1', city: 'Neiva', state_province: 'Huila', country_code: 'CO', is_primary: true, type: 'shipping' },
+      ] };
+      mount(state);
+      component.addressValid.set(true);
+      component.goToShipSubStep(2);
+      fixture.detectChanges();
+
+      expect(component.hasResolvedLocation()).toBeFalse();
+      const btn = fixture.debugElement.query(By.css('.custom-rate-btn'));
+      expect(btn).not.toBeNull();
+      expect(btn.nativeElement.disabled).toBeFalse();
+      btn.nativeElement.click();
+      fixture.detectChanges();
+
+      expect(component.manualCostOverride()).toBeTrue();
+    });
+
+    it('custom rate button is disabled with the reason when the address is invalid', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [
+        { id: 5, address_line1: 'Calle sin geocodificar 1', city: 'Neiva', country_code: 'CO', is_primary: true, type: 'shipping' },
+      ] };
+      mount(state);
+      component.addressValid.set(false);
+      component.goToShipSubStep(2);
+      fixture.detectChanges();
+
+      const btn = fixture.debugElement.query(By.css('.custom-rate-btn'));
+      expect(btn.nativeElement.disabled).toBeTrue();
+      expect(fixture.debugElement.query(By.css('.no-methods-alert')).nativeElement.textContent)
+        .toContain('Completa una dirección válida');
+    });
+
+    it('a typed cost over a table rate cannot bypass the no-coordinates block', () => {
       const state = cart();
       state.shippingContext = undefined;
       state.linkedOrderId = null;
@@ -1526,6 +1567,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       ] };
       mount(state);
       component.manualCostOverride.set(true);
+      component.shippingRateId.set(93);
       component.shippingCost.set(15000);
       fixture.detectChanges();
 

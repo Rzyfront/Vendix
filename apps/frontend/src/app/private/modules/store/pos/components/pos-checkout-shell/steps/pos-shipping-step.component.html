@@ -306,10 +306,10 @@
       @if (isCostSubStep()) {
         @if (selectedShippingMethod()) {
           <!--
-            Requirement 3 (coordinator, 2026-09): a delivery method without a
-            resolved location cannot show a zone cost or enable custom pricing.
-            Once the location is valid, a cashier may explicitly choose the
-            no-rate custom-price path from this alert.
+            Requirement 3 (coordinator, 2026-09; owner decision 2026-10): a
+            custom shipping rate is a manual price that does not depend on
+            distance. With a delivery method, a valid address is enough to
+            enable it; a resolved map location is no longer required.
           -->
           @if ((requiresAddress() && !shippingRateId() && !isCalculatingShipping() && !manualCostOverride()) ||
               (isPickupMethod() && !!quoteError() && !manualCostOverride())) {
@@ -319,18 +319,19 @@
                 <span class="no-methods-title">
                   {{ isPickupMethod() ? quoteError() : (hasResolvedLocation()
                     ? (quoteError() || 'No hay una tarifa disponible para el método seleccionado.')
-                    : 'Marca la ubicación en el mapa para calcular el envío') }}
+                    : 'No pudimos ubicar la dirección en el mapa') }}
                 </span>
                 <span class="no-methods-desc">
                   {{ isPickupMethod()
                     ? 'Puedes usar una tarifa personalizada o configurar una tarifa para este método.'
                     : (hasResolvedLocation()
                       ? 'Revisa las tarifas y la cobertura de este método, o selecciona otro método de envío.'
-                      : 'No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.') }}
+                      : 'Marca la ubicación en el mapa para calcular la tarifa automática, o usa una tarifa personalizada.') }}
                 </span>
-                <button type="button" class="no-methods-link"
+                <button type="button" class="custom-rate-btn"
                   [disabled]="!canUseCustomShippingRate()"
                   (click)="useCustomShippingRate()">
+                  <app-icon name="pencil" [size]="16"></app-icon>
                   Usar tarifa personalizada
                 </button>
                 @if (!canUseCustomShippingRate() && customShippingRateBlockReason()) {

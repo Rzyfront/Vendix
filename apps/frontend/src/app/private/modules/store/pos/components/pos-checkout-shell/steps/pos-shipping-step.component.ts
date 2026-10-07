@@ -390,9 +390,6 @@ export class PosShippingStepComponent {
     if (this.requiresAddress() && !this.addressValid()) {
       return 'Completa una dirección válida para habilitar esta opción.';
     }
-    if (this.requiresAddress() && !this.hasResolvedLocation()) {
-      return 'Marca la ubicación en el mapa para habilitar esta opción.';
-    }
     return null;
   });
   readonly canUseCustomShippingRate = computed<boolean>(() =>
@@ -1200,14 +1197,11 @@ export class PosShippingStepComponent {
       !untouchedPickupSnapshot && !explicitCustomRateWithoutTable) {
       return { section: 'shipping-method', message: 'Selecciona una tarifa activa para recoger en tienda' };
     }
-    // Requirement 3 (coordinator, 2026-09): an explicit custom-rate override
-    // is allowed only after this same address-valid + resolved-coordinates
-    // gate; it must not become an escape hatch for an unresolved destination.
-    //
-    // Deliberately keyed on `hasResolvedLocation()`, NOT `shippingRateId()`:
-    // a `null` `shippingRateId` is allowed here only after the cashier
-    // explicitly chooses the custom-rate path and this location gate passes.
-    if (this.requiresAddress() && !this.hasResolvedLocation()) {
+    // Requirement 3 (coordinator, 2026-09; owner decision 2026-10): an
+    // explicit custom rate is a manual price independent of distance, so it
+    // does not need a resolved map location (a valid address, checked below,
+    // is enough). Automatic rates still require the resolved location.
+    if (this.requiresAddress() && !this.hasResolvedLocation() && !explicitCustomRateWithoutTable) {
       return { section: 'address', message: 'Marca la ubicación en el mapa para calcular el envío' };
     }
     if (!Number.isFinite(this.shippingCost()) || this.shippingCost() < 0) {
