@@ -472,34 +472,45 @@ export class OrdersListComponent {
     return base;
   });
 
-  actions: TableAction[] = [
-    {
-      label: 'View Details',
-      icon: 'eye',
-      action: (order: Order) => this.viewOrderDetails(order),
-      variant: 'secondary',
-    },
-    {
-      label: 'Imprimir',
-      icon: 'printer',
-      action: (order: Order) =>
-        this.printService.printOrder(order).catch(() => {
-          this.toastService.error(
-            'No se pudo imprimir la orden: reintenta; si persiste, revisa el Hub de formatos de impresión.',
-          );
-        }),
-      variant: 'info',
-      show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
-    },
-    {
-      label: 'Cancel Order',
-      icon: 'x-circle',
-      action: (order: Order) => this.cancelOrder(order),
-      variant: 'danger',
-      show: (order: Order) =>
-        order.cancellation_policy?.can_cancel === true,
-    },
-  ];
+  readonly viewAction: TableAction = {
+    label: 'View Details',
+    icon: 'eye',
+    action: (order: Order) => this.viewOrderDetails(order),
+    variant: 'secondary',
+  };
+
+  readonly printAction: TableAction = {
+    label: 'Imprimir',
+    icon: 'printer',
+    action: (order: Order) =>
+      this.printService.printOrder(order).catch(() => {
+        this.toastService.error(
+          'No se pudo imprimir la orden: reintenta; si persiste, revisa el Hub de formatos de impresión.',
+        );
+      }),
+    variant: 'info',
+    show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
+  };
+
+  readonly cancelAction: TableAction = {
+    label: 'Cancelar orden',
+    icon: 'x-circle',
+    action: (order: Order) => this.cancelOrder(order),
+    variant: 'danger',
+    show: (order: Order) =>
+      order.cancellation_policy?.can_cancel === true,
+  };
+
+  actions: TableAction[] = [this.viewAction, this.printAction, this.cancelAction];
+
+  /** Keep desktop configuration intact and mobile core actions ahead of extras. */
+  readonly mobileActions = computed<TableAction[]>(() => {
+    const core = [this.viewAction, this.printAction, this.cancelAction];
+    return [...core, ...this.actions.filter((action) => !core.includes(action))];
+  });
+  readonly mobileDirectActionsCount = computed(() =>
+    Math.min(4, this.mobileActions().length),
+  );
 
   // Card configuration for mobile
   // T10 B3 — cardConfig ahora es computed. detailKeys incluye Mesa solo

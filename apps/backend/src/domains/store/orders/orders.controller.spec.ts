@@ -409,6 +409,31 @@ describe('OrdersController', () => {
         .rejects.toBe(error);
       expect(mockResponseService.error).not.toHaveBeenCalled();
     });
+
+    it('propaga errores inesperados al cancelar para que el filtro responda HTTP 500', async () => {
+      const error = new Error('unexpected cancellation failure');
+      mockOrdersService.update.mockRejectedValue(error);
+
+      await expect(
+        controller.update(1, { state: 'cancelled' } as UpdateOrderDto),
+      ).rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
+
+    it('mantiene el contrato anterior ante errores inesperados de otros PATCH', async () => {
+      const errorResponse = { success: false, statusCode: 400 };
+      mockOrdersService.update.mockRejectedValue(new Error('notes failure'));
+      mockResponseService.error.mockReturnValue(errorResponse);
+
+      await expect(
+        controller.update(1, { internal_notes: 'note' } as UpdateOrderDto),
+      ).resolves.toBe(errorResponse);
+      expect(mockResponseService.error).toHaveBeenCalledWith(
+        'notes failure',
+        'notes failure',
+        400,
+      );
+    });
   });
 
   describe('remove', () => {

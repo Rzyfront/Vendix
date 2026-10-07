@@ -36,8 +36,10 @@
             [variant]="dispatchableFilter() ? 'primary' : 'outline'"
             size="md"
             [iconOnlyMobile]="true"
+            customClasses="!h-10 !w-10 !px-0 !shadow-none sm:!h-11 sm:!w-11 md:!h-11 md:!w-auto md:!px-4"
             class="shrink-0"
-            [attr.aria-pressed]="dispatchableFilter()"
+            [ariaLabel]="dispatchableFilter() ? 'Quitar filtro Por enviar' : 'Filtrar Por enviar'"
+            [ariaPressed]="dispatchableFilter()"
             [attr.title]="
               dispatchableFilter()
                 ? 'Mostrando solo órdenes por enviar — clic para quitar el filtro'
@@ -83,7 +85,10 @@
           [data]="orders()"
           [columns]="columns()"
           [actions]="actions"
+          [mobileActions]="mobileActions()"
+          [mobileDirectActionsCount]="mobileDirectActionsCount()"
           [cardConfig]="cardConfig()"
+          rowLabelKey="order_number"
           [loading]="loading()"
           [sortable]="true"
           [rowClass]="rowClassFn"

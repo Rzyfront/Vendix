@@ -5393,7 +5393,14 @@ export class OrdersService {
     // Auto-scoped
     const where: Prisma.ordersWhereInput = {};
 
-    const [totalOrders, totalRevenue, pendingOrders, completedOrders] =
+    const [
+      totalOrders,
+      totalRevenue,
+      pendingOrders,
+      completedOrders,
+      cancelledOrders,
+      refundedOrders,
+    ] =
       await Promise.all([
         this.prisma.orders.count({ where }),
         this.prisma.orders.aggregate({
@@ -5425,6 +5432,18 @@ export class OrdersService {
             },
           },
         }),
+        this.prisma.orders.count({
+          where: {
+            ...where,
+            state: 'cancelled' as order_state_enum,
+          },
+        }),
+        this.prisma.orders.count({
+          where: {
+            ...where,
+            state: 'refunded' as order_state_enum,
+          },
+        }),
       ]);
 
     const averageOrderValue =
@@ -5435,6 +5454,8 @@ export class OrdersService {
       total_revenue: totalRevenue._sum.grand_total || 0,
       pending_orders: pendingOrders,
       completed_orders: completedOrders,
+      cancelled_orders: cancelledOrders,
+      refunded_orders: refundedOrders,
       average_order_value: averageOrderValue,
     };
   }
