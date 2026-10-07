@@ -1,4 +1,5 @@
-import {Component, OnInit, inject, DestroyRef} from '@angular/core';
+import {Component, OnInit, inject, DestroyRef, signal} from '@angular/core';
+import { Subscription, defaultIfEmpty } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
@@ -27,41 +28,50 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
   template: `
     <div class="w-full">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
-        <app-stats
-          title="Valor Total Inventario"
-          [value]="formatCurrency(stats.total_stock_value)"
-          iconName="dollar-sign"
-          iconBgColor="bg-purple-100"
-          iconColor="text-purple-600"
-        ></app-stats>
+      @if (stats_error()) {
+        <p role="alert" class="mb-4 p-4 bg-surface border border-border rounded-lg text-text-secondary">No se pudo cargar el resumen de inventario</p>
+      } @else {
+        <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
+          <app-stats
+            [loading]="is_loading_stats()"
+            title="Valor Total Inventario"
+            [value]="formatCurrency(stats().total_stock_value)"
+            iconName="dollar-sign"
+            iconBgColor="bg-purple-100"
+            iconColor="text-purple-600"
+          ></app-stats>
 
-        <app-stats
-          title="Productos con Stock"
-          [value]="stats.total_products"
-          iconName="package"
-          iconBgColor="bg-blue-100"
-          iconColor="text-blue-600"
-        ></app-stats>
+          <app-stats
+            [loading]="is_loading_stats()"
+            title="Productos con Stock"
+            [value]="stats().total_products"
+            iconName="package"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          ></app-stats>
 
-        <app-stats
-          title="Stock Bajo"
-          [value]="stats.low_stock_items"
-          [smallText]="stats.out_of_stock_items + ' agotados'"
-          iconName="alert-triangle"
-          iconBgColor="bg-amber-100"
-          iconColor="text-amber-600"
-        ></app-stats>
+          <app-stats
+            [loading]="is_loading_stats()"
+            title="Stock Bajo"
+            [value]="stats().low_stock_items"
+            [smallText]="stats().out_of_stock_items + ' agotados'"
+            iconName="alert-triangle"
+            iconBgColor="bg-amber-100"
+            iconColor="text-amber-600"
+          ></app-stats>
 
-        <app-stats
-          title="Órdenes Pendientes"
-          [value]="stats.pending_orders"
-          [smallText]="formatCurrency(stats.incoming_stock) + ' en camino'"
-          iconName="truck"
-          iconBgColor="bg-green-100"
-          iconColor="text-green-600"
-        ></app-stats>
-      </div>
+          <app-stats
+            [loading]="is_loading_stats()"
+            title="Órdenes Pendientes"
+            [value]="stats().pending_orders"
+            [smallText]="formatCurrency(stats().incoming_stock) + ' en camino'"
+            iconName="truck"
+            iconBgColor="bg-green-100"
+            iconColor="text-green-600"
+          ></app-stats>
+        </div>
+
+      }
 
       <!-- Main Content Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -75,13 +85,17 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
             <a routerLink="./orders" class="text-sm text-primary hover:underline">Ver todas</a>
           </div>
           <div class="p-4">
-            <app-table
-              [data]="recent_orders"
-              [columns]="order_columns"
-              [loading]="is_loading_orders"
-              emptyMessage="No hay órdenes recientes"
-              size="sm"
-            ></app-table>
+            @if (orders_error()) {
+              <p role="alert" class="text-text-secondary">No se pudieron cargar las órdenes recientes</p>
+            } @else {
+              <app-table
+                [data]="recent_orders()"
+                [columns]="order_columns"
+                [loading]="is_loading_orders()"
+                emptyMessage="No hay órdenes recientes"
+                size="sm"
+              ></app-table>
+            }
           </div>
         </div>
 
@@ -95,13 +109,17 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
             <a routerLink="./suppliers" class="text-sm text-primary hover:underline">Ver todos</a>
           </div>
           <div class="p-4">
-            <app-table
-              [data]="top_suppliers"
-              [columns]="supplier_columns"
-              [loading]="is_loading_suppliers"
-              emptyMessage="No hay proveedores"
-              size="sm"
-            ></app-table>
+            @if (suppliers_error()) {
+              <p role="alert" class="text-text-secondary">No se pudieron cargar los proveedores</p>
+            } @else {
+              <app-table
+                [data]="top_suppliers()"
+                [columns]="supplier_columns"
+                [loading]="is_loading_suppliers()"
+                emptyMessage="No hay proveedores"
+                size="sm"
+              ></app-table>
+            }
           </div>
         </div>
       </div>
@@ -149,23 +167,29 @@ export class InventoryDashboardComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
   // Stats
-  stats: InventoryStats = {
+  readonly stats = signal<InventoryStats>({
     total_products: 0,
     total_stock_value: 0,
     low_stock_items: 0,
     out_of_stock_items: 0,
     pending_orders: 0,
     incoming_stock: 0,
-  };
+  });
 
   // Data
-  recent_orders: PurchaseOrder[] = [];
-  top_suppliers: Supplier[] = [];
+  readonly recent_orders = signal<PurchaseOrder[]>([]);
+  readonly top_suppliers = signal<Supplier[]>([]);
 
   // Loading
-  is_loading_stats = false;
-  is_loading_orders = false;
-  is_loading_suppliers = false;
+  readonly is_loading_stats = signal(false);
+  readonly is_loading_orders = signal(false);
+  readonly is_loading_suppliers = signal(false);
+  readonly stats_error = signal(false);
+  readonly orders_error = signal(false);
+  readonly suppliers_error = signal(false);
+  private statsRequest?: Subscription;
+  private ordersRequest?: Subscription;
+  private suppliersRequest?: Subscription;
 
   // Table Columns
   order_columns: TableColumn[] = [
@@ -205,7 +229,13 @@ export class InventoryDashboardComponent implements OnInit {
     private inventoryService: InventoryService,
     private purchaseOrdersService: PurchaseOrdersService,
     private suppliersService: SuppliersService
-  ) { }
+  ) {
+    this.destroyRef.onDestroy(() => {
+      this.statsRequest?.unsubscribe();
+      this.ordersRequest?.unsubscribe();
+      this.suppliersRequest?.unsubscribe();
+    });
+  }
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -215,51 +245,67 @@ export class InventoryDashboardComponent implements OnInit {
   }
 
   loadStats(): void {
-    this.is_loading_stats = true;
-    this.inventoryService.getInventoryStats().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        if (response.data) {
-          this.stats = response.data;
-        }
-        this.is_loading_stats = false;
-      },
-      error: (error) => {
-        this.toastService.error(
-          extractApiErrorMessage(error) || 'No se pudo cargar el resumen de inventario',
-        );
-        this.is_loading_stats = false;
-      },
-    });
+    if (this.destroyRef.destroyed) return;
+    this.statsRequest?.unsubscribe();
+    this.is_loading_stats.set(true);
+    this.stats_error.set(false);
+    this.statsRequest = this.inventoryService.getInventoryStats()
+      .pipe(defaultIfEmpty(null), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const data = response?.success === false ? undefined : response?.data;
+          if (data) this.stats.set(data);
+          this.stats_error.set(!data);
+          this.is_loading_stats.set(false);
+        },
+        error: (error) => {
+          this.stats_error.set(true);
+          this.toastService.error(extractApiErrorMessage(error) || 'No se pudo cargar el resumen de inventario');
+          this.is_loading_stats.set(false);
+        },
+      });
   }
 
   loadRecentOrders(): void {
-    this.is_loading_orders = true;
-    this.purchaseOrdersService.getPurchaseOrders({ limit: 5 }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        if (response.data) {
-          this.recent_orders = response.data;
-        }
-        this.is_loading_orders = false;
-      },
-      error: () => {
-        this.is_loading_orders = false;
-      },
-    });
+    if (this.destroyRef.destroyed) return;
+    this.ordersRequest?.unsubscribe();
+    this.is_loading_orders.set(true);
+    this.orders_error.set(false);
+    this.ordersRequest = this.purchaseOrdersService.getPurchaseOrders({ limit: 5 })
+      .pipe(defaultIfEmpty(null), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const data = response?.success === false ? undefined : response?.data;
+          if (data) this.recent_orders.set(data);
+          this.orders_error.set(!data);
+          this.is_loading_orders.set(false);
+        },
+        error: () => {
+          this.orders_error.set(true);
+          this.is_loading_orders.set(false);
+        },
+      });
   }
 
   loadTopSuppliers(): void {
-    this.is_loading_suppliers = true;
-    this.suppliersService.getSuppliers({ limit: 5, state: 'active' as const }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        if (response.data) {
-          this.top_suppliers = response.data;
-        }
-        this.is_loading_suppliers = false;
-      },
-      error: () => {
-        this.is_loading_suppliers = false;
-      },
-    });
+    if (this.destroyRef.destroyed) return;
+    this.suppliersRequest?.unsubscribe();
+    this.is_loading_suppliers.set(true);
+    this.suppliers_error.set(false);
+    this.suppliersRequest = this.suppliersService.getSuppliers({ limit: 5, state: 'active' as const })
+      .pipe(defaultIfEmpty(null), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const data = response?.success === false ? undefined : response?.data;
+          if (data) this.top_suppliers.set(data);
+          this.suppliers_error.set(!data);
+          this.is_loading_suppliers.set(false);
+        },
+        error: () => {
+          this.suppliers_error.set(true);
+          this.is_loading_suppliers.set(false);
+        },
+      });
   }
 
   formatCurrency(value: number): string {

@@ -606,7 +606,7 @@ export class InventoryAnalyticsService {
 
     const rows: LowStockReportRow[] = products
       .filter((product) => Number(product.stock_quantity ?? 0) <= resolveProductLowStockThreshold(settings, product))
-      .map<LowStockReportRow>((product) => {
+      .map((product): LowStockReportRow => {
         const qty = Number(product.stock_quantity ?? 0);
         return {
           product_id: product.id,
