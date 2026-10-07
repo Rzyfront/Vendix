@@ -239,6 +239,100 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
     expect(municipalityCenter).not.toHaveBeenCalled();
   });
 
+  const lockInRiohacha = { country_code: 'CO', state_province: 'La Guajira', city: 'Riohacha' };
+
+  it('lock: dirección legacy sin municipality_code de otra ciudad descarta lat/lng', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'Bogotá', country_code: 'CO',
+      latitude: 4.65, longitude: -74.06,
+    });
+    fixture.componentRef.setInput('lockedLocation', lockInRiohacha);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.form.get('city')!.value).toBe('Riohacha');
+    expect(component.form.get('latitude')!.value).toBeNull();
+    expect(component.form.get('longitude')!.value).toBeNull();
+    expect(component.coordsSignal()).toBeNull();
+  });
+
+  it('lock: dirección legacy sin código de la misma ciudad conserva lat/lng', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'Riohacha', country_code: 'CO',
+      latitude: 11.54, longitude: -72.91,
+    });
+    fixture.componentRef.setInput('lockedLocation', lockInRiohacha);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.form.get('latitude')!.value).toBe(11.54);
+    expect(component.form.get('longitude')!.value).toBe(-72.91);
+  });
+
+  it('lock: aplicar el lock no geocodifica; teclear en line1 lo hace una vez por el debounce', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      fixture.componentRef.setInput('initialAddress', {
+        address_line1: 'Calle 1 # 2-3', country_code: 'CO',
+      });
+      fixture.componentRef.setInput('lockedLocation', lockInRiohacha);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+      expect(component.isLocked()).toBeTrue();
+      expect(forward).not.toHaveBeenCalled();
+
+      component.form.markAsDirty();
+      component.form.get('address_line1')!.setValue('Calle 5 # 6-7');
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+
+    expect(forward).toHaveBeenCalledTimes(1);
+  });
+
+  it('teléfono prellenado: chip visible, input oculto; Editar muestra el input', async () => {
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', country_code: 'CO', phone_number: '3001234567',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.css('.phone-chip'))).toBeTruthy();
+    expect(fixture.debugElement.query(By.css('input[type="tel"]'))).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('3001234567');
+
+    (fixture.debugElement.query(By.css('button[aria-label="Editar teléfono"]'))
+      .nativeElement as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.phoneEditing()).toBeTrue();
+    expect(fixture.debugElement.query(By.css('.phone-chip'))).toBeNull();
+    expect(fixture.debugElement.query(By.css('input[type="tel"]'))).toBeTruthy();
+    expect(component.form.get('phone_number')!.value).toBe('3001234567');
+  });
+
+  it('sin teléfono: se muestra el input, no el chip', async () => {
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', country_code: 'CO',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.css('.phone-chip'))).toBeNull();
+    expect(fixture.debugElement.query(By.css('input[type="tel"]'))).toBeTruthy();
+  });
+
   it('sin lockedLocation el comportamiento no cambia', async () => {
     fixture.detectChanges();
     await fixture.whenStable();

@@ -3,7 +3,9 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  Injector,
   ViewEncapsulation,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -349,6 +351,7 @@ export class AddressFormFieldsComponent {
   private readonly geocoding = inject(GeocodingService);
   private readonly municipalities = inject(DianMunicipalityLookupService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
   /** Host element — used to tell "the operator is still typing in THIS
    *  form" apart from focus elsewhere on the page (see
    *  {@link isTextEntryInsideHost}, rule 3 of the auto-scroll gate). */
@@ -385,6 +388,16 @@ export class AddressFormFieldsComponent {
   readonly departmentCatalogError = signal<string | null>(null);
   readonly municipalityCatalogError = signal<string | null>(null);
   readonly legacyAddressHint = signal<string | null>(null);
+  /** Phone that arrived prefilled (hydration) and is valid; null otherwise. */
+  private readonly prefilledPhone = signal<string | null>(null);
+  /** True once the user chose "Editar" on the phone chip (reset on hydration). */
+  readonly phoneEditing = signal(false);
+  /** Presentation only: the form value and its validators are untouched. */
+  readonly phoneChipValue = computed<string | null>(() =>
+    this.phoneEditing() ? null : this.prefilledPhone(),
+  );
+  /** Raw `city` of the hydrated address (hydration blanks the form's city). */
+  private hydratedCity = '';
   readonly departmentOptions = computed<SelectorOption[]>(() =>
     this.departments().map((item) => ({ value: item.code, label: item.name })),
   );
@@ -585,6 +598,19 @@ export class AddressFormFieldsComponent {
     this.showMap.set(!this.showMap());
   }
 
+  editPhone(): void {
+    this.phoneEditing.set(true);
+    afterNextRender(
+      () => {
+        const input = (this.hostRef.nativeElement as HTMLElement).querySelector<HTMLInputElement>(
+          'input[type="tel"]',
+        );
+        input?.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
   onDepartmentChange(value: string | number | null): void {
     const code = value == null ? null : String(value);
     const department = this.departments().find((item) => item.code === code) ?? null;
@@ -709,6 +735,10 @@ export class AddressFormFieldsComponent {
     const state = address.state_province?.trim() ?? '';
     const hint = city || state ? `Antes: ${[city, state].filter(Boolean).join(', ')}` : null;
     const hasValidCoords = this.hasValidCoords(address.latitude, address.longitude);
+    this.hydratedCity = city;
+    const phone = address.phone_number?.trim() ?? '';
+    this.prefilledPhone.set(phone && /^[\d+#*\s()-]*$/.test(phone) ? phone : null);
+    this.phoneEditing.set(false);
 
     this.selectedDepartmentCode.set(null);
     this.selectedMunicipalityCode.set(null);
@@ -824,10 +854,16 @@ export class AddressFormFieldsComponent {
     // Cancels any pending hydration lookup that could overwrite the lock.
     this.hydrationGeneration++;
     const previousCode = this.form.get('municipality_code')?.value as string | null;
-    if (previousCode && previousCode !== municipality.code) {
-      // Coordinates of another municipality must not survive the lock.
+    const currentCity = (
+      ((this.form.get('city')?.value as string | null) ?? '').trim() || this.hydratedCity
+    );
+    const foreignCity = !previousCode && !!currentCity &&
+      this.normalizeName(currentCity) !== this.normalizeName(municipality.name);
+    if ((previousCode && previousCode !== municipality.code) || foreignCity) {
+      // Coordinates of another municipality (by code, or legacy city name) must not survive the lock.
       this.invalidateGeographyAndLocation();
     }
+    this.hydratedCity = '';
     this.selectedDepartmentCode.set(municipality.department_code);
     this.selectedMunicipalityCode.set(municipality.code);
     this.legacyAddressHint.set(null);
@@ -838,6 +874,10 @@ export class AddressFormFieldsComponent {
       municipality_code: municipality.code,
     }, { emitEvent: false });
     this.form.updateValueAndValidity({ emitEvent: true });
+  }
+
+  private normalizeName(value: string): string {
+    return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
 
   private frameLockedMunicipality(loc: LockedLocation | null): void {
