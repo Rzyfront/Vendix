@@ -17,6 +17,8 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
+import { memoryStorage } from 'multer';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 
@@ -66,6 +68,7 @@ export class SubscriptionFiscalController {
     private readonly fiscalService: SubscriptionFiscalService,
     private readonly responseService: ResponseService,
     private readonly resolutionScanner: ResolutionScannerService,
+    private readonly aiScanJobService: AiScanJobService,
   ) {}
 
   @Get('status')
@@ -516,6 +519,9 @@ export class SubscriptionFiscalController {
    * `POST resolutions` or `PATCH resolutions/:id`, so an OCR slip can never
    * reach the platform numbering by itself.
    */
+  /**
+   * @deprecated Usar POST superadmin/subscriptions/fiscal/resolutions/scan/async (el síncrono muere en 504 tras 60 s de proxy).
+   */
   @Post('resolutions/scan')
   @Permissions('superadmin:subscriptions:fiscal:write')
   @UseInterceptors(FileInterceptor('file'))
@@ -535,6 +541,31 @@ export class SubscriptionFiscalController {
 
     const result = await this.resolutionScanner.scanResolutionDocument(file);
     return this.responseService.success(result, 'Platform resolution scanned');
+  }
+
+  @Post('resolutions/scan/async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } }))
+  @ApiOperation({
+    summary:
+      'Enqueue a DIAN resolution scan (async ai-scan job); poll GET /ai-scan-jobs/:jobId',
+  })
+  async scanResolutionAsync(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<any> {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_NO_FILE);
+    }
+    if (!SCAN_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_INVALID_FILE);
+    }
+    await this.resolutionScanner.assertReady();
+    const { job_id } = await this.aiScanJobService.enqueue(
+      'dian_resolution',
+      [file],
+    );
+    return this.responseService.success({ job_id }, 'Escaneo encolado');
   }
 
   @Post('resolutions')

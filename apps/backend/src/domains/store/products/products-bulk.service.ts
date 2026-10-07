@@ -38,6 +38,13 @@ type UomCatalogEntry = {
   is_stock_eligible: boolean;
 };
 
+interface BarcodeOwner {
+  kind: 'product' | 'variant' | 'presentation';
+  product_id: number;
+  product_name?: string;
+  archived: boolean;
+}
+
 @Injectable()
 export class ProductsBulkService {
   private readonly logger = new Logger(ProductsBulkService.name);
@@ -629,12 +636,47 @@ export class ProductsBulkService {
 
     // 2. Pre-fetch existing products by SKU for this store
     const existingProducts = await this.prisma.products.findMany({
-      where: { store_id: storeId, state: { not: 'archived' } },
-      select: { id: true, sku: true, name: true },
+      // Incluye archivados: un SKU de archivo que coincide con un archivado
+      // se reactiva. Un archivado ya NO ocupa slug/barcode (índices únicos
+      // parciales WHERE state <> 'archived'), pero sí sirve para reactivar.
+      where: { store_id: storeId },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        slug: true,
+        state: true,
+        updated_at: true,
+      },
     });
-    const skuMap = new Map<string, { id: number; name: string }>();
+    const skuMap = new Map<
+      string,
+      { id: number; name: string; archived: boolean; ts: number }
+    >();
+    // Solo dueños NO archivados: un archivado no ocupa el slug.
+    const slugMap = new Map<string, { id: number; name: string }>();
     for (const p of existingProducts) {
-      if (p.sku) skuMap.set(p.sku.toLowerCase(), { id: p.id, name: p.name });
+      const archived = p.state === 'archived';
+      const ts = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+      if (p.sku) {
+        const key = p.sku.toLowerCase();
+        const prev = skuMap.get(key);
+        // Con varios productos por SKU gana el no archivado (el commit lo
+        // actualiza); si solo hay archivados, el más reciente (updated_at,
+        // luego id mayor) se reactiva.
+        const wins =
+          !prev ||
+          (prev.archived && !archived) ||
+          (prev.archived === archived &&
+            archived &&
+            (ts > prev.ts || (ts === prev.ts && p.id > prev.id)));
+        if (wins) {
+          skuMap.set(key, { id: p.id, name: p.name, archived, ts });
+        }
+      }
+      if (p.slug && !archived) {
+        slugMap.set(p.slug, { id: p.id, name: p.name });
+      }
     }
 
     // 3. Pre-fetch existing brands
@@ -806,8 +848,29 @@ export class ProductsBulkService {
         // Check if SKU exists in store
         const existing = skuMap.get(skuLower);
         if (existing) {
-          item.action = 'update';
+          item.action = existing.archived ? 'reactivate' : 'update';
           item.existing_product_id = existing.id;
+          if (existing.archived) {
+            item.warnings.push({
+              code: 'WILL_REACTIVATE_ARCHIVED',
+              message: `El SKU corresponde al producto archivado "${existing.name}": se reactivará con los datos del archivo`,
+              field: 'sku',
+            });
+          }
+        }
+      }
+
+      // Paridad con create: el slug es único entre productos NO archivados
+      // (PROD_DUP_001). Se avisa aquí, no en el commit.
+      if (item.action !== 'update' && item.name) {
+        const effectiveSlug = product.slug || generateSlug(item.name);
+        const slugOwner = effectiveSlug ? slugMap.get(effectiveSlug) : undefined;
+        if (slugOwner && slugOwner.id !== item.existing_product_id) {
+          item.errors.push({
+            code: 'DUPLICATE_SLUG',
+            message: `El nombre genera el slug "${effectiveSlug}", que ya usa el producto "${slugOwner.name}". Cambia el nombre o la columna slug.`,
+            field: 'name',
+          });
         }
       }
 
@@ -838,9 +901,12 @@ export class ProductsBulkService {
               : owner.kind === 'presentation'
                 ? 'una presentación de venta'
                 : 'otro producto';
+          const ownerName = owner.product_name
+            ? ` del producto ${owner.archived ? 'archivado ' : ''}"${owner.product_name}"`
+            : '';
           item.errors.push({
             code: 'BARCODE_IN_USE',
-            message: `El código de barras ya está en uso por ${where} de esta tienda`,
+            message: `El código de barras ya está en uso por ${where}${ownerName} de esta tienda`,
             field: 'barcode',
           });
         }
@@ -928,7 +994,7 @@ export class ProductsBulkService {
       // Cross-field validations (only when BOTH fields are explicitly present)
       if (
         item.product_type === 'service' &&
-        item.action === 'create' &&
+        item.action !== 'update' &&
         product.service_duration_minutes === undefined
       ) {
         item.warnings.push({
@@ -941,7 +1007,7 @@ export class ProductsBulkService {
 
       if (
         item.product_type === 'service' &&
-        item.action === 'create' &&
+        item.action !== 'update' &&
         product.service_pricing_type === undefined
       ) {
         item.warnings.push({
@@ -1057,44 +1123,71 @@ export class ProductsBulkService {
   private async loadBarcodeOwners(
     barcodes: string[],
     storeId: number,
-  ): Promise<
-    Map<
-      string,
-      { kind: 'product' | 'variant' | 'presentation'; product_id: number }
-    >
-  > {
-    const owners = new Map<
-      string,
-      { kind: 'product' | 'variant' | 'presentation'; product_id: number }
-    >();
+  ): Promise<Map<string, BarcodeOwner>> {
+    const owners = new Map<string, BarcodeOwner>();
     const unique = Array.from(new Set(barcodes));
     if (unique.length === 0) return owners;
 
+    // Un producto archivado ya no ocupa su código (índice único parcial):
+    // solo cuentan productos activos y variantes de productos no archivados.
+    // Las presentaciones cuentan siempre (decisión del dueño): el código de
+    // una presentación de un producto archivado sigue bloqueado.
     const [productRows, variantRows, presentationRows] = await Promise.all([
       this.prisma.products.findMany({
-        where: { store_id: storeId, barcode: { in: unique } },
-        select: { id: true, barcode: true },
+        where: {
+          store_id: storeId,
+          barcode: { in: unique },
+          state: { not: 'archived' },
+        },
+        select: { id: true, barcode: true, name: true },
       }),
       this.prisma.product_variants.findMany({
-        where: { barcode: { in: unique }, products: { store_id: storeId } },
-        select: { product_id: true, barcode: true },
+        where: {
+          barcode: { in: unique },
+          products: { store_id: storeId, state: { not: 'archived' } },
+        },
+        select: {
+          product_id: true,
+          barcode: true,
+          products: { select: { name: true } },
+        },
       }),
       this.prisma.product_price_tier_assignments.findMany({
         where: { barcode: { in: unique }, product: { store_id: storeId } },
-        select: { product_id: true, barcode: true },
+        select: {
+          product_id: true,
+          barcode: true,
+          product: { select: { name: true, state: true } },
+        },
       }),
     ]);
 
     for (const r of presentationRows) {
       if (r.barcode)
-        owners.set(r.barcode, { kind: 'presentation', product_id: r.product_id });
+        owners.set(r.barcode, {
+          kind: 'presentation',
+          product_id: r.product_id,
+          product_name: r.product?.name,
+          archived: r.product?.state === 'archived',
+        });
     }
     for (const r of variantRows) {
       if (r.barcode)
-        owners.set(r.barcode, { kind: 'variant', product_id: r.product_id });
+        owners.set(r.barcode, {
+          kind: 'variant',
+          product_id: r.product_id,
+          product_name: r.products?.name,
+          archived: false,
+        });
     }
     for (const r of productRows) {
-      if (r.barcode) owners.set(r.barcode, { kind: 'product', product_id: r.id });
+      if (r.barcode)
+        owners.set(r.barcode, {
+          kind: 'product',
+          product_id: r.id,
+          product_name: r.name,
+          archived: false,
+        });
     }
     return owners;
   }
@@ -1839,18 +1932,41 @@ export class ProductsBulkService {
         // Validar datos
         await this.validateProductData(productData, storeId);
 
-        // Buscar si existe por SKU para decidir si Crear o Actualizar
-        const existingProduct = await this.prisma.products.findFirst({
-          where: {
-            store_id: storeId,
-            sku: productData.sku,
-            state: { not: 'archived' },
-          },
-        });
+        // Prefiere el NO archivado; si solo hay archivados, el más reciente
+        // se reactiva (un archivado ya no ocupa el SKU ante un activo).
+        const existingProduct =
+          (await this.prisma.products.findFirst({
+            where: {
+              store_id: storeId,
+              sku: productData.sku,
+              state: { not: 'archived' },
+            },
+          })) ??
+          (await this.prisma.products.findFirst({
+            where: {
+              store_id: storeId,
+              sku: productData.sku,
+              state: 'archived',
+            },
+            orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+          }));
 
         let resultProduct;
 
-        if (existingProduct) {
+        if (existingProduct && existingProduct.state === 'archived') {
+          resultProduct = await this.reactivateArchivedProduct(
+            existingProduct,
+            productData,
+            storeId,
+          );
+
+          results.push({
+            product: resultProduct,
+            status: 'success',
+            action: 'reactivate',
+            message: `Producto con SKU ${productData.sku} reactivado con los datos del archivo`,
+          });
+        } else if (existingProduct) {
           // Actualizar producto existente (sparse update: solo campos presentes)
           const updateProductDto = this.mapToUpdateProductDto(productData);
           resultProduct = await this.productsService.update(
@@ -1861,6 +1977,7 @@ export class ProductsBulkService {
           results.push({
             product: resultProduct,
             status: 'success',
+            action: 'update',
             message: `Producto con SKU ${productData.sku} actualizado exitosamente`,
           });
         } else {
@@ -1885,6 +2002,7 @@ export class ProductsBulkService {
             results.push({
               product: resultProduct,
               status: 'success',
+              action: 'create',
               message: 'Producto creado exitosamente',
             });
           } catch (createErr) {
@@ -1920,15 +2038,24 @@ export class ProductsBulkService {
         } else if (error instanceof BadRequestException) {
           userMessage = error.message;
         } else if (error?.code === 'P2002') {
-          const target = Array.isArray(error?.meta?.target)
-            ? (error.meta.target as string[]).join(', ')
-            : error?.meta?.target || 'desconocido';
+          const rawTarget = error?.meta?.target;
+          const constraint = error?.meta?.driverAdapterError?.cause?.constraint;
+          const targetText = [
+            Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
+            // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
+            constraint ? JSON.stringify(constraint) : undefined,
+          ]
+            .filter((v) => typeof v === 'string' && v)
+            .join(' ');
+          const target = targetText || 'desconocido';
 
-          if (typeof target === 'string' && target.includes('slug')) {
+          if (target.includes('slug')) {
             const generated = generateSlug(productData.name || '');
             userMessage = `El nombre genera un slug duplicado ("${generated}"). Otro producto en la tienda ya lo usa.`;
-          } else if (typeof target === 'string' && target.includes('sku')) {
-            userMessage = `SKU "${productData.sku}" ya existe en la tienda (posiblemente archivado).`;
+          } else if (target.includes('sku')) {
+            userMessage = `SKU "${productData.sku}" ya existe en la tienda.`;
+          } else if (target.includes('barcode')) {
+            userMessage = `El código de barras ya está en uso por otro producto de la tienda.`;
           } else {
             userMessage = `Violación de unicidad en campo(s): ${target}`;
           }
@@ -2492,6 +2619,190 @@ export class ProductsBulkService {
     }
 
     return dto;
+  }
+
+  /**
+   * Payload "set completo" para reactivar un producto archivado.
+   *
+   * Regla: parte de `mapToCreateProductDto` (lo que trae el archivo se aplica)
+   * y todo campo que ese mapper gestiona y el archivo NO trae vuelve al valor
+   * por defecto de creación (`@default` de `model products`; nullable sin
+   * default => null; listas => []). Nunca se conserva lo viejo del archivado.
+   * Sin `store_id`: `productsService.update` no lo acepta ni lo necesita.
+   * El stock no se toca (al archivar quedó en 0).
+   */
+  private mapToReactivateProductDto(product: BulkProductItemDto): any {
+    const { store_id: _omit, ...fromFile } = this.mapToCreateProductDto(
+      product,
+      0,
+    );
+    const defaults: Record<string, any> = {
+      barcode: null,
+      description: null,
+      brand_id: null,
+      category_ids: [],
+      weight: null,
+      is_on_sale: false,
+      sale_price: null,
+      state: 'active',
+      available_for_ecommerce: false,
+      is_featured: false,
+      allow_pos_price_override: false,
+      tax_category_ids: [],
+      service_duration_minutes: null,
+      service_modality: null,
+      service_pricing_type: null,
+      requires_booking: false,
+      booking_mode: 'provider_required',
+      buffer_minutes: 0,
+      is_recurring: false,
+      service_instructions: null,
+      preparation_time_minutes: null,
+      pricing_type: 'unit',
+      is_consultation: false,
+      send_preconsultation: false,
+      consultation_template_id: null,
+      preconsultation_template_id: null,
+      has_multiple_price_tiers: false,
+      stock_uom_id: null,
+      purchase_uom_id: null,
+      price_unit_quantity: 1,
+    };
+    const dto: any = { ...fromFile };
+    for (const [field, value] of Object.entries(defaults)) {
+      if (dto[field] === undefined) dto[field] = value;
+    }
+    return dto;
+  }
+
+  /**
+   * Reactiva el producto archivado que coincide por SKU (mismo id: el
+   * historial de ventas/facturas/kardex queda intacto) y le aplica el set
+   * completo del archivo. `productsService.update` rechaza archivados
+   * (PROD_FIND_001), así que primero se cambia el estado por el prisma
+   * scoped; si el update falla se compensa devolviendo `archived`.
+   */
+  private async reactivateArchivedProduct(
+    existing: { id: number; state: any },
+    productData: BulkProductItemDto,
+    storeId: number,
+  ): Promise<any> {
+    const dto = this.mapToReactivateProductDto(productData);
+    const targetState = dto.state;
+    // Un destino `archived` no tiene sentido para reactivar: se pasa por
+    // `inactive` y el update deja el estado pedido por el archivo.
+    const transitionState = targetState === 'archived' ? 'inactive' : targetState;
+
+    // Antes de cambiar el estado: el slug efectivo y el barcode del archivo no
+    // pueden estar ocupados por otro producto NO archivado (fila falla limpia,
+    // sin P2002 crudo y sin dejar el estado cambiado).
+    if (dto.slug) {
+      const slugOwner = await this.prisma.products.findFirst({
+        where: {
+          store_id: storeId,
+          slug: dto.slug,
+          state: { not: 'archived' },
+          id: { not: existing.id },
+        },
+        select: { id: true, name: true },
+      });
+      if (slugOwner) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_DUP_001,
+          `El slug "${dto.slug}" ya lo usa el producto "${slugOwner.name}". Cambia el nombre o la columna slug.`,
+        );
+      }
+    }
+    if (dto.barcode) {
+      const barcodeOwner = await this.prisma.products.findFirst({
+        where: {
+          store_id: storeId,
+          barcode: dto.barcode,
+          state: { not: 'archived' },
+          id: { not: existing.id },
+        },
+        select: { id: true, name: true },
+      });
+      if (barcodeOwner) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_BARCODE_DUP_001,
+          `El código de barras "${dto.barcode}" ya lo usa el producto "${barcodeOwner.name}".`,
+        );
+      }
+    }
+
+    await this.prisma.products.updateMany({
+      where: { id: existing.id, store_id: storeId },
+      data: { state: transitionState, updated_at: new Date() },
+    });
+
+    let updated: any;
+    try {
+      updated = await this.productsService.update(existing.id, dto);
+
+      // Variantes del archivo: emparejar por SKU con las del producto (cualquier
+      // estado). Las que el archivo no trae no se tocan.
+      if (productData.variants && productData.variants.length > 0) {
+        const currentVariants = await this.prisma.product_variants.findMany({
+          where: { product_id: existing.id },
+          select: { id: true, sku: true },
+        });
+        const bySku = new Map<string, number>();
+        for (const v of currentVariants || []) {
+          bySku.set(String(v.sku).toLowerCase(), v.id);
+        }
+        for (const variantData of productData.variants as any[]) {
+          const variantId = variantData?.sku
+            ? bySku.get(String(variantData.sku).toLowerCase())
+            : undefined;
+          if (variantId) {
+            await this.productsService.updateVariant(variantId, variantData);
+          } else {
+            await this.productsService.createVariant(existing.id, variantData);
+          }
+        }
+      }
+    } catch (err) {
+      await this.prisma.products
+        .updateMany({
+          where: { id: existing.id, store_id: storeId },
+          data: { state: 'archived', updated_at: new Date() },
+        })
+        .catch((e) =>
+          this.logger.error(
+            `Compensation (re-archive) failed for product ${existing.id}`,
+            e?.stack || e,
+          ),
+        );
+      throw err;
+    }
+
+    // Fuera del try: la reactivación ya ocurrió; un fallo de auditoría no
+    // debe re-archivar un producto que ya tiene los datos del archivo.
+    const context = RequestContextService.getContext();
+    await this.prisma.audit_logs
+      .create({
+        data: {
+          user_id: context?.user_id ?? null,
+          store_id: storeId,
+          organization_id: context?.organization_id ?? null,
+          action: 'PRODUCT_REACTIVATE',
+          resource: 'products',
+          resource_id: existing.id,
+          request_id: RequestContextService.getRequestId() ?? null,
+          old_values: { state: 'archived' },
+          new_values: { state: targetState },
+          metadata: { source: 'bulk', event: 'product_reactivated' },
+        },
+      })
+      .catch((e) =>
+        this.logger.error(
+          `Audit PRODUCT_REACTIVATE failed for product ${existing.id}`,
+          e?.stack || e,
+        ),
+      );
+
+    return updated;
   }
 
   private mapToUpdateProductDto(product: BulkProductItemDto): any {

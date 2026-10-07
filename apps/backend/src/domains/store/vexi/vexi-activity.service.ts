@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { SseNotificationPayload } from '../notifications/interfaces/notification-events.interface';
+// Circular with the feed file (it imports the helpers below). Safe: both sides
+// only touch the other's exports inside function bodies, never at load time.
+import { buildAgentLiveEvent } from '../vex/services/vex-activity-feed.service';
 
 /** One screen's worth. Past this it is an audit export, not a review panel. */
 const DEFAULT_LIMIT = 25;
@@ -120,6 +125,43 @@ function redactUiAuditDeep(key: string, value: unknown): unknown {
   return redactUiAuditValue(key, value);
 }
 
+/** The operation in the words the arguments carry, never a raw route. */
+export function describeAgentOperation(call: Record<string, any>): string {
+  const args = call?.arguments as Record<string, any> | undefined;
+  if (args?.path && args?.method) {
+    const domain = String(args.path)
+      .split('/')
+      .filter((segment) => segment && !/^\d+$/.test(segment))
+      .slice(-1)[0];
+    const verb =
+      {
+        POST: 'registró',
+        PATCH: 'modificó',
+        PUT: 'reemplazó',
+        DELETE: 'archivó',
+      }[String(args.method).toUpperCase()] ?? 'cambió';
+    return `${verb} ${domain?.replace(/-/g, ' ') ?? 'un registro'}`;
+  }
+  return String(call?.name ?? 'operación').replace(/_/g, ' ');
+}
+
+/** Redacted one-line summary of the call arguments (max 280 chars). */
+export function summarizeAgentArgs(args: unknown): string {
+  const redacted = redactUiAuditArgs(args as Record<string, unknown>);
+  const summary = Object.entries(redacted)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(' ');
+  return summary.slice(0, 280);
+}
+
+/** Feed/live title for an applied agent action: `Vex: …` / `Vexi: …`. */
+export function agentFeedTitle(
+  agentKey: string,
+  call: Record<string, any>,
+): string {
+  return `${agentKey === 'vex' ? 'Vex' : 'Vexi'}: ${describeAgentOperation(call)}`;
+}
+
 /**
  * The review trail for everything Vexi changed.
  *
@@ -138,7 +180,10 @@ function redactUiAuditDeep(key: string, value: unknown): unknown {
 export class VexiActivityService {
   private readonly logger = new Logger(VexiActivityService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly sse: NotificationsSseService,
+  ) {}
 
   /**
    * Records a write the person approved, at the moment it lands.
@@ -170,7 +215,7 @@ export class VexiActivityService {
     }
 
     try {
-      await this.prisma.ai_messages.create({
+      const row = await this.prisma.ai_messages.create({
         data: {
           conversation_id: input.conversationId,
           role: 'tool',
@@ -189,11 +234,51 @@ export class VexiActivityService {
           ],
         },
       });
+      this.emitLive(row.id, row.created_at, input);
     } catch (error: any) {
       // Never fails the apply. The change already landed in the business; refusing
       // the response now would tell the person their approved change did not happen.
       this.logger.error(
         `Could not record applied write "${input.tool}": ${error?.message}`,
+      );
+    }
+  }
+
+  /**
+   * Pushes the applied action live over the store notifications SSE
+   * (`vex_agent_action`). The id is the one the same `ai_messages` row gets in
+   * `GET store/vex/activity-feed` (`agent-<row id>-0`), so the frontend dedupes.
+   * Never throws: a failed push must not look like a failed apply.
+   */
+  private emitLive(
+    messageId: number,
+    createdAt: Date | undefined,
+    input: {
+      conversationId?: number;
+      tool: string;
+      args: Record<string, unknown>;
+      agent_key?: string;
+    },
+  ): void {
+    try {
+      const storeId = RequestContextService.getStoreId();
+      if (!storeId) return;
+      const agent = input.agent_key === 'vex' ? 'vex' : 'vexi';
+      const call = { name: input.tool, arguments: input.args };
+      const event = buildAgentLiveEvent({
+        id: `agent-${messageId}-0`,
+        title: agentFeedTitle(agent, call),
+        description: summarizeAgentArgs(input.args),
+        created_at: createdAt ?? new Date(),
+        agent,
+        tool: input.tool,
+        conversation_id: input.conversationId,
+      });
+      // Live-only frame: the string id never touches the `notifications` table.
+      this.sse.push(storeId, event as unknown as SseNotificationPayload);
+    } catch (error: any) {
+      this.logger.error(
+        `Could not push live agent action "${input.tool}": ${error?.message}`,
       );
     }
   }

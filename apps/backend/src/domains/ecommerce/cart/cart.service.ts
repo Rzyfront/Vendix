@@ -237,6 +237,8 @@ export class CartService {
         // is_sellable: true bloquea agregar al carrito un plato "agotado"
         // (is_sellable=false se sigue mostrando en la carta como is_sold_out=true).
         is_sellable: true,
+        // Un insumo nunca se compra por ecommerce.
+        is_ingredient: false,
       },
     });
 

@@ -1,0 +1,4 @@
+Total messages: 5 (Errors: 0, Warnings: 1)
+Returning 1 messages for level "warning"
+
+[WARNING] NG0505: Angular hydration was requested on the client, but there was no serialized information present in the server response, thus hydration was not enabled. Make sure the `provideClientHydration()` is included into the list of providers in the server part of the application configuration. Find more at https://v20.angular.dev/errors/NG0505 @ https://vendix.com/@fs/Users/rzy/Documents/Organizations/Quickss/Vendix/apps/frontend/.angular/cache/20.3.26/vendix/vite/deps/chunk-PF442UR7.js?v=946fa384:11974

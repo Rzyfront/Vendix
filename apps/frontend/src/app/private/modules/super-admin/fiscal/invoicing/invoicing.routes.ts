@@ -60,6 +60,12 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
           icon: 'file-stack',
           route: '/super-admin/fiscal/invoicing/profiles',
         },
+        {
+          id: 'buyer-event-activation',
+          label: 'Habilitaciones',
+          icon: 'shield-check',
+          route: '/super-admin/fiscal/invoicing/buyer-event-activation',
+        },
       ],
     },
     // `providePlatformDianApi()` reapunta `DIAN_API_CONTEXT` a
@@ -154,6 +160,13 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
         loadComponent: () =>
           import('./pages/profiles/platform-profile-editor.component').then(
             (c) => c.PlatformProfileEditorComponent,
+          ),
+      },
+      {
+        path: 'buyer-event-activation',
+        loadComponent: () =>
+          import('./pages/buyer-event-activation/buyer-event-activation.component').then(
+            (c) => c.BuyerEventActivationComponent,
           ),
       },
     ],

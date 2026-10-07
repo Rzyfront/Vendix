@@ -11,7 +11,9 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject, switchMap, catchError, map, of } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Subject, Subscription, switchMap, catchError, map, of } from 'rxjs';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 import {
   ModalComponent,
@@ -227,6 +229,13 @@ interface EditableCountRow extends MatchedCountProduct {
             <app-spinner size="lg" text="Procesando hoja de reconteo con IA..."></app-spinner>
             <p class="text-sm text-text-secondary text-center">
               Extrayendo productos contados y comparando contra el stock actual...
+            </p>
+            <p class="text-xs text-text-secondary text-center">
+              @if (scanStalled()) {
+                Está tardando más de lo normal; seguimos procesando.
+              } @else {
+                Esto puede tardar unos minutos. No cierres la ventana.
+              }
             </p>
           </div>
         </div>
@@ -619,6 +628,9 @@ export class InventoryScannerModalComponent {
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
   readonly isScanning = signal(false);
+  /** true cuando el job lleva más de ~60 s sin terminar. */
+  readonly scanStalled = signal(false);
+  private scanSub: Subscription | null = null;
   readonly isProcessingFile = signal(false);
   readonly submitting = signal(false);
 
@@ -838,8 +850,12 @@ export class InventoryScannerModalComponent {
     this.currentStep.set(1);
     this.isScanning.set(true);
 
-    this.inventoryScannerService
-      .scanCount(file, locationId)
+    this.scanSub?.unsubscribe();
+    this.scanStalled.set(false);
+    this.scanSub = this.inventoryScannerService
+      .scanCount(file, locationId, {
+        onStall: () => this.scanStalled.set(true),
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -863,15 +879,11 @@ export class InventoryScannerModalComponent {
         },
         error: (err) => {
           this.isScanning.set(false);
-          // Nota: InventoryScannerService.handleError hace
-          // `throwError(() => error_message)` con error_message ya como
-          // STRING (no un HttpErrorResponse), a diferencia de
-          // Invoice/ExpenseScannerService. Se maneja ambos casos por
-          // robustez, pero el shape real esperado aquí es string.
           const message =
-            typeof err === 'string'
-              ? err
-              : err?.error?.message || err?.message || 'Error al procesar la hoja de reconteo';
+            err instanceof HttpErrorResponse
+              ? parseApiError(err).userMessage
+              : (err as Error | null)?.message ||
+                'Error al procesar la hoja de reconteo';
           this.toastService.error(message);
           this.currentStep.set(0);
         },
@@ -1132,6 +1144,9 @@ export class InventoryScannerModalComponent {
   }
 
   resetWizard(): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.scanStalled.set(false);
     // QUI-644: el descarte no debe sobrevivir al siguiente escaneo.
     this.discardedIndexes.set(new Set());
     this.currentStep.set(0);

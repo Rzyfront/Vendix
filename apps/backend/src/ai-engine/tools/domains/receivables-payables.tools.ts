@@ -238,6 +238,7 @@ export function createReceivablesPayablesTools(
       },
       requiredPermissions: [PERM_AR_PAYMENT],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args) => {
         const id = toPositiveInt(args?.receivable_id);
         if (id === null) {
@@ -490,6 +491,7 @@ export function createReceivablesPayablesTools(
       },
       requiredPermissions: [PERM_AP_PAYMENT],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args) => {
         const id = toPositiveInt(args?.payable_id);
         if (id === null) {

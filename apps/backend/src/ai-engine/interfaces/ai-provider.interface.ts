@@ -81,6 +81,10 @@ export interface AIResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Input tokens served from the provider prompt cache (Anthropic). */
+    cacheReadTokens?: number;
+    /** Input tokens written to the provider prompt cache (Anthropic). */
+    cacheCreationTokens?: number;
   };
   model?: string;
   error?: string;
@@ -109,6 +113,12 @@ export interface AIStreamChunk {
     | 'ui_block'
     | 'plan_approval';
   content?: string;
+  /**
+   * Present on the chat `done` frame when the turn persisted an assistant row:
+   * its `ai_messages.id`. For continuation turns the frontend links the new
+   * message through it (`metadata.continuation_of` points back at the proposal).
+   */
+  message_id?: number;
   /** Present on `ui_block`: the rendered block reference and payload. */
   ui_block?: {
     block_id: string;
@@ -119,15 +129,37 @@ export interface AIStreamChunk {
   };
   /** Present on `plan_approval`: the proposal the person must approve. */
   plan_approval?: {
-    tool: string;
-    arguments: Record<string, any>;
-    confirmation_token: string;
+    /**
+     * Single-step proposal (Vexi, and Vex fallback cards): the one write
+     * awaiting its own confirmation. Absent on whole-plan frames, which carry
+     * `steps` and mint their token at approve time instead of proposal time.
+     */
+    tool?: string;
+    arguments?: Record<string, any>;
+    confirmation_token?: string;
     preview?: unknown;
-    /** Set when the proposal belongs to an approved-plan step resume. */
+    /**
+     * Whole-plan proposal id (Vex): the active plan the steps were recorded
+     * against. Set on whole-plan frames; also echoed on single-step fallbacks
+     * resumed under an approved plan.
+     */
     plan_id?: string;
     /** Steps the plan token covers vs steps needing their own card. */
     covered_steps?: number[];
     reconfirm_steps?: number[];
+    /**
+     * Whole-plan proposal (Vex only): every write step of the turn in ONE
+     * frame, so one click approves the bundle. Absent on single-step frames.
+     */
+    steps?: Array<{
+      /** Stable within the plan (`s1`, `s2`, …); the card keys steps by it. */
+      step_id: string;
+      order: number;
+      tool: string;
+      arguments: Record<string, any>;
+      preview?: unknown;
+      irreversible: boolean;
+    }>;
   };
   /** Present on `tool_call` and `tool_result`. */
   tool?: {
@@ -151,6 +183,10 @@ export interface AIStreamChunk {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Input tokens served from the provider prompt cache (Anthropic). */
+    cacheReadTokens?: number;
+    /** Input tokens written to the provider prompt cache (Anthropic). */
+    cacheCreationTokens?: number;
   };
   error?: string;
 }

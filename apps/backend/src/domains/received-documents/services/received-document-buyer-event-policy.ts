@@ -55,6 +55,10 @@ export function evaluateBuyerEventReadiness(input: BuyerEventReadinessInput): Bu
       if (input.has_prior_acceptance) blockers.push('acceptance_already_recorded');
       break;
     case '032':
+      // DIAN Anexo Técnico FEV v1.9 §8.5.1 (LGC09; pp. 598–599): 032 requires prior 030.
+      // The caller's has_prior_acknowledgement contract must mean an accepted 030 only;
+      // do not infer it from imported/internal timeline events. https://www.dian.gov.co/impuestos/factura-electronica/Documents/Anexo-Tecnico-Factura-Electronica-de-Venta-vr-1-9.pdf
+      if (!input.has_prior_acknowledgement) blockers.push('prior_acknowledgement_required');
       if (!input.has_goods_receipt_evidence) blockers.push('goods_receipt_evidence_required');
       if (input.has_prior_goods_receipt) blockers.push('goods_receipt_already_recorded');
       break;

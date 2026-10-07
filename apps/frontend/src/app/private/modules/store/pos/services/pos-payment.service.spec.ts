@@ -95,6 +95,73 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
     }));
   });
 
+  it('sends a manual custom pickup cost without requiring a tariff, preserving zero', async () => {
+    const customPickup: PosShippingSaleData = {
+      ...shipping,
+      deliveryType: 'pickup',
+      shippingCost: 0,
+      shippingAddress: undefined as unknown as PosShippingSaleData['shippingAddress'],
+      shippingRateId: null,
+      manualCostOverride: true,
+      manualShippingPrice: 0,
+    };
+
+    await firstValueFrom(service.processShippingSale(cart(null), customPickup, null, 'current_user'));
+    let payload = post.calls.mostRecent().args[1];
+    expect(payload.manual_shipping_price).toBe(0);
+    expect(payload.shipping_cost).toBe(0);
+    expect(payload.shipping_rate_id).toBeUndefined();
+    expect(payload.total_amount).toBe(1000);
+    expect(payload.shipping_address_snapshot).toBeUndefined();
+
+    await firstValueFrom(service.saveDraft(cart(null), 'current_user', undefined, customPickup));
+    payload = post.calls.mostRecent().args[1];
+    expect(payload.manual_shipping_price).toBe(0);
+    expect(payload.shipping_cost).toBe(0);
+    expect(payload.shipping_rate_id).toBeUndefined();
+    expect(payload.total_amount).toBe(1000);
+    expect(payload.shipping_address_snapshot).toBeUndefined();
+  });
+
+  it('sends positive manual custom costs without a tariff and omits manual price for automatic shipping', async () => {
+    const custom: PosShippingSaleData = {
+      ...shipping, shippingRateId: null, manualCostOverride: true,
+      manualShippingPrice: 1250.5, shippingCost: 1250.5,
+    };
+    await firstValueFrom(service.processShippingSale(cart(null), custom, null, 'current_user'));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      manual_shipping_price: 1250.5, shipping_cost: 1250.5, total_amount: 2250.5,
+    }));
+    expect(post.calls.mostRecent().args[1].shipping_rate_id).toBeUndefined();
+
+    await firstValueFrom(service.processShippingSale(cart(null), shipping, null, 'current_user'));
+    expect(post.calls.mostRecent().args[1].manual_shipping_price).toBeUndefined();
+  });
+
+  it('rejects negative or non-finite manual prices before either sale or draft POST', async () => {
+    for (const invalidPrice of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const invalid: PosShippingSaleData = {
+        ...shipping, shippingRateId: null, manualCostOverride: true,
+        manualShippingPrice: invalidPrice,
+      };
+      let saleRejected = false;
+      try {
+        await firstValueFrom(service.processShippingSale(cart(null), invalid, null, 'current_user'));
+      } catch {
+        saleRejected = true;
+      }
+      let draftRejected = false;
+      try {
+        await firstValueFrom(service.saveDraft(cart(null), 'current_user', undefined, invalid));
+      } catch {
+        draftRejected = true;
+      }
+      expect(saleRejected).toBeTrue();
+      expect(draftRejected).toBeTrue();
+      expect(post).not.toHaveBeenCalled();
+    }
+  });
+
   it('carries one stable Wallet multi-tender attempt key to POS and shipping writes', async () => {
     const request = {
       orderId: 'local', amount: 1000, paymentMethod: { id: '1', type: 'cash' },

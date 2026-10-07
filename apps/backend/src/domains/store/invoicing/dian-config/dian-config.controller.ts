@@ -16,6 +16,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
+import { memoryStorage } from 'multer';
 import { DianConfigService } from './dian-config.service';
 import { DianTestService } from './dian-test.service';
 import { DianNumberingRangeService } from './dian-numbering-range.service';
@@ -62,6 +64,7 @@ export class DianConfigController {
     private readonly response_service: ResponseService,
     private readonly s3_service: S3Service,
     private readonly habilitation_scanner_service: DianHabilitationScannerService,
+    private readonly ai_scan_job_service: AiScanJobService,
   ) {}
 
   @Get('dashboard')
@@ -149,6 +152,9 @@ export class DianConfigController {
    * dispara después de revisar, así que una lectura equivocada nunca aterriza
    * sola en la configuración fiscal.
    */
+  /**
+   * @deprecated Usar POST store/invoicing/dian-config/scan-habilitation/async (el síncrono muere en 504 tras 60 s de proxy).
+   */
   @Post('scan-habilitation')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
@@ -164,6 +170,22 @@ export class DianConfigController {
       result,
       'Documentos de habilitación escaneados exitosamente',
     );
+  }
+
+  @Post('scan-habilitation/async')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_HABILITATION_SCAN_FILES + 1, { storage: memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } }),
+  )
+  async scanHabilitationAsync(@UploadedFiles() files: Express.Multer.File[]) {
+    const valid_files = assertScannableFiles(files);
+    await this.habilitation_scanner_service.assertReady();
+    const { job_id } = await this.ai_scan_job_service.enqueue(
+      'dian_habilitation',
+      valid_files,
+    );
+    return this.response_service.success({ job_id }, 'Escaneo encolado');
   }
 
   @Post()

@@ -384,7 +384,14 @@ export class PlanDetailComponent {
   }
 
   featureLabel(key: AIFeatureKey): string {
-    return AI_FEATURE_CATEGORY_LABELS[key] ?? this.formatFeatureKey(key);
+    // AIFeatureKey is wider than the engine catalog's AIFeatureCategory
+    // (e.g. 'vex_agent' has no engine label yet): unknown keys fall back to
+    // the formatted key instead of breaking the build.
+    return (
+      (AI_FEATURE_CATEGORY_LABELS as Partial<Record<AIFeatureKey, string>>)[
+        key
+      ] ?? this.formatFeatureKey(key)
+    );
   }
 
   loadPlan(id: string): void {

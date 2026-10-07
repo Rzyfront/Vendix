@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
 import { validateFreightAndTaxHeader } from './dto/create-purchase-order.dto';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -34,16 +35,24 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
   let service: PurchaseOrdersService;
   let prismaService: any;
   let eventEmitter: { emit: jest.Mock };
+  let purchaseVatContribution: { reserve: jest.Mock };
   let costingService: { calculateCostOnReceipt: jest.Mock };
   let stockLevelManager: { updateStock: jest.Mock };
 
   beforeEach(async () => {
     prismaService = {
       $transaction: jest.fn(),
+      invoices: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation(async ({ data }: any) => {
+          return { id: 881, ...data };
+        }),
+      },
       purchase_order_receptions: { findMany: jest.fn().mockResolvedValue([]) },
       accounting_entries: { findMany: jest.fn().mockResolvedValue([]) },
     };
     eventEmitter = { emit: jest.fn() };
+    purchaseVatContribution = { reserve: jest.fn().mockResolvedValue({ id: 880 }) };
     costingService = {
       calculateCostOnReceipt: jest.fn().mockResolvedValue({
         new_cost_per_unit: 1080,
@@ -61,6 +70,7 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        { provide: PurchaseVatContributionService, useValue: purchaseVatContribution },
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: stockLevelManager },
         { provide: CostingService, useValue: costingService },
@@ -380,6 +390,144 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
       expect(received).toBeDefined();
       expect(received![1].total_amount).toBe(5400);
       expect(received![1].gross_reception_share).toBe(6350);
+    });
+
+    it('reserves the contribution before emitting VAT recognition without a synthetic invoice', async () => {
+      const sealed = { itemUpdates: [] as any[] };
+      const tx = mockReceiveTx(sealed);
+      const supplierInvoiceDate = new Date('2026-08-15T00:00:00.000Z');
+      const supplierInvoiceNumber = 'SUP-' + 'X'.repeat(76);
+      tx.purchase_orders.update.mockResolvedValue({
+        ...purchaseOrder,
+        status: 'received',
+        supplier_id: SUPPLIER_ID,
+        supplier_invoice_number: supplierInvoiceNumber,
+        supplier_invoice_date: supplierInvoiceDate,
+        suppliers: { id: SUPPLIER_ID, name: 'Supplier 77', tax_id: '900111222' },
+        purchase_order_items: [{
+          ...orderItem,
+          deductible_tax_amount: 950,
+          capitalized_tax_amount: 400,
+          products: null,
+          product_variants: null,
+        }],
+      });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      const order: string[] = [];
+      purchaseVatContribution.reserve.mockImplementation(async (input: any) => {
+        order.push('reserve');
+        expect(input).toMatchObject({
+          organization_id: ORG_ID,
+          accounting_entity_id: 1,
+          store_id: STORE_ID,
+          purchase_order_id: PO_ID,
+          reception_id: 1,
+          supplier_id: SUPPLIER_ID,
+          supplier_tax_id_snapshot: '900111222',
+          invoice_number_snapshot: supplierInvoiceNumber,
+          invoice_issue_date_snapshot: supplierInvoiceDate,
+          currency: 'COP',
+          net_amount: 5000,
+          iva_amount: 950,
+          tax_groups: [{ tax_rate: 19, tax_type: 'iva', taxable_amount: 5000, tax_amount: 950 }],
+        });
+        return { id: 880 };
+      });
+      eventEmitter.emit.mockImplementation((eventName) => {
+        if (eventName === 'purchase.vat_recognized') order.push('vat-event');
+      });
+
+      await service.receive(PO_ID, {
+        items: [{ id: PO_ITEM_ID, quantity_received: 5 }],
+      } as any);
+
+      expect(order).toEqual(['reserve', 'vat-event']);
+      expect(prismaService.invoices.findFirst).not.toHaveBeenCalled();
+      expect(prismaService.invoices.create).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).toHaveBeenCalledWith('purchase.vat_recognized', expect.objectContaining({
+        contribution_id: 880,
+        organization_id: ORG_ID,
+        accounting_entity_id: 1,
+        store_id: STORE_ID,
+        purchase_order_id: PO_ID,
+        reception_id: 1,
+        iva_amount: 950,
+        supplier: expect.objectContaining({ id: SUPPLIER_ID }),
+      }));
+      const vatEvent = eventEmitter.emit.mock.calls.find((call) => call[0] === 'purchase.vat_recognized')![1];
+      expect(vatEvent).not.toHaveProperty('invoice_id');
+      expect(eventEmitter.emit).toHaveBeenCalledWith('purchase_order.received', expect.anything());
+    });
+
+    it('keeps equal supplier invoice numbers on separate POs keyed by distinct contributions', async () => {
+      const supplierInvoiceNumber = 'SUPPLIER-INV-REUSED';
+      const contributionIds = [901, 902];
+      const receivedPoIds = [PO_ID, PO_ID + 1];
+      purchaseVatContribution.reserve.mockImplementation(async () => ({ id: contributionIds.shift() }));
+      const tx = mockReceiveTx({ itemUpdates: [] as any[] });
+      tx.purchase_orders.update.mockImplementation(async ({ where }: any) => ({
+        ...purchaseOrder,
+        id: where.id,
+        status: 'received',
+        supplier_id: SUPPLIER_ID,
+        supplier_invoice_number: supplierInvoiceNumber,
+        suppliers: { id: SUPPLIER_ID, name: 'Supplier 77', tax_id: '900111222' },
+        purchase_order_items: [{
+          ...orderItem,
+          deductible_tax_amount: 950,
+          capitalized_tax_amount: 400,
+          products: null,
+          product_variants: null,
+        }],
+      }));
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      for (const id of receivedPoIds) {
+        await service.receive(id, { items: [{ id: PO_ITEM_ID, quantity_received: 5 }] } as any);
+      }
+
+      expect(purchaseVatContribution.reserve).toHaveBeenCalledTimes(2);
+      expect(purchaseVatContribution.reserve.mock.calls.map((call) => call[0])).toEqual([
+        expect.objectContaining({ purchase_order_id: PO_ID, invoice_number_snapshot: supplierInvoiceNumber }),
+        expect.objectContaining({ purchase_order_id: PO_ID + 1, invoice_number_snapshot: supplierInvoiceNumber }),
+      ]);
+      const vatEvents = eventEmitter.emit.mock.calls
+        .filter((call) => call[0] === 'purchase.vat_recognized')
+        .map((call) => call[1]);
+      expect(vatEvents.map((event) => [event.purchase_order_id, event.contribution_id])).toEqual([
+        [PO_ID, 901],
+        [PO_ID + 1, 902],
+      ]);
+      expect(prismaService.invoices.findFirst).not.toHaveBeenCalled();
+      expect(prismaService.invoices.create).not.toHaveBeenCalled();
+    });
+
+    it('does not project or emit recognized VAT when reservation fails', async () => {
+      const sealed = { itemUpdates: [] as any[] };
+      const tx = mockReceiveTx(sealed);
+      tx.purchase_orders.update.mockResolvedValue({
+        ...purchaseOrder,
+        status: 'received',
+        supplier_id: SUPPLIER_ID,
+        suppliers: { id: SUPPLIER_ID, name: 'Supplier 77', tax_id: '900111222' },
+        purchase_order_items: [{
+          ...orderItem,
+          deductible_tax_amount: 950,
+          capitalized_tax_amount: 400,
+          products: null,
+          product_variants: null,
+        }],
+      });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      purchaseVatContribution.reserve.mockRejectedValueOnce(new Error('reservation unavailable'));
+
+      await service.receive(PO_ID, {
+        items: [{ id: PO_ITEM_ID, quantity_received: 5 }],
+      } as any);
+
+      expect(prismaService.invoices.findFirst).not.toHaveBeenCalled();
+      expect(prismaService.invoices.create).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith('purchase.vat_recognized', expect.anything());
     });
 
     it('línea legacy sin filas hijas con tax_type inc ⇒ todo el impuesto se capitaliza', async () => {

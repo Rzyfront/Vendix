@@ -1247,6 +1247,7 @@ export class AutoEntryService {
       'purchase_order.advance_payment': 'auto_purchase',
       'purchase_order.advance_reclass': 'adjustment',
       purchase_vat: 'auto_purchase',
+      purchase_vat_contribution: 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
       installment_payment: 'auto_installment_payment',
@@ -5513,27 +5514,201 @@ export class AutoEntryService {
   }
 
   /**
-   * F2 IVA lifecycle — recognize the DEDUCTIBLE VAT (IVA descontable) of a POP
-   * purchase from a VAT-responsible commerce (O-48), via a "VAT-only" journal
-   * entry:
-   *
-   *   DR 240804  IVA descontable en compras (iva)
-   *   CR 2205    Proveedores                (iva)
-   *
-   * This is the complement to `purchase_order.received` (which already posts
-   * DR 1435 net / CR 2205 net). Together the combined economic entry is:
-   *
-   *   DR 1435   Inventario        (neto)
-   *   DR 240804 IVA descontable   (iva)
-   *   CR 2205   Proveedores       (bruto = neto + iva)
-   *
-   * It deliberately does NOT reuse `onSupportDocumentAccepted` (which also
-   * debits 5195 expense + credits the FULL 2205), because that would duplicate
-   * the payable and contabilize expense over inventoried merchandise.
-   *
-   * Idempotent by (organization_id, source_type='purchase_vat',
-   * source_id=invoice_id, accounting_entity_id). O-49 (non-responsible) never
-   * reaches here — its VAT is already capitalized into inventory cost by F1.
+   * Recognizes the persisted deductible IVA contribution as a VAT-only journal
+   * entry. A journal may already have been posted before the contribution link
+   * was written, so reconciliation runs before mappings and period checks.
+   */
+  async reconcilePurchaseVatContributionEntry(data: {
+    contribution_id: number;
+    organization_id: number;
+    accounting_entity_id: number;
+    store_id: number;
+  }, expected_entry_id?: number) {
+    const db = this.prisma.withoutScope();
+    const contribution = await db.purchase_vat_contributions.findFirst({
+      where: {
+        id: data.contribution_id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+      },
+      select: { id: true, ledger_status: true, accounting_entry_id: true },
+    });
+    if (!contribution) {
+      throw new Error(
+        `Purchase VAT contribution #${data.contribution_id} not found for the supplied organization/entity/store`,
+      );
+    }
+
+    const entry = await db.accounting_entries.findFirst({
+      where: {
+        source_type: 'purchase_vat_contribution',
+        source_id: contribution.id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+      },
+      select: {
+        id: true,
+        status: true,
+        source_type: true,
+        source_id: true,
+        organization_id: true,
+        accounting_entity_id: true,
+        store_id: true,
+      },
+    });
+    if (!entry) {
+      if (contribution.ledger_status === 'pending') return null;
+      if (contribution.ledger_status === 'posted' && contribution.accounting_entry_id != null) {
+        throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+      }
+      throw new Error(`Purchase VAT contribution #${contribution.id} has no matching journal entry`);
+    }
+    if (
+      entry.status !== 'posted' ||
+      entry.source_type !== 'purchase_vat_contribution' ||
+      entry.source_id !== contribution.id ||
+      entry.organization_id !== data.organization_id ||
+      entry.accounting_entity_id !== data.accounting_entity_id ||
+      entry.store_id !== data.store_id ||
+      !Number.isSafeInteger(entry.id) ||
+      entry.id <= 0
+    ) {
+      throw new Error(`Journal entry for purchase VAT contribution #${contribution.id} is not a valid posted journal in the supplied scope`);
+    }
+    if (expected_entry_id !== undefined && entry.id !== expected_entry_id) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} resolved to a different journal entry than the posted entry`);
+    }
+    if (contribution.ledger_status === 'posted' && contribution.accounting_entry_id !== entry.id) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+    }
+
+    const linked = await db.purchase_vat_contributions.updateMany({
+      where: {
+        id: contribution.id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+        OR: [
+          { ledger_status: { in: ['pending', 'failed', 'skipped'] } },
+          { ledger_status: 'posted', accounting_entry_id: entry.id },
+        ],
+      },
+      data: { ledger_status: 'posted', accounting_entry_id: entry.id },
+    });
+    if (linked.count !== 1) {
+      throw new Error(`Purchase VAT contribution #${contribution.id} is already linked to a different journal entry`);
+    }
+    return entry;
+  }
+
+  async onPurchaseVatContributionRecognized(data: {
+    contribution_id: number;
+    organization_id: number;
+    accounting_entity_id: number;
+    store_id: number;
+    user_id?: number;
+  }) {
+    const db = this.prisma.withoutScope();
+    const contribution = await db.purchase_vat_contributions.findFirst({
+      where: {
+        id: data.contribution_id,
+        organization_id: data.organization_id,
+        accounting_entity_id: data.accounting_entity_id,
+        store_id: data.store_id,
+      },
+      select: {
+        id: true,
+        ledger_status: true,
+        accounting_entry_id: true,
+        iva_amount: true,
+        supplier_id: true,
+        supplier_tax_id_snapshot: true,
+        supplier: { select: { name: true } },
+      },
+    });
+    if (!contribution) {
+      throw new Error(
+        `Purchase VAT contribution #${data.contribution_id} not found for the supplied organization/entity/store`,
+      );
+    }
+
+    const iva = Number(contribution.iva_amount || 0);
+    if (!(iva > 0)) {
+      await this.entry_failure_service.recordSkip({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        source_type: 'purchase_vat_contribution',
+        source_id: contribution.id,
+        cause: 'SKIPPED_ZERO_AMOUNT',
+        detail: `IVA descontable no positivo (${iva}) en la contribución de IVA de compra #${contribution.id}. No hay IVA que asentar.`,
+        event_payload: { ...data, iva_amount: iva },
+      });
+      return null;
+    }
+
+    const reconciled = await this.reconcilePurchaseVatContributionEntry(data);
+    if (reconciled) return reconciled;
+
+    const supplier_third_party: AutoEntryThirdParty = {
+      id: contribution.supplier_id,
+      type: 'supplier',
+      name: contribution.supplier?.name,
+      tax_id: contribution.supplier_tax_id_snapshot ?? undefined,
+    };
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.iva_deductible',
+        'IVA Descontable en Compras',
+        iva,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.accounts_payable',
+        'Proveedores (complemento IVA)',
+        0,
+        iva,
+        data.store_id,
+        supplier_third_party,
+      ),
+    ]);
+
+    const event_data: AutoEntryEventData = {
+      source_type: 'purchase_vat_contribution',
+      source_id: contribution.id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `IVA descontable compra — contribución #${contribution.id}`,
+      lines,
+      user_id: data.user_id,
+    };
+    const entry = await this.createAutoEntry(event_data);
+    if (entry == null) return null;
+    if (entry.status !== 'posted' || !Number.isSafeInteger(entry.id) || entry.id <= 0) {
+      throw new Error(`Auto-entry for purchase VAT contribution #${contribution.id} did not return a valid posted journal`);
+    }
+    try {
+      const linked = await this.reconcilePurchaseVatContributionEntry(data, entry.id);
+      if (!linked) {
+        throw new Error(`Posted journal #${entry.id} could not be linked to purchase VAT contribution #${contribution.id}`);
+      }
+      return linked;
+    } catch (error) {
+      await this.entry_failure_service.recordFailure(event_data, error as Error);
+      throw error;
+    }
+  }
+
+  /**
+   * Legacy invoice-keyed VAT-only journal complement: DR IVA descontable / CR
+   * Proveedores. Kept for the existing invoice source path; the contribution
+   * handler above posts from a persisted row. Idempotent by organization,
+   * accounting entity, source_type='purchase_vat', and invoice_id.
    */
   async onPurchaseVatRecognized(data: {
     invoice_id: number;

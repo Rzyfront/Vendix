@@ -596,6 +596,76 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/sales/trends',
   },
 
+  {
+    // Vive en página propia (reusa SalesByDimensionComponent de analytics)
+    // porque el visor genérico solo envía fechas y aquí hay filtro por
+    // proveedor y vistas por producto/vendedor/cliente.
+    id: 'sales-by-supplier',
+    category: 'sales',
+    title: 'Por Proveedor',
+    description: 'Venta neta sin IVA por proveedor, con detalle por producto, vendedor y cliente.',
+    detailedDescription:
+      'Venta neta sin IVA por proveedor con detalle por producto, vendedor y cliente, clientes impactados y referencias vendidas. La venta se atribuye al proveedor asignado al producto o, si no tiene, al de su última orden de compra.',
+    icon: 'truck',
+    route: '/admin/reports/sales/sales-by-supplier',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    columns: [
+      { key: 'dimension_name', header: 'Proveedor', type: 'text' },
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'units', header: 'Unidades', type: 'number' },
+      { key: 'net_sales', header: 'Venta neta', type: 'currency' },
+      { key: 'orders', header: 'Órdenes', type: 'number' },
+      { key: 'customers', header: 'Clientes', type: 'number' },
+    ],
+    exportFilename: 'ventas_por_proveedor',
+    stats: [
+      { key: 'net_sales', label: 'Venta neta', type: 'currency', icon: 'dollar-sign' },
+      { key: 'units', label: 'Unidades', type: 'number', icon: 'package' },
+      { key: 'impacted_customers', label: 'Clientes impactados', type: 'number', icon: 'users' },
+      { key: 'distinct_references', label: 'Referencias', type: 'number', icon: 'layers' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-dimension',
+    exportEndpoint: 'store/analytics/sales/by-dimension/export',
+  },
+
+  {
+    // Vive en página propia (reusa SalesByDimensionComponent de analytics)
+    // porque el visor genérico solo envía fechas y aquí hay filtro por
+    // marca y vistas por producto/vendedor/cliente.
+    id: 'sales-by-brand',
+    category: 'sales',
+    title: 'Por Marca',
+    description: 'Venta neta sin IVA por marca, con detalle por producto, vendedor y cliente.',
+    detailedDescription:
+      'Venta neta sin IVA por marca con detalle por producto, vendedor y cliente, clientes impactados y referencias vendidas.',
+    icon: 'tag',
+    route: '/admin/reports/sales/sales-by-brand',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    columns: [
+      { key: 'dimension_name', header: 'Marca', type: 'text' },
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'units', header: 'Unidades', type: 'number' },
+      { key: 'net_sales', header: 'Venta neta', type: 'currency' },
+      { key: 'orders', header: 'Órdenes', type: 'number' },
+      { key: 'customers', header: 'Clientes', type: 'number' },
+    ],
+    exportFilename: 'ventas_por_marca',
+    stats: [
+      { key: 'net_sales', label: 'Venta neta', type: 'currency', icon: 'dollar-sign' },
+      { key: 'units', label: 'Unidades', type: 'number', icon: 'package' },
+      { key: 'impacted_customers', label: 'Clientes impactados', type: 'number', icon: 'users' },
+      { key: 'distinct_references', label: 'Referencias', type: 'number', icon: 'layers' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-dimension',
+    exportEndpoint: 'store/analytics/sales/by-dimension/export',
+  },
+
   // ─── INVENTARIO (7) ──────────────────────────────────────────────────────────
 
   {
@@ -676,7 +746,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       'Productos activos con stock_quantity ≤ reorder_point, incluyendo el valor en riesgo (stock_actual × costo) para priorizar la reposición.',
     icon: 'alert-triangle',
     route: '/admin/reports/inventory/inventory-low-stock',
-    requiresDateRange: true,
+    requiresDateRange: false,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
     trackKey: 'product_id',
@@ -1334,9 +1404,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     id: 'tax-summary',
     category: 'financial',
     title: 'Resumen de Impuestos',
-    description: 'IVA, retenciones e ICA del periodo',
+    description: 'Resumen operativo preliminar de impuestos registrados y reembolsos',
     detailedDescription:
-      'Consolidado de impuestos del periodo: IVA generado, IVA descontable, retenciones en la fuente, retencion de ICA y otros impuestos. Util para declaraciones tributarias.',
+      'Resumen operativo preliminar de impuestos registrados y reembolsos del periodo. El neto registrado no es el total a pagar a la DIAN ni una cifra lista para declarar; la elegibilidad de documentos recibidos, anticipos, arrastres o saldos a favor y otras jurisdicciones tributarias no se resuelve aquí.',
     icon: 'file-stack',
     route: '/admin/reports/financial/tax-summary',
     requiresDateRange: true,
@@ -1344,25 +1414,25 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     type: 'summary' as ReportType,
     summaryLayout: {
       fields: [
-        { key: 'total_tax_collected', label: 'Impuestos Recaudados', type: 'currency' },
+        { key: 'total_tax_collected', label: 'Impuestos Registrados', type: 'currency' },
         { key: 'total_tax_refunded', label: 'Impuestos Reembolsados', type: 'currency' },
-        { key: 'net_tax', label: 'Impuesto Neto', type: 'currency' },
-        { key: 'total_taxable_revenue', label: 'Base Gravable', type: 'currency' },
-        { key: 'effective_tax_rate', label: 'Tasa Efectiva', type: 'percentage' },
+        { key: 'net_tax', label: 'Neto Registrado (no DIAN)', type: 'currency' },
+        { key: 'total_taxable_revenue', label: 'Base Registrada', type: 'currency' },
+        { key: 'effective_tax_rate', label: 'Tasa Efectiva Indicativa', type: 'percentage' },
       ],
     },
     columns: [
       { key: 'tax_name', header: 'Tipo de Impuesto', type: 'text' },
-      { key: 'taxable_amount', header: 'Base Gravable', type: 'currency', footer: 'sum' },
-      { key: 'total_tax', header: 'Impuesto', type: 'currency', footer: 'sum' },
+      { key: 'taxable_amount', header: 'Base Registrada', type: 'currency', footer: 'sum' },
+      { key: 'total_tax', header: 'Impuesto Registrado', type: 'currency', footer: 'sum' },
       { key: 'tax_rate', header: 'Tasa', type: 'percentage', transform: formatPercentFromFraction },
     ],
     exportFilename: 'tax_summary',
     stats: [
-      { key: 'total_tax_collected', label: 'Impuestos Recaudados', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_tax_collected', label: 'Impuestos Registrados', type: 'currency', icon: 'dollar-sign' },
       { key: 'total_tax_refunded', label: 'Impuestos Reembolsados', type: 'currency', icon: 'rotate-ccw' },
-      { key: 'net_tax', label: 'Impuesto Neto', type: 'currency', icon: 'calculator' },
-      { key: 'effective_tax_rate', label: 'Tasa Efectiva', type: 'percentage', icon: 'percent' },
+      { key: 'net_tax', label: 'Neto Registrado (no DIAN)', type: 'currency', icon: 'calculator' },
+      { key: 'effective_tax_rate', label: 'Tasa Efectiva Indicativa', type: 'percentage', icon: 'percent' },
     ],
     dataEndpoint: 'store/analytics/financial/tax-summary',
     exportEndpoint: 'store/analytics/financial/tax-summary/export',

@@ -1,0 +1,15 @@
+> bash apps/frontend/scripts/zoneless-audit.sh
+
+❌ @Input/@Output: 1 archivos
+❌ EventEmitter: 2 archivos
+✅ NgZone residual: 0
+✅ markForCheck/detectChanges: 0
+❌ *ngIf/*ngFor/*ngSwitch: 1 templates
+❌ BehaviorSubject: 1 archivos
+✅ toSignal con initialValue: 0
+❌ subscribe sin gestión: 20 archivos
+✅ zone.js fuera de build/serve/server
+⚠️  take(1) en 10 archivos (informativo — revisar; exentos: auth.interceptor, account-mappings)
+✅ UI state plano en archivos cambiados: 0
+
+❌ Zoneless audit FAILED

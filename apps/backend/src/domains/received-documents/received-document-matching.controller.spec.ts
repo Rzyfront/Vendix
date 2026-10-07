@@ -54,6 +54,8 @@ function store(deps: ReturnType<typeof dependencies>) {
     deps.candidates as unknown as ReceivedDocumentMatchCandidatesService,
     deps.allocations as unknown as ReceivedDocumentMatchAllocationsService,
     deps.expenses as unknown as ReceivedDocumentMatchExpensesService,
+    {} as never,
+    {} as never,
   );
 }
 function organization(deps: ReturnType<typeof dependencies>) {
@@ -65,6 +67,8 @@ function organization(deps: ReturnType<typeof dependencies>) {
     deps.candidates as unknown as ReceivedDocumentMatchCandidatesService,
     deps.allocations as unknown as ReceivedDocumentMatchAllocationsService,
     deps.expenses as unknown as ReceivedDocumentMatchExpensesService,
+    {} as never,
+    {} as never,
   );
 }
 

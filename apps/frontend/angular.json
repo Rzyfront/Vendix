@@ -40,12 +40,21 @@
                 "glob": "**/*",
                 "input": "src/assets",
                 "output": "assets"
+              },
+              {
+                "glob": "maplibre-gl-worker.mjs",
+                "input": "../../node_modules/maplibre-gl/dist",
+                "output": "maplibre"
+              },
+              {
+                "glob": "maplibre-gl-shared.mjs",
+                "input": "../../node_modules/maplibre-gl/dist",
+                "output": "maplibre"
               }
             ],
             "styles": ["src/styles.scss", "maplibre-gl/dist/maplibre-gl.css"],
             "allowedCommonJsDependencies": [
               "dijkstrajs",
-              "maplibre-gl",
               "pngjs",
               "qrcode"
             ]

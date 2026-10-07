@@ -18,7 +18,12 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CurrentStore } from '../../../common/decorators/current-store.decorator';
 import { Public } from '../../../common/decorators/public.decorator';
 import { RequestContextService } from '../../../common/context/request-context.service';
-import { CalculateShippingDto, QuoteManualShippingDto } from './dto/shipping_calc.dto';
+import { ResponseService } from '@common/responses/response.service';
+import {
+  CalculateShippingDto,
+  QuoteManualShippingDto,
+  QuotePickupShippingDto,
+} from './dto/shipping_calc.dto';
 import {
   CreateShippingMethodDto,
   UpdateShippingMethodDto,
@@ -34,6 +39,7 @@ export class ShippingController {
   constructor(
     private readonly shippingService: ShippingService,
     private readonly calculatorService: ShippingCalculatorService,
+    private readonly responseService: ResponseService,
   ) {}
 
   // --- METHODS ---
@@ -145,6 +151,23 @@ export class ShippingController {
       dto.shipping_method_id,
       dto.shipping_rate_id,
       dto.manual_shipping_price,
+    );
+  }
+
+  @Post('pickup-quote')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:pos:access', 'store:orders:create', 'store:orders:update')
+  async quotePickupShipping(
+    @CurrentStore() storeId: number,
+    @Body() dto: QuotePickupShippingDto,
+  ) {
+    const options = await this.calculatorService.quotePickupRates(
+      storeId,
+      dto.shipping_method_id,
+    );
+    return this.responseService.success(
+      options,
+      'Tarifas de recogida obtenidas exitosamente',
     );
   }
 

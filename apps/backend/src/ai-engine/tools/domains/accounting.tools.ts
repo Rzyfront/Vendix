@@ -1541,6 +1541,7 @@ export function createAccountingTools(
       name: 'post_journal_entry',
       version: '1',
       domain: 'accounting',
+      irreversible: true,
       description:
         'Postea (contabiliza) un asiento en borrador: desde ese momento afecta todos los reportes. Solo asientos draft con periodo abierto y balance intacto. Cadena habilitante: get_journal_entry (F-1) en estado draft.',
       parameters: {
@@ -1650,6 +1651,7 @@ export function createAccountingTools(
       },
       requiredPermissions: [PERM_JOURNAL_VOID],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context) => {
         const resolved = await resolveEntryForFlow(args ?? {}, 'anula');
         if (!resolved.ok) {
@@ -1860,6 +1862,7 @@ export function createAccountingTools(
       },
       requiredPermissions: [PERM_PERIODS_UPDATE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, _context) => {
         const label = `Periodo fiscal #${args?.fiscal_period_id ?? '?'}`;
         const fiscal_period_id = toPositiveInt(args?.fiscal_period_id);

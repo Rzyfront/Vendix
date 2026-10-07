@@ -234,8 +234,12 @@ describe('ProductsBulkEditService', () => {
       expect(result.errors).toBe(0);
       expect(result.items[0].status).toBe('warning');
       expect(result.items[0].message).toContain('no admiten insumos');
-      // El flag se neutraliza, así que no queda cambio real que aplicar.
-      expect(result.items[0].changes).toEqual([]);
+      // is_ingredient se neutraliza (sin cambio), pero el sanitizer (que corre
+      // antes del gate de industria, igual que ProductsService) ya forzó
+      // available_for_ecommerce=false: ese es el único cambio.
+      expect(result.items[0].changes).toEqual([
+        { field: 'available_for_ecommerce', current: true, next: false },
+      ]);
     });
 
     it('no consulta las industrias de la tienda cuando el payload no pide is_ingredient', async () => {
@@ -380,6 +384,44 @@ describe('ProductsBulkEditService', () => {
         current: true,
         next: false,
       });
+    });
+
+    it('insumo vendible (is_ingredient=true, sin is_sellable=false) fuerza ecommerce y destacado a false', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({
+          id: 1,
+          store_id: 10,
+          available_for_ecommerce: true,
+          is_featured: true,
+        }),
+      ]);
+      prisma.stores.findMany.mockResolvedValue([
+        { id: 10, industries: ['restaurant'] },
+      ]);
+
+      const result = await service.preview(
+        makeDto([1], {
+          is_ingredient: true,
+          available_for_ecommerce: true,
+          is_featured: true,
+        }),
+      );
+
+      const diffByField = new Map(
+        result.items[0].changes.map((change) => [change.field, change]),
+      );
+      expect(diffByField.get('available_for_ecommerce')).toEqual({
+        field: 'available_for_ecommerce',
+        current: true,
+        next: false,
+      });
+      expect(diffByField.get('is_featured')).toEqual({
+        field: 'is_featured',
+        current: true,
+        next: false,
+      });
+      // No es insumo puro: no se neutraliza precio.
+      expect(diffByField.has('base_price')).toBe(false);
     });
 
     it('avisa cuando se marca como preparado un producto sin receta activa', async () => {

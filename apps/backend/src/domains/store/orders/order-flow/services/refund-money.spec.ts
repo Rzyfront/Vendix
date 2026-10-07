@@ -93,13 +93,11 @@ describe('RefundFlowService — gate de caja durable (paso 4, CP-REFUND-FLOW-RED
       payment_id: 100,
       amount: 1000,
       channel: 'cash',
-      session_id: 3,
     });
     expect(notice).toEqual({ status: 'recorded', movement_id: 9 });
   });
 
   it('sin sesión abierta NO retorna en silencio: pending + fila del outbox', async () => {
-    sessionsService.getActiveSession.mockResolvedValue(null);
     movementsService.recordRefundCashMovementDurable.mockResolvedValue({
       status: 'pending',
       failure_id: 44,
@@ -109,7 +107,7 @@ describe('RefundFlowService — gate de caja durable (paso 4, CP-REFUND-FLOW-RED
     const notice = await run(cashInput());
 
     expect(movementsService.recordRefundCashMovementDurable).toHaveBeenCalledWith(
-      expect.objectContaining({ session_id: null }),
+      expect.objectContaining({ refund_id: 999, payment_id: 100 }),
     );
     expect(notice).toEqual({ status: 'pending', failure_id: 44, reason: 'no_open_cash_session' });
   });

@@ -56,6 +56,8 @@ function build(opts: {
   vexEnabled?: boolean;
   access?: Record<string, unknown>;
   enforce?: boolean;
+  /** Resolves the Vex-only services (blocks, plan approval, confirmations). */
+  wireVex?: boolean;
 }) {
   const prisma: any = {
     ai_conversations: {
@@ -69,7 +71,10 @@ function build(opts: {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
     },
-    ai_messages: { create: jest.fn().mockResolvedValue({ id: 1 }) },
+    ai_messages: {
+      create: jest.fn().mockResolvedValue({ id: 1 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
   };
   const run = opts.run ?? agentGen([{ type: 'done' }], EMPTY_RESULT);
   const runSync = jest.fn().mockResolvedValue({ content: 'ok', total_tokens: 1 });
@@ -93,17 +98,40 @@ function build(opts: {
     isEnforce: jest.fn().mockReturnValue(opts.enforce ?? true),
   };
   const buildSnapshot = jest.fn().mockResolvedValue({});
+  const buildVexSnapshot = jest.fn().mockResolvedValue({});
   const planState: any = {
     getActive: jest.fn().mockResolvedValue(opts.plan ?? null),
     get: jest.fn().mockResolvedValue(opts.paused ?? opts.plan ?? null),
     markCurrentChangeStep: jest.fn().mockResolvedValue(null),
     createHook: jest.fn().mockReturnValue({ hook: true }),
+    setStepHashes: jest.fn().mockResolvedValue([]),
   };
   const streamIntents: any = {
     consume: jest.fn(),
     claimTurn: jest.fn().mockResolvedValue(undefined),
     isCurrentTurn: jest.fn().mockResolvedValue(true),
   };
+  const vexBlocks: any = opts.wireVex
+    ? {
+        recentSelections: jest.fn().mockResolvedValue([]),
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'block-1', kind: 'markdown', version: 1 }),
+        listByConversation: jest.fn().mockResolvedValue([]),
+        attachToMessage: jest.fn().mockResolvedValue(0),
+      }
+    : undefined;
+  const planApproval: any = opts.wireVex
+    ? {
+        classifySteps: jest.fn((steps: any[]) => ({
+          covered: steps,
+          reconfirm: [],
+        })),
+      }
+    : undefined;
+  const confirmations: any = opts.wireVex
+    ? { issue: jest.fn().mockResolvedValue('su-1') }
+    : undefined;
   const service = new AIChatService(
     prisma,
     {
@@ -119,13 +147,16 @@ function build(opts: {
     aiAgent as any,
     {} as any,
     { emit: jest.fn() } as any,
-    { buildSnapshot } as any,
+    { buildSnapshot, buildVexSnapshot } as any,
     streamIntents,
     { registerTurn: jest.fn(), releaseTurn: jest.fn() } as any,
     {} as any,
     planState,
     { canUseAIFeature } as any,
     gateConfig as any,
+    vexBlocks,
+    planApproval,
+    confirmations,
   );
   return {
     service,
@@ -138,6 +169,10 @@ function build(opts: {
     findVexSettings,
     canUseAIFeature,
     buildSnapshot,
+    buildVexSnapshot,
+    vexBlocks,
+    planApproval,
+    confirmations,
   };
 }
 
@@ -181,9 +216,10 @@ describe('AIChatService — plan interno de Vexi', () => {
       'rejected',
     );
     const params = b.run.mock.calls[0][0];
-    expect(params.goal).toBe(
-      '(interno) La persona rechazó el cambio propuesto; no se aplicó. Decide si lo demás sigue teniendo sentido: si sí, continúa; si no, pregúntale con naturalidad.',
+    expect(params.goal).toContain(
+      '(interno) La persona rechazó el cambio propuesto; no se aplicó.',
     );
+    expect(params.goal).toContain('1 frase');
     expect(
       b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data.role),
     ).not.toContain('user');
@@ -198,15 +234,52 @@ describe('AIChatService — plan interno de Vexi', () => {
       b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data.role),
     ).not.toContain('user');
     const params = b.run.mock.calls[0][0];
-    expect(params.goal).toBe(
-      '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado. Continúa con lo que sigue sin avisarle que retomas.',
+    expect(params.goal).toContain(
+      '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado.',
     );
+    expect(params.goal).toContain('1 o 2 frases');
+    expect(params.goal).toContain('sin tablas');
     expect(params.messages).toEqual([
       { role: 'system', content: renderPlanForModel(PLAN) },
     ]);
     expect(params.plan).toEqual({ hook: true });
     expect(b.planState.createHook).toHaveBeenCalledWith(7);
     expect(b.streamIntents.claimTurn).toHaveBeenCalledWith(7, 's1');
+  });
+
+  it('continuación approved: fila assistant NUEVA con continuation_of y done con message_id', async () => {
+    const run = agentGen(
+      [{ type: 'text', content: 'Listo, reembolso aplicado.' }, { type: 'done' }],
+      { tools_used: [], content: 'Listo, reembolso aplicado.' },
+    );
+    const b = build({
+      plan: PLAN,
+      run,
+      messages: [
+        { id: 3, role: 'user', content: 'reembolsa', metadata: null, created_at: new Date() },
+        {
+          id: 5,
+          role: 'assistant',
+          content: 'Propuesta',
+          metadata: { plan: { plan_id: 'p1', steps: [], status: 'proposed' } },
+          created_at: new Date(),
+        },
+      ],
+    });
+    b.prisma.ai_messages.create.mockResolvedValue({ id: 99 });
+    withIntent(b, { continuation: 'approved' });
+    const frames = await collect(b.service, null);
+    const created = b.prisma.ai_messages.create.mock.calls.map(
+      (c: any) => c[0].data,
+    );
+    expect(created).toHaveLength(1);
+    expect(created[0].role).toBe('assistant');
+    expect(created[0].content).toBe('Listo, reembolso aplicado.');
+    expect(created[0].metadata).toMatchObject({
+      continuation: 'approved',
+      continuation_of: 5,
+    });
+    expect(frames[frames.length - 1]).toEqual({ type: 'done', message_id: 99 });
   });
 
   it('resume usa su goal', async () => {
@@ -605,13 +678,23 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
     expect(b.findVexSettings).not.toHaveBeenCalled();
   });
 
-  it('turno SSE de Vex arma snapshot sin ui_context', async () => {
+  it('turno SSE de Vex arma snapshot Vex sin ui_context', async () => {
     asOwner();
     const b = build({
+      wireVex: true,
       agentRow: vexRow,
       conversation: vexThread,
       vexEnabled: true,
     });
+    b.vexBlocks.listByConversation.mockResolvedValue([
+      {
+        id: 'b1',
+        kind: 'table',
+        version: 2,
+        spec: { title: 'Ventas' },
+        data: { rows: [{ a: 1 }, { a: 2 }] },
+      },
+    ]);
     b.streamIntents.consume.mockResolvedValue({
       conversation_id: 7,
       user_id: 9,
@@ -621,7 +704,13 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
     });
     await collect(b.service, null);
     expect(b.run).toHaveBeenCalled();
-    expect(b.buildSnapshot).toHaveBeenCalledWith({ attachmentIds: ['a1'] });
+    expect(b.buildSnapshot).not.toHaveBeenCalled();
+    expect(b.buildVexSnapshot).toHaveBeenCalledWith({
+      attachmentIds: ['a1'],
+      vexBlocks: [
+        { block_id: 'b1', kind: 'table', version: 2, title: 'Ventas', rows: 2 },
+      ],
+    });
   });
 
   it('turno SSE de Vexi conserva ui_context en el snapshot', async () => {
@@ -705,5 +794,491 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
       { metadata: { equals: Prisma.AnyNull } },
       { NOT: { metadata: { path: ['agent_key'], equals: 'vex' } } },
     ]);
+  });
+});
+
+describe('AIChatService — cableado de plan Vex (rx3)', () => {
+  const vexRow = {
+    key: 'vex',
+    app_key: 'vex_assistant',
+    system_prompt: null,
+    allowed_tools: [],
+    max_iterations: 40,
+    is_active: true,
+  };
+  const vexThread = { metadata: { agent_key: 'vex' } };
+  const vexiRow = {
+    key: 'vexi',
+    app_key: 'chat_assistant',
+    system_prompt: null,
+    allowed_tools: ['list_orders'],
+    max_iterations: 9,
+    is_active: true,
+  };
+
+  const asOwner = () =>
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      user_id: 9,
+      organization_id: 1,
+      store_id: 1,
+      roles: ['owner'],
+    } as any);
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('turno SSE vex recibe plan_approval y block_sink definidos y cableados', async () => {
+    asOwner();
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+
+    const params = b.run.mock.calls[0][0];
+    expect(params.agent_key).toBe('vex');
+    expect(params.plan_approval).toBeDefined();
+    expect(params.block_sink).toBeDefined();
+
+    // El hook respalda: classify → PlanApprovalService, save → setStepHashes.
+    params.plan_approval.classifyProposedSteps([
+      { order: 1, tool: 'create_customer', args: {} },
+    ]);
+    expect(b.planApproval.classifySteps).toHaveBeenCalledWith([
+      { order: 1, tool: 'create_customer', args: {} },
+    ]);
+    await params.plan_approval.saveProposedSteps([
+      { order: 1, tool: 'create_customer', args: {} },
+    ]);
+    // Tercer argumento: plan_id del turno (los hashes quedan ligados al plan).
+    expect(b.planState.setStepHashes).toHaveBeenCalledWith(
+      7,
+      [{ order: 1, tool: 'create_customer', args: {} }],
+      params.plan_approval.plan_id,
+    );
+    expect(typeof params.plan_approval.plan_id).toBe('string');
+    // Proposing turn (sin token): todo redeem responde missing.
+    await expect(
+      params.plan_approval.redeem('create_customer', {}),
+    ).resolves.toBe('missing');
+
+    // El sink persiste bajo la conversación vía VexBlockService.
+    const id = await params.block_sink.save({
+      kind: 'markdown',
+      data: { text: 'x'.repeat(7000) },
+    });
+    expect(id).toBe('block-1');
+    expect(b.vexBlocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation_id: 7, kind: 'markdown' }),
+    );
+  });
+
+  it('turno sync vex también recibe hook y sink', async () => {
+    asOwner();
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    await b.service.sendMessage(7, { content: 'hola' });
+    const params = b.runSync.mock.calls[0][0];
+    expect(params.agent_key).toBe('vex');
+    expect(params.plan_approval).toBeDefined();
+    expect(params.block_sink).toBeDefined();
+  });
+
+  it('turno vexi no recibe ni hook ni sink (sync y SSE)', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const b = build({ wireVex: true, agentRow: vexiRow });
+    await b.service.sendMessage(7, { content: 'hola' });
+    expect(b.runSync.mock.calls[0][0].agent_key).toBe('vexi');
+    expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('plan_approval');
+    expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('block_sink');
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    expect(b.run.mock.calls[0][0]).not.toHaveProperty('plan_approval');
+    expect(b.run.mock.calls[0][0]).not.toHaveProperty('block_sink');
+  });
+
+  it('turno vex sin servicios resueltos corre sin hook ni sink (degradado, no roto)', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    const params = b.run.mock.calls[0][0];
+    expect(params.agent_key).toBe('vex');
+    expect(b.run).toHaveBeenCalled();
+    expect(params).not.toHaveProperty('plan_approval');
+    expect(params).not.toHaveProperty('block_sink');
+  });
+});
+
+describe('AIChatService — persistencia vex (rx6)', () => {
+  const vexRow = {
+    key: 'vex',
+    app_key: 'vex_assistant',
+    system_prompt: null,
+    allowed_tools: [],
+    max_iterations: 40,
+    is_active: true,
+  };
+  const vexThread = { metadata: { agent_key: 'vex' } };
+  const STEPS = [
+    {
+      step_id: 's1',
+      order: 1,
+      tool: 'create_product',
+      arguments: { name: 'A' },
+      irreversible: false,
+    },
+    {
+      step_id: 's2',
+      order: 2,
+      tool: 'send_invoice_dian',
+      arguments: { order_id: 5 },
+      irreversible: true,
+    },
+  ];
+  // Contrato R3: al persistir, cada paso nace con status 'pending'.
+  const PENDING_STEPS = STEPS.map((s) => ({ ...s, status: 'pending' }));
+
+  const asOwner = () =>
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      user_id: 9,
+      organization_id: 1,
+      store_id: 1,
+      roles: ['owner'],
+    } as any);
+
+  afterEach(() => jest.restoreAllMocks());
+
+  const assistantCreate = (b: ReturnType<typeof build>) =>
+    b.prisma.ai_messages.create.mock.calls.find(
+      (c: any) => c[0].data.role === 'assistant',
+    )?.[0].data;
+
+  it('cierre SSE persiste blocks + plan proposed y enlaza message_id', async () => {
+    asOwner();
+    const run = agentGen(
+      [
+        { type: 'text', content: 'listo' },
+        {
+          type: 'ui_block',
+          ui_block: { block_id: 'b-table', kind: 'table', version: 2 },
+        },
+        {
+          type: 'ui_block',
+          ui_block: { block_id: 'b-chart', kind: 'chart' },
+        },
+        {
+          type: 'plan_approval',
+          plan_approval: {
+            plan_id: 'p1',
+            steps: STEPS,
+            covered_steps: [1],
+            reconfirm_steps: [2],
+          },
+        },
+        { type: 'done' },
+      ],
+      {
+        tools_used: [],
+        content: 'listo',
+        pending_plan: { plan_id: 'p1', steps: STEPS },
+      },
+    );
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      run,
+    });
+    // Barrido: solo adopta huérfanos nacidos durante ESTE turno. Uno de un
+    // turno anterior (b-old) NO se enlaza al mensaje equivocado; uno nuevo
+    // sin mensaje (b-new) sí.
+    b.vexBlocks.listByConversation.mockResolvedValue([
+      {
+        id: 'b-old',
+        kind: 'markdown',
+        version: 1,
+        message_id: null,
+        created_at: new Date(Date.now() - 60 * 60 * 1000),
+      },
+      {
+        id: 'b-new',
+        kind: 'markdown',
+        version: 1,
+        message_id: null,
+        created_at: new Date(Date.now() + 60 * 1000),
+      },
+      { id: 'b-linked', kind: 'table', version: 1, message_id: 41 },
+    ]);
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+
+    const data = assistantCreate(b);
+    expect(data.metadata).toEqual({
+      blocks: [
+        { block_id: 'b-table', kind: 'table', version: 2 },
+        { block_id: 'b-chart', kind: 'chart', version: 1 },
+        { block_id: 'b-new', kind: 'markdown', version: 1 },
+      ],
+      plan: { plan_id: 'p1', steps: PENDING_STEPS, status: 'proposed' },
+    });
+    expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(
+      ['b-table', 'b-chart', 'b-new'],
+      1,
+    );
+  });
+
+  it('el sink de compactación alimenta el metadata del cierre', async () => {
+    asOwner();
+    // El loop llama al sink a mitad del turno (compactación >6000 chars).
+    const run = jest.fn(async function* (params: any) {
+      yield { type: 'text', content: 'ok' };
+      await params.block_sink.save({
+        kind: 'markdown',
+        data: { text: 'x'.repeat(7000) },
+      });
+      yield { type: 'done' };
+      return { tools_used: [], content: 'ok' };
+    });
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      run,
+    });
+    b.vexBlocks.create.mockResolvedValue({
+      id: 'b-sink',
+      kind: 'markdown',
+      version: 1,
+    });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+
+    const data = assistantCreate(b);
+    expect(data.metadata).toEqual({
+      blocks: [{ block_id: 'b-sink', kind: 'markdown', version: 1 }],
+    });
+    expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(['b-sink'], 1);
+  });
+
+  it('camino sync persiste plan + bloques del envelope de render', async () => {
+    asOwner();
+    const b = build({
+      wireVex: true,
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    b.runSync.mockResolvedValue({
+      content: 'ok',
+      total_tokens: 3,
+      tools_used: [
+        {
+          name: 'vex_render_table',
+          args: {},
+          result: JSON.stringify({
+            data: {
+              block_id: 'b-sync',
+              kind: 'table',
+              version: 1,
+              block: { block_id: 'b-sync', kind: 'table', version: 1 },
+            },
+          }),
+        },
+        { name: 'list_orders', args: {}, result: '{"data":[]}' },
+      ],
+      pending_plan: { plan_id: 'p9', steps: STEPS },
+    });
+    await b.service.sendMessage(7, { content: 'hola' });
+
+    const data = assistantCreate(b);
+    expect(data.metadata).toEqual({
+      blocks: [{ block_id: 'b-sync', kind: 'table', version: 1 }],
+      plan: { plan_id: 'p9', steps: PENDING_STEPS, status: 'proposed' },
+    });
+    expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(['b-sync'], 1);
+    expect(b.buildVexSnapshot).toHaveBeenCalled();
+    expect(b.buildSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('turno vexi no escribe blocks ni plan', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any);
+    const run = agentGen([{ type: 'text', content: 'hola' }, { type: 'done' }], {
+      tools_used: [],
+      content: 'hola',
+    });
+    const b = build({ wireVex: true, run });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'hola',
+    });
+    await collect(b.service, null);
+    const data = assistantCreate(b);
+    expect(data).not.toHaveProperty('metadata');
+    expect(b.vexBlocks.attachToMessage).not.toHaveBeenCalled();
+  });
+
+  it('updateVexPlanStatus mueve el estado con updateMany scope-safe', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 10,
+          role: 'assistant',
+          content: 'plan',
+          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+        },
+      ],
+    });
+    await expect(
+      b.service.updateVexPlanStatus(7, 'p1', 'approved'),
+    ).resolves.toBe(true);
+    expect(b.prisma.ai_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, conversation_id: 7 },
+      data: {
+        metadata: {
+          plan: { plan_id: 'p1', steps: STEPS, status: 'approved' },
+        },
+      },
+    });
+  });
+
+  it('updateVexPlanStatus conserva blocks y responde false sin match', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 11,
+          role: 'assistant',
+          content: 'x',
+          metadata: {
+            blocks: [{ block_id: 'b1', kind: 'table', version: 1 }],
+            plan: { plan_id: 'p1', steps: [], status: 'proposed' },
+          },
+        },
+      ],
+    });
+    await expect(
+      b.service.updateVexPlanStatus(7, 'otro-plan', 'rejected'),
+    ).resolves.toBe(false);
+    expect(b.prisma.ai_messages.updateMany).not.toHaveBeenCalled();
+
+    await expect(
+      b.service.updateVexPlanStatus(7, 'p1', 'rejected'),
+    ).resolves.toBe(true);
+    const metadata = b.prisma.ai_messages.updateMany.mock.calls[0][0].data
+      .metadata as any;
+    expect(metadata.blocks).toEqual([
+      { block_id: 'b1', kind: 'table', version: 1 },
+    ]);
+    expect(metadata.plan.status).toBe('rejected');
+  });
+
+  it('updateVexPlanStatus rechaza estados fuera del enum', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+    });
+    await expect(
+      b.service.updateVexPlanStatus(7, 'p1', 'archived'),
+    ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+    expect(b.prisma.ai_messages.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('onVexPlanApproved mueve la tarjeta a approved (E2E-1)', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 10,
+          role: 'assistant',
+          content: 'plan',
+          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+        },
+      ],
+    });
+    await expect(
+      b.service.onVexPlanApproved({ conversation_id: 7, plan_id: 'p1' }),
+    ).resolves.toBeUndefined();
+    expect(b.prisma.ai_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, conversation_id: 7 },
+      data: {
+        metadata: {
+          plan: { plan_id: 'p1', steps: STEPS, status: 'approved' },
+        },
+      },
+    });
+  });
+
+  it('onVexPlanApproved no tumba el approve si el update falla (E2E-1)', async () => {
+    asOwner();
+    const b = build({
+      agentRow: vexRow,
+      conversation: vexThread,
+      vexEnabled: true,
+      messages: [
+        {
+          id: 10,
+          role: 'assistant',
+          content: 'plan',
+          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+        },
+      ],
+    });
+    b.prisma.ai_messages.updateMany.mockRejectedValueOnce(
+      new Error('db caída'),
+    );
+    await expect(
+      b.service.onVexPlanApproved({ conversation_id: 7, plan_id: 'p1' }),
+    ).resolves.toBeUndefined();
+    expect(b.prisma.ai_messages.updateMany).toHaveBeenCalledTimes(1);
   });
 });

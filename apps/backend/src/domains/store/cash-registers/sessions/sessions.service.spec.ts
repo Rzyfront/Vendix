@@ -538,6 +538,147 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
     });
   });
 
+  describe('getCloseReport — consolidado por método, salidas e integridad', () => {
+    const T = (h: number) => new Date(`2026-09-28T${h}:00:00Z`);
+    const base = {
+      ...OPEN_SESSION,
+      opened_at: T(13),
+      closed_at: null,
+      opened_by: USER_ID,
+      closed_by: null,
+      register: null,
+      opened_by_user: null,
+      closed_by_user: null,
+    };
+    const movs = [
+      { id: 1, type: 'sale', amount: 100000, payment_method: 'cash', order_id: 1, session_id: SESSION_ID, created_at: T(14) },
+      { id: 2, type: 'sale', amount: 60000, payment_method: 'card', order_id: 2, session_id: SESSION_ID, created_at: T(14) },
+      { id: 3, type: 'sale', amount: 40000, payment_method: 'bank_transfer', order_id: 3, session_id: SESSION_ID, created_at: T(15) },
+      { id: 4, type: 'refund', amount: 5000, payment_method: 'cash', reference: 'refund:9', order_id: 1, notes: null, created_at: T(16), user: { first_name: 'Ana', last_name: 'Paz' } },
+      { id: 5, type: 'refund', amount: 60000, payment_method: 'card', reference: 'payment_cancelled', order_id: 2, created_at: T(17) },
+      { id: 6, type: 'cash_out', amount: 7000, payment_method: 'cash', reference: 'Cancelación orden #X', order_id: 3, created_at: T(18) },
+      { id: 7, type: 'cash_out', amount: 3000, payment_method: 'cash', reference: null, notes: 'Compra hielo', created_at: T(19) },
+      { id: 8, type: 'cash_in', amount: 2000, payment_method: 'cash', created_at: T(20) },
+      { id: 9, type: 'opening_balance', amount: OPENING_AMOUNT, payment_method: 'cash' },
+    ];
+
+    const wire = (session: any, orders: any[]) => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(session);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue(movs);
+      prismaMock.orders = {
+        findMany: jest.fn().mockImplementation(async (args: any) => {
+          if (args?.where?.state) return [];
+          return orders;
+        }),
+      };
+      prismaMock.order_promotions = { findMany: jest.fn().mockResolvedValue([]) };
+      prismaMock.coupon_uses = { findMany: jest.fn().mockResolvedValue([]) };
+      prismaMock.refunds = {
+        findMany: jest.fn().mockResolvedValue([{ id: 9, reason: 'Producto dañado', amount: 5000 }]),
+      };
+    };
+    const ord = (id: number, total: number, state = 'finished') => ({
+      id, order_number: `ORD-${id}`, state, subtotal_amount: total, discount_amount: 0,
+      tax_amount: 0, shipping_cost: 0, shipping_tax_amount: 0, tip_amount: 0, grand_total: total, coupon_code: null,
+    });
+
+    it('arma filas por método y la fila cash coincide con el esperado vigente', async () => {
+      wire(base, [ord(1, 100000), ord(2, 60000, 'cancelled'), ord(3, 40000, 'refunded')]);
+      const report = await service.getCloseReport(SESSION_ID);
+      const cash = report.consolidated.rows[0];
+      expect(cash.method).toBe('cash');
+      expect(cash).toMatchObject({
+        sales: 100000, cash_in: 2000, entered: 102000,
+        refunds: 5000, cancellations: 7000, withdrawals: 3000, exited: 15000,
+        expected: 187000, counted: null, difference: null,
+      });
+      // esperado vigente: 100000 + 100000 + 2000 − 5000 − (7000 + 3000)
+      expect(cash.expected).toBe(
+        (await service.getCashSummary(SESSION_ID)).expected_cash_total,
+      );
+      expect(report.cash.expected).toBe(cash.expected);
+      const card = report.consolidated.rows.find((r) => r.method === 'card')!;
+      expect(card).toMatchObject({ entered: 60000, exited: 60000, expected: 0, counted: null });
+      const bank = report.consolidated.rows.find((r) => r.method === 'bank_transfer')!;
+      expect(bank.expected).toBe(40000);
+      expect(report.consolidated.rows.map((r) => r.method)).toEqual(['cash', 'card', 'bank_transfer']);
+      expect(report.consolidated.totals).toEqual({ entered: 202000, exited: 75000, expected: 227000 });
+      expect(report.cash_breakdown).toMatchObject({
+        opening: 100000, sales: 100000, cash_in: 2000, refunds: 5000,
+        cancellations: 7000, withdrawals: 3000, expected: 187000,
+      });
+    });
+
+    it('lista única de salidas con tipo, orden, motivo y usuario', async () => {
+      wire(base, [ord(1, 100000), ord(2, 60000, 'cancelled'), ord(3, 40000, 'refunded')]);
+      const { outflows } = await service.getCloseReport(SESSION_ID);
+      expect(outflows.map((o) => [o.id, o.kind, o.payment_method, o.amount])).toEqual([
+        [4, 'refund', 'cash', 5000],
+        [5, 'cancellation', 'card', 60000],
+        [6, 'cancellation', 'cash', 7000],
+        [7, 'withdrawal', 'cash', 3000],
+      ]);
+      expect(outflows[0]).toMatchObject({ reason: 'Producto dañado', user_name: 'Ana Paz', order_number: 'ORD-1' });
+      expect(outflows[3].reason).toBe('Compra hielo');
+    });
+
+    it('sales_summary excluye canceladas/reembolsadas y total cobrado sale de movimientos', async () => {
+      wire(base, [ord(1, 100000), ord(2, 60000, 'cancelled'), ord(3, 40000, 'refunded')]);
+      const r = await service.getCloseReport(SESSION_ID);
+      expect(r.sales_summary).toMatchObject({
+        orders_count: 1, payments_count: 3, subtotal: 100000,
+        grand_total: 200000, orders_grand_total: 100000,
+        cancelled: { count: 2, total: 100000 },
+      });
+      expect(r.sales.orders_count).toBe(3); // bloque legado intacto
+      expect(r.integrity).toEqual({ sales_match: true, notes: [] });
+    });
+
+    it('integrity marca pago parcial en vez de esconderlo', async () => {
+      wire(base, [ord(1, 130000), ord(2, 60000), ord(3, 40000)]);
+      const r = await service.getCloseReport(SESSION_ID);
+      expect(r.integrity.sales_match).toBe(false);
+      expect(r.integrity.notes.join(' ')).toContain('ORD-1');
+    });
+
+    it('sesión cerrada con snapshot: usa el snapshot, no recalcula', async () => {
+      const snapshot = {
+        consolidated: { rows: [], totals: { entered: 1, exited: 2, expected: 3 } },
+        cash_breakdown: { opening: 1, sales: 0, cash_in: 0, refunds: 0, cancellations: 0, withdrawals: 0, expected: 1, counted: 1, difference: 0 },
+        outflows: [],
+      };
+      wire({ ...base, status: 'closed', closed_at: T(21), actual_closing_amount: 187000, expected_closing_amount: 187000, difference: 0, summary: snapshot }, [ord(1, 100000)]);
+      const r = await service.getCloseReport(SESSION_ID);
+      expect(r.consolidated).toEqual(snapshot.consolidated);
+      expect(r.cash_breakdown).toEqual(snapshot.cash_breakdown);
+      expect(r.outflows).toEqual([]);
+    });
+
+    it('sesión cerrada sin snapshot (vieja): calcula en vivo con counted', async () => {
+      wire({ ...base, status: 'closed', closed_at: T(21), actual_closing_amount: 186000, expected_closing_amount: 187000, difference: -1000, summary: { by_type: {} } }, [ord(1, 100000)]);
+      const r = await service.getCloseReport(SESSION_ID);
+      expect(r.consolidated.rows[0]).toMatchObject({ counted: 186000, difference: -1000 });
+      expect(r.outflows).toHaveLength(4);
+    });
+
+    it('closeSession guarda consolidated, cash_breakdown y outflows en summary sin borrar claves', async () => {
+      prismaMock.cash_register_sessions.findFirst
+        .mockResolvedValueOnce({ ...OPEN_SESSION, summary: { extra: 'keep' } })
+        .mockResolvedValueOnce({ ...OPEN_SESSION, status: 'closed' });
+      prismaMock.cash_register_movements.findMany.mockResolvedValue(movs);
+      prismaMock.orders = { findMany: jest.fn().mockResolvedValue([ord(1, 1)]) };
+      prismaMock.refunds = { findMany: jest.fn().mockResolvedValue([]) };
+      await service.closeSession(SESSION_ID, { actual_closing_amount: 187000 } as any);
+      const data = prismaMock.cash_register_sessions.updateMany.mock.calls[0][0].data;
+      expect(data.summary.extra).toBe('keep');
+      expect(data.summary.by_type).toBeDefined();
+      expect(data.summary.consolidated.rows[0]).toMatchObject({ method: 'cash', counted: 187000, difference: 0 });
+      expect(data.summary.cash_breakdown.counted).toBe(187000);
+      expect(data.summary.outflows).toHaveLength(4);
+      expect(data.expected_closing_amount).toBe(187000);
+    });
+  });
+
   /**
    * Gate único de caja para cobros (`assertSessionForSales`): con
    * `pos.cash_register.enabled`, quien cobra debe tener SU sesión abierta

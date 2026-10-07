@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
+
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import {
@@ -34,6 +36,12 @@ import { VatResponsibilityService } from '@common/helpers/vat-responsibility.hel
  *      updateStock is still called and falls back to the receipt unit cost
  *      both for `unit_cost` and `movement_unit_cost`.
  */
+
+const purchaseVatContributionProvider = () => ({
+  provide: PurchaseVatContributionService,
+  useValue: { reserve: jest.fn().mockResolvedValue({ id: 1 }) },
+});
+
 describe('PurchaseOrdersService.receive()', () => {
   let service: PurchaseOrdersService;
   let prismaService: jest.Mocked<StorePrismaService>;
@@ -208,6 +216,7 @@ describe('PurchaseOrdersService.receive()', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
         { provide: CostingService, useValue: mockCostingService },
@@ -863,6 +872,7 @@ describe('PurchaseOrdersService.receive()', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           PurchaseOrdersService,
+        purchaseVatContributionProvider(),
           { provide: StorePrismaService, useValue: mockPrismaService },
           { provide: StockLevelManager, useValue: mockStockLevelManager },
           { provide: CostingService, useValue: mockCostingService },
@@ -1295,6 +1305,7 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: mockCostingService },
@@ -1916,6 +1927,7 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           PurchaseOrdersService,
+        purchaseVatContributionProvider(),
           { provide: StorePrismaService, useValue: mockPrismaService },
           { provide: StockLevelManager, useValue: {} as any },
           {
@@ -2212,6 +2224,7 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: mockPrismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2440,6 +2453,7 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2609,6 +2623,131 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
    * validar la combinación: un producto podía nacer con IVA + INC o dos IVA y
    * cobrarse dos veces en POS. Misma regla que products (PROD_TAX_COMBO_001).
    */
+  describe('SKU de un producto archivado', () => {
+    const newProductDto = () => ({
+      ...baseDto(),
+      items: [
+        {
+          product_name: 'Camisa Nueva',
+          sku: 'SKU-ARCH',
+          quantity: 1,
+          unit_price: 1000,
+        },
+      ],
+    });
+
+    it('la OC no actualiza ni choca con el archivado: crea un producto nuevo', async () => {
+      const tx: any = mockCreateTx();
+      // El archivado existe, pero SOLO lo ve una consulta sin filtro de estado.
+      const archived = { id: 99, name: 'Camisa Vieja', state: 'archived' };
+      tx.products.findFirst = jest.fn(async ({ where }: any) =>
+        where.state?.not === 'archived' ? null : archived,
+      );
+      tx.products.create = jest.fn().mockResolvedValue({ id: 8001 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(newProductDto() as any);
+
+      // Ninguna búsqueda por SKU puede ver archivados.
+      const skuLookups = tx.products.findFirst.mock.calls.filter(
+        (c: any) => c[0].where.sku === 'SKU-ARCH',
+      );
+      expect(skuLookups).toHaveLength(2);
+      for (const [arg] of skuLookups) {
+        expect(arg.where).toEqual({
+          store_id: STORE_ID,
+          sku: 'SKU-ARCH',
+          state: { not: 'archived' },
+        });
+      }
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+      expect(tx.products.create.mock.calls[0][0].data).toMatchObject({
+        sku: 'SKU-ARCH',
+        name: 'Camisa Nueva',
+        store_id: STORE_ID,
+      });
+      expect(tx.products.update).toBeUndefined();
+    });
+
+    it('un SKU ocupado por un producto NO archivado sigue siendo PROD_SKU_COLLISION_001', async () => {
+      const tx: any = mockCreateTx();
+      // `existingProduct` (1ª consulta) no lo ve; el chequeo A.7 (2ª) sí.
+      const owner = { id: 5, name: 'Camisa Activa', state: 'active' };
+      tx.products.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(owner);
+      tx.products.create = jest.fn();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      let caught: any = null;
+      try {
+        await service.create(newProductDto() as any);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught?.errorCode).toBe('PROD_SKU_COLLISION_001');
+      expect(caught.getResponse().details).toMatchObject({
+        sku: 'SKU-ARCH',
+        product_id: 5,
+        is_archived: false,
+      });
+      expect(tx.products.create).not.toHaveBeenCalled();
+    });
+
+    it('una línea nueva con código de barras ya usado se une al producto existente (sin crear)', async () => {
+      const tx: any = mockCreateTx();
+      const byBarcode = { id: 5, name: 'Ron Viejo', state: 'active' };
+      // 1ª consulta: por SKU (nada). 2ª: por código de barras (el activo).
+      tx.products.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(byBarcode);
+      tx.products.create = jest.fn();
+      tx.products.update = jest.fn().mockResolvedValue({ id: 5 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create({
+        ...baseDto(),
+        items: [
+          {
+            product_name: 'Ron Nuevo',
+            sku: 'SKU-NEW',
+            barcode: '7701234',
+            quantity: 1,
+            unit_price: 1000,
+          },
+        ],
+      } as any);
+
+      expect(tx.products.findFirst.mock.calls[1][0].where).toEqual({
+        barcode: '7701234',
+        store_id: STORE_ID,
+        state: { not: 'archived' },
+      });
+      expect(tx.products.create).not.toHaveBeenCalled();
+      expect(tx.products.update).toHaveBeenCalledTimes(1);
+      expect(tx.products.update.mock.calls[0][0].where).toEqual({ id: 5 });
+      const poData = tx.purchase_orders.create.mock.calls[0][0].data;
+      expect(poData.purchase_order_items.create[0].product_id).toBe(5);
+    });
+
+    it('una línea nueva sin código de barras no hace búsqueda por código', async () => {
+      const tx: any = mockCreateTx();
+      tx.products.findFirst = jest.fn().mockResolvedValue(null);
+      tx.products.create = jest.fn().mockResolvedValue({ id: 8002 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(newProductDto() as any);
+
+      const barcodeLookups = tx.products.findFirst.mock.calls.filter(
+        (c: any) => 'barcode' in c[0].where,
+      );
+      expect(barcodeLookups).toHaveLength(0);
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('P1-4: combinación de impuestos del producto', () => {
     const categories = [
       { id: 1, name: 'IVA 19%', tax_type: 'iva', tax_rates: [{ store_id: null }] },
@@ -2717,6 +2856,7 @@ describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un s
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -2848,6 +2988,7 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: {} as any },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
@@ -3069,142 +3210,187 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
   });
 });
 
-/**
- * F-214 — `materializeVatDocument()` debe escribir UNA fila de
- * `invoice_taxes` por grupo de `tax_groups`, nunca una única fila con una
- * tarifa derivada de `iva_amount / net_amount` de cabecera.
- */
-describe('PurchaseOrdersService.materializeVatDocument() — F-214', () => {
+describe('PurchaseOrdersService.persistIngredientConfigToProduct — insumos fuera de ecommerce', () => {
+  const run = async (product: Record<string, any>) => {
+    const svc: any = Object.create(PurchaseOrdersService.prototype);
+    const tx = {
+      products: {
+        findFirst: jest.fn().mockResolvedValue(product),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      stores: {
+        findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }),
+      },
+      units_of_measure: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    await svc.persistIngredientConfigToProduct(
+      7,
+      { purchase_uom_id: 3, stock_uom_id: 4 },
+      tx,
+    );
+    return tx;
+  };
+
+  it('al marcar un producto existente como insumo fuerza available_for_ecommerce=false e is_featured=false', async () => {
+    const tx = await run({
+      id: 7,
+      store_id: 10,
+      is_ingredient: false,
+      available_for_ecommerce: true,
+      is_featured: true,
+      purchase_uom_id: null,
+      stock_uom_id: null,
+      purchase_to_stock_factor: null,
+    });
+    expect(tx.products.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: expect.objectContaining({
+        is_ingredient: true,
+        available_for_ecommerce: false,
+        is_featured: false,
+      }),
+    });
+  });
+
+  it('un insumo ya publicado (dato viejo) se despublica aunque la config UoM no cambie', async () => {
+    const tx = await run({
+      id: 7,
+      store_id: 10,
+      is_ingredient: true,
+      available_for_ecommerce: true,
+      is_featured: false,
+      purchase_uom_id: 3,
+      stock_uom_id: 4,
+      purchase_to_stock_factor: null,
+    });
+    expect(tx.products.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: { available_for_ecommerce: false },
+    });
+  });
+});
+
+describe('PurchaseOrdersService.findNewItemConflicts()', () => {
   let service: PurchaseOrdersService;
   let prismaService: any;
 
+  const STORE_ID = 10;
+
   beforeEach(async () => {
-    prismaService = {
-      invoices: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 900 }),
-      },
-    };
+    prismaService = { products: { findMany: jest.fn().mockResolvedValue([]) } };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
+        purchaseVatContributionProvider(),
         { provide: StorePrismaService, useValue: prismaService },
         { provide: StockLevelManager, useValue: {} as any },
         { provide: CostingService, useValue: {} as any },
         { provide: CostingMethodResolverService, useValue: {} as any },
         { provide: InventorySerialNumbersService, useValue: {} as any },
         { provide: SerialNumberEnforcementService, useValue: {} as any },
-        { provide: AuditService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
         { provide: S3Service, useValue: {} as any },
         { provide: SettingsService, useValue: {} as any },
         { provide: FiscalScopeService, useValue: {} as any },
-        { provide: EventEmitter2, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         { provide: AccountsPayableService, useValue: {} as any },
-        { provide: VatResponsibilityService, useValue: {} as any },
+        VatResponsibilityService,
       ],
     }).compile();
 
     service = module.get(PurchaseOrdersService);
+
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
   });
 
-  it('escribe una fila de invoice_taxes por cada grupo, con la tarifa del catálogo (no derivada)', async () => {
-    const tax_groups = [
-      // QUI-INC — el grupo declara su propio `tax_type`; el escritor ya no
-      // lo inventa. Lo produce `buildPurchaseTaxGroups` leyendo
-      // `purchase_order_items.tax_type`.
-      {
-        tax_rate: 19,
-        tax_type: 'iva',
-        taxable_amount: 3985813.08,
-        tax_amount: 757304.49,
-      },
-      { tax_rate: 0, tax_type: 'iva', taxable_amount: 240720, tax_amount: 0 },
-    ];
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
 
-    await (service as any).materializeVatDocument({
-      purchase_order_id: 641,
-      order_number: 'PO-20260820-241',
-      supplier_invoice_number: null,
-      supplier_invoice_date: null,
-      supplier: { id: 5, name: 'Proveedor Test', tax_id: '900123456' },
-      organization_id: 1,
-      store_id: 66,
-      accounting_entity_id: 77,
-      net_amount: 4226533.08,
-      iva_amount: 757304.49,
-      tax_groups,
-      user_id: 9,
-    });
-
-    expect(prismaService.invoices.create).toHaveBeenCalledTimes(1);
-    const createArgs = prismaService.invoices.create.mock.calls[0][0];
-
-    // Cabecera: sigue siendo el neto/iva TOTAL del documento (sin cambios).
-    expect(createArgs.data.subtotal_amount).toBe(4226533.08);
-    expect(createArgs.data.tax_amount).toBe(757304.49);
-    expect(createArgs.data.total_amount).toBe(4983837.57);
-
-    // Desglose: una fila por grupo, con la tarifa TAL CUAL viene del catálogo.
-    expect(createArgs.data.invoice_taxes.create).toEqual([
-      {
-        tax_name: 'IVA',
-        tax_rate: 19,
-        taxable_amount: 3985813.08,
-        tax_amount: 757304.49,
-        tax_type: 'iva',
-      },
-      {
-        tax_name: 'IVA',
-        tax_rate: 0,
-        taxable_amount: 240720,
-        tax_amount: 0,
-        tax_type: 'iva',
-      },
+  it('SKU que ya existe: conflicto kind=sku con el producto', async () => {
+    prismaService.products.findMany.mockResolvedValue([
+      { id: 5, name: 'Ron Viejo', sku: 'SKU-1', barcode: null, state: 'active' },
     ]);
 
-    // Ninguna fila lleva la tarifa inventada que el cociente producía en prod.
-    const writtenRates = createArgs.data.invoice_taxes.create.map(
-      (row: { tax_rate: number }) => row.tax_rate,
-    );
-    expect(writtenRates).not.toContain(17.92);
+    const res = await service.findNewItemConflicts({
+      items: [{ line_index: 0, sku: ' SKU-1 ', barcode: '' }],
+    } as any);
+
+    expect(res.conflicts).toEqual([
+      {
+        line_index: 0,
+        kind: 'sku',
+        sku: 'SKU-1',
+        barcode: null,
+        product_id: 5,
+        product_name: 'Ron Viejo',
+        product_sku: 'SKU-1',
+        product_state: 'active',
+      },
+    ]);
   });
 
-  /**
-   * QUI-INC — `tax_name` y `tax_type` salen del GRUPO, no de dos literales
-   * escritos en el `create`. Se ejercita el escritor con un grupo que no es
-   * IVA —composición que la guarda de `buildPurchaseTaxGroups` no deja llegar
-   * hoy— justamente porque es la única forma de distinguir «deriva» de
-   * «escribe siempre IVA y coincide»: con el literal anterior esta prueba
-   * fallaba, con la derivación pasa.
-   */
-  it('QUI-INC: deriva tax_name y tax_type del grupo en vez de escribir IVA literal', async () => {
-    await (service as any).materializeVatDocument({
-      purchase_order_id: 642,
-      order_number: 'PO-20260820-242',
-      supplier_invoice_number: null,
-      supplier_invoice_date: null,
-      supplier: { id: 5, name: 'Proveedor Test', tax_id: '900123456' },
-      organization_id: 1,
-      store_id: 66,
-      accounting_entity_id: 77,
-      net_amount: 1000,
-      iva_amount: 80,
-      tax_groups: [
-        { tax_rate: 8, tax_type: 'inc', taxable_amount: 1000, tax_amount: 80 },
+  it('código de barras que ya existe (SKU distinto): conflicto kind=barcode', async () => {
+    prismaService.products.findMany.mockResolvedValue([
+      { id: 5, name: 'Ron Viejo', sku: 'OTRO', barcode: '7701234', state: 'active' },
+    ]);
+
+    const res = await service.findNewItemConflicts({
+      items: [{ line_index: 2, sku: 'SKU-NEW', barcode: '7701234' }],
+    } as any);
+
+    expect(res.conflicts).toEqual([
+      {
+        line_index: 2,
+        kind: 'barcode',
+        sku: 'SKU-NEW',
+        barcode: '7701234',
+        product_id: 5,
+        product_name: 'Ron Viejo',
+        product_sku: 'OTRO',
+        product_state: 'active',
+      },
+    ]);
+  });
+
+  it('mismo código de barras en dos líneas nuevas: la segunda es duplicate_barcode_in_order', async () => {
+    const res = await service.findNewItemConflicts({
+      items: [
+        { line_index: 0, sku: 'A', barcode: '999' },
+        { line_index: 1, sku: 'B', barcode: '999' },
       ],
-      user_id: 9,
-    });
+    } as any);
 
-    const createArgs = prismaService.invoices.create.mock.calls[0][0];
-    expect(createArgs.data.invoice_taxes.create).toEqual([
+    expect(res.conflicts).toEqual([
       {
-        tax_name: 'INC',
-        tax_rate: 8,
-        taxable_amount: 1000,
-        tax_amount: 80,
-        tax_type: 'inc',
+        line_index: 1,
+        kind: 'duplicate_barcode_in_order',
+        barcode: '999',
+        duplicate_of_line_index: 0,
       },
     ]);
+  });
+
+  it('ignora archivados: la consulta filtra state != archived y por tienda', async () => {
+    await service.findNewItemConflicts({
+      items: [{ line_index: 0, sku: 'SKU-ARCH', barcode: '123' }],
+    } as any);
+
+    const where = prismaService.products.findMany.mock.calls[0][0].where;
+    expect(where.state).toEqual({ not: 'archived' });
+    expect(where.store_id).toBe(STORE_ID);
+    expect(where.OR).toEqual([
+      { sku: { in: ['SKU-ARCH'] } },
+      { barcode: { in: ['123'] } },
+    ]);
+  });
+
+  it('sin coincidencias: conflicts vacío', async () => {
+    const res = await service.findNewItemConflicts({
+      items: [{ line_index: 0, sku: 'X', barcode: '1' }, { line_index: 1 }],
+    } as any);
+    expect(res).toEqual({ conflicts: [] });
   });
 });

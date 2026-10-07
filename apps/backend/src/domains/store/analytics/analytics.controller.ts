@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { SalesAnalyticsService } from './services/sales-analytics.service';
-import { InventoryAnalyticsService } from './services/inventory-analytics.service';
+import { InventoryAnalyticsService, calculateLowStockTotals } from './services/inventory-analytics.service';
 import { ProductsAnalyticsService } from './services/products-analytics.service';
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
@@ -11,6 +11,8 @@ import { FinancialAnalyticsService } from './services/financial-analytics.servic
 import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import { DispatchAnalyticsService } from './services/dispatch-analytics.service';
+import { SalesDimensionAnalyticsService } from './services/sales-dimension-analytics.service';
+import { SalesByDimensionQueryDto } from './dto/sales-by-dimension-query.dto';
 import {
   DispatchAnalyticsQueryDto,
   DispatchPlanillasQueryDto,
@@ -64,6 +66,7 @@ export class AnalyticsController {
     private readonly purchases_analytics_service: PurchasesAnalyticsService,
     private readonly reviews_analytics_service: ReviewsAnalyticsService,
     private readonly dispatch_analytics_service: DispatchAnalyticsService,
+    private readonly sales_dimension_analytics_service: SalesDimensionAnalyticsService,
     private readonly response_service: ResponseService,
     private readonly prisma: StorePrismaService,
   ) {}
@@ -357,6 +360,90 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('sales/by-dimension')
+  @Permissions('store:analytics:read')
+  async getSalesByDimension(@Query() query: SalesByDimensionQueryDto) {
+    const result =
+      await this.sales_dimension_analytics_service.getSalesByDimension(query);
+    const label = query.dimension === 'supplier' ? 'proveedor' : 'marca';
+    return this.response_service.paginated(
+      result.rows,
+      result.total,
+      result.page,
+      result.limit,
+      `Ventas por ${label} obtenidas correctamente`,
+      undefined,
+      { summary: result.summary },
+    );
+  }
+
+  @Get('sales/by-dimension/export')
+  @Permissions('store:analytics:read')
+  async exportSalesByDimension(
+    @Query() query: SalesByDimensionQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const result =
+      await this.sales_dimension_analytics_service.getSalesByDimensionForExport(
+        query,
+      );
+    const dimensionHeader =
+      query.dimension === 'supplier' ? 'Proveedor' : 'Marca';
+    const dim: ReportColumn = {
+      key: 'dimension_name',
+      header: dimensionHeader,
+      type: 'text',
+    };
+    const metrics = (withCustomers: boolean, withReferences: boolean) =>
+      [
+        { key: 'units', header: 'Unidades', type: 'number' },
+        { key: 'net_sales', header: 'Venta neta', type: 'currency' },
+        { key: 'orders', header: 'Órdenes', type: 'number' },
+        ...(withCustomers
+          ? [{ key: 'customers', header: 'Clientes', type: 'number' }]
+          : []),
+        ...(withReferences
+          ? [{ key: 'references', header: 'Referencias', type: 'number' }]
+          : []),
+      ] as ReportColumn[];
+
+    const summaryColumns: ReportColumn[] = [dim, ...metrics(true, true)];
+    const productColumns: ReportColumn[] = [
+      dim,
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'variant_name', header: 'Variante', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      ...metrics(true, false),
+    ];
+    const userColumns: ReportColumn[] = [
+      dim,
+      { key: 'user_name', header: 'Vendedor', type: 'text' },
+      { key: 'user_document', header: 'Documento', type: 'text' },
+      ...metrics(true, true),
+    ];
+    const customerColumns: ReportColumn[] = [
+      dim,
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_document', header: 'Documento', type: 'text' },
+      ...metrics(false, true),
+    ];
+
+    await this.emitReport(
+      res,
+      query.dimension === 'supplier'
+        ? 'ventas_por_proveedor'
+        : 'ventas_por_marca',
+      tz,
+      [
+        this.toSheet('Resumen', summaryColumns, result.dimension_rows, tz),
+        this.toSheet('Por producto', productColumns, result.by_product, tz),
+        this.toSheet('Por vendedor', userColumns, result.by_user, tz),
+        this.toSheet('Por cliente', customerColumns, result.by_customer, tz),
+      ],
+    );
+  }
+
   @Get('sales/tips-by-waiter')
   @Permissions('store:analytics:read')
   async getTipsByWaiter(@Query() query: SalesAnalyticsQueryDto) {
@@ -614,7 +701,40 @@ export class AnalyticsController {
       result.meta.pagination.total,
       result.meta.pagination.page,
       result.meta.pagination.limit,
+      undefined,
+      undefined,
+      { totals: result.meta.totals },
     );
+  }
+
+  @Get('inventory/low-stock/export')
+  @Permissions('store:analytics:read')
+  async exportLowStockAlerts(
+    @Query() query: InventoryAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const rows = await this.inventory_analytics_service.getLowStockForExport(query);
+    const tz = await this.resolveReportTz();
+    const columns: ReportColumn[] = [
+      { key: 'product_name', header: 'Producto', type: 'text', width: 36 },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'stock_quantity', header: 'Stock Actual', type: 'number' },
+      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
+      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency' },
+    ];
+    const displayRows = rows.map((row) => ({
+      ...row,
+      status: row.status === 'out_of_stock' ? 'Agotado' : 'Stock bajo',
+    }));
+    await this.emitReport(res, 'stock_bajo', tz, [
+      this.toSheet('Stock Bajo', columns, displayRows, tz, {
+        product_name: 'TOTAL',
+        ...calculateLowStockTotals(rows),
+      }),
+    ]);
   }
 
   @Get('inventory/movements')
@@ -1617,13 +1737,13 @@ export class AnalyticsController {
       { key: 'tax_name', header: 'Impuesto', type: 'text' },
       { key: 'tax_type', header: 'Tipo fiscal', type: 'text' },
       { key: 'tax_rate', header: 'Tasa', type: 'percent' },
-      { key: 'taxable_amount', header: 'Base gravable', type: 'currency' },
-      { key: 'tax_collected', header: 'Recaudado', type: 'currency' },
+      { key: 'taxable_amount', header: 'Base registrada', type: 'currency' },
+      { key: 'tax_collected', header: 'Impuesto registrado', type: 'currency' },
       { key: 'is_compound', header: 'Compuesto', type: 'text' },
     ];
 
-    await this.emitReport(res, 'impuestos', tz, [
-      this.toSheet('Impuestos', columns, rows, tz),
+    await this.emitReport(res, 'impuestos_operativos', tz, [
+      this.toSheet('Impuestos operativos', columns, rows, tz),
     ]);
   }
 

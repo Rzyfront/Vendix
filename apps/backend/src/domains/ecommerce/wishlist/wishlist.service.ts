@@ -64,6 +64,7 @@ export class WishlistService {
         id: dto.product_id,
         state: 'active',
         available_for_ecommerce: true,
+        is_ingredient: false,
       },
     });
 

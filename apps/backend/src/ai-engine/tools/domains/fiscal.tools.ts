@@ -1136,6 +1136,7 @@ export function createFiscalTools(deps: FiscalToolDeps): RegisteredTool[] {
       name: 'approve_declaration',
       version: '1',
       domain: 'fiscal',
+      irreversible: true,
       description:
         'Aprueba un borrador de declaración en estado listo: lo congela (ya no se recalcula) y, si es de IVA, dispara su liquidación contable. Requiere haberlo revisado con get_declaration_draft tras el último cambio. Cadena habilitante: get_declaration_draft (F-18) recalculada.',
       parameters: {
@@ -1289,6 +1290,7 @@ export function createFiscalTools(deps: FiscalToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PERM_DECLARATIONS_WRITE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context) => {
         const resolved = await resolveGuardedContext(context);
         if ('error' in resolved) {
@@ -1619,6 +1621,7 @@ export function createFiscalTools(deps: FiscalToolDeps): RegisteredTool[] {
       },
       requiredPermissions: [PERM_CLOSE_WRITE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args, context) => {
         const resolved = await resolveGuardedContext(context);
         if ('error' in resolved) {

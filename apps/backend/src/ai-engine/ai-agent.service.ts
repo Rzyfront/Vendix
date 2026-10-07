@@ -1,14 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
+import {
+  DEGENERATE_OUTPUT_MESSAGE,
+  detectDegenerateRepetition,
+} from './degenerate-output.util';
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
-import { VendixHttpException } from '../common/errors';
+import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
+import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
 import {
   AgentPlan,
   AgentPlanHook,
@@ -68,6 +73,23 @@ const VEX_PLANNED_MAX_ITERATIONS = 60;
 const VEX_PLANNED_TIMEOUT_MS = 600_000;
 
 /**
+ * Absolute wall-clock ceiling for a turn with an explicit per-agent timeout
+ * (`ai_agents.timeout_seconds`, `@Max(600)` in the DTO). Plan widening never
+ * pushes a row-driven timeout past it.
+ */
+const AGENT_TIMEOUT_CEILING_MS = 600_000;
+
+/**
+ * Absolute iteration ceiling for any agent row. Mirrors `@Max(60)` in
+ * `CreateAIAgentDto` (inherited by `UpdateAIAgentDto` via `PartialType`).
+ *
+ * The plan widening below never exceeds it: an explicit row value amplified
+ * for a planned turn is capped here via `Math.min`, so superadmin's setting
+ * is respected instead of forced up to a fixed constant.
+ */
+const SUPERADMIN_MAX_ITERATIONS = 60;
+
+/**
  * Tool results longer than this never travel to the model in full: they are
  * compacted to `{summary, block_id, rows}` and the complete payload is kept
  * server-side as a block when a sink is present (step 5 of the Vex plan).
@@ -83,7 +105,19 @@ export interface AgentRunParams {
   app_key?: string;
   tools?: string[];
   max_iterations?: number;
+  /**
+   * Wall-clock budget for the turn. The caller resolves it from the agent
+   * row when one exists; absent, Vex defaults to 300 s and everyone else to
+   * 60 s. An open plan widens it alongside the iteration budget.
+   */
   timeout_ms?: number;
+  /**
+   * Per-agent wall-clock budget in seconds (`ai_agents.timeout_seconds`).
+   * When present it replaces the hardcoded 60/300 s base; an open plan widens
+   * it to at most 600 s and never below this value. Absent keeps the
+   * historical behavior.
+   */
+  agent_timeout_seconds?: number;
   config_id?: number;
   /**
    * Prior turns of the conversation, oldest first, WITHOUT the current goal —
@@ -151,14 +185,41 @@ export interface AgentRunParams {
 }
 
 /**
- * Same-stream execution of an approved plan, without the loop importing the
- * Vex domain (that direction would close a DI cycle: VexModule imports the
- * global AIEngineModule). Implemented by the chat surface on top of
- * `PlanApprovalService` + `VexiConfirmationService`.
+ * One proposed write step of a Vex turn, before the person approves the plan.
+ * Same shape `PlanApprovalService` classifies and fingerprints, so the chat
+ * surface can bind those methods directly.
+ */
+export interface AgentProposedPlanStep {
+  order: number;
+  tool: string;
+  args: Record<string, any>;
+}
+
+/**
+ * Whole-plan approval for Vex turns, without the loop importing the Vex
+ * domain (that direction would close a DI cycle: VexModule imports the global
+ * AIEngineModule). Implemented by the chat surface on top of
+ * `PlanApprovalService` + `VexiConfirmationService` + `VexiPlanStateService`.
+ *
+ * Two phases share the one hook. On a PROPOSING turn (no token yet) the loop
+ * accumulates every write proposal and finalizes with a single `plan_approval`
+ * frame; `classifyProposedSteps` / `saveProposedSteps` back that phase. On an
+ * EXECUTING turn (the client sent back the token approve minted) the loop
+ * redeems each covered step via `redeem` and runs it in the same stream.
  */
 export interface AgentPlanApprovalHook {
-  token: string;
-  plan_id: string;
+  /**
+   * Approved-plan token. Present only on executing turns — the client holds
+   * the token approve minted and sends it back with the approval
+   * continuation. Absent on proposing turns, where there is nothing approved
+   * yet and the loop accumulates instead of redeeming.
+   */
+  token?: string;
+  /**
+   * Active plan id when the caller knows it. The loop resolves it at
+   * finalization from the plan snapshot when absent.
+   */
+  plan_id?: string;
   redeem(
     tool: string,
     args: Record<string, any>,
@@ -166,6 +227,23 @@ export interface AgentPlanApprovalHook {
     'ok' | 'missing' | 'mismatch' | 'unknown_step' | 'replayed' | 'irreversible'
   >;
   issueSingleUse(tool: string, args: Record<string, any>): Promise<string>;
+  /**
+   * Proposal side (Vex proposing turns, backed by PlanApprovalService):
+   * splits proposed steps into covered vs reconfirm so the frame flags each
+   * irreversible honestly. When absent the loop classifies locally with the
+   * same rule (explicit flag → domain net → bridge path/verb → unknown fails
+   * closed).
+   */
+  classifyProposedSteps?(steps: AgentProposedPlanStep[]): {
+    covered: AgentProposedPlanStep[];
+    reconfirm: AgentProposedPlanStep[];
+  };
+  /**
+   * Proposal side (backed by VexiPlanStateService): persists the ordered step
+   * hashes next to the plan, so approve-time validation never trusts the
+   * client re-declaration of the steps.
+   */
+  saveProposedSteps?(steps: AgentProposedPlanStep[]): Promise<void>;
 }
 
 /**
@@ -191,6 +269,12 @@ export interface AgentResult {
   /** The turn was superseded by a newer one (`shouldAbort`); nothing was emitted. */
   aborted?: boolean;
   /**
+   * The model produced degenerate repetition (`VEX_DEGENERATE_OUTPUT`): the
+   * text was discarded and an `error` frame was emitted. Callers must not
+   * replace the silence with a fallback answer nor persist anything.
+   */
+  degenerate?: boolean;
+  /**
    * The budget ran out with the plan still open: the client must fire another
    * turn to continue. `content` is empty on purpose.
    */
@@ -207,6 +291,23 @@ export interface AgentResult {
     arguments: Record<string, any>;
     confirmation_token: string;
     preview?: unknown;
+  };
+  /**
+   * A whole-plan proposal (Vex): every write step of the turn, awaiting the
+   * one-click approval. The `plan_approval` frame already carried it; this is
+   * the receipt for the caller. Mutually exclusive with
+   * `pending_confirmation` (the single-step path).
+   */
+  pending_plan?: {
+    plan_id: string;
+    steps: Array<{
+      step_id: string;
+      order: number;
+      tool: string;
+      arguments: Record<string, any>;
+      preview?: unknown;
+      irreversible: boolean;
+    }>;
   };
 }
 
@@ -251,7 +352,96 @@ export class AIAgentService {
   }
 
   /**
-   * F3 — allowlist efectiva de tools del plan (`tool_agents.tools_allowed`).
+   * R3-A — topes `daily_messages_cap` y `monthly_tokens_cap` de `vex_agent`,
+   * antes de la primera llamada al proveedor. Verifica ambos y, si pasan,
+   * consume 1 mensaje del contador diario. Con `degradation: 'block'` un cap
+   * agotado corta el turno con el mismo error de cuota que el resto
+   * (`SUBSCRIPTION_006`); sin `block` solo se registra. Sin tienda (interno)
+   * no hay metering.
+   */
+  private async enforceVexTurnCaps(storeId: number | undefined): Promise<void> {
+    if (!storeId) return;
+    const [daily, tokens] = await Promise.all([
+      this.subscriptionAccess.checkExtraQuota(
+        storeId,
+        'vex_agent',
+        'daily_messages',
+      ),
+      this.subscriptionAccess.checkExtraQuota(
+        storeId,
+        'vex_agent',
+        'monthly_tokens',
+      ),
+    ]);
+    for (const [counter, status] of [
+      ['daily_messages', daily],
+      ['monthly_tokens', tokens],
+    ] as const) {
+      if (!status.exceeded) continue;
+      this.logger.warn(
+        JSON.stringify({
+          event: 'VEX_CAP_EXCEEDED',
+          storeId,
+          counter,
+          cap: status.cap,
+          used: status.used,
+          degradation: status.degradation,
+        }),
+      );
+      if (status.degradation === 'block') {
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_006, undefined, {
+          feature: 'vex_agent',
+          counter,
+          cap: status.cap,
+          used: status.used,
+        });
+      }
+    }
+    await this.subscriptionAccess.consumeExtraQuota(
+      storeId,
+      'vex_agent',
+      'daily_messages',
+      1,
+      `${RequestContextService.getRequestId() ?? `internal-${randomUUID()}`}:vex-msg`,
+    );
+  }
+
+  /** R3-A — suma los tokens del turno al contador mensual de `vex_agent`. */
+  private async consumeVexTurnTokens(
+    storeId: number | undefined,
+    tokens: number,
+  ): Promise<void> {
+    if (!storeId || !(tokens > 0)) return;
+    try {
+      await this.subscriptionAccess.consumeExtraQuota(
+        storeId,
+        'vex_agent',
+        'monthly_tokens',
+        tokens,
+        `${RequestContextService.getRequestId() ?? `internal-${randomUUID()}`}:vex-tokens`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `VEX_TOKENS_CONSUMED failed for store=${storeId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Metering key for the turn: Vex burns its own `vex_agent` budget, every
+   * other agent (Vexi included) keeps the historical `tool_agents` one.
+   * Unknown or absent keys fall back to `tool_agents` — fail-open on
+   * identity, fail-closed on the gate itself.
+   */
+  private quotaFeatureFor(
+    agentKey: string | undefined,
+  ): 'vex_agent' | 'tool_agents' {
+    return agentKey === 'vex' ? 'vex_agent' : 'tool_agents';
+  }
+
+  /**
+   * F3 — allowlist efectiva de tools del plan (`tools_allowed` de la feature
+   * de cuota del turno: `vex_agent` en turnos Vex, `tool_agents` en el resto).
    *
    * - Sin `storeId` → `null`: llamada interna, sin alcance de plan.
    * - Gate bloqueado (feature deshabilitada → `SUBSCRIPTION_005`, cuota
@@ -270,18 +460,21 @@ export class AIAgentService {
    */
   private async resolvePlanToolAllowlist(
     storeId: number | undefined,
+    agentKey?: string,
   ): Promise<Set<string> | null> {
     if (!storeId) return null;
+    const feature = this.quotaFeatureFor(agentKey);
     try {
       const [gate, config] = await Promise.all([
-        this.subscriptionAccess.canUseAIFeature(storeId, 'tool_agents'),
-        this.subscriptionAccess.getAIFeatureConfig(storeId, 'tool_agents'),
+        this.subscriptionAccess.canUseAIFeature(storeId, feature),
+        this.subscriptionAccess.getAIFeatureConfig(storeId, feature),
       ]);
 
       this.logger.log(
         JSON.stringify({
           event: 'AI_TOOLS_GATE',
           storeId,
+          feature,
           allowed: gate.allowed,
           reason: gate.reason ?? null,
           tools_allowed_declared: Array.isArray(config?.tools_allowed)
@@ -325,14 +518,16 @@ export class AIAgentService {
     storeId: number | undefined,
     toolCallId: string | undefined,
     toolName: string,
+    agentKey?: string,
   ): Promise<void> {
     if (!storeId) return;
+    const feature = this.quotaFeatureFor(agentKey);
     try {
       const base =
         RequestContextService.getRequestId() ?? `internal-${randomUUID()}`;
       await this.subscriptionAccess.consumeAIQuota(
         storeId,
-        'tool_agents',
+        feature,
         1,
         `${base}:tool:${toolCallId || randomUUID()}`,
       );
@@ -340,6 +535,7 @@ export class AIAgentService {
         JSON.stringify({
           event: 'AI_TOOL_CONSUMED',
           storeId,
+          feature,
           tool: toolName,
         }),
       );
@@ -423,6 +619,190 @@ export class AIAgentService {
   }
 
   /**
+   * Local twin of `PlanApprovalService`'s irreversibility rule, for proposing
+   * turns whose surface bound no `classifyProposedSteps`: explicit flag →
+   * domain net → bridge path/verb → unknown fails closed. The approve-time
+   * classification (server, full) re-checks anyway, so a drift here mislabels
+   * the card at worst — never smuggles a step through the token.
+   */
+  private isIrreversibleProposal(
+    toolName: string,
+    args: Record<string, any>,
+  ): boolean {
+    const tool = this.toolRegistry.get(toolName) as
+      | { domain?: string; irreversible?: boolean }
+      | undefined;
+    if (!tool) return true;
+    if (tool.irreversible === true) return true;
+    if (tool.domain && IRREVERSIBLE_DOMAIN_SEGMENTS.has(tool.domain)) {
+      return true;
+    }
+    if (toolName === 'write_endpoint') {
+      const segments = String(args?.path ?? '')
+        .split('/')
+        .filter(Boolean);
+      if (segments.some((s) => IRREVERSIBLE_DOMAIN_SEGMENTS.has(s))) {
+        return true;
+      }
+      if (String(args?.method ?? '').toUpperCase() === 'DELETE') return true;
+    }
+    return false;
+  }
+
+  /**
+   * The sentence closing a Vex turn that recorded a plan: a compact step list
+   * for the transcript (the card carries the full diffs) plus the irreversible
+   * count. Composed server-side for the same reason as `describePendingWrite`:
+   * with writes pending, the model is not trusted to word what happened.
+   */
+  private describePendingPlan(
+    steps: Array<{
+      order: number;
+      tool: string;
+      preview?: unknown;
+      irreversible: boolean;
+    }>,
+  ): string {
+    const labelOf = (tool: string, preview: unknown): string => {
+      const p = preview as
+        | { label?: unknown; target?: unknown }
+        | undefined;
+      const label =
+        typeof p?.label === 'string' && p.label.trim()
+          ? p.label.trim().charAt(0).toLowerCase() + p.label.trim().slice(1)
+          : null;
+      if (label) return label;
+      const target =
+        typeof p?.target === 'string' && p.target.trim()
+          ? p.target.trim()
+          : null;
+      return target ?? tool;
+    };
+    if (steps.length === 1) {
+      // Vex planifica por dentro: la persona ve UNA acción a aprobar, no un plan.
+      const [only] = steps;
+      return `Necesito tu aprobación para ${labelOf(only.tool, only.preview)}.${
+        only.irreversible ? ' Es irreversible.' : ''
+      } Todavía no apliqué nada.`;
+    }
+    const head = `Tengo listo un plan con ${steps.length} pasos`;
+    const list = steps
+      .map((s) => `${s.order}. ${labelOf(s.tool, s.preview)}`)
+      .join('; ');
+    const flagged = steps.filter((s) => s.irreversible).length;
+    const tail =
+      flagged > 0
+        ? ` ${flagged} ${flagged === 1 ? 'necesita' : 'necesitan'} su propia confirmación por ser irreversible.`
+        : '';
+    return `${head}: ${list}.${tail} Todavía no apliqué nada: revísalo y apruébalo de una vez.`;
+  }
+
+  /**
+   * Builds the whole-plan proposal from the turn's recorded writes: classifies
+   * each step, resolves the plan id (hook → active plan snapshot → fresh id),
+   * and persists the ordered hashes so approve validates against the server,
+   * never against the client's re-declaration.
+   */
+  private async buildVexPlanProposal(
+    proposals: Array<{
+      order: number;
+      step_id: string;
+      tool: string;
+      args: Record<string, any>;
+      preview?: unknown;
+    }>,
+    params: AgentRunParams,
+  ): Promise<NonNullable<AgentResult['pending_plan']>> {
+    const hookSteps: AgentProposedPlanStep[] = proposals.map((p) => ({
+      order: p.order,
+      tool: p.tool,
+      args: p.args,
+    }));
+    let reconfirmOrders: Set<number>;
+    if (params.plan_approval?.classifyProposedSteps) {
+      const { reconfirm } =
+        params.plan_approval.classifyProposedSteps(hookSteps);
+      reconfirmOrders = new Set(reconfirm.map((s) => s.order));
+    } else {
+      reconfirmOrders = new Set(
+        hookSteps
+          .filter((s) => this.isIrreversibleProposal(s.tool, s.args))
+          .map((s) => s.order),
+      );
+    }
+    const planId =
+      params.plan_approval?.plan_id ??
+      (await params.plan?.snapshot())?.id ??
+      randomUUID();
+    await params.plan_approval?.saveProposedSteps?.(hookSteps);
+    const steps = proposals.map((p) => ({
+      step_id: p.step_id,
+      order: p.order,
+      tool: p.tool,
+      arguments: p.args,
+      ...(p.preview !== undefined ? { preview: p.preview } : {}),
+      irreversible: reconfirmOrders.has(p.order),
+    }));
+    return { plan_id: planId, steps };
+  }
+
+  /**
+   * Closes a Vex turn that recorded write proposals with the ONE plan frame.
+   * Emits `plan_approval` (plan + steps + coverage), then the narration as a
+   * single text chunk, then `done`.
+   */
+  private async *finalizeVexPlan(input: {
+    proposals: Array<{
+      order: number;
+      step_id: string;
+      tool: string;
+      args: Record<string, any>;
+      preview?: unknown;
+    }>;
+    params: AgentRunParams;
+    totalTokens: number;
+    iteration: number;
+    toolsUsed: AgentResult['tools_used'];
+  }): AsyncGenerator<AIStreamChunk, AgentResult> {
+    const { proposals, params, totalTokens, iteration, toolsUsed } = input;
+    const context = RequestContextService.getContext();
+    const pendingPlan = await this.buildVexPlanProposal(proposals, params);
+    this.eventEmitter.emit('ai.agent.completed', {
+      iterations: iteration,
+      tools_used: toolsUsed.length,
+      total_tokens: totalTokens,
+      store_id: context?.store_id,
+    });
+    yield {
+      type: 'plan_approval',
+      plan_approval: {
+        plan_id: pendingPlan.plan_id,
+        steps: pendingPlan.steps,
+        covered_steps: pendingPlan.steps
+          .filter((s) => !s.irreversible)
+          .map((s) => s.order),
+        reconfirm_steps: pendingPlan.steps
+          .filter((s) => s.irreversible)
+          .map((s) => s.order),
+      },
+    };
+    const narration = this.describePendingPlan(pendingPlan.steps);
+    yield { type: 'text', content: narration };
+    yield {
+      type: 'done',
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens },
+    };
+    return {
+      content: narration,
+      iterations: iteration,
+      tools_used: toolsUsed,
+      total_tokens: totalTokens,
+      success: true,
+      pending_plan: pendingPlan,
+    };
+  }
+
+  /**
    * What is still owed by the plan, phrased for the internal nudge, or null when
    * the turn may end (no open step, everything verified, or the plan is waiting
    * on the person).
@@ -453,6 +833,10 @@ export class AIAgentService {
     result: string,
     params: AgentRunParams,
   ): Promise<string> {
+    // Vex-only: its 40-iteration turns over the full catalog are the ones that
+    // drown in 100KB query results. Vexi keeps full results — its trace,
+    // transcript and model all predate compaction and behave unchanged.
+    if (params.agent_key !== 'vex') return result;
     if (result.length <= TOOL_RESULT_COMPACT_CHARS) return result;
     let rows: number | null = null;
     try {
@@ -617,15 +1001,44 @@ export class AIAgentService {
       : PLANNED_MAX_ITERATIONS;
     const plannedTimeout = isVex ? VEX_PLANNED_TIMEOUT_MS : PLANNED_TIMEOUT_MS;
     // Not `const`: a declared plan widens it mid-turn (see PLANNED_MAX_ITERATIONS).
-    let maxIterations =
-      params.max_iterations ||
-      (isVex ? VEX_MAX_ITERATIONS : this.DEFAULT_MAX_ITERATIONS);
+    // The row value comes from superadmin (`ai_agents.max_iterations`); absent,
+    // the agent default holds (Vex 40, everyone else 10).
+    const baseDefault = isVex ? VEX_MAX_ITERATIONS : this.DEFAULT_MAX_ITERATIONS;
+    let maxIterations = params.max_iterations || baseDefault;
+    // Plan-amplified budget: the row value (or the agent default) plus the
+    // plan headroom, capped at the superadmin absolute max. `Math.min`, not a
+    // fixed `Math.max`: forcing every planned turn up to a constant would
+    // override a superadmin who deliberately set a lower row value, and would
+    // let a high row value grow past the ceiling the DTO enforces for new rows.
+    const plannedBudget = Math.min(
+      maxIterations + (plannedMax - baseDefault),
+      SUPERADMIN_MAX_ITERATIONS,
+    );
     // Widened alongside the iteration budget, and for a second reason: a turn
     // that drives the interface now blocks up to 25 s per command waiting for the
     // browser, so two UI steps alone can consume the whole one-minute default and
     // abort a turn that was working correctly.
+    const agentTimeoutMs =
+      typeof params.agent_timeout_seconds === 'number' &&
+      params.agent_timeout_seconds > 0
+        ? Math.min(
+            Math.floor(params.agent_timeout_seconds * 1000),
+            AGENT_TIMEOUT_CEILING_MS,
+          )
+        : undefined;
     let timeoutMs =
-      params.timeout_ms || (isVex ? VEX_TIMEOUT_MS : this.DEFAULT_TIMEOUT_MS);
+      agentTimeoutMs ??
+      (params.timeout_ms || (isVex ? VEX_TIMEOUT_MS : this.DEFAULT_TIMEOUT_MS));
+    // Widening for an open plan. Without a row timeout it is the historical
+    // `max(current, planned)`; with one it is capped at 600 s and never drops
+    // below the row value.
+    const widenTimeout = (current: number): number =>
+      agentTimeoutMs === undefined
+        ? Math.max(current, plannedTimeout)
+        : Math.min(
+            Math.max(current, plannedTimeout, agentTimeoutMs),
+            AGENT_TIMEOUT_CEILING_MS,
+          );
 
     const context = RequestContextService.getContext();
 
@@ -658,7 +1071,10 @@ export class AIAgentService {
     // store_id (llamadas internas, cron, super-admin) se conserva el
     // comportamiento actual. `null` = sin alcance de plan; un `Set` (quizá
     // vacío) = alcance aplicado.
-    const planAllowed = await this.resolvePlanToolAllowlist(context?.store_id);
+    const planAllowed = await this.resolvePlanToolAllowlist(
+      context?.store_id,
+      params.agent_key,
+    );
     const toolDefinitions =
       planAllowed === null || planAllowed.has('*')
         ? permissionTools
@@ -699,8 +1115,8 @@ export class AIAgentService {
     // An already-active plan (a continuation turn) gets the wide budget from the
     // first iteration instead of waiting for a propose_plan that will not come.
     if (params.plan && (await params.plan.snapshot())) {
-      maxIterations = Math.max(maxIterations, plannedMax);
-      timeoutMs = Math.max(timeoutMs, plannedTimeout);
+      maxIterations = Math.max(maxIterations, plannedBudget);
+      timeoutMs = widenTimeout(timeoutMs);
     }
 
     const messages: AIMessage[] = [];
@@ -755,6 +1171,18 @@ export class AIAgentService {
 
     const toolsUsed: AgentResult['tools_used'] = [];
     let pendingConfirmation: AgentResult['pending_confirmation'];
+    /**
+     * Write proposals recorded by a Vex PROPOSING turn (no plan token yet).
+     * They finalize into ONE `plan_approval` frame — never one card per write
+     * — once the model stops calling tools. Stays empty on every other turn.
+     */
+    const vexProposals: Array<{
+      order: number;
+      step_id: string;
+      tool: string;
+      args: Record<string, any>;
+      preview?: unknown;
+    }> = [];
     let totalTokens = 0;
     let iteration = 0;
     let timedOut = false;
@@ -762,6 +1190,13 @@ export class AIAgentService {
     // Time spent blocked on the browser (`ui_*` results). It is the person's
     // screen latency, not the model's work, so it must not eat the turn budget.
     let waitedMs = 0;
+
+    // R3-A: vex caps gate the turn BEFORE the first provider call. Outside the
+    // try on purpose: a cap breach is a quota error the caller surfaces, not a
+    // loop failure to narrate.
+    if (isVex) {
+      await this.enforceVexTurnCaps(context?.store_id);
+    }
 
     try {
       while (iteration < maxIterations) {
@@ -847,6 +1282,34 @@ export class AIAgentService {
 
         totalTokens += response.usage?.totalTokens || 0;
 
+        // Degenerate output ("ellsellsells…" up to the token cap). `run()` hands
+        // back the finished completion, so there is no provider call left to
+        // abort here; what can still be avoided is painting and persisting it.
+        const degeneration = detectDegenerateRepetition(response.content ?? '');
+        if (degeneration.degenerate) {
+          this.logger.error(
+            JSON.stringify({
+              event: 'VEX_DEGENERATE_OUTPUT',
+              storeId: context?.store_id,
+              model: response.model,
+              chars: (response.content ?? '').length,
+              cut_at: degeneration.cutAt,
+              agent_key: params.agent_key,
+              iteration,
+            }),
+          );
+          yield { type: 'error', error: DEGENERATE_OUTPUT_MESSAGE };
+          return {
+            content: '',
+            iterations: iteration,
+            tools_used: toolsUsed,
+            total_tokens: totalTokens,
+            success: false,
+            error: DEGENERATE_OUTPUT_MESSAGE,
+            degenerate: true,
+          };
+        }
+
         // If finish_reason is 'length', the response was truncated
         if (response.finish_reason === 'length') {
           this.logger.warn(
@@ -858,6 +1321,18 @@ export class AIAgentService {
         // providers answer 'stop' with tool_calls attached, and closing the turn
         // on that dropped the calls and left compound requests half done.
         if (!response.tool_calls?.length) {
+          // A Vex turn that recorded write proposals ends HERE with the single
+          // plan frame — never nudged back (the person must approve first) and
+          // never closed as prose (the proposals would be lost with it).
+          if (isVex && vexProposals.length > 0) {
+            return yield* this.finalizeVexPlan({
+              proposals: vexProposals,
+              params,
+              totalTokens,
+              iteration,
+              toolsUsed,
+            });
+          }
           // The model spoke while the plan still has open work: push it back
           // into the loop instead of ending the turn on a status sentence.
           if (
@@ -954,8 +1429,8 @@ export class AIAgentService {
               planContent = outcome.result;
 
               if (toolName === PROPOSE_PLAN_TOOL) {
-                maxIterations = Math.max(maxIterations, plannedMax);
-                timeoutMs = Math.max(timeoutMs, plannedTimeout);
+                maxIterations = Math.max(maxIterations, plannedBudget);
+                timeoutMs = widenTimeout(timeoutMs);
               }
 
               if (outcome.endTurn) {
@@ -971,6 +1446,22 @@ export class AIAgentService {
                   store_id: context?.store_id,
                 });
                 const text = outcome.endTurn.text;
+                // A question asked after recording writes must not drop them:
+                // the frame goes out first, then the question it may answer.
+                let pendingPlan: AgentResult['pending_plan'];
+                if (isVex && vexProposals.length > 0) {
+                  pendingPlan = await this.buildVexPlanProposal(
+                    vexProposals,
+                    params,
+                  );
+                  yield {
+                    type: 'plan_approval',
+                    plan_approval: {
+                      plan_id: pendingPlan.plan_id,
+                      steps: pendingPlan.steps,
+                    },
+                  };
+                }
                 yield { type: 'text', content: text };
                 yield {
                   type: 'done',
@@ -982,6 +1473,7 @@ export class AIAgentService {
                   tools_used: toolsUsed,
                   total_tokens: totalTokens,
                   success: true,
+                  ...(pendingPlan ? { pending_plan: pendingPlan } : {}),
                 };
               }
             } catch (planError: any) {
@@ -994,6 +1486,45 @@ export class AIAgentService {
               content: planContent,
               tool_call_id: toolCall.id,
             });
+            continue;
+          }
+
+          // Execution backstop for the offered catalog. The model may only run
+          // tools from the set it was offered this turn (permissions ∩ plan ∩
+          // agent scope − denies). A call outside that set — a hallucinated
+          // name or a tool denied for this agent, e.g. `ui_navigate` in a Vex
+          // turn — is rejected HERE, before the clientSide branch and before
+          // `executeTool`: nothing reaches the browser, nothing executes,
+          // nothing consumes quota. The rejection goes back as a tool result
+          // so the model can correct itself on the next iteration.
+          //
+          // R3-A: this runs BEFORE the `ai.agent.tool_executed` event and the
+          // `tool_call` frame. The browser dispatches UI commands off that
+          // frame, so emitting it first let a not-offered `ui_*` reach the
+          // screen even though execution was rejected afterwards. A rejected
+          // call now produces only the error `tool_result`, never a `tool_call`.
+          if (!offeredNames.has(toolName)) {
+            const notAllowed =
+              `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
+              `está en el catálogo ofrecido en este turno. Usa solo las ` +
+              `herramientas ofrecidas; si ninguna sirve, dilo y pide lo que falte.`;
+            messages.push({
+              role: 'tool',
+              content: JSON.stringify({
+                error: notAllowed,
+                error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
+              }),
+              tool_call_id: toolCall.id,
+            });
+            yield {
+              type: 'tool_result',
+              tool: {
+                id: toolCall.id,
+                name: toolName,
+                summary: notAllowed.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                failed: true,
+              },
+            };
             continue;
           }
 
@@ -1128,6 +1659,7 @@ export class AIAgentService {
               context?.store_id,
               toolCall.id,
               toolName,
+              params.agent_key,
             );
 
             // A plan is a promise about the rest of the turn, so the turn is
@@ -1136,8 +1668,8 @@ export class AIAgentService {
             // budget set before the first provider call would have to guess, and
             // guessing high makes every simple question slower.
             if (toolName === PROPOSE_PLAN_TOOL) {
-              maxIterations = Math.max(maxIterations, plannedMax);
-              timeoutMs = Math.max(timeoutMs, plannedTimeout);
+              maxIterations = Math.max(maxIterations, plannedBudget);
+              timeoutMs = widenTimeout(timeoutMs);
             }
 
             messages.push({
@@ -1215,7 +1747,9 @@ export class AIAgentService {
               // proposal below. The inner single-use token keeps the choke
               // point honest: permissions + roles are re-validated and the
               // handler re-checks its preconditions on the way through.
-              if (params.plan_approval) {
+              // Token-gated (not hook-gated): a proposing turn carries the
+              // hook for its classify/save side and must accumulate below.
+              if (params.plan_approval?.token) {
                 let approved: Awaited<
                   ReturnType<AgentPlanApprovalHook['redeem']>
                 > = 'missing';
@@ -1254,6 +1788,7 @@ export class AIAgentService {
                     context?.store_id,
                     toolCall.id,
                     toolName,
+                    params.agent_key,
                   );
                   messages.push({
                     role: 'tool',
@@ -1274,6 +1809,69 @@ export class AIAgentService {
                   }
                   continue;
                 }
+              }
+
+              // Vex proposing turn (no token): the proposal is RECORDED and the
+              // turn keeps going, so one turn yields ONE plan frame with every
+              // write step instead of one card per write. Approval (one click)
+              // and per-step execution happen after, through the plan token.
+              // Executing turns (token present, redeem answered non-ok) fall
+              // through to the single card below — re-planning them would orphan
+              // the approval they run under.
+              if (isVex && !params.plan_approval?.token) {
+                // Una escritura por turno: la PRIMERA se propone (plan de 1
+                // paso) y el turno se pausa tras el for. Las demás escrituras de
+                // la misma iteración NO se registran ni se ejecutan: el modelo
+                // las re-propone en la continuación, después de la aprobación.
+                if (vexProposals.length >= 1) {
+                  messages.push({
+                    role: 'tool',
+                    content: JSON.stringify({
+                      deferred: true,
+                      message:
+                        'Pendiente: esta escritura se propondrá tras la aprobación de la anterior. No se ejecutó; vuelve a proponerla en el siguiente turno.',
+                    }),
+                    tool_call_id: toolCall.id,
+                  });
+                  yield {
+                    type: 'tool_result',
+                    tool: {
+                      id: toolCall.id,
+                      name: toolName,
+                      summary: 'Pendiente de la aprobación anterior.',
+                    },
+                  };
+                  continue;
+                }
+                const order = vexProposals.length + 1;
+                vexProposals.push({
+                  order,
+                  step_id: `s${order}`,
+                  tool: toolName,
+                  args: toolArgs,
+                  preview: details.preview,
+                });
+                messages.push({
+                  role: 'tool',
+                  content: JSON.stringify({
+                    requires_confirmation: true,
+                    proposal_recorded: true,
+                    step_order: order,
+                    preview: details?.preview,
+                    next_step:
+                      'Esta escritura quedó propuesta y espera la aprobación de la persona. NO la repitas ni pidas aprobación en palabras; el turno se pausa aquí y continuarás con lo que falte cuando la apruebe.',
+                  }),
+                  tool_call_id: toolCall.id,
+                });
+                yield {
+                  type: 'tool_result',
+                  tool: {
+                    id: toolCall.id,
+                    name: toolName,
+                    summary: `Paso ${order} registrado en el plan.`,
+                  },
+                };
+                continue;
               }
 
               pendingConfirmation = {
@@ -1307,7 +1905,7 @@ export class AIAgentService {
                   arguments: toolArgs,
                   confirmation_token: details.confirmation_token,
                   preview: details?.preview,
-                  ...(params.plan_approval
+                  ...(params.plan_approval?.plan_id
                     ? { plan_id: params.plan_approval.plan_id }
                     : {}),
                 },
@@ -1336,6 +1934,19 @@ export class AIAgentService {
               },
             };
           }
+        }
+
+        // Vex: la escritura propuesta (una por turno) cierra el turno con su
+        // frame `plan_approval` de 1 paso. Lecturas de la misma iteración ya
+        // corrieron arriba; la continuación aprobada retoma lo que falte.
+        if (isVex && vexProposals.length > 0) {
+          return yield* this.finalizeVexPlan({
+            proposals: vexProposals,
+            params,
+            totalTokens,
+            iteration,
+            toolsUsed,
+          });
         }
 
         // Un turno que propone un cambio TERMINA ahí.
@@ -1381,6 +1992,19 @@ export class AIAgentService {
             pending_confirmation: pendingConfirmation,
           };
         }
+      }
+
+      // Budget exhausted with recorded proposals: the plan frame goes out BEFORE
+      // any plan_continue or closing text — ending without it would silently
+      // drop every proposal of the turn.
+      if (isVex && vexProposals.length > 0) {
+        return yield* this.finalizeVexPlan({
+          proposals: vexProposals,
+          params,
+          totalTokens,
+          iteration,
+          toolsUsed,
+        });
       }
 
       // Budget exhausted (iterations or clock) with the plan still open: do not
@@ -1478,6 +2102,12 @@ export class AIAgentService {
         success: false,
         error: error.message,
       };
+    } finally {
+      // R3-A: tokens (input + output) of the whole turn, whichever way it
+      // ended, into the monthly counter. Never throws.
+      if (isVex) {
+        await this.consumeVexTurnTokens(context?.store_id, totalTokens);
+      }
     }
   }
 }

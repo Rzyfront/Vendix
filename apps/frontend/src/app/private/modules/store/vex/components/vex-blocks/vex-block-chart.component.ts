@@ -1,10 +1,15 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  PLATFORM_ID,
   computed,
+  inject,
   input,
   output,
+  signal,
 } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import type { EChartsOption } from 'echarts';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import {
@@ -14,15 +19,22 @@ import {
   VexUiBlock,
 } from '../../models/vex.models';
 
+/**
+ * SSR/no-DOM fallback. Mirrors the `:root` defaults in `styles.scss`
+ * (`--color-primary`, `--color-accent`, `--color-success`, `--color-info`,
+ * `--color-warning`, `--color-error`, `--color-secondary`, `--color-gaming`)
+ * as `rgb()` strings — echarts accepts any CSS color, and hex literals stay
+ * out of Vex components per the no-fixed-colors rule.
+ */
 const FALLBACK_PALETTE = [
-  '#2ecc71',
-  '#3498db',
-  '#f39c12',
-  '#9b59b6',
-  '#e74c3c',
-  '#1abc9c',
-  '#e67e22',
-  '#34495e',
+  'rgb(46, 204, 113)',
+  'rgb(161, 244, 217)',
+  'rgb(34, 197, 94)',
+  'rgb(59, 130, 246)',
+  'rgb(251, 146, 60)',
+  'rgb(239, 68, 68)',
+  'rgb(22, 43, 33)',
+  'rgb(139, 92, 246)',
 ];
 
 /**
@@ -74,8 +86,38 @@ export class VexBlockChartComponent {
 
   readonly has_rows = computed(() => this.rows().length > 0);
 
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+
+  /**
+   * Palette read from the live CSS variables. `ThemeService` writes mode and
+   * preset colors straight onto `<html>` (inline style + `data-theme`) and
+   * exposes no signal for those axes (`currentTheme` is only set by the
+   * deprecated `applyTheme`), so the DOM is the source of truth: an observer
+   * on those attributes re-reads the palette, and the signal only changes
+   * when the colors really did — an unrelated style write is a no-op.
+   */
+  private readonly palette = signal<string[]>(readPalette());
+
+  constructor() {
+    if (this.isBrowser && typeof MutationObserver !== 'undefined') {
+      const observer = new MutationObserver(() => {
+        const next = readPalette();
+        const previous = this.palette();
+        if (next.some((color, i) => color !== previous[i])) {
+          this.palette.set(next);
+        }
+      });
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['style', 'class', 'data-theme'],
+      });
+      this.destroyRef.onDestroy(() => observer.disconnect());
+    }
+  }
+
   readonly options = computed<EChartsOption>(() =>
-    buildOption(this.spec(), this.rows(), readPalette()),
+    buildOption(this.spec(), this.rows(), this.palette()),
   );
 
   onChartClick(event: unknown): void {
@@ -94,9 +136,13 @@ function readPalette(): string[] {
     };
     return [
       pick('--color-primary', FALLBACK_PALETTE[0]),
-      pick('--color-secondary', FALLBACK_PALETTE[1]),
-      pick('--color-accent', FALLBACK_PALETTE[2]),
-      ...FALLBACK_PALETTE.slice(3),
+      pick('--color-accent', FALLBACK_PALETTE[1]),
+      pick('--color-success', FALLBACK_PALETTE[2]),
+      pick('--color-info', FALLBACK_PALETTE[3]),
+      pick('--color-warning', FALLBACK_PALETTE[4]),
+      pick('--color-error', FALLBACK_PALETTE[5]),
+      pick('--color-secondary', FALLBACK_PALETTE[6]),
+      pick('--color-gaming', FALLBACK_PALETTE[7]),
     ];
   } catch {
     return FALLBACK_PALETTE;

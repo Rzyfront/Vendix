@@ -388,8 +388,16 @@ jobs:
           --include='**/pos/utils/document-format-hint.util.spec.ts'
           --include='**/pos/utils/phone-format-hint.util.spec.ts'
           --include='**/pos/services/pos-cart.service.spec.ts'
+          --include='**/pos/services/pos-payment.service.spec.ts'
+          --include='**/pos/services/pos-ticket.service.spec.ts'
+          --include='**/pos/components/pos-order-confirmation.component.spec.ts'
+          --include='**/shared/services/print/document-print.service.spec.ts'
           --include='**/analytics/config/analytics-registry.spec.ts'
           --include='**/orders/pages/order-details/can-resend.spec.ts'
+          --include='**/orders/components/order-payment-modal/order-payment-modal.component.spec.ts'
+          --include='**/orders/components/order-refund-modal/order-refund-modal.component.spec.ts'
+          --include='**/orders/pages/order-details/cancel-order-default-disposition.spec.ts'
+          --include='**/shared/components/item-cancellation-modal/item-cancellation-modal.component.spec.ts'
           --include='**/orders/utils/fiscal-alert-dictionary.spec.ts'
           --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
           --include='**/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts'
@@ -398,6 +406,10 @@ jobs:
           --include='**/settings/shipping/components/method-zones-inline/method-zones-inline.component.spec.ts'
           --include='**/shared/components/payment-collector/payment-collector.component.spec.ts'
           --include='**/store/inventory/pop/**/*.spec.ts'
+          --include='**/reports/services/reports-data.service.spec.ts'
+          --include='**/reports/state/reports.effects.spec.ts'
+          --include='**/shared/directives/pull-to-refresh.directive.spec.ts'
+          --include='**/reviews/review-summary.component.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
@@ -460,6 +472,44 @@ jobs:
       - name: nest build
         working-directory: apps/backend
         run: npm run build
+
+  backend-test-pr-regressions:
+    name: Backend Tests (PR regressions)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    timeout-minutes: 30
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client (regresiones de PR)
+        working-directory: apps/backend
+        run: npx prisma generate
+      # Additive gate: existing POS/products jobs remain unchanged. Run each
+      # touched spec separately so an unmatched path cannot hide behind another.
+      - name: Ejecutar cada spec backend cambiado por esta PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          list="$RUNNER_TEMP/backend-pr-regression-specs.txt"
+          git diff --name-only --diff-filter=ACMRT "$BASE_SHA" HEAD -- ':(glob)apps/backend/src/**/*.spec.ts' > "$list"
+          if [[ ! -s "$list" ]]; then
+            echo "No backend specs changed; existing backend gates still apply."
+          fi
+          while IFS= read -r spec; do
+            test -f "$spec"
+            echo "Regression spec: $spec"
+            (cd apps/backend && npm run test:path -- "${spec#apps/backend/}")
+          done < "$list"
 
   backend-test-scoped:
     # F-123 y F-113 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832).

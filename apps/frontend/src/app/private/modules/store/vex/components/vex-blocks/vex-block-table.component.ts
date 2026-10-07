@@ -244,7 +244,8 @@ export class VexBlockTableComponent {
     const items = [...this.filtered()];
     if (!key) return items;
     const dir = this.sort_dir() === 'asc' ? 1 : -1;
-    return items.sort((a, b) => compareValues(a.row[key], b.row[key]) * dir);
+    const locale = this.date_locale();
+    return items.sort((a, b) => compareValues(a.row[key], b.row[key], locale) * dir);
   });
 
   readonly total_rows = computed(() => this.sorted().length);
@@ -280,6 +281,34 @@ export class VexBlockTableComponent {
       general?: { timezone?: string };
     } | null;
     return settings?.general?.timezone || 'America/Bogota';
+  });
+
+  /**
+   * Number/date locale from the STORE, never a hardcoded `es-CO`: once the
+   * currency resolves, grouping follows the store's `format_style` (same
+   * mapping `CurrencyFormatService` uses); before that, `general.language`.
+   */
+  private readonly number_locale = computed(() => {
+    const settings = this.auth.storeSettings() as {
+      general?: { language?: string };
+    } | null;
+    return storeNumberLocale(
+      settings?.general?.language,
+      this.currencyFormat.currencyFormatStyle(),
+      this.currencyFormat.resolution() === 'resolved',
+    );
+  });
+
+  /**
+   * Linguistic locale (month names, collation) from `general.language` only:
+   * the grouping locales above (`de-DE`/`fr-FR`) would render month
+   * abbreviations in the wrong language.
+   */
+  private readonly date_locale = computed(() => {
+    const settings = this.auth.storeSettings() as {
+      general?: { language?: string };
+    } | null;
+    return settings?.general?.language === 'en' ? 'en-US' : 'es-CO';
   });
 
   constructor() {
@@ -365,14 +394,14 @@ export class VexBlockTableComponent {
           : String(value);
       case 'number':
         return numeric !== null
-          ? numeric.toLocaleString('es-CO', { maximumFractionDigits: 4 })
+          ? numeric.toLocaleString(this.number_locale(), { maximumFractionDigits: 4 })
           : String(value);
       case 'date':
         return typeof value === 'string' ? formatDateOnlyUTC(value) : String(value);
       case 'datetime': {
         const parsed = value instanceof Date ? value : new Date(String(value));
         if (isNaN(parsed.getTime())) return String(value);
-        return parsed.toLocaleString('es-CO', {
+        return parsed.toLocaleString(this.date_locale(), {
           timeZone: this.timezone(),
           hourCycle: 'h23',
           day: '2-digit',
@@ -396,10 +425,34 @@ export class VexBlockTableComponent {
   }
 }
 
-function compareValues(a: unknown, b: unknown): number {
+function compareValues(a: unknown, b: unknown, locale: string): number {
   if (a === b) return 0;
   if (a === null || a === undefined || a === '') return 1;
   if (b === null || b === undefined || b === '') return -1;
   if (typeof a === 'number' && typeof b === 'number') return a - b;
-  return String(a).localeCompare(String(b), 'es-CO', { numeric: true });
+  return String(a).localeCompare(String(b), locale, { numeric: true });
+}
+
+/**
+ * Store-driven `Intl` locale for plain numbers. Mirrors the service-private
+ * `getLocaleForStyle` mapping so grouping matches the store's money; the
+ * language fallback keeps pre-resolution renders stable (`es-CO` groups like
+ * `de-DE`, so the default COP tenant sees no flip when it resolves).
+ */
+function storeNumberLocale(
+  language: string | undefined,
+  format_style: string,
+  resolved: boolean,
+): string {
+  if (resolved) {
+    switch (format_style) {
+      case 'dot_comma':
+        return 'de-DE';
+      case 'space_comma':
+        return 'fr-FR';
+      default:
+        return 'en-US';
+    }
+  }
+  return language === 'en' ? 'en-US' : 'es-CO';
 }

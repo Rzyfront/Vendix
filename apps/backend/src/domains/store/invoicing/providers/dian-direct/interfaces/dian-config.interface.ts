@@ -48,6 +48,7 @@ export interface DianConfigDecrypted {
    * alongside the S3 key rather than through the encryption envelope.
    */
   certificate_kms_key_id: string | null;
+  certificate_fingerprint?: string | null;
   certificate_expiry: Date | null;
   environment: 'test' | 'production';
   enablement_status:

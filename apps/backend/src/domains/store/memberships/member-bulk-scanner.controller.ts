@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  HttpCode,
   HttpException,
+  HttpStatus,
   Post,
   UploadedFile,
   UseGuards,
@@ -14,6 +16,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { MemberBulkScannerService } from './member-bulk-scanner.service';
+import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
 import {
   CommitMemberRosterDto,
   RosterScanResult,
@@ -50,6 +53,7 @@ export class MemberBulkScannerController {
 
   constructor(
     private readonly scannerService: MemberBulkScannerService,
+    private readonly aiScanJobs: AiScanJobService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -63,6 +67,9 @@ export class MemberBulkScannerController {
     );
   }
 
+  /**
+   * @deprecated Usar `POST bulk-scan/async` (504 tras 60 s de proxy).
+   */
   @Post()
   @Permissions('store:memberships:bulk_import')
   @UseInterceptors(
@@ -94,6 +101,29 @@ export class MemberBulkScannerController {
       );
     } catch (error) {
       this.fail(error, 'Error al escanear el padrón');
+    }
+  }
+
+  @Post('async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('store:memberships:bulk_import')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MemberBulkScannerController.MAX_FILE_BYTES },
+    }),
+  )
+  async scanAsync(@UploadedFile() file?: Express.Multer.File) {
+    try {
+      this.scannerService.assertValidFile(file);
+      const { job_id } = await this.aiScanJobs.enqueue(
+        'member_roster',
+        [this.scannerService.toScanFile(file!)],
+        {},
+      );
+      return this.responseService.success({ job_id }, 'Escaneo encolado');
+    } catch (error) {
+      this.fail(error, 'Error al encolar el escaneo del padrón');
     }
   }
 

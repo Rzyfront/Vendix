@@ -143,6 +143,14 @@ describe('reporting.tools · A-1 export_report / A-2 analyze_report', () => {
       expect(description).toContain('analyze_report');
     });
 
+    it('A-1 encadena vex_render_file por s3_key, nunca URL firmada', () => {
+      const { tools } = buildTools();
+      const description = getTool(tools, 'export_report').description;
+      expect(description).toContain('vex_render_file');
+      expect(description).toContain('s3_key');
+      expect(description).toContain('jamás se persiste');
+    });
+
     it('A-2 declara que el modelo nunca recalcula', () => {
       const { tools } = buildTools();
       const description = getTool(tools, 'analyze_report').description;
@@ -274,11 +282,18 @@ describe('reporting.tools · A-1 export_report / A-2 analyze_report', () => {
         report_id: 'sales-summary',
         file_name: 'sales-summary-2026-08-01-a-2026-08-31.xlsx',
         size_kb: 2,
+        s3_key: expect.stringMatching(
+          /^vexi-reports\/stores\/7\/.+\.xlsx$/,
+        ),
         download_url: 'https://s3.test/presigned/sales-summary.xlsx',
         expires_in_minutes: 15,
         note: expect.stringContaining('vence en 15 minutos'),
       });
       expect(deps.s3.uploadFile).toHaveBeenCalledTimes(1);
+      // Lo que se devuelve como s3_key es exactamente lo que se subió:
+      // el bloque file lo referencia y la URL firmada jamás se persiste.
+      expect(deps.s3.uploadFile.mock.calls[0][1]).toBe(answer.s3_key);
+      expect(answer.note).toContain('vex_render_file');
       const calledUrl = String(fetchMock.mock.calls[0][0]);
       expect(calledUrl).toContain('store/analytics/sales/export');
       expect(fetchMock.mock.calls[0][1].headers.Accept).toContain(

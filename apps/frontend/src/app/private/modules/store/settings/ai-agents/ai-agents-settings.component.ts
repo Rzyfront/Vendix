@@ -25,8 +25,8 @@ type AiAgentsTab = 'vexi' | 'vex';
   template: `
     <div class="w-full max-w-3xl">
       <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">Agentes IA</h1>
-        <p class="text-gray-600">
+        <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2">Agentes IA</h1>
+        <p class="text-[var(--color-text-secondary)]">
           Los asistentes de inteligencia artificial de tu tienda. Cada uno se
           activa por separado y solo lo configuran el propietario y los
           administradores.
@@ -34,7 +34,7 @@ type AiAgentsTab = 'vexi' | 'vex';
       </div>
 
       <div
-        class="flex gap-1 rounded-lg border bg-gray-50 p-1 mb-6"
+        class="flex gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-secondary)] p-1 mb-6"
         role="tablist"
         aria-label="Agentes IA"
       >
@@ -47,9 +47,9 @@ type AiAgentsTab = 'vexi' | 'vex';
           class="flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors"
           [class.bg-surface]="activeTab() === 'vexi'"
           [class.shadow-sm]="activeTab() === 'vexi'"
-          [class.text-gray-900]="activeTab() === 'vexi'"
-          [class.text-gray-500]="activeTab() !== 'vexi'"
-          [class.hover:text-gray-900]="activeTab() !== 'vexi'"
+          [class.text-[var(--color-text-primary)]]="activeTab() === 'vexi'"
+          [class.text-[var(--color-text-secondary)]]="activeTab() !== 'vexi'"
+          [class.hover:text-[var(--color-text-primary)]]="activeTab() !== 'vexi'"
         >
           <app-icon name="bot" [size]="16" />
           Vexi
@@ -63,9 +63,9 @@ type AiAgentsTab = 'vexi' | 'vex';
           class="flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors"
           [class.bg-surface]="activeTab() === 'vex'"
           [class.shadow-sm]="activeTab() === 'vex'"
-          [class.text-gray-900]="activeTab() === 'vex'"
-          [class.text-gray-500]="activeTab() !== 'vex'"
-          [class.hover:text-gray-900]="activeTab() !== 'vex'"
+          [class.text-[var(--color-text-primary)]]="activeTab() === 'vex'"
+          [class.text-[var(--color-text-secondary)]]="activeTab() !== 'vex'"
+          [class.hover:text-[var(--color-text-primary)]]="activeTab() !== 'vex'"
         >
           <app-icon name="sparkles" [size]="16" />
           Vex

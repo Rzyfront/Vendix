@@ -9,7 +9,10 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, of } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Subscription, catchError, of } from 'rxjs';
+
+import { parseApiError } from '../../../core/utils/parse-api-error';
 
 import { AiReviewAckComponent } from '../ai-review-ack/ai-review-ack.component';
 import { BadgeComponent, BadgeVariant } from '../badge/badge.component';
@@ -252,6 +255,13 @@ interface ReviewSection {
             Extrayendo Software ID, PIN, Test Set ID, NIT y la resolución de
             pruebas.
           </p>
+          <p class="relative z-10 max-w-[320px] text-center text-xs text-text-secondary">
+            @if (scanStalled()) {
+              Está tardando más de lo normal; seguimos procesando el documento.
+            } @else {
+              Esto puede tardar unos minutos. No cierres la ventana.
+            }
+          </p>
         </div>
       }
 
@@ -479,6 +489,9 @@ export class DianHabilitationScannerModalComponent {
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
   readonly isScanning = signal(false);
+  /** true cuando el job lleva más de ~60 s sin terminar. */
+  readonly scanStalled = signal(false);
+  private scanSub: Subscription | null = null;
   readonly result = signal<DianHabilitationScanResult | null>(null);
 
   /** Verificación obligatoria de lo que precargó la IA. */
@@ -693,10 +706,13 @@ export class DianHabilitationScannerModalComponent {
     this.currentStep.set(2);
     this.isScanning.set(true);
 
-    this.scanner
+    this.scanSub?.unsubscribe();
+    this.scanStalled.set(false);
+    this.scanSub = this.scanner
       .scanHabilitation(
         picked.map((item) => item.file),
         this.scope(),
+        { onStall: () => this.scanStalled.set(true) },
       )
       .pipe(
         catchError((err: unknown) => {
@@ -761,6 +777,9 @@ export class DianHabilitationScannerModalComponent {
     this.currentStep.set(1);
     this.files.set([]);
     this.fileError.set(null);
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.scanStalled.set(false);
     this.isScanning.set(false);
     this.result.set(null);
     // Obligatorio: el contenido proyectado en app-modal no se destruye al
@@ -785,11 +804,7 @@ export class DianHabilitationScannerModalComponent {
   }
 
   private extractErrorMessage(err: unknown): string {
-    const fallback = 'No se pudo analizar la habilitación. Inténtalo de nuevo.';
-    if (err && typeof err === 'object') {
-      const e = err as { error?: { message?: string }; message?: string };
-      return e.error?.message || e.message || fallback;
-    }
-    return fallback;
+    if (err instanceof HttpErrorResponse) return parseApiError(err).userMessage;
+    return (err as Error | null)?.message || 'No se pudo escanear el documento';
   }
 }

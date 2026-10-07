@@ -70,6 +70,17 @@ export function defaultAIFeatureFlags(): Required<AIFeatureFlags> {
       degradation: 'block',
       period: 'monthly',
     },
+    // Costly feature: starts OFF. The tool budget is the quota the gate
+    // enforces (`FEATURE_QUOTA_CONFIG.vex_agent`); the token/message caps
+    // travel alongside for the turn-level accounting.
+    vex_agent: {
+      enabled: false,
+      monthly_tool_calls_cap: 5000,
+      monthly_tokens_cap: 100000,
+      daily_messages_cap: 100,
+      degradation: 'block',
+      period: 'monthly',
+    },
   };
 }
 
@@ -154,6 +165,8 @@ export function formatFeatureCap(config: AIFeatureConfigLike): string {
     return `${config.daily_messages_cap.toLocaleString()} mensajes/día`;
   if (config.monthly_jobs_cap)
     return `${config.monthly_jobs_cap.toLocaleString()} jobs/mes`;
+  if (config.monthly_tool_calls_cap)
+    return `${config.monthly_tool_calls_cap.toLocaleString()} tool calls/mes`;
   if (config.monthly_voice_seconds_cap)
     return formatVoiceSeconds(config.monthly_voice_seconds_cap);
   if (config.retention_days) return `${config.retention_days} días retención`;
@@ -182,6 +195,7 @@ type AIFeatureConfigLike =
       monthly_tokens_cap?: number | null;
       daily_messages_cap?: number | null;
       monthly_jobs_cap?: number | null;
+      monthly_tool_calls_cap?: number | null;
       monthly_voice_seconds_cap?: number | null;
       retention_days?: number | null;
       indexed_docs_cap?: number | null;

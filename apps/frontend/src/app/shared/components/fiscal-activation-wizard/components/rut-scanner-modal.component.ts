@@ -9,7 +9,10 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, of } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Subscription, catchError, of } from 'rxjs';
+
+import { parseApiError } from '../../../../core/utils/parse-api-error';
 
 import { AiReviewAckComponent } from '../../ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../modal/modal.component';
@@ -226,6 +229,13 @@ const TAX_REGIME_LABELS: Record<string, string> = {
           </p>
           <p class="ai-stage__caption relative z-10 max-w-[280px] text-center text-sm">
             Extrayendo NIT, razón social, régimen y responsabilidades fiscales.
+          </p>
+          <p class="relative z-10 max-w-[320px] text-center text-xs text-text-secondary">
+            @if (scanStalled()) {
+              Está tardando más de lo normal; seguimos procesando el documento.
+            } @else {
+              Esto puede tardar unos minutos. No cierres la ventana.
+            }
           </p>
         </div>
       }
@@ -741,6 +751,9 @@ export class RutScannerModalComponent {
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
   readonly isScanning = signal(false);
+  /** true cuando el job lleva más de ~60 s sin terminar. */
+  readonly scanStalled = signal(false);
+  private scanSub: Subscription | null = null;
   readonly isProcessingFile = signal(false);
   readonly result = signal<RutScanResult | null>(null);
 
@@ -900,8 +913,10 @@ export class RutScannerModalComponent {
     this.currentStep.set(2);
     this.isScanning.set(true);
 
-    this.rutScannerService
-      .scanRut(file, this.scope())
+    this.scanSub?.unsubscribe();
+    this.scanStalled.set(false);
+    this.scanSub = this.rutScannerService
+      .scanRut(file, this.scope(), { onStall: () => this.scanStalled.set(true) })
       .pipe(
         catchError((err: unknown) => {
           this.toastService.error(
@@ -930,15 +945,8 @@ export class RutScannerModalComponent {
   }
 
   private extractErrorMessage(err: unknown): string {
-    const fallback = 'No se pudo analizar el RUT. Inténtalo de nuevo.';
-    if (err && typeof err === 'object') {
-      const e = err as {
-        error?: { message?: string };
-        message?: string;
-      };
-      return e.error?.message || e.message || fallback;
-    }
-    return fallback;
+    if (err instanceof HttpErrorResponse) return parseApiError(err).userMessage;
+    return (err as Error | null)?.message || 'No se pudo escanear el documento';
   }
 
   /**
@@ -1004,6 +1012,9 @@ export class RutScannerModalComponent {
     this.filePreviewUrl.set(null);
     this.fileError.set(null);
     this.isProcessingFile.set(false);
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.scanStalled.set(false);
     this.isScanning.set(false);
     this.result.set(null);
     // Obligatorio: el contenido proyectado en app-modal no se destruye al

@@ -101,7 +101,7 @@ describe('InvoiceScannerModalComponent — QUI-855 paso 8b revalidación con IA'
       providers: [
         {
           provide: InvoiceScannerService,
-          useValue: { scanInvoice: () => of(null), matchProducts: () => of(null), revalidateAndWait: revalidateSpy },
+          useValue: { scanInvoiceAndWait: () => of(null), matchProducts: () => of(null), revalidateAndWait: revalidateSpy },
         },
         { provide: UomService, useValue: { getCatalog: () => of({ data: [] }), peekCatalog: () => null } },
         { provide: ToastService, useValue: { success: () => undefined, error: () => undefined } },

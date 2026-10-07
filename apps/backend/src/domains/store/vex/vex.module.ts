@@ -4,6 +4,7 @@ import { ResponseModule } from '../../../common/responses/response.module';
 import { AIEngineModule } from '../../../ai-engine/ai-engine.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { VexiModule } from '../vexi/vexi.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { VexiActivityService } from '../vexi/vexi-activity.service';
 import { VexController } from './vex.controller';
 import { VexEnabledGuard } from './guards/vex-enabled.guard';
@@ -33,6 +34,8 @@ import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks
     AIEngineModule,
     SubscriptionsModule,
     VexiModule,
+    // `VexiActivityService` pushes applied actions over the notifications SSE.
+    NotificationsModule,
   ],
   controllers: [VexController],
   providers: [

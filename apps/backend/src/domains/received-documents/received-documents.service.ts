@@ -120,7 +120,7 @@ export class ReceivedDocumentsService {
         taxes: { where: { item_id: null } },
         links: true,
         events: {
-          select: { id: true, event_type: true, idempotency_key: true, status: true, result: true, actor_id: true, created_at: true },
+          select: { id: true, event_type: true, event_code: true, event_number: true, cude: true, event_date: true, confirmed_at: true, idempotency_key: true, status: true, result: true, actor_id: true, created_at: true },
           orderBy: { created_at: 'asc' },
         },
       },
@@ -246,6 +246,20 @@ export class ReceivedDocumentsService {
         `) as Array<{ id: number }>;
         if (locked.length !== 1) {
           throw new ConflictException('El documento cambió o ya no admite edición; vuelva a cargarlo.');
+        }
+
+        const legalBuyerEvent = await tx.received_document_events.findFirst({
+          where: {
+            document_id: id,
+            event_type: 'BUYER_DIAN_EVENT',
+            status: { in: ['preparing', 'prepared', 'sending', 'unknown', 'accepted'] },
+          },
+          select: { id: true },
+        });
+        if (legalBuyerEvent) {
+          throw new ConflictException(
+            'No se pueden editar los hechos fiscales porque existe un evento DIAN del adquiriente aceptado o pendiente de transmisión/reconciliación; sólo se permite actualizar la nota de revisión.',
+          );
         }
 
         const allocation = await tx.received_document_match_allocations.findFirst({

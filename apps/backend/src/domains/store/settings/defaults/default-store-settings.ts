@@ -479,6 +479,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       enable_table_checkout: false,
       qr_scan_behavior: 'menu_only',
       qr_auto_fire: false,
+      kitchen_mode: 'virtual',
     },
 
     // Membership - gym/membership suite behavior toggles. Ambient access

@@ -1,5 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import * as zlib from 'zlib';
+import { createHash } from 'crypto';
 import { DOMParser } from '@xmldom/xmldom';
 import {
   InvoiceProviderAdapter,
@@ -32,7 +40,11 @@ import {
   dianLineExtensionTotal,
   dianSum,
 } from '../../utils/dian-money.util';
-import { dianPartyId, onlyDigits } from '../../../../../common/utils/nit.util';
+import {
+  dianPartyId,
+  onlyDigits,
+  normalizeNit,
+} from '../../../../../common/utils/nit.util';
 import {
   normalizeAcquirerDocumentType,
   resolveMissingAcquirerDocumentType,
@@ -88,6 +100,9 @@ import {
 import {
   DianDocumentEventRequest,
   DianDocumentEventResult,
+  DianPreparedDocumentEvent,
+  DianPreparedEventTransmissionResult,
+  DianEventConfigurationSelection,
 } from './interfaces/dian-event.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -1372,6 +1387,74 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
+  /** Confirm DIAN acceptance of a referenced invoice before authorizing a buyer event. */
+  async assertReferencedInvoiceAccepted(
+    cufe: string,
+    selection: DianEventConfigurationSelection,
+  ): Promise<{ document_key: string; checked_at: string }> {
+    if (!/^[a-f\d]{96}$/i.test(cufe)) {
+      throw new BadRequestException('El CUFE de la factura referenciada no es válido.');
+    }
+    const config = await this.loadConfig('invoicing', selection);
+    if (config.environment !== 'production' || config.enablement_status !== 'enabled') {
+      throw new ConflictException('La configuración DIAN no está habilitada para verificar una factura legal.');
+    }
+    this.validateCertificateExpiry(config);
+
+    let raw_response: string;
+    try {
+      const credentials = await this.loadWsCredentials(config);
+      if (!credentials) throw new Error('DIAN WS-Security credentials unavailable');
+      const response = await this.soap_client.getStatus(cufe, config.environment, credentials);
+      if (response.timed_out || !response.success || !response.raw_response) {
+        throw new Error('DIAN status response unavailable');
+      }
+      raw_response = response.raw_response;
+    } catch {
+      throw new ServiceUnavailableException('No fue posible confirmar el estado de la factura en DIAN.');
+    }
+
+    let status: { document_key: string; is_valid: string; status_code: string };
+    try {
+      const document = new DOMParser({
+        errorHandler: {
+          warning: () => undefined,
+          error: () => { throw new Error('Invalid SOAP XML'); },
+          fatalError: () => { throw new Error('Invalid SOAP XML'); },
+        },
+      }).parseFromString(raw_response, 'application/xml');
+      const elements = Array.from(document.getElementsByTagName('*'));
+      const localName = (element: Element) => element.localName || element.nodeName.split(':').pop();
+      const results = elements.filter((element) => localName(element) === 'GetStatusResult');
+      if (elements.some((element) => localName(element) === 'Fault') || results.length !== 1) {
+        throw new Error('Ambiguous SOAP result');
+      }
+      const children = Array.from(results[0].childNodes).filter(
+        (node): node is Element => node.nodeType === 1,
+      );
+      const readOne = (name: string) => {
+        const matches = children.filter((element) => localName(element) === name);
+        if (matches.length !== 1) throw new Error('Missing or duplicate status field');
+        return matches[0].textContent?.trim() ?? '';
+      };
+      status = {
+        document_key: readOne('XmlDocumentKey'),
+        is_valid: readOne('IsValid'),
+        status_code: readOne('StatusCode'),
+      };
+    } catch {
+      throw new ServiceUnavailableException('DIAN devolvió una respuesta de estado ambigua.');
+    }
+
+    if (status.document_key.toLowerCase() !== cufe.toLowerCase()) {
+      throw new ConflictException('DIAN devolvió un CUFE distinto al de la factura referenciada.');
+    }
+    if (status.is_valid.toLowerCase() !== 'true' || !['0', '00'].includes(status.status_code)) {
+      throw new ConflictException('DIAN no confirma que la factura referenciada esté aceptada.');
+    }
+    return { document_key: status.document_key, checked_at: new Date().toISOString() };
+  }
+
   async cancelInvoice(
     invoice_id: string,
     reason: string,
@@ -1390,32 +1473,110 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
-  /**
-   * Registers a RADIAN document event (`ApplicationResponse`) against an
-   * already-accepted document.
-   *
-   * Differences from a document transmission that are easy to get wrong:
-   * - The key is a CUDE derived from the EVENT fields, not from amounts
-   *   (`CufeCalculator.generateEventCude`).
-   * - The SOAP operation is `SendEventUpdateStatus`, not `SendBillSync`.
-   * - There is no contingency scheme: Anexo §12 covers documents, not events, so
-   *   a DIAN outage means "retry later", never "declare contingency".
-   * - No numbering resolution applies, so `sts:InvoiceControl` is omitted.
-   */
-  async sendDocumentEvent(
+  private async buildDocumentEventPayload(
     event: DianDocumentEventRequest,
-  ): Promise<DianDocumentEventResult> {
-    const start_time = Date.now();
-    const config = await this.loadConfig();
+    selection?: DianEventConfigurationSelection,
+  ) {
+    const config = await this.loadConfig('invoicing', selection);
 
     this.validateCertificateExpiry(config);
 
     const issuer = await this.loadIssuerData(config);
 
+    const configured_buyer_nit = event.referenced_issuer
+      ? normalizeNit(issuer.nit)
+      : undefined;
+    const declared_buyer_nit = event.referenced_issuer
+      ? normalizeNit(event.customer.document_number)
+      : undefined;
+    const supplier_nit =
+      event.referenced_issuer?.document_type === DIAN_ID_TYPES.NIT
+        ? normalizeNit(event.referenced_issuer.document_number)
+        : undefined;
+
+    // Received-document events are emitted by this tenant as the buyer. Do not
+    // allow this transport seam to masquerade as the supplier/issuer.
+    if (event.referenced_issuer) {
+      if (
+        !['030', '031', '032', '033'].includes(event.event_code) ||
+        event.generated_by !== 'customer'
+      ) {
+        throw new BadRequestException(
+          'Los eventos de comprador para facturas recibidas solo permiten códigos 030–033 generados por customer.',
+        );
+      }
+      if (
+        !configured_buyer_nit?.number ||
+        !configured_buyer_nit.dv ||
+        configured_buyer_nit.dv_mismatch ||
+        (configured_buyer_nit.provided_dv !== null &&
+          configured_buyer_nit.provided_dv !== configured_buyer_nit.dv) ||
+        configured_buyer_nit.dv !== issuer.nit_dv ||
+        event.customer.document_type !== DIAN_ID_TYPES.NIT ||
+        !declared_buyer_nit?.number ||
+        declared_buyer_nit.dv_mismatch ||
+        (event.customer.document_dv !== undefined &&
+          event.customer.document_dv !== declared_buyer_nit.dv) ||
+        configured_buyer_nit.number !== declared_buyer_nit.number ||
+        configured_buyer_nit.dv !== declared_buyer_nit.dv
+      ) {
+        throw new UnprocessableEntityException(
+          'La identificación NIT/DV del comprador no coincide con la entidad fiscal configurada o es inválida.',
+        );
+      }
+      if (
+        !supplier_nit?.number ||
+        supplier_nit.dv_mismatch ||
+        (event.referenced_issuer.document_dv !== undefined &&
+          event.referenced_issuer.document_dv !== supplier_nit.dv)
+      ) {
+        throw new UnprocessableEntityException(
+          'La identificación NIT/DV del proveedor referenciado es inválida.',
+        );
+      }
+      if (['030', '032'].includes(event.event_code)) {
+        const person = event.details?.receipt_person;
+        const person_type = typeof person?.document_type === 'string' ? person.document_type.trim() : '';
+        const person_number = typeof person?.document_number === 'string' ? person.document_number.trim() : '';
+        const first_name = typeof person?.first_name === 'string' ? person.first_name.trim() : '';
+        const family_name = typeof person?.family_name === 'string' ? person.family_name.trim() : '';
+        const person_dv = typeof person?.document_dv === 'string' ? person.document_dv.trim() : '';
+        const person_type_is_valid = Object.values(DIAN_ID_TYPES).includes(person_type);
+        const nit = person_type === DIAN_ID_TYPES.NIT && person_number
+          ? normalizeNit(`${person_number}-${person_dv}`)
+          : undefined;
+        if (
+          !person || !person_type_is_valid || !person_number || !first_name || !family_name ||
+          (person.document_dv !== undefined && typeof person.document_dv !== 'string') ||
+          (person_type === DIAN_ID_TYPES.NIT &&
+            (!/^\d$/.test(person_dv) || !nit?.number || nit.dv_mismatch || nit.provided_dv !== nit.dv))
+        ) {
+          throw new UnprocessableEntityException(
+            'El acuse de recibo requiere identificación y nombre de la persona que recibió el bien o servicio.',
+          );
+        }
+      }
+      if (event.event_code === '031' && !['01', '02', '03', '04'].includes(event.details?.claim_concept_code ?? '')) {
+        throw new UnprocessableEntityException('El reclamo requiere un concepto DIAN válido (01–04).');
+      }
+      if (
+        (event.event_code !== '031' && event.details?.claim_concept_code !== undefined) ||
+        (['031', '033'].includes(event.event_code) && event.details?.receipt_person !== undefined) ||
+        event.details?.issuer_party !== undefined ||
+        event.details?.endorsement_list_id !== undefined
+      ) {
+        throw new UnprocessableEntityException('Los detalles enviados no corresponden al tipo de evento de comprador.');
+      }
+    }
+
     const issuer_party: DianEventParty = {
       document_type: issuer.document_type || DIAN_ID_TYPES.NIT,
-      document_number: onlyDigits(issuer.nit),
-      document_dv: issuer.nit_dv,
+      document_number: event.referenced_issuer
+        ? configured_buyer_nit!.number
+        : onlyDigits(issuer.nit),
+      document_dv: event.referenced_issuer
+        ? configured_buyer_nit!.dv
+        : issuer.nit_dv,
       legal_name: issuer.legal_name,
     };
     const customer_party: DianEventParty = {
@@ -1424,10 +1585,22 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
 
     // 030/031/032/033 travel adquiriente → emisor; 034 travels the other way.
-    const sender =
-      event.generated_by === 'issuer' ? issuer_party : customer_party;
-    const receiver =
-      event.generated_by === 'issuer' ? customer_party : issuer_party;
+    const supplier_party: DianEventParty | undefined = event.referenced_issuer
+      ? {
+          ...event.referenced_issuer,
+          document_number: dianPartyId(
+            event.referenced_issuer.document_number,
+            event.referenced_issuer.document_type,
+          ),
+          document_dv: supplier_nit?.dv ?? event.referenced_issuer.document_dv,
+        }
+      : undefined;
+    const sender = event.referenced_issuer
+      ? issuer_party
+      : event.generated_by === 'issuer' ? issuer_party : customer_party;
+    const receiver = event.referenced_issuer
+      ? supplier_party!
+      : event.generated_by === 'issuer' ? customer_party : issuer_party;
 
     const issue_time =
       event.issue_time ||
@@ -1482,6 +1655,205 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       config,
       String(event.event_number),
     );
+    return {
+      config,
+      cude,
+      xml,
+      xml_filename: file_names.xml,
+      zip_filename: file_names.zip,
+    };
+  }
+
+  /** Prepare and sign an event without contacting DIAN or writing an audit row. */
+  async prepareDocumentEvent(
+    event: DianDocumentEventRequest,
+    selection?: DianEventConfigurationSelection,
+  ): Promise<DianPreparedDocumentEvent> {
+    if (event.referenced_issuer && !selection) {
+      throw new BadRequestException('Buyer events require an exact DIAN configuration selection');
+    }
+    const { config, cude, xml, xml_filename, zip_filename } =
+      await this.buildDocumentEventPayload(event, selection);
+    const signed_xml = await this.signXml(xml, config);
+    return {
+      event_code: event.event_code,
+      event_number: event.event_number,
+      dian_configuration_id: config.id,
+      accounting_entity_id: config.accounting_entity_id,
+      store_id: selection !== undefined
+        ? selection.store_id ?? null
+        : RequestContextService.getContext()?.store_id ?? null,
+      environment: config.environment,
+      cude,
+      signed_xml,
+      signed_xml_sha256: createHash('sha256')
+        .update(signed_xml, 'utf8')
+        .digest('hex'),
+      xml_filename,
+      zip_filename,
+      software_id: config.software_id,
+      certificate_s3_key: config.certificate_s3_key,
+      certificate_kms_key_id: config.certificate_kms_key_id,
+      certificate_fingerprint: config.certificate_fingerprint ?? null,
+    };
+  }
+
+  /** Transmit the exact frozen event artifact; this path never rebuilds or signs XML. */
+  async sendPreparedDocumentEvent(
+    prepared: DianPreparedDocumentEvent,
+  ): Promise<DianPreparedEventTransmissionResult> {
+    const valid_codes = ['030', '031', '032', '033'];
+    if (
+      !prepared ||
+      !valid_codes.includes(prepared.event_code) ||
+      !prepared.event_number || !prepared.dian_configuration_id ||
+      !prepared.accounting_entity_id || !prepared.environment ||
+      !prepared.cude || !prepared.signed_xml || !prepared.signed_xml_sha256 ||
+      !prepared.xml_filename || !prepared.zip_filename || !prepared.software_id ||
+      !('certificate_s3_key' in prepared) || !('certificate_kms_key_id' in prepared)
+    ) throw new BadRequestException('Prepared DIAN event is malformed or unsupported');
+
+    const actual_hash = createHash('sha256').update(prepared.signed_xml, 'utf8').digest('hex');
+    if (actual_hash !== prepared.signed_xml_sha256) {
+      throw new BadRequestException('Prepared DIAN event signed XML hash does not match');
+    }
+    try {
+      const document = new DOMParser({
+        errorHandler: {
+          warning: () => undefined,
+          error: (message) => { throw new Error(message); },
+          fatalError: (message) => { throw new Error(message); },
+        },
+      }).parseFromString(prepared.signed_xml, 'application/xml');
+      const value = (local_name: string) =>
+        document.getElementsByTagNameNS('*', local_name)[0]?.textContent?.trim();
+      if (
+        document.documentElement?.localName !== 'ApplicationResponse' ||
+        value('UUID') !== prepared.cude || value('ID') !== prepared.event_number ||
+        value('ResponseCode') !== prepared.event_code
+      ) throw new Error('Prepared event metadata does not match signed XML');
+    } catch {
+      throw new BadRequestException('Prepared event metadata does not match valid signed XML');
+    }
+    const config = await this.loadConfig('invoicing', {
+      configuration_id: prepared.dian_configuration_id,
+      accounting_entity_id: prepared.accounting_entity_id,
+      store_id: prepared.store_id,
+    });
+    if (
+      config.id !== prepared.dian_configuration_id ||
+      config.accounting_entity_id !== prepared.accounting_entity_id ||
+      config.environment !== prepared.environment ||
+      config.software_id !== prepared.software_id ||
+      config.certificate_s3_key !== prepared.certificate_s3_key ||
+      config.certificate_kms_key_id !== prepared.certificate_kms_key_id ||
+      (config.certificate_fingerprint ?? null) !== (prepared.certificate_fingerprint ?? null)
+    ) throw new ConflictException('DIAN configuration changed since event preparation');
+    this.validateCertificateExpiry(config);
+
+    const start_time = Date.now();
+    let response_xml: string | undefined;
+    let result: DianPreparedEventTransmissionResult;
+    try {
+      const zip_base64 = await this.compressToZipBase64(prepared.signed_xml, prepared.xml_filename);
+      const credentials = await this.loadWsCredentials(config);
+      const response = await this.soap_client.sendEventUpdateStatus(
+        zip_base64, prepared.zip_filename, config.environment, credentials,
+      );
+      response_xml = response.raw_response;
+      const parsed = this.response_parser.parseApplicationResponse(response_xml);
+      let soap_event_key: string | undefined;
+      let soap_result_valid = false;
+      try {
+        const soap_document = new DOMParser({
+          errorHandler: {
+            warning: () => undefined,
+            error: (message) => { throw new Error(message); },
+            fatalError: (message) => { throw new Error(message); },
+          },
+        }).parseFromString(response_xml, 'application/xml');
+        const elements = Array.from(soap_document.getElementsByTagName('*'));
+        const local_name = (element: Element) => element.localName || element.nodeName.split(':').pop();
+        const has_fault = elements.some((element) => local_name(element) === 'Fault');
+        const result_nodes = elements.filter((element) => local_name(element) === 'SendEventUpdateStatusResult');
+        if (!has_fault && result_nodes.length === 1) {
+          const keys = Array.from(result_nodes[0].childNodes).filter(
+            (node): node is Element => node.nodeType === 1 && local_name(node as Element) === 'XmlDocumentKey',
+          );
+          if (keys.length === 1) {
+            soap_event_key = keys[0].textContent?.trim();
+            soap_result_valid = Boolean(soap_event_key);
+          }
+        }
+      } catch {
+        // An unparseable SOAP envelope cannot provide a definitive DIAN verdict.
+      }
+      const matching_event_key = soap_result_valid && soap_event_key === prepared.cude;
+      const explicit_rejection =
+        parsed.is_valid === false &&
+        parsed.status_code === '99' && matching_event_key &&
+        parsed.already_processed !== true &&
+        (parsed.rule_messages?.some((rule) => rule.severity === 'rechazo') ?? false);
+      const accepted = parsed.is_valid === true && parsed.status_code === '00' && matching_event_key;
+      const delivery_status = accepted
+        ? 'accepted'
+        : explicit_rejection ? 'rejected' : 'unknown';
+      const message = delivery_status === 'unknown'
+        ? 'Respuesta inconclusa; conciliar antes de reintentar'
+        : describeDianVerdict(parsed, `Evento ${prepared.event_code} registrado en RADIAN`, `Evento ${prepared.event_code} rechazado`);
+      result = {
+        success: accepted, delivery_status,
+        event_code: prepared.event_code, dian_configuration_id: config.id,
+        cude: prepared.cude, ...(matching_event_key ? { tracking_id: prepared.cude } : {}),
+        status_code: parsed.status_code,
+        message,
+        request_xml: prepared.signed_xml, response_xml,
+        errors: parsed.errors.map((e) => ({ code: e.code, message: e.message })),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      this.logger.error(`Failed to transmit prepared DIAN event: ${message}`);
+      result = {
+        success: false, delivery_status: 'unknown', event_code: prepared.event_code,
+        dian_configuration_id: config.id, cude: prepared.cude, message,
+        request_xml: prepared.signed_xml, ...(response_xml ? { response_xml } : {}),
+        errors: [{ message }],
+      };
+    }
+    try {
+      await this.createAuditLog(config.id, {
+        action: 'send_document_event', document_type: `event_${prepared.event_code}`,
+        document_number: prepared.event_number, request_xml: prepared.signed_xml,
+        response_xml, status: result.delivery_status === 'accepted' ? 'success' : 'error',
+        error_message: result.delivery_status === 'accepted' ? null : result.message ?? null,
+        cufe: prepared.cude, duration_ms: Date.now() - start_time,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      this.logger.error(`Failed to audit prepared DIAN event: ${message}`);
+    }
+    return result;
+  }
+
+  /**
+   * Registers a RADIAN document event (`ApplicationResponse`) against an
+   * already-accepted document.
+   *
+   * Differences from a document transmission that are easy to get wrong:
+   * - The key is a CUDE derived from the EVENT fields, not from amounts
+   *   (`CufeCalculator.generateEventCude`).
+   * - The SOAP operation is `SendEventUpdateStatus`, not `SendBillSync`.
+   * - There is no contingency scheme: Anexo §12 covers documents, not events, so
+   *   a DIAN outage means "retry later", never "declare contingency".
+   * - No numbering resolution applies, so `sts:InvoiceControl` is omitted.
+   */
+  async sendDocumentEvent(
+    event: DianDocumentEventRequest,
+  ): Promise<DianDocumentEventResult> {
+    const start_time = Date.now();
+    const payload = await this.buildDocumentEventPayload(event);
+    const { config, cude, xml } = payload;
+    const file_names = { xml: payload.xml_filename, zip: payload.zip_filename };
     let signed_xml = xml;
 
     try {
@@ -1614,20 +1986,35 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    */
   private async loadConfig(
     configuration_type: DianConfigurationType = 'invoicing',
+    selection?: DianEventConfigurationSelection,
   ): Promise<DianConfigDecrypted> {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new Error('Organization context required for DIAN operations');
     }
+    if (selection && context.store_id != null && selection.store_id !== undefined &&
+      selection.store_id !== context.store_id) {
+      throw new BadRequestException('DIAN configuration selection does not match the authenticated store');
+    }
     const accounting_entity =
       await this.fiscalScope.resolveAccountingEntityForFiscal({
         organization_id: context.organization_id,
-        store_id: context.store_id ?? null,
+        store_id: selection?.store_id ?? context.store_id ?? null,
       });
+
+    if (selection && (
+      !Number.isSafeInteger(selection.configuration_id) || selection.configuration_id <= 0 ||
+      !Number.isSafeInteger(selection.accounting_entity_id) || selection.accounting_entity_id <= 0 ||
+      (selection.store_id != null && (!Number.isSafeInteger(selection.store_id) || selection.store_id <= 0)) ||
+      selection.accounting_entity_id !== accounting_entity.id
+    )) {
+      throw new BadRequestException('DIAN configuration selection does not match the authenticated fiscal entity');
+    }
 
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
         accounting_entity_id: accounting_entity.id,
+        ...(selection && { id: selection.configuration_id }),
         configuration_type,
         operation_mode: 'own_software',
         enablement_status: { in: ['testing', 'test_set_passed', 'enabled'] },
@@ -1709,6 +2096,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       certificate_s3_key: config.certificate_s3_key,
       certificate_password,
       certificate_kms_key_id: config.certificate_kms_key_id,
+      certificate_fingerprint: config.certificate_fingerprint ?? null,
       certificate_expiry: config.certificate_expiry,
       environment: config.environment as 'test' | 'production',
       enablement_status: config.enablement_status,

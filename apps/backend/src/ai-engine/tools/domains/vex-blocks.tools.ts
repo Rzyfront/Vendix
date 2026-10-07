@@ -237,7 +237,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
       domain: 'vex_blocks',
       readOnly: true,
       description:
-        'Muestra una imagen a la persona a partir de una clave S3 (la que devuelven las herramientas de generación o los adjuntos). Pasa SIEMPRE la clave S3, nunca una URL firmada: las URL vencen y el bloque quedaría roto.',
+        'Muestra una imagen a la persona a partir de una clave S3 (la s3_key que devuelve ai_generate_image). Pasa SIEMPRE la clave S3, nunca una URL firmada: las URL vencen y el bloque quedaría roto.',
       parameters: {
         type: 'object',
         properties: {
@@ -289,7 +289,7 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
       domain: 'vex_blocks',
       readOnly: true,
       description:
-        'Entrega un archivo descargable a la persona a partir de una clave S3 (la que devuelve get_report u otra herramienta que genere archivos). Pasa SIEMPRE la clave S3, nunca una URL firmada. Incluye filename para que la descarga tenga buen nombre.',
+        'Entrega un archivo descargable a la persona a partir de una clave S3 (la s3_key que devuelve export_report). Pasa SIEMPRE la clave S3, nunca una URL firmada: las URL vencen y el bloque quedaría roto. Incluye filename para que la descarga tenga buen nombre.',
       parameters: {
         type: 'object',
         properties: {
@@ -428,6 +428,18 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
         required: ['block_id'],
       },
       handler: async (args) => {
+        // group_by sin aggregate es no-op en el servicio (devuelve las filas
+        // intactas): fallar explícito para que el modelo corrija el llamado
+        // en vez de narrar un resumen que nunca ocurrió.
+        if (args.group_by && !args.aggregate) {
+          return JSON.stringify(
+            buildToolErrorEnvelope(
+              'vex_block_transform',
+              'Pasaste group_by sin aggregate: agrupar sin resumir no cambia las filas.',
+              'Añade aggregate {field, function} con function en sum|avg|count|min|max, o quita group_by si solo quieres filtrar u ordenar.',
+            ),
+          );
+        }
         try {
           const block = await blocks.transform(String(args.block_id), {
             filter: args.filter,

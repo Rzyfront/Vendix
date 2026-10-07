@@ -11,7 +11,8 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { of, switchMap, catchError } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { of, switchMap, catchError, Subscription } from 'rxjs';
 
 import { AiReviewAckComponent } from '../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -31,6 +32,7 @@ import {
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency/currency.pipe';
 
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import {
   ConfirmRouteSheetDto,
@@ -247,6 +249,13 @@ interface EditableStopDecision {
             <app-spinner size="lg" text="Analizando planilla..."></app-spinner>
             <p class="text-sm text-text-secondary text-center">
               Extrayendo recaudos y buscando coincidencias con las paradas de la ruta...
+            </p>
+            <p class="text-xs text-text-secondary text-center">
+              @if (scanStalled()) {
+                Está tardando más de lo normal; seguimos procesando.
+              } @else {
+                Esto puede tardar unos minutos. No cierres la ventana.
+              }
             </p>
           </div>
         </div>
@@ -598,6 +607,9 @@ export class RouteSheetScannerModalComponent {
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
   readonly isScanning = signal(false);
+  /** true cuando el job lleva más de ~60 s sin terminar. */
+  readonly scanStalled = signal(false);
+  private scanSub: Subscription | null = null;
   readonly isProcessingFile = signal(false);
   readonly isConfirming = signal(false);
 
@@ -791,22 +803,23 @@ export class RouteSheetScannerModalComponent {
     this.currentStep.set(2);
     this.isScanning.set(true);
 
-    this.service
-      .scanSheet(this.routeId(), file)
+    this.scanSub?.unsubscribe();
+    this.scanStalled.set(false);
+    this.scanSub = this.service
+      .scanSheet(this.routeId(), file, {
+        onStall: () => this.scanStalled.set(true),
+      })
       .pipe(
         switchMap((scan) => {
           this.scanResult.set(scan);
           return this.service.matchStops(this.routeId(), scan);
         }),
-        catchError((err: any) => {
-          // Distinguish the most common operator-facing failure: no AI provider
-          // configured for the org. Show a clear, actionable message instead of
-          // the raw error string.
-          const code = err?.error?.error_code || err?.error_code;
+        catchError((err: unknown) => {
           const msg =
-            code === 'AI_PROVIDER_002'
-              ? 'No hay un proveedor de IA configurado para tu organización. Pide al administrador que configure uno (OpenAI, Anthropic, etc.) antes de usar el escaneo de planillas.'
-              : err?.message || 'Error al procesar la planilla';
+            err instanceof HttpErrorResponse
+              ? parseApiError(err).userMessage
+              : (err as Error | null)?.message ||
+                'Error al procesar la planilla';
           this.toast.error(msg);
           this.currentStep.set(1);
           this.isScanning.set(false);
@@ -1115,6 +1128,9 @@ export class RouteSheetScannerModalComponent {
   }
 
   resetWizard(): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.scanStalled.set(false);
     // QUI-644: el descarte no debe sobrevivir al siguiente escaneo.
     this.discardedIndexes.set(new Set());
     this.currentStep.set(1);

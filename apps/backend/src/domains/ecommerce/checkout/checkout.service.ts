@@ -1333,7 +1333,11 @@ export class CheckoutService {
           available_for_ecommerce: true,
         },
       });
-      if (!product || product.is_sellable !== true) {
+      if (
+        !product ||
+        product.is_sellable !== true ||
+        product.is_ingredient === true
+      ) {
         throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_002);
       }
       let variant: any = null;
@@ -1754,7 +1758,11 @@ export class CheckoutService {
       // por lo que este check es necesario aqui. Mismo codigo que cart.addItem
       // (ECOM_PRODUCT_002 = "Product not available") para mantener la invariant
       // is_sellable consistente entre add-to-cart y checkout.
-      if (!item.product || item.product.is_sellable !== true) {
+      if (
+        !item.product ||
+        item.product.is_sellable !== true ||
+        item.product.is_ingredient === true
+      ) {
         throw new VendixHttpException(
           ErrorCodes.ECOM_PRODUCT_002,
           `Product ${item.product?.name ?? item.product_id} is sold out and cannot be checked out`,
@@ -2818,7 +2826,11 @@ export class CheckoutService {
       // (marcado agotado desde la carta) no puede checkearse. Cubre el path
       // guest/localStorage de whatsappCheckout, que construye items desde DTO
       // sin pasar por cart.addItem. Mismo ECOM_PRODUCT_002 que cart.addItem.
-      if (!item.product || item.product.is_sellable !== true) {
+      if (
+        !item.product ||
+        item.product.is_sellable !== true ||
+        item.product.is_ingredient === true
+      ) {
         throw new VendixHttpException(
           ErrorCodes.ECOM_PRODUCT_002,
           `Product ${item.product?.name ?? item.product_id} is sold out and cannot be checked out`,

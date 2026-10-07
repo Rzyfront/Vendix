@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.3"
+  version: "2.4"
   scope: [root]
   auto_invoke:
     - "Working with AI async processing"
@@ -17,6 +17,9 @@ metadata:
     - "Migrating an OCR/image scanner to async (202 + job_id + poll)"
     - "Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan)"
     - "Exposing a job-status poll endpoint that returns job.returnvalue"
+    - "Adding a new AI scan kind to the generic ai-scan queue"
+    - "Making an AI scanner or AI generation endpoint async (anything that can exceed 60 s)"
+    - "Consuming an ai-scan job from the frontend with AiScanJobService.enqueueAndWait"
 ---
 
 ## Source of Truth
@@ -27,6 +30,8 @@ metadata:
 - Embedding processor: `apps/backend/src/ai-engine/queue/processors/ai-embedding.processor.ts`
 - Embedding module registration: `apps/backend/src/ai-engine/embeddings/embedding.module.ts`
 - Agent processor: `apps/backend/src/ai-engine/queue/processors/ai-agent.processor.ts` (registered in `AIEngineModule`, not `AIQueueModule`)
+- Generic scan queue: `apps/backend/src/common/ai-scan-jobs/` (`ai-scan-job.service.ts`, `ai-scan-handler.registry.ts`, `ai-scan.processor.ts`, `ai-scan-jobs.controller.ts`, `interfaces/ai-scan-job.interface.ts`)
+- Frontend helper: `apps/frontend/src/app/core/services/ai-scan-job.service.ts`; mobile: `apps/mobile/src/features/pop/services/invoice-scan-job.ts`
 
 ## Queues
 
@@ -84,7 +89,46 @@ Agent processor (`AIAgentProcessor`):
 - Emits `vexi.task.finished` on success AND failure (the person is not watching; the notification is the only way they learn the task died). Still throws on failure so BullMQ records it.
 - Has no Bearer [REDACTED] so `write_endpoint` refuses and confirmation-gated tools throw their approval demand: background tasks review, validate and prepare; the proposal comes back to the chat, where it can be approved.
 
-## Per-domain OCR scan queues (async pattern)
+## Cola genérica `ai-scan` (camino por defecto)
+
+**Regla dura: nada de IA que pueda pasar 60 s corre dentro de una petición HTTP** (nginx corta con 504). Todo escáner o generación de IA nuevo (OCR, visión, generación de imagen) usa esta cola. Las colas por dominio de la sección siguiente quedan como legado válido, no como patrón para código nuevo.
+
+Piezas (módulo `@Global` `AiScanJobsModule`):
+
+- Cola `ai-scan`; `AiScanJobService.enqueue(kind, files, params)` sube los archivos a S3 bajo `ai-scans/{org|platform}/{store-N|org}/{kind}/…` (el payload de Redis lleva keys, nunca buffers).
+- `AiScanHandlerRegistry.register(kind, handler)` — **lanza si el kind ya está registrado**.
+- `AiScanProcessor`: concurrency 3, restaura `RequestContextService.run()` desde el job; error 4xx → `UnrecoverableError(errorCode)` (sin reintento) salvo 429, que SÍ se reintenta con backoff.
+- `GET /api/ai-scan-jobs/:jobId` → `{ status, result?, error? }` con check de propietario (ver abajo).
+
+Kinds registrados: `rut` (`domains/store/settings/rut-scan-handler.registrar.ts`), `dian_habilitation` y `dian_resolution` (`domains/store/invoicing/fiscal-scan-handlers.registrar.ts`), `route_sheet`, `inventory_count`, `member_roster` (en `onModuleInit` de sus servicios), `product_image_enhance` y `product_image_generate` (`products.module.ts`).
+
+### Cómo añadir un kind
+
+1. Añadir el literal al union `AiScanKind` (`interfaces/ai-scan-job.interface.ts`).
+2. En el servicio de dominio, exponer `…FromFiles(files: AiScanFile[], params)` que haga la misma lógica que el camino síncrono (la imagen/PDF llega desde S3, no de multer).
+3. Registrar el handler **UNA sola vez** en `onModuleInit` del servicio. Si el servicio se provee en varios módulos, usar un registrar dedicado (`*-handler.registrar.ts`) provisto en un solo módulo; si no, el registry lanza por duplicado.
+4. Endpoint `…/async` hermano del síncrono (que pasa a `@deprecated`): **validar ANTES de encolar** (tipo/tamaño de archivo, permisos, cuota) y responder `202 { job_id }`.
+5. Frontend: `AiScanJobService.enqueueAndWait<T>(url, body, opts)` (enqueue + poll con timeout mayor al presupuesto de reintentos). Mobile reutiliza el mismo contrato (`invoice-scan-job.ts`).
+
+### Check de propietario (contextos store / org / superadmin)
+
+El poll valida `user_id` + `organization_id` + `store_id` del job contra el `RequestContextService` del llamante; los contextos sin store (org, superadmin/plataforma) comparan `store_id` nulo contra nulo. Cualquier desajuste o job inexistente devuelve el **mismo 404 `AI_QUEUE_002`** (no filtra existencia). Ver también la regla IDOR más abajo.
+
+### Resultados binarios
+
+Si el resultado es un binario (p.ej. imagen generada), el handler lo sube a S3 y retorna la key — **nunca base64 en Redis**. Para mostrarlo se usa un proxy autenticado (`GET store/products/ai-image?key=`), porque el bucket no tiene CORS para el navegador.
+
+### Escáneres async (estado actual)
+
+| Escáner | Camino |
+| --- | --- |
+| rut, dian_habilitation, dian_resolution, route_sheet, inventory_count, member_roster, product_image_enhance/generate | `ai-scan` (`…/async`) |
+| invoice-scanner (OC), invoice-revalidate, payment-receipt-scan, received-document-scan | colas por dominio (legado) |
+| receipt-scan, expense-scan | colas por dominio (legado) |
+
+Otros cambios: el prediagnóstico de data-collection es fire-and-forget; el SSE de anuncios usa heartbeat de 15 s (`withSseHeartbeat`) para no caer por idle.
+
+## Per-domain OCR scan queues (async pattern, legado)
 
 Some multimodal OCR scanners run **async on their own dedicated per-domain
 queue**, NOT on the shared `ai-generation` queue. Currently migrated:
@@ -94,9 +138,7 @@ queue**, NOT on the shared `ai-generation` queue. Currently migrated:
 | `receipt-scan` | dispatch-notes (recibo/factura de compra) | `dispatch-notes.module.ts` |
 | `expense-scan` | expenses (factura de gasto) | `expenses.module.ts` |
 
-**Still SYNC (candidates to migrate with this same pattern):**
-`orders/purchase-orders/invoice-scanner.service.ts` and the member bulk
-scanner — they still block the HTTP request. Do not assume every scanner is async.
+Código nuevo debe usar la cola genérica `ai-scan` (sección anterior), no crear otra cola por dominio.
 
 ### Why a dedicated queue, not `ai-generation`
 
@@ -153,6 +195,7 @@ Source of truth: `dispatch-notes.{service,controller,module}.ts` +
 - Let BullMQ retry by throwing from processors on failures.
 - Use `getJobStatus(queueName, jobId)` for status checks.
 - For multimodal/image jobs, call `aiEngine.run(appKey, {}, [imageMessage])` directly (NOT `runByApplicationType`, which drops `extra_messages` on `image` apps).
+- New AI scanners/generators: use the generic `ai-scan` queue; never run AI > 60 s inside an HTTP request.
 - Any poll endpoint returning `job.returnvalue` MUST enforce the IDOR tenant check (see "Per-domain OCR scan queues" above) — `job.returnvalue` is not Prisma-scoped.
 
 ## Related Skills

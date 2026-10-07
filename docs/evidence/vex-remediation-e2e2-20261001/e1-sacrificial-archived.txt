@@ -1,0 +1,1 @@
+{"id":2513,"name":"E2E2Z-sacrificial","state":"archived"} — GET /store/products/2513 -> 404 Producto no encontrado (archived hidden from direct GET); DB ground truth in e1-db-ground-truth.txt

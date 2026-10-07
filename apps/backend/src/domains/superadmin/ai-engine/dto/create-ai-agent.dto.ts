@@ -56,14 +56,14 @@ export class CreateAIAgentDto {
   /**
    * Filtro adicional sobre las tools del turno, aplicado ENCIMA de la
    * intersección permisos-del-caller × `tools_allowed` del plan (F3).
-   * Vacío = sin filtro adicional. Los nombres desconocidos NO rechazan el
+   * Vacío = sin filtro adicional. Tope 500 (el catálogo ronda ~304 tools). Los nombres desconocidos NO rechazan el
    * request (validación blanda): se aceptan y se registran en warn, porque el
    * catálogo del registry vive en memoria y un deploy con tools nuevas no
    * debe romper el admin.
    */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(100)
+  @ArrayMaxSize(500)
   @IsString({ each: true })
   @MaxLength(120, { each: true })
   allowed_tools?: string[];
@@ -71,12 +71,12 @@ export class CreateAIAgentDto {
   /**
    * Resta herramientas del catálogo del turno DESPUÉS de todos los filtros
    * (permisos ∩ plan ∩ `allowed_tools`): lo que está acá nunca se ofrece.
-   * Vex lo usa para excluir las `ui_*`. Vacío = sin exclusiones. Misma
+   * Vex lo usa para excluir las `ui_*`. Vacío = sin exclusiones. Tope 500. Misma
    * validación blanda que `allowed_tools` (nombres desconocidos se aceptan).
    */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(100)
+  @ArrayMaxSize(500)
   @IsString({ each: true })
   @MaxLength(120, { each: true })
   denied_tools?: string[];
@@ -85,8 +85,20 @@ export class CreateAIAgentDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(50)
+  @Max(60)
   max_iterations?: number | null;
+
+  /**
+   * Presupuesto de reloj del turno en segundos. `null`/ausente = default del
+   * loop (Vexi 60 s, Vex 300 s). Con un plan abierto el loop lo amplía hasta
+   * 600 s como máximo, nunca por debajo de este valor.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(30)
+  @Max(600)
+  timeout_seconds?: number | null;
 
   @IsOptional()
   @IsBoolean()

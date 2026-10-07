@@ -14,6 +14,7 @@ import {
   SubscriptionAccessService,
 } from '../../../../../core/services/subscription-access.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
+import { formatStoreDate } from '../../../../../shared/utils/date.util';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 /**
@@ -39,7 +40,7 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
   ],
   template: `
     <div class="w-full max-w-3xl">
-      <div class="bg-surface rounded-lg shadow-sm border p-6">
+      <div class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-6">
         <app-setting-toggle
           label="Activar a Vex en esta tienda"
           [description]="toggleDescription()"
@@ -50,7 +51,7 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
         @if (!enabled()) {
           <div
-            class="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+            class="mt-4 rounded-lg border border-[var(--color-warning)] bg-[rgba(var(--color-warning-rgb),0.08)] p-4 text-sm text-[var(--color-text-primary)]"
           >
             <p class="font-semibold mb-1">Vex está apagado</p>
             <ul class="list-disc pl-5 space-y-1">
@@ -69,7 +70,7 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
           <div class="mt-4">
             <a
               routerLink="/admin/vex"
-              class="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700"
+              class="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-[var(--color-text-on-primary)] hover:bg-primary-700"
             >
               <app-icon name="sparkles" [size]="16" />
               Abrir Vex
@@ -81,30 +82,30 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
       <!-- Estado del plan. El gate real vive en el backend (AiAccessGuard +
            feature 'vex_agent'); esto solo lo explica para que el interruptor
            no se lea como averiado cuando el plan no incluye a Vex. -->
-      <div class="bg-surface rounded-lg shadow-sm border p-6 mt-6">
+      <div class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-6 mt-6">
         <div class="flex items-start gap-3">
           <app-icon
             [name]="canUseVex() ? 'check-circle' : 'alert-circle'"
             [size]="20"
             [class]="
               canUseVex()
-                ? 'text-green-600 mt-0.5 shrink-0'
-                : 'text-amber-500 mt-0.5 shrink-0'
+                ? 'text-[var(--color-success)] mt-0.5 shrink-0'
+                : 'text-[var(--color-warning)] mt-0.5 shrink-0'
             "
           />
           <div class="min-w-0 flex-1">
-            <h2 class="text-lg font-semibold text-gray-900">
+            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
               Estado del plan
             </h2>
             @if (canUseVex()) {
-              <p class="text-sm text-gray-600 mt-1">
+              <p class="text-sm text-[var(--color-text-secondary)] mt-1">
                 Tu plan incluye al agente Vex.
               </p>
             } @else {
-              <p class="text-sm text-gray-600 mt-1">
+              <p class="text-sm text-[var(--color-text-secondary)] mt-1">
                 Tu plan actual no incluye al agente Vex.
                 @if (vexBlockReason()) {
-                  <span class="text-gray-500"
+                  <span class="text-[var(--color-text-secondary)]"
                     >({{ vexBlockReason() }})</span
                   >
                 }
@@ -120,14 +121,16 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
         </div>
       </div>
 
-      <!-- Uso del mes. getAiUsage nunca lanza: ante error retorna un objeto
+      <!-- Uso del periodo (día o mes). getAiUsage nunca lanza: ante error retorna un objeto
            vacio, asi que un snapshot ausente se lee como "sin datos", no
            como cero. -->
-      <div class="bg-surface rounded-lg shadow-sm border p-6 mt-6">
+      <div class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-6 mt-6">
         <div class="flex items-start justify-between gap-4 mb-2">
           <div>
-            <h2 class="text-lg font-semibold text-gray-900">Uso del mes</h2>
-            <p class="text-sm text-gray-600">
+            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
+              {{ usageTitle() }}
+            </h2>
+            <p class="text-sm text-[var(--color-text-secondary)]">
               Consumo de Vex en el periodo vigente.
             </p>
           </div>
@@ -142,35 +145,36 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
         </div>
 
         @if (loadingUsage() && !vexUsage()) {
-          <p class="text-sm text-gray-500">Midiendo el consumo reciente…</p>
+          <p class="text-sm text-[var(--color-text-secondary)]">Midiendo el consumo reciente…</p>
         } @else if (!vexUsage()) {
-          <p class="text-sm text-gray-500">
+          <p class="text-sm text-[var(--color-text-secondary)]">
             Todavía no hay consumo de Vex registrado en este periodo.
           </p>
         } @else {
           @if (vexUsage(); as usage) {
             <div class="mt-2">
               <div class="flex items-baseline justify-between text-sm">
-                <span class="text-gray-900 font-semibold">
+                <span class="text-[var(--color-text-primary)] font-semibold">
                   {{ usage.used | number }}
                   @if (usage.cap !== null) {
-                    <span class="font-normal text-gray-500">
+                    <span class="font-normal text-[var(--color-text-secondary)]">
                       / {{ usage.cap | number }}
                     </span>
                   }
                 </span>
-                <span class="text-gray-500">
+                <span class="text-[var(--color-text-secondary)]">
                   @if (usage.cap === null) {
                     ilimitado
                   } @else {
                     {{ usagePercent() }}% del plan
                   }
-                  · {{ usage.period === 'daily' ? 'diario' : 'mensual' }}
+                  · {{ usage.period === 'daily' ? 'diario' : 'mensual' }} ·
+                  {{ usagePeriodLabel() }}
                 </span>
               </div>
               @if (usage.cap !== null) {
                 <div
-                  class="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden"
+                  class="mt-2 h-2 rounded-full bg-[var(--color-border)] overflow-hidden"
                   role="progressbar"
                   [attr.aria-valuenow]="usagePercent()"
                   aria-valuemin="0"
@@ -216,6 +220,29 @@ export class VexSettingsComponent {
     const usage = this.vexUsage();
     if (!usage || usage.cap === null || usage.cap <= 0) return 0;
     return Math.min(100, Math.round((usage.used / usage.cap) * 100));
+  });
+
+  /** "Uso del día" for a daily counter, "Uso del mes" for a monthly one. */
+  readonly usageTitle = computed(() =>
+    this.vexUsage()?.period === 'daily' ? 'Uso del día' : 'Uso del mes',
+  );
+
+  /**
+   * Concrete quota period behind "Uso del mes" (`octubre de 2026` for a
+   * monthly cap, `01/10/2026` for a daily one), computed on the STORE clock:
+   * timezone and language come from store settings, never the browser.
+   */
+  readonly usagePeriodLabel = computed(() => {
+    const period = this.vexUsage()?.period ?? 'monthly';
+    const general = this.settingsFacade.settings()?.general;
+    const tz = general?.timezone || 'America/Bogota';
+    const locale = general?.language === 'en' ? 'en-US' : 'es-CO';
+    if (period === 'daily') return formatStoreDate(new Date(), tz);
+    return new Intl.DateTimeFormat(locale, {
+      timeZone: tz,
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date());
   });
 
   constructor() {
@@ -266,12 +293,7 @@ export class VexSettingsComponent {
     try {
       // Sólo viaja `vex.enabled`. El backend mezcla la sección por clave, como
       // `vexi`, así que esto no pisa el resto de la configuración.
-      //
-      // El cast existe porque `StoreSettings` (frontend) todavía no declara el
-      // bloque `vex`: llega con el bloque de settings de Vex del backend
-      // (wave 2). Cuando la interfaz lo declare, este cast sobra y el payload
-      // debe tiparse directo.
-      const payload = { vex: { enabled: next } } as unknown as Partial<StoreSettings>;
+      const payload: Partial<StoreSettings> = { vex: { enabled: next } };
       await firstValueFrom(this.settingsService.saveSettingsNow(payload));
       // Drop the override so the facade becomes the single source of truth
       // again — leaving it set would mask a later change made elsewhere.

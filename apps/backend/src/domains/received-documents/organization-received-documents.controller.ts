@@ -41,6 +41,10 @@ import {
   RevokeReceivedDocumentMatchDto,
 } from './dto/received-document-match.dto';
 import { ReceivedDocumentMatchExpensesQueryDto } from './dto/received-document-match-expenses.dto';
+import { ReceivedBuyerEventOptionsQueryDto, ReceivedBuyerEventReadinessParamsDto, ReceivedBuyerEventRequestDto } from './dto/received-buyer-event-request.dto';
+import { ReceivedBuyerEventEnablementService } from './services/received-buyer-event-enablement.service';
+import { ReceivedBuyerEventDispatchService } from './services/received-buyer-event-dispatch.service';
+import { ReceivedBuyerEventCommandDto } from './dto/received-buyer-event-command.dto';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SAFE_FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
@@ -64,7 +68,45 @@ export class OrganizationReceivedDocumentsController {
     private readonly matchCandidates: ReceivedDocumentMatchCandidatesService,
     private readonly matchAllocations: ReceivedDocumentMatchAllocationsService,
     private readonly matchExpenses: ReceivedDocumentMatchExpensesService,
+    private readonly buyerEvents: ReceivedBuyerEventEnablementService,
+    private readonly buyerEventDispatch: ReceivedBuyerEventDispatchService,
   ) {}
+
+  @Get('buyer-event-enablement')
+  @Permissions('organization:invoicing:received:read')
+  async getBuyerEventEnablement(@Query() scope: ReceivedDocumentContextQueryDto) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.success(await this.buyerEvents.getStatus(context));
+  }
+
+  @Get('buyer-event-enablement/options')
+  @Permissions('organization:invoicing:received:events:configure')
+  async getBuyerEventOptions(@Query() query: ReceivedBuyerEventOptionsQueryDto) {
+    const context = await this.contexts.resolveOrganization(query.store_id);
+    const { store_id: _storeId, ...paging } = query;
+    return this.responses.success(await this.buyerEvents.listOptions(context, paging));
+  }
+
+  @Get('buyer-event-enablement/readiness/:eventCode')
+  @Permissions('organization:invoicing:received:read')
+  async getBuyerEventReadiness(
+    @Param() params: ReceivedBuyerEventReadinessParamsDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.success(await this.buyerEvents.getReadiness(context, params.eventCode));
+  }
+
+  @Post('buyer-event-enablement/request')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('organization:invoicing:received:events:configure')
+  async requestBuyerEventVerification(
+    @Body() dto: ReceivedBuyerEventRequestDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.updated(await this.buyerEvents.requestVerification(context, dto));
+  }
 
   @Get()
   @Permissions('organization:invoicing:received:read')
@@ -163,6 +205,18 @@ export class OrganizationReceivedDocumentsController {
   ) {
     const context = await this.contexts.resolveOrganization(scope.store_id);
     return this.responses.updated(await this.matchAllocations.revoke(context, id, allocationId, dto));
+  }
+
+  @Post(':id/buyer-events')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('organization:invoicing:received:events:emit')
+  async emitBuyerEvent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReceivedBuyerEventCommandDto,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.updated(await this.buyerEventDispatch.execute(context, id, dto));
   }
 
   @Get(':id')

@@ -15,6 +15,7 @@ function build() {
     new ResponseService(),
     {} as any,
     queue as any,
+    {} as any,
   );
   return { controller, queue };
 }

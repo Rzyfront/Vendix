@@ -16,6 +16,14 @@ import { VexChatStore } from '../../state/vex-chat.store';
 const MAX_LINES = 8;
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+/** Mirror of the "+" input's `accept` attribute (drops and pastes bypass it). */
+const ACCEPTED_EXTENSIONS = ['.pdf', '.csv', '.xlsx', '.xls', '.txt'];
+
+function isAcceptedFile(file: File): boolean {
+  if (file.type.startsWith('image/')) return true;
+  const name = file.name.toLowerCase();
+  return ACCEPTED_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
 
 interface StagedFile {
   local_id: string;
@@ -39,8 +47,8 @@ interface StagedFile {
               class="inline-flex items-center gap-2 max-w-full pl-3 pr-1.5 py-1.5 rounded-xl border text-xs"
               [class.border-[var(--color-border)]]="file.status !== 'error'"
               [class.bg-[var(--color-surface)]]="file.status !== 'error'"
-              [class.border-[var(--color-error,#dc2626)]]="file.status === 'error'"
-              [class.bg-[rgba(220,38,38,0.07)]]="file.status === 'error'"
+              [class.border-[var(--color-error)]]="file.status === 'error'"
+              [class.bg-[rgba(var(--color-error-rgb),0.07)]]="file.status === 'error'"
             >
               @if (file.status === 'uploading') {
                 <app-icon name="loader-2" [size]="14" [spin]="true"></app-icon>
@@ -97,6 +105,7 @@ interface StagedFile {
           [value]="text()"
           (input)="onInput($event)"
           (keydown)="onKeydown($event)"
+          (paste)="onPaste($event)"
         ></textarea>
 
         <button
@@ -179,7 +188,25 @@ export class VexComposerComponent {
     const input = event.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
     input.value = '';
-    if (!files.length) return;
+    this.addFiles(files);
+  }
+
+  /** Whether attaching is currently allowed (same gate as the "+" button). */
+  readonly can_attach = computed(() => !this.store.is_agent_typing());
+
+  onPaste(event: ClipboardEvent): void {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (!files.length) return; // plain text paste: leave it alone
+    event.preventDefault();
+    this.addFiles(files);
+  }
+
+  /**
+   * Single entry for the "+" picker, drag-and-drop and paste: same limits,
+   * same upload, same staged preview. Invalid files toast, the rest attach.
+   */
+  addFiles(files: File[]): void {
+    if (!files.length || !this.can_attach()) return;
 
     const room = MAX_FILES - this.staged().length;
     if (room <= 0) {
@@ -187,6 +214,10 @@ export class VexComposerComponent {
       return;
     }
     for (const file of files.slice(0, room)) {
+      if (!isAcceptedFile(file)) {
+        this.toast.warning(`${file.name || 'El archivo'} no es un tipo permitido.`);
+        continue;
+      }
       if (file.size > MAX_FILE_BYTES) {
         this.toast.warning(`${file.name} supera los 15 MB.`);
         continue;

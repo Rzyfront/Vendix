@@ -55,9 +55,18 @@ describe('RefundFlowService — order_events (plan order-truth-and-invoice-tz)',
     $queryRaw: jest.fn(),
     refund_items: { create: jest.fn(), findMany: jest.fn() },
     order_items: { findMany: jest.fn() },
-    payments: { update: jest.fn() },
+    payments: { update: jest.fn(), findFirst: jest.fn() },
+    cash_register_movements: { findFirst: jest.fn() },
+    audit_logs: { create: jest.fn() },
     $transaction: jest.fn(),
   };
+
+  const mockMovements = {
+    recordRefundMovement: jest.fn(),
+    resolveCompensationSessionId: jest.fn(),
+  };
+  const mockPaymentGateway = { reversePaymentWithProcessor: jest.fn() };
+  const mockWallet = { getOrCreateWallet: jest.fn(), creditForRefund: jest.fn() };
 
   const mockCalculationService = {
     calculate: jest.fn(),
@@ -88,12 +97,12 @@ describe('RefundFlowService — order_events (plan order-truth-and-invoice-tz)',
         { provide: StockLevelManager, useValue: mockStockLevelManager },
         { provide: SettingsService, useValue: {} },
         { provide: SessionsService, useValue: {} },
-        { provide: MovementsService, useValue: { recordRefundMovement: jest.fn() } },
+        { provide: MovementsService, useValue: mockMovements },
         { provide: SerialNumberEnforcementService, useValue: { isSerialized: () => Promise.resolve(false) } },
         { provide: InventorySerialNumbersService, useValue: { returnSerial: jest.fn() } },
-        { provide: WalletService, useValue: { getOrCreateWallet: jest.fn(), creditForRefund: jest.fn() } },
+        { provide: WalletService, useValue: mockWallet },
         { provide: WalletBalanceService, useValue: { credit: jest.fn().mockResolvedValue(undefined) } },
-        { provide: PaymentGatewayService, useValue: { reversePaymentWithProcessor: jest.fn() } },
+        { provide: PaymentGatewayService, useValue: mockPaymentGateway },
         { provide: ManualRefundDeliveryService, useValue: manualRefundDelivery },
         { provide: OrderHistoryService, useValue: orderHistoryService },
       ],
@@ -462,6 +471,11 @@ describe('RefundFlowService — order_events (plan order-truth-and-invoice-tz)',
         'Cancelación',
       );
 
+      // ADR-13: las piernas nacen `processing` (estado de libro), nunca `requested`.
+      expect(tx.refunds.create).toHaveBeenCalledTimes(2);
+      for (const [arg] of tx.refunds.create.mock.calls) {
+        expect(arg.data.state).toBe('processing');
+      }
       expect(orderHistoryService.record).toHaveBeenCalledTimes(2);
       expect(orderHistoryService.record).toHaveBeenNthCalledWith(1, tx, {
         orderId: ORDER_ID,
@@ -498,6 +512,168 @@ describe('RefundFlowService — order_events (plan order-truth-and-invoice-tz)',
       ).rejects.toMatchObject({ errorCode: 'REF_VALIDATE_001' });
       expect(tx.refunds.create).not.toHaveBeenCalled();
       expect(orderHistoryService.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('completeCancellationNonCashRefunds (ADR-13)', () => {
+    const ORDER_ID = 9401;
+    const STORE_ID = 55;
+    const order = { id: ORDER_ID, store_id: STORE_ID, grand_total: new Prisma.Decimal(60000) };
+    const resultOf = (refundId: number, paymentId: number, method: string) =>
+      ({
+        refund: { id: refundId, payment_id: paymentId },
+        breakdown: {
+          amount: new Prisma.Decimal(60000),
+          subtotal: new Prisma.Decimal(60000),
+          tax: new Prisma.Decimal(0),
+          shipping: new Prisma.Decimal(0),
+          shippingTax: new Prisma.Decimal(0),
+          shippingTaxType: null,
+        },
+        leg: { payment_id: paymentId, amount: new Prisma.Decimal(60000), method_label: 'x', method_type: method },
+      }) as any;
+    const paymentOf = (id: number, type: string, transaction_id: string | null = null) => ({
+      id,
+      state: 'cancelled',
+      transaction_id,
+      store_payment_method: { system_payment_method: { type } },
+    });
+
+    beforeEach(() => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(7);
+      mockPrisma.refunds.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.stores.findUnique.mockResolvedValue({ organization_id: 4 });
+      mockPrisma.order_items.findMany.mockResolvedValue([]);
+      mockPrisma.orders.findFirst.mockResolvedValue({ customer_id: 31 });
+      mockPrisma.cash_register_movements.findFirst
+        .mockResolvedValueOnce({ payment_method: 'bank_transfer' }) // sale
+        .mockResolvedValueOnce(null); // sin contra-movimiento previo
+      mockMovements.resolveCompensationSessionId.mockResolvedValue(88);
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    it('transferencia: completed + movimiento bank_transfer order_cancelled + un solo refund.completed', async () => {
+      mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(801, 'bank_transfer'));
+
+      await service.completeCancellationNonCashRefunds(order, [resultOf(382, 801, 'bank_transfer')]);
+
+      expect(mockPrisma.refunds.updateMany).toHaveBeenCalledWith({
+        where: { id: 382, state: { in: ['processing', 'failed'] } },
+        data: expect.objectContaining({ state: 'completed', processed_at: expect.any(Date) }),
+      });
+      expect(orderHistoryService.record).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({ type: 'refund_resolved', paymentId: 801 }),
+      );
+      expect(mockMovements.recordRefundMovement).toHaveBeenCalledWith(
+        88,
+        expect.objectContaining({
+          amount: 60000,
+          payment_method: 'bank_transfer',
+          payment_id: 801,
+          reference: 'order_cancelled',
+        }),
+      );
+      const completed = eventEmitter.emit.mock.calls.filter(([name]: any) => name === 'refund.completed');
+      expect(completed).toHaveLength(1);
+      expect(completed[0][1]).toMatchObject({
+        refund_id: 382,
+        effective_channel: 'bank_transfer',
+        refund_method: 'original_payment',
+      });
+      expect(mockPaymentGateway.reversePaymentWithProcessor).not.toHaveBeenCalled();
+    });
+
+    it('wompi que falla: el reembolso igual queda completed y se audita gateway_reversal_failed', async () => {
+      mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(802, 'wompi', 'tx-1'));
+      mockPaymentGateway.reversePaymentWithProcessor.mockRejectedValue(new Error('wompi down'));
+      mockPrisma.refunds.update.mockResolvedValue({});
+
+      await service.completeCancellationNonCashRefunds(order, [resultOf(383, 802, 'wompi')]);
+
+      expect(mockPaymentGateway.reversePaymentWithProcessor).toHaveBeenCalledWith('tx-1', 60000);
+      expect(mockPrisma.audit_logs.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'payment.cancel.cash_reversal_issue',
+          metadata: expect.objectContaining({ cause: 'gateway_reversal_failed', refund_id: 383 }),
+        }),
+      });
+      expect(mockPrisma.refunds.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 383, state: { in: ['processing', 'failed'] } },
+          data: expect.objectContaining({ state: 'completed' }),
+        }),
+      );
+      const completed = eventEmitter.emit.mock.calls.filter(([name]: any) => name === 'refund.completed');
+      expect(completed).toHaveLength(1);
+      expect(completed[0][1]).toMatchObject({ effective_channel: 'gateway' });
+    });
+
+    it('wompi que reversa con éxito: dispatch ya dejó completed; igual registra historial, movimiento y un solo refund.completed', async () => {
+      mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(806, 'wompi', 'tx-2'));
+      mockPaymentGateway.reversePaymentWithProcessor.mockResolvedValue({
+        status: 'succeeded', refundId: 'wo-refund-1', gatewayResponse: {},
+      });
+      mockPrisma.refunds.update.mockResolvedValue({});
+      // El row ya está `completed`: un claim sobre processing/failed daría 0.
+      mockPrisma.refunds.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.cash_register_movements.findFirst.mockReset();
+      mockPrisma.cash_register_movements.findFirst
+        .mockResolvedValueOnce({ payment_method: 'wompi' })
+        .mockResolvedValueOnce(null);
+
+      await service.completeCancellationNonCashRefunds(order, [resultOf(387, 806, 'wompi')]);
+
+      expect(mockPrisma.refunds.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.audit_logs.create).not.toHaveBeenCalled();
+      expect(orderHistoryService.record).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({ type: 'refund_resolved', paymentId: 806 }),
+      );
+      expect(mockMovements.recordRefundMovement).toHaveBeenCalledWith(
+        88,
+        expect.objectContaining({ payment_method: 'wompi', payment_id: 806, reference: 'order_cancelled' }),
+      );
+      const completed = eventEmitter.emit.mock.calls.filter(([name]: any) => name === 'refund.completed');
+      expect(completed).toHaveLength(1);
+      expect(completed[0][1]).toMatchObject({ refund_id: 387, effective_channel: 'gateway' });
+    });
+
+    it('voucher/wallet: canal store_credit y crédito a la wallet del cliente', async () => {
+      mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(803, 'wallet'));
+
+      await service.completeCancellationNonCashRefunds(order, [resultOf(384, 803, 'wallet')]);
+
+      expect(mockWallet.creditForRefund).toHaveBeenCalledWith(31, 60000, {
+        refund_id: 384, order_id: ORDER_ID, user_id: 7,
+      });
+      const completed = eventEmitter.emit.mock.calls.filter(([name]: any) => name === 'refund.completed');
+      expect(completed[0][1]).toMatchObject({ effective_channel: 'store_credit' });
+    });
+
+    it('sin sesión abierta: no registra movimiento, audita y aun así cierra y emite', async () => {
+      mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(804, 'bank_transfer'));
+      mockMovements.resolveCompensationSessionId.mockResolvedValue(null);
+
+      await service.completeCancellationNonCashRefunds(order, [resultOf(385, 804, 'bank_transfer')]);
+
+      expect(mockMovements.recordRefundMovement).not.toHaveBeenCalled();
+      expect(mockPrisma.audit_logs.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({ cause: 'no_open_session_non_cash' }),
+        }),
+      });
+      expect(eventEmitter.emit.mock.calls.filter(([n]: any) => n === 'refund.completed')).toHaveLength(1);
+    });
+
+    it('cierre ya hecho (claim 0): no emite ni asienta nada', async () => {
+      mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(805, 'bank_transfer'));
+      mockPrisma.refunds.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.completeCancellationNonCashRefunds(order, [resultOf(386, 805, 'bank_transfer')]);
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(mockMovements.recordRefundMovement).not.toHaveBeenCalled();
     });
   });
 });

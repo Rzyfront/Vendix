@@ -1,0 +1,16 @@
+
+event: ai-chunk
+id: 1
+data: {"type":"tool_call","tool":{"id":"call_01a0f89dd919754188c4b732","name":"find_product","arguments":{"query":"E2E2A-vex"}}}
+
+event: ai-chunk
+id: 2
+data: {"type":"tool_result","tool":{"id":"call_01a0f89dd919754188c4b732","name":"find_product","summary":"{\"query\":\"E2E2A-vex\",\"matched_by\":\"nombre\",\"match_count\":1,\"ambiguous\":false,\"currency\":\"COP\",\"products\":[{\"product_id\":2514,\"name\":\"E2E2A-vex\",\"sku\":null,\"barcode\":null,\"brand\":null,\"state\":\"active\",\"product_type\":\"physical\",\"is_sellable\":true,\"requires_booking\":false,\"stock_unit\":null,\"net_price\":"}}
+
+event: ai-chunk
+id: 3
+data: {"type":"text","content":"**E2E2A-vex** — producto físico, activo, ID 2514.\n\n- **Precio de venta: 1.000 COP** (sin impuestos; IVA 0 %).\n- Existencias disponibles: 0 unidades.\n- No tiene SKU, código de barras, marca ni variantes.\n\nNo creé nada: solo consulté. Si quieres ver el desglose completo de precio (costo, margen, tarifas), dímelo y lo leo."}
+
+event: ai-chunk
+id: 4
+data: {"type":"done","usage":{"promptTokens":0,"completionTokens":0,"totalTokens":156519}}

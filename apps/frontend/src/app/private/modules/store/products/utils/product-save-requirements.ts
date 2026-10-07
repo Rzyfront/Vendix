@@ -43,7 +43,7 @@ export const PRODUCT_SAVE_ERROR_MAP: Record<string, ProductSaveErrorInfo> = {
   PROD_BARCODE_DUP_001: {
     label: 'Código de barras duplicado',
     reason:
-      'El código de barras ya está en uso por otro producto o variante de la tienda. Usa uno distinto.',
+      'El código de barras ya está en uso por otro producto, variante o presentación de la tienda.',
     actionKind: 'focus',
     actionLabel: 'Ir al código de barras',
     actionTarget: 'barcode',
@@ -172,9 +172,14 @@ export function mapBackendErrorToRequirements(err: unknown): SaveRequirement[] {
   if (parsed.errorCode && info) {
     let reason = info.reason;
 
-    // PROD_TAX_COMBO_001: el backend redacta el motivo exacto en español
-    // (qué categorías chocan y por qué); ese texto ES la razón.
-    if (parsed.errorCode === 'PROD_TAX_COMBO_001') {
+    // PROD_TAX_COMBO_001 / PROD_BARCODE_DUP_001 / PROD_DUP_001: el backend
+    // redacta el motivo exacto en español (qué chocó o qué producto ocupa el
+    // valor); ese texto ES la razón.
+    if (
+      parsed.errorCode === 'PROD_TAX_COMBO_001' ||
+      parsed.errorCode === 'PROD_BARCODE_DUP_001' ||
+      parsed.errorCode === 'PROD_DUP_001'
+    ) {
       const detail = readBackendMessage(err)?.trim();
       if (detail && detail !== parsed.errorCode) reason = detail;
     }

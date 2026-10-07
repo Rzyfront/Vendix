@@ -9,7 +9,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.0"
+  version: "3.1"
   scope: [root]
   auto_invoke:
     - "Creating new AI tools"
@@ -43,6 +43,7 @@ interface RegisteredTool {
   requiresConfirmation?: boolean;
   readOnly?: boolean;      // opt-in, fail-closed: gates the voice surface
   clientSide?: boolean;    // dispatched by the browser, never by the server
+  irreversible?: boolean;  // explicit per-tool mark, enforced by a coverage spec
   preview?: (args, context) => Promise<ToolPreview>;
   handler?: (args, context) => Promise<string>;  // absent for clientSide tools
 }
@@ -171,6 +172,27 @@ Tool errors are returned to the model as tool results so it can recover.
 8. Call `registry.registerMany(...)` from the **owning domain module**'s
    `onModuleInit()`, not from `AIEngineModule`.
 
+## Coverage Specs For Cross-Cutting Flags
+
+A flag every dangerous tool must carry cannot rely on review. Add a
+registry-wide coverage spec that registers the real factories and fails when
+a write matching the danger pattern lacks the flag. Exemplar:
+`apps/backend/src/ai-engine/tools/irreversible-coverage.spec.ts` for
+`irreversible: true` (pattern
+`send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_`).
+
+Rules for the pattern:
+
+- Walk the real factories on a real `AIToolRegistry`, not fixtures.
+- Scope to writes (`requiresConfirmation`): exclude `readOnly` and
+  `clientSide` tools even when their names match (`preview_refund`,
+  `list_close_sessions`).
+- Pin explicit exclusions with a test, not a comment: an evaluator
+  (`run_close_checks`) that one day executes must break the pin instead of
+  inheriting silence.
+- Scope the spec to the factories its step owns; other domains belong to
+  their owners' specs.
+
 ## Anti-Patterns
 
 - Registering domain tools centrally in `AIEngineModule` (reintroduces the DI cycle).
@@ -179,6 +201,7 @@ Tool errors are returned to the model as tool results so it can recover.
 - Giving a `clientSide` tool a `handler` — `executeTool()` rejects it anyway.
 - Treating `AI_AGENT_005` as an error in a new caller. It is a proposal.
 - Trusting `preview`'s snapshot inside `handler` instead of re-checking.
+- Adding a cross-cutting tool flag without a coverage spec that fails when a new tool forgets it.
 
 ## Related Skills
 

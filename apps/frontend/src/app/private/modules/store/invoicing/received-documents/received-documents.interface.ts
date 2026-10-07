@@ -61,6 +61,11 @@ export interface ReceivedDocumentEvent {
   id: number;
   event_type: string;
   status: string;
+  event_code?: string | null;
+  event_number?: string | null;
+  cude?: string | null;
+  event_date?: string | null;
+  confirmed_at?: string | null;
   created_at: string;
   result?: unknown;
 }
@@ -123,6 +128,19 @@ export interface ReceivedDocumentAccountingEvidence {
   }>;
   unresolved_allocation_ids: number[];
   fiscal_eligibility: 'pending';
+  payable_evidence: Array<{
+    reception_id: number;
+    purchase_order_id: number | null;
+    status: 'linked' | 'missing' | 'invalid_source' | 'foreign_scope';
+    accounts_payable_id?: number;
+    ap_reception_link_id?: number;
+    gross_amount?: string;
+    currency?: string;
+  }>;
+  payable_evidence_complete: boolean | null;
+  unresolved_tax_purchase_order_ids: number[];
+  unresolved_vat_purchase_order_ids: number[];
+  financial_evidence_complete: boolean;
 }
 
 export interface ApiEnvelope<T> {

@@ -5,8 +5,19 @@ import {
   dianAmount,
   dianLineExtension,
   dianLineExtensionTotal,
+  dianRate,
+  dianSum,
   clearInclusiveLine,
+  toDecimal,
 } from '../../../store/invoicing/utils/dian-money.util';
+import { create as xmlCreate } from 'xmlbuilder2';
+import {
+  TaxBreakdownItem,
+  TaxFiscalTypeValue,
+} from '../../../../common/interfaces/tax-breakdown.interface';
+import { InvoiceCalculatorService } from '../../../store/invoicing/services/invoice-calculator.service';
+import { DianTotalsValidator } from '../../../store/invoicing/providers/dian-direct/xml/dian-totals.validator';
+import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/xml/xml-namespaces';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 // Mismas funciones que el generador de numeración de tiendas, sin copia local:
 // la forma de una ClTec no puede tener dos definiciones, o el carril que valida
@@ -108,6 +119,7 @@ import {
   SubscriptionInvoiceMetadata,
 } from '../../../store/subscriptions/types/billing.types';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
+import { isDianUnitCode } from '../../../store/invoicing/providers/dian-direct/constants/dian-unit-codes';
 import {
   buildSubscriptionItemCode,
   buildSubscriptionInvoiceNotes,
@@ -131,6 +143,8 @@ import {
   DianAddressFields,
   DianDocumentExtras,
   DianExchangeRateDeclaration,
+  ProviderInvoiceWithholding,
+  UblCommonBuilder,
   UblDocumentLine,
 } from '../../../store/invoicing/providers/dian-direct/xml/ubl-common.builder';
 
@@ -163,7 +177,7 @@ type PlatformProviderInvoiceData = ProviderInvoiceData &
  * `is_inclusive`. Sin este registro, después de firmar no quedaría rastro de
  * si el precio traía el impuesto dentro.
  */
-interface PlatformTaxBreakdownRow {
+export interface PlatformTaxBreakdownRow {
   tax_type: string;
   /** Tarifa en FRACCIÓN (0,19), NO en porcentaje. */
   rate: number;
@@ -190,6 +204,34 @@ interface PlatformSnapshotLine {
   unit_code: string;
   taxes: PlatformTaxBreakdownRow[];
   account_code: string | null;
+}
+
+/**
+ * Resultado del cálculo PURO de la factura de plataforma
+ * (`computePlatformInvoiceTotals`): lo que se firma (`lineItems`), lo que se
+ * persiste (`snapshotItems`) y los totales de cabecera como CADENAS DIAN.
+ */
+export interface PlatformInvoiceComputation {
+  lineItems: UblDocumentLine[];
+  snapshotItems: PlatformSnapshotLine[];
+  /** `LegalMonetaryTotal/LineExtensionAmount` = ValFac del CUFE. */
+  subtotal: string;
+  /** Σ de los impuestos de línea = `TaxTotal/TaxAmount`. */
+  taxTotal: string;
+  /** Σ de los descuentos que las líneas EMITEN. */
+  discountTotal: string;
+  /** `PayableAmount` = ValTot del CUFE. */
+  payable: string;
+  hasAnyTax: boolean;
+  /** Alguna línea declara un impuesto a tarifa 0 % (EXENTO, art. 477 ET). */
+  hasExemptLine: boolean;
+  taxBreakdown: Array<{
+    tax_type: string;
+    code: string;
+    rate: number;
+    base: string;
+    amount: string;
+  }>;
 }
 
 /**
@@ -233,6 +275,74 @@ const SETTINGS_KEY = PLATFORM_FISCAL_SETTINGS_KEY;
 const VENDOR_SUPPORT_SETTINGS_KEY = 'vendor_support_fiscal';
 const PRODUCTION_TEST_FRESHNESS_MS = 60 * 60 * 1000;
 const DECIMAL_ZERO = new Prisma.Decimal(0);
+
+/**
+ * `tax_type` de retención (`RETE_FUENTE`, `RETE_IVA`, `RETE_ICA`, `WITHHOLDING`…):
+ * no es un impuesto de línea, viaja en `withholdings`.
+ */
+function isWithholdingTaxType(taxType: unknown): boolean {
+  return /^(rete|withholding)/i.test(String(taxType ?? '').trim());
+}
+
+/** Importe de una retención calculado por el servidor (no se confía en el cliente). */
+function platformWithholdingAmount(w: {
+  base_amount: number;
+  rate: number;
+}): number {
+  return Math.round((Number(w.base_amount) || 0) * (Number(w.rate) || 0) * 100) / 100;
+}
+
+interface PlatformWithholdingConcept {
+  id: number;
+  code: string;
+  withholding_type: 'retefuente' | 'reteiva' | 'reteica';
+  account_code: string | null;
+}
+
+/**
+ * Retenciones tal como viajan a `cac:WithholdingTaxTotal`, con el MISMO
+ * contrato que `InvoiceFlowService.toProviderWithholdings` del riel tienda:
+ * tarifa FRACCIÓN → PORCENTAJE formateado, base e importe a 2 decimales, y se
+ * descartan las de importe 0. Un concepto no resuelto se omite del XML.
+ */
+function buildPlatformXmlWithholdings(
+  withholdings: Array<{ concept_id: number; base_amount: number; rate: number }>,
+  concepts: Map<number, PlatformWithholdingConcept>,
+): ProviderInvoiceWithholding[] {
+  const out: ProviderInvoiceWithholding[] = [];
+  for (const w of withholdings) {
+    const concept = concepts.get(Number(w.concept_id));
+    const amount = platformWithholdingAmount(w as any);
+    if (!concept || !(amount > 0)) continue;
+    out.push({
+      withholding_type: concept.withholding_type,
+      concept_code: concept.code,
+      rate: dianRate(toDecimal(w.rate).times(100)),
+      base: dianAmount(w.base_amount),
+      amount: dianAmount(amount),
+    });
+  }
+  return out;
+}
+
+/**
+ * Unidad de medida de una línea: default `NIU`; `MON` (que perfiles guardados
+ * arrastran) es el mes en UN/ECE pero la DIAN publicó `LUN`, así que se mapea;
+ * cualquier otro código fuera del catálogo DIAN es un 400 legible, ANTES de
+ * reservar consecutivo.
+ */
+function resolvePlatformUnitCode(raw: string | undefined | null, index: number): string {
+  const code = String(raw ?? '').trim();
+  if (!code) return 'NIU';
+  if (code.toUpperCase() === 'MON') return 'LUN';
+  if (!isDianUnitCode(code)) {
+    throw new BadRequestException(
+      `Línea ${index + 1}: la unidad de medida «${code}» no pertenece al catálogo DIAN ` +
+        '(ej. NIU unidad, LUN mes, ANA año, HUR hora).',
+    );
+  }
+  return code;
+}
 /**
  * Respaldo cuando `organizations.is_platform` no está sembrado todavía. NO es la
  * fuente de verdad: el id se deriva vía `PlatformOrgService`, que lee la fila
@@ -2074,12 +2184,13 @@ export class SubscriptionFiscalService {
     dueAt: string,
     issueAtLocal: string,
     lineItems: UblDocumentLine[],
-    subtotal: number,
-    taxAmount: number,
-    total: number,
+    subtotal: string,
+    taxAmount: string,
+    total: string,
     withholdingAmount: number,
     hasAnyTax: boolean,
     notesText: string,
+    xmlWithholdings: ProviderInvoiceWithholding[] = [],
   ): PlatformProviderInvoiceData {
     const customerDocumentType = dto.customer.document_type ?? '31';
     const customerPersonType = dto.customer.person_type ?? '2';
@@ -2096,10 +2207,10 @@ export class SubscriptionFiscalService {
       due_date: dueAt,
       invoice_period: {
         start_date: dto.period_start
-          ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
+          ? this.toCivilDate(dto.period_start, 'period_start')
           : issueAtLocal,
         end_date: dto.period_end
-          ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
+          ? this.toCivilDate(dto.period_end, 'period_end')
           : issueAtLocal,
       },
       customer_name: dto.customer.legal_name,
@@ -2121,17 +2232,25 @@ export class SubscriptionFiscalService {
       customer_person_type: customerPersonType,
       customer_regime: customerRegime,
       customer_tax_responsibilities: customerResponsibilities,
-      subtotal_amount: subtotal.toFixed(2),
-      discount_amount: dto.items
-        .reduce((acc, it) => acc + Number(it.discount_amount ?? 0), 0)
-        .toFixed(2),
-      tax_amount: taxAmount.toFixed(2),
+      subtotal_amount: subtotal,
+      // Σ de los descuentos que las LÍNEAS EMITEN, no de los capturados en el
+      // DTO. En una línea con impuesto incluido el descuento se despeja junto
+      // con el precio (`clearInclusiveLine`): 10.000 capturados viajan como
+      // 8.403,36. Sumar el capturado dejaba un remanente de 1.596,64 que
+      // `UblCommonBuilder.documentDiscount` leía como descuento DE PIE: el XML
+      // descontaba dos veces y el prevalidador cortaba con
+      // `PAYABLE_AMOUNT_MISMATCH`. El riel tienda no tiene remanente porque
+      // sus descuentos nacen por línea; con esto la plataforma tampoco.
+      discount_amount: dianSum(lineItems.map((it) => it.discount_amount)),
+      tax_amount: taxAmount,
       withholding_amount: withholdingAmount.toFixed(2),
-      total_amount: total.toFixed(2),
+      // Vacío ⇒ el grupo no se emite (igual que el riel tienda).
+      ...(xmlWithholdings.length > 0 ? { withholdings: xmlWithholdings } : {}),
+      total_amount: total,
       currency: 'COP',
-      ...(function buildExchangeRate(): {
+      ...((): {
         exchange_rate?: DianExchangeRateDeclaration;
-      } {
+      } => {
         const cur = dto.exchange_rate_payload;
         if (!cur) return {};
         const foreign = cur.iso_4217;
@@ -2142,7 +2261,9 @@ export class SubscriptionFiscalService {
           exchange_rate: {
             foreign_currency: foreign.toUpperCase(),
             rate: dianAmount(rateRaw),
-            date: cur.exchange_rate_date ?? issueAtLocal,
+            date: cur.exchange_rate_date
+              ? this.toCivilDate(cur.exchange_rate_date, 'exchange_rate_date')
+              : issueAtLocal,
           },
         };
       })(),
@@ -2247,57 +2368,22 @@ export class SubscriptionFiscalService {
         );
       }
       const m: any = meta;
-      const customer = m.customer as {
-        legal_name: string;
-        tax_id: string;
-        tax_id_dv: string;
-        email?: string;
-        address_line?: string;
-        city?: string;
-        department_code?: string;
-      };
-      const items = m.items as Array<{
-        position: number;
-        description: string;
-        quantity: number;
-        unit_price: number;
-        line_total: number | string;
-      }>;
-      /**
-       * Las líneas del snapshot en la forma que el emisor firma
-       * (`UblDocumentLine`, todos los importes en cadena).
-       *
-       * NO se enriquecen con `discount_amount` / `unit_code` aunque el snapshot
-       * los tenga: el primer intento los emitió ausentes, y el reintento tiene
-       * que reproducir EL MISMO documento. Cambiar cualquiera de los dos mueve
-       * `cbc:LineExtensionAmount` o la unidad y con ellos el CUFE, sobre un
-       * consecutivo que la DIAN ya quemó.
-       */
-      const providerItems: UblDocumentLine[] = items.map((it) => ({
-        description: it.description,
-        // `String(...)` y no `dianAmount(...)`: truncar a 2 decimales cambiaría
-        // el precio que el primer intento declaró en una línea con 4 decimales.
-        quantity: String(it.quantity),
-        unit_price: String(it.unit_price),
-        discount_amount: dianAmount(0),
-        tax_amount: dianAmount(0),
-        total_amount: dianAmount(it.line_total),
-      }));
-      const totals = m.totals as { subtotal: number; tax_amount: number; total: number };
-      const periodStart = (m.period_start as string | null) ?? null;
-      const periodEnd = (m.period_end as string | null) ?? null;
-      const currency = (m.currency as string) ?? 'COP';
-
-      // Fechas del primer intento: si cambian, el CUFE recalculado ya
-      // no matchea el burnt y la DIAN rechaza. La fila trae `created_at`
-      // que es el instante del primer CREATE.
+      // El payload EXACTO del primer intento (`createPlatformInvoice` lo
+      // persiste en el snapshot). Antes el reenvío reconstruía el documento con
+      // defaults —tipo de documento '31', régimen '49', forma de pago '1', medio
+      // '42', vencimiento = creación + 7, notas con «(retry)», moneda del
+      // snapshot— y firmaba OTRO documento sobre un consecutivo ya quemado.
+      const storedProviderData = m.provider_data as
+        | PlatformProviderInvoiceData
+        | undefined;
+      if (!storedProviderData || typeof storedProviderData !== 'object') {
+        throw new BadRequestException(
+          'El snapshot de esta factura no guarda el payload firmado (emitida antes de que se persistiera): ' +
+            'reconstruirlo con valores por defecto firmaría un documento distinto sobre un consecutivo ya gastado. ' +
+            'Corrígela con una nota crédito y vuelve a emitir.',
+        );
+      }
       const firstAttemptAt = transmission.created_at ?? new Date();
-      const firstAttemptDate = localDateString(firstAttemptAt, PLATFORM_TIMEZONE);
-      const firstAttemptTime = localTimeString(firstAttemptAt, PLATFORM_TIMEZONE);
-      const firstAttemptDueDate = localDateString(
-        new Date(firstAttemptAt.getTime() + 7 * 24 * 60 * 60 * 1000),
-        PLATFORM_TIMEZONE,
-      );
 
       // Resolución: la MISMA que se usó en el primer intento. La fuente
       // correcta es el snapshot persistido en `createPlatformInvoice`
@@ -2331,58 +2417,19 @@ export class SubscriptionFiscalService {
       }
 
       const providerData: PlatformProviderInvoiceData = {
+        ...storedProviderData,
         invoice_number: transmission.document_number,
-        invoice_type: 'sales_invoice',
-        issue_date: firstAttemptDate,
-        issue_time: firstAttemptTime,
-        due_date: firstAttemptDueDate,
-        invoice_period: {
-          start_date: periodStart ? localDateString(new Date(periodStart), PLATFORM_TIMEZONE) : firstAttemptDate,
-          end_date: periodEnd ? localDateString(new Date(periodEnd), PLATFORM_TIMEZONE) : firstAttemptDate,
-        },
-        customer_name: customer.legal_name,
-        customer_tax_id: customer.tax_id,
-        customer_email: customer.email ?? undefined,
-        customer_address: customer.address_line
-          ? {
-              line: customer.address_line,
-              city: customer.city ?? null,
-              department_code: customer.department_code ?? null,
-              country_code: 'CO',
-            }
-          : null,
-        customer_document_type: '31',
-        customer_verification_digit: customer.tax_id_dv ?? undefined,
-        customer_person_type: '2',
-        customer_regime: '49',
-        customer_tax_responsibilities: ['O-13'],
-        subtotal_amount: Number(totals.subtotal ?? 0).toFixed(2),
-        discount_amount: '0.00',
-        tax_amount: Number(totals.tax_amount ?? 0).toFixed(2),
-        withholding_amount: '0.00',
-        total_amount: Number(totals.total ?? 0).toFixed(2),
-        currency,
-        items: providerItems,
-        taxes: [],
-        notes: [
-          `Factura de servicios generada desde super-admin el ${firstAttemptDate}`,
-          'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
-          `(retry) ${localDateString(new Date(), PLATFORM_TIMEZONE)} ${localTimeString(new Date(), PLATFORM_TIMEZONE)}`,
-        ].join('\n'),
-        // `order_reference` / `payment_method`: mismo residuo legado que en
-        // `buildPlatformProviderData` — el emisor de factura de venta no lee
-        // ninguno de los dos, y viajaban en `null`.
-        // `resolution_number` es `string | null` en la fila y el contrato lo
-        // declara OPCIONAL: otro null que la aserción de tipo ocultaba.
+        // Lo que SÍ se re-deriva de la resolución del primer intento.
         resolution_number: resolution.resolution_number ?? undefined,
         technical_key: this.technicalKeyVault.reveal(resolution) ?? undefined,
         control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, firstAttemptAt, {
           resolution_id: resolution.id,
           document_type: 'sales_invoice',
         }),
-        payment_form: '1',
-        payment_means: '42',
       };
+
+      // Sin certificado no se firma: se corta antes de tocar la transmisión.
+      await this.assertPlatformSigningReady(settings);
 
       // No se reescribe `request_hash`: el primer intento ya lo dejó
       // firmado. Bump de `retry_count` ocurre implícitamente al
@@ -2401,18 +2448,493 @@ export class SubscriptionFiscalService {
         throw error;
       }
 
-      const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
-        where: { id: transmission.id },
-      });
-
-      return {
-        transmission_id: transmission.id,
-        fiscal_number: final?.document_number ?? transmission.document_number,
-        transmission_status: final?.transmission_status ?? 'unknown',
-        dian_status: final?.dian_status ?? 'unknown',
-        cufe: final?.cufe ?? null,
-      };
+      return this.platformTransmissionResult(
+        transmission.id,
+        transmission.document_number,
+      );
     });
+  }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Factura de plataforma: fechas civiles, cálculo por kernel y compuertas
+  // previas al consecutivo. Todo lo de esta sección es PURO (sin BD), salvo
+  // `assertPlatformSigningReady`, que sólo lee la configuración DIAN.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Una fecha de negocio (`issue_date`, `due_date`, período, fecha de la TRM)
+   * es un DÍA CIVIL, no un instante. `'2026-09-11'` parseado con `new Date()`
+   * es la medianoche UTC, que en Bogotá (UTC-5) es el 10 de septiembre: el
+   * documento firmado salía un día antes del que el operador eligió.
+   *
+   * Regla: `YYYY-MM-DD` (o ese mismo día a medianoche exacta, con `Z` o sin
+   * zona) se usa TAL CUAL; sólo un instante con hora real se convierte a la
+   * fecha civil de la plataforma.
+   */
+  private toCivilDate(value: string, field: string): string {
+    const raw = String(value ?? '').trim();
+    const midnight =
+      /^(\d{4}-\d{2}-\d{2})(?:T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)?)?$/.exec(
+        raw,
+      );
+    if (midnight) {
+      const day = midnight[1];
+      const parsed = new Date(`${day}T00:00:00Z`);
+      if (
+        Number.isNaN(parsed.getTime()) ||
+        parsed.toISOString().slice(0, 10) !== day
+      ) {
+        throw new BadRequestException(
+          `${field} no es una fecha válida (${raw}).`,
+        );
+      }
+      return day;
+    }
+    const instant = new Date(raw);
+    if (Number.isNaN(instant.getTime())) {
+      throw new BadRequestException(`${field} no es una fecha válida (${raw}).`);
+    }
+    return localDateString(instant, PLATFORM_TIMEZONE);
+  }
+
+  private addCivilDays(day: string, days: number): string {
+    const base = new Date(`${day}T00:00:00Z`);
+    base.setUTCDate(base.getUTCDate() + days);
+    return base.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Fechas del documento, todas como día civil. Valida `due_date >= issue_date`
+   * y exige `due_date` en una factura a crédito (`payment_form = '2'`).
+   * Default de vencimiento (contado): emisión + 7 días, como siempre.
+   */
+  private resolvePlatformCivilDates(
+    dto: CreatePlatformInvoiceDto,
+    issuedAt: Date,
+  ): {
+    issueAt: string;
+    dueAt: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+  } {
+    const issueAt = dto.issue_date
+      ? this.toCivilDate(dto.issue_date, 'La fecha de emisión (issue_date)')
+      : localDateString(issuedAt, PLATFORM_TIMEZONE);
+    if (dto.payment_form === '2' && !dto.due_date) {
+      throw new BadRequestException(
+        'Una factura a crédito requiere fecha de vencimiento (due_date).',
+      );
+    }
+    const dueAt = dto.due_date
+      ? this.toCivilDate(dto.due_date, 'La fecha de vencimiento (due_date)')
+      : this.addCivilDays(issueAt, 7);
+    if (dueAt < issueAt) {
+      throw new BadRequestException(
+        `La fecha de vencimiento (${dueAt}) no puede ser anterior a la fecha de emisión (${issueAt}).`,
+      );
+    }
+    return {
+      issueAt,
+      dueAt,
+      periodStart: dto.period_start
+        ? this.toCivilDate(dto.period_start, 'El inicio del período (period_start)')
+        : null,
+      periodEnd: dto.period_end
+        ? this.toCivilDate(dto.period_end, 'El fin del período (period_end)')
+        : null,
+    };
+  }
+
+  /**
+   * CÁLCULO PURO de la factura de plataforma, con el MISMO motor que el riel de
+   * tiendas (`InvoiceCalculatorService` + kernel `dian-money`): importes de
+   * línea truncados (`dianLineExtension`), impuestos por línea truncados,
+   * impuesto incluido por absorción de centavos (`absorbInclusiveLine`) y
+   * precio despejado con `clearInclusiveLine`, cabecera = `dianSum` de lo que
+   * las líneas declaran. Sin BD: la previsualización lo reutiliza.
+   *
+   * Lo que el cliente mande en `tax_amount` / `taxable_amount` se IGNORA.
+   */
+  computePlatformInvoiceTotals(
+    input: Pick<CreatePlatformInvoiceDto, 'items'>,
+  ): PlatformInvoiceComputation {
+    // Entradas normalizadas ANTES de calcular y ANTES del consecutivo:
+    //  · las filas de RETENCIÓN (`RETE_*`) que lleguen dentro de `taxes` NO son
+    //    impuestos de línea (el motor las rechazaba como `tax_type:unknown` y
+    //    la línea caía en `invalid_line_input`); la retención viaja en
+    //    `withholdings`, así que acá se descartan del cálculo;
+    //  · `unit_code` validado contra el catálogo DIAN (default `NIU`).
+    const dto = {
+      items: input.items.map((item, index) => ({
+        ...item,
+        taxes: (Array.isArray(item.taxes) ? item.taxes : []).filter(
+          (t) => !isWithholdingTaxType(t.tax_type),
+        ),
+        unit_code: resolvePlatformUnitCode(item.unit_code, index),
+      })),
+    };
+    const calculation = new InvoiceCalculatorService().calculate({
+      items: dto.items.map((item) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount ?? 0,
+        taxes: (Array.isArray(item.taxes) ? item.taxes : []).map((t) => ({
+          // El nombre conserva el `tax_type` del DTO ('IVA', 'INC'…): es lo
+          // que viajaba al proveedor y lo que lee el snapshot contable.
+          tax_name: t.tax_type,
+          tax_type: String(t.tax_type ?? '').toLowerCase(),
+          // El DTO declara FRACCIÓN y acá se convierte a la unidad del
+          // contrato del proveedor: porcentaje para todo tributo, POR MIL para
+          // el ICA (9,66 ‰ = 0.00966 → 9.66; el builder del XML lo divide por
+          // 10 al imprimir `cbc:Percent`). Sin fijarla, el motor deduciría la
+          // unidad y el ICA firmaría una tarifa diez veces menor.
+          tax_rate: toDecimal(t.rate ?? 0).times(
+            String(t.tax_type ?? '').toLowerCase() === 'ica' ? 1000 : 100,
+          ),
+          rate_basis:
+            String(t.tax_type ?? '').toLowerCase() === 'ica'
+              ? ('per_mil' as const)
+              : ('percent' as const),
+          is_inclusive: t.is_inclusive === true,
+        })),
+      })),
+    });
+
+    const blocking = calculation.divergences.filter(
+      (d) => d.scope === 'unclosed_residual' || d.scope === 'invalid_line_input',
+    );
+    if (blocking.length > 0) {
+      const first = blocking[0];
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        first.scope === 'unclosed_residual'
+          ? `Línea ${first.line_index + 1}: el valor con impuesto incluido no se puede despejar a centavos exactos; ` +
+              'ajusta el precio o captura el impuesto como adicional.'
+          : `Línea ${first.line_index + 1}: datos de cantidad, precio, descuento o tarifa inválidos (${first.detail ?? 'sin detalle'}).`,
+        { divergences: blocking },
+      );
+    }
+
+    const lineItems: UblDocumentLine[] = [];
+    const snapshotItems: PlatformSnapshotLine[] = [];
+    const breakdown = new Map<
+      string,
+      { tax_type: string; code: string; rate: number; bases: string[]; amounts: string[] }
+    >();
+    let hasAnyTax = false;
+    let hasExemptLine = false;
+
+    calculation.lines.forEach((cl, i) => {
+      const item = dto.items[i];
+      const qty = Number(item.quantity);
+      const price = Number(item.unit_price);
+      const discount = Number(item.discount_amount ?? 0);
+      const taxesIn = Array.isArray(item.taxes) ? item.taxes : [];
+      const inclusive = taxesIn.some(
+        (t) => t.is_inclusive === true && Number(t.rate || 0) > 0,
+      );
+
+      let emittedUnitPrice = String(price);
+      let emittedDiscount = dianAmount(discount);
+      let lineNet = dianLineExtension({
+        quantity: qty,
+        unit_price: price,
+        discount_amount: discount,
+      });
+      if (inclusive) {
+        // Mismo despeje que el riel tienda (`resolveInclusiveLineOverrides`):
+        // la base es la que el motor acaba de calcular, no una segunda.
+        const cleared = clearInclusiveLine({
+          quantity: qty,
+          unit_price: price,
+          discount_amount: discount,
+          taxable_base: cl.line_extension_amount,
+        });
+        if (cleared) {
+          emittedUnitPrice = cleared.unit_price;
+          emittedDiscount = cleared.discount_amount;
+          lineNet = dianLineExtension({
+            quantity: qty,
+            unit_price: cleared.unit_price,
+            discount_amount: cleared.discount_amount,
+          });
+        }
+      }
+      if (lineNet !== cl.line_extension_amount) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_VALIDATE_001,
+          discount > qty * price
+            ? `Línea ${i + 1}: el descuento supera el valor de la línea.`
+            : `Línea ${i + 1}: el importe de la línea (${lineNet}) no cuadra con su base gravable (${cl.line_extension_amount}); revisa cantidad, precio y descuento.`,
+        );
+      }
+
+      const providerTaxes: ProviderInvoiceTax[] = cl.taxes.map((ct) => ({
+        tax_type: ct.tax_name,
+        tax_name: ct.tax_name,
+        tax_rate: ct.tax_rate,
+        taxable_amount: ct.taxable_amount,
+        tax_amount: ct.tax_amount,
+      }));
+      // Tarifa en FRACCIÓN para el snapshot: la del DTO cuando el motor
+      // devuelve una fila por impuesto declarado (sin perder decimales).
+      const snapshotTaxes: PlatformTaxBreakdownRow[] = cl.taxes.map((ct, k) => ({
+        tax_type: ct.tax_name,
+        rate:
+          cl.taxes.length === taxesIn.length
+            ? Number(taxesIn[k].rate)
+            : toDecimal(ct.tax_rate).dividedBy(100).toNumber(),
+        tax_amount: Number(ct.tax_amount),
+        is_inclusive: ct.is_inclusive,
+        taxable_amount: Number(ct.taxable_amount),
+      }));
+      for (const [k, ct] of cl.taxes.entries()) {
+        hasAnyTax = true;
+        // Tarifa 0 % con su grupo emitido = EXENTO (art. 477 ET), no excluido.
+        if (toDecimal(ct.tax_rate).isZero()) hasExemptLine = true;
+        // FRACCIÓN (0,19), igual que las líneas del snapshot: la tarifa que el
+        // contrato guarda, no el porcentaje truncado que el XML imprime.
+        const fractionRate = snapshotTaxes[k].rate;
+        const key = `${ct.tax_name}|${fractionRate}`;
+        const row = breakdown.get(key) ?? {
+          tax_type: ct.tax_name,
+          code: ct.dian_tax_code,
+          rate: fractionRate,
+          bases: [],
+          amounts: [],
+        };
+        row.bases.push(ct.taxable_amount);
+        row.amounts.push(ct.tax_amount);
+        breakdown.set(key, row);
+      }
+
+      const unit_code = item.unit_code;
+      lineItems.push({
+        description: item.description,
+        quantity: String(qty),
+        unit_price: emittedUnitPrice,
+        discount_amount: emittedDiscount,
+        tax_amount: cl.tax_amount,
+        total_amount: dianSum([lineNet, cl.tax_amount]),
+        unit_code,
+        // Sólo la línea SIN `taxes` calla su grupo (excluido, art. 476 ET).
+        omit_tax_total: taxesIn.length === 0,
+        ...(taxesIn.length > 0 ? { taxes: providerTaxes } : {}),
+      });
+      snapshotItems.push({
+        position: i + 1,
+        description: item.description,
+        quantity: qty,
+        // El snapshot guarda lo que se FIRMÓ, no lo que se capturó.
+        unit_price: Number(emittedUnitPrice),
+        line_total: Number(lineNet),
+        discount_amount: Number(emittedDiscount),
+        unit_code,
+        taxes: snapshotTaxes,
+        account_code: item.account_code ?? null,
+      });
+    });
+
+    // Cabecera = suma de lo que las líneas DECLARAN (FAU02 / FAS02), nunca
+    // base × tarifa sobre el subtotal.
+    const subtotal = dianLineExtensionTotal(lineItems);
+    const taxTotal = dianSum(lineItems.map((l) => l.tax_amount));
+    const discountTotal = dianSum(lineItems.map((l) => l.discount_amount));
+    const payable = dianSum([subtotal, taxTotal]);
+
+    if (
+      subtotal !== calculation.totals.total_before_tax ||
+      taxTotal !== calculation.totals.tax_amount ||
+      payable !== calculation.totals.total_amount
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'Los totales de la factura no cuadran con la suma de sus líneas ' +
+          `(líneas ${subtotal} + impuestos ${taxTotal} ≠ motor ${calculation.totals.total_amount}). No se consumió consecutivo.`,
+      );
+    }
+
+    return {
+      lineItems,
+      snapshotItems,
+      subtotal,
+      taxTotal,
+      discountTotal,
+      payable,
+      hasAnyTax,
+      hasExemptLine,
+      taxBreakdown: [...breakdown.values()].map((r) => ({
+        tax_type: r.tax_type,
+        code: r.code,
+        rate: r.rate,
+        base: dianSum(r.bases),
+        amount: dianSum(r.amounts),
+      })),
+    };
+  }
+
+  /**
+   * Compuerta de totales ANTES de reservar consecutivo. Arma el XML de totales
+   * con el mismo `UblCommonBuilder` que firma el emisor y lo pasa por
+   * `DianTotalsValidator` (FAU02/04/06/14, FAS01b/02), y comprueba además lo que
+   * el CUFE hashea: `ValFac` = `LineExtensionAmount` y `ValTot` =
+   * `PayableAmount`, con tolerancia 0. Antes esto fallaba (422) DESPUÉS de
+   * gastar el número, que la DIAN no devuelve.
+   */
+  private assertPlatformTotalsCoherent(data: PlatformProviderInvoiceData): void {
+    const currency = data.currency || 'COP';
+    const doc = xmlCreate({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+    UblCommonBuilder.buildDocumentAllowanceCharge(doc, data as any, currency);
+    UblCommonBuilder.buildPaymentExchangeRate(doc, data.exchange_rate);
+    UblCommonBuilder.buildTaxTotals(doc, data.taxes, currency);
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, data as any, currency);
+    UblCommonBuilder.buildInvoiceLines(doc, data.items as any, data.taxes, currency);
+    const xml = doc.end({ prettyPrint: false });
+
+    const problems: string[] = DianTotalsValidator.validate(xml).violations.map(
+      (v: any) => `${v.rule}: ${v.message}`,
+    );
+    const group = xml.match(/<cac:LegalMonetaryTotal>(.*?)<\/cac:LegalMonetaryTotal>/);
+    const xmlAmount = (name: string): string | undefined =>
+      group?.[1].match(
+        new RegExp(`<cbc:${name} currencyID="[^"]*">([^<]*)</cbc:${name}>`),
+      )?.[1];
+    const valFac = dianLineExtensionTotal(data.items);
+    if (xmlAmount('LineExtensionAmount') !== valFac) {
+      problems.push(
+        `ValFac: el XML declara LineExtensionAmount ${xmlAmount('LineExtensionAmount')} y las líneas suman ${valFac}`,
+      );
+    }
+    if (xmlAmount('PayableAmount') !== data.total_amount) {
+      problems.push(
+        `ValTot: el XML declara PayableAmount ${xmlAmount('PayableAmount')} y el documento declara ${data.total_amount}`,
+      );
+    }
+    if (problems.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'Los totales de la factura no cuadran y la DIAN la rechazaría; no se consumió consecutivo: ' +
+          problems[0],
+        { problems },
+      );
+    }
+  }
+
+  /**
+   * Sin certificado vigente NO se emite. El emisor, fuera de producción,
+   * devuelve el XML SIN FIRMAR y el documento quedaba «exitoso» sin firma.
+   * Se evalúa ANTES de asignar consecutivo.
+   */
+  private async assertPlatformSigningReady(
+    settings: SubscriptionFiscalSettings,
+  ): Promise<void> {
+    const config = settings.dian_configuration_id
+      ? await this.prisma.withoutScope().dian_configurations.findUnique({
+          where: { id: settings.dian_configuration_id },
+        })
+      : null;
+    const hasCertificate =
+      !!config?.certificate_s3_key &&
+      (!!config.certificate_password_encrypted || !!config.certificate_kms_key_id);
+    if (!hasCertificate) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_CONFIG_INCOMPLETE,
+        'La plataforma no tiene un certificado de firma cargado: no se puede emitir un documento sin firmar. ' +
+          'Sube el certificado en la configuración DIAN de la plataforma.',
+        { missing_field: 'certificate' },
+      );
+    }
+    if (
+      config!.certificate_expiry &&
+      config!.certificate_expiry.getTime() <= Date.now()
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CERT_003,
+        'El certificado de firma de la plataforma está vencido: renuévalo antes de emitir.',
+      );
+    }
+  }
+
+  /** Forma de respuesta de emisión/reintento: refleja el estado REAL. */
+  private async platformTransmissionResult(
+    transmissionId: number,
+    fallbackNumber: string,
+  ) {
+    const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
+      where: { id: transmissionId },
+    });
+    const status = final?.transmission_status ?? 'unknown';
+    return {
+      invoice_id: transmissionId,
+      transmission_id: transmissionId,
+      fiscal_number: final?.document_number ?? fallbackNumber,
+      transmission_status: status,
+      dian_status: final?.dian_status ?? 'unknown',
+      cufe: final?.cufe ?? null,
+      accepted: status === 'accepted',
+      error_message: final?.error_message ?? null,
+    };
+  }
+
+  /**
+   * Conceptos de retención referenciados por la factura (tipo y código para el
+   * XML y el asiento). Degrada a mapa vacío si la lectura falla: la emisión no
+   * se bloquea por el catálogo; la retención simplemente no se declara.
+   */
+  private async loadPlatformWithholdingConcepts(
+    withholdings: Array<{ concept_id: number }>,
+  ): Promise<Map<number, PlatformWithholdingConcept>> {
+    const ids = [...new Set(withholdings.map((w) => Number(w.concept_id)))].filter(
+      (id) => Number.isInteger(id) && id > 0,
+    );
+    const map = new Map<number, PlatformWithholdingConcept>();
+    if (ids.length === 0) return map;
+    try {
+      const rows = await this.prisma.withoutScope().withholding_concepts.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, code: true, withholding_type: true, account_code: true },
+      });
+      for (const r of rows) {
+        map.set(r.id, {
+          id: r.id,
+          code: r.code,
+          withholding_type: r.withholding_type as PlatformWithholdingConcept['withholding_type'],
+          account_code: r.account_code ?? null,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron leer los conceptos de retención ${ids.join(',')}: ${(error as Error).message}`,
+      );
+    }
+    return map;
+  }
+
+  /**
+   * El payload firmado, listo para `fiscal_evidences.metadata` (JSON). Sin los
+   * campos que se RE-DERIVAN de la resolución en cada envío: `technical_key` es
+   * un secreto de la bóveda y no debe quedar en una tabla de evidencias;
+   * `control` y `resolution_number` salen de la fila `invoice_resolutions`.
+   */
+  private serializablePlatformProviderData(
+    data: PlatformProviderInvoiceData,
+  ): Record<string, unknown> {
+    const {
+      technical_key: _technicalKey,
+      control: _control,
+      resolution_number: _resolutionNumber,
+      ...rest
+    } = data as PlatformProviderInvoiceData & Record<string, unknown>;
+    return JSON.parse(JSON.stringify(rest));
   }
 
   /**
@@ -2435,6 +2957,12 @@ export class SubscriptionFiscalService {
     transmission_status: string;
     dian_status: string;
     cufe: string | null;
+    /** `true` sólo cuando la DIAN aceptó el documento. */
+    accepted: boolean;
+    /** Motivo del rechazo/fallo de la transmisión, si lo hay. */
+    error_message: string | null;
+    /** `true` cuando la idempotency_key ya existía: no se emitió otra factura. */
+    idempotent_replay?: boolean;
   }> {
     const settings = await this.getSettings();
     if (!settings.is_enabled) {
@@ -2492,267 +3020,29 @@ export class SubscriptionFiscalService {
 
     return this.runInPlatformContext(settings, async () => {
       const issuedAt = new Date();
-      const issuedAtLocal = localDateString(issuedAt, PLATFORM_TIMEZONE);
       const issuedAtTime = localTimeString(issuedAt, PLATFORM_TIMEZONE);
-      // due_date: el caller puede sobreescribirla (DTO). Default legacy:
-      // emisión + 7 días. ISO8601 → YYYY-MM-DD local.
-      const dueAt = dto.due_date
-        ? localDateString(new Date(dto.due_date), PLATFORM_TIMEZONE)
-        : localDateString(
-            new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
-            PLATFORM_TIMEZONE,
-          );
-      // issue_date: idem, default = emisión.
-      const issueAtLocal = dto.issue_date
-        ? localDateString(new Date(dto.issue_date), PLATFORM_TIMEZONE)
-        : issuedAtLocal;
+      // Fechas de NEGOCIO como día civil (`YYYY-MM-DD`), nunca como instante:
+      // `'2026-09-11'` pasado por `new Date()` es la medianoche UTC = 10/09 en
+      // Bogotá. Valida además `due_date >= issue_date` y exige `due_date` en
+      // una factura a crédito (`payment_form = '2'`).
+      const civil = this.resolvePlatformCivilDates(dto, issuedAt);
+      const dueAt = civil.dueAt;
+      const issueAtLocal = civil.issueAt;
 
-      // 0.b) Cálculo por línea. Construye `lineItems` (forma que firma la
-      //     DIAN) Y `snapshotItems` (forma del snapshot contable que lee el
-      //     listener de auto-asientos vía `loadInvoiceSnapshot`).
+      // 0.b) Cálculo con el MISMO motor que el riel de tiendas
+      //     (`InvoiceCalculatorService` + kernel `dian-money`): truncado por
+      //     hoja, impuesto incluido por absorción de centavos, cabecera = Σ de
+      //     lo que las líneas declaran. Todo lo numérico vive en
+      //     `computePlatformInvoiceTotals` (puro, sin BD); acá sólo se consume.
       //
-      //     Regla de cuadre FAS02 (peer rule 3): `tax_amount` de cabecera
-      //     es SIEMPRE la suma de los impuestos por línea — NUNCA base×tarifa
-      //     recalculada sobre el subtotal. Recalcular da un céntimo de
-      //     diferencia y lo rechaza la DIAN.
-      //
-      //     Regla de impuesto incluido (peer rule 4): cuando una línea trae
-      //     `taxes[].is_inclusive=true`, su base gravable es
-      //     `neto / (1 + Σ tarifas_inclusivas)`. Cada impuesto exclusivo
-      //     usa esa misma base despejada. El frontend manda `rate` en
-      //     fracción 0–1.
-      //
-      //     Backward compat (peer rule 2): si NINGUNA línea trae `taxes`,
-      //     `tax_amount = 0` y se conserva la nota de exclusión art. 476
-      //     num. 21 ET. Si AL MENOS una línea trae `taxes`, la nota de
-      //     exclusión NO se emite (sería una declaración falsa) y la
-      //     cabecera lleva `taxes[]`.
-      let hasAnyTax = false;
-      let totalTaxAmount = 0;
-      // Subtotal acumulado línea a línea. Antes se derivaba de un campo
-      // `line_total` que el payload del proveedor arrastraba sólo para esto y
-      // que el contrato del emisor no tiene; acumularlo acá deja la línea
-      // exactamente en la forma que se firma.
-      let subtotalAccum = 0;
-      const lineItems: UblDocumentLine[] = [];
-      const snapshotItems: PlatformSnapshotLine[] = [];
-
-      for (let i = 0; i < dto.items.length; i++) {
-        const item = dto.items[i];
-        const qty = Number(item.quantity);
-        const price = Number(item.unit_price);
-        const discount = Number(item.discount_amount ?? 0);
-        // Redondeo POR LÍNEA, después suma. Coincide con la convención
-        // `LineExtensionAmount` de la DIAN; una suma de floats sin
-        // redondeo intermedio puede dar FAU04 al cuadrar con
-        // TaxExclusiveAmount.
-        const gross = Math.round((qty * price - discount) * 100) / 100;
-
-        const taxes = Array.isArray(item.taxes) ? item.taxes : [];
-        const inclusiveRateSum = taxes
-          .filter((t) => t.is_inclusive === true)
-          .reduce((acc, t) => acc + Number(t.rate || 0), 0);
-
-        let lineBaseForExclusiveTaxes: number;
-        let lineBaseForInclusiveTaxes: number;
-        if (inclusiveRateSum > 0) {
-          // gross = base * (1 + Σ inclusive). Despejamos.
-          lineBaseForInclusiveTaxes = Math.round((gross / (1 + inclusiveRateSum)) * 100) / 100;
-          // La base para exclusivos comparte el mismo neto despejado: ambos
-          // tipos tributan sobre el valor sin impuesto (post-disc, pre-tax).
-          lineBaseForExclusiveTaxes = lineBaseForInclusiveTaxes;
-        } else {
-          lineBaseForExclusiveTaxes = gross;
-          lineBaseForInclusiveTaxes = gross;
-        }
-
-        // DESPEJE DEL PRECIO CUANDO EL IMPUESTO VIENE DENTRO.
-        //
-        // Despejar sólo la BASE del `cac:TaxSubtotal` y dejar el precio con el
-        // impuesto adentro produce un documento que se contradice: una línea de
-        // 1 × $1.190 con IVA 19 % incluido declaraba `LineExtensionAmount`
-        // 1.190 contra una `TaxableAmount` de 1.000, y la cabecera cerraba en
-        // 1.190 + 190 = **$1.380** por una venta de $1.190. Peor que un
-        // rechazo: la aritmética del XML es internamente consistente, así que
-        // la DIAN puede ACEPTARLO y dejar firmada una factura por un importe
-        // que nadie pagó, con el consecutivo ya quemado.
-        //
-        // Se despeja el PRECIO, no sólo el importe, porque la regla FAV06
-        // (rechazo) valida la línea contra su propio precio:
-        // `LineExtensionAmount = PriceAmount × cantidad − descuentos`. El
-        // descuento se despeja en la misma proporción, porque un descuento
-        // sobre un precio con impuesto dentro también lo lleva dentro.
-        //
-        // Es el mismo helper que usa el riel tienda (`invoice-flow.service.ts`
-        // → `resolveInclusiveLineOverrides`), no una segunda implementación:
-        // dos despejes distintos del mismo importe es exactamente el defecto
-        // que este bloque cierra.
-        let emittedUnitPrice: string = String(price);
-        let emittedDiscount: string = discount.toFixed(2);
-        let lineNet = gross;
-        if (inclusiveRateSum > 0) {
-          const cleared = clearInclusiveLine({
-            quantity: qty,
-            unit_price: price,
-            discount_amount: discount,
-            taxable_base: lineBaseForInclusiveTaxes,
-          });
-          if (cleared) {
-            emittedUnitPrice = cleared.unit_price;
-            emittedDiscount = cleared.discount_amount;
-            // El neto vuelve a derivarse del precio despejado con la MISMA
-            // función que el emisor usa para escribir `LineExtensionAmount`,
-            // para que la igualdad de FAV06 se cumpla por construcción y no
-            // por coincidencia aritmética.
-            lineNet = Number(
-              dianLineExtension({
-                quantity: qty,
-                unit_price: cleared.unit_price,
-                discount_amount: cleared.discount_amount,
-              }),
-            );
-          } else {
-            // Cantidad cero o base inservible frente al bruto. Se deja la línea
-            // como estaba —comportamiento histórico— y que la puerta de
-            // pre-emisión la frene: visible, no silencioso.
-            this.logger.warn(
-              `Línea ${i + 1} de la factura de plataforma declara impuesto incluido pero su base ` +
-                `${lineBaseForInclusiveTaxes} no es despejable contra el bruto ${gross}; se emite sin ` +
-                `despejar y la validación de pre-emisión decidirá.`,
-            );
-          }
-        }
-
-        const providerTaxes: ProviderInvoiceTax[] = [];
-        const taxBreakdownSnapshot: PlatformTaxBreakdownRow[] = [];
-        let lineTaxTotal = 0;
-        for (const tax of taxes) {
-          const rate = Number(tax.rate || 0);
-          if (rate <= 0) continue;
-          // El frontend PUEDE mandar `tax_amount` calculado, pero un navegador
-          // es un origen que se puede manipular: si el monto que inyecta no
-          // cuadra con `base × tarifa`, la DIAN lo rechaza con FAS02 firmando
-          // con NUESTRO certificado. El monto que va al XML sale SIEMPRE de
-          // nuestro cálculo sobre la base despejada; el del cliente, si llega,
-          // se descarta (peer rule de vendix-db).
-          // La BASE la calcula el servidor, igual que el importe: el inclusivo
-          // grava el neto despejado (`gross / (1 + Σ tarifas)`) y el exclusivo
-          // el neto tal cual. `tax.taxable_amount` del DTO se IGNORA a
-          // propósito, por el mismo motivo que `tax.tax_amount`: es un dato de
-          // origen manipulable, y una base que no cuadra con el importe hace
-          // que la DIAN rechace por FAS02 un documento firmado con NUESTRO
-          // certificado.
-          const taxableBase = tax.is_inclusive
-            ? lineBaseForInclusiveTaxes
-            : lineBaseForExclusiveTaxes;
-          const taxAmount = Math.round(taxableBase * rate * 100) / 100;
-          lineTaxTotal += taxAmount;
-          providerTaxes.push({
-            tax_type: tax.tax_type,
-            tax_name: tax.tax_type, // el mapper legacy renombra según enum
-            // UNIDADES: el DTO trae `rate` en FRACCIÓN (0,19) y el contrato del
-            // proveedor —`ProviderInvoiceTax.tax_rate`— lo quiere en PORCENTAJE
-            // como cadena ('19.00'), que es lo que va a `cbc:Percent`. La
-            // conversión ocurre UNA sola vez, acá. Antes se empujaba la
-            // fracción bajo el nombre `rate`, un campo que el contrato no
-            // tiene: el emisor leía `tax_rate` → `undefined`, y el
-            // prevalidador levantaba `TAX_RATE_MISSING` en TODA factura con
-            // impuestos.
-            tax_rate: (rate * 100).toFixed(2),
-            taxable_amount: taxableBase.toFixed(2),
-            tax_amount: taxAmount.toFixed(2),
-            // `is_inclusive` NO viaja al proveedor: el contrato no lo tiene y
-            // el emisor no lo lee. El dato sigue vivo en
-            // `taxBreakdownSnapshot`, que es el snapshot contable.
-          });
-          // El snapshot contable conserva la FRACCIÓN (`rate`) y el
-          // `is_inclusive` que el proveedor no lleva: es el único sitio donde
-          // ese par sigue vivo después de firmar. La base es la MISMA que se
-          // declara en el XML —una sola fuente— en vez de la del DTO, que
-          // podía llegar nula y dejaba el asiento sin base.
-          taxBreakdownSnapshot.push({
-            tax_type: tax.tax_type,
-            rate,
-            tax_amount: taxAmount,
-            is_inclusive: !!tax.is_inclusive,
-            taxable_amount: taxableBase,
-          });
-          hasAnyTax = true;
-        }
-
-        // Default unit_code: 'NIU' (UN/ECE Rec. 20). 'EA' no está en la rec.
-        // y ningún selector del front lo puede pintar — el legacy lo
-        // hardcodeaba por bug histórico.
-        const unit_code = item.unit_code ?? 'NIU';
-
-        // La línea viaja en el contrato del emisor (`UblDocumentLine`): todos
-        // sus importes son CADENAS. `position` y `line_total` ya no viajan —
-        // el XML numera por índice y deriva el importe de
-        // `cantidad × precio − descuento`, así que nadie los leía; el subtotal
-        // que sí los usaba se acumula ahora en `subtotalAccum`. La forma con
-        // ordinal e importe de línea sigue existiendo donde SÍ se lee: en
-        // `snapshotItems`, que es lo que persiste el snapshot contable.
-        lineItems.push({
-          description: item.description,
-          quantity: String(qty),
-          // Precio y descuento YA DESPEJADOS cuando la línea captura con
-          // impuesto incluido; idénticos a los del DTO en cualquier otro caso.
-          unit_price: emittedUnitPrice,
-          // Si la línea no trae descuento lo emitimos como 0 explícito
-          // para que el snapshot refleje el cálculo real; si lo trae, fluye.
-          discount_amount: emittedDiscount,
-          // Importes de la línea que el contrato exige. El XML no los lee (la
-          // línea con impuestos declara su propio desglose y la que no los
-          // tiene calla su grupo), pero declararlos evita que el payload
-          // afirme cero donde hay impuesto.
-          tax_amount: lineTaxTotal.toFixed(2),
-          total_amount: (Math.round((lineNet + lineTaxTotal) * 100) / 100).toFixed(2),
-          unit_code,
-          // `omit_tax_total: true` SÓLO cuando la línea no trae taxes (legacy).
-          // Con taxes presentes la línea SÍ tributa y la DIAN debe incluirla
-          // en TaxSubtotal.
-          omit_tax_total: taxes.length === 0,
-          // Si la línea trae taxes, propagamos al provider; el mapper los
-          // aplana al array `taxes` de cabecera. Si NO trae taxes, no
-          // emitimos `taxes` por línea — el legacy así lo hacía.
-          ...(taxes.length > 0 ? { taxes: providerTaxes } : {}),
-        });
-
-        snapshotItems.push({
-          position: i + 1,
-          description: item.description,
-          quantity: qty,
-          // El snapshot guarda lo que se FIRMÓ, no lo que se capturó. Dos
-          // motivos: (1) el asiento contable debe reconocer como ingreso la
-          // base sin impuesto —con el bruto inclusivo el asiento quedaba
-          // 1.190 de ingreso + 190 de IVA contra un cobro de 1.190—; (2)
-          // `resendPlatformTransmission` reconstruye el documento desde acá y
-          // tiene que reproducir el MISMO XML, o cambia el CUFE sobre un
-          // consecutivo ya gastado.
-          unit_price: Number(emittedUnitPrice),
-          line_total: lineNet,
-          discount_amount: Number(emittedDiscount),
-          unit_code,
-          taxes: taxBreakdownSnapshot,
-          // Peer rule: cuenta PUC de ingreso por línea. Si falta, queda
-          // null en el snapshot; el listener cae al mapping legacy
-          // `invoice.validated.revenue`.
-          account_code: item.account_code ?? null,
-          // Para asiento multi-crédito futuro: la línea PUEDE llevar
-          // también un centro de costo / descripción adicional, pero el
-          // DTO V1 no lo trae — se omite.
-        });
-
-        totalTaxAmount += lineTaxTotal;
-        // El subtotal de cabecera es la suma de los importes que las líneas
-        // DECLARAN (`lineNet`), no la de los brutos capturados: FAU02 compara
-        // `LegalMonetaryTotal/LineExtensionAmount` contra esa misma suma.
-        subtotalAccum += lineNet;
-      }
-
-      const subtotal = Math.round(subtotalAccum * 100) / 100;
-      const taxAmount = Math.round(totalTaxAmount * 100) / 100;
-      const total = Math.round((subtotal + taxAmount) * 100) / 100;
+      //     Backward compat: si NINGUNA línea trae `taxes` se conserva la nota
+      //     de exclusión art. 476 num. 21 ET; si al menos una trae, la nota NO
+      //     se emite (sería una declaración falsa).
+      const computed = this.computePlatformInvoiceTotals(dto);
+      const { lineItems, snapshotItems, hasAnyTax, hasExemptLine } = computed;
+      const subtotal = computed.subtotal;
+      const taxAmount = computed.taxTotal;
+      const total = computed.payable;
 
       // Withholdings: suman al campo withholding_amount del provider (asset
       // debit en el listener — ver onInvoiceValidated caso 2). Si el caller
@@ -2764,11 +3054,16 @@ export class SubscriptionFiscalService {
       // confiar en lo que mande el cliente — mismo razonamiento que para
       // `tax_amount`: un navegador se puede manipular.
       const withholdings = Array.isArray(dto.withholdings) ? dto.withholdings : [];
-      const withholdingAmount = withholdings.reduce((acc, w) => {
-        const base = Number(w.base_amount) || 0;
-        const rate = Number(w.rate) || 0;
-        return acc + Math.round(base * rate * 100) / 100;
-      }, 0);
+      const withholdingAmount = withholdings.reduce(
+        (acc, w) => acc + platformWithholdingAmount(w),
+        0,
+      );
+      // `cac:WithholdingTaxTotal` — mismo contrato que el riel tienda: se
+      // DECLARAN las retenciones, NO restan de `PayableAmount` (Anexo 1.9
+      // §11.9.1). Se resuelven ANTES del consecutivo; un concepto que no se
+      // pueda resolver se omite del XML (recuperable) sin bloquear la emisión.
+      const conceptById = await this.loadPlatformWithholdingConcepts(withholdings);
+      const xmlWithholdings = buildPlatformXmlWithholdings(withholdings, conceptById);
 
       // 0.c) Idempotencia por contenido. Doble click en el botón =
       //     mismo tax_id + mismas items + mismo período → misma key.
@@ -2856,7 +3151,15 @@ export class SubscriptionFiscalService {
       // del sondeo. Si la nota cambia entre sondeo y final —no puede, sale
       // sólo del DTO y de los totales locales, todos inmutables entre los dos
       // puntos— el providerData real lo recalcula dentro de la tx.
-      const defaultNotes = hasAnyTax
+      // Nota legal: art. 476 ET (excluido) SOLO si la factura no declara
+      // ningún impuesto; con líneas exentas al 0 % la referencia es el art.
+      // 477 ET (exentos), que es otra figura.
+      const defaultNotes = hasExemptLine
+        ? [
+            `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
+            'Operación exenta de IVA (tarifa 0 %) — art. 477 del Estatuto Tributario',
+          ]
+        : hasAnyTax
         ? [`Factura de servicios generada desde super-admin el ${issueAtLocal}`]
         : [
             `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
@@ -2879,6 +3182,7 @@ export class SubscriptionFiscalService {
         withholdingAmount,
         hasAnyTax,
         notesText,
+        xmlWithholdings,
       );
 
       // `fix` viaja junto al `problem`: es la mitad accionable del hallazgo, y
@@ -2938,13 +3242,43 @@ export class SubscriptionFiscalService {
         );
       }
 
+      // 0.e) Compuerta de TOTALES antes del consecutivo: lo que el XML declara
+      //     (`LineExtensionAmount` = ValFac, `PayableAmount` = ValTot) tiene que
+      //     cuadrar con las líneas y pasar `DianTotalsValidator`. Si no, el
+      //     proveedor lo rechaza con 422 `INVOICING_CUFE_001` DESPUÉS de gastar
+      //     el número, que la DIAN no devuelve.
+      this.assertPlatformTotalsCoherent(probeProviderData);
+
       // 1) TODO dentro de UNA transacción. `pg_advisory_xact_lock` se
       //    libera al COMMIT, no antes. Si la llamada anterior era
       //    `await this.prisma.$transaction(async (tx) => tx)`, el
       //    `tx` ya hizo COMMIT y la siguiente query (el SELECT FOR
       //    UPDATE del lock) recibe P2028. La memoria del proyecto
       //    documenta esto en `prisma_transaction_returns_committed_handle`.
-      const result = await this.prisma.$transaction(async (tx) => {
+      let result;
+      try {
+        result = await this.prisma.$transaction(async (tx) => {
+        // 1.0) Sin certificado vigente NO se emite: el emisor, fuera de
+        //      producción, devuelve el XML SIN FIRMAR y el documento quedaba
+        //      «exitoso» con el consecutivo ya quemado. Va ANTES de asignar.
+        await this.assertPlatformSigningReady(settings);
+
+        // 1.0.b) Idempotencia: si la key ya existe se devuelve esa factura sin
+        //      asignar número ni reenviar. Se consulta ANTES de insertar porque
+        //      un P2002 dentro de una transacción interactiva la deja abortada
+        //      (25P02): cualquier consulta posterior —la que antes buscaba la
+        //      fila «existente»— fallaba y el cliente recibía un 500.
+        const prior = await tx.fiscal_transmissions.findFirst({
+          where: {
+            accounting_entity_id: settings.accounting_entity_id!,
+            document_type: 'sales_invoice' as const,
+            idempotency_key: idempotencyKey,
+          },
+        });
+        if (prior) {
+          return { replay: true as const, transmission: prior };
+        }
+
         // 1.a) Asignar número con el lock consultivo.
         const allocated = await this.allocateFiscalNumber(tx, settings, dto.resolution_id);
         const fiscalNumber = allocated.invoice_number;
@@ -2972,52 +3306,31 @@ export class SubscriptionFiscalService {
           withholdingAmount,
           hasAnyTax,
           notesText,
+          xmlWithholdings,
         );
 
-        // 1.c) Insertar la fila. Si la idempotency_key ya existe, el
-        // UNIQUE la rechaza y devolvemos la fila existente — el caller
-        // ve la misma respuesta que la primera.
-        let transmission;
-        try {
-          transmission = await tx.fiscal_transmissions.create({
-            data: {
-              organization_id: settings.platform_organization_id!,
-              store_id: null,
-              accounting_entity_id: settings.accounting_entity_id!,
-              dian_configuration_id: settings.dian_configuration_id!,
-              source_type: 'platform_invoice',
-              source_id: 0,
-              document_type: 'sales_invoice',
-              document_number: fiscalNumber,
-              transmission_status: 'queued',
-              dian_status: 'pending',
-              accounting_status: 'provisional',
-              idempotency_key: idempotencyKey,
-              request_hash: this.hash(providerData),
-            },
-          });
-        } catch (error: any) {
-          if (error?.code === 'P2002') {
-            // Idempotencia: la UNIQUE (accounting_entity_id,
-            // document_type, idempotency_key) rechazó. Devolvemos la
-            // fila existente. La transacción sigue para que el lock
-            // se libere al COMMIT.
-            const existing = await tx.fiscal_transmissions.findFirst({
-              where: {
-                accounting_entity_id: settings.accounting_entity_id!,
-                document_type: 'sales_invoice' as const,
-                idempotency_key: idempotencyKey,
-              },
-            });
-            if (existing) {
-              transmission = existing;
-            } else {
-              throw error;
-            }
-          } else {
-            throw error;
-          }
-        }
+        // 1.c) Insertar la fila. Si una petición CONCURRENTE ganó la carrera
+        //      por la misma idempotency_key, el UNIQUE rechaza acá con P2002:
+        //      la transacción entera (incluida la asignación de número) se
+        //      revierte —no se quema consecutivo— y el `catch` de afuera
+        //      devuelve la factura ganadora.
+        const transmission = await tx.fiscal_transmissions.create({
+          data: {
+            organization_id: settings.platform_organization_id!,
+            store_id: null,
+            accounting_entity_id: settings.accounting_entity_id!,
+            dian_configuration_id: settings.dian_configuration_id!,
+            source_type: 'platform_invoice',
+            source_id: 0,
+            document_type: 'sales_invoice',
+            document_number: fiscalNumber,
+            transmission_status: 'queued',
+            dian_status: 'pending',
+            accounting_status: 'provisional',
+            idempotency_key: idempotencyKey,
+            request_hash: this.hash(providerData),
+          },
+        });
 
         // 1.d) Snapshot del origen. El frontend navega a `/invoices/:id`
         //     usando `transmission.id` como id (la UNIQUE del cursor es la
@@ -3052,27 +3365,102 @@ export class SubscriptionFiscalService {
               kind: 'platform_invoice_snapshot',
               customer: dto.customer,
               items: snapshotItems,
-              totals: { subtotal, tax_amount: taxAmount, total },
+              totals: {
+                subtotal: Number(subtotal),
+                tax_amount: Number(taxAmount),
+                total: Number(total),
+              },
               period_start: dto.period_start ?? null,
               period_end: dto.period_end ?? null,
               currency: dto.currency ?? 'COP',
-              withholdings: withholdings.map((w) => ({
-                role: w.role,
-                concept_id: w.concept_id,
-                base_amount: Number(w.base_amount),
-                rate: Number(w.rate),
-                amount: w.amount != null ? Number(w.amount) : Math.round(Number(w.base_amount) * Number(w.rate) * 100) / 100,
-              })),
+              withholdings: withholdings.map((w) => {
+                const concept = conceptById.get(Number(w.concept_id));
+                return {
+                  role: w.role,
+                  concept_id: w.concept_id,
+                  base_amount: Number(w.base_amount),
+                  rate: Number(w.rate),
+                  // Calculado por el servidor, el mismo importe del XML.
+                  amount: platformWithholdingAmount(w),
+                  // Clasificación que el asiento y el PDF necesitan; su
+                  // presencia marca el snapshot con el rol ya corregido.
+                  ...(concept
+                    ? {
+                        withholding_type: concept.withholding_type,
+                        concept_code: concept.code,
+                        account_code: concept.account_code ?? null,
+                      }
+                    : {}),
+                };
+              }),
               counterpart_account_code: dto.counterpart_account_code ?? null,
               resolution_id: resolution.id,
               issue_date: issueAtLocal,
+              // Lo que se FIRMÓ, para que reenvío, PDF y asiento lean el mismo
+              // dato y no un default: hora, forma y medio de pago, vencimiento,
+              // notas, TRM y el desglose de impuestos que el XML declara.
+              issue_time: providerData.issue_time,
+              payment_form: providerData.payment_form,
+              payment_means_code: providerData.payment_means,
+              due_date: providerData.due_date,
+              notes: providerData.notes,
+              exchange_rate: providerData.exchange_rate ?? null,
+              tax_breakdown: computed.taxBreakdown,
+              // El payload EXACTO que se firmó (sin los secretos que se
+              // re-derivan de la resolución: `technical_key`, `control`,
+              // `resolution_number`). El reenvío parte de acá: reconstruir el
+              // documento con defaults cambia fecha, tipo de identificación o
+              // forma de pago sobre un consecutivo ya quemado.
+              provider_data: this.serializablePlatformProviderData(providerData),
               created_by: 'createPlatformInvoice',
             },
           },
         });
 
-        return { transmission, providerData, resolution };
+        return {
+          replay: false as const,
+          transmission,
+          providerData,
+          resolution,
+        };
       });
+      } catch (error: any) {
+        if (error?.code === 'P2002') {
+          const winner = await this.prisma
+            .withoutScope()
+            .fiscal_transmissions.findFirst({
+              where: {
+                accounting_entity_id: settings.accounting_entity_id!,
+                document_type: 'sales_invoice' as const,
+                idempotency_key: idempotencyKey,
+              },
+            });
+          if (winner) {
+            return {
+              ...(await this.platformTransmissionResult(
+                winner.id,
+                winner.document_number,
+              )),
+              idempotent_replay: true,
+            };
+          }
+          throw new VendixHttpException(
+            ErrorCodes.FISCAL_IDEMPOTENCY_CONFLICT,
+            'Otra emisión simultánea chocó con esta (restricción única) y no se pudo localizar la factura existente; reintenta en unos segundos.',
+          );
+        }
+        throw error;
+      }
+
+      if (result.replay) {
+        return {
+          ...(await this.platformTransmissionResult(
+            result.transmission.id,
+            result.transmission.document_number,
+          )),
+          idempotent_replay: true,
+        };
+      }
 
       const { transmission, providerData, resolution } = result;
 
@@ -3094,18 +3482,10 @@ export class SubscriptionFiscalService {
         throw error;
       }
 
-      const final = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
-        where: { id: transmission.id },
-      });
-
-      return {
-        invoice_id: transmission.id,
-        transmission_id: transmission.id,
-        fiscal_number: final?.document_number ?? '',
-        transmission_status: final?.transmission_status ?? 'unknown',
-        dian_status: final?.dian_status ?? 'unknown',
-        cufe: final?.cufe ?? null,
-      };
+      return this.platformTransmissionResult(
+        transmission.id,
+        transmission.document_number,
+      );
     });
   }
 
@@ -5763,19 +6143,42 @@ export class SubscriptionFiscalService {
         .map((it) => (it as any)?.account_code ?? null)
         .filter((c): c is string => typeof c === 'string');
 
-      const withholding_breakdown = Array.isArray(snapshot.withholdings)
-        ? (snapshot.withholdings as unknown as Array<{
-            tax_type?: string;
-            amount?: number;
-            [k: string]: unknown;
-          }>)
-        : undefined;
+      // El evento `invoice.accepted` trata el `withholding_breakdown` como
+      // retención SUFRIDA (DR 1355xx, rebaja la CxC): sólo entra lo que el
+      // adquiriente le retiene a la plataforma (`role='suffered'`). La
+      // autorretención y cualquier otro rol no mueven la CxC. Una fila sin
+      // clasificar (snapshot anterior a que se persistiera el tipo) no se puede
+      // rutear a una cuenta y se omite, como el resto del snapshot legado.
+      const withholding_breakdown = (
+        Array.isArray(snapshot.withholdings) ? snapshot.withholdings : []
+      )
+        .filter(
+          (w) =>
+            (w as any)?.role === 'suffered' &&
+            typeof (w as any)?.withholding_type === 'string' &&
+            Number((w as any)?.amount) > 0,
+        )
+        .map((w: any) => ({
+          withholding_type: w.withholding_type,
+          concept_code: String(w.concept_code ?? w.concept_id ?? ''),
+          concept_id: w.concept_id,
+          rate: Number(w.rate),
+          base: Number(w.base_amount),
+          amount: Number(w.amount),
+          role: 'suffered' as const,
+          account_role: `withholding.suffered.${w.withholding_type}_receivable`,
+          account_code: w.account_code ?? null,
+        }));
 
-      // `tax_breakdown` por línea no existe todavía en el snapshot V1; el
-      // listener y `AutoEntryService` toleran su ausencia cayendo al mapping key
-      // legacy `invoice.validated.vat_payable` (suma simple). El contrato
-      // formal de `tax_breakdown` se completará cuando `elon` lo agregue al
-      // snapshot — el campo es optional en el listener.
+      // Desglose TIPADO de impuestos (IVA → 2408, INC → 2436, ICA → 2412) que
+      // `createPlatformInvoice` persiste en el snapshot. Snapshot anterior sin
+      // desglose, o desglose que no suma el impuesto de cabecera: `undefined`
+      // ⇒ comportamiento previo (todo a `invoice.validated.vat_payable`).
+      const tax_breakdown = await this.loadPlatformTaxBreakdown(
+        transmission.id,
+        Number(snapshot.totals?.tax_amount ?? 0),
+      );
+
       const payload = {
         invoice_id: transmission.id,
         invoice_number: transmission.document_number,
@@ -5785,7 +6188,8 @@ export class SubscriptionFiscalService {
         subtotal_amount: Number(snapshot.totals?.subtotal ?? 0),
         tax_amount: Number(snapshot.totals?.tax_amount ?? 0),
         total_amount: Number(snapshot.totals?.total ?? 0),
-        withholding_breakdown,
+        withholding_breakdown: withholding_breakdown.length > 0 ? withholding_breakdown : undefined,
+        tax_breakdown,
         user_id: transmission.created_by_user_id ?? undefined,
         customer: snapshot.customer as { id: number; name?: string; tax_id?: string } | undefined,
         // Regla de precedencia: cuenta del operador > mapeo automático.
@@ -5811,6 +6215,43 @@ export class SubscriptionFiscalService {
         (error as Error).stack,
       );
     }
+  }
+
+  /**
+   * `tax_breakdown` del snapshot (filas `{tax_type, rate (fracción), base,
+   * amount}`) → `TaxBreakdownItem[]` tipado por tributo. Se lee directo de la
+   * evidencia porque `loadInvoiceSnapshot` no lo expone. Devuelve `undefined`
+   * (⇒ asiento legado) si no hay desglose o no suma el impuesto de cabecera.
+   */
+  private async loadPlatformTaxBreakdown(
+    transmissionId: number,
+    headerTaxAmount: number,
+  ): Promise<TaxBreakdownItem[] | undefined> {
+    const row = await this.prisma.withoutScope().fiscal_evidences.findFirst({
+      where: { fiscal_transmission_id: transmissionId, evidence_type: 'manual_support' },
+      orderBy: { created_at: 'desc' },
+      select: { metadata: true },
+    });
+    const meta = row?.metadata as Record<string, unknown> | null | undefined;
+    const rows = meta && meta['kind'] === 'platform_invoice_snapshot' ? meta['tax_breakdown'] : null;
+    if (!Array.isArray(rows) || rows.length === 0) return undefined;
+
+    const byType = new Map<TaxFiscalTypeValue, number>();
+    for (const r of rows as Array<Record<string, unknown>>) {
+      const amount = Number(r?.['amount']);
+      if (!Number.isFinite(amount) || amount < 0) return undefined;
+      const raw = String(r?.['tax_type'] ?? '').toLowerCase();
+      // Tipos con cuenta propia; el resto (ICUI…) cae a IVA como todo tipo sin tipar.
+      const type: TaxFiscalTypeValue = raw === 'inc' || raw === 'ica' ? raw : 'iva';
+      byType.set(type, (byType.get(type) ?? 0) + amount);
+    }
+    const items: TaxBreakdownItem[] = [...byType].map(([tax_type, tax_amount]) => ({
+      tax_type,
+      tax_amount: Math.round(tax_amount * 100) / 100,
+    }));
+    const sumCents = items.reduce((acc, i) => acc + Math.round(i.tax_amount * 100), 0);
+    if (sumCents !== Math.round(headerTaxAmount * 100)) return undefined;
+    return items;
   }
 
   private async markRejected(

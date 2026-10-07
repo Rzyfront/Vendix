@@ -21,6 +21,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
   let kdsSse: { tickets: ReturnType<typeof signal<unknown[]>>; refreshSnapshot: jasmine.Spy };
   let router: jasmine.SpyObj<Router>;
   let floorTables: ReturnType<typeof signal<Table[]>>;
+  let settings: ReturnType<typeof signal<unknown>>;
 
   const item = (id: number, isTakeaway: boolean): TableSessionOrderItem => ({
     id,
@@ -64,12 +65,14 @@ describe('TableSessionPageComponent waiter delivery', () => {
   });
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap', 'addItems', 'payTableSession']);
+    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap', 'addItems', 'payTableSession', 'getFinancialSplit']);
+    api.getFinancialSplit.and.returnValue(of(null));
+    settings = signal<unknown>(null);
     floorTables = signal<Table[]>([]);
     Object.defineProperty(api, 'floorTables', { value: floorTables });
     api.getFloorMap.and.returnValue(of([]));
     kitchen = jasmine.createSpyObj('KitchenTicketsService', ['markDelivered']);
-    toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    toast = jasmine.createSpyObj('ToastService', ['success', 'error', 'warning']);
     dialog = jasmine.createSpyObj('DialogService', ['confirm', 'prompt']);
     kdsSse = { tickets: signal([]), refreshSnapshot: jasmine.createSpy().and.resolveTo([]) };
     router = jasmine.createSpyObj('Router', ['navigate']);
@@ -81,7 +84,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
         { provide: KitchenTicketsService, useValue: kitchen },
         { provide: KdsSseService, useValue: kdsSse },
         { provide: AdminTablesSseService, useValue: { lastEvent: signal(null) } },
-        { provide: StoreSettingsFacade, useValue: { settings: signal(null) } },
+        { provide: StoreSettingsFacade, useValue: { settings } },
         { provide: AuthFacade, useValue: {} },
         { provide: ToastService, useValue: toast },
         { provide: DialogService, useValue: dialog },
@@ -421,6 +424,56 @@ describe('TableSessionPageComponent waiter delivery', () => {
       (component as any).onKitchenMutationError('Error de red');
 
       expect(toast.error).toHaveBeenCalledOnceWith('Error de red');
+    });
+  });
+  describe('split states', () => {
+    const splitResult = (count: number) => ({
+      source_order_id: 30, split_group_id: 5, source_version: 'v', currency: 'COP',
+      accounts: Array.from({ length: count }, (_, i) => ({ id: i + 1 })),
+      retained_account: null, kitchen_fire: null,
+    }) as any;
+    const labels = () => component.secondaryActions().map((a) => a.label);
+
+    beforeEach(() => component.session.set(session([item(1, false)])));
+
+    it('without table checkout never offers Dividir cuenta nor Cobrar, and reports the split for the info strip', () => {
+      settings.set({ restaurant: { enable_table_checkout: false } });
+      component.onFinancialSplitLoaded(splitResult(3));
+      expect(component.checkoutEnabled()).toBeFalse();
+      expect(labels()).not.toContain('Dividir cuenta');
+      expect(labels()).not.toContain('Ver cuentas');
+      expect(labels()).not.toContain('Cobrar');
+      expect(labels()).not.toContain('Cobrar cuentas');
+      expect(component.hasFinancialSplit()).toBeTrue();
+      expect(component.financialSplitAccountCount()).toBe(3);
+    });
+
+    it('with table checkout and split renames the actions to Cobrar cuentas / Ver cuentas', () => {
+      settings.set({ restaurant: { enable_table_checkout: true } });
+      component.onFinancialSplitLoaded(splitResult(2));
+      expect(labels()).toContain('Cobrar cuentas');
+      expect(labels()).toContain('Ver cuentas');
+      expect(labels()).not.toContain('Dividir cuenta');
+      component.openPay();
+      expect(component.isSplitOpen()).toBeTrue();
+      expect(component.isPayOpen()).toBeFalse();
+    });
+
+    it('with split, adding and cancelling items are blocked and cancel shows the reason', () => {
+      component.onFinancialSplitLoaded(splitResult(2));
+      expect(component.canRemoveItem(item(1, false))).toBeFalse();
+      expect(component.removeDisabledReason(item(1, false))).toBe(component.splitLockedCancelReason);
+      expect(component.splitLockedAddReason).toContain('quita la división');
+      component.openAddItems();
+      expect(component.isAddItemsOpen()).toBeFalse();
+    });
+
+    it('with table checkout and no split offers Cobrar and Dividir cuenta', () => {
+      settings.set({ restaurant: { enable_table_checkout: true } });
+      component.onFinancialSplitLoaded(null);
+      expect(labels()).toContain('Cobrar');
+      expect(labels()).toContain('Dividir cuenta');
+      expect(component.financialSplitAccountCount()).toBeNull();
     });
   });
 });

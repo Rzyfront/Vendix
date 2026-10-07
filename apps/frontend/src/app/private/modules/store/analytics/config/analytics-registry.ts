@@ -216,6 +216,24 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     category: 'sales',
     icon: 'user-check',
   },
+  {
+    key: 'sales_by_supplier',
+    title: 'Por Proveedor',
+    description: 'Ventas (sell-out) por proveedor',
+    detailedDescription: 'Ventas netas, unidades y clientes impactados por proveedor, con detalle por producto, vendedor o cliente. Se atribuyen al proveedor asignado al producto o, si no tiene, al de su última orden de compra.',
+    route: '/admin/analytics/sales/by-supplier',
+    category: 'sales',
+    icon: 'truck',
+  },
+  {
+    key: 'sales_by_brand',
+    title: 'Por Marca',
+    description: 'Ventas (sell-out) por marca',
+    detailedDescription: 'Ventas netas, unidades y clientes impactados por marca, con detalle por producto, vendedor o cliente.',
+    route: '/admin/analytics/sales/by-brand',
+    category: 'sales',
+    icon: 'tag',
+  },
 
   // Inventory (5)
   {

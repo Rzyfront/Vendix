@@ -22,6 +22,7 @@ import { OrgFiscalScopeSelectorComponent } from '../../../organization/shared/co
 import { ReceivedDocumentImportComponent } from './received-document-import.component';
 import { ReceivedDocumentFormComponent } from './received-document-form.component';
 import { DocumentReceptionConnectionsComponent } from './document-reception-connections.component';
+import { ReceivedBuyerEventActivationComponent } from './received-buyer-event-activation.component';
 import type { ReceivedDocument, ReceivedDocumentQuery, ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 
@@ -36,7 +37,7 @@ const STATUS_FILTERS = [
 @Component({
   selector: 'app-received-documents-page',
   standalone: true,
-  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent, DocumentReceptionConnectionsComponent],
+  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent, DocumentReceptionConnectionsComponent, ReceivedBuyerEventActivationComponent],
   template: `
     <div class="w-full space-y-4">
       @if (scope === 'organization') {
@@ -46,6 +47,7 @@ const STATUS_FILTERS = [
           (storeChange)="onFiscalStoreChange($event)"
         />
       }
+      <app-received-buyer-event-activation [scope]="scope" [selectedStoreId]="storeId() ?? null" [scopeReady]="scopeReady()" />
       <app-card [responsive]="true" [padding]="false">
         <div class="flex flex-col gap-3 border-b border-border p-3 md:flex-row md:items-center md:justify-between md:p-4">
           <div class="min-w-0">

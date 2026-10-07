@@ -12,7 +12,9 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, of, switchMap, tap } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Subscription, catchError, of, switchMap, tap } from 'rxjs';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 
 import {
   AiReviewAckComponent,
@@ -267,6 +269,13 @@ const ACCEPTED_MIMETYPES = [
               La IA extrae socios y planes, los cruza contra los existentes y
               clasifica cada fila como <strong>OK</strong>, <strong>Revisar</strong>
               o <strong>Error</strong>.
+            </p>
+            <p class="text-xs text-text-secondary text-center max-w-sm">
+              @if (scanStalled()) {
+                Está tardando más de lo normal; seguimos procesando.
+              } @else {
+                Esto puede tardar unos minutos. No cierres la ventana.
+              }
             </p>
           </div>
         </div>
@@ -649,6 +658,9 @@ export class MemberBulkScannerModalComponent {
 
   /** 1 = upload, 2 = analyze, 3 = review. */
   readonly currentStep = signal<1 | 2 | 3>(1);
+  /** true cuando el job lleva más de ~60 s sin terminar. */
+  readonly scanStalled = signal(false);
+  private scanSub: Subscription | null = null;
 
   /**
    * Verificación obligatoria de los datos precargados por la IA. El botón de
@@ -828,8 +840,10 @@ export class MemberBulkScannerModalComponent {
 
     this.currentStep.set(2);
 
-    this.service
-      .scanRoster(file)
+    this.scanSub?.unsubscribe();
+    this.scanStalled.set(false);
+    this.scanSub = this.service
+      .scanRoster(file, { onStall: () => this.scanStalled.set(true) })
       .pipe(
         switchMap((res) => {
           if (!res.success || !res.data) {
@@ -846,16 +860,11 @@ export class MemberBulkScannerModalComponent {
           this.currentStep.set(3);
         }),
         catchError((err: unknown) => {
-          const message =
-            (err as { error?: { message?: string | string[] } })?.error?.message ??
-            (err instanceof Error ? err.message : null) ??
-            'Error al procesar el documento';
           const display =
-            typeof message === 'string'
-              ? message
-              : Array.isArray(message)
-                ? message.join(', ')
-                : 'Error al procesar el documento';
+            err instanceof HttpErrorResponse
+              ? parseApiError(err).userMessage
+              : (err as Error | null)?.message ||
+                'Error al procesar el documento';
           this.toast.error(display);
           this.currentStep.set(1);
           return of(null);
@@ -1200,6 +1209,9 @@ export class MemberBulkScannerModalComponent {
   }
 
   resetWizard(): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.scanStalled.set(false);
     this.currentStep.set(1);
     this.selectedFile.set(null);
     this.filePreviewUrl.set(null);

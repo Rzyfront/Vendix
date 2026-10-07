@@ -69,6 +69,7 @@ export class AIAgentsService {
         allowed_tools: dto.allowed_tools ?? [],
         denied_tools: dto.denied_tools ?? [],
         max_iterations: dto.max_iterations ?? null,
+        timeout_seconds: dto.timeout_seconds ?? null,
         requires_confirmation_default:
           dto.requires_confirmation_default ?? false,
         is_active: dto.is_active ?? true,

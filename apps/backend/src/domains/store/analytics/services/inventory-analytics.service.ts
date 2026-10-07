@@ -51,6 +51,32 @@ import {
   saleUnitScaleFactor,
 } from '../../products/services/sale-unit-display.util';
 
+/** Current low-stock snapshot shared by the screen and XLSX export. */
+export interface LowStockReportRow {
+  product_id: number;
+  product_name: string;
+  sku: string | null;
+  image_url: string | null;
+  category_id: number | null;
+  category_name: string | null;
+  quantity_available: number;
+  stock_quantity: number;
+  min_stock_level: number;
+  reorder_point: number;
+  stock_value_at_risk: number;
+  days_of_stock: null;
+  status: 'out_of_stock' | 'low_stock';
+}
+
+export function calculateLowStockTotals(rows: readonly LowStockReportRow[]) {
+  return {
+    stock_quantity: rows.reduce((sum, row) => sum + row.stock_quantity, 0),
+    stock_value_at_risk: Math.round(
+      rows.reduce((sum, row) => sum + row.stock_value_at_risk, 0) * 100,
+    ) / 100,
+  };
+}
+
 /**
  * One row of the stock-levels report. RAW values only — numbers are plain
  * numbers, there is NO pre-formatting and NO presentation fallback strings.
@@ -540,12 +566,17 @@ export class InventoryAnalyticsService {
     });
   }
 
-  async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
+  private async buildLowStockRows(
+    query: InventoryAnalyticsQueryDto,
+  ): Promise<LowStockReportRow[]> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
     const settings = await this.loadMergedSettings();
-
-    // track_inventory is Boolean @default(false), not nullable
     const products = await this.prisma.products.findMany({
       where: {
+        store_id: context.store_id,
         state: 'active',
         track_inventory: true,
         ...(query.category_id !== undefined && {
@@ -556,12 +587,13 @@ export class InventoryAnalyticsService {
         id: true,
         name: true,
         sku: true,
-        product_images: {
-          select: { image_url: true },
-          take: 1,
-        },
+        product_images: { select: { image_url: true }, take: 1 },
         product_categories: {
+          ...(query.category_id !== undefined && {
+            where: { category_id: query.category_id },
+          }),
           select: { categories: { select: { id: true, name: true } } },
+          orderBy: { category_id: 'asc' },
           take: 1,
         },
         stock_quantity: true,
@@ -569,134 +601,59 @@ export class InventoryAnalyticsService {
         min_stock_level: true,
         reorder_point: true,
       },
-      orderBy: {
-        stock_quantity: 'asc',
-      },
+      orderBy: [{ stock_quantity: 'asc' }, { id: 'asc' }],
     });
 
-    const sortDir = query.sort_direction ?? 'asc';
-    const sorted =
-      query.sort_by === 'name'
-        ? [...products].sort((a, b) =>
-            sortDir === 'asc'
-              ? a.name.localeCompare(b.name, 'es')
-              : b.name.localeCompare(a.name, 'es'),
-          )
-        : products;
-
-    const results = sorted
-      .filter((p) => {
-        const qty = Number(p.stock_quantity || 0);
-        const reorderPoint = resolveProductLowStockThreshold(settings, p);
-        return qty <= reorderPoint;
-      })
-      .map((product) => {
-        const qty = Number(product.stock_quantity || 0);
-        const reorderPoint = resolveProductLowStockThreshold(settings, product);
-
-        return {
-          product_id: product.id,
-          product_name: product.name,
-          sku: product.sku,
-          image_url: product.product_images?.[0]?.image_url || null,
-          quantity_available: qty,
-          // Campos que consume el reporte "Stock Bajo" del registry
-          // (Reportes > Inventario): sin ellos la tabla pinta 0 aunque haya
-          // stock (p. ej. VALVULAS CT100 con 88 unidades). Misma forma que
-          // getLowStockForExport (pantalla == archivo).
-          stock_quantity: qty,
-          min_stock_level: Number(product.min_stock_level ?? 0),
-          stock_value_at_risk:
-            Math.round(qty * Number(product.cost_price ?? 0) * 100) / 100,
-          category_id: product.product_categories?.[0]?.categories?.id ?? null,
-          category_name:
-            product.product_categories?.[0]?.categories?.name ?? null,
-          reorder_point: reorderPoint,
-          days_of_stock: null, // TODO: Calculate from sales velocity
-          status: qty === 0 ? 'out_of_stock' : 'low_stock',
-        };
-      });
-
-    const isPaginated = query.page !== undefined && query.limit !== undefined;
-    if (isPaginated) {
-      const page = query.page!;
-      const limit = query.limit!;
-      const totalCount = results.length;
-      const paginatedData = results.slice((page - 1) * limit, page * limit);
-
-      return {
-        data: paginatedData,
-        meta: {
-          pagination: {
-            total: totalCount,
-            page,
-            limit,
-            total_pages: Math.ceil(totalCount / limit),
-          },
-        },
-      };
-    }
-
-    // Non-paginated: respect original limit behavior
-    return results.slice(0, query.limit || 100);
-  }
-
-  /**
-   * QUI-545: variante flat-array de `getLowStockAlerts` para exportación XLSX.
-   * Devuelve TODAS las filas (no la envoltura paginada ni el slice de `limit`)
-   * con datos crudos: stock_quantity numérico, reorder_point calculado por
-   * helper, cost_price y un derivado `stock_value_at_risk` para que el
-   * reporte de "stock bajo" muestre el riesgo monetario de comprar
-   * antes de que se agote.
-   */
-  async getLowStockForExport(query: InventoryAnalyticsQueryDto) {
-    const settings = await this.loadMergedSettings();
-
-    const products = await this.prisma.products.findMany({
-      where: {
-        state: 'active',
-        track_inventory: true,
-      },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        product_images: {
-          select: { image_url: true },
-          take: 1,
-        },
-        stock_quantity: true,
-        cost_price: true,
-        min_stock_level: true,
-        reorder_point: true,
-      },
-      orderBy: { stock_quantity: 'asc' },
-      take: 10000,
-    });
-
-    return products
-      .filter((p) => {
-        const qty = Number(p.stock_quantity || 0);
-        const reorderPoint = resolveProductLowStockThreshold(settings, p);
-        return qty <= reorderPoint;
-      })
-      .map((product) => {
-        const qty = Number(product.stock_quantity || 0);
-        const reorderPoint = resolveProductLowStockThreshold(settings, product);
-        const minLevel = Number(product.min_stock_level || 0);
-        const cost = Number(product.cost_price || 0);
+    const rows: LowStockReportRow[] = products
+      .filter((product) => Number(product.stock_quantity ?? 0) <= resolveProductLowStockThreshold(settings, product))
+      .map<LowStockReportRow>((product) => {
+        const qty = Number(product.stock_quantity ?? 0);
         return {
           product_id: product.id,
           product_name: product.name,
           sku: product.sku,
           image_url: product.product_images?.[0]?.image_url ?? null,
+          category_id: product.product_categories?.[0]?.categories?.id ?? null,
+          category_name: product.product_categories?.[0]?.categories?.name ?? null,
+          quantity_available: qty,
           stock_quantity: qty,
-          min_stock_level: minLevel,
-          reorder_point: reorderPoint,
+          min_stock_level: Number(product.min_stock_level ?? 0),
+          reorder_point: resolveProductLowStockThreshold(settings, product),
+          stock_value_at_risk: Math.round(qty * Number(product.cost_price ?? 0) * 100) / 100,
+          days_of_stock: null,
           status: qty === 0 ? 'out_of_stock' : 'low_stock',
-          stock_value_at_risk: Math.round(qty * cost * 100) / 100,
         };
       });
+
+    const direction = query.sort_direction === 'desc' ? -1 : 1;
+    return rows.sort((a, b) => {
+      const comparison = query.sort_by === 'name'
+        ? a.product_name.localeCompare(b.product_name, 'es')
+        : a.stock_quantity - b.stock_quantity;
+      return comparison * direction || a.product_id - b.product_id;
+    });
+  }
+
+  async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
+    const rows = await this.buildLowStockRows(query);
+    if (query.page !== undefined && query.limit !== undefined) {
+      const page = query.page;
+      const limit = query.limit;
+      return {
+        data: rows.slice((page - 1) * limit, page * limit),
+        meta: {
+          pagination: { total: rows.length, page, limit, total_pages: Math.ceil(rows.length / limit) },
+          totals: calculateLowStockTotals(rows),
+        },
+      };
+    }
+    // Preserve the non-paginated screen contract; export never applies this cap.
+    return rows.slice(0, query.limit || 100);
+  }
+
+  /** Complete current snapshot, with the same filters, projection and order as the screen. */
+  async getLowStockForExport(query: InventoryAnalyticsQueryDto): Promise<LowStockReportRow[]> {
+    return this.buildLowStockRows(query);
   }
 
   private async loadMergedSettings(): Promise<StoreSettings> {

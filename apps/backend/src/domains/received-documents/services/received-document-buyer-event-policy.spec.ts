@@ -30,6 +30,7 @@ describe('evaluateBuyerEventReadiness', () => {
       input.has_prior_acknowledgement = true;
       input.has_prior_goods_receipt = true;
     }
+    if (event_code === '032') input.has_prior_acknowledgement = true;
     expect(evaluateBuyerEventReadiness(input)).toEqual({ ready: true, blockers: [] });
   });
 
@@ -94,6 +95,15 @@ describe('evaluateBuyerEventReadiness', () => {
     missingGoodsReceipt.claim_reason = 'Invoice amount differs';
     missingGoodsReceipt.has_prior_acknowledgement = true;
     expect(evaluateBuyerEventReadiness(missingGoodsReceipt).blockers).toContain('prior_goods_receipt_required');
+  });
+
+  it('requires a prior acknowledgement for event 032', () => {
+    const withoutAcknowledgement = validInput('032');
+    expect(evaluateBuyerEventReadiness(withoutAcknowledgement).blockers).toContain('prior_acknowledgement_required');
+
+    const withAcknowledgement = validInput('032');
+    withAcknowledgement.has_prior_acknowledgement = true;
+    expect(evaluateBuyerEventReadiness(withAcknowledgement).blockers).not.toContain('prior_acknowledgement_required');
   });
 
   it('requires exact normalized receiver/tenant NIT equality', () => {

@@ -320,10 +320,12 @@ describe('OrdersBulkService', () => {
         args.include.payments.select.store_payment_method,
       ).toBeDefined();
 
-      // El pie afirma "validada por la DIAN": solo `accepted` lo respalda.
+      // El pie afirma "validada por la DIAN": solo `accepted` lo respalda, y
+      // solo la factura de la orden (las de cuenta de una division financiera
+      // llevan `financial_account_id` y no son la de la orden).
       expect(args.include.invoices).toEqual(
         expect.objectContaining({
-          where: { dian_status: 'accepted' },
+          where: { dian_status: 'accepted', financial_account_id: null },
           take: 1,
         }),
       );

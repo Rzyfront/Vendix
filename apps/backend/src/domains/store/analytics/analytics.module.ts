@@ -11,6 +11,7 @@ import { FinancialAnalyticsService } from './services/financial-analytics.servic
 import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import { DispatchAnalyticsService } from './services/dispatch-analytics.service';
+import { SalesDimensionAnalyticsService } from './services/sales-dimension-analytics.service';
 import { PaymentsAnalyticsService } from './services/payments-analytics.service';
 import { PaymentsAnalyticsController } from './payments-analytics.controller';
 import { FinancialAnalyticsCacheInvalidationListener } from './listeners/financial-analytics-cache-invalidation.listener';
@@ -33,6 +34,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     ReviewsAnalyticsService,
     DispatchAnalyticsService,
     PaymentsAnalyticsService,
+    SalesDimensionAnalyticsService,
     FinancialAnalyticsCacheInvalidationListener,
   ],
   exports: [

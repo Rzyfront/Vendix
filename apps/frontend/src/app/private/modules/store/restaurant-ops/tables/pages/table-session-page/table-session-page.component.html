@@ -53,7 +53,23 @@
         <p>Cargando sesión…</p>
       </div>
     } @else if (session()) {
-      @if (session()?.order_id; as sourceId) {
+      @if (hasFinancialSplit() && !checkoutEnabled()) {
+        <div class="flex items-start gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm">
+          <app-icon name="split" [size]="16" class="mt-0.5 shrink-0"></app-icon>
+          <div class="min-w-0">
+            <p class="font-medium">
+              Cuenta dividida{{ financialSplitAccountCount() ? ' en ' + financialSplitAccountCount() + ' cuentas' : '' }}
+            </p>
+            <p class="text-[var(--color-text-secondary)]">
+              Gestiónala en el detalle de la orden
+              @if (session()?.order_id; as orderId) {
+                <a class="ml-1 font-medium text-[var(--color-primary)] underline" [routerLink]="['/admin/orders', orderId]">Ver orden</a>
+              }
+            </p>
+          </div>
+        </div>
+      }
+      @if (checkoutEnabled() && !hasFinancialSplit() && session()?.order_id; as sourceId) {
         <app-split-accounts-panel
           [sourceOrderId]="sourceId" [items]="items()" [allowCreate]="false"
           [refreshKey]="splitRefreshKey()" (loaded)="onFinancialSplitLoaded($event)"
@@ -104,7 +120,12 @@
                       → el mesero aún no la liberó).
                     - Pendiente (aún sin pagar).
                 -->
-                @if (isClosed() && isPaid()) {
+                @if (hasFinancialSplit()) {
+                  <app-badge variant="info" size="sm">
+                    <app-icon name="split" [size]="12"></app-icon>
+                    Cuenta dividida
+                  </app-badge>
+                } @else if (isClosed() && isPaid()) {
                   <app-badge variant="success" size="sm">
                     <app-icon name="circle-check" [size]="12"></app-icon>
                     Pagada / Cerrada
@@ -246,16 +267,30 @@
                 <h3 class="items-card-title">Comanda</h3>
                 <span class="items-count-badge">{{ items().length }}</span>
               </div>
-              <app-button
-                class="items-card-add"
-                variant="primary"
-                size="sm"
-                [disabled]="isClosed()"
-                (clicked)="openAddItems()"
-              >
-                <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-                Agregar items
-              </app-button>
+              <div class="flex items-center gap-2">
+                @if (kitchenTicketPrint.isPhysicalKitchen()) {
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [disabled]="printableTicketIds().length === 0"
+                    (clicked)="printKitchenTickets()"
+                  >
+                    <app-icon slot="icon" name="printer" [size]="14"></app-icon>
+                    Imprimir comanda
+                  </app-button>
+                }
+                <app-button
+                  class="items-card-add"
+                  variant="primary"
+                  size="sm"
+                  [disabled]="isClosed() || hasFinancialSplit()"
+                  [attr.title]="hasFinancialSplit() ? splitLockedAddReason : null"
+                  (clicked)="openAddItems()"
+                >
+                  <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+                  Agregar items
+                </app-button>
+              </div>
             </div>
 
             @if (items().length === 0) {
@@ -267,7 +302,7 @@
                 <p class="empty-sub">
                   Agrega items para empezar a tomar el pedido de esta mesa.
                 </p>
-                @if (!isClosed()) {
+                @if (!isClosed() && !hasFinancialSplit()) {
                   <app-button variant="primary" size="md" (clicked)="openAddItems()">
                     <app-icon slot="icon" name="plus" [size]="15"></app-icon>
                     Agregar el primer plato
@@ -677,7 +712,8 @@
         size="md"
         customClasses="!h-11"
         [fullWidth]="!checkoutEnabled()"
-        [disabled]="isClosed()"
+        [disabled]="isClosed() || hasFinancialSplit()"
+        [attr.title]="hasFinancialSplit() ? splitLockedAddReason : null"
         (clicked)="openAddItems()"
       >
         <app-icon slot="icon" name="plus" [size]="15"></app-icon>
@@ -695,7 +731,7 @@
           (clicked)="openPay()"
         >
           <app-icon slot="icon" name="credit-card" [size]="15"></app-icon>
-          Cobrar
+          {{ hasFinancialSplit() ? 'Cobrar cuentas' : 'Cobrar' }}
         </app-button>
       }
     </div>
@@ -745,12 +781,14 @@
     (addItems)="onAddItems($event)"
   />
 
-  <app-split-order-modal
-    [(isOpen)]="isSplitOpen"
-    [orderId]="session()?.order_id ?? null"
-    [items]="items()"
-    (splitCompleted)="onSplitCompleted($event)"
-  />
+  @if (checkoutEnabled()) {
+    <app-split-order-modal
+      [(isOpen)]="isSplitOpen"
+      [orderId]="session()?.order_id ?? null"
+      [items]="items()"
+      (splitCompleted)="onSplitCompleted($event)"
+    />
+  }
 
   <app-transfer-table-modal
     [isOpen]="isTransferOpen()"

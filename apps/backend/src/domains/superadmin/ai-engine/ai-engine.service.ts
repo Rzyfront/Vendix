@@ -338,6 +338,7 @@ export class AIEngineConfigService {
       readOnly: tool.readOnly ?? false,
       clientSide: tool.clientSide ?? false,
       requiresConfirmation: tool.requiresConfirmation ?? false,
+      irreversible: tool.irreversible ?? false,
     }));
   }
 

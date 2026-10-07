@@ -3,6 +3,7 @@ import {
   CashRegisterToolDeps,
 } from './cash-register.tools';
 import { RegisteredTool } from '../interfaces/tool.interface';
+import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../bridge/capability-registry.service';
 
 /**
  * Paso 8 (vex-agent) — contrato cash-register: 2 reads + 3 writes.
@@ -187,5 +188,34 @@ describe('cash-register.tools · caja', () => {
     expect(
       deps.movementsService.createManualMovement,
     ).not.toHaveBeenCalled();
+  });
+
+  it('close_cash_session y record_cash_movement declaran irreversible: true', () => {
+    const { byName } = buildTools();
+    expect(byName.close_cash_session.irreversible).toBe(true);
+    // R3-A: el movimiento manual de efectivo mueve dinero y se aprueba con
+    // confirmación propia dentro de planes.
+    expect(byName.record_cash_movement.irreversible).toBe(true);
+    // Apertura y lecturas no llevan la marca (evita fatiga del badge).
+    for (const name of [
+      'get_active_cash_session',
+      'list_cash_sessions',
+      'open_cash_session',
+    ]) {
+      expect(byName[name].irreversible).not.toBe(true);
+    }
+  });
+
+  it('la red compartida cubre ambas grafías del dominio de caja', () => {
+    // Regresión: el espejo local de plan-approval solo traía `cash-registers`
+    // (segmento de ruta) y el dominio tipado `cash-register` colaba como
+    // reversible dentro de planes aprobados.
+    expect(byNameDomain()).toBe('cash-register');
+    expect(IRREVERSIBLE_DOMAIN_SEGMENTS.has('cash-register')).toBe(true);
+    expect(IRREVERSIBLE_DOMAIN_SEGMENTS.has('cash-registers')).toBe(true);
+
+    function byNameDomain() {
+      return buildTools().byName.close_cash_session.domain;
+    }
   });
 });

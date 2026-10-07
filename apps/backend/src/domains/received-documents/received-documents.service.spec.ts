@@ -84,6 +84,7 @@ function makeHarness() {
       create: jest.fn(async ({ data }: any) => { fileSha = data.sha256; return { id: 1, ...data }; }),
     },
     received_document_events: {
+      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 1 }),
       upsert: jest.fn().mockResolvedValue({ id: 1 }),
     },
@@ -327,6 +328,67 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(h.tx.received_document_events.create).not.toHaveBeenCalled();
   });
 
+  it.each(['preparing', 'prepared', 'sending', 'unknown', 'accepted'])(
+    'blocks fiscal fact edits when a buyer DIAN event is %s after locking the tenant-scoped document',
+    async (status) => {
+      const h = makeHarness();
+      h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+        id: 50, version: 1, source_channel: 'manual', fiscal_status: 'pending', posting_status: 'pending',
+        accepted_at: null, metadata: { source_format: 'manual_entry' }, files: [],
+      });
+      h.tx.received_document_events.findFirst.mockResolvedValueOnce({ id: 901, status });
+
+      await expect(h.service.updateReview(context, 50, {
+        expected_version: 1, facts: manualDto(), reviewer_note: 'Correction requested',
+      } as any)).rejects.toThrow('existe un evento DIAN del adquiriente');
+
+      expect(h.tx.$queryRaw).toHaveBeenCalledTimes(1);
+      const lockQuery = h.tx.$queryRaw.mock.calls[0][0];
+      expect(lockQuery.sql).toContain('"organization_id"');
+      expect(lockQuery.sql).toContain('"accounting_entity_id"');
+      expect(lockQuery.sql).toContain('"store_id"');
+      expect(lockQuery.values).toEqual(expect.arrayContaining([50, 2, 8, 3]));
+      expect(h.tx.received_document_events.findFirst).toHaveBeenCalledWith({
+        where: {
+          document_id: 50,
+          event_type: 'BUYER_DIAN_EVENT',
+          status: { in: ['preparing', 'prepared', 'sending', 'unknown', 'accepted'] },
+        },
+        select: { id: true },
+      });
+      expect(h.tx.received_document_events.findFirst.mock.invocationCallOrder[0]).toBeGreaterThan(
+        h.tx.$queryRaw.mock.invocationCallOrder[0],
+      );
+      expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+      expect(h.tx.received_document_items.deleteMany).not.toHaveBeenCalled();
+      expect(h.tx.received_document_taxes.deleteMany).not.toHaveBeenCalled();
+      expect(h.tx.received_document_events.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['rejected', 'preparation_failed'])(
+    'allows fiscal fact edits after a terminal non-accepted buyer event status %s',
+    async (status) => {
+      const h = makeHarness();
+      h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+        id: 50, version: 1, source_channel: 'manual', fiscal_status: 'pending', posting_status: 'pending',
+        accepted_at: null, metadata: { source_format: 'manual_entry' }, files: [],
+      });
+      h.tx.received_document_events.findFirst.mockImplementationOnce(({ where }: any) =>
+        Promise.resolve(where.status.in.includes(status) ? { id: 901 } : null),
+      );
+
+      await h.service.updateReview(context, 50, { expected_version: 1, facts: manualDto() } as any);
+
+      expect(h.tx.received_document_events.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ status: { in: ['preparing', 'prepared', 'sending', 'unknown', 'accepted'] } }),
+      }));
+      expect(h.tx.received_documents.updateMany).toHaveBeenCalledTimes(1);
+      expect(h.tx.received_document_items.deleteMany).toHaveBeenCalledTimes(1);
+      expect(h.tx.received_document_taxes.deleteMany).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('also blocks fact edits when only a historical tax allocation exists', async () => {
     const h = makeHarness();
     h.prisma.received_documents.findFirst.mockResolvedValueOnce({
@@ -357,11 +419,13 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     });
     h.tx.received_document_match_allocations.findFirst.mockResolvedValue({ id: 701 });
     h.tx.received_document_match_tax_allocations.findFirst.mockResolvedValue({ id: 702 });
+    h.tx.received_document_events.findFirst.mockResolvedValue({ id: 901, status: 'accepted' });
 
     await h.service.updateReview(context, 50, { expected_version: 1, reviewer_note: 'Nota de revisión sin cambiar hechos' } as any);
 
     expect(h.tx.received_document_match_allocations.findFirst).not.toHaveBeenCalled();
     expect(h.tx.received_document_match_tax_allocations.findFirst).not.toHaveBeenCalled();
+    expect(h.tx.received_document_events.findFirst).not.toHaveBeenCalled();
     expect(h.tx.received_documents.updateMany).toHaveBeenCalledTimes(1);
     expect(h.tx.received_document_items.deleteMany).not.toHaveBeenCalled();
     expect(h.tx.received_document_taxes.deleteMany).not.toHaveBeenCalled();

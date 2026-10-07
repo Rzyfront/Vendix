@@ -53,10 +53,20 @@ export class ReportsDataService {
       return cached.observable as Observable<T>;
     }
     const obs$ = factory().pipe(
-      shareReplay({ bufferSize: 1, refCount: false }),
+      // Preserve completed replay, but cancel obsolete in-flight HTTP on switchMap.
+      shareReplay({ bufferSize: 1, refCount: true }),
     );
     reportsCache.set(key, { observable: obs$, lastFetch: now });
     return obs$;
+  }
+
+  private withExtraParams(params: HttpParams, extraParams?: Record<string, string>): HttpParams {
+    for (const [key, value] of Object.entries(extraParams ?? {})) {
+      if (value != null && value !== '' && !['page', 'limit', 'date_from', 'date_to'].includes(key)) {
+        params = params.set(key, value);
+      }
+    }
+    return params;
   }
 
   /**
@@ -77,7 +87,7 @@ export class ReportsDataService {
     const url = `${environment.apiUrl}/${dataEndpoint}`;
     let params = new HttpParams();
 
-    if (options?.dateRange) {
+    if (report.requiresDateRange && options?.dateRange) {
       if (options.dateRange.start_date) {
         params = params.set('date_from', options.dateRange.start_date);
       }
@@ -97,9 +107,7 @@ export class ReportsDataService {
       params = params.set('limit', String(options.limit));
     }
 
-    for (const [k, v] of Object.entries(options?.extraParams ?? {})) {
-      if (v != null && v !== '') params = params.set(k, v);
-    }
+    params = this.withExtraParams(params, options?.extraParams);
 
     // Invalidate previous cache entries for this report ONLY when the date range or fiscal period changes.
     // Preserves cached pages during pagination and tab returns (QUI-544).
@@ -147,7 +155,11 @@ export class ReportsDataService {
   /**
    * Download export blob from backend.
    */
-  exportFromBackend(exportEndpoint: string, dateRange?: DateRange): Observable<Blob> {
+  exportFromBackend(
+    exportEndpoint: string,
+    dateRange?: DateRange,
+    extraParams?: Record<string, string>,
+  ): Observable<Blob> {
     const url = `${environment.apiUrl}/${exportEndpoint}`;
     let params = new HttpParams();
 
@@ -159,6 +171,8 @@ export class ReportsDataService {
         params = params.set('date_to', dateRange.end_date);
       }
     }
+
+    params = this.withExtraParams(params, extraParams);
 
     return this.http.get(url, { params, responseType: 'blob' });
   }

@@ -203,6 +203,27 @@ describe('VexiPlanStateService', () => {
     await svc.setStatus(1, 'abandoned');
     expect(row.metadata.agent_plan.status).toBe('abandoned');
   });
+
+  it('los hashes de escritura persisten sin plan interno (E2E-1 Vex)', async () => {
+    // Un turno Vex propone escrituras sin lista interna de tareas (el loop
+    // ni recibe `params.plan`): los hashes son el binding de aprobación y
+    // deben persistir/leerse sin gate de `agent_plan`.
+    const { svc, row } = makeService({ agent_key: 'vex' });
+    expect(row.metadata.agent_plan).toBeUndefined();
+    const written = await svc.setStepHashes(1, [
+      { order: 1, tool: 'create_product', args: { name: 'E2EA' } },
+      { order: 2, tool: 'archive_product', args: { product_id: 2510 } },
+    ]);
+    expect(written).toHaveLength(2);
+    // Contrato R3: se guarda `{plan_id, created_at, steps}`, no un arreglo plano.
+    expect(row.metadata.agent_plan_step_hashes.steps).toHaveLength(2);
+    expect(row.metadata.agent_plan_step_hashes).toHaveProperty('plan_id');
+    expect(typeof row.metadata.agent_plan_step_hashes.created_at).toBe('string');
+    const read = await svc.getStepHashes(1);
+    expect(read).toEqual(written);
+    expect(read[0]).toMatchObject({ order: 1, tool: 'create_product' });
+    expect(typeof read[0].args_hash).toBe('string');
+  });
 });
 
 describe('renderPlanForModel', () => {

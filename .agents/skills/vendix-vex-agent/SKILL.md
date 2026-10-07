@@ -9,7 +9,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Working with the Vex full-screen business agent (/admin/vex)"
@@ -46,7 +46,9 @@ the Vexi dock — those stay in their own skills.
 - `apps/backend/src/domains/store/vex/services/vex-activity-feed.service.ts` — business log (`FeedCategory`: sale, inventory, cash, alert, agent).
 - `apps/backend/src/domains/store/vex/guards/vex-enabled.guard.ts` — store toggle, mirror of `VexiEnabledGuard`.
 - `apps/backend/src/ai-engine/tools/domains/vex-blocks.tools.ts` — the 7 block tools, all `readOnly`.
-- `apps/backend/src/ai-engine/ai-agent.service.ts` — `denied_tools` filter, per-agent budget, `ui_block` emission, result compaction (>6000 chars).
+- `apps/backend/src/ai-engine/ai-agent.service.ts` — `denied_tools` filter, per-agent budget, `ui_block` emission, result compaction (>6000 chars, vex only), offered-catalog execution guard, single `plan_approval` frame, `vex_agent` metering.
+- `apps/backend/src/ai-engine/tools/irreversible-coverage.spec.ts` — registry-wide spec: a write whose name matches the irreversible pattern must declare `irreversible: true`.
+- `apps/backend/src/domains/store/ai-chat/ai-chat.plan.spec.ts` — wiring specs (`plan_approval` + `block_sink` present for vex, absent for vexi) and `metadata.blocks/plan` persistence specs.
 - `apps/backend/src/ai-engine/tools/ai-tool-registry.ts` — catalog scoping (deny applied last).
 - `apps/backend/src/ai-engine/interfaces/ai-provider.interface.ts` — chunk types `ui_block` and `plan_approval`.
 - `apps/backend/src/ai-engine/providers/anthropic-compatible.provider.ts` — `cache_control: ephemeral` on system + tools.
@@ -86,9 +88,10 @@ a retry of step 2 never re-runs step 1.
 
 Outcomes that route to the step's own card (`AI_AGENT_005` with a fresh
 single-use token, same details shape as `executeTool`): `irreversible` (step
-flagged `irreversible: true` or in `IRREVERSIBLE_DOMAIN_SEGMENTS`:
-invoicing, dian-config, payroll, pila, cash-registers, payments, refunds,
-subscriptions, declarations), `unknown_step` (args drifted after approval),
+flagged `irreversible: true`, or its domain in the shared
+`IRREVERSIBLE_DOMAIN_SEGMENTS` — single-sourced from `IRREVERSIBLE_DOMAINS`
+in `capability-registry.service.ts`, never mirrored), `unknown_step` (args
+drifted after approval),
 `replayed` (step already ran), `missing`/`mismatch` (expired token or wrong
 user/plan). On `ok` the controller mints an inner single-use token for exactly
 this tool+args and executes through `executeTool()`, so permissions are
@@ -146,6 +149,59 @@ model). The business log (`activity-feed`) unions domain notifications with
 applied Vex/Vexi actions as `{category, title, description, created_at,
 is_new}` and goes live over the existing notifications SSE.
 
+## Remediation rules (irreversible, wiring, identity, persistence)
+
+Learned closing the gaps where specs were green but the wiring was missing.
+All five are enforced by specs, not by convention.
+
+1. **Explicit `irreversible` + coverage spec.** Irreversible = external or
+   accounting effect not undone by a normal write: DIAN sends (invoice, note,
+   payroll, support document), payments, collections, refunds, cash/period
+   closes, order/invoice void/cancel, declarations, every
+   `delete`/`archive`. Each such typed tool declares `irreversible: true`
+   explicitly; the shared segment list is only the safety net. The coverage
+   spec (`irreversible-coverage.spec.ts`) walks the real factories and fails
+   if a write matching
+   `send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_`
+   lacks the flag — reads (`readOnly`) and UI tools (`clientSide`) are
+   excluded even when their names match. A new tool in a dangerous domain
+   without the flag breaks the build on purpose.
+2. **Execution-time offered-catalog validation.** The model may only execute
+   tools from the catalog offered that turn (permissions ∩ plan ∩
+   `allowed_tools` − `denied_tools`). A call outside it returns a
+   `tool_result` error (`AI_AGENT_TOOL_NOT_ALLOWED`) **before** the
+   `clientSide` branch and before `executeTool` — no browser dispatch, no
+   execution, no quota burn. Catalog filtering is not enough: a hallucinated
+   `ui_*` must die at execution, not at offer time.
+3. **Mandatory hook/sink for vex turns, forbidden for vexi.** In
+   `ai-chat`, `agent_key='vex'` turns always receive `plan_approval`
+   (backed by `PlanApprovalService` + `VexiPlanStateService`) and
+   `block_sink` (backed by `VexBlockService` with
+   `conversation_id`/`message_id`); vexi turns receive neither. The loop
+   accumulates every write proposal of the turn and emits **one**
+   `plan_approval` frame (`plan_id` + steps), saving hashes via
+   `setStepHashes`; results > 6000 chars persist as real blocks through the
+   sink instead of being dropped by compaction. Wire specs assert the args
+   at the seam — a spec that mocks the loop never proves this (see
+   `vendix-known-errors`, mocked wire point).
+4. **`step_id` identity, server-verified approve.** Steps are identified by
+   `step_id`, never by tool name (two `create_product` = two steps). Approve
+   (`POST store/vex/plans/:id/approve`) validates: caller owns the
+   conversation (else 403), steps equal the server hashes (`getStepHashes` —
+   client `steps` are ignored except as a subset selection), single-use
+   token TTL 15 min. Approved reversible steps run without further
+   confirmation; irreversible steps stay `pending_confirmation` and emit
+   their own card.
+5. **`metadata.blocks/plan` persistence.** At vex turn close, the agent
+   message stores `blocks: [{block_id, version, kind}]` and
+   `plan: {plan_id, steps[], status}` in `ai_messages.metadata`; plan status
+   moves on approve/reject/apply. The frontend rehydrates with
+   `GET blocks/:id` (signed data minted on read, never persisted). Turn
+   context uses `buildVexSnapshot` (with `vex_blocks`) and never emits
+   `ui_context`. `ai_ui_blocks` is registered on `StorePrismaService` and
+   `VexBlockService.create()` verifies the conversation belongs to the
+   store and user.
+
 ## Context budget
 
 Two mechanisms keep a 240+-tool, 40-iteration turn affordable: prompt caching
@@ -160,6 +216,9 @@ provider only) and the block-backed compaction from Pattern 3. Measure on
 | Agent row | `psql "$DATABASE_URL" -c "select key, app_key, max_iterations from ai_agents where key='vex'"` — 25 `ui_*` in `denied_tools` |
 | Deny filter | `npx jest --runInBand src/ai-engine/ai-agent.service.spec.ts` — `ui_navigate` absent from vex catalog, present for vexi |
 | Plan approval | `npx jest --runInBand src/domains/store/vex/services/plan-approval.service.spec.ts` — 1 approval runs 3 reversibles; drifted args and `send_invoice_dian` reconfirm; token replay rejected |
+| Irreversible coverage | `npx jest --runInBand src/ai-engine/tools/irreversible-coverage.spec.ts` — fails if a dangerous-domain write lacks `irreversible: true` (check by reverting `close_cash_session` locally) |
+| Offered-catalog guard | `npx jest --runInBand src/ai-engine/ai-agent.service.spec.ts` — simulated `ui_navigate` call in a vex turn → `AI_AGENT_TOOL_NOT_ALLOWED`, 0 `executeTool`/client dispatches |
+| Wiring | `npx jest --runInBand src/domains/store/ai-chat/ai-chat.plan.spec.ts` — vex turn receives `plan_approval` + `block_sink`, vexi receives neither; closing message persists `metadata.blocks/plan` |
 | Blocks | `npx jest --runInBand src/domains/store/vex/services/vex-block.service.spec.ts` — schema validation, transform, cross-store 404 |
 | Gating | cashier token → 403; owner with `vex.enabled=false` → disabled-agent error; owner with `true` → 200 |
 | Thread split | list `?agent_key=vex` shows only Vex threads; Vexi list excludes them |
@@ -173,4 +232,5 @@ provider only) and the block-backed compaction from Pattern 3. Measure on
 (conversations), `vendix-ai-streaming` (SSE frames), `vendix-ai-platform-core`
 (`AIEngineService.run`, providers), `vendix-subscription-gate`
 (`vex_agent` caps), `vendix-settings-system` (`vex` block),
-`vendix-s3-storage`, `vendix-report-xlsx` (blocks `file`), `vendix-permissions`.
+`vendix-s3-storage`, `vendix-report-xlsx` (blocks `file`), `vendix-permissions`,
+`vendix-known-errors` (mocked wire point: green specs that never touch the seam).

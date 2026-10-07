@@ -1,0 +1,1 @@
+{"success":true,"message":"Plan aprobado. Los pasos irreversibles pedirán su propia confirmación.","data":{"plan_id":"44826ba2-4a02-481c-9631-e59c7beb5010","plan_token":"cd8bdcf2-2b50-417e-baf0-146e01951de7","expires_in_seconds":900,"covered_steps":[1,2],"reconfirm_steps":[3],"ignored_steps":[]}}

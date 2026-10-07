@@ -20,6 +20,7 @@ describe('RouteSheetScannerService', () => {
   let routeFlowMock: any;
   let dispatchRoutesMock: any;
   let s3Mock: any;
+  let registryMock: any;
 
   // The AI app returns a JSON string matching the route_sheet_ocr schema.
   const AI_FIXTURE = JSON.stringify({
@@ -86,16 +87,60 @@ describe('RouteSheetScannerService', () => {
     };
     s3Mock = { uploadFile: jest.fn().mockResolvedValue('s3/key/planilla.jpg') };
 
+    registryMock = { register: jest.fn() };
+
     service = new RouteSheetScannerService(
       aiMock as any,
       prismaMock as any,
       routeFlowMock as any,
       dispatchRoutesMock as any,
       s3Mock as any,
+      registryMock as any,
     );
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  describe('scanRouteSheetFromFiles / registro async', () => {
+    const scanFile = (mimeType = 'image/jpeg') => ({
+      buffer: Buffer.from('fake'),
+      mimeType,
+      originalName: 'planilla.jpg',
+      size: 4,
+    });
+
+    it('da el mismo resultado que el escaneo sincrono', async () => {
+      const sync = await service.scanRouteSheet(ROUTE_ID, file());
+      const viaFiles = await service.scanRouteSheetFromFiles([scanFile()], {
+        route_id: ROUTE_ID,
+      });
+      expect(viaFiles).toEqual(sync);
+    });
+
+    it('rechaza mime invalido y archivo ausente', async () => {
+      await expect(
+        service.scanRouteSheetFromFiles([scanFile('text/plain')], {
+          route_id: ROUTE_ID,
+        }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      await expect(
+        service.scanRouteSheetFromFiles([], { route_id: ROUTE_ID }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it('onModuleInit registra route_sheet y delega al nucleo', async () => {
+      service.onModuleInit();
+      expect(registryMock.register).toHaveBeenCalledWith(
+        'route_sheet',
+        expect.any(Function),
+      );
+      const handler = registryMock.register.mock.calls[0][1];
+      const spy = jest.spyOn(service, 'scanRouteSheetFromFiles');
+      const files = [scanFile()];
+      await handler({ files, params: { route_id: ROUTE_ID }, context: {} });
+      expect(spy).toHaveBeenCalledWith(files, { route_id: ROUTE_ID });
+    });
+  });
 
   describe('scanRouteSheet', () => {
     it('normalizes the AI fixture into a RouteSheetScanResult', async () => {

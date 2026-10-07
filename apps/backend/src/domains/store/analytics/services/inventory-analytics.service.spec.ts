@@ -3,6 +3,13 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
 
+// Use REAL query-extension registration/scoping without a Prisma pool/DB.
+jest.mock('../../../../prisma/base/base-prisma.service', () => ({
+  BasePrismaService: class {
+    protected baseClient = { $extends: () => ({}) };
+  },
+}));
+
 /**
  * Mock shape for StorePrismaService. Only the delegates touched by
  * InventoryAnalyticsService (in the paths exercised here) are declared;
@@ -1048,4 +1055,152 @@ describe('InventoryAnalyticsService', () => {
       expect(rows[0].category_name).toBe('Bebidas');
     });
   });
+  describe('low-stock screen/export shared snapshot (PR883)', () => {
+    type Link = { category_id: number; categories: { id: number; name: string } };
+    type Product = {
+      id: number; store_id: number; name: string; sku: string | null;
+      state: string; track_inventory: boolean; product_images: { image_url: string }[];
+      product_categories: Link[]; stock_quantity: number | null;
+      cost_price: number | string | null; min_stock_level: number | null; reorder_point: number | null;
+    };
+    type Args = {
+      where?: { store_id?: number; state?: string; track_inventory?: boolean; product_categories?: { some: { category_id: number } } };
+      select?: { product_categories?: { where?: { category_id: number }; orderBy?: { category_id: string }; take?: number } };
+      take?: number;
+    };
+    type Extensions = {
+      products: { findMany(input: { args: Args; query: (args: Args) => Promise<Product[]> }): Promise<Product[]> };
+      store_settings: { findFirst: unknown };
+    };
+    const A: Link = { category_id: 2, categories: { id: 2, name: 'Categoría A' } };
+    const B: Link = { category_id: 7, categories: { id: 7, name: 'Categoría B' } };
+    const product = (id: number, overrides: Partial<Product> = {}): Product => ({
+      id, store_id: 1, name: `Producto ${id}`, sku: `SKU-${id}`, state: 'active', track_inventory: true,
+      product_images: [], product_categories: [B, A], stock_quantity: 2,
+      cost_price: 12.34, min_stock_level: 5, reorder_point: 0, ...overrides,
+    });
+
+    // Real extension registration/scoping, then an adapter which applies Prisma
+    // where/select/order/take, including the nested category projection.
+    function installDataset(dataset: Product[]) {
+      const scoped = new StorePrismaService() as unknown as { createStoreQueryExtensions(): Extensions };
+      const extensions = scoped.createStoreQueryExtensions();
+      expect(extensions.products.findMany).toBeDefined();
+      expect(extensions.store_settings.findFirst).toBeDefined();
+      prisma.products.findMany.mockImplementation((args: Args) => extensions.products.findMany({
+        args,
+        query: async scopedArgs => {
+          const where = scopedArgs.where ?? {};
+          const category = where.product_categories?.some?.category_id;
+          let rows = dataset.filter(row =>
+            row.store_id === where.store_id && row.state === where.state && row.track_inventory === where.track_inventory &&
+            (category === undefined || row.product_categories.some(link => link.category_id === category)),
+          ).sort((a, b) => Number(a.stock_quantity) - Number(b.stock_quantity) || a.id - b.id);
+          if (scopedArgs.take !== undefined) rows = rows.slice(0, scopedArgs.take);
+          return rows.map(row => {
+            const projection = scopedArgs.select?.product_categories;
+            let links = [...row.product_categories];
+            if (projection?.where) links = links.filter(link => link.category_id === projection.where!.category_id);
+            if (projection?.orderBy) links.sort((a, b) => a.category_id - b.category_id);
+            if (projection?.take !== undefined) links = links.slice(0, projection.take);
+            return { ...row, product_categories: links };
+          });
+        },
+      }));
+    }
+
+    it('projects matching B for an A+B product in both screen and export', async () => {
+      installDataset([product(1, { product_categories: [A, B] }), product(2, { product_categories: [A] })]);
+      const query = { category_id: 7 };
+      const screen = await service.getLowStockAlerts(query);
+      const exported = await service.getLowStockForExport(query);
+      expect(exported).toHaveLength(1);
+      expect(exported[0].category_id).toBe(7);
+      expect(exported[0].category_name).toBe('Categoría B');
+      expect(screen).toEqual(exported);
+    });
+
+    it('chooses the lowest category ID deterministically without a filter', async () => {
+      installDataset([product(1, { product_categories: [B, A] }), product(2, { product_categories: [A, B] })]);
+      expect((await service.getLowStockForExport({})).map(row => row.category_name)).toEqual(['Categoría A', 'Categoría A']);
+    });
+
+    it('preserves uncategorized products and returns empty for an unmatched category', async () => {
+      installDataset([product(1, { product_categories: [] })]);
+      const rows = await service.getLowStockForExport({});
+      expect(rows[0].category_name).toBeNull();
+      expect(rows[0].category_id).toBeNull();
+      expect(await service.getLowStockForExport({ category_id: 999 })).toEqual([]);
+    });
+
+    it.each(['asc', 'desc'] as const)('sorts accents by Spanish names %s before paging and uses identical export order', async direction => {
+      installDataset([product(3, { name: 'Zorro' }), product(2, { name: 'Béta' }), product(1, { name: 'Árbol' })]);
+      const query = { category_id: 7, sort_by: 'name' as const, sort_direction: direction };
+      const exported = await service.getLowStockForExport({ ...query, page: 20, limit: 1 });
+      const pages = await Promise.all([1, 2, 3].map(page => service.getLowStockAlerts({ ...query, page, limit: 1 })));
+      expect(exported.map(row => row.product_name)).toEqual(direction === 'asc' ? ['Árbol', 'Béta', 'Zorro'] : ['Zorro', 'Béta', 'Árbol']);
+      expect(pages.flatMap(page => Array.isArray(page) ? page : page.data)).toEqual(exported);
+      expect(prisma.products.findMany.mock.calls.every(([args]) => args.take === undefined)).toBe(true);
+    });
+
+    it('keeps complete totals when only one row is visible', async () => {
+      installDataset([product(1, { stock_quantity: 2, cost_price: 10 }), product(2, { stock_quantity: 3, cost_price: 20 })]);
+      const paged = await service.getLowStockAlerts({ page: 2, limit: 1 });
+      if (Array.isArray(paged)) throw new Error('Expected pagination');
+      expect(paged.data).toHaveLength(1);
+      expect(paged.meta.pagination.total).toBe(2);
+      expect(paged.meta.totals).toEqual({ stock_quantity: 5, stock_value_at_risk: 80 });
+    });
+
+    it('does not cap the inspected universe before low-stock filtering', async () => {
+      const ample = Array.from({ length: 10005 }, (_, index) => product(index + 1, { stock_quantity: 20, min_stock_level: 5 }));
+      installDataset([...ample, product(20000, { stock_quantity: 50, min_stock_level: 60 })]);
+      expect((await service.getLowStockForExport({ page: 99, limit: 1 })).map(row => row.product_id)).toEqual([20000]);
+    });
+
+    it('preserves zero/exact thresholds, null/zero costs and raw decimal rounding', async () => {
+      installDataset([
+        product(1, { stock_quantity: 0, min_stock_level: 0, cost_price: null }),
+        product(2, { stock_quantity: 5, min_stock_level: 5, cost_price: '1.234' }),
+        product(3, { stock_quantity: 6, min_stock_level: 5 }),
+        product(4, { stock_quantity: null, cost_price: 0 }),
+        product(5, { stock_quantity: 7, min_stock_level: 2, reorder_point: 7 }),
+      ]);
+      const rows = await service.getLowStockForExport({});
+      expect(rows.map(row => row.product_id)).toEqual([1, 4, 2, 5]);
+      expect(rows[0].status).toBe('out_of_stock');
+      expect(rows[0].stock_value_at_risk).toBe(0);
+      expect(rows.find(row => row.product_id === 2)?.stock_value_at_risk).toBe(6.17);
+      expect(rows.find(row => row.product_id === 5)?.reorder_point).toBe(7);
+      expect(rows.every(row => typeof row.stock_quantity === 'number')).toBe(true);
+    });
+
+    it('uses configured threshold zero without excluding stock zero', async () => {
+      prisma.store_settings.findFirst.mockResolvedValue({ settings: { inventory: { low_stock_threshold: 0 } } });
+      installDataset([product(1, { stock_quantity: 0, min_stock_level: 0 }), product(2, { stock_quantity: 1, min_stock_level: 0 })]);
+      expect((await service.getLowStockForExport({})).map(row => row.product_id)).toEqual([1]);
+    });
+
+    it('sorts stock descending when requested and keeps stable ID ties', async () => {
+      installDataset([product(3, { stock_quantity: 3 }), product(2), product(1)]);
+      expect((await service.getLowStockForExport({ sort_by: 'stock', sort_direction: 'desc' })).map(row => row.product_id)).toEqual([3, 1, 2]);
+    });
+
+    it('never exposes another store through category filters; inactive/untracked stay out', async () => {
+      installDataset([product(1), product(2, { store_id: 2 }), product(3, { state: 'inactive' }), product(4, { track_inventory: false })]);
+      expect((await service.getLowStockForExport({ category_id: 7 })).map(row => row.product_id)).toEqual([1]);
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 2, organization_id: 2, is_super_admin: false, is_owner: false });
+      expect((await service.getLowStockForExport({ category_id: 7 })).map(row => row.product_id)).toEqual([2]);
+      expect(prisma.withoutScope).not.toHaveBeenCalled();
+    });
+
+    it('rejects both readers without a store before querying settings/products', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue(undefined);
+      await expect(service.getLowStockAlerts({})).rejects.toThrow(VendixHttpException);
+      await expect(service.getLowStockForExport({})).rejects.toThrow(VendixHttpException);
+      expect(prisma.products.findMany).not.toHaveBeenCalled();
+      expect(prisma.store_settings.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
 });

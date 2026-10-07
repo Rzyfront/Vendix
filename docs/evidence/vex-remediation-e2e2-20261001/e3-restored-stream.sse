@@ -1,0 +1,8 @@
+
+event: ai-chunk
+id: 1
+data: {"type":"text","content":"restaurado"}
+
+event: ai-chunk
+id: 2
+data: {"type":"done","usage":{"promptTokens":0,"completionTokens":0,"totalTokens":78048}}

@@ -1,9 +1,11 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 
 import { AuthFacade } from '../store/auth/auth.facade';
 import { StoreSettingsFacade } from '../store/store-settings/store-settings.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
+import { StoreSettingsService } from '../../private/modules/store/settings/general/services/store-settings.service';
 
 /**
  * Gates the Vex fullscreen view (`/admin/vex`) by role AND store toggle.
@@ -31,9 +33,10 @@ const ROLE_DENIED_MESSAGE =
 const DISABLED_MESSAGE =
   'Vex está desactivado en esta tienda. Actívalo en Agentes IA para entrar.';
 
-export const vexAccessGuard: CanActivateFn = () => {
+export const vexAccessGuard: CanActivateFn = async () => {
   const authFacade = inject(AuthFacade);
   const settingsFacade = inject(StoreSettingsFacade);
+  const settingsService = inject(StoreSettingsService);
   const router = inject(Router);
   const toast = inject(ToastService);
 
@@ -47,6 +50,25 @@ export const vexAccessGuard: CanActivateFn = () => {
     toast.info(ROLE_DENIED_MESSAGE);
     router.navigateByUrl('/admin');
     return false;
+  }
+
+  // Cold load, or a snapshot that predates the `vex` block: landing directly
+  // on /admin/vex before NgRx holds store_settings — or holding a stale
+  // snapshot/cache without `settings.vex` — must not read as "Vex off". Await
+  // one hydrated, cache-bypassing fetch (getSettings() publishes into the
+  // store and is request-shared), then decide on the real value. A store that
+  // really never set `vex` still answers undefined after the refetch and stays
+  // closed. A fetch failure falls through to the closed check below
+  // (redirect), never to access.
+  const current = settingsFacade.settings();
+  if (current === null || current.vex === undefined) {
+    try {
+      await firstValueFrom(
+        settingsService.getSettings({ forceRefresh: true }),
+      );
+    } catch {
+      // Fail closed below.
+    }
   }
 
   if (!settingsFacade.vexEnabled()) {

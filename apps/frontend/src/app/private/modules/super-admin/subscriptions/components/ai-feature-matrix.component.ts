@@ -16,6 +16,16 @@ import {
   MultiSelectorComponent,
   SelectorComponent,
 } from '../../../../../shared/components';
+import {
+  AiToolPickerComponent,
+  AiToolPickerEntry,
+} from '../../ai-engine/components/ai-tool-picker/ai-tool-picker.component';
+
+interface CapDefinition {
+  field: keyof AIFeatureConfig;
+  label: string;
+  help?: string;
+}
 
 interface FeatureDefinition {
   key: AIFeatureKey;
@@ -24,12 +34,14 @@ interface FeatureDefinition {
   capField?: keyof AIFeatureConfig;
   capLabel?: string;
   capHelp?: string;
+  /** Extra numeric caps after the primary one (e.g. vex_agent's 3 caps). */
+  extraCaps?: CapDefinition[];
 }
 
 @Component({
   selector: 'app-ai-feature-matrix',
   standalone: true,
-  imports: [FormsModule, ToggleComponent, InputComponent, MultiSelectorComponent, SelectorComponent],
+  imports: [FormsModule, ToggleComponent, InputComponent, MultiSelectorComponent, SelectorComponent, AiToolPickerComponent],
   template: `
     <div class="space-y-5">
       <div class="rounded-lg border border-border bg-background p-4 space-y-2">
@@ -81,6 +93,17 @@ interface FeatureDefinition {
               ></app-input>
             }
 
+            @for (cap of feature.extraCaps ?? []; track cap.field) {
+              <app-input
+                [label]="cap.label"
+                type="number"
+                [min]="0"
+                [ngModel]="capFieldValue(feature.key, cap.field)"
+                (ngModelChange)="updateCapField(feature.key, cap.field, $event)"
+                [helperText]="cap.help ?? ''"
+              ></app-input>
+            }
+
             @if (liveApps(feature.key).length > 0) {
               <div class="space-y-1.5">
                 <p class="text-xs font-medium text-text-secondary uppercase tracking-wide">
@@ -106,14 +129,15 @@ interface FeatureDefinition {
 
             @if (feature.key === 'tool_agents') {
               @if (toolOptions().length > 0) {
-                <app-multi-selector
+                <app-ai-tool-picker
                   label="Herramientas permitidas"
-                  [options]="toolOptions()"
-                  [ngModel]="config('tool_agents').tools_allowed ?? []"
+                  mode="allow"
+                  allValue="wildcard"
+                  [tools]="toolOptions()"
+                  [ngModel]="config('tool_agents').tools_allowed ?? ['*']"
                   (ngModelChange)="updateFeature('tool_agents', { tools_allowed: toStringArray($event) })"
-                  placeholder="Seleccionar herramientas"
-                  helpText="Nombres vivos del AIToolRegistry. Si el feature esta apagado, estas herramientas no se habilitan aunque esten listadas."
-                ></app-multi-selector>
+                  helpText="Nombres vivos del AIToolRegistry. Todas guarda un comodín que incluye las herramientas futuras; una lista vacía deja al agente del plan sin herramientas. Si el feature esta apagado, estas herramientas no se habilitan aunque esten listadas."
+                ></app-ai-tool-picker>
               } @else {
                 <p class="text-xs text-text-secondary">
                   Catálogo de herramientas sin cargar: abre el plan con el Engine
@@ -160,7 +184,7 @@ export class AiFeatureMatrixComponent {
    * existe en el `AIToolRegistry` real y el backend ahora rechaza esas refs
    * con 400, así que mostrarlas sería ofrecer un guardado imposible.
    */
-  readonly availableTools = input<{ value: string; label: string; description?: string }[]>([]);
+  readonly availableTools = input<AiToolPickerEntry[]>([]);
   readonly availableAgents = input<{ value: string; label: string; description?: string }[]>([]);
   readonly appsByCategory = input<Partial<Record<AIFeatureKey, EngineAppLineage[]>>>({});
   readonly valueChange = output<AIFeatureFlags>();
@@ -233,6 +257,28 @@ export class AiFeatureMatrixComponent {
       capHelp:
         'Se mide en segundos de sesion, no en sesiones: un turno de push-to-talk dura 5-20 s. 3600 = 1 hora, 7200 = 2 horas. Cero significa ILIMITADO: lo que habilita o corta la funcion es el switch, no el cupo.',
     },
+    {
+      key: 'vex_agent',
+      label: 'Vex (agente)',
+      description:
+        'Autoriza al agente Vex a ejecutar turnos con herramientas sobre el catalogo del plan. El cupo de tool calls es el que el gate cobra por ejecucion; los otros dos alimentan la contabilidad del turno.',
+      capField: 'monthly_tool_calls_cap',
+      capLabel: 'Tool calls al mes',
+      capHelp:
+        'Presupuesto mensual de ejecuciones de tools (1 unidad por tool_result exitoso). Cero significa ILIMITADO: para restringir hay que poner un numero mayor que cero.',
+      extraCaps: [
+        {
+          field: 'monthly_tokens_cap',
+          label: 'Tokens mensuales',
+          help: 'Cupo mensual de tokens consumido por los turnos Vex. Cero significa ILIMITADO.',
+        },
+        {
+          field: 'daily_messages_cap',
+          label: 'Mensajes diarios',
+          help: 'Cupo diario de mensajes de turnos Vex por tienda.',
+        },
+      ],
+    },
   ];
 
   readonly degradationOptions = [
@@ -271,13 +317,25 @@ export class AiFeatureMatrixComponent {
 
   updateCap(feature: FeatureDefinition, value: unknown): void {
     if (!feature.capField) return;
-    this.updateFeature(feature.key, {
-      [feature.capField]: this.toNullableNumber(value),
-    } as Partial<AIFeatureConfig>);
+    this.updateCapField(feature.key, feature.capField, value);
   }
 
   capValue(feature: FeatureDefinition): any {
     return feature.capField ? this.config(feature.key)[feature.capField] : null;
+  }
+
+  updateCapField(
+    key: AIFeatureKey,
+    field: keyof AIFeatureConfig,
+    value: unknown,
+  ): void {
+    this.updateFeature(key, {
+      [field]: this.toNullableNumber(value),
+    } as Partial<AIFeatureConfig>);
+  }
+
+  capFieldValue(key: AIFeatureKey, field: keyof AIFeatureConfig): any {
+    return this.config(key)[field];
   }
 
   updateDegradation(key: AIFeatureKey, value: string | number | null): void {

@@ -15,9 +15,9 @@ import { MovementsService } from '../../../domains/store/cash-registers/movement
  * Cadena: get_active_cash_session/list_cash_sessions (lecturas
  * habilitantes) → open_cash_session → record_cash_movement →
  * close_cash_session. El cierre es irreversible en la práctica (la sesión
- * cerrada no se reabre): el preview lo marca como `warning` y el paso 6
- * del plan (`irreversible: true` en `tool.interface.ts`) le dará su
- * confirmación propia dentro de planes aprobados.
+ * cerrada no se reabre): el preview lo marca como `warning` y el flag
+ * `irreversible: true` le da su confirmación propia dentro de planes
+ * aprobados.
  *
  * Permisos verificados en `sessions.controller.ts`.
  */
@@ -323,6 +323,7 @@ export function createCashRegisterTools(
       },
       requiredPermissions: [PERM_CLOSE],
       requiresConfirmation: true,
+      irreversible: true,
       preview: async (args) => {
         const id = toPositiveInt(args?.session_id);
         if (id === null) {
@@ -421,6 +422,7 @@ export function createCashRegisterTools(
       name: 'record_cash_movement',
       version: '1',
       domain: 'cash-register',
+      irreversible: true,
       description:
         'Registra un movimiento manual de efectivo en una sesión abierta: cash_in (ingreso) o cash_out (egreso) con monto, reference y notes opcionales. Cadena: get_active_cash_session para la sesión.',
       parameters: {

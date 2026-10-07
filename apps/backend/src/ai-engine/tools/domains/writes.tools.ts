@@ -639,7 +639,7 @@ export function createInventoryWriteTools(
             type: target.adjustmentType,
             quantity_after: target.quantityAfter,
             description:
-              cleanString(args.reason) ?? 'Ajuste registrado desde Vexi',
+              cleanString(args.reason) ?? 'Ajuste registrado por el asistente IA',
           };
 
           const checked = toValidatedDto(
@@ -2342,7 +2342,7 @@ export function createOrderWriteTools(
           const transition = resolved.value;
 
           const reason =
-            cleanString(args.reason) ?? 'Cambio de estado solicitado a Vexi';
+            cleanString(args.reason) ?? 'Cambio de estado solicitado al asistente IA';
 
           await orderFlowService.forceOrderState(
             transition.orderId,
