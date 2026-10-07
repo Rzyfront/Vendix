@@ -1,12 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { KitchenFireService, isPostCancelRemake, isWasteRemakeType } from './kitchen-fire.service';
+import { KitchenFireService, PreExplodedFireContext, isPostCancelRemake, isWasteRemakeType } from './kitchen-fire.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RecipesService } from '../recipes/recipes.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 
 // El servicio resuelve OrderFlowService con un require perezoso (evita el ciclo
@@ -537,6 +538,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
    * por test para poder inspeccionar el `.create({})`.
    */
   const buildFireTxMock = (opts: { orderItemId?: number } = {}) => ({
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
     orders: {
       findFirst: jest.fn().mockResolvedValue({ id: 100, state: 'processing' }),
     },
@@ -826,6 +828,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     });
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
       cb({
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
         orders: {
           findFirst: transactionalOrderRead,
         },
@@ -1040,6 +1043,111 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     expect(claim).not.toHaveBeenCalled();
     expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  function fireContext(enforceManualEligibility?: boolean): PreExplodedFireContext {
+    const item = makeVariantOrderItem(10, 50);
+    return {
+      order: { id: 100, order_number: 'ORD-100', enforceManualEligibility },
+      firedItemIds: [10], skippedItemIds: [],
+      preparedItems: [{ orderItem: { ...item, products: { ...item.products, kds_id: null } },
+        recipeId: 7, bomLines: [{ component_product_id: 201, quantity: 1, unit_cost: 10,
+          depth: 1, path_recipe_ids: [7] }] }],
+      recipeLessItems: [], locationByProduct: new Map([[201, 1]]),
+      businessDate: '2026-10-07', user_id: 42, allowIngredientOveruse: false,
+    };
+  }
+  function completedFireTx() {
+    return { ...buildFireTxMock({ orderItemId: 10 }), kitchen_tickets: {
+      create: jest.fn().mockResolvedValue(makeTxTicket(555, 10, 50)),
+      count: jest.fn().mockResolvedValue(0),
+    } };
+  }
+
+  it('manual lifecycle race: cancellation owns lock, fire waits and rejects freshly cancelled order without effects', async () => {
+    const item = makeVariantOrderItem(10, 50); setupFireableContext([item]);
+    let state = 'processing';
+    let release!: (rows: Array<{ id: number; state: string }>) => void;
+    const heldOrder = new Promise<Array<{ id: number; state: string }>>((resolve) => release = resolve);
+    let attempted!: () => void;
+    const lockAttempted = new Promise<void>((resolve) => attempted = resolve);
+    const cancellationTx: any = { $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state }]) };
+    await lockOrderLifecycle(cancellationTx, 100, 1);
+    const tx = completedFireTx();
+    tx.$queryRaw.mockImplementation((sql: TemplateStringsArray) => {
+      if (sql.join('').includes('FROM orders')) { attempted(); return heldOrder; }
+      return Promise.resolve([]);
+    });
+    tx.orders.findFirst.mockImplementation(async () => ({ id: 100, state }));
+    tx.order_items.updateMany.mockImplementation(async () => {
+      item.inventory_consumed_at_fire = true; return { count: 1 };
+    });
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx));
+    const outcome = service.fireOrderItems({ order_id: 100, order_item_ids: [10] })
+      .then((result) => ({ result, error: undefined }), (error) => ({ result: undefined, error }));
+    // The original source finishes without attempting the lock: the red control
+    // observes that outcome instead of hanging on an unresolved lock signal.
+    const phase = await Promise.race([lockAttempted.then(() => 'waiting'), outcome.then(() => 'finished')]);
+    const readsBeforeRelease = tx.orders.findFirst.mock.calls.length;
+    const claimsBeforeRelease = tx.order_items.updateMany.mock.calls.length;
+    // Cancellation ignores prepared/unfired items: cancelled_at/consumed stay
+    // untouched. A claim predicate alone cannot reject the cancelled header.
+    state = 'cancelled'; release([{ id: 100, state }]);
+    const result = await outcome;
+    expect(phase).toBe('waiting');
+    expect(readsBeforeRelease).toBe(0); expect(claimsBeforeRelease).toBe(0);
+    expect(result.error).toBeInstanceOf(VendixHttpException);
+    expect(result.error).toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_ELIGIBLE_001' });
+    expect(result.error.getStatus()).toBe(409);
+    expect(result.error.getResponse()).toMatchObject({ error_code: 'KITCHEN_FIRE_NOT_ELIGIBLE_001' });
+    expect(tx.orders.findFirst).toHaveBeenCalledWith({ where: { id: 100, store_id: 1 }, select: { id: true, state: true } });
+    expect(tx.order_items.updateMany).not.toHaveBeenCalled(); expect(item.inventory_consumed_at_fire).toBe(false);
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled(); expect(tx.kitchen_tickets.create).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2])('manual direct context store%s locks order→payments before fresh read→claim→stock', async (storeId) => {
+    const tx = completedFireTx(), trace: string[] = [];
+    stockLevelManager.updateStock.mockImplementation(async () => {
+      trace.push('stock'); return { cost_snapshot: { total_cost: 20 } } as any;
+    });
+    tx.$queryRaw.mockImplementation((sql: TemplateStringsArray) => {
+      trace.push(sql.join('').includes('FROM orders') ? 'order-lock' : 'payment-lock');
+      return Promise.resolve([{ id: 100, state: 'processing' }]);
+    });
+    tx.orders.findFirst.mockImplementation(async () => { trace.push('eligibility-read'); return { id: 100, state: 'processing' }; });
+    tx.order_items.updateMany.mockImplementation(async () => { trace.push('item-claim'); return { count: 1 }; });
+    const result = await service.fireOrderItemsInTx(tx as any, storeId, fireContext(true));
+    expect(trace.slice(0, 4)).toEqual(['order-lock', 'payment-lock', 'eligibility-read', 'item-claim']);
+    expect(trace.indexOf('stock')).toBeGreaterThan(trace.indexOf('item-claim'));
+    const [orderSql, orderId, scopedStoreId] = tx.$queryRaw.mock.calls[0];
+    expect((orderSql as unknown as TemplateStringsArray).join('')).toContain('FOR UPDATE');
+    expect(orderId).toBe(100); expect(scopedStoreId).toBe(storeId);
+    const [paymentsSql, paymentOrderId] = tx.$queryRaw.mock.calls[1];
+    expect((paymentsSql as unknown as TemplateStringsArray).join('')).toContain('ORDER BY id FOR UPDATE');
+    expect(paymentOrderId).toBe(100); expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.orders.findFirst).toHaveBeenCalledWith({ where: { id: 100, store_id: storeId }, select: { id: true, state: true } });
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1); expect(result.ticketId).toBe(555);
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('manual public context remains valid and uses lifecycle locks before effects', async () => {
+    setupFireableContext([makeVariantOrderItem(10, 50)]);
+    const tx = completedFireTx(); prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx));
+    const result = await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+    expect(result.kitchen_ticket_id).toBe(555); expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(tx.orders.findFirst.mock.invocationCallOrder[0]);
+    expect(tx.orders.findFirst.mock.invocationCallOrder[0]).toBeLessThan(tx.order_items.updateMany.mock.invocationCallOrder[0]);
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1); expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, false])('auto-fire context with enforceManualEligibility=%s keeps its prior path without new lifecycle locks', async (flag) => {
+    const tx = completedFireTx(); tx.orders.findFirst.mockResolvedValue({ id: 100, state: 'cancelled' });
+    stockLevelManager.updateStock.mockResolvedValue({ cost_snapshot: { total_cost: 20 } } as any);
+    const result = await service.fireOrderItemsInTx(tx as any, 1, fireContext(flag));
+    expect(tx.$queryRaw).not.toHaveBeenCalled(); expect(tx.orders.findFirst).not.toHaveBeenCalled();
+    expect(tx.order_items.updateMany).toHaveBeenCalledTimes(1); expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+    expect(result.ticketId).toBe(555); expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
   it('unit coverage: allows only one request to proceed when the conditional claim loses', async () => {

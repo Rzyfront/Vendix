@@ -993,6 +993,8 @@ export class KitchenFireService {
     let consumedLineCount = 0;
 
     if (order.enforceManualEligibility) {
+      // Serialize with cancellation before checking state or claiming items.
+      await lockOrderLifecycle(tx, order.id, store_id);
       const currentOrder = await tx.orders.findFirst({
         where: { id: order.id, store_id },
         select: { id: true, state: true },
