@@ -99,7 +99,72 @@
              expone); la dirección solo se pide para domicilio (C.2). -->
         @if (step() === 1 && !cartHasOnlyServices) {
           <div class="checkout-section">
-            <h2>¿Cómo quieres recibirlo?</h2>
+            @if (
+              selected_delivery() !== null &&
+              !loading_delivery_options() &&
+              !deliveryPickerOpen()
+            ) {
+              <div
+                class="delivery-collapsed"
+                role="group"
+                aria-label="Forma de entrega seleccionada"
+              >
+                @if (offersHomeDelivery() !== offersPickup()) {
+                  <div class="delivery-collapsed__main delivery-collapsed__main--static">
+                    <app-icon
+                      [name]="selected_delivery() === 'home' ? 'home' : 'store'"
+                      [size]="18"
+                    ></app-icon>
+                    <span class="delivery-collapsed__text">
+                      <span class="delivery-collapsed__title">{{
+                        selected_delivery() === 'home'
+                          ? 'Envío a domicilio'
+                          : 'Recoger en tienda'
+                      }}</span>
+                      <span class="delivery-collapsed__detail">{{
+                        selected_delivery() === 'home'
+                          ? 'Lo llevamos a tu dirección'
+                          : 'Retíralo en el local, sin costo de envío'
+                      }}</span>
+                    </span>
+                  </div>
+                } @else {
+                  <button
+                    type="button"
+                    class="delivery-collapsed__main"
+                    (click)="deliveryPickerOpen.set(true)"
+                    aria-label="Cambiar forma de entrega"
+                  >
+                    <app-icon
+                      [name]="selected_delivery() === 'home' ? 'home' : 'store'"
+                      [size]="18"
+                    ></app-icon>
+                    <span class="delivery-collapsed__text">
+                      <span class="delivery-collapsed__title">{{
+                        selected_delivery() === 'home'
+                          ? 'Envío a domicilio'
+                          : 'Recoger en tienda'
+                      }}</span>
+                      <span class="delivery-collapsed__detail">{{
+                        selected_delivery() === 'home'
+                          ? 'Lo llevamos a tu dirección'
+                          : 'Retíralo en el local, sin costo de envío'
+                      }}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    class="delivery-collapsed__edit"
+                    (click)="deliveryPickerOpen.set(true)"
+                    aria-label="Cambiar forma de entrega"
+                  >
+                    <app-icon name="pencil" [size]="14"></app-icon>
+                  </button>
+                }
+              </div>
+            } @else {
+              <h2>¿Cómo quieres recibirlo?</h2>
+            }
 
             @if (loading_delivery_options()) {
               <div class="shipping-coverage-empty">
@@ -108,7 +173,7 @@
                   Cargando opciones de entrega…
                 </p>
               </div>
-            } @else {
+            } @else if (selected_delivery() === null || deliveryPickerOpen()) {
               <div class="delivery-cards">
                 @if (offersHomeDelivery()) {
                   <div

@@ -2053,6 +2053,8 @@ export class CheckoutComponent implements OnInit {
   readonly loading_delivery_options = signal(false);
   /** 'home' = envío a domicilio · 'pickup' = recoger en tienda. */
   readonly selected_delivery = signal<'home' | 'pickup' | null>(null);
+  /** true = el selector de modo se muestra expandido aunque ya haya elección. */
+  readonly deliveryPickerOpen = signal(false);
   /** Dirección de la tienda para "recoger" (endpoint público de reservas). */
   readonly store_address = signal<any | null>(null);
   readonly loading_store_address = signal(false);
@@ -2305,6 +2307,7 @@ export class CheckoutComponent implements OnInit {
 
   /** Elige el modo de entrega. Recoger limpia la dirección del comprador. */
   selectDelivery(mode: 'home' | 'pickup'): void {
+    this.deliveryPickerOpen.set(false);
     if (this.selected_delivery() === mode) return;
     this.selected_delivery.set(mode);
     this.error_message.set('');
