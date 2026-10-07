@@ -5649,6 +5649,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Todos los items ya fueron enviados a cocina (idempotente)',
   },
+  KITCHEN_FIRE_NOT_ELIGIBLE_001: {
+    code: 'KITCHEN_FIRE_NOT_ELIGIBLE_001',
+    httpStatus: 409,
+    devMessage: 'La orden o uno de sus items no es elegible para enviar a cocina',
+  },
   // QUI-651 — el fire rutea cada item a su estacion y cae en el KDS por defecto
   // cuando el plato no declara uno. Sin KDS por defecto no hay a donde rutear:
   // se falla fuerte en vez de mandar el ticket a un tablero que nadie mira.

@@ -48,6 +48,10 @@ export class OrdersComponent {
       this.authFacade.hasPermission('store:orders:bulk_print'),
   );
 
+  readonly canCreateKitchenFire = computed<boolean>(() =>
+    this.authFacade.hasPermission('store:kitchen_fire:create'),
+  );
+
   // Stats data
   orderStats = signal<ExtendedOrderStats>({
     total_orders: 0,

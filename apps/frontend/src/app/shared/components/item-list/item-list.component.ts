@@ -9,6 +9,8 @@ import {
 } from '@angular/core';
 import { NgClass, NgStyle } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
+import type { TooltipColor } from '../tooltip/tooltip.component';
 import {
   ItemListCardConfig,
   ItemListSize,
@@ -22,7 +24,7 @@ export type ItemListActionsDisplay = 'buttons' | 'dropdown';
   selector: 'app-item-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, NgStyle, IconComponent],
+  imports: [NgClass, NgStyle, IconComponent, TooltipComponent],
   templateUrl: './item-list.component.html',
   styleUrl: './item-list.component.scss',
 })
@@ -433,6 +435,12 @@ export class ItemListComponent {
         : action.tooltip;
     }
     return this.getActionLabel(action, item);
+  }
+
+  getActionTooltipColor(action: TableAction, item: any): TooltipColor {
+    return typeof action.tooltipColor === 'function'
+      ? action.tooltipColor(item)
+      : action.tooltipColor ?? 'ai';
   }
 
   getActionIcon(action: TableAction, item: any): string {

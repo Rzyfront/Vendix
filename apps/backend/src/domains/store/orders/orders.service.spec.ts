@@ -794,6 +794,61 @@ describe('OrdersService', () => {
   });
 
   describe('read-side cancellation policy', () => {
+    it('projects prepared-line and complete KDS attempt evidence in the paginated query', async () => {
+      const attempts = [
+        { id: 92, status: 'in_preparation', kitchen_ticket_id: 31 },
+        { id: 77, status: 'delivered', kitchen_ticket_id: 24 },
+      ];
+      const line = {
+        id: 531,
+        product_id: 88,
+        product_name: 'Arepa rellena',
+        quantity: 2,
+        skip_kds: false,
+        cancelled_at: null,
+        inventory_committed: true,
+        inventory_consumed_at_fire: true,
+        delivered_at: null,
+        products: { product_type: 'prepared' },
+        kitchen_ticket_items: attempts,
+      };
+      mockPrismaService.orders.findMany.mockResolvedValueOnce([
+        { id: 50, state: 'processing', order_items: [line], payments: [], refunds: [] },
+      ]);
+      mockPrismaService.orders.count.mockResolvedValueOnce(51);
+
+      const result = await service.findAll({ page: 2, limit: 50 } as any);
+
+      const [query] = mockPrismaService.orders.findMany.mock.calls[0];
+      expect(query).toMatchObject({ skip: 50, take: 50 });
+      expect(query.include.order_items.select).toMatchObject({
+        product_id: true,
+        quantity: true,
+        skip_kds: true,
+        cancelled_at: true,
+        inventory_consumed_at_fire: true,
+        delivered_at: true,
+        products: { select: { product_type: true } },
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          select: { id: true, status: true, kitchen_ticket_id: true },
+        },
+      });
+      // The list performs one page read and one count; no per-order or per-line lookups.
+      expect(mockPrismaService.orders.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrismaService.orders.count).toHaveBeenCalledTimes(1);
+      expect(mockPrismaService.orders.count).toHaveBeenCalledWith({ where: query.where });
+      expect(mockPrismaService.orders.findFirst).not.toHaveBeenCalled();
+      expect(mockPrismaService.orders.findUnique).not.toHaveBeenCalled();
+      expect(result.data[0].order_items[0]).toMatchObject({
+        product_id: 88,
+        quantity: 2,
+        skip_kds: false,
+        products: { product_type: 'prepared' },
+        kitchen_ticket_items: attempts,
+      });
+    });
+
     it('returns per-order policy and loads safety evidence in the page query without N+1', async () => {
       mockPrismaService.orders.findMany.mockResolvedValueOnce([
         { id: 1, state: 'processing', order_items: [{ inventory_committed: true }], payments: [] },
