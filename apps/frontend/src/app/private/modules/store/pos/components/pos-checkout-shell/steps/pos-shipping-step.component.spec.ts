@@ -1,4 +1,12 @@
-import { NO_ERRORS_SCHEMA, Pipe, PipeTransform, signal } from '@angular/core';
+import {
+  DebugElement,
+  NO_ERRORS_SCHEMA,
+  Pipe,
+  PipeTransform,
+  ViewContainerRef,
+  getDebugNode,
+  signal,
+} from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -34,15 +42,60 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   let component: PosShippingStepComponent;
   let methods: Subject<PosShippingMethod[]>;
   let quotes: Subject<PosShippingOption[]>[];
+  let pickupQuotes: Subject<PosShippingOption[]>[];
   let calculate: jasmine.Spy;
+  let quotePickup: jasmine.Spy;
   let manualQuote: jasmine.Spy;
   let customers: jasmine.SpyObj<CustomersService>;
   const originalMethod: PosShippingMethod = { id: 7, name: 'Transportadora', type: 'carrier', is_active: true };
   const firstMethod: PosShippingMethod = { id: 1, name: 'Mensajero', type: 'own_fleet', is_active: true };
   const originalAddress = {
     address_line1: 'Calle bodega 42', address_line2: 'Piso 2', city: 'Cali',
-    state_province: 'Valle', country_code: 'CO', postal_code: '760001',
+    state_province: 'Valle del Cauca', country_code: 'CO', postal_code: '760001',
     phone_number: '3001234567', latitude: 3.45, longitude: -76.5, municipality_code: '76001',
+  };
+  const dianDepartments = [
+    { code: '11', name: 'Bogotá' },
+    { code: '44', name: 'La Guajira' },
+    { code: '76', name: 'Valle del Cauca' },
+  ];
+  const dianMunicipalities = [
+    {
+      code: '11001', name: 'Bogotá, D.c.', department_code: '11',
+      department_name: 'Bogotá', postal_code: '110111',
+    },
+    {
+      code: '44001', name: 'Riohacha', department_code: '44',
+      department_name: 'La Guajira', postal_code: '440001',
+    },
+    {
+      code: '76001', name: 'Cali', department_code: '76',
+      department_name: 'Valle del Cauca', postal_code: '760001',
+    },
+  ];
+  const municipalityLookup = {
+    listDepartments: () => of(dianDepartments),
+    listByDepartment: (code: string) =>
+      of(dianMunicipalities.filter((municipality) => municipality.department_code === code)),
+    resolveByCode: (code: string | null | undefined) =>
+      of(dianMunicipalities.find((municipality) => municipality.code === code) ?? null),
+    resolveByName: (city: string | null | undefined, department: string | null | undefined) => {
+      const normalize = (value: string) => value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+      const departmentText = normalize(department ?? '');
+      const cityText = normalize(city ?? '');
+      if (!departmentText || !cityText) return of(null);
+      return of(dianMunicipalities.find((municipality) =>
+        (normalize(municipality.department_name) === departmentText ||
+          (municipality.department_code === '11' && departmentText === 'bogota d c')) &&
+        (normalize(municipality.name) === cityText || normalize(municipality.name).startsWith(cityText)),
+      ) ?? null);
+    },
+    setBaseUrl: () => {},
   };
   const cart = (): CartState => ({
     items: [{ product: { id: '7' }, itemType: 'product', quantity: 1, totalPrice: 1000 }],
@@ -65,19 +118,40 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     id, method_id: methodId, method_name: 'Método', method_type: 'carrier', cost, currency: 'COP',
   });
   const latestQuote = () => quotes[quotes.length - 1];
-  const mount = (state = cart()) => {
+  const mount = (state = cart(), availableMethods = [firstMethod, originalMethod]) => {
     fixture.componentRef.setInput('cartState', state);
     fixture.detectChanges();
-    methods.next([firstMethod, originalMethod]);
+    methods.next(availableMethods);
     fixture.detectChanges();
+  };
+  const selectMunicipality = (
+    form: AddressFormFieldsComponent,
+    departmentCode: string,
+    municipalityCode: string,
+  ) => {
+    form.onDepartmentChange(departmentCode);
+    form.onCityChange(municipalityCode);
+  };
+  const renderClientDeliveryDetails = () => {
+    const template = component.clientDeliveryDetails();
+    expect(template).toBeTruthy();
+    return fixture.componentRef.injector
+      .get(ViewContainerRef)
+      .createEmbeddedView(template!);
   };
 
   beforeEach(async () => {
     methods = new Subject();
     quotes = [];
+    pickupQuotes = [];
     calculate = jasmine.createSpy('calculateShipping').and.callFake(() => {
       const response = new Subject<PosShippingOption[]>();
       quotes.push(response);
+      return response.asObservable();
+    });
+    quotePickup = jasmine.createSpy('quotePickupShipping').and.callFake(() => {
+      const response = new Subject<PosShippingOption[]>();
+      pickupQuotes.push(response);
       return response.asObservable();
     });
     manualQuote = jasmine.createSpy('quoteManualShipping').and.callFake(
@@ -96,12 +170,15 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       providers: [
         { provide: Router, useValue: { navigate: () => {} } },
         { provide: PosPaymentService, useValue: {} },
-        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quoteManualShipping: manualQuote } },
+        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quotePickupShipping: quotePickup, quoteManualShipping: manualQuote } },
         { provide: CustomersService, useValue: customers },
         { provide: ToastService, useValue: { show: () => {} } },
-        { provide: CurrencyFormatService, useValue: { currencySymbol: signal('$'), loadCurrency: () => {}, format: (v: number) => `$${v}` } },
+        { provide: CurrencyFormatService, useValue: {
+          currencySymbol: signal('$'), currencyDecimals: signal(2),
+          loadCurrency: () => {}, format: (v: number) => `$${v}`,
+        } },
         { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]), getDefaultCountry: () => ({ code: 'CO' }) } },
-        { provide: DianMunicipalityLookupService, useValue: { resolveByName: () => of(null), setBaseUrl: () => {} } },
+        { provide: DianMunicipalityLookupService, useValue: municipalityLookup },
         { provide: GeocodingService, useValue: { forward: () => of(null), reverse: () => of(null) } },
       ],
     });
@@ -136,10 +213,9 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     component.addressEditing.set(true);
     fixture.detectChanges();
     const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent)).componentInstance as AddressFormFieldsComponent;
+    expect(form.allowGeolocation()).toBeTrue();
     expect(form.form.pristine).toBeTrue();
     expect(form.form.get('address_line1')?.value).toBe(originalAddress.address_line1);
-    form.form.get('country_code')!.setValue('CO');
-    form.form.get('municipality_code')!.setValue('76001');
     fixture.detectChanges();
     component.goToShipSubStep(2);
     component.attemptPrevSubStep();
@@ -181,6 +257,167 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     }));
   });
 
+  it('edits the selected saved address without replacing its seed or persisting on open', () => {
+    mount();
+    const seed = component.initialAddress();
+    component.editSavedAddress(33);
+
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.addressId()).toBe(33);
+    expect(component.hasShippingChanges()).toBeFalse();
+    expect(component.editorValidationError()).toBeNull();
+    expect(component.initialAddress()).toEqual(seed);
+    expect(component.address()).toEqual(seed);
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+
+    const edited = { ...originalAddress, address_line1: 'Calle modificada 9' };
+    component.onAddressChange(edited, true);
+    component.editSavedAddress(33);
+    expect(component.address()).toEqual(edited);
+    expect(component.initialAddress()).toEqual(seed);
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.addressId()).toBe(33);
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('selects and prefills another saved address before opening its editor', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+
+    component.editSavedAddress(33);
+
+    expect(component.addressId()).toBe(33);
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.initialAddress()).toEqual(jasmine.objectContaining({
+      address_line1: originalAddress.address_line1,
+      city: originalAddress.city,
+      state_province: originalAddress.state_province,
+    }));
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('opens an unlocated saved address without triggering geocoding persistence', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [
+      { ...originalAddress, id: 33, is_primary: true, type: 'shipping' },
+      {
+        id: 41, type: 'shipping', address_line1: 'Calle sin punto 2', city: 'Neiva',
+        state_province: 'Huila', country_code: 'CO', phone_number: '3001234567',
+        latitude: null, longitude: null, is_primary: false,
+      },
+    ] };
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(of(null));
+    mount(state);
+
+    component.editSavedAddress(41);
+
+    expect(component.addressId()).toBe(41);
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.address()?.latitude).toBeNull();
+    expect(geocoding.forward).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('ignores edit requests for an address outside the current customer', () => {
+    mount();
+    const address = component.address();
+    const seed = component.initialAddress();
+
+    component.editSavedAddress(999);
+
+    expect(component.addressId()).toBe(33);
+    expect(component.address()).toBe(address);
+    expect(component.initialAddress()).toBe(seed);
+    expect(component.addressEditing()).toBeFalse();
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('persists an explicit saved-address text edit with UPDATE on the same id', () => {
+    customers.updateCustomerAddress.and.returnValue(of({ id: 33 }));
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    component.editSavedAddress(33);
+    component.onAddressChange({ ...originalAddress, address_line1: 'Calle actualizada 15' }, true);
+    const processOrder = spyOn<any>(component, 'processOrder');
+
+    (component as any).persistAddressThenProcess(
+      component.address(), (component as any).buildShippingAddress(), 'home_delivery', null,
+    );
+
+    expect(customers.updateCustomerAddress).toHaveBeenCalledWith(33,
+      jasmine.objectContaining({ address_line_1: 'Calle actualizada 15' }));
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(processOrder).toHaveBeenCalled();
+  });
+
+  it('shows sibling accessible edit buttons for every saved address in both POS surfaces', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('detailsInCliente', true);
+    mount(state);
+    const embeddedView = renderClientDeliveryDetails();
+    try {
+      embeddedView.detectChanges();
+      const root = embeddedView.rootNodes
+        .map((rootNode) => getDebugNode(rootNode) as DebugElement | null)
+        .find((debugNode) => !!debugNode && debugNode.query(By.css('.saved-addresses')));
+      const cards = root?.queryAll(By.css('.saved-address-card')) ?? [];
+      expect(cards.length).toBe(state.customer!.addresses!.length);
+      for (const card of cards) {
+        const buttons = card.queryAll(By.css('button'));
+        expect(buttons.length).toBe(2);
+        expect(buttons[0].nativeElement.contains(buttons[1].nativeElement)).toBeFalse();
+        const edit = card.query(By.css('button.saved-address-edit'));
+        expect(edit.attributes['aria-label']).toContain('Editar dirección');
+        expect(edit.attributes['title']).toContain('Editar dirección');
+        expect(edit.query(By.css('app-icon'))).toBeTruthy();
+        expect(card.query(By.css('button.saved-address-select'))).toBeTruthy();
+      }
+      cards[1].query(By.css('button.saved-address-edit')).triggerEventHandler('click', null);
+      embeddedView.detectChanges();
+      expect(component.addressId()).toBe(state.customer!.addresses![1].id);
+      expect(component.addressEditing()).toBeTrue();
+      expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+      expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+    } finally {
+      embeddedView.destroy();
+    }
+
+    fixture.componentRef.setInput('detailsInCliente', false);
+    fixture.detectChanges();
+    component.goToShipSubStep(1);
+    fixture.detectChanges();
+    const inlineCards = fixture.debugElement.queryAll(By.css('.saved-address-card'));
+    expect(inlineCards.length).toBe(state.customer!.addresses!.length);
+    for (const card of inlineCards) {
+      const buttons = card.queryAll(By.css('button'));
+      expect(buttons.length).toBe(2);
+      expect(buttons[0].nativeElement.contains(buttons[1].nativeElement)).toBeFalse();
+      const edit = card.query(By.css('button.saved-address-edit'));
+      expect(edit.attributes['aria-label'])
+        .toContain('Editar dirección');
+      expect(edit.attributes['title']).toContain('Editar dirección');
+      expect(edit.query(By.css('app-icon'))).toBeTruthy();
+    }
+    inlineCards[0].query(By.css('button.saved-address-edit')).triggerEventHandler('click', null);
+    fixture.detectChanges();
+    expect(component.addressId()).toBe(state.customer!.addresses![0].id);
+    expect(component.addressEditing()).toBeTrue();
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
   it('selecting the existing method/address again does not requote or dirty', () => {
     mount();
     component.selectShippingMethod(originalMethod);
@@ -211,9 +448,60 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     latestQuote().next([quote(7, 200)]);
     fixture.detectChanges();
     expect(component.shippingCost()).toBe(12500.5);
-    expect(component.quoteError()).toContain('No hay tarifa');
-    expect(component.editorValidationError()).toContain('No hay tarifa');
+    expect(component.quoteError()).toBe('No hay una tarifa disponible para "Mensajero".');
+    expect(component.editorValidationError()).toContain('No hay una tarifa disponible');
     expect(component.canConfirm()).toBeFalse();
+  });
+
+  it('requires explicit choice before accepting a zero custom amount for a no-rate delivery method', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([]);
+    fixture.detectChanges();
+
+    expect(component.canConfirm()).toBeFalse();
+    expect(component.manualCostOverride()).toBeFalse();
+    component.useCustomShippingRate();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.calculatedShippingCost()).toBeNull();
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBeNull();
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.totalWithShipping()).toBe(1000);
+    expect(component.buildShippingContext()).toEqual(jasmine.objectContaining({
+      shippingRateId: null, shippingCost: 0, manualShippingPrice: 0,
+      manualCostOverride: true,
+    }));
+  });
+
+  it('includes positive custom amount without a rate in sale payload and totals', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    component.onShippingCostChange(2500.5);
+
+    expect(component.shippingCost()).toBe(2500.5);
+    expect(component.totalWithShipping()).toBe(3500.5);
+    expect(component.canConfirm()).toBeTrue();
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+    (component as any).processOrder(
+      (component as any).buildShippingAddress(), 'home_delivery', null, 33,
+    );
+
+    expect(payment.processShippingSale.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      shippingRateId: null, shippingCost: 2500.5, manualShippingPrice: 2500.5,
+      manualCostOverride: true,
+    }));
   });
 
   it('keeps missing/inactive original method and address without default fallback, with warning', () => {
@@ -319,11 +607,18 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.buildShippingContext()?.shippingAddressId).toBeUndefined();
   });
 
-  it('H6 — dirección guardada sin state_province muestra el formulario precargado y al completarla addressValid true', () => {
+  it('H6 — dirección guardada sin state_province muestra el formulario y al elegir ubicación DANE queda válida', () => {
     // `state_province` es nullable en Prisma; `phone_number` se rellena aparte
-    // desde `customer.phone` en `toAddressPayload` (comportamiento ya
-    // existente), así que solo el departamento queda ausente aquí.
-    const incompleteSaved = { ...originalAddress, id: 55, type: 'shipping', is_primary: true, state_province: null as any };
+    // desde `customer.phone` en `toAddressPayload`. Se omite también el código
+    // DANE para probar que el cajero puede completar la ubicación desde el form.
+    const incompleteSaved = {
+      ...originalAddress,
+      id: 55,
+      type: 'shipping',
+      is_primary: true,
+      state_province: null as any,
+      municipality_code: null,
+    };
     const state = cart();
     state.shippingContext = undefined;
     state.linkedOrderId = null;
@@ -333,6 +628,9 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
 
     expect(component.addressId()).toBe(55);
     expect(component.addressValid()).toBeFalse();
+    component.selectShippingMethod(firstMethod, { advance: false });
+    fixture.detectChanges();
+
     // Antes de este fix, la plantilla `#clientDeliveryDetails` solo mostraba
     // resumen + "Usar otra dirección" (formulario vacío) para este caso; el
     // fix reabre el mismo formulario precargado con la dirección guardada.
@@ -343,12 +641,35 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     }));
     expect(component.missingAddressFieldsLabel()).toBe('el departamento');
 
-    // El cajero completa solo el campo faltante en el formulario precargado.
-    component.onAddressChange({ ...component.address()!, state_province: 'Valle' }, true);
-    component.onAddressValidChange(true);
+    // En producción el checkout-shell proyecta esta TemplateRef junto al paso
+    // Cliente. La fixture de este spec monta el paso aislado, así que se inserta
+    // la misma vista proyectada para ejercitar el editor real y sus outputs.
+    const template = component.clientDeliveryDetails();
+    expect(template).toBeTruthy();
+    const embeddedView = fixture.componentRef.injector
+      .get(ViewContainerRef)
+      .createEmbeddedView(template!);
+    try {
+      embeddedView.detectChanges();
+      const formElement = embeddedView.rootNodes
+        .map((rootNode) => getDebugNode(rootNode) as DebugElement | null)
+        .filter((debugNode): debugNode is DebugElement => !!debugNode)
+        .map((debugNode) => debugNode.query(By.directive(AddressFormFieldsComponent)))
+        .find((debugNode) => !!debugNode);
+      expect(formElement).toBeTruthy();
 
-    expect(component.addressValid()).toBeTrue();
-    expect(component.addressId()).toBe(55); // sigue siendo UPDATE sobre el mismo id, no uno nuevo
+      // El cajero completa departamento y municipio como ubicación DANE coherente.
+      const form = formElement!.componentInstance as AddressFormFieldsComponent;
+      expect(form.allowGeolocation()).toBeTrue();
+      selectMunicipality(form, '76', '76001');
+      embeddedView.detectChanges();
+      fixture.detectChanges();
+
+      expect(component.addressValid()).toBeTrue();
+      expect(component.addressId()).toBe(55); // sigue siendo UPDATE sobre el mismo id, no uno nuevo
+    } finally {
+      embeddedView.destroy();
+    }
   });
 
   it('en Cliente muestra solo costo en Envío y exige método y dirección antes de avanzar', () => {
@@ -413,8 +734,234 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     fixture.detectChanges();
 
     expect(component.missingShippingMethodReason()).toBeNull();
+    expect(quotePickup).toHaveBeenCalledWith(9);
+    expect(calculate).not.toHaveBeenCalled();
+    expect(component.canConfirm()).toBeFalse(); // still waiting for a real configured rate
+    pickupQuotes[0].next([{
+      ...quote(9, 8500, 109), method_type: 'pickup', method_name: 'Recoger en tienda',
+    }]);
+    fixture.detectChanges();
+
+    expect(component.shippingRateId()).toBe(109);
+    expect(component.shippingCost()).toBe(8500);
+    expect(component.totalWithShipping()).toBe(9500);
     expect(component.canConfirm()).toBeTrue();
     expect(component.buildShippingContext()?.deliveryType).toBe('pickup');
+    expect(component.buildShippingContext()?.shippingAddress).not.toEqual(jasmine.objectContaining({ latitude: jasmine.any(Number), longitude: jasmine.any(Number) }));
+  });
+
+  it('muestra pickup activo en métodos nuevos y oculta los inactivos', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    const inactivePickup: PosShippingMethod = { id: 10, name: 'Pickup inactivo', type: 'pickup', is_active: false };
+    mount(state, [firstMethod, pickup, inactivePickup]);
+
+    expect(component.activeShippingMethods().map((method) => method.id)).toEqual([1, 9]);
+    const cards = fixture.debugElement.queryAll(By.css('.method-card'));
+    expect(cards.some((card) => card.nativeElement.textContent.includes('Recoger en tienda'))).toBeTrue();
+    expect(cards.some((card) => card.nativeElement.textContent.includes('Pickup inactivo'))).toBeFalse();
+  });
+
+  it('acepta $0 solo cuando viene de una tarifa pickup real', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup]);
+    component.selectShippingMethod(pickup);
+    fixture.detectChanges();
+    pickupQuotes[0].next([{ ...quote(9, 0, 90), method_type: 'pickup' }]);
+    fixture.detectChanges();
+
+    expect(component.shippingCost()).toBe(0);
+    expect(component.shippingRateId()).toBe(90);
+    expect(component.canConfirm()).toBeTrue();
+  });
+
+  it('bloquea pickup si el backend no devuelve tarifas activas', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup]);
+    component.selectShippingMethod(pickup);
+    fixture.detectChanges();
+    pickupQuotes[0].next([]);
+    fixture.detectChanges();
+
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBe('No hay tarifa activa para recoger en tienda');
+    expect(component.canConfirm()).toBeFalse();
+  });
+
+  it('permite pickup sin dirección con costo personalizado solo tras la acción explícita', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup]);
+    component.selectShippingMethod(pickup);
+    fixture.detectChanges();
+    pickupQuotes[0].next([]);
+    fixture.detectChanges();
+
+    expect(component.address()).toBeNull();
+    expect(component.canConfirm()).toBeFalse();
+    component.useCustomShippingRate();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingCost()).toBe(0);
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.buildShippingContext()).toEqual(jasmine.objectContaining({
+      deliveryType: 'pickup', shippingAddressId: undefined,
+      shippingRateId: null, manualShippingPrice: 0, manualCostOverride: true,
+    }));
+  });
+
+  it('offers custom price for an untouched historical pickup without changing its cost before click', () => {
+    const state = cart();
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    state.shippingContext = {
+      ...state.shippingContext!, shippingMethodId: pickup.id, shippingMethod: pickup,
+      deliveryType: 'pickup', shippingAddressId: null, shippingAddress: null,
+      shippingRateId: null, shippingCost: 4800,
+    };
+    mount(state, [pickup]);
+    component.goToShipSubStep(1);
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.shippingCost()).toBe(4800);
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.shippingCostPending()).toBeFalse();
+    const action = fixture.debugElement.query(By.css('.cost-card button.no-methods-link'));
+    expect(action.nativeElement.textContent).toContain('Usar tarifa personalizada');
+    action.triggerEventHandler('click', null);
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingCost()).toBe(0);
+    expect(component.shippingCostPending()).toBeFalse();
+  });
+
+  it('rejects custom price when location is unresolved, amount invalid, or method inactive', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [
+      { id: 501, address_line1: 'Calle sin punto 1', city: 'Neiva',
+        state_province: 'Huila', country_code: 'CO', is_primary: true, type: 'shipping' },
+    ] };
+    mount(state);
+    component.useCustomShippingRate();
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.canConfirm()).toBeFalse();
+
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    component.selectShippingMethod(pickup);
+    fixture.detectChanges();
+    pickupQuotes[0].next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    component.onShippingCostChange(-1);
+    expect(component.quoteError()).toBe('Ingresa un costo de envío válido.');
+    expect(component.canConfirm()).toBeFalse();
+
+    component.onShippingCostChange(1.001);
+    expect(component.quoteError()).toBe('Ingresa un costo de envío válido.');
+    expect(component.canConfirm()).toBeFalse();
+
+    component.manualCostOverride.set(false);
+    component.selectedShippingMethod.set({ ...pickup, is_active: false });
+    component.useCustomShippingRate();
+    expect(component.manualCostOverride()).toBeFalse();
+  });
+
+  it('ignores an outstanding automatic quote after explicit custom-rate fallback', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    const staleQuote = latestQuote();
+    staleQuote.next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    staleQuote.next([quote(1, 9999, 119)]);
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeTrue();
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.shippingCost()).toBe(0);
+  });
+
+  it('clears the custom amount and blocks again when returning to automatic with no quote', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([]);
+    fixture.detectChanges();
+    component.useCustomShippingRate();
+    component.onShippingCostChange(2800);
+    component.useAutomaticShippingRate();
+    fixture.detectChanges();
+
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.manualShippingPrice()).toBe(0);
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBeNull();
+    latestQuote().next([]);
+    fixture.detectChanges();
+    expect(component.manualCostOverride()).toBeFalse();
+    expect(component.shippingCost()).toBe(0);
+    expect(component.quoteError()).toBe('No hay una tarifa disponible para "Mensajero".');
+    expect(component.canConfirm()).toBeFalse();
+  });
+
+  it('descarta pickup quote tardía al cambiar a un método de domicilio', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    mount(state, [firstMethod, pickup, originalMethod]);
+    component.selectShippingMethod(pickup);
+    fixture.detectChanges();
+    const stalePickup = pickupQuotes[0];
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    stalePickup.next([{ ...quote(9, 30000, 901), method_type: 'pickup' }]);
+    latestQuote().next([quote(1, 7000, 201)]);
+    fixture.detectChanges();
+
+    expect(component.selectedShippingMethod()?.id).toBe(1);
+    expect(component.shippingRateId()).toBe(201);
+    expect(component.shippingCost()).toBe(7000);
+  });
+
+  it('preserva snapshot pickup histórico intacto sin recotizar aunque no tenga rate id', () => {
+    const state = cart();
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger en tienda', type: 'pickup', is_active: true };
+    state.shippingContext = {
+      ...state.shippingContext!, deliveryType: 'pickup', shippingMethodId: 9,
+      shippingMethod: pickup, shippingAddressId: null, shippingAddress: null,
+      shippingRateId: null, shippingCost: 6400,
+    };
+    mount(state, [firstMethod, pickup, originalMethod]);
+
+    expect(component.selectedShippingMethod()?.id).toBe(9);
+    expect(component.shippingCost()).toBe(6400);
+    expect(component.shippingRateId()).toBeNull();
+    expect(component.hasShippingChanges()).toBeFalse();
+    expect(component.canConfirm()).toBeTrue();
+    expect(quotePickup).not.toHaveBeenCalled();
+    expect(calculate).not.toHaveBeenCalled();
   });
 
   it('rate-sourced cost: the context carries the rate and the payload keeps shipping_rate_id', () => {
@@ -457,7 +1004,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     manualQuote.and.returnValue(pendingQuote.asObservable());
 
     component.onShippingCostChange(18000);
-    component.onAddressChange({ ...originalAddress, city: 'Riohacha' }, true);
+    component.onAddressChange({
+      ...originalAddress,
+      city: 'Riohacha',
+      state_province: 'La Guajira',
+      municipality_code: '44001',
+      postal_code: '440001',
+    }, true);
     pendingQuote.next({
       shipping_rate_id: 93,
       manual_shipping_price: 18000,
@@ -488,7 +1041,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     fixture.detectChanges();
 
     expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
-      country_code: 'CO', city: 'Cali', state_province: 'Valle',
+      country_code: 'CO', city: 'Cali', state_province: 'Valle del Cauca',
       postal_code: '760001', latitude: 3.45, longitude: -76.5,
     }));
   });
@@ -657,10 +1210,11 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     state.linkedOrderId = null;
     state.customer = { ...state.customer!, addresses: [] };
     mount(state);
+    customers.createCustomerAddress.and.returnValue(of({ id: 321 }));
+    component.beginNewAddress();
     component.address.set(originalAddress);
     component.addressValid.set(true);
     component.manualCostOverride.set(true);
-    customers.createCustomerAddress.and.returnValue(of({ id: 321 }));
     const payment = TestBed.inject(PosPaymentService) as any;
     payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
       of({ success: true, order: { id: 700 } }),
@@ -782,10 +1336,10 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   // Zoneless: sin zone.js/testing, `fakeAsync` no existe en este arnés (ver
   // pos-order-confirmation.component.spec.ts). Se usa `jasmine.clock()` para
   // controlar el debounce de 500ms del forward-geocode del formulario real.
-  it('after geocode emits coords, /shipping/calculate payload includes latitude/longitude', async () => {
+  it('after selecting Riohacha and geocoding, /shipping/calculate receives coordinates and DANE code', async () => {
     const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
     geocoding.forward = jasmine.createSpy('forward').and.returnValue(
-      of({ lat: 4.6097, lng: -74.0817, precision: 'exact' }),
+      of({ lat: 11.5444, lng: -72.907, precision: 'exact' }),
     );
     const state = cart();
     state.shippingContext = undefined;
@@ -801,20 +1355,9 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     // called. `mockDate()` freezes/advances `Date` in lockstep with `tick()`
     // so the operator's own time check agrees with the fake clock.
     //
-    // Installed BEFORE the render that constructs `AddressFormFieldsComponent`
-    // (not just around the real edits below): its constructor's
-    // `initialAddress` prefill effect ALSO fires `municipality_code` through
-    // the same debounced `merge(...)` on first render (emitEvent:true, to
-    // bridge country/municipality into their signals — see that effect's own
-    // comment). `debounceTime` keeps a single shared "pending task" slot per
-    // subscription; if that first, harmless emission schedules its wait on the
-    // REAL scheduler (clock installed later), it silently claims that slot and
-    // every later value (ours) just updates the pending value/time without
-    // scheduling a NEW fake timer — so a `tick()` from an installed-afterward
-    // clock flushes nothing, ever. Ticking once right after that first render
-    // flushes the harmless cycle (address_line1 is still empty, so
-    // `forwardGeocodeFromForm` no-ops on its own length guard) and frees the
-    // slot for the real edits' own debounce below.
+    // Installed before rendering so the form's catalog-backed geographic
+    // selection and address edit share the same fake scheduler. Tick once after
+    // mount to flush any harmless initialization emission before editing.
     jasmine.clock().install();
     jasmine.clock().mockDate();
     try {
@@ -827,8 +1370,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         .componentInstance as AddressFormFieldsComponent;
       form.form.markAsDirty();
       form.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
-      form.form.get('city')!.setValue('Bogotá');
-      form.form.get('state_province')!.setValue('Bogotá D.C.');
+      selectMunicipality(form, '44', '44001');
       jasmine.clock().tick(600); // flush the shared component's 500ms forward-geocode debounce
       await fixture.whenStable();
     } finally {
@@ -838,11 +1380,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
 
     expect(geocoding.forward).toHaveBeenCalled();
     expect(component.address()).toEqual(jasmine.objectContaining({
-      latitude: 4.6097, longitude: -74.0817,
+      city: 'Riohacha', state_province: 'La Guajira', municipality_code: '44001',
+      latitude: 11.5444, longitude: -72.907,
     }));
     expect(component.addressGeocodePrecision()).toBe('exact');
     expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
-      latitude: 4.6097, longitude: -74.0817,
+      city: 'Riohacha', state_province: 'La Guajira', municipality_code: '44001',
+      latitude: 11.5444, longitude: -72.907,
     }));
   });
 
@@ -873,8 +1417,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         .componentInstance as AddressFormFieldsComponent;
       form.form.markAsDirty();
       form.form.get('address_line1')!.setValue('Vereda Xyzqwerty Km 99 Via Inexistente');
-      form.form.get('city')!.setValue('Riohacha');
-      form.form.get('state_province')!.setValue('La Guajira');
+      selectMunicipality(form, '44', '44001');
       jasmine.clock().tick(600);
       await fixture.whenStable();
     } finally {
@@ -965,6 +1508,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       expect(component.canConfirm()).toBeFalse();
       component.flashValidation();
       expect(component.flashMessage()).toBe('Marca la ubicación en el mapa para calcular el envío');
+      component.goToShipSubStep(2);
+      fixture.detectChanges();
+      const alert = fixture.debugElement.query(By.css('.no-methods-alert'));
+      expect(alert.nativeElement.textContent).toContain('Marca la ubicación en el mapa para calcular el envío');
+      expect(alert.nativeElement.textContent).toContain('No se cobrará ni se mostrará un costo de envío hasta resolver la ubicación.');
+      expect(alert.nativeElement.textContent).not.toContain('Revisa las tarifas y la cobertura');
+      expect(fixture.debugElement.query(By.css('.cost-card'))).toBeNull();
     });
 
     it('a manually typed cost cannot bypass the no-coordinates block', () => {
@@ -1010,8 +1560,15 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       fixture.detectChanges();
 
       expect(component.hasResolvedLocation()).toBeTrue();
-      expect(component.quoteError()).toBe('No hay tarifa de envío para esta ubicación');
+      expect(component.quoteError()).toBe('No hay una tarifa disponible para "Mensajero".');
       expect(component.canConfirm()).toBeFalse();
+      component.goToShipSubStep(2);
+      fixture.detectChanges();
+      const alert = fixture.debugElement.query(By.css('.no-methods-alert'));
+      expect(alert.nativeElement.textContent).toContain('No hay una tarifa disponible para "Mensajero".');
+      expect(alert.nativeElement.textContent).toContain('Revisa las tarifas y la cobertura de este método');
+      expect(alert.nativeElement.textContent).not.toContain('Marca la ubicación en el mapa');
+      expect(fixture.debugElement.query(By.css('.cost-card'))).toBeNull();
     });
   });
 });

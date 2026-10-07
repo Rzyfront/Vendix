@@ -1,4 +1,12 @@
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 
@@ -30,6 +38,16 @@ export class DianMunicipalityQueryDto {
   @Min(1)
   @Max(50)
   limit?: number;
+
+  @ApiPropertyOptional({
+    example: '44',
+    description:
+      'Código DANE de 2 dígitos del departamento. Devuelve todos sus municipios, sin paginación.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}$/)
+  department_code?: string;
 }
 
 /**

@@ -38,7 +38,7 @@ describe('AnalyticsRegistry', () => {
 
   describe('ANALYTICS_VIEWS', () => {
     it('should have 35 views', () => {
-      expect(ANALYTICS_VIEWS).toHaveSize(36);
+      expect(ANALYTICS_VIEWS).toHaveSize(38);
     });
 
     it('should have unique keys', () => {
@@ -59,9 +59,9 @@ describe('AnalyticsRegistry', () => {
       expect(overviewViews).toHaveSize(1);
     });
 
-    it('should have sales with 7 views', () => {
+    it('should have sales with 9 views', () => {
       const salesViews = getViewsByCategory('sales');
-      expect(salesViews).toHaveSize(7);
+      expect(salesViews).toHaveSize(9);
     });
 
     it('should have inventory with 7 views', () => {
@@ -166,7 +166,7 @@ describe('AnalyticsRegistry', () => {
       const entries = getSidebarEntries();
       const salesEntry = entries.find(e => e.label === 'Ventas');
       // QUI-551: Ventas incluye 7 vistas tras agregar sales_by_user
-      expect(salesEntry?.viewCount).toBe(7);
+      expect(salesEntry?.viewCount).toBe(9);
       const salesViews = getViewsByCategory('sales');
       expect(salesViews.some(v => v.key === 'sales_by_user')).toBe(true);
     });

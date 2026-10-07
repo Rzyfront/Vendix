@@ -1,6 +1,11 @@
 import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { address_type_enum, shipping_rate_type_enum } from '@prisma/client';
+import type {
+  shipping_methods,
+  shipping_rates,
+  shipping_zones,
+} from '@prisma/client';
 import { SettingsService } from '../settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -82,6 +87,17 @@ export interface ShippingOption {
    */
   postal_code_match?: boolean;
 }
+
+type PickupRate = Pick<
+  shipping_rates,
+  'id' | 'shipping_method_id' | 'shipping_zone_id' | 'name' | 'type' | 'base_cost'
+> & {
+  shipping_method: Pick<
+    shipping_methods,
+    'name' | 'type' | 'min_days' | 'max_days'
+  >;
+  shipping_zone?: Pick<shipping_zones, 'name' | 'display_name'> | null;
+};
 
 @Injectable()
 export class ShippingCalculatorService {
@@ -369,6 +385,37 @@ export class ShippingCalculatorService {
     );
 
     return options;
+  }
+
+  /**
+   * Quotes all active rates for a store-owned pickup method without requiring
+   * buyer location data. Pickup is chosen at the merchant's store, so the
+   * storefront fallback's city-coverage checks do not apply here.
+   */
+  async quotePickupRates(
+    storeId: number,
+    methodId: number,
+  ): Promise<ShippingOption[]> {
+    const pickupRates = await this.prisma.shipping_rates.findMany({
+      where: {
+        shipping_method_id: methodId,
+        is_active: true,
+        shipping_method: {
+          id: methodId,
+          store_id: storeId,
+          is_active: true,
+          type: 'pickup',
+        },
+        shipping_zone: {
+          is_active: true,
+          OR: [{ store_id: storeId }, { is_system: true, store_id: null }],
+        },
+      },
+      include: { shipping_method: true, shipping_zone: true },
+      orderBy: { id: 'asc' },
+    });
+
+    return this.mapPickupRateOptions(storeId, pickupRates, false, false);
   }
 
   /**
@@ -702,19 +749,30 @@ export class ShippingCalculatorService {
       return [];
     }
 
+    return this.mapPickupRateOptions(storeId, pickupRates, true, true);
+  }
+
+  /** Applies the pickup fallback's configured-price and shipping-tax rule. */
+  private async mapPickupRateOptions(
+    storeId: number,
+    pickupRates: PickupRate[],
+    dedupeMethods: boolean,
+    isFallback: boolean,
+  ): Promise<ShippingOption[]> {
+    if (pickupRates.length === 0) return [];
+
     // Mismo cálculo único que la ruta principal: el retiro también cotiza
-    // el bruto (una lectura fiscal para todo el fallback).
+    // el bruto (una lectura fiscal para todas las tarifas).
     const rateTaxContext = await this.shippingTaxService.loadRateTaxContext(
-      pickupRates.map((r) => r.id),
+      pickupRates.map((rate) => rate.id),
       { store_id: storeId },
     );
-
     const storeCurrency = await this.settingsService.getStoreCurrency();
     const seenMethods = new Set<number>();
     const options: ShippingOption[] = [];
 
     for (const rate of pickupRates) {
-      if (seenMethods.has(rate.shipping_method_id)) continue;
+      if (dedupeMethods && seenMethods.has(rate.shipping_method_id)) continue;
       seenMethods.add(rate.shipping_method_id);
 
       const optionName =
@@ -723,7 +781,6 @@ export class ShippingCalculatorService {
           : (rate.shipping_zone?.display_name?.trim() ||
              rate.shipping_zone?.name?.trim() ||
              rate.shipping_method.name);
-
       const ratePrice =
         rate.type === shipping_rate_type_enum.free
           ? 0
@@ -744,7 +801,7 @@ export class ShippingCalculatorService {
           max: rate.shipping_method.max_days || 0,
         },
         zone_id: rate.shipping_zone_id,
-        is_fallback: true,
+        is_fallback: isFallback,
       });
     }
 

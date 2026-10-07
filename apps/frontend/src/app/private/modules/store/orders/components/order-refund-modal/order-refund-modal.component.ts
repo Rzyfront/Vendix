@@ -689,10 +689,8 @@ export class OrderRefundModalComponent {
       .map((oi) => {
         const alreadyRefunded = refundedMap.get(oi.id) || 0;
         const maxQuantity = oi.quantity - alreadyRefunded;
-        // Paso 6/8 — plato ya disparado a cocina (`prepared` + consumido al
-        // disparar): nace preseleccionado en `write_off` (lo más habitual: el
-        // plato se cocinó), pero el usuario puede cambiar a `restock` o
-        // `no_return` en el paso Inventario.
+        // Reusar/reabastecer es la selección inicial también para platos
+        // disparados; merma o no devolver requieren elección del usuario.
         const isPreparedDish = oi.products?.product_type === 'prepared';
         const isFiredDish = isPreparedDish && oi.inventory_consumed_at_fire === true;
         return {
@@ -701,7 +699,7 @@ export class OrderRefundModalComponent {
           quantity: Math.max(maxQuantity, 1),
           maxQuantity,
           alreadyRefunded,
-          inventoryAction: (isFiredDish ? 'write_off' : 'restock') as InventoryAction,
+          inventoryAction: 'restock' as InventoryAction,
           locationId: defaultLocationId,
           isPreparedDish,
           isFiredDish,

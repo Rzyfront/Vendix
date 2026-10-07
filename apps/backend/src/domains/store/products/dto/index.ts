@@ -2315,7 +2315,7 @@ export class BulkUploadItemResultDto {
   row_number?: number;
   product_name?: string;
   sku?: string;
-  action?: 'create' | 'update';
+  action?: 'create' | 'update' | 'reactivate';
   product: any;
   status: 'success' | 'error' | 'skipped';
   message: string;

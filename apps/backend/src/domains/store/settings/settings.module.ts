@@ -14,6 +14,7 @@ import { ScheduleValidationService } from './schedule-validation.service';
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { PosSearchPathService } from './pos-smart-search/pos-search-path.service';
 import { RutScannerService } from './rut-scanner.service';
+import { RutScanHandlerRegistrar } from './rut-scan-handler.registrar';
 import { ResponseService } from '@common/responses/response.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { AuditModule } from '../../../common/audit/audit.module';
@@ -53,6 +54,7 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
     SettingsMigratorService,
     PosSearchPathService,
     RutScannerService,
+    RutScanHandlerRegistrar,
     ResponseService,
   ],
   exports: [

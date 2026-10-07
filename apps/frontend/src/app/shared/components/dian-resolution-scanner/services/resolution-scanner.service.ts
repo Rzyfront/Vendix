@@ -1,9 +1,13 @@
-import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 
 import { environment } from '../../../../../environments/environment';
 import {
+  AiScanJobOptions,
+  AiScanJobService,
+} from '../../../../core/services/ai-scan-job.service';
+import {
+  DianResolutionScanResult,
   ResolutionScanApiResponse,
   ResolutionScannerScope,
 } from '../interfaces/resolution-scan-result.interface';
@@ -20,7 +24,7 @@ import {
  */
 @Injectable({ providedIn: 'root' })
 export class ResolutionScannerService {
-  private readonly http = inject(HttpClient);
+  private readonly aiScanJobs = inject(AiScanJobService);
 
   /**
    * Sube una resolución DIAN (imagen o PDF) para extracción con IA.
@@ -31,14 +35,18 @@ export class ResolutionScannerService {
   scanResolution(
     file: File,
     scope: ResolutionScannerScope,
+    opts?: AiScanJobOptions,
   ): Observable<ResolutionScanApiResponse> {
     const formData = new FormData();
     formData.append('file', file);
 
-    return this.http.post<ResolutionScanApiResponse>(
-      this.scanUrl(scope),
-      formData,
-    );
+    return this.aiScanJobs
+      .enqueueAndWait<DianResolutionScanResult>(
+        `${this.scanUrl(scope)}/async`,
+        formData,
+        opts,
+      )
+      .pipe(map((result) => ({ success: true, data: result })));
   }
 
   private scanUrl(scope: ResolutionScannerScope): string {

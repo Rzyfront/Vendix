@@ -359,6 +359,46 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
       expect(Object.keys(result)).not.toContain('session_moved');
     });
   });
+
+  describe('payTable — cuenta dividida', () => {
+    it('rechaza con SPLIT_ACCOUNT_LOCKED y no inserta pagos si la orden tiene split activo', async () => {
+      jest.spyOn(service as any, 'resolveActiveSessionByToken').mockResolvedValue({
+        store_id: STORE_ID,
+        table: { id: TABLE_ID, name: 'M5' },
+        session: { id: SESSION_ID, order_id: ORDER_ID },
+      });
+      jest.spyOn(service as any, 'getQrSettings').mockResolvedValue({ enable_table_checkout: true });
+      (service as any).storePaymentMethodsService = {
+        findOne: jest.fn().mockResolvedValue({
+          id: 1,
+          state: 'enabled',
+          system_payment_method: { type: 'cash' },
+        }),
+      };
+      prismaMock.payments = { create: jest.fn() };
+      prismaMock.orders.findFirst.mockResolvedValue({
+        id: ORDER_ID,
+        grand_total: 100,
+        total_paid: 0,
+        remaining_balance: 0,
+        currency: 'COP',
+        active_financial_split_id: 12,
+      });
+
+      const err: any = await service
+        .payTable(TOKEN, { store_payment_method_id: 1 } as any)
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+      expect(prismaMock.payments.create).not.toHaveBeenCalled();
+      expect(prismaMock.orders.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ active_financial_split_id: true }),
+        }),
+      );
+    });
+  });
 });
 
 // ====================================================================

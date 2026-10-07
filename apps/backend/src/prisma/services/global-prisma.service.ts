@@ -560,6 +560,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.withholding_calculations;
   }
 
+  get withholding_concepts() {
+    return this.baseClient.withholding_concepts;
+  }
+
   get exogenous_reports() {
     return this.baseClient.exogenous_reports;
   }

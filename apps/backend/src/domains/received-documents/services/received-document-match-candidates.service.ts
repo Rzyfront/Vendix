@@ -544,6 +544,7 @@ export class ReceivedDocumentMatchCandidatesService {
     const rows = await this.prisma.supplier_products.findMany({
       where: {
         supplier_id: supplierId,
+        products: { state: { not: 'archived' } },
         OR: codes.map((code) => ({ supplier_sku: { equals: code, mode: 'insensitive' as const } })),
       },
       select: {

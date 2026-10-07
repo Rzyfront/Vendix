@@ -10,13 +10,15 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Subscription } from 'rxjs';
 import {
   ButtonComponent,
   IconComponent,
   ModalComponent,
   ToastService,
 } from '../../../../../shared/components';
-import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { ProductsService } from '../services/products.service';
 
 @Component({
@@ -137,6 +139,13 @@ import { ProductsService } from '../services/products.service';
                 </div>
                 <p class="ai-result-stage__caption">
                   {{ generationMessage() }}
+                </p>
+                <p class="relative z-[3] mt-1 text-center text-xs text-text-secondary">
+                  @if (generationStalled()) {
+                    Está tardando más de lo normal; seguimos procesando.
+                  } @else {
+                    Esto puede tardar unos minutos. No cierres la ventana.
+                  }
                 </p>
               </div>
               <div class="ai-result-stage__shimmer"></div>
@@ -823,6 +832,7 @@ export class ProductImageAiEnhanceModalComponent {
     'Aplicando acabado de catálogo...',
     'Esperando la versión final...',
   ];
+  private generationSub: Subscription | null = null;
   private generationIntervalId: ReturnType<typeof setInterval> | null = null;
 
   readonly mode = input<'enhance' | 'generate'>('enhance');
@@ -854,6 +864,8 @@ export class ProductImageAiEnhanceModalComponent {
   readonly revisedPrompt = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly isGenerating = signal(false);
+  /** true cuando el job lleva más de ~60 s sin terminar. */
+  readonly generationStalled = signal(false);
   readonly generationMessage = signal(this.enhanceSteps[0]);
   readonly generationStepIndex = signal(0);
   readonly comparePosition = signal(50);
@@ -896,14 +908,18 @@ export class ProductImageAiEnhanceModalComponent {
       this.revisedPrompt.set(null);
       this.startGenerationEffects();
 
-      this.productsService
-        .enhanceProductImage({
-          image_url: imageUrl,
-          prompt: this.prompt().trim(),
-          product_name: this.productName(),
-          product_type: this.productType(),
-          description: this.description(),
-        })
+      this.generationSub?.unsubscribe();
+      this.generationSub = this.productsService
+        .enhanceProductImage(
+          {
+            image_url: imageUrl,
+            prompt: this.prompt().trim(),
+            product_name: this.productName(),
+            product_type: this.productType(),
+            description: this.description(),
+          },
+          { onStall: () => this.generationStalled.set(true) },
+        )
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (result) => {
@@ -938,14 +954,18 @@ export class ProductImageAiEnhanceModalComponent {
       this.revisedPrompt.set(null);
       this.startGenerationEffects();
 
-      this.productsService
-        .generateProductImage({
-          prompt: this.prompt().trim(),
-          aspect_ratio: '1:1',
-          product_name: this.productName(),
-          product_type: this.productType(),
-          description: this.description(),
-        })
+      this.generationSub?.unsubscribe();
+      this.generationSub = this.productsService
+        .generateProductImage(
+          {
+            prompt: this.prompt().trim(),
+            aspect_ratio: '1:1',
+            product_name: this.productName(),
+            product_type: this.productType(),
+            description: this.description(),
+          },
+          { onStall: () => this.generationStalled.set(true) },
+        )
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (result) => {
@@ -1018,7 +1038,10 @@ export class ProductImageAiEnhanceModalComponent {
   }
 
   private reset(): void {
+    this.generationSub?.unsubscribe();
+    this.generationSub = null;
     this.stopGenerationEffects();
+    this.generationStalled.set(false);
     this.prompt.set('');
     this.generatedImageUrl.set(null);
     this.revisedPrompt.set(null);
@@ -1035,6 +1058,7 @@ export class ProductImageAiEnhanceModalComponent {
 
   private startGenerationEffects(): void {
     this.stopGenerationEffects();
+    this.generationStalled.set(false);
     const steps = this.getCurrentSteps();
     this.generationStepIndex.set(0);
     this.generationMessage.set(steps[0]);
@@ -1062,11 +1086,13 @@ export class ProductImageAiEnhanceModalComponent {
   }
 
   private resolveGenerationError(error: unknown): string {
-    const message = extractApiErrorMessage(error);
-    if (!message || message === 'Error desconocido') {
-      return 'No se pudo procesar la imagen. Revisa la conexión o intenta con otra instrucción.';
-    }
-
-    return message;
+    const message =
+      error instanceof HttpErrorResponse
+        ? parseApiError(error).userMessage
+        : (error as Error | null)?.message;
+    return (
+      message ||
+      'No se pudo procesar la imagen. Revisa la conexión o intenta con otra instrucción.'
+    );
   }
 }

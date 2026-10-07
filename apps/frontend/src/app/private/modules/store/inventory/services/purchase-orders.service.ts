@@ -16,6 +16,10 @@ import {
     CostPreviewRequest,
     CostPreviewResponse,
 } from '../interfaces';
+import type {
+    NewItemConflictRequestItem,
+    NewItemConflictsResponse,
+} from '../pop/interfaces/pop-cost-preview.interface';
 
 @Injectable({
     providedIn: 'root',
@@ -143,6 +147,14 @@ export class PurchaseOrdersService {
     getCostPreview(data: CostPreviewRequest): Observable<ApiResponse<CostPreviewResponse>> {
         return this.http
             .post<ApiResponse<CostPreviewResponse>>(`${this.api_url}/cost-preview`, data)
+            .pipe(catchError(this.handleError));
+    }
+
+    getNewItemConflicts(
+        items: NewItemConflictRequestItem[],
+    ): Observable<ApiResponse<NewItemConflictsResponse>> {
+        return this.http
+            .post<ApiResponse<NewItemConflictsResponse>>(`${this.api_url}/new-item-conflicts`, { items })
             .pipe(catchError(this.handleError));
     }
 

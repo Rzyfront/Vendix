@@ -9,6 +9,11 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionAccessService } from './subscription-access.service';
 import {
+  FREE_PLAN_LAPSE_REASON,
+  freePlanLapseDeadline,
+  shouldLapseFreePlanAtPeriodEnd,
+} from '../contracts/free-plan-lapse.contract';
+import {
   AUTO_RENEW_PAUSE_REASON_NO_CARD,
   AutoRenewPauseSource,
   autoRenewIntentDesired,
@@ -1478,6 +1483,7 @@ export class SubscriptionStateService {
           select: {
             state: true,
             archived_at: true,
+            is_promotional: true,
             grace_period_soft_days: true,
             grace_period_hard_days: true,
             suspension_day: true,
@@ -1582,6 +1588,35 @@ export class SubscriptionStateService {
 
     // 3. Period expiry — dunning windows
     if (sub.current_period_end && new Date(sub.current_period_end) < now) {
+      // Free promo / auto_renew=false plans lapse 1 day after period end: the grace
+      // day keeps the sub active, then it expires with no dunning (see free-plan-lapse.contract.ts).
+      if (
+        currentState === 'active' &&
+        shouldLapseFreePlanAtPeriodEnd({
+          effectivePrice: sub.effective_price,
+          marginAmount: sub.partner_margin_amount,
+          isPromotional: plan?.is_promotional,
+          autoRenew: sub.auto_renew,
+        })
+      ) {
+        const lapseDeadline = freePlanLapseDeadline(
+          new Date(sub.current_period_end),
+        );
+        // Gracia de 1 día: la tienda sigue operando (active, sin dunning).
+        if (now < lapseDeadline) return;
+        await this.transition(sub.store_id, 'expired', {
+          reason: FREE_PLAN_LAPSE_REASON,
+          triggeredByJob: 'subscription-state-engine',
+          payload: {
+            current_period_end: sub.current_period_end,
+            plan_id: sub.plan_id,
+            is_promotional: plan?.is_promotional ?? null,
+            auto_renew: sub.auto_renew,
+            grace_deadline: lapseDeadline.toISOString(),
+          },
+        });
+        return;
+      }
       const periodEnd = new Date(sub.current_period_end);
       // RNC-23: read dunning cadence from the plan. Defaults (5/10/14/45) are
       // applied here as a safety net for legacy rows where the plan FK is

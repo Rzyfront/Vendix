@@ -513,3 +513,33 @@ export interface DunningPreviewResponse {
   side_effects: DunningPreviewSideEffects;
   warnings: string[];
 }
+
+// ─── Activar plan por consignación directa ───
+
+export type ActivatePlanPaymentMethod =
+  | 'consignacion'
+  | 'transferencia'
+  | 'efectivo'
+  | 'otro';
+
+export interface ActivateStorePlanDto {
+  plan_id: number;
+  amount?: string;
+  payment_method?: ActivatePlanPaymentMethod;
+  reference?: string;
+  /** YYYY-MM-DD */
+  paid_at?: string;
+  notes?: string;
+}
+
+export interface ActivateStorePlanResult {
+  store_id: number;
+  subscription_id: number;
+  plan_id: number;
+  plan_name: string;
+  state: string;
+  invoice_id: number | null;
+  invoice_number: string | null;
+  payment_id: number | null;
+  amount_paid: string | null;
+}

@@ -119,6 +119,7 @@ import {
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
+import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -4652,6 +4653,9 @@ export class PaymentsService {
         'La sesión de mesa no tiene una orden vinculada',
       );
     }
+    // Con cuentas independientes activas la orden principal es solo
+    // informativa: el único cobro válido es por cuenta (split/accounts/:id/pay).
+    assertNoActiveFinancialSplit(session.order);
 
     // QUI-704 — second-charge guard. Now that the session is no
     // longer auto-closed on payment, a second applyPosPaymentToTableSession
@@ -5113,7 +5117,9 @@ export class PaymentsService {
    * Impuesto opcional por tarifa de envío en la venta POS (contrato
    * shipping-rate-tax). El frontend manda `shipping_rate_id` si la tarifa
    * cotizó el costo o si gobierna el impuesto de `manual_shipping_price`.
-   * - Sin `shipping_rate_id` ⇒ copia vacía y `rate_id` null.
+   * - Sin `shipping_rate_id` ⇒ copia vacía y `rate_id` null. Un
+   *   `manual_shipping_price` explícito en ese caso es una tarifa personalizada
+   *   POS (gross, sin impuesto); requiere un método activo del mismo store.
    * - Con precio manual explícito y la tarifa SÍ recotiza la dirección ⇒ el
    *   servidor deriva bruto y copia fiscal desde la tarifa seleccionada, sin
    *   exigir que iguale su precio automático.
@@ -5142,10 +5148,49 @@ export class PaymentsService {
     const rate_id = dto.shipping_rate_id ?? null;
     if (!rate_id) {
       if (dto.manual_shipping_price != null) {
-        throw new VendixHttpException(
-          ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
-          'Selecciona una tarifa de envío para aplicar su impuesto al costo manual',
-        );
+        const methodId = dto.shipping_method_id;
+        const manualPrice = dto.manual_shipping_price;
+        if (
+          typeof methodId !== 'number' ||
+          !Number.isInteger(methodId) ||
+          methodId <= 0
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_SHIP_INVALID_METHOD_001,
+            'Selecciona un método de envío activo para la tarifa personalizada.',
+          );
+        }
+        if (
+          typeof manualPrice !== 'number' ||
+          !Number.isFinite(manualPrice) ||
+          manualPrice < 0 ||
+          manualPrice !== this.roundMoney(manualPrice)
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.PAY_VALIDATE_001,
+            'La tarifa personalizada debe ser un monto válido de hasta dos decimales.',
+          );
+        }
+
+        const method = await tx.shipping_methods.findFirst({
+          where: { id: methodId, store_id, is_active: true },
+          select: { id: true },
+        });
+        if (!method) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_SHIP_INVALID_METHOD_001,
+            'El método de envío debe estar activo y pertenecer a esta tienda.',
+          );
+        }
+
+        return {
+          snapshot: { ...EMPTY_SHIPPING_TAX },
+          rate_id: null,
+          is_inclusive: null,
+          // No cotización implica que el cajero fija explícitamente el monto
+          // final. No se deriva impuesto ni se confía en shipping_cost del DTO.
+          gross_cost: this.roundMoney(manualPrice),
+        };
       }
       return {
         snapshot: { ...EMPTY_SHIPPING_TAX },
@@ -5168,7 +5213,13 @@ export class PaymentsService {
           OR: [{ store_id }, { is_system: true, store_id: null }],
         },
       },
-      select: { id: true, shipping_method_id: true, type: true, base_cost: true },
+      select: {
+        id: true,
+        shipping_method_id: true,
+        type: true,
+        base_cost: true,
+        shipping_method: { select: { type: true } },
+      },
     });
     if (!rate || !dto.shipping_method_id) {
       throw new VendixHttpException(
@@ -5179,6 +5230,76 @@ export class PaymentsService {
           shipping_method_id: dto.shipping_method_id ?? null,
         },
       );
+    }
+
+    // Pickup is selected from the merchant's configured pickup rates and does
+    // not require a buyer address. Trust the persisted method type—not the
+    // client delivery_type—then validate the selected rate against the same
+    // server quote used to display pickup prices.
+    if (rate.shipping_method?.type === 'pickup') {
+      if (dto.manual_shipping_price != null) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'El retiro en tienda debe usar el costo de una tarifa configurada',
+        );
+      }
+
+      if (
+        !this.shippingCalculatorService ||
+        typeof this.shippingCalculatorService.quotePickupRates !== 'function'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'No se pudo validar la tarifa de retiro en tienda',
+        );
+      }
+      const pickupOptions = await this.shippingCalculatorService.quotePickupRates(
+        store_id,
+        rate.shipping_method_id,
+      );
+      const pickupQuote = pickupOptions.find((option) => option.id === rate.id);
+      if (
+        !pickupQuote ||
+        !Number.isFinite(pickupQuote.cost) ||
+        pickupQuote.cost < 0
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+          'La tarifa de retiro en tienda no está activa o ya no está disponible',
+          { shipping_rate_id: rate.id, shipping_method_id: rate.shipping_method_id },
+        );
+      }
+      if (differsByAtLeastCents(shipping_cost, pickupQuote.cost, 1)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'El total del retiro en tienda cambió. Revisa el costo antes de cobrar.',
+          { expected_shipping_cost: pickupQuote.cost, client_shipping_cost: shipping_cost },
+        );
+      }
+      if (
+        !this.shippingTaxService ||
+        typeof this.shippingTaxService.snapshotForRate !== 'function'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'No se pudo copiar el impuesto de la tarifa de retiro en tienda',
+        );
+      }
+      const snapshot = await this.shippingTaxService.snapshotForRate(
+        tx,
+        rate.id,
+        pickupQuote.cost,
+        { store_id },
+      );
+      return {
+        snapshot,
+        rate_id: rate.id,
+        is_inclusive:
+          snapshot.shipping_tax_amount > 0
+            ? pickupQuote.tax_is_inclusive ?? null
+            : null,
+        gross_cost: pickupQuote.cost,
+      };
     }
 
     if (dto.manual_shipping_price != null) {
@@ -5566,6 +5687,7 @@ export class PaymentsService {
             id: true, order_number: true, state: true,
             subtotal_amount: true, tax_amount: true,
             shipping_address_id: true,
+            active_financial_split_id: true,
             stores: { select: { organization_id: true } },
           },
         })
@@ -5575,6 +5697,7 @@ export class PaymentsService {
       throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
     if (existingOrder) {
+      assertNoActiveFinancialSplit(existingOrder);
       const orderLabel = existingOrder.order_number || `#${existingOrder.id}`;
       if (dto.is_draft || !['draft', 'created'].includes(existingOrder.state)) {
         throw new VendixHttpException(
@@ -6310,6 +6433,11 @@ export class PaymentsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const dtoStoreId: number = dto.store_id;
+    // Con cuentas independientes activas la orden principal no se cobra: el
+    // único camino válido es split/accounts/:id/pay. `order` es la fila ya
+    // cargada/bloqueada por createOrUpdateOrderFromPos (trae el campo); una
+    // orden nueva del propio cobro no tiene split.
+    if (order) assertNoActiveFinancialSplit(order);
     const payableAmount = this.roundMoney(
       Number(order?.grand_total ?? order?.total_amount ?? dto.total_amount ?? 0),
     );

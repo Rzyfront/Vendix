@@ -19,6 +19,7 @@ import { InvoiceEmissionGateService } from './services/invoice-emission-gate.ser
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
+import { FiscalScanHandlersRegistrar } from './fiscal-scan-handlers.registrar';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
@@ -39,6 +40,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
+import { OneShotEmissionService } from './one-shot-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
@@ -114,6 +116,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     ResolutionsService,
     ResolutionScannerService,
     DianHabilitationScannerService,
+    FiscalScanHandlersRegistrar,
     InvoiceNumberGenerator,
     // Motor aritmético único del documento, puerta de identidad fiscal del
     // adquiriente y prevalidador DIAN del documento. Los tres son PUROS —sin
@@ -150,6 +153,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // Carril del POS: emisión desacoplada del cobro + el oyente que la dispara
     // después del commit de la venta.
     PosFiscalEmissionService,
+    OneShotEmissionService,
     PosSaleCompletedListener,
   ],
   exports: [

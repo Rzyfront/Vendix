@@ -26,6 +26,19 @@ import {
   IssueNoteResult,
 } from '../interfaces/invoice.interface';
 
+/**
+ * Resultado de la emisión de un clic (`POST orders/:id/emit` y
+ * `POST financial-accounts/:id/emit`): `issued` = aceptada, `pending` = en
+ * proceso ante la DIAN, `failed` = no emitida (se puede reintentar).
+ */
+export interface InvoiceEmitResult {
+  state: 'issued' | 'pending' | 'failed';
+  invoice_id: number | null;
+  invoice_number: string | null;
+  dian_status: string | null;
+  message: string | null;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -77,6 +90,24 @@ export class InvoicingService {
   createFromOrder(orderId: number): Observable<ApiResponse<Invoice>> {
     return this.http.post<ApiResponse<Invoice>>(
       this.getApiUrl(`from-order/${orderId}`),
+      {},
+    );
+  }
+
+  /** Facturación de un clic de la orden completa (crea, valida y envía). */
+  emitOrder(orderId: number): Observable<ApiResponse<InvoiceEmitResult>> {
+    return this.http.post<ApiResponse<InvoiceEmitResult>>(
+      this.getApiUrl(`orders/${orderId}/emit`),
+      {},
+    );
+  }
+
+  /** Facturación de un clic de una cuenta de la división financiera. */
+  emitFinancialAccount(
+    accountId: number,
+  ): Observable<ApiResponse<InvoiceEmitResult>> {
+    return this.http.post<ApiResponse<InvoiceEmitResult>>(
+      this.getApiUrl(`financial-accounts/${accountId}/emit`),
       {},
     );
   }

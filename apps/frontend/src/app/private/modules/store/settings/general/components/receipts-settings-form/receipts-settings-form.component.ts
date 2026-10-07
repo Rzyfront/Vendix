@@ -10,6 +10,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
@@ -61,6 +62,7 @@ export type EmissionStage = 'receipts' | 'pending' | 'live';
   selector: 'app-receipts-settings-form',
   standalone: true,
   imports: [
+    RouterLink,
     ReactiveFormsModule,
     SettingToggleComponent,
     TextareaComponent,

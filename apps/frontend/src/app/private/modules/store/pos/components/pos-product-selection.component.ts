@@ -463,9 +463,9 @@ function isMultiTokenQuery(query: string): boolean {
 
                 <!-- Info -->
                 <div class="flex-1 min-w-0 pr-1 leading-tight">
-                  <div class="flex items-center gap-1.5">
+                  <div class="flex items-center gap-1.5 flex-wrap min-w-0">
                     <h3
-                      class="text-xs font-bold text-slate-800 min-w-0 group-hover:text-primary transition-colors"
+                      class="text-xs font-bold text-slate-800 min-w-0 w-full [overflow-wrap:anywhere] group-hover:text-primary transition-colors"
                       [title]="product.name"
                     >
                       {{ product.name }}
@@ -754,26 +754,26 @@ function isMultiTokenQuery(query: string): boolean {
                   }
                 </div>
                 <!-- Product Info -->
-                <div class="p-3 flex flex-col justify-between flex-1">
+                <div class="p-3 flex flex-col justify-between flex-1 min-w-0">
                   <!-- Name & Description/SKU slot: flexible height so
                        long names wrap fully (QUI-908). -->
-                  <div class="min-h-[3.5rem] flex flex-col justify-start">
+                  <div class="min-h-[3.5rem] flex flex-col justify-start min-w-0 w-full">
                     <h3
-                      class="font-bold text-xs sm:text-sm text-slate-800 group-hover:text-primary transition-colors leading-tight"
+                      class="min-w-0 w-full [overflow-wrap:anywhere] font-bold text-xs sm:text-sm text-slate-800 group-hover:text-primary transition-colors leading-tight"
                       [title]="product.name"
                     >
                       {{ product.name }}
                     </h3>
                     @if (product.description) {
                       <p
-                        class="text-[11px] text-slate-400 mt-0.5 truncate leading-tight"
+                        class="w-full shrink-0 text-[11px] text-slate-400 mt-0.5 truncate leading-tight"
                         [title]="product.description"
                       >
                         {{ product.description }}
                       </p>
                     } @else if (product.sku) {
                       <p
-                        class="text-[11px] text-slate-400 font-mono mt-0.5 truncate leading-tight"
+                        class="w-full shrink-0 text-[11px] text-slate-400 font-mono mt-0.5 truncate leading-tight"
                         [title]="'SKU: ' + product.sku"
                       >
                         SKU: {{ product.sku }}

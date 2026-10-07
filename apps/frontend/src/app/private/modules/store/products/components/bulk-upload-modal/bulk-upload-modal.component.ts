@@ -764,13 +764,16 @@ import {
                                   item.action === 'create',
                                 'bg-sky-100 text-sky-800':
                                   item.action === 'update',
+                                'bg-amber-100 text-amber-800':
+                                  item.action === 'reactivate',
                               }"
+                              [attr.title]="
+                                item.action === 'reactivate'
+                                  ? 'Este SKU pertenece a un producto eliminado; se restaurará con los datos del archivo.'
+                                  : null
+                              "
                             >
-                              {{
-                                item.action === 'create'
-                                  ? 'Crear'
-                                  : 'Actualizar'
-                              }}
+                              {{ getActionLabel(item.action) }}
                             </span>
                           </td>
                           <td class="px-3 py-2 text-sm">
@@ -994,9 +997,16 @@ import {
                           'bg-emerald-100 text-emerald-700':
                             item.action === 'create',
                           'bg-sky-100 text-sky-700': item.action === 'update',
+                          'bg-amber-100 text-amber-700':
+                            item.action === 'reactivate',
                         }"
+                        [attr.title]="
+                          item.action === 'reactivate'
+                            ? 'Este SKU pertenece a un producto eliminado; se restaurará con los datos del archivo.'
+                            : null
+                        "
                       >
-                        {{ item.action === 'create' ? 'Crear' : 'Actualizar' }}
+                        {{ getActionLabel(item.action) }}
                       </span>
                       <span
                         class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
@@ -1541,6 +1551,12 @@ export class BulkUploadModalComponent {
     );
   }
 
+  getActionLabel(action: BulkProductAnalysisItem['action']): string {
+    if (action === 'create') return 'Crear';
+    if (action === 'reactivate') return 'Reactivar';
+    return 'Actualizar';
+  }
+
   getValidationText(w: string | BulkValidationMessage): string {
     return typeof w === 'object' ? w.message : w;
   }
@@ -1549,7 +1565,9 @@ export class BulkUploadModalComponent {
     item: BulkProductAnalysisItem,
     field: string,
   ): 'modified' | 'nulled' | 'unchanged' | 'create' {
-    if (item.action === 'create') return 'create';
+    // reactivate: producto archivado restaurado con los datos del archivo; sin diff por campo, se muestra como alta
+    if (item.action === 'create' || item.action === 'reactivate')
+      return 'create';
     if (item.nulled_fields?.includes(field)) return 'nulled';
     if (item.modified_fields?.includes(field)) return 'modified';
     return 'unchanged';

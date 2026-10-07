@@ -11,6 +11,8 @@ import { FinancialAnalyticsService } from './services/financial-analytics.servic
 import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import { DispatchAnalyticsService } from './services/dispatch-analytics.service';
+import { SalesDimensionAnalyticsService } from './services/sales-dimension-analytics.service';
+import { SalesByDimensionQueryDto } from './dto/sales-by-dimension-query.dto';
 import {
   DispatchAnalyticsQueryDto,
   DispatchPlanillasQueryDto,
@@ -64,6 +66,7 @@ export class AnalyticsController {
     private readonly purchases_analytics_service: PurchasesAnalyticsService,
     private readonly reviews_analytics_service: ReviewsAnalyticsService,
     private readonly dispatch_analytics_service: DispatchAnalyticsService,
+    private readonly sales_dimension_analytics_service: SalesDimensionAnalyticsService,
     private readonly response_service: ResponseService,
     private readonly prisma: StorePrismaService,
   ) {}
@@ -355,6 +358,90 @@ export class AnalyticsController {
       this.toSheet('Por vendedor × marca', brandColumns, result.byBrand, tz),
       this.toSheet('Por vendedor × proveedor', supplierColumns, result.bySupplier, tz),
     ]);
+  }
+
+  @Get('sales/by-dimension')
+  @Permissions('store:analytics:read')
+  async getSalesByDimension(@Query() query: SalesByDimensionQueryDto) {
+    const result =
+      await this.sales_dimension_analytics_service.getSalesByDimension(query);
+    const label = query.dimension === 'supplier' ? 'proveedor' : 'marca';
+    return this.response_service.paginated(
+      result.rows,
+      result.total,
+      result.page,
+      result.limit,
+      `Ventas por ${label} obtenidas correctamente`,
+      undefined,
+      { summary: result.summary },
+    );
+  }
+
+  @Get('sales/by-dimension/export')
+  @Permissions('store:analytics:read')
+  async exportSalesByDimension(
+    @Query() query: SalesByDimensionQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const result =
+      await this.sales_dimension_analytics_service.getSalesByDimensionForExport(
+        query,
+      );
+    const dimensionHeader =
+      query.dimension === 'supplier' ? 'Proveedor' : 'Marca';
+    const dim: ReportColumn = {
+      key: 'dimension_name',
+      header: dimensionHeader,
+      type: 'text',
+    };
+    const metrics = (withCustomers: boolean, withReferences: boolean) =>
+      [
+        { key: 'units', header: 'Unidades', type: 'number' },
+        { key: 'net_sales', header: 'Venta neta', type: 'currency' },
+        { key: 'orders', header: 'Órdenes', type: 'number' },
+        ...(withCustomers
+          ? [{ key: 'customers', header: 'Clientes', type: 'number' }]
+          : []),
+        ...(withReferences
+          ? [{ key: 'references', header: 'Referencias', type: 'number' }]
+          : []),
+      ] as ReportColumn[];
+
+    const summaryColumns: ReportColumn[] = [dim, ...metrics(true, true)];
+    const productColumns: ReportColumn[] = [
+      dim,
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'variant_name', header: 'Variante', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      ...metrics(true, false),
+    ];
+    const userColumns: ReportColumn[] = [
+      dim,
+      { key: 'user_name', header: 'Vendedor', type: 'text' },
+      { key: 'user_document', header: 'Documento', type: 'text' },
+      ...metrics(true, true),
+    ];
+    const customerColumns: ReportColumn[] = [
+      dim,
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_document', header: 'Documento', type: 'text' },
+      ...metrics(false, true),
+    ];
+
+    await this.emitReport(
+      res,
+      query.dimension === 'supplier'
+        ? 'ventas_por_proveedor'
+        : 'ventas_por_marca',
+      tz,
+      [
+        this.toSheet('Resumen', summaryColumns, result.dimension_rows, tz),
+        this.toSheet('Por producto', productColumns, result.by_product, tz),
+        this.toSheet('Por vendedor', userColumns, result.by_user, tz),
+        this.toSheet('Por cliente', customerColumns, result.by_customer, tz),
+      ],
+    );
   }
 
   @Get('sales/tips-by-waiter')

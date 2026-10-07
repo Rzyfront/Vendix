@@ -154,6 +154,37 @@ export interface AiUsageEntry {
   period: 'daily' | 'monthly';
 }
 
+/** Grupo de consumo IA que agrega el backend (`consumption[].group`). */
+export type AiUsageGroupKey =
+  | 'assistant'
+  | 'vex'
+  | 'text_generation'
+  | 'jobs'
+  | 'semantic_search'
+  | 'voice';
+
+export type AiUsageUnit = 'messages' | 'tokens' | 'jobs' | 'docs' | 'seconds';
+
+/** Consumo real del mes por grupo, con su cuota del plan si aplica. */
+export interface AiUsageGroupEntry {
+  group: AiUsageGroupKey;
+  calls: number;
+  tokens: number;
+  quota: {
+    feature: string;
+    used: number;
+    cap: number | null;
+    period: 'daily' | 'monthly';
+    unit: AiUsageUnit;
+  } | null;
+}
+
+/** `consumption === null` = el backend no pudo leer el consumo. */
+export interface AiUsageReport {
+  periodStart: string | null;
+  consumption: AiUsageGroupEntry[] | null;
+}
+
 /**
  * F7 — plan summary for the upgrade modal, served by `GET
  * /store/subscriptions/upgrade-suggestion`. Public catalog data only.
@@ -825,6 +856,30 @@ export class SubscriptionAccessService {
       return res?.data?.features ?? {};
     } catch {
       return {};
+    }
+  }
+
+  /**
+   * Consumo real por grupo de funciones IA del mes (`GET
+   * /store/subscriptions/usage`, campos `period_start` y `consumption`).
+   * Nunca lanza al llamante: ante error retorna `consumption: null`.
+   */
+  async getAiUsageReport(): Promise<AiUsageReport> {
+    const empty: AiUsageReport = { periodStart: null, consumption: null };
+    if (!this.http) return empty;
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{
+          success: boolean;
+          data: { period_start?: string | null; consumption?: AiUsageGroupEntry[] | null };
+        }>(`${environment.apiUrl}/store/subscriptions/usage`),
+      );
+      return {
+        periodStart: res?.data?.period_start ?? null,
+        consumption: res?.data?.consumption ?? null,
+      };
+    } catch {
+      return empty;
     }
   }
 

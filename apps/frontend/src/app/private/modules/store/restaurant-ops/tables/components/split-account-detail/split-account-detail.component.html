@@ -1,0 +1,161 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  [title]="title()"
+  size="lg"
+  [dialog]="true"
+  [fullScreenOnMobile]="true"
+>
+  <div class="space-y-5 text-[var(--color-text-primary)]">
+    <!-- 1. Encabezado -->
+    <section class="flex flex-wrap items-start justify-between gap-3" aria-label="Resumen de la cuenta">
+      <div class="min-w-0">
+        <p class="truncate text-sm text-[var(--color-text-secondary)]">{{ customerName() }}</p>
+        <app-badge [variant]="statusVariant()" size="sm">{{ statusLabel() }}</app-badge>
+      </div>
+      <div class="text-right">
+        <p class="text-xs text-[var(--color-text-secondary)]">Total {{ currency() }}</p>
+        <p class="text-xl font-semibold">{{ total() | currency }}</p>
+        <p class="text-xs text-[var(--color-text-secondary)]">
+          Saldo {{ balance() | currency }}
+        </p>
+      </div>
+    </section>
+
+    <!-- 2. Qué incluye -->
+    <section aria-labelledby="split-detail-includes">
+      <h4 id="split-detail-includes" class="mb-2 text-sm font-semibold">Qué incluye</h4>
+      @if (isItemsMode()) {
+        <div class="hidden sm:block overflow-x-auto" data-testid="items-table">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-[var(--color-text-secondary)]">
+              <tr>
+                <th class="py-1 pr-2 font-medium">Producto</th>
+                <th class="py-1 px-2 text-right font-medium">Cant.</th>
+                <th class="py-1 px-2 text-right font-medium">Precio</th>
+                <th class="py-1 px-2 text-right font-medium">Impuesto</th>
+                <th class="py-1 pl-2 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (line of itemLines(); track line.id) {
+                <tr class="border-t border-[var(--color-border)]">
+                  <td class="py-1.5 pr-2">{{ line.name }}</td>
+                  <td class="py-1.5 px-2 text-right">{{ line.quantity }}</td>
+                  <td class="py-1.5 px-2 text-right">{{ line.unitPrice | currency }}</td>
+                  <td class="py-1.5 px-2 text-right">{{ line.tax | currency }}</td>
+                  <td class="py-1.5 pl-2 text-right font-medium">{{ line.total | currency }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <ul class="space-y-2 sm:hidden" data-testid="items-list">
+          @for (line of itemLines(); track line.id) {
+            <li class="rounded-lg border border-[var(--color-border)] p-2 text-sm">
+              <div class="flex justify-between gap-2">
+                <span class="font-medium">{{ line.name }}</span>
+                <span class="font-medium">{{ line.total | currency }}</span>
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                {{ line.quantity }} × {{ line.unitPrice | currency }} · Impuesto {{ line.tax | currency }}
+              </p>
+            </li>
+          }
+        </ul>
+      } @else {
+        <div class="rounded-lg border border-[var(--color-border)] p-3" data-testid="amount-breakdown">
+          <div class="mb-2 flex justify-between text-sm font-semibold">
+            <span>Monto asignado</span>
+            <span>{{ total() | currency }}</span>
+          </div>
+          <dl class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+            @for (row of breakdown(); track row.label) {
+              <dt class="text-[var(--color-text-secondary)]">{{ row.label }}</dt>
+              <dd class="text-right">
+                @if (row.negative && row.value > 0) {−}{{ row.value | currency }}
+              </dd>
+            }
+          </dl>
+        </div>
+        @if (shares().length) {
+          <h5 class="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">
+            Participación por producto
+          </h5>
+          <ul class="divide-y divide-[var(--color-border)] text-sm" data-testid="share-list">
+            @for (share of shares(); track share.id) {
+              <li class="flex items-center justify-between gap-2 py-1.5">
+                <span class="min-w-0 flex-1 truncate">{{ share.name }}</span>
+                <span class="w-16 shrink-0 text-right tabular-nums text-[var(--color-text-secondary)]">{{ share.percent }} %</span>
+                <span class="w-28 shrink-0 text-right font-medium tabular-nums">{{ share.total | currency }}</span>
+              </li>
+            }
+          </ul>
+        }
+      }
+    </section>
+
+    <!-- 3. Pagos -->
+    <section aria-labelledby="split-detail-payments">
+      <h4 id="split-detail-payments" class="mb-2 text-sm font-semibold">Pagos</h4>
+      @if (payments().length) {
+        <ul class="space-y-2">
+          @for (payment of payments(); track payment.id) {
+            <li class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] p-2 text-sm">
+              <div class="min-w-0">
+                <p class="font-medium">{{ payment.method }}</p>
+                <p class="text-xs text-[var(--color-text-secondary)]">{{ payment.date }}</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="font-medium">{{ payment.amount | currency }}</span>
+                <span class="text-xs text-[var(--color-text-secondary)]">{{ payment.state }}</span>
+                @if (payment.canConfirm) {
+                  <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="confirmPayment(payment.paymentId)">
+                    Confirmar recibido
+                  </app-button>
+                }
+                @if (payment.continueUrl; as url) {
+                  <a class="text-sm text-[var(--color-primary)] underline" [href]="url" target="_blank" rel="noopener noreferrer">Continuar pago</a>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="text-sm text-[var(--color-text-secondary)]">Aún no hay pagos registrados.</p>
+      }
+    </section>
+
+    <!-- 4. Factura -->
+    <section aria-labelledby="split-detail-invoice">
+      <h4 id="split-detail-invoice" class="mb-2 text-sm font-semibold">Factura</h4>
+      @if (account().invoice; as invoice) {
+        <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] p-3 text-sm" data-testid="invoice-block">
+          <div>
+            <p class="font-medium">N° {{ invoice.invoice_number || 'sin numerar' }}</p>
+            <p class="text-xs text-[var(--color-text-secondary)]">{{ invoiceStatus() }}</p>
+          </div>
+          <span class="font-medium">{{ money(invoice.grand_total) | currency }}</span>
+          @if (canInvoice()) {
+            <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="runAction()">Ver factura</app-button>
+          }
+        </div>
+      } @else {
+        <p class="text-sm text-[var(--color-text-secondary)]" data-testid="invoice-hint">{{ invoiceHint() }}</p>
+      }
+    </section>
+  </div>
+
+  <!-- 5. Pie -->
+  <div slot="footer" class="flex w-full flex-wrap justify-end gap-2">
+    <app-button variant="ghost" (clicked)="isOpen.set(false)">Cerrar</app-button>
+    @if (action(); as act) {
+      <app-button variant="primary" [disabled]="busy()" (clicked)="runAction()">
+        @if (act.kind === 'pay') {
+          Cobrar {{ payAmount() | currency }}
+        } @else {
+          {{ act.label }}
+        }
+      </app-button>
+    }
+  </div>
+</app-modal>

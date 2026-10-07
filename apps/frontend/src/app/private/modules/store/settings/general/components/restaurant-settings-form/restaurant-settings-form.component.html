@@ -135,6 +135,24 @@
         ></app-toggle>
       </div>
 
+      <div class="setting-row">
+        <div class="setting-row__copy">
+          <p class="setting-row__label">
+            <span>KDS físico (comandas impresas)</span>
+          </p>
+          <p class="setting-row__desc">
+            Al enviar a cocina se imprime la comanda en este equipo y los platos
+            se marcan como entregados a mano. Desactiva el KDS virtual (pantalla
+            de Comandas).
+          </p>
+        </div>
+        <app-toggle
+          [formControl]="kitchenPhysicalControl"
+          ariaLabel="KDS físico (comandas impresas)"
+          (changed)="onFieldChange()"
+        ></app-toggle>
+      </div>
+
       @if (autoFireHasNoEffect()) {
         <app-alert-banner variant="warning" icon="alert-triangle">
           El auto-disparo está activo pero no hará nada: en el modo

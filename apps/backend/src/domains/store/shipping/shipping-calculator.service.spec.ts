@@ -5,6 +5,9 @@ import { SettingsService } from '../settings/settings.service';
 import { ShippingTaxService } from './services/shipping-tax.service';
 import { ShippingDistanceService } from './services/shipping-distance.service';
 import { shipping_rate_type_enum } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { QuotePickupShippingDto } from './dto/shipping_calc.dto';
 
 describe('ShippingCalculatorService', () => {
   let service: ShippingCalculatorService;
@@ -914,6 +917,173 @@ describe('ShippingCalculatorService', () => {
 
         expect(cost).toBe(8000); // base_cost de la tarifa (zona)
       });
+    });
+  });
+
+  describe('quotePickupRates', () => {
+    const pickupMethod = (id: number) => ({
+      id,
+      name: `Recoger ${id}`,
+      type: 'pickup',
+      is_active: true,
+      display_order: id,
+      min_days: 0,
+      max_days: 0,
+    });
+    const pickupRate = (
+      id: number,
+      methodId = 20,
+      overrides: Record<string, unknown> = {},
+    ) => ({
+      id,
+      shipping_zone_id: 40,
+      shipping_method_id: methodId,
+      name: `Tarifa ${id}`,
+      type: shipping_rate_type_enum.flat,
+      base_cost: 10000,
+      is_active: true,
+      shipping_method: pickupMethod(methodId),
+      shipping_zone: { id: 40, name: 'Recogida', store_id: 42, is_active: true },
+      ...overrides,
+    });
+
+    it('cotiza todas las tarifas del método, con bruto fiscal y gratuidad configurada', async () => {
+      const iva = {
+        id: 90,
+        name: 'IVA 19%',
+        tax_type: 'iva',
+        tax_rates: [{ id: 9, name: 'IVA 19%', rate: 0.19 }],
+      };
+      const inc8 = {
+        id: 91,
+        name: 'INC 8%',
+        tax_type: 'inc',
+        tax_rates: [{ id: 10, name: 'INC 8%', rate: 0.08 }],
+      };
+      const rateTaxContext = new Map([
+        [301, {
+          rate_id: 301,
+          tax_is_inclusive: false,
+          category: iva,
+          vat_responsible: true,
+          inc_responsible: true,
+        }],
+        [302, {
+          rate_id: 302,
+          tax_is_inclusive: false,
+          category: iva,
+          vat_responsible: true,
+          inc_responsible: true,
+        }],
+        [303, {
+          rate_id: 303,
+          tax_is_inclusive: true,
+          category: inc8,
+          vat_responsible: true,
+          inc_responsible: true,
+        }],
+      ]);
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([
+        pickupRate(301),
+        pickupRate(302, 20, { type: shipping_rate_type_enum.free, base_cost: 0 }),
+        pickupRate(303, 20, { base_cost: 15000 }),
+      ]);
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(rateTaxContext);
+
+      const options = await service.quotePickupRates(42, 20);
+
+      expect(options.map((option) => option.rate_id)).toEqual([301, 302, 303]);
+      expect(options.map((option) => option.cost)).toEqual([11900, 0, 15000]);
+      expect(options[0]).toEqual(expect.objectContaining({
+        id: 301,
+        method_id: 20,
+        method_type: 'pickup',
+        base: 10000,
+        shipping_tax_amount: 1900,
+        tax_is_inclusive: false,
+        is_fallback: false,
+      }));
+      expect(options[2].base).toBeCloseTo(13888.89, 2);
+      expect(options[2].shipping_tax_amount).toBeCloseTo(1111.11, 2);
+      expect(options.every((option) => option.is_fallback === false)).toBe(true);
+      expect(mockShippingTax.loadRateTaxContext).toHaveBeenCalledWith(
+        [301, 302, 303],
+        { store_id: 42 },
+      );
+    });
+
+    it('returns no options when the selected method has no eligible pickup rates', async () => {
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([]);
+
+      await expect(service.quotePickupRates(42, 999)).resolves.toEqual([]);
+      expect(mockShippingTax.loadRateTaxContext).not.toHaveBeenCalled();
+      expect(mockSettings.getStoreCurrency).not.toHaveBeenCalled();
+    });
+
+    it('restricts pickup quotes to the exact active store method and active store/system zones', async () => {
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([]);
+
+      await service.quotePickupRates(42, 20);
+
+      expect(mockPrisma.shipping_rates.findMany).toHaveBeenCalledWith({
+        where: {
+          shipping_method_id: 20,
+          is_active: true,
+          shipping_method: {
+            id: 20,
+            store_id: 42,
+            is_active: true,
+            type: 'pickup',
+          },
+          shipping_zone: {
+            is_active: true,
+            OR: [{ store_id: 42 }, { is_system: true, store_id: null }],
+          },
+        },
+        include: { shipping_method: true, shipping_zone: true },
+        orderBy: { id: 'asc' },
+      });
+    });
+
+    it('mantiene el fallback storefront con ciudad, una opción por método y marca is_fallback', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([]);
+      mockPrisma.addresses.findMany.mockResolvedValue([{ city: 'Riohacha' }]);
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([
+        pickupRate(401),
+        pickupRate(402),
+        pickupRate(403, 21),
+      ]);
+
+      const options = await service.calculateRates(42, [], {
+        country_code: 'CO',
+        city: 'Riohacha',
+      });
+
+      expect(options.map((option) => option.rate_id)).toEqual([401, 403]);
+      expect(options.every((option) => option.is_fallback)).toBe(true);
+      expect(mockPrisma.shipping_rates.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          shipping_zone: { store_id: 42, is_active: true },
+        }),
+      }));
+    });
+
+    it('no ofrece fallback storefront cuando falta la ciudad del comprador', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([]);
+
+      await expect(service.calculateRates(42, [], { country_code: 'CO' })).resolves.toEqual([]);
+
+      expect(mockPrisma.addresses.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.shipping_rates.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('QuotePickupShippingDto', () => {
+    it.each([0, -1, 1.5])('rechaza shipping_method_id=%s', async (shipping_method_id) => {
+      const dto = plainToInstance(QuotePickupShippingDto, { shipping_method_id });
+      const errors = await validate(dto);
+
+      expect(errors.some((error) => error.property === 'shipping_method_id')).toBe(true);
     });
   });
 });

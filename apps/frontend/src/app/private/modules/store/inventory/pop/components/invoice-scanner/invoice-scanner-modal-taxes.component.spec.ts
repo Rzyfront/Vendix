@@ -94,7 +94,7 @@ const buildProductsStub = () =>
 
 const buildScannerStub = () =>
   ({
-    scanInvoice: () => of(null),
+    scanInvoiceAndWait: () => of(null),
     matchProducts: () => of(null),
   }) as unknown as InvoiceScannerService;
 
@@ -221,7 +221,7 @@ describe('InvoiceScannerModalComponent — QUI-855 multi-impuesto por línea', (
 
   function scanWith(item: MatchedLineItem): void {
     const scanner = TestBed.inject(InvoiceScannerService) as any;
-    scanner.scanInvoice = () => of({ success: true, data: buildScan() });
+    scanner.scanInvoiceAndWait = () => of(buildScan());
     scanner.matchProducts = () =>
       of({ success: true, data: { ...buildMatch(false), items: [item] } });
     component.selectedFile.set(new File(['x'], 'factura.png'));

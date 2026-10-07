@@ -11,7 +11,8 @@ import {
   TECHNICAL_KEY_LENGTHS_LABEL,
   isWellFormedTechnicalKey,
 } from '../fiscal-document-requirements';
-import sharp = require('sharp');
+import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * One extracted field, already checked against the shape the DIAN actually
@@ -143,9 +144,28 @@ export class DianHabilitationScannerService {
   async scanHabilitationDocuments(
     files: Express.Multer.File[],
   ): Promise<DianHabilitationScanResult> {
+    return this.scanHabilitationFromFiles(
+      files.map((f) => ({
+        buffer: f.buffer,
+        mimeType: f.mimetype,
+        originalName: f.originalname,
+        size: f.size,
+      })),
+    );
+  }
+
+  /** Validación previa a la IA; el controller async la llama ANTES de encolar. */
+  async assertReady(): Promise<void> {
+    await this.aiEngine.assertVisionModelLinked('dian_habilitation_scanner');
+  }
+
+  /** Núcleo del escaneo: recibe buffer+mime (handler de la cola `ai-scan`). */
+  async scanHabilitationFromFiles(
+    files: AiScanFile[],
+  ): Promise<DianHabilitationScanResult> {
     this.logger.debug(
       `[HabilitationScan] ${files.length} file(s): ${files
-        .map((f) => `${f.mimetype}/${f.size}b`)
+        .map((f) => `${f.mimeType}/${f.size}b`)
         .join(', ')}`,
     );
 
@@ -153,7 +173,7 @@ export class DianHabilitationScannerService {
     // config de texto por defecto y devuelve JSON inventado con pinta de
     // válido. Acá eso sería un `software_id` inexistente que el comerciante
     // guarda como bueno y solo descubre cuando la DIAN nunca clasifica.
-    await this.aiEngine.assertVisionModelLinked('dian_habilitation_scanner');
+    await this.assertReady();
 
     const content: AIMessageContentPart[] = [
       {
@@ -216,7 +236,7 @@ export class DianHabilitationScannerService {
    * so a PDF reaches the vision model untouched instead of failing the request.
    */
   private async preprocessImage(
-    file: Express.Multer.File,
+    file: AiScanFile,
   ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
@@ -250,7 +270,7 @@ export class DianHabilitationScannerService {
       );
       return {
         base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
+        mimeType: file.mimeType,
       };
     }
   }

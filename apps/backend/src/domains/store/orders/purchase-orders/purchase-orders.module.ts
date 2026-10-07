@@ -9,6 +9,7 @@ import { SuppliersService } from '../../inventory/suppliers/suppliers.service';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { PaymentReceiptScanProcessor } from './payment-receipt-scan.processor';
 import { InvoiceRevalidateProcessor } from './invoice-revalidate.processor';
+import { InvoiceScanProcessor } from './invoice-scan.processor';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { InventoryModule } from '../../inventory/inventory.module';
@@ -34,6 +35,8 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
     // QUI-855 paso 8a — cola dedicada `invoice-revalidate` (revalidación con IA
     // de la precarga de compras; 202 + job_id + poll con IDOR por tienda).
     BullModule.registerQueue({ name: 'invoice-revalidate' }),
+    // Escaneo IA async de facturas de compra (202 + job_id + poll con IDOR).
+    BullModule.registerQueue({ name: 'invoice-scan' }),
   ],
   controllers: [PurchaseOrdersController],
   providers: [
@@ -42,6 +45,7 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
     InvoiceScannerService,
     PaymentReceiptScanProcessor,
     InvoiceRevalidateProcessor,
+    InvoiceScanProcessor,
   ],
   exports: [PurchaseOrdersService],
 })

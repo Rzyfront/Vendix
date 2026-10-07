@@ -2167,9 +2167,20 @@ model products {
   excluded_in_order_items   order_item_exclusions[]          @relation("order_item_exclusion_component")
   excluded_in_kitchen_items kitchen_ticket_item_exclusions[] @relation("kti_exclusion_component")
 
-  @@unique([store_id, slug])
-  @@unique([store_id, sku])
-  @@unique([store_id, barcode])
+  /// Unicidad de slug, sku y barcode POR TIENDA y SOLO entre productos no
+  /// archivados (borrar = archivar; el archivado libera sus identificadores).
+  /// La garantizan indices unicos PARCIALES que Prisma no puede expresar y
+  /// viven solo en la migracion 20261003200000_products_unique_ignores_archived:
+  ///   CREATE UNIQUE INDEX products_store_id_sku_active_key
+  ///     ON products (store_id, sku) WHERE state <> 'archived' AND sku IS NOT NULL;
+  ///   CREATE UNIQUE INDEX products_store_id_slug_active_key
+  ///     ON products (store_id, slug) WHERE state <> 'archived';
+  ///   CREATE UNIQUE INDEX products_store_id_barcode_active_key
+  ///     ON products (store_id, barcode) WHERE state <> 'archived' AND barcode IS NOT NULL;
+  /// No lo vuelvas a declarar como @@unique al regenerar: por eso no existe
+  /// `store_id_sku` / `store_id_slug` / `store_id_barcode` como where-unique;
+  /// usa findFirst con `state: { not: 'archived' }`.
+  @@index([store_id, slug])
   @@index([store_id, sku])
   @@index([store_id, barcode])
   @@index([store_id, product_type])

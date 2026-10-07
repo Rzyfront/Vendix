@@ -2,19 +2,19 @@ import { Component } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { AiuSettingsSection } from './aiu-settings.section';
+import { PosInvoicingSettingsSection } from './pos-invoicing-settings.section';
 
 /**
- * Página de configuración FISCAL — hoy sólo aloja el Régimen AIU. El bloque
- * de facturación del POS (antes una segunda pestaña "Caja") se retiró de
- * aquí: ya vive en Configuración → General → Venta
- * (`pos-invoicing-settings.section.ts`, montado desde `sales-settings.page.ts`),
- * y mantenerlo también aquí era un segundo control del mismo flag
- * (`invoicing.pos.auto_emit`).
+ * Página de configuración de FACTURACIÓN. Su primera sección es «Emisión
+ * automática de factura» (`pos-invoicing-settings.section.ts`: flags
+ * `invoicing.pos` / `invoicing.ecommerce`), seguida del Régimen AIU. La
+ * pestaña «Venta» ya no monta el bloque de emisión: hay un solo control por
+ * flag, y es éste.
  */
 @Component({
   selector: 'app-fiscal-settings-page',
   standalone: true,
-  imports: [IconComponent, AiuSettingsSection],
+  imports: [IconComponent, PosInvoicingSettingsSection, AiuSettingsSection],
   template: `
     <div class="settings-page">
       <div class="page-intro">
@@ -23,10 +23,12 @@ import { AiuSettingsSection } from './aiu-settings.section';
         </div>
         <p class="page-intro__text">
           <span class="page-intro__lead">Configuración fiscal de la tienda.</span>
-          El régimen AIU afecta lo que el emisor electrónico declara cuando
-          firma un documento.
+          Define si la venta emite su factura electrónica sola y el régimen AIU
+          que el emisor declara al firmar un documento.
         </p>
       </div>
+
+      <app-pos-invoicing-settings-section></app-pos-invoicing-settings-section>
 
       <app-aiu-settings-section></app-aiu-settings-section>
     </div>

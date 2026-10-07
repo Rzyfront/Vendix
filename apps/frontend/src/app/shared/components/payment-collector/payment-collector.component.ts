@@ -211,6 +211,7 @@ export class PaymentCollectorComponent implements OnInit {
   // (tipType / tipValue / tipWaiterId); el consumidor los traduce
   // a snake_case al backend.
   readonly tipType = signal<'percentage' | 'fixed'>('fixed');
+  readonly tipExpanded = signal(false);
   readonly tipWaiterId = signal<number | null>(null);
   readonly tipValidationError = computed<string | null>(() => {
     if (!this.config().allowTip || this.mode() !== 'contado') return null;
@@ -793,6 +794,7 @@ export class PaymentCollectorComponent implements OnInit {
     const error = this.getFirstValidationError();
     if (!error) return;
     this.flashSection.set(error.section);
+    if (error.section === 'tip') this.tipExpanded.set(true);
     this.flashMessage.set(error.message);
     // Wallet/crédito sin cliente: el collector no captura clientes, así que se lo
     // pide al padre por el mismo escape que ya usan setMode('credito') y
@@ -1558,6 +1560,7 @@ export class PaymentCollectorComponent implements OnInit {
     // colgados del cobro anterior y el siguiente submit los enviaba
     // al backend sin que el operador los hubiera pedido.
     this.tipType.set('fixed');
+    this.tipExpanded.set(false);
     this.tipWaiterId.set(null);
     this.amountOverrideControl.setValue(null);
     this.referenceControl.setValue('');

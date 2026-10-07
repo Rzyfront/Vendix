@@ -246,6 +246,17 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       if (Number.isFinite(total)) {
         model.totals.grand_total = total;
         model.totals.grand_total_formatted = formatFiscalMoney(total);
+
+        // El total de la factura NO incluye la propina (no es ingreso ni base
+        // gravable): pasa debajo del TOTAL fiscal, con el total pagado.
+        const tip = Number(model.totals.tip_amount || 0);
+        if (tip > 0) {
+          const totalPaid = (Math.round(total * 100) + Math.round(tip * 100)) / 100;
+          model.totals.tip_outside_total = true;
+          model.totals.tip_amount_formatted = formatFiscalMoney(tip);
+          model.totals.total_paid = totalPaid;
+          model.totals.total_paid_formatted = formatFiscalMoney(totalPaid);
+        }
       }
 
       // El efectivo recibido y el vuelto NO salen de la factura —son del cobro,
@@ -931,6 +942,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     const tax = Number(order.tax_amount || 0);
     const shipping = Number(order.shipping_cost || 0);
     const grandTotal = Number(order.grand_total || (subtotal - discount + tax + shipping));
+    // La propina vive DENTRO de `grand_total` (fuera de subtotal): fila antes
+    // del TOTAL. `overrideWithInvoiceSnapshot` la mueve debajo si hay factura.
+    const tip = Number((order as any).tip_amount || 0);
 
     return {
       store: {
@@ -1019,6 +1033,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         tax_total_formatted: this.formatOrderMoney(tax),
         grand_total: grandTotal,
         grand_total_formatted: this.formatOrderMoney(grandTotal),
+        ...(tip > 0
+          ? {
+              tip_amount: tip,
+              tip_amount_formatted: this.formatOrderMoney(tip),
+            }
+          : {}),
       },
     };
   }

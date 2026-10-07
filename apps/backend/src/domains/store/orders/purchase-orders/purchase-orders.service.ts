@@ -12,6 +12,7 @@ import {
   validateFreightAndTaxHeader,
 } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
+import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
@@ -1312,14 +1313,29 @@ export class PurchaseOrdersService {
             }
           }
 
-          // Check if product with SKU exists to avoid duplicates
-          const existingProduct = await tx.products.findFirst({
-            where: {
-              sku: item.sku,
-              store_id: storeId,
-              state: { not: 'archived' },
-            },
-          });
+          // Producto existente: primero por SKU y, si no, por código de barras.
+          // Sin el respaldo por código, una línea "nueva" cuyo código ya tiene
+          // un producto no archivado (otra factura, o la misma línea repetida
+          // en esta OC) intentaba crear un duplicado y moría en P2002.
+          const normalizedBarcode =
+            typeof item.barcode === 'string' ? item.barcode.trim() : '';
+          const existingProduct =
+            (await tx.products.findFirst({
+              where: {
+                sku: item.sku,
+                store_id: storeId,
+                state: { not: 'archived' },
+              },
+            })) ??
+            (normalizedBarcode
+              ? await tx.products.findFirst({
+                  where: {
+                    barcode: normalizedBarcode,
+                    store_id: storeId,
+                    state: { not: 'archived' },
+                  },
+                })
+              : null);
 
           const availableForEcommerce = normalizeBool(
             item.available_for_ecommerce ?? true,
@@ -1571,6 +1587,13 @@ export class PurchaseOrdersService {
               }
             }
 
+            // Regla del dueño: un insumo (vendible o no) nunca se publica ni se
+            // destaca en la tienda en línea.
+            if (effectiveIsIngredient || existingProduct.is_ingredient === true) {
+              productUpdateData.available_for_ecommerce = false;
+              productUpdateData.is_featured = false;
+            }
+
             await tx.products.update({
               where: { id: existingProduct.id },
               data: productUpdateData,
@@ -1607,13 +1630,10 @@ export class PurchaseOrdersService {
 
             // ===== A.7 — la colisión de SKU no puede terminar en un 500 =====
             //
-            // `products` tiene `@@unique([store_id, sku])` y el índice NO
-            // distingue estado: el SKU de un producto ARCHIVADO lo sigue
-            // ocupando. El flujo que originó el reporte del dueño —«borro el
-            // producto y lo vuelvo a cargar»— cae justo ahí, y hasta A.4 el
-            // `try/catch` del controlador convertía el P2002 en un HTTP 200
-            // mentiroso; sin él sale un 500 crudo que no dice qué producto
-            // estorba ni ofrece salida.
+            // La unicidad de `products` (store_id, sku) es un índice único
+            // PARCIAL `WHERE state <> 'archived'`: un producto ARCHIVADO ya no
+            // ocupa su SKU, así que la OC no lo «actualiza» ni choca con él:
+            // crea uno nuevo. Solo un dueño NO archivado es colisión.
             //
             // Se comprueba ANTES de crear, no en un `catch`: un error de Postgres
             // ABORTA la transacción, así que dentro del `catch` ya no se puede
@@ -1622,7 +1642,11 @@ export class PurchaseOrdersService {
             // consulta indexada por línea, y solo por línea con producto NUEVO.
             const desiredSku = item.sku || `GEN-${Date.now()}`;
             const skuOwner = await tx.products.findFirst({
-              where: { store_id: storeId, sku: desiredSku },
+              where: {
+                store_id: storeId,
+                sku: desiredSku,
+                state: { not: 'archived' },
+              },
               select: { id: true, name: true, state: true },
             });
             if (skuOwner) {
@@ -1693,10 +1717,25 @@ export class PurchaseOrdersService {
               // El filtro por `target` es deliberadamente estrecho: mapear todo
               // P2002 escondería colisiones de `slug` o `barcode`, que exigen
               // otra explicación y otro remedio.
-              const target = error?.meta?.target;
-              const hitsSku = Array.isArray(target)
-                ? target.includes('sku')
-                : typeof target === 'string' && target.includes('sku');
+              const rawTarget = error?.meta?.target;
+              const constraint =
+                error?.meta?.driverAdapterError?.cause?.constraint;
+              const targetText = [
+                Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
+                // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
+                constraint ? JSON.stringify(constraint) : undefined,
+              ]
+                .filter((v) => typeof v === 'string' && v)
+                .join(' ');
+              const hitsSku = targetText.includes('sku');
+              const hitsBarcode = targetText.includes('barcode');
+              if (error?.code === 'P2002' && hitsBarcode) {
+                throw new VendixHttpException(
+                  ErrorCodes.PROD_BARCODE_DUP_001,
+                  'El código de barras ya está en uso por otro producto de la tienda.',
+                  { concurrent: true },
+                );
+              }
               if (error?.code === 'P2002' && hitsSku) {
                 throw new VendixHttpException(
                   ErrorCodes.PROD_SKU_COLLISION_001,
@@ -3334,6 +3373,8 @@ export class PurchaseOrdersService {
         id: true,
         store_id: true,
         is_ingredient: true,
+        available_for_ecommerce: true,
+        is_featured: true,
         purchase_uom_id: true,
         stock_uom_id: true,
         purchase_to_stock_factor: true,
@@ -3380,6 +3421,11 @@ export class PurchaseOrdersService {
 
     const data: Record<string, any> = {};
     if (!product.is_ingredient) data.is_ingredient = true;
+    // Regla del dueño: el producto resultante es insumo -> fuera de ecommerce.
+    if (product.available_for_ecommerce === true) {
+      data.available_for_ecommerce = false;
+    }
+    if (product.is_featured === true) data.is_featured = false;
     if (
       item.purchase_uom_id != null &&
       product.purchase_uom_id !== item.purchase_uom_id
@@ -5487,6 +5533,100 @@ export class PurchaseOrdersService {
       },
       orderBy: { created_at: 'desc' },
     });
+  }
+
+  /**
+   * Avisa ANTES de crear la OC qué líneas «nuevas» (sin product_id) se
+   * fusionarían con un producto existente o repiten un código de barras.
+   *
+   * Replica el orden de resolución de `create()`: primero SKU, luego código de
+   * barras (ambos contra productos NO archivados de la tienda). Una línea que
+   * no resuelve a un producto y repite el código de una línea anterior (que
+   * tampoco resolvió) crearía un duplicado, así que se reporta aparte.
+   */
+  async findNewItemConflicts(dto: NewItemConflictsDto) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException('Store ID not found in context');
+    }
+
+    const lines = dto.items.map((item) => ({
+      line_index: item.line_index,
+      sku: typeof item.sku === 'string' ? item.sku.trim() : '',
+      barcode: typeof item.barcode === 'string' ? item.barcode.trim() : '',
+    }));
+    const skus = [...new Set(lines.map((l) => l.sku).filter(Boolean))];
+    const barcodes = [...new Set(lines.map((l) => l.barcode).filter(Boolean))];
+
+    // Una sola consulta para todas las líneas; los archivados no ocupan SKU
+    // ni código (índices únicos parciales), así que no cuentan.
+    const orFilters: any[] = [];
+    if (skus.length) orFilters.push({ sku: { in: skus } });
+    if (barcodes.length) orFilters.push({ barcode: { in: barcodes } });
+    const products = orFilters.length
+      ? await this.prisma.products.findMany({
+          where: {
+            store_id: storeId,
+            state: { not: 'archived' },
+            OR: orFilters,
+          },
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            barcode: true,
+            state: true,
+          },
+        })
+      : [];
+
+    const bySku = new Map<string, (typeof products)[number]>();
+    const byBarcode = new Map<string, (typeof products)[number]>();
+    for (const p of products) {
+      if (p.sku) bySku.set(p.sku, p);
+      if (p.barcode) byBarcode.set(p.barcode, p);
+    }
+
+    const conflicts: Array<Record<string, unknown>> = [];
+    // Código de barras -> primera línea que NO resolvió a un producto existente.
+    const firstLineByBarcode = new Map<string, number>();
+
+    for (const line of lines) {
+      const bySkuMatch = line.sku ? bySku.get(line.sku) : undefined;
+      const byBarcodeMatch =
+        !bySkuMatch && line.barcode ? byBarcode.get(line.barcode) : undefined;
+      const match = bySkuMatch ?? byBarcodeMatch;
+
+      if (match) {
+        conflicts.push({
+          line_index: line.line_index,
+          kind: bySkuMatch ? 'sku' : 'barcode',
+          sku: line.sku || null,
+          barcode: line.barcode || null,
+          product_id: match.id,
+          product_name: match.name,
+          product_sku: match.sku,
+          product_state: match.state,
+        });
+        continue;
+      }
+
+      if (line.barcode) {
+        const earlier = firstLineByBarcode.get(line.barcode);
+        if (earlier !== undefined) {
+          conflicts.push({
+            line_index: line.line_index,
+            kind: 'duplicate_barcode_in_order',
+            barcode: line.barcode,
+            duplicate_of_line_index: earlier,
+          });
+        } else {
+          firstLineByBarcode.set(line.barcode, line.line_index);
+        }
+      }
+    }
+
+    return { conflicts };
   }
 
   /**

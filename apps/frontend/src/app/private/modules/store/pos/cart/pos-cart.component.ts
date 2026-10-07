@@ -345,16 +345,16 @@ import {
                   <div class="flex-1 min-w-0">
                     <!-- Line 1: Title + Variant badge + Actions -->
                     <div class="flex items-center justify-between gap-1">
-                      <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
+                      <div class="flex items-center gap-1.5 min-w-0 flex-wrap flex-1">
                         <h4
-                          class="text-xs font-bold text-slate-900 min-w-0 leading-tight"
+                          class="text-xs font-bold text-slate-900 min-w-0 w-full [overflow-wrap:anywhere] leading-tight"
                           [title]="item.product.name"
                         >
                           {{ item.product.name }}
                         </h4>
                         @if (item.variant_display_name) {
                           <span
-                            class="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.2 rounded shrink-0 leading-tight"
+                            class="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.2 rounded min-w-0 max-w-full [overflow-wrap:anywhere] leading-tight"
                           >
                             {{ item.variant_display_name }}
                           </span>
@@ -1034,6 +1034,17 @@ import {
                 (decisión "sin shortcuts" del paso 1); el handler sigue
                 abriendo el checkout-shell actual sin cambios.
               -->
+              @if (hasFinancialSplit()) {
+                <button
+                  type="button"
+                  class="cart-btn checkout-btn"
+                  (click)="chargeAccounts.emit()"
+                  aria-label="Cobrar cuentas"
+                >
+                  <app-icon name="credit-card" [size]="20"></app-icon>
+                  <span>Cobrar cuentas</span>
+                </button>
+              } @else {
               <button
                 type="button"
                 class="cart-btn checkout-btn"
@@ -1064,6 +1075,7 @@ import {
                   <app-icon name="credit-card" [size]="18"></app-icon>
                   <span>Cobrar</span>
                 </button>
+              }
               }
             }
           </div>
@@ -1649,6 +1661,8 @@ private cartService = inject(PosCartService);
    * the cashier has a single, unambiguous next step.
    */
   readonly readyToPayOrder = input<unknown>(null);
+  /** La orden tiene división financiera: solo se cobra por cuentas. */
+  readonly hasFinancialSplit = input<boolean>(false);
   readonly isCharging = input<boolean>(false);
   /**
    * PSVERSION0001 paso 4 — el shell POS pasa su señal cashRegisterEnabled;
@@ -1685,6 +1699,8 @@ private cartService = inject(PosCartService);
    * mounts the reused `OrderPaymentModalComponent` over the fresh order.
    */
   readonly charge = output<void>();
+  /** El cajero pidió cobrar las cuentas de una orden dividida. */
+  readonly chargeAccounts = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
   readonly customerSelected = output<any>();

@@ -37,7 +37,7 @@ export const API_REVERSIBLE_REFUND_PROCESSORS = [
 export type ApiReversibleRefundProcessor =
   (typeof API_REVERSIBLE_REFUND_PROCESSORS)[number];
 
-const CASH_PAYMENT_TYPES = new Set(['cash', 'cash_on_delivery']);
+export const CASH_PAYMENT_TYPES = new Set(['cash', 'cash_on_delivery']);
 const BANK_TRANSFER_PAYMENT_TYPES = new Set(['bank_transfer']);
 /**
  * Tipos de pago cuyo dinero NUNCA fue efectivo ni transferencia: entró como

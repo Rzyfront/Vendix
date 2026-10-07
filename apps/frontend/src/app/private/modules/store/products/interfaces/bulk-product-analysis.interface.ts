@@ -32,7 +32,7 @@ export interface BulkProductAnalysisItem {
   send_preconsultation?: boolean;
   consultation_template_id?: number;
   preconsultation_template_id?: number;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'reactivate';
   status: 'ready' | 'warning' | 'error';
   warnings: (string | BulkValidationMessage)[];
   errors: (string | BulkValidationMessage)[];
@@ -55,7 +55,7 @@ export interface BulkProductUploadItemResult {
   barcode?: string;
   /** Fila real del archivo (absoluta, la calcula el backend). */
   row_number?: number;
-  action?: 'create' | 'update';
+  action?: 'create' | 'update' | 'reactivate';
   product: any;
   status: 'success' | 'error' | 'skipped';
   message: string;

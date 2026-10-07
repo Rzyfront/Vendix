@@ -55,12 +55,15 @@ export class AddressesController {
     const result = this.dianMunicipalitiesService.search(
       query.search,
       query.limit,
+      query.department_code,
     );
     return this.responseService.paginated(
       result.items,
       result.total,
       1,
-      query.limit ?? 20,
+      query.department_code !== undefined
+        ? Math.max(result.items.length, 1)
+        : query.limit ?? 20,
       'Municipios DANE obtenidos exitosamente',
     );
   }

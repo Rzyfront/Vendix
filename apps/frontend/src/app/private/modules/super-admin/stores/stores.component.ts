@@ -23,6 +23,7 @@ import {
   CreateStoreDto,
   StoreDetail,
   StoreUpdatePayload} from './interfaces/store.interface';
+import { ActivatePlanModalComponent } from '../subscriptions/components/activate-plan-modal/activate-plan-modal.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 
 // Import new components
@@ -73,6 +74,7 @@ import './stores.component.css';
     EmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
+    ActivatePlanModalComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -280,6 +282,12 @@ export class StoresComponent implements OnInit, OnChanges {
       variant: 'ghost',
       tooltip: 'Abrir la configuración DIAN del tenant'},
     {
+      label: 'Activar plan',
+      icon: 'credit-card',
+      action: (store) => this.openActivatePlan(store),
+      variant: 'ghost',
+      tooltip: 'Activar un plan registrando el pago por consignación'},
+    {
       label: 'Generar reporte semanal',
       icon: 'file-text',
       action: (store) => this.generateWeeklyReport(store),
@@ -305,6 +313,19 @@ export class StoresComponent implements OnInit, OnChanges {
   readonly isCreateModalOpen = signal(false);
   readonly isCreatingStore = signal(false);
   createStoreForm!: FormGroup;
+
+  // Activate plan modal state
+  readonly isActivatePlanOpen = signal(false);
+  readonly activatePlanStore = signal<StoreListItem | null>(null);
+
+  openActivatePlan(store: StoreListItem): void {
+    this.activatePlanStore.set(store);
+    this.isActivatePlanOpen.set(true);
+  }
+
+  onPlanActivated(): void {
+    this.loadStores();
+  }
 
   // Edit Modal state
   readonly isEditModalOpen = signal(false);

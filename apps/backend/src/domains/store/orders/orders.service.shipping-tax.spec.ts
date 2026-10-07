@@ -357,7 +357,13 @@ describe('OrdersService.update — PATCH de envío (paso 5 B1)', () => {
       shipping_rates: {
         findFirst: jest.fn().mockResolvedValue({ id: 31, shipping_method_id: 4, type: 'flat', base_cost: 20000, is_active: true }),
       },
-      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      invoices: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      // findOne: division financiera + modo cocina (kitchen_mode).
+      order_financial_accounts: { findMany: jest.fn().mockResolvedValue([]) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     snapshotForRate = jest.fn().mockResolvedValue({ ...INC_SNAPSHOT });
     service = Object.create(OrdersService.prototype);

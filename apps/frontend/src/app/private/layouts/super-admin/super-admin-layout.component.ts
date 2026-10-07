@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import {
   Component,
   ViewChild,
@@ -486,6 +487,14 @@ export class SuperAdminLayoutComponent {
   }
 
   constructor() {
+    // El shell admin scrollea solo en su contenedor interno: se bloquea el
+    // scroll de html/body mientras este layout vive (las paginas publicas no
+    // pasan por aqui y conservan su scroll de body).
+    const rootEl = inject(DOCUMENT).documentElement;
+    rootEl.classList.add('vx-admin-shell-lock');
+    this.destroyRef.onDestroy(() =>
+      rootEl.classList.remove('vx-admin-shell-lock'),
+    );
     // Dynamic breadcrumb based on route
     this.updateBreadcrumb(this.router.url);
     this.router.events

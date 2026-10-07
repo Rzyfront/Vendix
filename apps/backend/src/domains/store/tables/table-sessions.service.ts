@@ -1434,7 +1434,7 @@ export class TableSessionsService {
           select: { state: true },
         });
         const invoices = await tx.invoices.findMany({
-          where: { order_id: order.id, store_id: storeId },
+          where: { order_id: order.id, store_id: storeId, financial_account_id: null },
           select: { status: true },
         });
         const eligibility = canReassignOrderToTable({
@@ -2810,6 +2810,7 @@ export class TableSessionsService {
               grand_total: true,
               total_paid: true,
               customer_id: true,
+              active_financial_split_id: true,
               stores: { select: { organization_id: true } },
             },
           },
@@ -2830,6 +2831,8 @@ export class TableSessionsService {
           'La orden asociada pertenece a otra tienda',
         );
       }
+      // Cuenta dividida: la orden principal no confirma cobros; se cobra por cuenta.
+      assertNoActiveFinancialSplit(payment.orders);
 
       const methodType =
         payment.store_payment_method?.system_payment_method?.type ?? null;

@@ -88,7 +88,7 @@ describe('InvoiceScannerModalComponent — QUI-855 descuento general en una sola
         {
           provide: InvoiceScannerService,
           useValue: {
-            scanInvoice: () => of({ success: true, data: scanned }),
+            scanInvoiceAndWait: () => of(scanned),
             matchProducts: () =>
               of({
                 success: true,

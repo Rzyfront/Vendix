@@ -76,6 +76,11 @@ export interface InvoicePdfData {
   tax_amount: number;
   withholding_amount: number;
   total_amount: number;
+  /**
+   * Propina voluntaria de la orden origen. Informativa: NO hace parte de la
+   * factura (ni base gravable ni ingreso); solo se imprime tras el TOTAL.
+   */
+  tip_amount?: number;
 
   // DIAN
   cufe?: string;
@@ -149,6 +154,35 @@ export interface InvoicePdfData {
    * caller omits it.
    */
   tz?: string;
+
+  // --- Opciones ADITIVAS (todas opcionales; sin ellas la salida es la de tienda) ---
+
+  /**
+   * Decimales de los importes. Ausente = pesos enteros (comportamiento de
+   * tienda). El riel plataforma pasa 2: el XML declara centavos y el papel
+   * debe mostrarlos.
+   */
+  money_decimals?: number;
+  /** Rótulo de la columna de impuesto por línea (default `IVA`). */
+  tax_column_label?: string;
+  /**
+   * Líneas de impuesto del bloque de totales, ya rotuladas (`IVA 19%`,
+   * `INC 8%`). Si se informa reemplaza a la línea única «IVA:».
+   */
+  tax_total_lines?: Array<{ label: string; amount: number }>;
+  /** Imprime «NETO A PAGAR» (total − retenciones) cuando hay retenciones. */
+  show_net_payable?: boolean;
+  /** Renglón de moneda / tasa de cambio bajo las fechas del título. */
+  currency_note?: string;
+  /** Hora de expedición (`HH:mm:ss`), se imprime junto a la fecha. */
+  issue_time?: string;
+  /**
+   * Responsabilidades del emisor ya legibles (`O-13 Gran contribuyente`).
+   * Si se informa se imprimen en lugar de los códigos crudos.
+   */
+  company_tax_responsibility_labels?: string[];
+  /** Leyenda del pie; reemplaza la leyenda fija de «válida conforme a la DIAN». */
+  validity_legend?: string;
 }
 
 export interface InvoicePdfItem {
@@ -165,6 +199,10 @@ export interface InvoicePdfItem {
   // Serial number(s) snapshot (CSV) captured at sale time for serialized
   // products (QUI-431). Rendered as a sub-line under the description.
   serial_numbers_snapshot?: string | null;
+  /** Nombre legible de la unidad de medida (`Mes`, `Hora`). Se imprime si viene. */
+  unit_label?: string | null;
+  /** Impuesto de la línea ya rotulado (`IVA 19%`). Se imprime si viene. */
+  tax_label?: string | null;
 }
 
 export interface InvoicePdfTax {
@@ -216,6 +254,8 @@ export interface PdfLayout {
    * mide primero y solo entonces reserva.
    */
   bottom_reserve: number;
+  /** Formateador de importes propio de esta impresión (ver `money_decimals`). */
+  money?: Intl.NumberFormat;
 }
 
 export const GEOMETRY: Record<
@@ -352,10 +392,27 @@ export class InvoicePdfBuilder {
     };
   }
 
+  /** Formatea un importe con el formateador de la impresión (COP entero por defecto). */
+  private static m(L: PdfLayout, value: number): string {
+    return (L.money ?? COP).format(value);
+  }
+
   private static render(
     data: InvoicePdfData,
-    L: PdfLayout,
+    base_layout: PdfLayout,
   ): Promise<{ buffer: Buffer; end_y: number; pages: number }> {
+    const L: PdfLayout =
+      data.money_decimals !== undefined
+        ? {
+            ...base_layout,
+            money: new Intl.NumberFormat('es-CO', {
+              style: 'currency',
+              currency: data.currency || 'COP',
+              minimumFractionDigits: data.money_decimals,
+              maximumFractionDigits: data.money_decimals,
+            }),
+          }
+        : base_layout;
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({
@@ -408,9 +465,9 @@ export class InvoicePdfBuilder {
         // --- Items ---
         doc.moveDown(0.5);
         if (L.roll) {
-          this.drawItemsRoll(doc, L, data.items);
+          this.drawItemsRoll(doc, L, data.items, data.tax_column_label);
         } else {
-          this.drawItemsTable(doc, L, data.items);
+          this.drawItemsTable(doc, L, data.items, data.tax_column_label);
         }
 
         doc.moveDown(0.5);
@@ -462,7 +519,7 @@ export class InvoicePdfBuilder {
         }
 
         // --- Footer ---
-        this.drawFooter(doc, L, data.tz);
+        this.drawFooter(doc, L, data.tz, data.validity_legend);
 
         const range = doc.bufferedPageRange();
         pages = range.count;
@@ -736,7 +793,11 @@ export class InvoicePdfBuilder {
     if (data.company_fiscal_qualities) {
       fiscal_parts.push(data.company_fiscal_qualities);
     }
-    if (data.company_tax_responsibilities?.length) {
+    if (data.company_tax_responsibility_labels?.length) {
+      fiscal_parts.push(
+        `Responsabilidades: ${data.company_tax_responsibility_labels.join('; ')}`,
+      );
+    } else if (data.company_tax_responsibilities?.length) {
       fiscal_parts.push(
         `Responsabilidades: ${data.company_tax_responsibilities.join(', ')}`,
       );
@@ -774,7 +835,9 @@ export class InvoicePdfBuilder {
       .fontSize(this.fs(L, 11))
       .text(`No. ${data.invoice_number}`, L.margin, doc.y + 4, center);
 
-    const date_parts: string[] = [`Fecha de emision: ${data.issue_date}`];
+    const date_parts: string[] = [
+      `Fecha de emision: ${data.issue_date}${data.issue_time ? ` ${data.issue_time}` : ''}`,
+    ];
     if (data.due_date) {
       date_parts.push(`Vencimiento: ${data.due_date}`);
     }
@@ -783,6 +846,10 @@ export class InvoicePdfBuilder {
       .font('Helvetica')
       .fontSize(this.fs(L, 9))
       .text(date_parts.join(L.roll ? '\n' : '  |  '), L.margin, doc.y + 4, center);
+
+    if (data.currency_note) {
+      doc.text(data.currency_note, L.margin, doc.y + 2, center);
+    }
   }
 
   private static drawResolutionInfo(
@@ -905,6 +972,7 @@ export class InvoicePdfBuilder {
     doc: PDFKit.PDFDocument,
     L: PdfLayout,
     items: InvoicePdfItem[],
+    tax_column_label = 'IVA',
   ): void {
     this.drawSectionTitle(doc, L, 'DETALLE DE PRODUCTOS / SERVICIOS');
 
@@ -950,7 +1018,7 @@ export class InvoicePdfBuilder {
       width: col_w.discount,
       align: 'right',
     });
-    doc.text('IVA', col_x.tax, header_y, {
+    doc.text(tax_column_label, col_x.tax, header_y, {
       width: col_w.tax,
       align: 'right',
     });
@@ -983,23 +1051,23 @@ export class InvoicePdfBuilder {
       doc.text(item.description, col_x.description, current_y, {
         width: col_w.description,
       });
-      doc.text(COP.format(item.unit_price), col_x.unit_price, current_y, {
+      doc.text(this.m(L, item.unit_price), col_x.unit_price, current_y, {
         width: col_w.unit_price,
         align: 'right',
       });
       doc.text(
-        item.discount_amount > 0 ? COP.format(item.discount_amount) : '-',
+        item.discount_amount > 0 ? this.m(L, item.discount_amount) : '-',
         col_x.discount,
         current_y,
         { width: col_w.discount, align: 'right' },
       );
       doc.text(
-        item.tax_amount > 0 ? COP.format(item.tax_amount) : '-',
+        item.tax_amount > 0 ? this.m(L, item.tax_amount) : '-',
         col_x.tax,
         current_y,
         { width: col_w.tax, align: 'right' },
       );
-      doc.text(COP.format(item.total_amount), col_x.total, current_y, {
+      doc.text(this.m(L, item.total_amount), col_x.total, current_y, {
         width: col_w.total,
         align: 'right',
       });
@@ -1029,6 +1097,7 @@ export class InvoicePdfBuilder {
     doc: PDFKit.PDFDocument,
     L: PdfLayout,
     items: InvoicePdfItem[],
+    tax_column_label = 'IVA',
   ): void {
     this.drawSectionTitle(doc, L, 'DETALLE');
 
@@ -1044,22 +1113,22 @@ export class InvoicePdfBuilder {
         .font('Helvetica')
         .fontSize(this.fs(L, 8))
         .text(
-          `${this.formatQuantity(item.quantity)} x ${COP.format(item.unit_price)}`,
+          `${this.formatQuantity(item.quantity)} x ${this.m(L, item.unit_price)}`,
           L.margin,
           amount_y,
           { width: L.content * 0.6 },
         );
-      doc.text(COP.format(item.total_amount), L.margin, amount_y, {
+      doc.text(this.m(L, item.total_amount), L.margin, amount_y, {
         width: L.content,
         align: 'right',
       });
 
       const extra: string[] = [];
       if (item.discount_amount > 0) {
-        extra.push(`Descuento: -${COP.format(item.discount_amount)}`);
+        extra.push(`Descuento: -${this.m(L, item.discount_amount)}`);
       }
       if (item.tax_amount > 0) {
-        extra.push(`IVA: ${COP.format(item.tax_amount)}`);
+        extra.push(`${tax_column_label}: ${this.m(L, item.tax_amount)}`);
       }
       extra.push(...this.itemSubLines(item));
 
@@ -1078,6 +1147,14 @@ export class InvoicePdfBuilder {
   /** Tier / packaging / serial snapshot lines shared by both item layouts. */
   private static itemSubLines(item: InvoicePdfItem): string[] {
     const lines: string[] = [];
+
+    if (item.unit_label) {
+      lines.push(`Unidad: ${item.unit_label}`);
+    }
+
+    if (item.tax_label) {
+      lines.push(`Impuesto: ${item.tax_label}`);
+    }
 
     if (item.applied_price_tier_name) {
       lines.push(`Tarifa: ${item.applied_price_tier_name}`);
@@ -1120,12 +1197,12 @@ export class InvoicePdfBuilder {
 
       if (L.roll) {
         doc.text(
-          `${tax.tax_name} (${tax.tax_rate}%) base ${COP.format(tax.taxable_amount)}`,
+          `${tax.tax_name} (${tax.tax_rate}%) base ${this.m(L, tax.taxable_amount)}`,
           L.margin,
           y,
           { width: L.content * 0.68 },
         );
-        doc.text(COP.format(tax.tax_amount), L.margin, y, {
+        doc.text(this.m(L, tax.tax_amount), L.margin, y, {
           width: L.content,
           align: 'right',
         });
@@ -1134,12 +1211,12 @@ export class InvoicePdfBuilder {
           width: L.content * 0.35,
         });
         doc.text(
-          `Base: ${COP.format(tax.taxable_amount)}`,
+          `Base: ${this.m(L, tax.taxable_amount)}`,
           L.margin + L.content * 0.4,
           y,
           { width: L.content * 0.3 },
         );
-        doc.text(COP.format(tax.tax_amount), L.margin, y, {
+        doc.text(this.m(L, tax.tax_amount), L.margin, y, {
           width: L.content - 10,
           align: 'right',
         });
@@ -1166,18 +1243,22 @@ export class InvoicePdfBuilder {
       doc.text(value, totals_x, y, { width: totals_width, align: 'right' });
     };
 
-    line('Subtotal:', COP.format(data.subtotal_amount), doc.y);
+    line('Subtotal:', this.m(L, data.subtotal_amount), doc.y);
 
     if (data.discount_amount > 0) {
-      line('Descuento:', `-${COP.format(data.discount_amount)}`, doc.y + 2);
+      line('Descuento:', `-${this.m(L, data.discount_amount)}`, doc.y + 2);
     }
 
-    if (data.tax_amount > 0) {
-      line('IVA:', COP.format(data.tax_amount), doc.y + 2);
+    if (data.tax_total_lines?.length) {
+      for (const tax_line of data.tax_total_lines) {
+        line(`${tax_line.label}:`, this.m(L, tax_line.amount), doc.y + 2);
+      }
+    } else if (data.tax_amount > 0) {
+      line('IVA:', this.m(L, data.tax_amount), doc.y + 2);
     }
 
     if (data.withholding_amount > 0) {
-      line('Retencion:', `-${COP.format(data.withholding_amount)}`, doc.y + 2);
+      line('Retencion:', `-${this.m(L, data.withholding_amount)}`, doc.y + 2);
     }
 
     // Total
@@ -1197,12 +1278,48 @@ export class InvoicePdfBuilder {
       .fillColor('#000000')
       .text('TOTAL:', totals_x, total_y + 4, { width: totals_width * 0.5 });
 
-    doc.text(COP.format(data.total_amount), totals_x, total_y + 4, {
+    doc.text(this.m(L, data.total_amount), totals_x, total_y + 4, {
       width: totals_width,
       align: 'right',
     });
 
     doc.y = total_y + box_height + 2;
+
+    if (data.show_net_payable && data.withholding_amount > 0) {
+      const net =
+        (Math.round(data.total_amount * 100) -
+          Math.round(data.withholding_amount * 100)) /
+        100;
+      doc.font('Helvetica-Bold').fontSize(this.fs(L, 10)).fillColor('#000000');
+      const net_y = doc.y + 2;
+      doc.text('NETO A PAGAR:', totals_x, net_y, { width: totals_width * 0.6 });
+      doc.text(this.m(L, net), totals_x, net_y, {
+        width: totals_width,
+        align: 'right',
+      });
+      doc.y = net_y + this.fs(L, 10) + 4;
+    }
+
+    // Propina voluntaria: informativa, fuera del TOTAL y del valor en letras.
+    const tip = data.tip_amount ?? 0;
+    if (tip > 0) {
+      const paid =
+        (Math.round(data.total_amount * 100) + Math.round(tip * 100)) / 100;
+      doc.font('Helvetica').fontSize(this.fs(L, 9)).fillColor('#000000');
+      const tip_line = (label: string, value: string) => {
+        const y = doc.y + 2;
+        doc.text(label, totals_x, y, { width: totals_width * 0.6 });
+        const label_end = doc.y;
+        doc.text(value, totals_x, y, { width: totals_width, align: 'right' });
+        doc.y = Math.max(label_end, doc.y);
+      };
+      tip_line(
+        'Propina voluntaria (no hace parte de la factura):',
+        this.m(L, tip),
+      );
+      tip_line('Total pagado:', this.m(L, paid));
+      doc.y += 2;
+    }
 
     // VALOR EN LETRAS. Es la única cifra del documento que se escribe dos veces
     // —en números y en palabras—, así que las dos salen del MISMO
@@ -1439,6 +1556,7 @@ export class InvoicePdfBuilder {
     doc: PDFKit.PDFDocument,
     L: PdfLayout,
     tz?: string,
+    legend?: string,
   ): void {
     const now = new Date();
     // B17 — antes formateaba en la zona del contenedor (sin `timeZone`); el
@@ -1458,7 +1576,8 @@ export class InvoicePdfBuilder {
       .fontSize(this.fs(L, 7))
       .fillColor('#999999')
       .text(
-        'Esta factura electronica fue generada por Vendix y es valida conforme a la normativa de la DIAN.',
+        legend ??
+          'Esta factura electronica fue generada por Vendix y es valida conforme a la normativa de la DIAN.',
         L.margin,
         doc.y,
         { align: 'center', width: L.content },

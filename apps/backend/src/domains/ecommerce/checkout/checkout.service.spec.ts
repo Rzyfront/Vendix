@@ -707,6 +707,22 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(result.discount_amount).toBe(1500);
     });
 
+    it('rechaza con ECOM_PRODUCT_002 un insumo (is_ingredient=true) aunque sea vendible', async () => {
+      prisma.products.findUnique.mockResolvedValue(
+        { ...buildProduct(), is_ingredient: true },
+      );
+
+      await expect(
+        service.checkout({
+          payment_method_id: 7,
+          items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+          guest_customer: { first_name: 'Invitado' },
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'ECOM_PRODUCT_002' });
+
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
     it('rejects an invalid coupon and never creates an order', async () => {
       couponsService.validate.mockRejectedValue(
         new VendixHttpException({

@@ -296,6 +296,9 @@ export const Endpoints = {
       APPROVE: '/store/orders/purchase-orders/:id/approve',
       RECEIVE: '/store/orders/purchase-orders/:id/receive',
       COST_PREVIEW: '/store/orders/purchase-orders/cost-preview',
+      /** Escaneo de factura asíncrono: POST encola (202 {job_id}), GET sondea. */
+      SCAN_ASYNC: '/store/orders/purchase-orders/scan/async',
+      SCAN_ASYNC_STATUS: '/store/orders/purchase-orders/scan/async/:jobId',
     },
     ACCOUNTING: {
       ACCOUNTS: {

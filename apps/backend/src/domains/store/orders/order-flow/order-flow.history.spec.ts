@@ -890,6 +890,8 @@ describe('OrderFlowService.deliverOrderItem — item_delivered', () => {
       stores: { organization_id: 9 },
     };
     const prismaMock: any = {
+      // kitchen_mode (modo cocina fisica): sin ajustes => 'virtual'.
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         findFirst: jest.fn().mockResolvedValue({
           id: ITEM_ID,
@@ -1258,6 +1260,24 @@ describe('OrderFlowService.applyDispatchCodPayment — payment_registered (liste
     );
     return { prismaMock, orderHistoryService, service };
   };
+
+  it('rechaza el recaudo con SPLIT_ACCOUNT_LOCKED si la orden tiene cuentas independientes', async () => {
+    const { prismaMock, orderHistoryService, service } = build();
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: ORDER_ID, currency: 'COP', total_paid: 0, remaining_balance: 30000,
+      customer_id: 12, active_financial_split_id: 5, stores: { organization_id: 3 },
+    });
+
+    const error: any = await service
+      .applyDispatchCodPayment({
+        storeId: STORE_ID, dispatchNoteId: NOTE_ID, amount: 30000, correlationKey: 'k-split',
+      })
+      .catch((failure) => failure);
+
+    expect(error.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(orderHistoryService.record).not.toHaveBeenCalled();
+  });
 
   it('registra payment_registered en la MISMA tx del payments.create, con id/monto/método y source listener', async () => {
     const { prismaMock, orderHistoryService, service } = build();

@@ -2623,6 +2623,131 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
    * validar la combinación: un producto podía nacer con IVA + INC o dos IVA y
    * cobrarse dos veces en POS. Misma regla que products (PROD_TAX_COMBO_001).
    */
+  describe('SKU de un producto archivado', () => {
+    const newProductDto = () => ({
+      ...baseDto(),
+      items: [
+        {
+          product_name: 'Camisa Nueva',
+          sku: 'SKU-ARCH',
+          quantity: 1,
+          unit_price: 1000,
+        },
+      ],
+    });
+
+    it('la OC no actualiza ni choca con el archivado: crea un producto nuevo', async () => {
+      const tx: any = mockCreateTx();
+      // El archivado existe, pero SOLO lo ve una consulta sin filtro de estado.
+      const archived = { id: 99, name: 'Camisa Vieja', state: 'archived' };
+      tx.products.findFirst = jest.fn(async ({ where }: any) =>
+        where.state?.not === 'archived' ? null : archived,
+      );
+      tx.products.create = jest.fn().mockResolvedValue({ id: 8001 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(newProductDto() as any);
+
+      // Ninguna búsqueda por SKU puede ver archivados.
+      const skuLookups = tx.products.findFirst.mock.calls.filter(
+        (c: any) => c[0].where.sku === 'SKU-ARCH',
+      );
+      expect(skuLookups).toHaveLength(2);
+      for (const [arg] of skuLookups) {
+        expect(arg.where).toEqual({
+          store_id: STORE_ID,
+          sku: 'SKU-ARCH',
+          state: { not: 'archived' },
+        });
+      }
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+      expect(tx.products.create.mock.calls[0][0].data).toMatchObject({
+        sku: 'SKU-ARCH',
+        name: 'Camisa Nueva',
+        store_id: STORE_ID,
+      });
+      expect(tx.products.update).toBeUndefined();
+    });
+
+    it('un SKU ocupado por un producto NO archivado sigue siendo PROD_SKU_COLLISION_001', async () => {
+      const tx: any = mockCreateTx();
+      // `existingProduct` (1ª consulta) no lo ve; el chequeo A.7 (2ª) sí.
+      const owner = { id: 5, name: 'Camisa Activa', state: 'active' };
+      tx.products.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(owner);
+      tx.products.create = jest.fn();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      let caught: any = null;
+      try {
+        await service.create(newProductDto() as any);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught?.errorCode).toBe('PROD_SKU_COLLISION_001');
+      expect(caught.getResponse().details).toMatchObject({
+        sku: 'SKU-ARCH',
+        product_id: 5,
+        is_archived: false,
+      });
+      expect(tx.products.create).not.toHaveBeenCalled();
+    });
+
+    it('una línea nueva con código de barras ya usado se une al producto existente (sin crear)', async () => {
+      const tx: any = mockCreateTx();
+      const byBarcode = { id: 5, name: 'Ron Viejo', state: 'active' };
+      // 1ª consulta: por SKU (nada). 2ª: por código de barras (el activo).
+      tx.products.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(byBarcode);
+      tx.products.create = jest.fn();
+      tx.products.update = jest.fn().mockResolvedValue({ id: 5 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create({
+        ...baseDto(),
+        items: [
+          {
+            product_name: 'Ron Nuevo',
+            sku: 'SKU-NEW',
+            barcode: '7701234',
+            quantity: 1,
+            unit_price: 1000,
+          },
+        ],
+      } as any);
+
+      expect(tx.products.findFirst.mock.calls[1][0].where).toEqual({
+        barcode: '7701234',
+        store_id: STORE_ID,
+        state: { not: 'archived' },
+      });
+      expect(tx.products.create).not.toHaveBeenCalled();
+      expect(tx.products.update).toHaveBeenCalledTimes(1);
+      expect(tx.products.update.mock.calls[0][0].where).toEqual({ id: 5 });
+      const poData = tx.purchase_orders.create.mock.calls[0][0].data;
+      expect(poData.purchase_order_items.create[0].product_id).toBe(5);
+    });
+
+    it('una línea nueva sin código de barras no hace búsqueda por código', async () => {
+      const tx: any = mockCreateTx();
+      tx.products.findFirst = jest.fn().mockResolvedValue(null);
+      tx.products.create = jest.fn().mockResolvedValue({ id: 8002 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(newProductDto() as any);
+
+      const barcodeLookups = tx.products.findFirst.mock.calls.filter(
+        (c: any) => 'barcode' in c[0].where,
+      );
+      expect(barcodeLookups).toHaveLength(0);
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('P1-4: combinación de impuestos del producto', () => {
     const categories = [
       { id: 1, name: 'IVA 19%', tax_type: 'iva', tax_rates: [{ store_id: null }] },
@@ -3082,5 +3207,190 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     expect(groups).toEqual([
       { tax_rate: 5, tax_type: 'iva', taxable_amount: 3000, tax_amount: 150 },
     ]);
+  });
+});
+
+describe('PurchaseOrdersService.persistIngredientConfigToProduct — insumos fuera de ecommerce', () => {
+  const run = async (product: Record<string, any>) => {
+    const svc: any = Object.create(PurchaseOrdersService.prototype);
+    const tx = {
+      products: {
+        findFirst: jest.fn().mockResolvedValue(product),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      stores: {
+        findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }),
+      },
+      units_of_measure: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    await svc.persistIngredientConfigToProduct(
+      7,
+      { purchase_uom_id: 3, stock_uom_id: 4 },
+      tx,
+    );
+    return tx;
+  };
+
+  it('al marcar un producto existente como insumo fuerza available_for_ecommerce=false e is_featured=false', async () => {
+    const tx = await run({
+      id: 7,
+      store_id: 10,
+      is_ingredient: false,
+      available_for_ecommerce: true,
+      is_featured: true,
+      purchase_uom_id: null,
+      stock_uom_id: null,
+      purchase_to_stock_factor: null,
+    });
+    expect(tx.products.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: expect.objectContaining({
+        is_ingredient: true,
+        available_for_ecommerce: false,
+        is_featured: false,
+      }),
+    });
+  });
+
+  it('un insumo ya publicado (dato viejo) se despublica aunque la config UoM no cambie', async () => {
+    const tx = await run({
+      id: 7,
+      store_id: 10,
+      is_ingredient: true,
+      available_for_ecommerce: true,
+      is_featured: false,
+      purchase_uom_id: 3,
+      stock_uom_id: 4,
+      purchase_to_stock_factor: null,
+    });
+    expect(tx.products.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: { available_for_ecommerce: false },
+    });
+  });
+});
+
+describe('PurchaseOrdersService.findNewItemConflicts()', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  const STORE_ID = 10;
+
+  beforeEach(async () => {
+    prismaService = { products: { findMany: jest.fn().mockResolvedValue([]) } };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        purchaseVatContributionProvider(),
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  it('SKU que ya existe: conflicto kind=sku con el producto', async () => {
+    prismaService.products.findMany.mockResolvedValue([
+      { id: 5, name: 'Ron Viejo', sku: 'SKU-1', barcode: null, state: 'active' },
+    ]);
+
+    const res = await service.findNewItemConflicts({
+      items: [{ line_index: 0, sku: ' SKU-1 ', barcode: '' }],
+    } as any);
+
+    expect(res.conflicts).toEqual([
+      {
+        line_index: 0,
+        kind: 'sku',
+        sku: 'SKU-1',
+        barcode: null,
+        product_id: 5,
+        product_name: 'Ron Viejo',
+        product_sku: 'SKU-1',
+        product_state: 'active',
+      },
+    ]);
+  });
+
+  it('código de barras que ya existe (SKU distinto): conflicto kind=barcode', async () => {
+    prismaService.products.findMany.mockResolvedValue([
+      { id: 5, name: 'Ron Viejo', sku: 'OTRO', barcode: '7701234', state: 'active' },
+    ]);
+
+    const res = await service.findNewItemConflicts({
+      items: [{ line_index: 2, sku: 'SKU-NEW', barcode: '7701234' }],
+    } as any);
+
+    expect(res.conflicts).toEqual([
+      {
+        line_index: 2,
+        kind: 'barcode',
+        sku: 'SKU-NEW',
+        barcode: '7701234',
+        product_id: 5,
+        product_name: 'Ron Viejo',
+        product_sku: 'OTRO',
+        product_state: 'active',
+      },
+    ]);
+  });
+
+  it('mismo código de barras en dos líneas nuevas: la segunda es duplicate_barcode_in_order', async () => {
+    const res = await service.findNewItemConflicts({
+      items: [
+        { line_index: 0, sku: 'A', barcode: '999' },
+        { line_index: 1, sku: 'B', barcode: '999' },
+      ],
+    } as any);
+
+    expect(res.conflicts).toEqual([
+      {
+        line_index: 1,
+        kind: 'duplicate_barcode_in_order',
+        barcode: '999',
+        duplicate_of_line_index: 0,
+      },
+    ]);
+  });
+
+  it('ignora archivados: la consulta filtra state != archived y por tienda', async () => {
+    await service.findNewItemConflicts({
+      items: [{ line_index: 0, sku: 'SKU-ARCH', barcode: '123' }],
+    } as any);
+
+    const where = prismaService.products.findMany.mock.calls[0][0].where;
+    expect(where.state).toEqual({ not: 'archived' });
+    expect(where.store_id).toBe(STORE_ID);
+    expect(where.OR).toEqual([
+      { sku: { in: ['SKU-ARCH'] } },
+      { barcode: { in: ['123'] } },
+    ]);
+  });
+
+  it('sin coincidencias: conflicts vacío', async () => {
+    const res = await service.findNewItemConflicts({
+      items: [{ line_index: 0, sku: 'X', barcode: '1' }, { line_index: 1 }],
+    } as any);
+    expect(res).toEqual({ conflicts: [] });
   });
 });
