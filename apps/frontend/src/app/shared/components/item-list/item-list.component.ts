@@ -463,6 +463,12 @@ export class ItemListComponent {
     return acts.filter((action) => this.isActionVisible(action, item));
   }
 
+  getDirectActions(item: any): TableAction[] {
+    return this.actionsDisplay() === 'dropdown'
+      ? []
+      : this.getVisibleActions(item).slice(0, this.directActionsCount());
+  }
+
   getMenuActions(item: any): TableAction[] {
     const visibleActions = this.getVisibleActions(item);
     return this.actionsDisplay() === 'dropdown'

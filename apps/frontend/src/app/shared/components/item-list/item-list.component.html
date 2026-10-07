@@ -239,7 +239,7 @@
                   @if (actionsDisplay() === 'buttons') {
                     <!-- First configured visible actions -->
                     @for (
-                      action of getVisibleActions(item).slice(0, directActionsCount());
+                      action of getDirectActions(item);
                       track action
                     ) {
                       <button
