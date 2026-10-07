@@ -308,6 +308,15 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
 
       this.map.on('load', () => {
         this.mapLoaded = true;
+        // A focus that arrived between map construction and `load` was
+        // dropped by the effect (mapLoaded was false): frame it now.
+        const pendingFocus = this.focusArea();
+        if (!this.center() && pendingFocus) {
+          this.map.jumpTo({
+            center: [pendingFocus.lng, pendingFocus.lat],
+            zoom: CITY_ZOOM,
+          });
+        }
         this.loading.set(false);
         // A slow basemap can finish AFTER LOAD_TIMEOUT_MS already raised the
         // "no se pudo cargar" placeholder. That placeholder is opaque and

@@ -1451,16 +1451,9 @@ export class CheckoutComponent implements OnInit {
     if (this.scope_focus()) return;
     try {
       const res = await firstValueFrom(
-        this.geocoding.forward(
-          `${muni.city}, ${muni.state_province}, Colombia`,
-          { city: muni.city, state: muni.state_province },
-        ),
+        this.geocoding.municipalityCenter(muni.city, muni.state_province),
       );
-      this.scope_focus.set(
-        res?.lat != null && res?.lng != null
-          ? { lat: res.lat, lng: res.lng }
-          : null,
-      );
+      this.scope_focus.set(res);
     } catch {
       this.scope_focus.set(null);
     }

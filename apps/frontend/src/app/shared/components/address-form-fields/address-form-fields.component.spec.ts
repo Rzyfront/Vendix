@@ -22,6 +22,7 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
   let resolveByCode: jasmine.Spy;
   let listByDepartment: jasmine.Spy;
   let forward: jasmine.Spy;
+  let municipalityCenter: jasmine.Spy;
 
   const riohacha = {
     code: '44001', name: 'Riohacha', department_code: '44',
@@ -39,6 +40,9 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
       }]),
     );
     forward = jasmine.createSpy('forward').and.returnValue(of(null));
+    municipalityCenter = jasmine
+      .createSpy('municipalityCenter')
+      .and.returnValue(of({ lat: 11.54, lng: -72.91 }));
     TestBed.configureTestingModule({
       imports: [AddressFormFieldsComponent],
       providers: [
@@ -49,7 +53,7 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
             resolveByName, resolveByCode, setBaseUrl: () => {},
           },
         },
-        { provide: GeocodingService, useValue: { forward, reverse: () => of(null) } },
+        { provide: GeocodingService, useValue: { forward, municipalityCenter, reverse: () => of(null) } },
         {
           provide: CurrencyFormatService,
           useValue: {
@@ -192,7 +196,6 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
 
   it('ubicación fija resuelta: oculta selectores, muestra chip y el form es válido con dirección y teléfono', async () => {
     resolveByName.and.returnValue(of(riohacha));
-    forward.and.returnValue(of({ lat: 11.54, lng: -72.9, precision: 'area' }));
     fixture.componentRef.setInput('lockedLocation', {
       country_code: 'CO', state_province: 'La Guajira', city: 'Riohacha',
     });
@@ -213,7 +216,8 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
     // País, departamento y ciudad ocultos.
     expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(0);
     // El centroide es solo visual: nunca llega a coordenadas ni a has_location.
-    expect(component.municipalityFocus()).toEqual({ lat: 11.54, lng: -72.9 });
+    expect(component.municipalityFocus()).toEqual({ lat: 11.54, lng: -72.91 });
+    expect(municipalityCenter).toHaveBeenCalledWith('Riohacha', 'La Guajira');
     expect(component.coordsSignal()).toBeNull();
     expect(component.form.get('latitude')!.value).toBeNull();
     expect(component.mapCenterHint()).toBeNull();
@@ -232,6 +236,7 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
     expect(fixture.debugElement.query(By.css('.locked-location-chip'))).toBeNull();
     expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(3);
     expect(forward).not.toHaveBeenCalled();
+    expect(municipalityCenter).not.toHaveBeenCalled();
   });
 
   it('sin lockedLocation el comportamiento no cambia', async () => {

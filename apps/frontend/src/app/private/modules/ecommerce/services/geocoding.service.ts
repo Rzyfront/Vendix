@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
@@ -119,6 +119,37 @@ export class GeocodingService {
               : (res as ForwardGeocodeResult);
           return payload;
         }),
+      );
+  }
+
+  /**
+   * Center of a municipality, ONLY to frame the map visually (never a pin nor
+   * a delivery coordinate). Emits `null` when unresolved or on any error.
+   */
+  municipalityCenter(
+    city: string,
+    state?: string,
+  ): Observable<{ lat: number; lng: number } | null> {
+    let params = new HttpParams().set('city', city);
+    if (state) params = params.set('state', state);
+
+    type Center = { lat: number | null; lng: number | null };
+    return this.http
+      .get<{ success: boolean; data: Center } | Center>(
+        `${this.api_url}/municipality-center`,
+        { headers: this.getHeaders(), params },
+      )
+      .pipe(
+        map((res) => {
+          const payload =
+            res && typeof res === 'object' && 'data' in res
+              ? (res as { data: Center }).data
+              : (res as Center);
+          return payload?.lat != null && payload?.lng != null
+            ? { lat: payload.lat, lng: payload.lng }
+            : null;
+        }),
+        catchError(() => of(null)),
       );
   }
 }

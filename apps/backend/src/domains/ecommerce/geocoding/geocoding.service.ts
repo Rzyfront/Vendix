@@ -511,6 +511,32 @@ export class GeocodingService {
 
   // ------------------------------------------------------- Municipality bbox
 
+  /**
+   * Center of the municipality bounding box. VISUAL FRAMING ONLY — never a
+   * delivery location. Never throws: any failure resolves to `null`.
+   */
+  async municipalityCenter(
+    city: string,
+    state?: string | null,
+  ): Promise<{ lat: number; lng: number } | null> {
+    try {
+      const cleanCity = (city ?? '').trim();
+      if (cleanCity.length < 2) return null;
+      const bbox = await this.resolveMunicipalityBbox(
+        cleanCity,
+        state?.trim() || null,
+        new RequestBudget(1),
+      );
+      if (!bbox) return null;
+      return {
+        lat: (bbox.south + bbox.north) / 2,
+        lng: (bbox.west + bbox.east) / 2,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   private async resolveMunicipalityBbox(
     city: string,
     state: string | null,

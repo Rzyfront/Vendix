@@ -991,3 +991,46 @@ describe('GeocodingService.forward — Google fallback integration (real GoogleG
     expect(result.lat).toBeCloseTo(4.65);
   });
 });
+
+describe('GeocodingService.municipalityCenter', () => {
+  let service: GeocodingService;
+
+  beforeEach(() => {
+    const redis = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue('OK'),
+    };
+    service = new GeocodingService(
+      redis as never,
+      { geocode: jest.fn().mockResolvedValue(null) } as never,
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('returns the center of the resolved bbox', async () => {
+    const spy = jest
+      .spyOn(service as any, 'resolveMunicipalityBbox')
+      .mockResolvedValue({ south: 11.0, north: 12.0, west: -73.0, east: -72.0 });
+
+    const center = await service.municipalityCenter(' Riohacha ', ' La Guajira ');
+
+    expect(center).toEqual({ lat: 11.5, lng: -72.5 });
+    expect(spy).toHaveBeenCalledWith('Riohacha', 'La Guajira', expect.anything());
+  });
+
+  it('returns null when the bbox cannot be resolved', async () => {
+    jest.spyOn(service as any, 'resolveMunicipalityBbox').mockResolvedValue(null);
+
+    expect(await service.municipalityCenter('Riohacha', null)).toBeNull();
+  });
+
+  it('returns null for an unusable city without resolving anything', async () => {
+    const spy = jest.spyOn(service as any, 'resolveMunicipalityBbox');
+
+    expect(await service.municipalityCenter('  ', 'La Guajira')).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

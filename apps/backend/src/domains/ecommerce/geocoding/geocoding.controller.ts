@@ -16,6 +16,7 @@ import {
 } from './geocoding.service';
 import { ReverseGeocodeDto } from './dto/reverse-geocode.dto';
 import { ForwardGeocodeDto } from './dto/forward-geocode.dto';
+import { MunicipalityCenterDto } from './dto/municipality-center.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
@@ -131,6 +132,26 @@ export class GeocodingController {
       municipalityCode: query.municipality_code,
       bias,
     });
+  }
+
+  /**
+   * `GET /ecommerce/geocoding/municipality-center?city={city}&state={state}`
+   *
+   * Center of the municipality bounding box, ONLY for visually framing the
+   * map. It is never a delivery location: callers must not use it as pin,
+   * coordinates or for shipping quotes. Returns `{ lat: null, lng: null }`
+   * when the municipality cannot be resolved.
+   */
+  @Get('municipality-center')
+  @OptionalAuth()
+  async municipalityCenter(
+    @Query() query: MunicipalityCenterDto,
+  ): Promise<{ lat: number | null; lng: number | null }> {
+    const center = await this.geocodingService.municipalityCenter(
+      query.city,
+      query.state,
+    );
+    return center ?? { lat: null, lng: null };
   }
 
   /**

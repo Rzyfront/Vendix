@@ -851,17 +851,12 @@ export class AddressFormFieldsComponent {
     this.municipalityFocusKey = key;
     this.municipalityFocus.set(null);
     this.geocoding
-      .forward(`${loc.city}, ${loc.state_province}, Colombia`, {
-        city: loc.city,
-        state: loc.state_province,
-      })
+      .municipalityCenter(loc.city, loc.state_province)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           if (this.municipalityFocusKey !== key) return;
-          this.municipalityFocus.set(
-            res?.lat != null && res?.lng != null ? { lat: res.lat, lng: res.lng } : null,
-          );
+          this.municipalityFocus.set(res);
         },
         error: () => {
           if (this.municipalityFocusKey === key) this.municipalityFocus.set(null);
