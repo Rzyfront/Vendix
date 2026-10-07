@@ -39,6 +39,62 @@
   margin: 0;
 }
 
+.pc-tip-toggle {
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+
+  .section-title {
+    flex: 1 1 auto;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 3px;
+    border-radius: var(--radius-md, 8px);
+  }
+}
+
+.pc-tip-toggle--collapsed {
+  min-height: 48px;
+  margin-bottom: 0;
+  padding: 12px 16px;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+  color: var(--color-primary);
+  font-weight: 600;
+  transition:
+    background-color 0.15s ease,
+    border-style 0.15s ease;
+
+  .section-title {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  &:hover {
+    border-style: solid;
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  }
+}
+
+.pc-tip-add-icon {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  color: var(--color-primary);
+}
+
 /* Prominent total */
 .total-label {
   font-size: 10px;
@@ -1053,4 +1109,3 @@
     flex-wrap: nowrap;
   }
 }
-

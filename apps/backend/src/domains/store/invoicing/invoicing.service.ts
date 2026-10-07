@@ -20,7 +20,7 @@ import {
   FiscalInvoiceThresholdService,
   POS_EQUIVALENT_DOCUMENT_UVT_LIMIT,
 } from '@common/services/fiscal-invoice-threshold.service';
-import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { VendixHttpException, ErrorCodes, FinancialSplitErrors } from 'src/common/errors';
 import type { EmitReadinessFinding } from './invoice-flow/emit-readiness.contract';
 import { exceptionToFinding } from './utils/exception-to-finding.util';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
@@ -2989,6 +2989,9 @@ export class InvoicingService {
     const existing = await this.prisma.invoices.findFirst({
       where: {
         ...where,
+        // Las facturas de cuenta (reparto financiero) cuelgan de la orden por
+        // `order_id` pero no son «la factura de la orden».
+        financial_account_id: null,
         invoice_type: 'sales_invoice',
         status: { notIn: ['voided', 'cancelled'] },
       },
@@ -3779,7 +3782,37 @@ export class InvoicingService {
         throw new VendixHttpException(ErrorCodes.INVOICING_CREATE_003, 'La cuenta cambió; recarga antes de facturar.');
       }
       const existing = await tx.invoices.findFirst({ where: { financial_account_id: accountId, invoice_type: 'sales_invoice', status: { notIn: ['voided', 'cancelled'] }, store_id: context.store_id }, include: INVOICE_INCLUDE });
-      if (existing) return existing;
+      // Documento ya numerado/transmitido (o rechazado): se devuelve tal cual.
+      // Sólo un documento AÚN NO EMITIDO (`draft`/`validated`) se somete otra
+      // vez a la regla de pago, para que un borrador viejo creado antes de la
+      // guarda no la esquive.
+      if (existing && !['draft', 'validated'].includes(existing.status)) {
+        return existing;
+      }
+      // Una cuenta se factura DESPUÉS de cobrarse completa (también la retenida
+      // «paid_original»: solo se exime si ya está pagada).
+      if (paid.lt(account.grand_total)) {
+        throw new VendixHttpException(FinancialSplitErrors.SPLIT_ACCOUNT_UNPAID_INVOICE);
+      }
+      if (existing) {
+        // Borrador sin emitir y cuenta ya cobrada: se refresca forma/medio de
+        // pago (un borrador viejo pudo nacer a crédito, payment_form=2). Es lo
+        // menos invasivo: no se cancela ni se recrea, así no se duplica fila.
+        if (
+          existing.payment_form !== means.payment_form ||
+          existing.payment_means_code !== means.payment_means_code
+        ) {
+          await tx.invoices.update({
+            where: { id: existing.id },
+            data: {
+              payment_form: means.payment_form,
+              payment_means_code: means.payment_means_code,
+            },
+          });
+          return tx.invoices.findFirstOrThrow({ where: { id: existing.id, store_id: context.store_id }, include: INVOICE_INCLUDE });
+        }
+        return existing;
+      }
       const created = await tx.invoices.create({
         data: {
           organization_id: context.organization_id,

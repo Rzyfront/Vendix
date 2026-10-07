@@ -54,7 +54,7 @@ import {
   isInvoiceOcrV2,
   toInvoiceOcrV2Shape,
 } from './invoice-ocr-v2.adapter';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * Resultado interno del emparejador de productos.
@@ -153,8 +153,31 @@ export class InvoiceScannerService {
       );
     }
 
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
+    return this.scanInvoiceFromBuffer(
+      file.buffer,
+      file.mimetype,
+      orderType,
+      scanAttachment,
+    );
+  }
+
+  /**
+   * Pipeline OCR completo desde un buffer (preprocesado + IA + normalizacion).
+   * Lo usan `scanInvoice` (sync) y el processor async `invoice-scan`.
+   */
+  async scanInvoiceFromBuffer(
+    buffer: Buffer,
+    mimeType: string,
+    orderType: 'retail' | 'ingredient',
+    scanAttachment: InvoiceScanResult['scan_attachment'],
+  ): Promise<InvoiceScanResult> {
+    const prepared = await this.preprocessImage({
+      buffer,
+      mimetype: mimeType,
+      size: buffer?.length ?? 0,
+    } as Express.Multer.File);
+    const base64 = prepared.base64;
+    const dataUri = `data:${prepared.mimeType};base64,${base64}`;
 
     this.logger.debug(`[InvoiceScan] DataURI length: ${dataUri.length} chars`);
 
@@ -873,9 +896,10 @@ export class InvoiceScannerService {
    * CP-PURCHASE-TRANSPARENCY D.1 — los tres niveles excluyen los productos
    * ARCHIVADOS.
    *
-   * Por qué era la puerta de entrada del defecto: `@@unique([store_id, sku])`
-   * impide crear un producto nuevo con el SKU de uno archivado, así que el
-   * operador que «borra y vuelve a cargar» pasa forzosamente por el nivel 1. Y
+   * Por qué era la puerta de entrada del defecto: antes `@@unique([store_id, sku])`
+   * impedía crear un producto nuevo con el SKU de uno archivado; ahora los
+   * índices únicos parciales (`WHERE state <> 'archived'`) lo permiten, pero el
+   * operador que «borra y vuelve a cargar» sigue pasando por el nivel 1. Y
    * ahí el emparejamiento se autoselecciona con confianza ≥ 90 sin que nadie
    * mire: `selected_product_id` quedaba sellado contra un producto archivado y
    * la compra volvía a promediar su costo y su stock. `matchSupplier` ya
@@ -909,6 +933,9 @@ export class InvoiceScannerService {
           cost_price: true,
           state: true,
         },
+        // Un archivado ya no ocupa su SKU: si conviven activo y archivado,
+        // gana el no archivado ('archived' es el último valor del enum).
+        orderBy: [{ state: 'asc' }, { updated_at: 'desc' }],
       });
       if (bySku) {
         // `seenIds` se marca en AMBAS ramas: un archivado descartado acá no

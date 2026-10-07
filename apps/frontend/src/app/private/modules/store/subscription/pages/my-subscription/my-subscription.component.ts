@@ -16,6 +16,9 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
 import { WompiCheckoutService } from '../../../../../../core/services/wompi-checkout.service';
 import {
+  AiUsageGroupKey,
+  AiUsageReport,
+  AiUsageUnit,
   STATE_PAYWALL_MAP,
   SubscriptionAccessService,
 } from '../../../../../../core/services/subscription-access.service';
@@ -547,87 +550,52 @@ import {
                   <app-icon name="bar-chart-3" [size]="20" class="text-text-primary"></app-icon>
                   <h3 class="text-base font-bold text-text-primary">Uso de funciones IA</h3>
                 </div>
-                <span class="text-xs text-text-secondary">
-                  {{ enabledCount() }} de {{ featuresList().length }} habilitadas
-                </span>
+                <span class="text-xs text-text-secondary">Consumo de este mes</span>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                @for (feature of featuresList(); track feature.key) {
-                  <div
-                    class="p-4 rounded-xl border-2 space-y-3 transition-all hover:shadow-sm"
-                    [class.bg-green-50/40]="feature.enabled"
-                    [class.border-green-200]="feature.enabled"
-                    [class.bg-gray-50]="!feature.enabled"
-                    [class.border-gray-200]="!feature.enabled"
-                    [class.opacity-60]="!feature.enabled"
-                  >
-                    <div class="flex items-start justify-between gap-2">
-                      <div class="flex items-center gap-2 min-w-0">
+              @if (usageLoading()) {
+                <p class="text-sm text-text-secondary">Cargando consumo...</p>
+              } @else if (usageGroups() === null) {
+                <p class="text-sm text-text-secondary">No se pudo cargar el consumo de IA.</p>
+              } @else if (usageGroups()!.length === 0) {
+                <p class="text-sm text-text-secondary">Aún no hay consumo de IA este mes.</p>
+              } @else {
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  @for (g of usageGroups(); track g.group) {
+                    <div class="p-4 rounded-xl border border-border bg-surface space-y-3">
+                      <div class="flex items-center gap-3 min-w-0">
                         <div
-                          class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                          [class.bg-green-100]="feature.enabled"
-                          [class.bg-gray-100]="!feature.enabled"
+                          class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center shrink-0"
                         >
-                          <app-icon
-                            [name]="feature.icon"
-                            [size]="18"
-                            [class.text-green-600]="feature.enabled"
-                            [class.text-gray-400]="!feature.enabled"
-                          ></app-icon>
+                          <app-icon [name]="g.icon" [size]="18" class="text-primary"></app-icon>
                         </div>
                         <div class="min-w-0">
-                          <p
-                            class="text-sm font-semibold truncate"
-                            [class.text-text-primary]="feature.enabled"
-                            [class.text-text-secondary]="!feature.enabled"
-                          >
-                            {{ feature.label }}
-                          </p>
-                          @if (feature.enabled && feature.limit !== null) {
-                            <p class="text-[11px] text-text-secondary">
-                              {{ feature.used }} / {{ feature.limit }} {{ feature.unit || '' }}
-                              @if (feature.period === 'daily') {
-                                <span>· por día</span>
-                              } @else if (feature.period === 'monthly') {
-                                <span>· por mes</span>
-                              }
-                            </p>
-                          } @else if (feature.enabled) {
-                            <p class="text-[11px] text-green-700 font-medium">Sin límite</p>
-                          } @else {
-                            <p class="text-[11px] text-text-secondary">No incluido</p>
-                          }
+                          <p class="text-sm font-semibold text-text-primary truncate">{{ g.label }}</p>
+                          <p class="text-[11px] text-text-secondary">{{ g.summary }}</p>
                         </div>
                       </div>
-                      <app-icon
-                        [name]="feature.enabled ? 'check-circle' : 'lock'"
-                        [size]="16"
-                        [class.text-green-600]="feature.enabled"
-                        [class.text-gray-400]="!feature.enabled"
-                        class="shrink-0"
-                      ></app-icon>
-                    </div>
 
-                    @if (feature.enabled && feature.limit !== null && feature.limit > 0) {
-                      <div class="space-y-1">
-                        <div class="w-full bg-surface rounded-full h-1.5 overflow-hidden border border-gray-200">
-                          <div
-                            class="h-1.5 rounded-full transition-all"
-                            [class.bg-green-500]="usagePercent(feature) < 70"
-                            [class.bg-amber-500]="usagePercent(feature) >= 70 && usagePercent(feature) < 90"
-                            [class.bg-red-500]="usagePercent(feature) >= 90"
-                            [style.width.%]="usagePercent(feature)"
-                          ></div>
+                      @if (g.quota) {
+                        <div class="space-y-1">
+                          <p class="text-[11px] text-text-secondary">
+                            {{ g.quota.usedText }} / {{ g.quota.capText }} {{ g.quota.unitLabel }}
+                            · {{ g.quota.periodLabel }}
+                          </p>
+                          <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              class="h-1.5 rounded-full bg-primary transition-all"
+                              [style.width.%]="g.quota.percent"
+                            ></div>
+                          </div>
+                          <p class="text-[10px] text-text-secondary text-right font-medium">
+                            {{ g.quota.percent | number: '1.0-0' }}%
+                          </p>
                         </div>
-                        <p class="text-[10px] text-text-secondary text-right font-medium">
-                          {{ usagePercent(feature) | number:'1.0-0' }}%
-                        </p>
-                      </div>
-                    }
-                  </div>
-                }
-              </div>
+                      }
+                    </div>
+                  }
+                </div>
+              }
             </div>
           </app-card>
 
@@ -1031,104 +999,68 @@ export class MySubscriptionComponent implements OnInit {
   });
 
   /**
-   * F7 — uso IA real del periodo vigente (`GET /store/subscriptions/usage`):
-   * usado leído del contador Redis `ai:quota:*` y cap del plan resuelto.
-   * La matriz del facade solo trae configuración (sin `used`); el snapshot
-   * manda cuando existe entrada para la feature.
+   * Consumo real del mes por grupo de funciones IA (`GET
+   * /store/subscriptions/usage`). `null` = el backend no pudo leerlo; nunca
+   * se pintan ceros falsos.
    */
-  readonly aiUsage = signal<
-    Record<string, { used: number; cap: number | null; period: string }>
-  >({});
+  readonly usageLoading = signal(true);
+  private readonly usageReport = signal<AiUsageReport>({ periodStart: null, consumption: null });
 
-  readonly featuresList = computed(() => {
-    const matrix = this.featureMatrix();
-    const usage = this.aiUsage();
-    const featureMeta: Record<string, { label: string; icon: string }> = {
-      text_generation: { label: 'Generación de Texto', icon: 'pen-line' },
-      streaming_chat: { label: 'Chat en Streaming', icon: 'message-square' },
-      conversations: { label: 'Conversaciones', icon: 'message-circle' },
-      tool_agents: { label: 'Agentes con Herramientas', icon: 'bot' },
-      rag_embeddings: { label: 'RAG / Embeddings', icon: 'database' },
-      async_queue: { label: 'Procesamiento Asíncrono', icon: 'layers' },
-      realtime_voice: { label: 'Voz en Tiempo Real', icon: 'mic' },
+  readonly usageGroups = computed(() => {
+    const consumption = this.usageReport().consumption;
+    if (consumption === null) return null;
+    const meta: Record<AiUsageGroupKey, { label: string; icon: string }> = {
+      assistant: { label: 'Asistente IA', icon: 'sparkles' },
+      vex: { label: 'Vex', icon: 'bot' },
+      text_generation: { label: 'Generación de texto', icon: 'pen-line' },
+      jobs: { label: 'Escáneres e imágenes', icon: 'scan-line' },
+      semantic_search: { label: 'Búsqueda semántica', icon: 'search' },
+      voice: { label: 'Voz', icon: 'mic' },
     };
-    return Object.entries(featureMeta).map(([key, meta]) => {
-      const feature = matrix?.[key];
-      const enabled = feature?.enabled === true;
-      const snapshot = usage?.[key];
-      const cap =
-        snapshot?.cap ??
-        (enabled
-          ? (feature.monthly_tokens_cap ??
-              feature.daily_messages_cap ??
-              feature.indexed_docs_cap ??
-              feature.monthly_jobs_cap ??
-              feature.monthly_tool_calls_cap ??
-              feature.monthly_voice_seconds_cap ??
-              null)
-          : null);
-      const limit = typeof cap === 'number' && cap > 0 ? cap : null;
-      const unitSource =
-        snapshot && limit === snapshot.cap && snapshot.cap != null
-          ? this.unitForFeatureKey(key)
-          : null;
-      return {
-        key,
-        label: meta.label,
-        icon: meta.icon,
-        enabled,
-        used: snapshot?.used ?? feature?.used ?? 0,
-        limit,
-        period: snapshot?.period ?? null,
-        unit:
-          unitSource ??
-          (enabled && feature?.monthly_tokens_cap
-            ? 'tokens'
-            : enabled && feature?.daily_messages_cap
-              ? 'msgs'
-              : enabled && feature?.indexed_docs_cap
-                ? 'docs'
-                : enabled && feature?.monthly_jobs_cap
-                  ? 'jobs'
-                  : enabled && feature?.monthly_tool_calls_cap
-                    ? 'llamadas'
-                    : enabled && feature?.monthly_voice_seconds_cap
-                      ? 'segs'
-                      : null),
-      };
-    });
+    const units: Record<AiUsageUnit, string> = {
+      messages: 'mensajes',
+      tokens: 'tokens',
+      jobs: 'trabajos',
+      docs: 'documentos',
+      seconds: 'segundos',
+    };
+    return consumption
+      .filter((g) => g.calls > 0 || (g.quota?.cap ?? 0) > 0)
+      .map((g) => {
+        const q = g.quota;
+        const cap = q?.cap ?? 0;
+        const parts = [`${this.formatNumber(g.calls)} llamadas`];
+        if (g.tokens > 0) parts.push(`${this.formatTokens(g.tokens)} tokens`);
+        return {
+          group: g.group,
+          label: meta[g.group]?.label ?? g.group,
+          icon: meta[g.group]?.icon ?? 'sparkles',
+          summary: parts.join(' · '),
+          quota:
+            q && cap > 0
+              ? {
+                  usedText: this.formatNumber(q.used),
+                  capText: this.formatNumber(cap),
+                  unitLabel: units[q.unit] ?? q.unit,
+                  periodLabel: q.period === 'daily' ? 'por día' : 'por mes',
+                  percent: this.usagePercent({ used: q.used, limit: cap }),
+                }
+              : null,
+        };
+      });
   });
 
-  /**
-   * F7 — unidad canónica por feature cuando el límite viene del snapshot de
-   * uso (el snapshot no trae unidad, solo usado/cap/periodo).
-   */
-  private unitForFeatureKey(key: string): string | null {
-    switch (key) {
-      case 'text_generation':
-        return 'tokens';
-      case 'streaming_chat':
-        return 'msgs';
-      case 'rag_embeddings':
-        return 'docs';
-      case 'async_queue':
-        return 'jobs';
-      case 'tool_agents':
-        return 'llamadas';
-      case 'realtime_voice':
-        return 'segs';
-      default:
-        return null;
-    }
+  private formatNumber(n: number): string {
+    return n.toLocaleString('es-CO');
   }
 
-  readonly enabledCount = computed(() => this.featuresList().filter((f) => f.enabled).length);
-
-  readonly featureCoverage = computed(() => {
-    const total = this.featuresList().length;
-    if (!total) return 0;
-    return (this.enabledCount() / total) * 100;
-  });
+  /** Tokens grandes abreviados ("1,9 M"); bajo 1 millón, separador de miles. */
+  private formatTokens(n: number): string {
+    if (n >= 1_000_000) {
+      return `${(n / 1_000_000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} M`;
+    }
+    return this.formatNumber(n);
+  }
 
   // ─── Sticky header bindings ────────────────────────────────────────────────
 
@@ -1246,13 +1178,11 @@ export class MySubscriptionComponent implements OnInit {
   ngOnInit(): void {
     this.facade.loadCurrent();
     this.facade.loadAccess();
-    // F7 — snapshot de uso real (contadores Redis del periodo vigente) para
-    // las barras usado/límite. Best-effort: el servicio retorna `{}` ante
-    // error y la UI conserva los límites del plan sin `used`.
-    void this.accessService
-      .getAiUsage()
-      .then((usage) => this.aiUsage.set(usage ?? {}))
-      .catch(() => this.aiUsage.set({}));
+    // Consumo real del mes por grupo; el servicio nunca lanza (consumption null = error).
+    void this.accessService.getAiUsageReport().then((report) => {
+      this.usageReport.set(report);
+      this.usageLoading.set(false);
+    });
   }
 
   usagePercent(feature: { used: number; limit: number | null }): number {

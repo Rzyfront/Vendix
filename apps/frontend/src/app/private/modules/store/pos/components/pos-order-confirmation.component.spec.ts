@@ -130,7 +130,7 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     };
 
     mockTicketService = {
-      shouldAutoPrint: jasmine.createSpy('shouldAutoPrint').and.returnValue(true),
+      shouldAutoPrint: jasmine.createSpy('shouldAutoPrint').and.returnValue(Promise.resolve(false)),
       printTicket: jasmine.createSpy('printTicket').and.returnValue(of(true)),
     };
 
@@ -235,31 +235,38 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     ],
   };
 
-  it('1. Venta sin FE dispara auto-impresion inmediata', () => {
+  it('1. Venta sin FE dispara auto-impresion inmediata', async () => {
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
     activeFiscalAreasSignal.set([]); // Tienda sin invoicing
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', sampleOrder);
     fixture.detectChanges();
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(false);
     expect(mockTicketService.printTicket).toHaveBeenCalled();
+    expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('automatic');
   });
 
-  it('2. Venta con FE encola auto-impresion esperando a la DIAN', () => {
+  it('2. Venta con FE encola auto-impresion esperando a la DIAN', async () => {
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
     activeFiscalAreasSignal.set(['invoicing']);
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', sampleOrder);
     fixture.detectChanges();
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(true);
     expect(mockTicketService.printTicket).not.toHaveBeenCalled();
   });
 
-  it('3. Venta con FE que recibe "issued" imprime Factura Electronica y notifica exito', () => {
+  it('3. Venta con FE que recibe "issued" imprime Factura Electronica y notifica exito', async () => {
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
     activeFiscalAreasSignal.set(['invoicing']);
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', sampleOrder);
     fixture.detectChanges();
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(true);
 
@@ -279,17 +286,21 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     };
 
     component.onFiscalStatus(fiscalIssued);
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(false);
     expect(mockTicketService.printTicket).toHaveBeenCalled();
+    expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('automatic');
     expect(mockToastService.success).toHaveBeenCalledWith('Factura FE-101 aceptada por la DIAN');
   });
 
-  it('4. Venta con FE que falla ("failed") emite ticket de contingencia y notifica al cajero', () => {
+  it('4. Venta con FE que falla ("failed") emite ticket de contingencia y notifica al cajero', async () => {
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
     activeFiscalAreasSignal.set(['invoicing']);
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', sampleOrder);
     fixture.detectChanges();
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(true);
 
@@ -309,6 +320,7 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     };
 
     component.onFiscalStatus(fiscalFailed);
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(false);
     expect(mockTicketService.printTicket).toHaveBeenCalled();
@@ -322,18 +334,23 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     jasmine.clock().install();
     try {
       activeFiscalAreasSignal.set(['invoicing']);
+      mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
       fixture.componentRef.setInput('isOpen', true);
       fixture.componentRef.setInput('orderData', sampleOrder);
+      fixture.detectChanges();
+      await Promise.resolve();
       fixture.detectChanges();
 
       expect(component.awaitingFiscalPrint()).toBe(true);
       expect(mockTicketService.printTicket).not.toHaveBeenCalled();
 
       jasmine.clock().tick(10000);
-      await fixture.whenStable();
+      await Promise.resolve();
+      fixture.detectChanges();
 
       expect(component.awaitingFiscalPrint()).toBe(false);
       expect(mockTicketService.printTicket).toHaveBeenCalled();
+      expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('automatic');
       expect(component.fiscalFallbackNotice()).toContain('La DIAN tardó más de lo esperado en responder');
       expect(mockToastService.warning).toHaveBeenCalled();
     } finally {
@@ -341,11 +358,13 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     }
   });
 
-  it('7. Venta con FE en contingencia imprime documento y avisa sin afirmar aceptación DIAN', () => {
+  it('7. Venta con FE en contingencia imprime documento y avisa sin afirmar aceptación DIAN', async () => {
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
     activeFiscalAreasSignal.set(['invoicing']);
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', sampleOrder);
     fixture.detectChanges();
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(true);
 
@@ -365,9 +384,11 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     };
 
     component.onFiscalStatus(fiscalContingency);
+    await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(false);
     expect(mockTicketService.printTicket).toHaveBeenCalled();
+    expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('automatic');
     expect(mockToastService.warning).toHaveBeenCalledWith(fiscalContingency.message);
     // `printReceipt` avisa 'Ticket enviado a impresión' en toda ruta: lo que
     // no debe aparecer es un éxito de aceptación DIAN.
@@ -377,12 +398,154 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     expect(successMsgs.some((m) => m.includes('aceptada por la DIAN'))).toBe(false);
   });
 
-  it('6. startNewSale() limpia timers y resetea awaitingFiscalPrint', () => {
+  it('settings legacy ON no auto-imprimen cuando el gate central está OFF', async () => {
+    activeFiscalAreasSignal.set([]);
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(false));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(mockTicketService.shouldAutoPrint).toHaveBeenCalledWith(1001);
+    expect(mockTicketService.printTicket).not.toHaveBeenCalled();
+  });
+
+  it('si el gate se apaga mientras espera FE, manda trigger automatic y no muestra falso éxito/error', async () => {
+    activeFiscalAreasSignal.set(['invoicing']);
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(component.awaitingFiscalPrint()).toBe(true);
+
+    // Simula que el gate final central ya observó el opt-out mientras la venta
+    // esperaba a la respuesta fiscal.
+    mockTicketService.printTicket.and.returnValue(of(false));
+    component.onFiscalStatus({
+      order_id: 1001,
+      state: 'failed',
+      message: 'Emisión no disponible',
+      invoice_id: null,
+      invoice_number: null,
+      invoice_status: 'rejected',
+      cufe: null,
+      pdf_url: null,
+      blockers: [],
+      retry: null,
+      contingency_deadline: null,
+      invoice_data_token: null,
+    });
+    await fixture.whenStable();
+
+    expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('automatic');
+    const toastMessages = mockToastService.success.calls.allArgs()
+      .concat(mockToastService.error.calls.allArgs())
+      .map((args: unknown[]) => String(args[0]));
+    expect(toastMessages).not.toContain('Ticket enviado a impresión');
+    expect(toastMessages).not.toContain('Error al imprimir ticket');
+  });
+
+  it('descarta un preflight de auto-print resuelto después de cerrar el modal', async () => {
+    activeFiscalAreasSignal.set([]);
+    let resolveGate!: (allowed: boolean) => void;
+    mockTicketService.shouldAutoPrint.and.returnValue(
+      new Promise<boolean>((resolve) => { resolveGate = resolve; }),
+    );
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    resolveGate(true);
+    await fixture.whenStable();
+    await Promise.resolve();
+
+    expect(mockTicketService.printTicket).not.toHaveBeenCalled();
+  });
+
+  it('un preflight pendiente de una orden no bloquea la nueva orden del modal', async () => {
+    activeFiscalAreasSignal.set([]);
+    let resolveOldOrder!: (allowed: boolean) => void;
+    mockTicketService.shouldAutoPrint.and.callFake((documentId: number) =>
+      documentId === 1001
+        ? new Promise<boolean>((resolve) => { resolveOldOrder = resolve; })
+        : Promise.resolve(true),
+    );
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+    expect(mockTicketService.shouldAutoPrint).toHaveBeenCalledWith(1001);
+
+    const nextOrder = { ...sampleOrder, id: 1002, order_number: 'ORD-1002' };
+    fixture.componentRef.setInput('orderData', nextOrder);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await Promise.resolve();
+
+    expect(mockTicketService.shouldAutoPrint).toHaveBeenCalledWith(1002);
+    expect(mockTicketService.printTicket).toHaveBeenCalledTimes(1);
+    expect(mockTicketService.printTicket.calls.mostRecent().args[0].orderId).toBe(1002);
+
+    resolveOldOrder(true);
+    await fixture.whenStable();
+    await Promise.resolve();
+    expect(mockTicketService.printTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it('imprimir manualmente conserva trigger explicit aunque el gate automático esté OFF', async () => {
+    activeFiscalAreasSignal.set([]);
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(false));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    component.printReceipt();
+
+    expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('explicit');
+  });
+
+  it('una FE emitida manualmente revalida el gate y pasa trigger automatic', async () => {
+    activeFiscalAreasSignal.set([]);
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(false));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
+    (component as any).awaitingManualEmit = true;
+    component.onFiscalStatus({
+      order_id: 1001,
+      state: 'issued',
+      message: 'Emitida manualmente',
+      invoice_id: 501,
+      invoice_number: 'FE-101',
+      invoice_status: 'accepted',
+      cufe: 'cufe',
+      pdf_url: null,
+      blockers: [],
+      retry: null,
+      contingency_deadline: null,
+      invoice_data_token: null,
+    });
+    await fixture.whenStable();
+
+    expect(mockTicketService.shouldAutoPrint).toHaveBeenCalledWith(1001);
+    expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('automatic');
+  });
+
+  it('6. startNewSale() limpia timers y resetea awaitingFiscalPrint', async () => {
     jasmine.clock().install();
     try {
       activeFiscalAreasSignal.set(['invoicing']);
+      mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
       fixture.componentRef.setInput('isOpen', true);
       fixture.componentRef.setInput('orderData', sampleOrder);
+      fixture.detectChanges();
+      await Promise.resolve();
       fixture.detectChanges();
 
       expect(component.awaitingFiscalPrint()).toBe(true);

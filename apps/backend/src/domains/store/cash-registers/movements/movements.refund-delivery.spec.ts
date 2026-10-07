@@ -1,4 +1,6 @@
 import {
+  CASH_MOVEMENT_DELIVERY_SCOPE,
+  LEGACY_MANUAL_REVIEW_PREFIX,
   MovementsService,
   REFUND_CASH_MOVEMENT_KEY,
   RefundCashMovementPayload,
@@ -36,6 +38,7 @@ describe('MovementsService.deliverRefundCashMovement', () => {
     payment_id: 88,
     amount: AMOUNT,
     channel: 'cash',
+    delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE,
   };
 
   const outboxRow = {
@@ -146,5 +149,119 @@ describe('MovementsService.deliverRefundCashMovement', () => {
     // El camino feliz nunca pasa por el catch exterior (no incrementa
     // attempt_count ni deja la fila pendiente).
     expect(unscoped.accounting_entry_failures.update).not.toHaveBeenCalled();
+  });
+  describe('filas legacy (sin delivery_scope)', () => {
+    const legacyPayload = { ...payload } as Partial<RefundCashMovementPayload>;
+    delete legacyPayload.delivery_scope;
+
+    it('con sesión abierta disponible NO crea movimiento: marca LEGACY_MANUAL_REVIEW, sin resolver', async () => {
+      const { service, tx, unscoped } = createService();
+      tx.accounting_entry_failures.findFirst.mockResolvedValue({
+        ...outboxRow,
+        error_message: 'PENDING_DELIVERY: x',
+        event_payload: legacyPayload,
+      });
+      tx.cash_register_sessions.findFirst.mockResolvedValue({ id: SESSION_ID });
+
+      await expect(
+        service.deliverRefundCashMovement(FAILURE_ID),
+      ).resolves.toBeUndefined();
+
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(tx.accounting_entry_failures.update).toHaveBeenCalledTimes(1);
+      const data = tx.accounting_entry_failures.update.mock.calls[0][0].data;
+      expect(data.error_message).toMatch(
+        new RegExp(`^${LEGACY_MANUAL_REVIEW_PREFIX}`),
+      );
+      expect(data.attempt_count).toEqual({ increment: 1 });
+      expect(data.resolved_at).toBeUndefined();
+      expect(unscoped.accounting_entry_failures.update).not.toHaveBeenCalled();
+    });
+
+    it('si ya está marcada no vuelve a tocar nada', async () => {
+      const { service, tx, unscoped } = createService();
+      tx.accounting_entry_failures.findFirst.mockResolvedValue({
+        ...outboxRow,
+        error_message: `${LEGACY_MANUAL_REVIEW_PREFIX}: ya marcada`,
+        event_payload: legacyPayload,
+      });
+
+      await service.deliverRefundCashMovement(FAILURE_ID);
+
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(tx.accounting_entry_failures.update).not.toHaveBeenCalled();
+      expect(unscoped.accounting_entry_failures.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sweepStrandedRefundCashMovements', () => {
+    it('excluye de la búsqueda las filas LEGACY_MANUAL_REVIEW', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      const prisma = {
+        withoutScope: jest
+          .fn()
+          .mockReturnValue({ accounting_entry_failures: { findMany } }),
+      };
+      const service = new MovementsService(
+        prisma as any,
+        { emit: jest.fn() } as any,
+      );
+
+      await service.sweepStrandedRefundCashMovements();
+
+      expect(findMany.mock.calls[0][0].where).toMatchObject({
+        handler_key: REFUND_CASH_MOVEMENT_KEY,
+        resolved_at: null,
+        NOT: {
+          error_message: { startsWith: LEGACY_MANUAL_REVIEW_PREFIX },
+        },
+      });
+    });
+  });
+
+  describe('encolado guarda la marca', () => {
+    it('recordRefundCashMovementDurable sin sesión crea la fila con delivery_scope; en dedupe sin marca no la agrega', async () => {
+      const failures = {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 9, event_payload: { version: 1 } }),
+        create: jest.fn().mockResolvedValue({ id: 9 }),
+        update: jest.fn().mockResolvedValue({}),
+      };
+      const unscoped = {
+        accounting_entry_failures: failures,
+        cash_register_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+        cash_register_movements: { findFirst: jest.fn().mockResolvedValue(null) },
+      };
+      const prisma = { withoutScope: jest.fn().mockReturnValue(unscoped) };
+      const service = new MovementsService(
+        prisma as any,
+        { emit: jest.fn() } as any,
+      );
+      jest
+        .spyOn(service as any, 'resolveCompensationSessionId')
+        .mockResolvedValue(null);
+      const input = {
+        organization_id: ORG_ID,
+        store_id: STORE_ID,
+        user_id: OWNER_USER_ID,
+        refund_id: REFUND_ID,
+        order_id: ORDER_ID,
+        payment_id: 88,
+        amount: AMOUNT,
+        channel: 'cash',
+      };
+
+      await service.recordRefundCashMovementDurable(input);
+      expect(failures.create.mock.calls[0][0].data.event_payload).toMatchObject({
+        delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE,
+      });
+
+      await service.recordRefundCashMovementDurable(input);
+      expect(
+        failures.update.mock.calls[0][0].data.event_payload,
+      ).not.toHaveProperty('delivery_scope');
+    });
   });
 });

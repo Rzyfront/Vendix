@@ -49,6 +49,10 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
       },
     };
     const prisma = {
+      received_documents: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
       invoices: {
         findMany: jest.fn().mockResolvedValue([
           {
@@ -177,6 +181,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
           invoice_id: 2,
           dian_status: 'pending',
         }),
+        { code: 'SOURCE_COVERAGE_UNKNOWN' },
       ],
     });
     expect(getCreatedLines()).toHaveLength(2);
@@ -355,7 +360,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
     expect(preview.lines).toHaveLength(0);
     expect(preview.source_snapshot.skipped_invoice_ids).toEqual([23]);
     expect(preview.validation_summary).toMatchObject({
-      warnings: [expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 23 })],
+      warnings: [expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 23 }), { code: 'SOURCE_COVERAGE_UNKNOWN' }],
       errors: [],
     });
   });
@@ -408,6 +413,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
         expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 33 }),
         expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 34 }),
         expect.objectContaining({ code: 'DIAN_NOT_ACCEPTED', invoice_id: 35 }),
+        { code: 'SOURCE_COVERAGE_UNKNOWN' },
       ],
       errors: [],
     });
@@ -482,7 +488,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
           code: 'DIAN_NOT_ACCEPTED',
           invoice_id: 44,
           invoice_type: 'equivalent_adjustment_note',
-        })],
+        }), { code: 'SOURCE_COVERAGE_UNKNOWN' }],
         errors: [],
       });
     },
@@ -632,6 +638,252 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
         return previewLine;
       }),
     );
+  });
+
+  it('tracks received IVA coverage conservatively without changing legacy VAT totals', async () => {
+    const { service, prisma, tx, getDraftData } = createService();
+    prisma.received_documents.findMany.mockResolvedValue([
+      {
+        id: 501, version: 3, source_hash: 'hash-501', document_type: 'invoice', processing_status: 'ready',
+        validation_status: 'valid', review_status: 'approved', fiscal_status: 'accepted',
+        issue_date: new Date('2026-03-05T00:00:00.000Z'),
+        taxes: [
+          { id: 601, tax_type: 'iva', amount: '19.00', treatment: 'deductible' },
+          { id: 602, tax_type: 'inc', amount: '8.00', treatment: 'pending' },
+          { id: 603, tax_type: null, amount: '2.00', treatment: 'excluded' },
+          { id: 604, tax_type: 'iva', amount: '0.00', treatment: 'pending' },
+        ],
+      },
+    ] as any);
+    const dto = { declaration_type: 'vat' as const, period_year: 2026, period_month: 3 };
+
+    const preview = await service.preview(context, dto);
+    expect(preview.source_snapshot.received_vat_coverage).toEqual({
+      version: 1,
+      state: 'unknown',
+      definitive_payable: null,
+      counted_received_tax_ids: [],
+      in_period_received_document_ids: [501],
+      in_period_received_sources: [{
+        id: 501, version: 3, source_hash: 'hash-501', document_type: 'invoice',
+        validation_status: 'valid', fiscal_status: 'accepted',
+      }],
+      undated_received_document_count: 0,
+      pending_or_unclassified_positive_tax_ids: [601, 603],
+    });
+    expect(preview.validation_summary.errors).toEqual([
+      expect.objectContaining({
+        code: 'RECEIVED_VAT_QUALIFICATION_PENDING',
+        received_document_id: 501,
+        received_tax_ids: [601, 603],
+      }),
+    ]);
+    expect(preview.validation_summary.warnings).toContainEqual({ code: 'SOURCE_COVERAGE_UNKNOWN' });
+    expect(preview.totals).toMatchObject({ generated_tax_amount: 190, deductible_tax_amount: 95 });
+    expect(prisma.received_documents.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        issue_date: { gte: new Date('2026-03-01T00:00:00.000Z'), lt: new Date('2026-04-01T00:00:00.000Z') },
+      },
+      select: expect.objectContaining({ id: true, version: true, taxes: expect.any(Object) }),
+    }));
+    expect(prisma.received_documents.count).toHaveBeenCalledWith({
+      where: { organization_id: context.organization_id, accounting_entity_id: context.accounting_entity_id, issue_date: null },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_lines.createMany).not.toHaveBeenCalled();
+
+    await RequestContextService.run(requestContext, () => service.createDraft(context, dto));
+    expect(getDraftData().status).toBe('needs_review');
+    expect(preview.source_snapshot).toEqual(getDraftData().source_snapshot);
+    expect(preview.validation_summary).toEqual(getDraftData().validation_summary);
+  });
+
+  it('warns for undated received documents and leaves an empty inbox unknown without blocking', async () => {
+    const { service, prisma } = createService();
+    prisma.received_documents.count.mockResolvedValueOnce(2);
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(preview.source_snapshot.received_vat_coverage).toMatchObject({
+      state: 'unknown', definitive_payable: null, counted_received_tax_ids: [],
+      in_period_received_document_ids: [], undated_received_document_count: 2,
+    });
+    expect(preview.validation_summary.errors).toEqual([]);
+    expect(preview.validation_summary.warnings).toEqual(expect.arrayContaining([
+      { code: 'SOURCE_COVERAGE_UNKNOWN' },
+      { code: 'SOURCE_COVERAGE_UNDATED', undated_received_document_count: 2 },
+    ]));
+    prisma.received_documents.count.mockResolvedValueOnce(0);
+    const empty = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(empty.source_snapshot.received_vat_coverage).toMatchObject({ state: 'unknown' });
+    expect(empty.validation_summary.errors).toEqual([]);
+  });
+
+  it('blocks received documents with unexplained header tax and invalid or negative IVA rows', async () => {
+    const { service, prisma } = createService();
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      {
+        id: 701, version: 1, source_hash: null, document_type: 'invoice',
+        processing_status: 'ready', validation_status: 'pending', review_status: 'pending',
+        fiscal_status: 'pending', issue_date: new Date('2026-03-04T00:00:00.000Z'),
+        tax_amount: '10.00', taxes: [],
+      },
+      {
+        id: 702, version: 1, source_hash: null, document_type: 'invoice',
+        processing_status: 'ready', validation_status: 'pending', review_status: 'pending',
+        fiscal_status: 'pending', issue_date: new Date('2026-03-05T00:00:00.000Z'),
+        tax_amount: '-3.00', taxes: [
+          { id: 703, tax_type: 'iva', amount: '-3.00', treatment: 'pending' },
+          { id: 704, tax_type: 'iva', amount: 'invalid', treatment: 'pending' },
+        ],
+      },
+    ] as any);
+    const preview = await service.preview(context, {
+      declaration_type: 'vat', period_year: 2026, period_month: 3,
+    });
+    expect(preview.validation_summary.errors).toEqual([
+      expect.objectContaining({
+        code: 'RECEIVED_VAT_QUALIFICATION_PENDING', received_document_id: 701,
+        received_tax_ids: [], has_unrepresented_positive_header_tax: true,
+      }),
+      expect.objectContaining({
+        code: 'RECEIVED_VAT_QUALIFICATION_PENDING', received_document_id: 702,
+        received_tax_ids: [703, 704], has_unrepresented_positive_header_tax: false,
+      }),
+    ]);
+    expect(preview.source_snapshot.received_vat_coverage).toMatchObject({
+      counted_received_tax_ids: [],
+      pending_or_unclassified_positive_tax_ids: [],
+    });
+  });
+
+  const approvalDraft = (overrides: Record<string, unknown> = {}) => ({
+    id: 801,
+    status: 'ready',
+    declaration_type: 'vat',
+    organization_id: context.organization_id,
+    accounting_entity_id: context.accounting_entity_id,
+    period_start: new Date('2026-03-01T00:00:00.000Z'),
+    period_end: new Date('2026-03-31T00:00:00.000Z'),
+    source_snapshot: {
+      received_vat_coverage: {
+        version: 1,
+        in_period_received_sources: [{ id: 901, version: 2, source_hash: 'source-hash' }],
+        undated_received_document_count: 0,
+      },
+    },
+    ...overrides,
+  });
+
+  it('approves VAT when its received-source snapshot is unchanged', async () => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    const draft = approvalDraft();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(draft as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      { id: 901, version: 2, source_hash: 'source-hash' },
+    ] as any);
+    prisma.tax_declaration_drafts.update.mockResolvedValueOnce({
+      ...draft, status: 'approved', generated_tax_amount: 0, deductible_tax_amount: 0,
+    } as any);
+
+    await expect(service.approveDraft([context], 801)).resolves.toMatchObject({ status: 'approved' });
+    expect(prisma.received_documents.findMany).toHaveBeenCalledWith({
+      where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        issue_date: { gte: new Date('2026-03-01T00:00:00.000Z'), lt: new Date('2026-04-01T00:00:00.000Z') },
+      },
+      select: { id: true, version: true, source_hash: true },
+    });
+    expect(prisma.received_documents.count).toHaveBeenCalledWith({
+      where: { organization_id: context.organization_id, accounting_entity_id: context.accounting_entity_id, issue_date: null },
+    });
+    expect(audit.logForResource).toHaveBeenCalledTimes(1);
+    expect(eventEmitter.emit).toHaveBeenCalledWith('vat.declaration.approved', expect.any(Object));
+  });
+
+  it.each([
+    ['new document', [{ id: 901, version: 2, source_hash: 'source-hash' }, { id: 902, version: 1, source_hash: null }]],
+    ['version drift', [{ id: 901, version: 3, source_hash: 'source-hash' }]],
+    ['hash drift', [{ id: 901, version: 2, source_hash: 'changed-hash' }]],
+  ])('blocks VAT approval for %s in the in-period received sources', async (_label, currentSources) => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(approvalDraft() as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce(currentSources as any);
+    await expect(service.approveDraft([context], 801)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('blocks VAT approval when the scoped undated received-document count changed', async () => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(approvalDraft() as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      { id: 901, version: 2, source_hash: 'source-hash' },
+    ] as any);
+    prisma.received_documents.count.mockResolvedValueOnce(1);
+    await expect(service.approveDraft([context], 801)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('does not see received documents from another fiscal entity during approval', async () => {
+    const { service, prisma } = createService();
+    const draft = approvalDraft();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(draft as any);
+    prisma.received_documents.findMany.mockResolvedValueOnce([
+      { id: 901, version: 2, source_hash: 'source-hash' },
+    ] as any);
+    prisma.tax_declaration_drafts.update.mockResolvedValueOnce({
+      ...draft, status: 'approved', generated_tax_amount: 0, deductible_tax_amount: 0,
+    } as any);
+    await service.approveDraft([context], 801);
+    expect(prisma.received_documents.findMany.mock.calls[0][0].where).toEqual({
+      organization_id: context.organization_id,
+      accounting_entity_id: context.accounting_entity_id,
+      issue_date: { gte: new Date('2026-03-01T00:00:00.000Z'), lt: new Date('2026-04-01T00:00:00.000Z') },
+    });
+  });
+
+  it('requires a received-source snapshot for legacy VAT drafts and propagates read failures', async () => {
+    const { service, prisma, audit, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(
+      approvalDraft({ source_snapshot: { invoice_count: 2 } }) as any,
+    );
+    await expect(service.approveDraft([context], 801)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.received_documents.findMany).not.toHaveBeenCalled();
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(approvalDraft() as any);
+    prisma.received_documents.findMany.mockRejectedValueOnce(new Error('received source read failed'));
+    await expect(service.approveDraft([context], 801)).rejects.toThrow('received source read failed');
+    expect(prisma.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('does not require received VAT coverage for non-VAT declarations or already-approved VAT drafts', async () => {
+    const { service, prisma, eventEmitter } = createService();
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(
+      approvalDraft({ declaration_type: 'inc', source_snapshot: {} }) as any,
+    );
+    prisma.tax_declaration_drafts.update.mockResolvedValueOnce({ status: 'approved', declaration_type: 'inc' } as any);
+    await service.approveDraft([context], 801);
+    expect(prisma.received_documents.findMany).not.toHaveBeenCalled();
+    expect(prisma.received_documents.count).not.toHaveBeenCalled();
+
+    prisma.tax_declaration_drafts.findFirst.mockResolvedValueOnce(
+      approvalDraft({ status: 'approved', source_snapshot: {} }) as any,
+    );
+    await service.approveDraft([context], 801);
+    expect(prisma.received_documents.findMany).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
   it('validates invalid periods and foreign linked obligations before writes in preview', async () => {

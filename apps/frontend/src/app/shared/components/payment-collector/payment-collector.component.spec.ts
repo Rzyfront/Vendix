@@ -671,3 +671,142 @@ describe('PaymentCollectorComponent — restaurant tip amount', () => {
     expect(component.isMultiValid()).toBeTrue();
   });
 });
+
+describe('PaymentCollectorComponent — collapsed optional tip section', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        provideHttpClient(),
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 100000);
+    fixture.componentRef.setInput('allowTip', true);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => fixture.destroy());
+
+  function renderTipLayout(layout: 'flat' | 'stepped'): void {
+    fixture.componentRef.setInput('layout', layout);
+    fixture.detectChanges();
+    if (layout === 'stepped') {
+      component.goToSubStep(component.montoIndex());
+      fixture.detectChanges();
+    }
+  }
+
+  for (const layout of ['flat', 'stepped'] as const) {
+    it(`starts collapsed, preserves the tip submission, and resets closed in ${layout} layout`, () => {
+      renderTipLayout(layout);
+
+      let toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
+      expect(toggle).toBeTruthy();
+      expect(toggle?.textContent).toContain('Agregar propina');
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle?.classList.contains('pc-tip-toggle--collapsed')).toBeTrue();
+      expect(toggle?.querySelector('.pc-tip-add-icon')).toBeTruthy();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
+      expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
+        .toBeNull();
+
+      toggle?.click();
+      fixture.detectChanges();
+      toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
+      expect(toggle?.textContent).toContain('Propina (opcional)');
+      expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+      expect(toggle?.classList.contains('pc-tip-toggle--collapsed')).toBeFalse();
+      expect(toggle?.querySelector('.pc-tip-add-icon')).toBeNull();
+      expect(toggle?.querySelector('.section-indicator')).toBeTruthy();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeTruthy();
+      expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
+        .toBeTruthy();
+
+      component.tipControl.setValue(5000);
+      component.selectMethod(multiCashMethod, { advance: false });
+      fixture.detectChanges();
+      expect(component.effectiveTotal()).toBe(105000);
+
+      const submitted = jasmine.createSpy('submitted');
+      component.submit.subscribe(submitted);
+      component.triggerSubmit();
+      expect(submitted).toHaveBeenCalledWith(jasmine.objectContaining({
+        tip: 5000,
+        tipType: 'fixed',
+        tipValue: 5000,
+      }));
+
+      toggle?.click();
+      fixture.detectChanges();
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle?.classList.contains('pc-tip-toggle--collapsed')).toBeTrue();
+      expect(toggle?.querySelector('.pc-tip-add-icon')).toBeTruthy();
+      expect(toggle?.textContent).toContain('Propina');
+      expect(toggle?.textContent).toContain('5.000');
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
+
+      fixture.componentRef.setInput('paymentResetKey', 1);
+      fixture.detectChanges();
+      renderTipLayout(layout);
+      toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
+      expect(component.tipExpanded()).toBeFalse();
+      expect(component.tipControl.value).toBe(0);
+      expect(toggle?.textContent).toContain('Agregar propina');
+    });
+
+    it(`does not render the tip section when allowTip is false in ${layout} layout`, () => {
+      renderTipLayout(layout);
+      fixture.componentRef.setInput('allowTip', false);
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.pc-tip-toggle')).toBeNull();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
+      expect(fixture.nativeElement.querySelector('[aria-label="Mesero que recibe la propina"]'))
+        .toBeNull();
+    });
+
+    it(`expands the tip section when validation feedback targets it in ${layout} layout`, () => {
+      renderTipLayout(layout);
+      const toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '.pc-tip-toggle',
+      );
+      expect(toggle).toBeTruthy();
+      toggle?.click();
+      fixture.detectChanges();
+      component.tipType.set('percentage');
+      component.tipControl.setValue(101);
+      fixture.detectChanges();
+      toggle?.click();
+      fixture.detectChanges();
+
+      expect(component.tipExpanded()).toBeFalse();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeNull();
+      component.flashValidation();
+      fixture.detectChanges();
+
+      expect(component.flashSection()).toBe('tip');
+      expect(component.tipExpanded()).toBeTrue();
+      expect(fixture.nativeElement.querySelector('[aria-label="Monto o porcentaje de propina"]'))
+        .toBeTruthy();
+      expect(fixture.nativeElement.textContent).toContain('El porcentaje de propina debe estar entre 0 y 100.');
+    });
+  }
+});

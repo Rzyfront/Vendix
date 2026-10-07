@@ -62,7 +62,7 @@ import {
   deliveryTypeToEntregaChoice,
 } from './models/cart.model';
 import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
-import type { SplitSourceItem } from '../restaurant-ops/tables/interfaces';
+import type { SplitResult, SplitSourceItem } from '../restaurant-ops/tables/interfaces';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
 import { environment } from '../../../../../environments/environment';
@@ -93,6 +93,7 @@ import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
+import { KitchenTicketPrintService } from '../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../dispatch-ticket/models/dispatch-ticket-data.model';
 import {
@@ -215,7 +216,7 @@ export function resolvePosPaymentCustomerName(
           <app-button variant="outline" size="sm" (clicked)="showSplitAccounts.set(true)">Dividir / cobrar cuentas</app-button>
         </div>
       }
-      <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" />
+      <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" (splitCompleted)="onSplitAccountsCompleted($event)" />
 
       <!-- Main POS Interface: Two flush columns directly at root (Stitch favorite design) -->
       <div
@@ -363,6 +364,7 @@ export function resolvePosPaymentCustomerName(
             [isQuotationMode]="isQuotationMode()"
             [isLayawayMode]="isLayawayMode()"
             [readyToPayOrder]="readyToPayOrder()"
+            [hasFinancialSplit]="hasFinancialSplit()"
             [isCharging]="isCharging()"
             [cashRegisterEnabled]="cashRegisterEnabled()"
             (cashOpenClicked)="showSessionOpenModal.set(true)"
@@ -373,6 +375,7 @@ export function resolvePosPaymentCustomerName(
             (saveDraft)="onSaveDraft()"
             (checkout)="onCheckout()"
             (charge)="onCharge()"
+            (chargeAccounts)="showSplitAccounts.set(true)"
             (quote)="onQuote()"
             (layaway)="onLayaway()"
             (customerSelected)="onCustomerSelected($event)"
@@ -1029,6 +1032,19 @@ export class PosComponent {
     const rows = this.restaurantIntegration.currentTableSession()?.order?.order_items ?? this.editingOrder()?.order_items ?? this.readyToPayOrder()?.order_items ?? [];
     return rows.map((item) => ({ id: Number(item.id), product_name: item.product_name, quantity: Number(item.quantity), cancelled_at: item.cancelled_at ?? null }));
   });
+  /** Resultado de la última consulta de división de la orden (restaurante). */
+  private readonly splitProbe = signal<{ orderId: number; active: boolean } | null>(null);
+  /**
+   * La orden cargada/guardada tiene división financiera: la orden principal es
+   * solo informativa y se cobra únicamente por cuentas (el backend responde 409
+   * SPLIT_ACCOUNT_LOCKED al cobrarla), así que ningún camino del POS la cobra.
+   */
+  readonly hasFinancialSplit = computed(() => {
+    if (this.editingOrder()?.active_financial_split_id || this.readyToPayOrder()?.active_financial_split_id) return true;
+    const id = this.splitSourceOrderId();
+    const probe = this.splitProbe();
+    return !!id && probe?.orderId === id && probe.active;
+  });
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
   /**
@@ -1233,6 +1249,7 @@ export class PosComponent {
   protected restaurantIntegration = inject(PosRestaurantIntegrationService);
   // Phase D.3 — settings facade + payment catalog are read-only inputs here.
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private readonly paymentMethodsCatalogService = inject(
     PaymentMethodsCatalogService,
   );
@@ -1343,6 +1360,26 @@ export class PosComponent {
     // existed and simply had no producer; this is it. Pushed from an effect so
     // the snapshot is current at send time, and cleared on destroy because a
     // cart reported from a screen the user already left is worse than none.
+    // División financiera: el objeto de la orden no siempre trae
+    // `active_financial_split_id` (mesa abierta, orden guardada), así que se
+    // consulta una vez por orden y al abrir/cerrar el modal de cuentas.
+    effect(() => {
+      const orderId = this.splitSourceOrderId();
+      this.showSplitAccounts();
+      if (!orderId || !this.restaurantIntegration.isRestaurantMode()) return;
+      this.restaurantIntegration
+        .getFinancialSplit(orderId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (result) => {
+            if (this.splitSourceOrderId() === orderId) {
+              this.splitProbe.set({ orderId, active: !!result?.split_group_id });
+            }
+          },
+          error: () => undefined,
+        });
+    });
+
     effect(() => {
       const summary = this.cartSummary();
       const customer = this.selectedCustomer();
@@ -2234,6 +2271,9 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                this.kitchenTicketPrint.printAfterFire(
+                  fireResult.kitchen_ticket_ids ?? [fireResult.kitchen_ticket_id],
+                );
                 if (fireResult.stock_warnings?.length) {
                   this.toastService.warning(
                     formatStockWarningSummary(fireResult.stock_warnings),
@@ -2339,6 +2379,9 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                this.kitchenTicketPrint.printAfterFire(
+                  fireResult.kitchen_ticket_ids ?? [fireResult.kitchen_ticket_id],
+                );
                 if (fireResult.stock_warnings?.length) {
                   this.toastService.warning(
                     formatStockWarningSummary(fireResult.stock_warnings),
@@ -2431,7 +2474,17 @@ export class PosComponent {
     return 'llevar';
   }
 
+  onSplitAccountsCompleted(result: SplitResult): void {
+    const orderId = this.splitSourceOrderId();
+    if (orderId) this.splitProbe.set({ orderId, active: !!result?.split_group_id });
+  }
+
   onCheckout(): void {
+    if (this.hasFinancialSplit()) {
+      this.showCartModal.set(false);
+      this.showSplitAccounts.set(true);
+      return;
+    }
     if (!this.cartState() || this.isEmpty) return;
 
     // CP-POS-MODAL-SCOPE-001 / Phase A.4 — edit mode now opens the shell
@@ -2490,6 +2543,11 @@ export class PosComponent {
    * a stale method set. No navigation. No new modal definition.
    */
   onCharge(): void {
+    if (this.hasFinancialSplit()) {
+      this.showCartModal.set(false);
+      this.showSplitAccounts.set(true);
+      return;
+    }
     // CP-POS-MODAL-SCOPE-001 / Phase A.4 — when editing, route the Cobrar
     // CTA through the shell (mode='edit') so the cashier re-validates
     // cliente + payment before POST flow/pay. The shell still falls back to
@@ -2813,6 +2871,10 @@ export class PosComponent {
         this.toastService.success(
           `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
         );
+        this.kitchenTicketPrint.printAfterFire(
+          fireInfo.kitchen_ticket_ids ??
+            (fireInfo.kitchen_ticket_id != null ? [fireInfo.kitchen_ticket_id] : []),
+        );
       }
 
       const cs = this.cartState();
@@ -2909,15 +2971,10 @@ export class PosComponent {
       this.initialEntrega.set(this.resolveDefaultEntrega());
     }
 
-    // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
-    // (`'automatic'`) al cierre de venta POS. La bandera de auto es
-    // `print_dispatch_ticket_auto_with_pos` (origen = POS). El predicado
-    // compartido considera además `print_dispatch_ticket_on_counter`
-    // para imprimir también en mostrador/para-llevar.
-    void this.printDispatchTicketIfNeededForOrder(
-      paymentData.order,
-      'auto_with_pos',
-    );
+    // CP-DTLP — la activación y auto-impresión se resuelven en la configuración
+    // moderna del documento dispatch_ticket (is_active / paper.auto_print).
+    // Este helper solo añade la elegibilidad de mostrador/para llevar.
+    void this.printDispatchTicketIfNeededForOrder(paymentData.order);
 
     // CP-pos-checkout-enter-focus (step A.2) — venta terminada: el foco
     // vuelve al buscador (la confirmación, si abrió, re-enfoca al cerrarse).
@@ -3788,6 +3845,10 @@ export class PosComponent {
         this.toastService.success(
           `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
         );
+        this.kitchenTicketPrint.printAfterFire(
+          fireInfo.kitchen_ticket_ids ??
+            (fireInfo.kitchen_ticket_id != null ? [fireInfo.kitchen_ticket_id] : []),
+        );
       }
 
       const cs = this.cartState();
@@ -3853,14 +3914,10 @@ export class PosComponent {
       this.paymentTableId.set(null);
     }
 
-    // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
-    // (`'automatic'`) al crear la orden con envío en postventa. La bandera
-    // de auto es `print_dispatch_ticket_auto_on_postventa` (origen =
-    // postventa), NO la del POS — son dos flags distintos.
-    void this.printDispatchTicketIfNeededForOrder(
-      shippingData.order,
-      'auto_on_postventa',
-    );
+    // CP-DTLP — la activación y auto-impresión del documento dispatch_ticket
+    // se resuelven en Formatos de impresión; el contexto solo aplica la
+    // elegibilidad de mostrador/para llevar.
+    void this.printDispatchTicketIfNeededForOrder(shippingData.order);
 
     // CP-pos-checkout-enter-focus (step A.2) — envío terminado: el foco
     // vuelve al buscador (la confirmación, si abrió, re-enfoca al cerrarse).
@@ -4843,62 +4900,26 @@ export class PosComponent {
     this.loading.set(false);
   }
 
-  // ── CP-DTLP Phase E.2 — disparador POS del tiquete de despacho ────
-  //
-  // Cadena explícita (`trigger: 'explicit'`) al cierre de la venta con envío.
-  // Defense-in-depth: `pos-order-confirmation` ya encadena su propio
-  // `'automatic'` cuando `maybeAutoPrint` dispara, pero esta cadena aquí cubre
-  // escenarios donde el modal aún no abre (`isOpen()` false) o la venta no es
-  // `derivedIsPaid` (draft) — casos que `maybeAutoPrint` se salta por guard.
-
   /**
-   * Helper único para los hooks `onPaymentCompleted` y `onShippingCompleted`.
-   * Misma guard que E.2 manual: enabled + envío + NO `direct_delivery`.
-   * El `'automatic'` (que además exige `print_dispatch_ticket_auto_with_pos`)
-   * vive en `pos-order-confirmation.maybeAutoPrint`.
-   */
-  /**
-   * Defense-in-depth para imprimir el tiquete de despacho desde el POS en
-   * los hooks de cierre (`onPaymentCompleted` → venta POS, `onShippingCompleted`
-   * → postventa).
-   *
-   * **QUI-764**: antes esta cadena rechazaba `direct_delivery` con un `return`
-   * HARDCODED (lógica pre-QUI-727), ignorando `print_dispatch_ticket_on_counter`.
-   * Adopta el predicado compartido `shouldAutoPrintDispatchTicket` que ya
-   * entiende el flag del mostrador.
-   *
-   * El parámetro `autoFlagKey` selecciona la llave de auto-impresión del
-   * ORIGEN. Hay dos, no una — los dos callsites tienen semántica distinta:
-   *  - `'auto_with_pos'`     → cierre de venta POS (línea 2517)
-   *  - `'auto_on_postventa'` → cierre de envío en postventa (línea 3456)
-   *
-   * El trigger es `'automatic'` (NO `'explicit'`): esta función corre desde
-   * hooks automáticos. Pasar `'explicit'` saltaría la guarda `trigger ===
-   * 'automatic' && !printDispatchTicketAuto` y el tiquete se imprimiría
-   * aunque el admin haya apagado la auto-impresión — bug peor.
+   * Encadena el tiquete de despacho al cerrar un pago POS o un envío de
+   * postventa. El documento central dispatch_ticket determina activación y
+   * auto-impresión; este contexto añade la elegibilidad de mostrador.
    *
    * La deduplicación de la impresión (entre esta cadena y la del modal de
    * confirmación `pos-order-confirmation.maybeAutoPrint`) vive en
    * `DispatchTicketPrintService.printDispatchTicket` (singleton) para que
    * ambos callsites la compartan.
    */
-  private async printDispatchTicketIfNeededForOrder(
-    order: any,
-    autoFlagKey: 'auto_with_pos' | 'auto_on_postventa',
-  ): Promise<void> {
+  private async printDispatchTicketIfNeededForOrder(order: any): Promise<void> {
     if (!order) return;
     const receipts = this.settingsFacade.receipts();
-    const enabled = receipts?.print_dispatch_ticket_enabled ?? true;
-    const autoFlag =
-      autoFlagKey === 'auto_with_pos'
-        ? receipts?.print_dispatch_ticket_auto_with_pos ?? false
-        : receipts?.print_dispatch_ticket_auto_on_postventa ?? false;
     const counterEnabled =
       receipts?.print_dispatch_ticket_on_counter ?? false;
 
     const context: ShouldAutoPrintDispatchTicketContext = {
-      printDispatchTicketEnabled: enabled,
-      printDispatchTicketAuto: autoFlag,
+      // The central document-print service owns these two gates.
+      printDispatchTicketEnabled: true,
+      printDispatchTicketAuto: true,
       counterEnabled,
       deliveryType: order.delivery_type,
       isShippingSale: (order as any)?.isShippingSale,
@@ -4954,10 +4975,7 @@ export class PosComponent {
     try {
       await this.dispatchTicketPrint.printDispatchTicket(data, 'automatic');
     } catch (err) {
-      console.error(
-        `[QUI-764] Error al imprimir tiquete de despacho (${autoFlagKey}):`,
-        err,
-      );
+      console.error('[QUI-764] Error al imprimir tiquete de despacho:', err);
     }
   }
 }

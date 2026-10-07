@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { membership_status_enum } from '@prisma/client';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
@@ -6,6 +6,8 @@ import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { MembershipPlansService } from '../membership-plans/membership-plans.service';
@@ -24,7 +26,7 @@ import {
   CommitMemberResult,
 } from './dto/scan-roster.dto';
 import { UpsertMemberProfileDto } from './dto/upsert-member-profile.dto';
-import sharp = require('sharp');
+const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * MemberBulkScannerService — backend of the "Carga masiva de socios por IA"
@@ -51,7 +53,7 @@ import sharp = require('sharp');
  * and re-add `store_id` manually).
  */
 @Injectable()
-export class MemberBulkScannerService {
+export class MemberBulkScannerService implements OnModuleInit {
   private readonly logger = new Logger(MemberBulkScannerService.name);
 
   /** Hard cap driven by the AI app's `max_tokens` (≈200 rows). */
@@ -73,7 +75,15 @@ export class MemberBulkScannerService {
     private readonly memberProfilesService: MemberProfilesService,
     private readonly customersService: CustomersService,
     private readonly responseService: ResponseService,
+    private readonly aiScanRegistry: AiScanHandlerRegistry,
   ) {}
+
+  /** Registra el handler async `member_roster` (cola generica `ai-scan`). */
+  onModuleInit(): void {
+    this.aiScanRegistry.register<RosterScanResult>('member_roster', ({ files }) =>
+      this.scanRosterFromFiles(files),
+    );
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // /scan
@@ -87,6 +97,13 @@ export class MemberBulkScannerService {
    */
   async scanRoster(file: Express.Multer.File): Promise<RosterScanResult> {
     this.assertValidFile(file);
+    return this.scanRosterFromFiles([this.toScanFile(file)]);
+  }
+
+  /** Nucleo (buffer + mime, sin multer): sincrono y handler async. */
+  async scanRosterFromFiles(files: AiScanFile[]): Promise<RosterScanResult> {
+    const file = files?.[0];
+    this.assertValidScanFile(file);
 
     const { base64, mimeType } = await this.preprocessImage(file);
     const dataUri = `data:${mimeType};base64,${base64}`;
@@ -567,13 +584,25 @@ export class MemberBulkScannerService {
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────
 
-  private assertValidFile(file?: Express.Multer.File): void {
+  /** Validacion previa (mime) reutilizable por el controller async antes de encolar. */
+  assertValidFile(file?: Express.Multer.File): void {
+    this.assertValidScanFile(file ? this.toScanFile(file) : undefined);
+  }
+
+  toScanFile(file: Express.Multer.File): AiScanFile {
+    return {
+      buffer: file.buffer,
+      mimeType: file.mimetype,
+      originalName: file.originalname,
+      size: file.size,
+    };
+  }
+
+  private assertValidScanFile(file?: AiScanFile): asserts file is AiScanFile {
     if (!file) {
       throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_NO_FILE);
     }
-    if (
-      !MemberBulkScannerService.ALLOWED_MIMETYPES.includes(file.mimetype)
-    ) {
+    if (!MemberBulkScannerService.ALLOWED_MIMETYPES.includes(file.mimeType)) {
       throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_INVALID_FILE);
     }
   }
@@ -587,7 +616,7 @@ export class MemberBulkScannerService {
    * fall-through to raw buffer for PDFs).
    */
   private async preprocessImage(
-    file: Express.Multer.File,
+    file: AiScanFile,
   ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
@@ -623,7 +652,7 @@ export class MemberBulkScannerService {
       );
       return {
         base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
+        mimeType: file.mimeType,
       };
     }
   }

@@ -355,11 +355,11 @@ interface SubscriptionInvoiceDetail {
                     <span class="font-mono">{{ t.document_number }}</span>
                     ·
                     <span [class]="'inline-block px-2 py-0.5 rounded text-xs border ' + transmissionStatusBadgeClasses(t.transmission_status)">
-                      {{ transmissionStatusLabel(t.transmission_status) }}
+                      {{ statusText(t.transmission_status) }}
                     </span>
                     ·
                     <span [class]="'inline-block px-2 py-0.5 rounded text-xs border ' + transmissionStatusBadgeClasses(t.dian_status)">
-                      {{ transmissionStatusLabel(t.dian_status) }}
+                      {{ statusText(t.dian_status) }}
                     </span>
                     @if (t.retry_count && t.retry_count > 0) {
                       <span class="ml-2 text-xs text-text-secondary">reintentos: {{ t.retry_count }}</span>
@@ -613,6 +613,25 @@ export class PlatformInvoiceDetailComponent {
   readonly billingCycleLabel = billingCycleLabel;
   readonly evidenceTypeLabel = evidenceTypeLabel;
   readonly transmissionStatusLabel = transmissionStatusLabel;
+
+  private static readonly STATUS_LABELS: Record<string, string> = {
+    accepted: 'Aceptada',
+    rejected: 'Rechazada',
+    error: 'Error',
+    pending: 'Pendiente',
+    submitted: 'Enviada',
+    sent: 'Enviada',
+    queued: 'En cola',
+    retrying: 'Reintentando',
+  };
+
+  /** Etiqueta en español de un estado crudo; cae al helper compartido. */
+  statusText(status?: string | null): string {
+    return (
+      (status && PlatformInvoiceDetailComponent.STATUS_LABELS[status]) ||
+      transmissionStatusLabel(status)
+    );
+  }
   readonly transmissionStatusBadgeClasses = transmissionStatusBadgeClasses;
 
   private base = `${environment.apiUrl}/superadmin/subscriptions/fiscal`;
@@ -1087,7 +1106,7 @@ export class PlatformInvoiceDetailComponent {
         this.fiscal.registerPlatformDianEvent(invoiceId, { event_code: eventCode }),
       );
       this.toast.success(
-        `Evento ${eventCode} registrado (id=${event?.id}, status=${event?.status})`,
+        `Evento ${eventCode} registrado (id=${event?.id}, estado=${this.statusText(event?.status)})`,
       );
     } catch (err) {
       this.toast.error(describeApiFailure(err).message, 'RADIAN');
@@ -1113,7 +1132,10 @@ export class PlatformInvoiceDetailComponent {
         this.fiscal.previewPlatformInvoicePdf(invoiceId),
       );
       const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-      if (!window.open(url, '_blank', 'noopener')) {
+      const w = window.open(url, '_blank');
+      if (w) {
+        w.opener = null;
+      } else {
         this.toast.warning(
           'El navegador bloqueó la ventana emergente con la previsualización.',
           'Previsualización',
@@ -1140,7 +1162,8 @@ export class PlatformInvoiceDetailComponent {
         this.fiscal.regeneratePlatformInvoicePdf(invoiceId),
       );
       if (location?.url) {
-        window.open(location.url, '_blank', 'noopener');
+        const w = window.open(location.url, '_blank');
+        if (w) w.opener = null;
         this.toast.success('PDF regenerado');
       } else {
         this.toast.warning('El PDF se regeneró pero no devolvió URL firmada.');

@@ -13,7 +13,10 @@ describe('AccountingEntryRetryProcessor.process — ruteo por handler_key', () =
   const FAILURE_ID = 777;
 
   const createProcessor = () => {
-    const auto_entry_service = { postAutoEntry: jest.fn() };
+    const auto_entry_service = {
+      postAutoEntry: jest.fn(),
+      reconcilePurchaseVatContributionEntry: jest.fn(),
+    };
     const failure_service = {
       findOne: jest.fn(),
       markResolved: jest.fn(),
@@ -125,6 +128,155 @@ describe('AccountingEntryRetryProcessor.process — ruteo por handler_key', () =
     expect(failure_service.markResolved).toHaveBeenCalledWith(FAILURE_ID);
     expect(moduleRef.get).not.toHaveBeenCalled();
     expect(movements.deliverRefundCashMovement).not.toHaveBeenCalled();
+  });
+
+  describe('purchase_vat_contribution retry reconciliation', () => {
+    const payload = {
+      source_type: 'purchase_vat_contribution',
+      source_id: 42,
+      organization_id: 3,
+      accounting_entity_id: 4,
+      store_id: 10,
+      user_id: 7,
+    };
+    const linkedEntry = {
+      id: 501,
+      status: 'posted',
+      source_type: 'purchase_vat_contribution',
+      source_id: payload.source_id,
+      organization_id: payload.organization_id,
+      accounting_entity_id: payload.accounting_entity_id,
+      store_id: payload.store_id,
+    };
+
+    const persistFailure = (failure_service: any) =>
+      failure_service.findOne.mockResolvedValue({
+        id: FAILURE_ID,
+        handler_key: 'purchase_vat_contribution',
+        resolved_at: null,
+        event_payload: payload,
+      });
+
+    it('links an already-posted entry before any post retry and resolves the failure', async () => {
+      const { processor, auto_entry_service, failure_service } = createProcessor();
+      persistFailure(failure_service);
+      auto_entry_service.reconcilePurchaseVatContributionEntry.mockResolvedValue(
+        linkedEntry,
+      );
+
+      await processor.process({ data: { failure_id: FAILURE_ID } } as any);
+
+      expect(
+        auto_entry_service.reconcilePurchaseVatContributionEntry,
+      ).toHaveBeenCalledWith({
+        contribution_id: payload.source_id,
+        organization_id: payload.organization_id,
+        accounting_entity_id: payload.accounting_entity_id,
+        store_id: payload.store_id,
+      });
+      expect(auto_entry_service.postAutoEntry).not.toHaveBeenCalled();
+      expect(failure_service.markResolved).toHaveBeenCalledWith(FAILURE_ID);
+      expect(failure_service.recordAttempt).not.toHaveBeenCalled();
+    });
+
+    it('posts only after no existing entry is found, then resolves only after the new entry is linked', async () => {
+      const { processor, auto_entry_service, failure_service } = createProcessor();
+      persistFailure(failure_service);
+      auto_entry_service.reconcilePurchaseVatContributionEntry
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(linkedEntry);
+      auto_entry_service.postAutoEntry.mockResolvedValue({ id: linkedEntry.id });
+
+      await processor.process({ data: { failure_id: FAILURE_ID } } as any);
+
+      expect(
+        auto_entry_service.reconcilePurchaseVatContributionEntry,
+      ).toHaveBeenNthCalledWith(1, {
+        contribution_id: payload.source_id,
+        organization_id: payload.organization_id,
+        accounting_entity_id: payload.accounting_entity_id,
+        store_id: payload.store_id,
+      });
+      expect(auto_entry_service.postAutoEntry).toHaveBeenCalledWith(
+        expect.objectContaining(payload),
+      );
+      expect(
+        auto_entry_service.reconcilePurchaseVatContributionEntry,
+      ).toHaveBeenNthCalledWith(2, {
+        contribution_id: payload.source_id,
+        organization_id: payload.organization_id,
+        accounting_entity_id: payload.accounting_entity_id,
+        store_id: payload.store_id,
+      }, linkedEntry.id);
+      expect(failure_service.markResolved).toHaveBeenCalledWith(FAILURE_ID);
+    });
+
+    it('leaves the failure unresolved when postAutoEntry produces no entry', async () => {
+      const { processor, auto_entry_service, failure_service } = createProcessor();
+      persistFailure(failure_service);
+      auto_entry_service.reconcilePurchaseVatContributionEntry.mockResolvedValue(
+        null,
+      );
+      auto_entry_service.postAutoEntry.mockResolvedValue(null);
+
+      await processor.process({ data: { failure_id: FAILURE_ID } } as any);
+
+      expect(auto_entry_service.postAutoEntry).toHaveBeenCalledTimes(1);
+      expect(
+        auto_entry_service.reconcilePurchaseVatContributionEntry,
+      ).toHaveBeenCalledTimes(1);
+      expect(failure_service.markResolved).not.toHaveBeenCalled();
+      expect(failure_service.recordAttempt).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['source_id', { source_id: 0 }],
+      ['organization_id', { organization_id: Number.MAX_SAFE_INTEGER + 1 }],
+      ['accounting_entity_id', { accounting_entity_id: undefined }],
+      ['store_id', { store_id: -1 }],
+    ])('rejects malformed scoped %s before posting or resolving', async (_field, override) => {
+      const { processor, auto_entry_service, failure_service } = createProcessor();
+      failure_service.findOne.mockResolvedValue({
+        id: FAILURE_ID,
+        handler_key: 'purchase_vat_contribution',
+        resolved_at: null,
+        event_payload: { ...payload, ...override },
+      });
+
+      await expect(
+        processor.process({ data: { failure_id: FAILURE_ID } } as any),
+      ).rejects.toThrow(/Invalid .* on purchase VAT contribution retry payload/);
+
+      expect(auto_entry_service.postAutoEntry).not.toHaveBeenCalled();
+      expect(
+        auto_entry_service.reconcilePurchaseVatContributionEntry,
+      ).not.toHaveBeenCalled();
+      expect(failure_service.markResolved).not.toHaveBeenCalled();
+      expect(failure_service.recordAttempt).toHaveBeenCalledWith(
+        FAILURE_ID,
+        expect.any(Error),
+      );
+    });
+
+    it('records and throws a failed post-link reconciliation without resolving', async () => {
+      const { processor, auto_entry_service, failure_service } = createProcessor();
+      persistFailure(failure_service);
+      const linkError = new Error('contribution already linked elsewhere');
+      auto_entry_service.reconcilePurchaseVatContributionEntry
+        .mockResolvedValueOnce(null)
+        .mockRejectedValueOnce(linkError);
+      auto_entry_service.postAutoEntry.mockResolvedValue({ id: linkedEntry.id });
+
+      await expect(
+        processor.process({ data: { failure_id: FAILURE_ID } } as any),
+      ).rejects.toBe(linkError);
+
+      expect(failure_service.markResolved).not.toHaveBeenCalled();
+      expect(failure_service.recordAttempt).toHaveBeenCalledWith(
+        FAILURE_ID,
+        linkError,
+      );
+    });
   });
 
   it('handler_key MANUAL_REFUND_DELIVERY_KEY: va a ManualRefundDeliveryService y NUNCA a MovementsService', async () => {

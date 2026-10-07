@@ -78,6 +78,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.purchase_orders;
   }
 
+  get purchase_vat_contributions() {
+    return this.baseClient.purchase_vat_contributions;
+  }
+
   get purchase_order_items() {
     return this.baseClient.purchase_order_items;
   }
@@ -556,6 +560,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.withholding_calculations;
   }
 
+  get withholding_concepts() {
+    return this.baseClient.withholding_concepts;
+  }
+
   get exogenous_reports() {
     return this.baseClient.exogenous_reports;
   }
@@ -746,6 +754,14 @@ export class GlobalPrismaService extends BasePrismaService {
   // this service intentionally bypasses tenant scoping.
   get received_documents() {
     return this.baseClient.received_documents;
+  }
+
+  get received_tax_qualifications() {
+    return this.baseClient.received_tax_qualifications;
+  }
+
+  get received_tax_effects() {
+    return this.baseClient.received_tax_effects;
   }
 
   get received_document_files() {

@@ -119,6 +119,9 @@ export interface OrderDetail extends Order {
      */
     final_unit_price?: number | null;
     final_total_price?: number | null;
+    /** Actual additive gross aliases emitted by the account backend. */
+    unit_price_gross?: number | null;
+    line_total_gross?: number | null;
     image_url: string | null;
     variant_image_url?: string | null;
     /** Mirrors `product_type_enum`; null when the product row was removed. */
@@ -145,6 +148,7 @@ export interface OrderDetail extends Order {
     amount: number;
     state: string;
     method: string | null;
+    method_type?: string | null;
     paid_at: string | null;
     reference: string | null;
     /** Presencia de comprobante (visor) + content-type del HEAD. */

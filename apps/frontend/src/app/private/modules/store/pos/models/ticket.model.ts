@@ -1,4 +1,5 @@
 import { PrintFormat } from '../../../../../core/models/store-settings.interface';
+import type { PrintTrigger } from '../../../../../shared/services/print';
 
 export interface TicketItem {
   id: string;
@@ -114,6 +115,7 @@ export interface PrinterConfig {
 }
 
 export interface PrintOptions {
+  trigger?: PrintTrigger;
   printer?: string;
   copies?: number;
   openCashDrawer?: boolean;

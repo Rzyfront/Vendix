@@ -1,9 +1,13 @@
-import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 
 import { environment } from '../../../../../environments/environment';
 import {
+  AiScanJobOptions,
+  AiScanJobService,
+} from '../../../../core/services/ai-scan-job.service';
+import {
+  DianHabilitationScanResult,
   HabilitationScanApiResponse,
   HabilitationScannerScope,
 } from '../interfaces/habilitation-scan-result.interface';
@@ -21,7 +25,7 @@ export const MAX_HABILITATION_SCAN_FILES = 3;
  */
 @Injectable({ providedIn: 'root' })
 export class HabilitationScannerService {
-  private readonly http = inject(HttpClient);
+  private readonly aiScanJobs = inject(AiScanJobService);
 
   /**
    * Sube 1-3 documentos de habilitación (imagen o PDF) para extracción con IA.
@@ -37,16 +41,20 @@ export class HabilitationScannerService {
   scanHabilitation(
     files: File[],
     scope: HabilitationScannerScope,
+    opts?: AiScanJobOptions,
   ): Observable<HabilitationScanApiResponse> {
     const formData = new FormData();
     for (const file of files.slice(0, MAX_HABILITATION_SCAN_FILES)) {
       formData.append('files', file);
     }
 
-    return this.http.post<HabilitationScanApiResponse>(
-      this.scanUrl(scope),
-      formData,
-    );
+    return this.aiScanJobs
+      .enqueueAndWait<DianHabilitationScanResult>(
+        `${this.scanUrl(scope)}/async`,
+        formData,
+        opts,
+      )
+      .pipe(map((result) => ({ success: true, data: result })));
   }
 
   private scanUrl(scope: HabilitationScannerScope): string {

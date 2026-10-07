@@ -102,10 +102,30 @@ export class DianMunicipalitiesService {
    * - Con término: prioriza los que EMPIEZAN por el término sobre los que solo
    *   lo contienen, para que teclear `medel` ponga «Medellín» primero.
    */
-  search(term: string | undefined, limit?: number): DianMunicipalitySearchResult {
+  search(
+    term: string | undefined,
+    limit?: number,
+    department_code?: string,
+  ): DianMunicipalitySearchResult {
     const index = this.buildSearchIndex();
     const page_size = this.resolveLimit(limit);
     const needle = normalize(term ?? '');
+
+    if (department_code !== undefined) {
+      const matches = (
+        this.buildDepartmentMunicipalityIndex().get(department_code) ?? []
+      )
+        .filter(({ option }) => {
+          if (!needle) return true;
+          return `${option.code} ${normalize(option.name)} ${normalize(
+            option.department_name,
+          )}`.includes(needle);
+        })
+        .map(({ option }) => option)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      return { items: matches, total: matches.length, hasMore: false };
+    }
 
     if (!needle) {
       return {

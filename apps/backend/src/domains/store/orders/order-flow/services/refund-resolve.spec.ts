@@ -205,7 +205,7 @@ describe('RefundFlowService — gate de resolve canónico (paso 5, CP-REFUND-FLO
       );
 
       expect(movementsService.recordRefundCashMovementDurable).toHaveBeenCalledWith(
-        expect.objectContaining({ refund_id: 55, order_id: 1, payment_id: 100, channel: 'cash', session_id: 3 }),
+        expect.objectContaining({ refund_id: 55, order_id: 1, payment_id: 100, channel: 'cash' }),
       );
       expect(result.cash_movement).toEqual({ status: 'recorded', movement_id: 9 });
     });

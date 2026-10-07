@@ -230,6 +230,16 @@ export interface StandardPrintDataModel {
     grand_total_in_words?: string;
     tip_amount?: number;
     tip_amount_formatted?: string;
+    /**
+     * Cuando el TOTAL impreso es el fiscal (factura), la propina NO está dentro
+     * de él (no es ingreso ni base gravable): el compositor la pinta DESPUÉS de
+     * la fila TOTAL, junto con `total_paid`. Sin este flag la propina va antes
+     * del TOTAL (el `grand_total` de la orden ya la incluye).
+     */
+    tip_outside_total?: boolean;
+    /** Total fiscal + propina (lo que el cliente pagó). Sólo con `tip_outside_total`. */
+    total_paid?: number;
+    total_paid_formatted?: string;
   };
   custom_variables?: Record<string, any>;
 }

@@ -383,6 +383,13 @@ export interface DispatchSettings {
  */
 export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
 
+/**
+ * Kitchen workflow mode. Mutually exclusive: one mode disables the other.
+ * - `virtual`: live KDS board via SSE (default).
+ * - `physical`: printed kitchen tickets; dishes are marked delivered manually.
+ */
+export type KitchenMode = 'virtual' | 'physical';
+
 export interface RestaurantSettings {
   /**
    * When `true`, the table view exposes a checkout action so the bill can be
@@ -404,6 +411,10 @@ export interface RestaurantSettings {
    * (KDS) without waiter intervention. Default `false`.
    */
   qr_auto_fire?: boolean;
+  /**
+   * Kitchen workflow mode. Missing/null resolves to `'virtual'`.
+   */
+  kitchen_mode?: KitchenMode;
 }
 
 /**

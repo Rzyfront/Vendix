@@ -81,9 +81,8 @@ export class PrintFormatsController {
   }
 
   @Get(':formatType')
-  @Permissions('store:settings:read', 'invoicing:read')
-  // Misma razón que en `listFormats`: la factura precarga el detalle del
-  // formato elegido (E.1) y necesita alcanzarlo con `invoicing:read`.
+  @Permissions('store:settings:read', 'invoicing:read', 'store:pos:access', 'store:orders:read')
+  // Quien imprime también debe poder leer la política automática vigente.
   @ApiOperation({ summary: 'Get print format configuration and template detail' })
   async getFormatDetail(@Param('formatType') formatType: print_format_type_enum) {
     const context = RequestContextService.getContext();

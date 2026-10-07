@@ -4,100 +4,57 @@ import { signal } from '@angular/core';
 import { Subject, of } from 'rxjs';
 
 import { AddressFormFieldsComponent } from './address-form-fields.component';
-import { CountryService } from '../../../core/services/country.service';
 import { DianMunicipalityLookupService } from '../../services/dian-municipality-lookup.service';
 import { GeocodingService } from '../../../private/modules/ecommerce/services/geocoding.service';
 import { CurrencyFormatService } from '../../pipes/currency/currency.pipe';
 
-/**
- * H7 (regresión en producción): en modo `compact` (el que usa el POS —
- * `pos-shipping-step.component.html` pasa `[compact]="true"`) el selector de
- * municipio DANE quedaba detrás de `showAdvanced() && showMunicipality()`, y
- * `showAdvanced()` en compact es `false` salvo que la dirección precargada ya
- * trajera apto/postal/país≠CO. `resolveMunicipalityFromText()` solo se
- * llamaba desde el reverse-fill del mapa (también oculto en compact), así que
- * una dirección nueva capturada desde el POS se guardaba sin
- * `municipality_code` — el dato que la factura electrónica usa como
- * `city_code` del adquiriente.
- *
- * Zoneless: sin zone.js/testing en este arnés, así que el debounce de 500ms
- * del `merge(...)` del constructor se controla con `jasmine.clock()`, igual
- * que `pos-shipping-step.component.spec.ts`. Dos gotchas de ese archivo
- * (comentario junto a su propio `jasmine.clock().install()`) aplican aquí
- * también:
- *
- * 1. `debounceTime`'s internal "¿de verdad pasaron 500ms?" lee `Date.now()`
- *    vía el scheduler de RxJS, que `jasmine.clock().install()` por sí solo NO
- *    mockea (solo los timers). Sin `mockDate()`, `tick()` dispara el timer
- *    falso pero el operador ve que el reloj real casi no avanzó y
- *    RE-agenda — el callback nunca corre y el spy nunca se llama.
- * 2. El primer render construye el componente y su constructor ya dispara un
- *    ciclo inocuo de ese mismo `merge(...)` (el efecto de precarga de
- *    `initialAddress`, `emitEvent:true`). `debounceTime` guarda un solo
- *    "pending" por suscripción: si ese primer ciclo agenda su espera en el
- *    scheduler real (reloj aún no instalado), reclama el slot en silencio y
- *    la edición real de abajo solo actualiza el valor pendiente sin agendar
- *    un timer NUEVO — un `tick()` posterior no libera nada. Por eso el reloj
- *    se instala ANTES del primer `detectChanges()` y se hace un `tick(600)`
- *    de purga antes de la edición real.
- */
-describe('AddressFormFieldsComponent — H7 municipio DANE en modo compact', () => {
+const ADDRESS_TEST_DEPARTMENTS = [{ code: '44', name: 'La Guajira' }];
+const ADDRESS_TEST_RIOHACHA = {
+  code: '44001', name: 'Riohacha', department_code: '44',
+  department_name: 'La Guajira', postal_code: '440001',
+};
+
+/** Regression coverage for the DANE department → municipality form flow. */
+describe('AddressFormFieldsComponent — selectores DANE', () => {
   let fixture: ComponentFixture<AddressFormFieldsComponent>;
   let component: AddressFormFieldsComponent;
   let resolveByName: jasmine.Spy;
+  let resolveByCode: jasmine.Spy;
+  let listByDepartment: jasmine.Spy;
+  let forward: jasmine.Spy;
 
-  /**
-   * Instala el reloj falso ANTES del primer render (ver gotcha 2 arriba),
-   * dispara ese primer render y purga el ciclo inocuo que dispara el
-   * constructor. El reloj queda instalado al retornar — el test debe
-   * desinstalarlo en su `finally`.
-   */
-  const renderAndFlushInitialCycle = async () => {
-    jasmine.clock().install();
-    jasmine.clock().mockDate();
-    fixture.detectChanges();
-    jasmine.clock().tick(600);
-    await fixture.whenStable();
+  const riohacha = {
+    code: '44001', name: 'Riohacha', department_code: '44',
+    department_name: 'La Guajira', postal_code: '440001',
   };
+  const departments = [{ code: '44', name: 'La Guajira' }, { code: '05', name: 'Antioquia' }];
 
-  /** Edita ciudad/departamento y purga el debounce real de 500ms del `merge()`. */
-  const editAddressAndFlushDebounce = async (city: string, department: string) => {
-    component.form.markAsDirty();
-    component.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
-    component.form.get('city')!.setValue(city);
-    component.form.get('state_province')!.setValue(department);
-    jasmine.clock().tick(600);
-    await fixture.whenStable();
-  };
-
-  beforeEach(async () => {
+  beforeEach(() => {
     resolveByName = jasmine.createSpy('resolveByName').and.returnValue(of(null));
+    resolveByCode = jasmine.createSpy('resolveByCode').and.returnValue(of(null));
+    listByDepartment = jasmine.createSpy('listByDepartment').and.callFake((code: string) =>
+      of(code === '44' ? [riohacha] : [{
+        code: '05001', name: 'Medellín', department_code: '05',
+        department_name: 'Antioquia', postal_code: '050001',
+      }]),
+    );
+    forward = jasmine.createSpy('forward').and.returnValue(of(null));
     TestBed.configureTestingModule({
       imports: [AddressFormFieldsComponent],
       providers: [
-        { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]) } },
         {
           provide: DianMunicipalityLookupService,
           useValue: {
-            resolveByName,
-            // `app-dian-municipality-select` (dentro del @if de
-            // `municipalitySelectVisible`) hidrata su display al recibir un
-            // `municipality_code` vía `writeValue` → `resolveByCode`. No es
-            // el foco de este spec (solo importa que `resolveByName` haya
-            // puesto el código en el form), así que basta con no-matchear.
-            resolveByCode: () => of(null),
-            setBaseUrl: () => {},
+            listDepartments: () => of(departments), listByDepartment,
+            resolveByName, resolveByCode, setBaseUrl: () => {},
           },
         },
-        { provide: GeocodingService, useValue: { forward: jasmine.createSpy('forward').and.returnValue(of(null)), reverse: () => of(null) } },
+        { provide: GeocodingService, useValue: { forward, reverse: () => of(null) } },
         {
           provide: CurrencyFormatService,
           useValue: {
-            currencySymbol: signal('$'),
-            currencyFormatStyle: () => 'comma_dot',
-            currencyDecimals: () => 0,
-            loadCurrency: () => {},
-            format: (v: number) => `$${v}`,
+            currencySymbol: signal('$'), currencyFormatStyle: () => 'comma_dot',
+            currencyDecimals: () => 0, loadCurrency: () => {}, format: (v: number) => `$${v}`,
           },
         },
       ],
@@ -106,70 +63,171 @@ describe('AddressFormFieldsComponent — H7 municipio DANE en modo compact', () 
     component = fixture.componentInstance;
   });
 
-  it('compact + CO + ciudad/departamento válidos: resuelve municipality_code y lo emite', async () => {
-    resolveByName.and.returnValue(of({
-      code: '76001', name: 'Cali', department_code: '76', department_name: 'Valle del Cauca', postal_code: '760001',
+  it('elige departamento y ciudad del catálogo y emite los nombres/código oficiales', async () => {
+    let emitted: unknown;
+    component.addressChange.subscribe((value) => emitted = value);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    component.form.get('address_line1')!.setValue('Calle 1 # 2-3');
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+
+    expect(listByDepartment).toHaveBeenCalledWith('44');
+    expect(component.form.value).toEqual(jasmine.objectContaining({
+      city: 'Riohacha', state_province: 'La Guajira', municipality_code: '44001',
     }));
-    fixture.componentRef.setInput('compact', true);
-
-    let lastEmitted: any = null;
-    component.addressChange.subscribe((v) => (lastEmitted = v));
-
-    try {
-      await renderAndFlushInitialCycle();
-      await editAddressAndFlushDebounce('Cali', 'Valle del Cauca');
-    } finally {
-      jasmine.clock().uninstall();
-    }
-    fixture.detectChanges();
-
-    expect(resolveByName).toHaveBeenCalledWith('Cali', 'Valle del Cauca');
-    expect(component.form.get('municipality_code')!.value).toBe('76001');
-    expect(lastEmitted?.municipality_code).toBe('76001');
+    expect(emitted).toEqual(jasmine.objectContaining({
+      city: 'Riohacha', state_province: 'La Guajira', municipality_code: '44001',
+    }));
   });
 
-  it('compact + no resuelve el catálogo: el selector DANE queda visible para que el cajero elija', async () => {
-    resolveByName.and.returnValue(of(null)); // catálogo no encuentra coincidencia
-    fixture.componentRef.setInput('compact', true);
-
-    // Antes del fix: showAdvanced() es false en compact sin precarga, así que
-    // el bloque completo (incluyendo el <label> y el <app-dian-municipality-select>)
-    // ni siquiera se renderizaba.
-    try {
-      await renderAndFlushInitialCycle();
-      await editAddressAndFlushDebounce('Cali', 'Valle del Cauca');
-    } finally {
-      jasmine.clock().uninstall();
-    }
+  it('cambiar departamento limpia ciudad/código y coordenadas anteriores', async () => {
     fixture.detectChanges();
+    await fixture.whenStable();
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+    component.onLocated({ lat: 11.54, lng: -72.91 });
+    component.onDepartmentChange('05');
 
-    expect(resolveByName).toHaveBeenCalledWith('Cali', 'Valle del Cauca');
+    expect(component.form.get('city')!.value).toBeNull();
+    expect(component.form.get('state_province')!.value).toBe('Antioquia');
     expect(component.form.get('municipality_code')!.value).toBeNull();
-    expect(component.municipalitySelectVisible()).toBeTrue();
-    expect(fixture.debugElement.query(By.css('app-dian-municipality-select'))).toBeTruthy();
+    expect(component.coordsSignal()).toBeNull();
+    expect(component.form.get('latitude')!.value).toBeNull();
   });
 
-  it('no-compact: comportamiento sin cambios — no auto-resuelve y el selector ya estaba siempre visible', async () => {
-    // compact() default es false — mismos consumidores existentes
-    // (customer-modal, dispatch-note editor, checkout suscripción,
-    // organization/store edit).
+  it('al limpiar ciudad elimina código/coords y una re-selección idéntica conserva el pin', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+    component.onLocated({ lat: 11.54, lng: -72.91 });
+    component.onCityChange('44001');
+    expect(component.coordsSignal()).toEqual({ lat: 11.54, lng: -72.91 });
+
+    component.onCityChange(null);
+    expect(component.form.get('city')!.value).toBeNull();
+    expect(component.form.get('municipality_code')!.value).toBeNull();
+    expect(component.form.invalid).toBeTrue();
+    expect(component.coordsSignal()).toBeNull();
+  });
+
+  it('quita el selector redundante y mantiene inválida una dirección sin ciudad DANE', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.css('app-dian-municipality-select'))).toBeNull();
+    expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(3);
+    expect(component.form.invalid).toBeTrue();
+    expect(component.municipalitySelectorDisabled()).toBeTrue();
+  });
+
+  it('rehidrata por código, normaliza nombres y conserva coordenadas válidas sin dirty', async () => {
+    resolveByCode.and.returnValue(of(riohacha));
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'Vieja', state_province: 'Viejo',
+      country_code: 'CO', latitude: 11.54, longitude: -72.91, municipality_code: '44001',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(resolveByCode).toHaveBeenCalledWith('44001');
+    expect(component.selectedDepartmentCode()).toBe('44');
+    expect(component.selectedMunicipalityCode()).toBe('44001');
+    expect(component.form.get('city')!.value).toBe('Riohacha');
+    expect(component.form.get('state_province')!.value).toBe('La Guajira');
+    expect(component.coordsSignal()).toEqual({ lat: 11.54, lng: -72.91 });
+    expect(component.form.pristine).toBeTrue();
+  });
+
+  it('rehidrata texto DANE sin código y deja el form válido/pristine sin geocodificar', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'Riohacha', state_province: 'La Guajira', country_code: 'CO',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(resolveByName).toHaveBeenCalledOnceWith('Riohacha', 'La Guajira');
+    expect(component.selectedDepartmentCode()).toBe('44');
+    expect(component.selectedMunicipalityCode()).toBe('44001');
+    expect(component.form.get('city')!.value).toBe('Riohacha');
+    expect(component.form.get('municipality_code')!.value).toBe('44001');
+    expect(component.form.valid).toBeTrue();
+    expect(component.form.pristine).toBeTrue();
+    expect(forward).not.toHaveBeenCalled();
+  });
+
+  it('resuelve una sola vez por nombre; campos invertidos quedan vacíos, inválidos y con pista', async () => {
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'La guajira', state_province: 'Riohacha', country_code: 'CO',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(resolveByName).toHaveBeenCalledOnceWith('La guajira', 'Riohacha');
+    expect(component.selectedDepartmentCode()).toBeNull();
+    expect(component.selectedMunicipalityCode()).toBeNull();
+    expect(component.form.get('city')!.value).toBeNull();
+    expect(component.form.get('state_province')!.value).toBeNull();
+    expect(component.form.invalid).toBeTrue();
+    expect(component.legacyAddressHint()).toBe('Antes: La guajira, Riohacha');
+  });
+
+  it('descarta la resolución tardía si el usuario elige otra ciudad', async () => {
+    const pending = new Subject<typeof riohacha | null>();
+    resolveByName.and.returnValue(pending);
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'Ciudad vieja', state_province: 'Depto viejo', country_code: 'CO',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+    pending.next({ ...riohacha, code: '44002', name: 'Uribia' });
+
+    expect(component.form.get('city')!.value).toBe('Riohacha');
+    expect(component.form.get('municipality_code')!.value).toBe('44001');
+  });
+
+  it('ignora la lista tardía del departamento anterior', async () => {
+    const guajiraList = new Subject<typeof riohacha[]>();
+    const antioquiaList = new Subject<typeof riohacha[]>();
+    listByDepartment.and.callFake((code: string) => code === '44' ? guajiraList : antioquiaList);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    component.onDepartmentChange('44');
+    component.onDepartmentChange('05');
+    guajiraList.next([riohacha]);
+    antioquiaList.next([{
+      code: '05001', name: 'Medellín', department_code: '05',
+      department_name: 'Antioquia', postal_code: '050001',
+    }]);
+
+    expect(component.selectedDepartmentCode()).toBe('05');
+    expect(component.municipalityOptions()).toEqual([{ value: '05001', label: 'Medellín' }]);
+  });
+
+  it('una selección ciudad dispara el forward-geocode por el debounce existente', async () => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
     try {
-      await renderAndFlushInitialCycle();
-
-      expect(component.showAdvanced()).toBeTrue();
-      expect(component.municipalitySelectVisible()).toBeTrue();
-      expect(fixture.debugElement.query(By.css('app-dian-municipality-select'))).toBeTruthy();
-
-      await editAddressAndFlushDebounce('Cali', 'Valle del Cauca');
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+      component.form.get('address_line1')!.setValue('Calle 1 # 2-3');
+      component.onDepartmentChange('44');
+      component.onCityChange('44001');
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
     } finally {
       jasmine.clock().uninstall();
     }
-    fixture.detectChanges();
 
-    // El H7 fix está gateado a compact(): fuera de compact, resolveByName
-    // jamás se invoca desde este watcher (solo desde el reverse-fill del mapa).
-    expect(resolveByName).not.toHaveBeenCalled();
-    expect(component.form.get('municipality_code')!.value).toBeNull();
+    expect(forward).toHaveBeenCalledWith(
+      'Calle 1 # 2-3, Riohacha, Colombia',
+      jasmine.objectContaining({ city: 'Riohacha', state: 'La Guajira' }),
+    );
   });
 });
 
@@ -199,9 +257,11 @@ describe('AddressFormFieldsComponent — geocode precisión "area" no es una ubi
   const editAddressAndFlushDebounce = async () => {
     component.form.markAsDirty();
     component.form.get('address_line1')!.setValue('Vereda Xyzqwerty Km 99 Via Inexistente');
-    component.form.get('city')!.setValue('Riohacha');
-    component.form.get('state_province')!.setValue('La Guajira');
-    jasmine.clock().tick(600);
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+    jasmine.clock().tick(500);
+    await fixture.whenStable();
+    jasmine.clock().tick(500);
     await fixture.whenStable();
   };
 
@@ -210,10 +270,13 @@ describe('AddressFormFieldsComponent — geocode precisión "area" no es una ubi
     TestBed.configureTestingModule({
       imports: [AddressFormFieldsComponent],
       providers: [
-        { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]) } },
         {
           provide: DianMunicipalityLookupService,
-          useValue: { resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {} },
+          useValue: {
+            listDepartments: () => of(ADDRESS_TEST_DEPARTMENTS),
+            listByDepartment: () => of([ADDRESS_TEST_RIOHACHA]),
+            resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {},
+          },
         },
         { provide: GeocodingService, useValue: { forward, reverse: () => of(null) } },
         {
@@ -309,9 +372,11 @@ describe('AddressFormFieldsComponent — chip de carga sobre el mapa', () => {
   const editAddressAndFlushDebounce = async () => {
     component.form.markAsDirty();
     component.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
-    component.form.get('city')!.setValue('Bogotá');
-    component.form.get('state_province')!.setValue('Cundinamarca');
-    jasmine.clock().tick(600);
+    component.onDepartmentChange('44');
+    component.onCityChange('44001');
+    jasmine.clock().tick(500);
+    await fixture.whenStable();
+    jasmine.clock().tick(500);
     await fixture.whenStable();
   };
 
@@ -321,10 +386,13 @@ describe('AddressFormFieldsComponent — chip de carga sobre el mapa', () => {
     TestBed.configureTestingModule({
       imports: [AddressFormFieldsComponent],
       providers: [
-        { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]) } },
         {
           provide: DianMunicipalityLookupService,
-          useValue: { resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {} },
+          useValue: {
+            listDepartments: () => of(ADDRESS_TEST_DEPARTMENTS),
+            listByDepartment: () => of([ADDRESS_TEST_RIOHACHA]),
+            resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {},
+          },
         },
         { provide: GeocodingService, useValue: { forward, reverse: () => of(null) } },
         {

@@ -108,6 +108,7 @@ describe('PurchaseOrdersController — un fallo no puede responder 2xx', () => {
       responseService,
       queue as any,
       { add: jest.fn(), getJob: jest.fn() } as any,
+      { add: jest.fn(), getJob: jest.fn() } as any,
     );
 
     // El `catch` que sobrevive registra con `logger.error`. Silenciarlo evita

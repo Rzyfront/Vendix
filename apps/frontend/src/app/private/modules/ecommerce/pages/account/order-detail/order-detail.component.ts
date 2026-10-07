@@ -109,8 +109,9 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
           variant_sku: i.variant_sku ?? null,
           variant_attributes: this.variantAttributesText(i.variant_attributes),
           quantity: i.quantity,
-          unit_price: Number(i.unit_price ?? 0),
-          total_price: Number(i.total_price ?? 0),
+          unit_price: Number(i.unit_price_gross ?? i.final_unit_price ?? i.unit_price ?? 0),
+          total_price: Number(i.line_total_gross ?? i.final_total_price ?? i.total_price ?? 0),
+          product_type: i.product_type ?? null,
           kitchen_status: i.kitchen_status ?? null,
           preparation_time_minutes: i.preparation_time_minutes ?? null,
           cancelled_at: i.cancelled_at ?? null,
@@ -156,6 +157,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
           amount: Number(p.amount ?? 0),
           paid_at: p.paid_at ?? null,
           method: p.method ?? null,
+          method_type: p.method_type ?? null,
           has_receipt: p.has_receipt ?? false,
           receipt_content_type: p.receipt_content_type ?? null,
         })),
@@ -319,7 +321,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     const order_id = this.route.snapshot.params['id'];
-    this.is_new_order.set(this.route.snapshot.queryParams['success'] === 'true');
+    this.is_new_order.set(this.route.snapshot.queryParams['success'] === 'true' && this.route.snapshot.queryParams['wompi_callback'] !== 'true');
 
     // Handle Wompi payment callback
     this.route.queryParams
@@ -337,6 +339,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     if (this.wompiPollTimer) {
       clearInterval(this.wompiPollTimer);
+      this.wompiPollTimer = null;
     }
   }
 
@@ -345,86 +348,103 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
    * Stops polling after payment is no longer pending or after 60 attempts (5 minutes).
    */
   private pollOrderPaymentStatus(orderId: number): void {
+    if (this.wompiPollTimer) return;
     let attempts = 0;
     const maxAttempts = 60;
 
     this.wompiPollTimer = setInterval(() => {
       attempts++;
 
-      this.account_service.getOrderDetail(orderId).subscribe({
-        next: (response) => {
-          if (response.success) {
-            this.order.set(response.data);
-            const currentOrder = response.data;
+      this.account_service.getOrderDetail(orderId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response) => {
+            if (this.wompiPaymentVerified) return;
+            if (response.success) {
+              this.order.set(response.data);
+              const currentOrder = response.data;
 
-            // Check if any payment is no longer pending
-            const hasCompletedPayment = currentOrder.payments?.some(
-              (p: any) =>
-                p.state === 'completed' ||
-                p.state === 'paid' ||
-                p.state === 'succeeded',
-            );
-            const hasFailedPayment = currentOrder.payments?.some(
-              (p: any) => p.state === 'failed' || p.state === 'declined',
-            );
+              // Check if any payment is no longer pending
+              const hasCompletedPayment = currentOrder.payments?.some(
+                (p: any) =>
+                  p.state === 'completed' ||
+                  p.state === 'paid' ||
+                  p.state === 'succeeded' ||
+                  p.state === 'captured',
+              );
+              const hasFailedPayment = ['cancelled', 'refunded'].includes(currentOrder.state) || currentOrder.payments?.some(
+                (p: any) => ['failed', 'declined', 'cancelled', 'refunded'].includes(p.state),
+              );
 
-            if (
-              hasCompletedPayment ||
-              hasFailedPayment ||
-              attempts >= maxAttempts
-            ) {
-              this.verifyingWompiPayment.set(false);
-              this.wompiPaymentVerified = true;
-              if (hasCompletedPayment) {
-                this.is_new_order.set(true);
-              }
               if (
-                !hasCompletedPayment &&
-                !hasFailedPayment &&
+                hasCompletedPayment ||
+                hasFailedPayment ||
                 attempts >= maxAttempts
               ) {
-                this.toast.warning(
-                  'La verificación del pago está tardando más de lo esperado. Tu pago puede estar siendo procesado. Recarga la página en unos minutos.',
-                  'Verificación en progreso',
-                );
+                this.verifyingWompiPayment.set(false);
+                this.wompiPaymentVerified = true;
+                this.is_new_order.set(Boolean(hasCompletedPayment && !hasFailedPayment));
+                if (
+                  !hasCompletedPayment &&
+                  !hasFailedPayment &&
+                  attempts >= maxAttempts
+                ) {
+                  this.toast.warning(
+                    'La verificación del pago está tardando más de lo esperado. Tu pago puede estar siendo procesado. Recarga la página en unos minutos.',
+                    'Verificación en progreso',
+                  );
+                }
+                if (this.wompiPollTimer) {
+                  clearInterval(this.wompiPollTimer);
+                  this.wompiPollTimer = null;
+                }
               }
+            } else if (attempts >= maxAttempts) {
+              this.verifyingWompiPayment.set(false);
+              this.is_new_order.set(false);
+              this.wompiPaymentVerified = true;
+              this.toast.warning('No pudimos verificar el estado del pago. Recarga la página en unos minutos para ver la actualización.', 'Verificación interrumpida');
               if (this.wompiPollTimer) {
                 clearInterval(this.wompiPollTimer);
                 this.wompiPollTimer = null;
               }
             }
-          }
-        },
-        error: () => {
-          if (attempts >= maxAttempts) {
-            this.verifyingWompiPayment.set(false);
-            this.toast.warning(
-              'No pudimos verificar el estado del pago. Recarga la página en unos minutos para ver la actualización.',
-              'Verificación interrumpida',
-            );
-            if (this.wompiPollTimer) {
-              clearInterval(this.wompiPollTimer);
-              this.wompiPollTimer = null;
+          },
+          error: () => {
+            if (this.wompiPaymentVerified) return;
+            if (attempts >= maxAttempts) {
+              this.verifyingWompiPayment.set(false);
+              this.is_new_order.set(false);
+              this.wompiPaymentVerified = true;
+              this.toast.warning(
+                'No pudimos verificar el estado del pago. Recarga la página en unos minutos para ver la actualización.',
+                'Verificación interrumpida',
+              );
+              if (this.wompiPollTimer) {
+                clearInterval(this.wompiPollTimer);
+                this.wompiPollTimer = null;
+              }
             }
-          }
-        },
-      });
+          },
+        });
     }, 5000); // Poll every 5 seconds
   }
 
   loadOrder(order_id: number): void {
     this.is_loading.set(true);
-    this.account_service.getOrderDetail(order_id).subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.order.set(response.data);
-        }
-        this.is_loading.set(false);
-      },
-      error: () => {
-        this.is_loading.set(false);
-      },
-    });
+    this.account_service.getOrderDetail(order_id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.order.set(response.data);
+          }
+          this.is_loading.set(false);
+        },
+        error: () => {
+          this.is_loading.set(false);
+        },
+      });
   }
 
   /**

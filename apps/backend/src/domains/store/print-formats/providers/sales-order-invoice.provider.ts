@@ -107,6 +107,8 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
     const tax = Number(order.tax_amount || 0);
     const shipping = Number(order.shipping_cost || 0);
     const grandTotal = Number(order.grand_total || subtotal - discount + tax + shipping);
+    // Propina dentro de `grand_total` (fuera de subtotal): fila antes del TOTAL.
+    const tip = Number((order as any).tip_amount || 0);
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, store.logo_url, this.logger);
     // B17 — fecha del documento en la zona de la tienda, no la del contenedor.
     const tz = await resolveStoreTimezone(this.prisma, storeId);
@@ -160,6 +162,12 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
         grand_total: grandTotal,
         grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
+        ...(tip > 0
+          ? {
+              tip_amount: tip,
+              tip_amount_formatted: `$${tip.toLocaleString('es-CO')}`,
+            }
+          : {}),
       },
     };
     // CP-REFUND-FLOW-REDESIGN paso 9: sección Reembolsos/NC referenciada,

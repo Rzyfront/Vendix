@@ -334,3 +334,85 @@ describe('FiscalCloseService close', () => {
     );
   });
 });
+
+describe('FiscalCloseService terminal sessions', () => {
+  const context = {
+    organization_id: 1,
+    store_id: 2,
+    accounting_entity_id: 77,
+  } as any;
+
+  it.each(['closed', 'cancelled'])(
+    'does not recheck a %s session',
+    async (status) => {
+      const session = {
+        id: 10,
+        organization_id: 1,
+        store_id: 2,
+        accounting_entity_id: 77,
+        status,
+        checks: [],
+      };
+      const prisma = {
+        fiscal_close_sessions: {
+          findFirst: jest.fn().mockResolvedValue(session),
+          update: jest.fn(),
+        },
+        $transaction: jest.fn(),
+      };
+      const audit = { logForResource: jest.fn() };
+      const service = new FiscalCloseService(
+        prisma as any,
+        { emit: jest.fn() } as any,
+        audit as any,
+      );
+      (service as any).evaluateChecks = jest.fn();
+
+      await expect(service.runChecks([context], 10)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect((service as any).evaluateChecks).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.fiscal_close_sessions.update).not.toHaveBeenCalled();
+      expect(audit.logForResource).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['closed', 'cancelled'])(
+    'does not approve a %s session',
+    async (status) => {
+      const session = {
+        id: 10,
+        organization_id: 1,
+        store_id: 2,
+        accounting_entity_id: 77,
+        status,
+        checks: [],
+      };
+      const prisma = {
+        fiscal_close_sessions: {
+          findFirst: jest.fn().mockResolvedValue(session),
+          update: jest.fn(),
+        },
+        $transaction: jest.fn(),
+      };
+      const audit = { logForResource: jest.fn() };
+      const service = new FiscalCloseService(
+        prisma as any,
+        { emit: jest.fn() } as any,
+        audit as any,
+      );
+      (service as any).evaluateChecks = jest.fn();
+
+      await expect(service.approveClose([context], 10)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect((service as any).evaluateChecks).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.fiscal_close_sessions.update).not.toHaveBeenCalled();
+      expect(audit.logForResource).not.toHaveBeenCalled();
+    },
+  );
+});

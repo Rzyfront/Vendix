@@ -17,6 +17,7 @@ import {
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
+import { KitchenTicketPrintService } from '../../services/kitchen-ticket-print.service';
 
 /**
  * Opciones del modal de reenvío (QUI-762).
@@ -74,6 +75,7 @@ const RESEND_OPTIONS: ResendOption[] = [
 export class ResendDishModalComponent {
   private readonly kitchenTicketsService = inject(KitchenTicketsService);
   private readonly toastService = inject(ToastService);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
 
   /** Apertura del modal. */
   readonly isOpen = input<boolean>(false);
@@ -164,6 +166,10 @@ export class ResendDishModalComponent {
         next: (res) => {
           this.isSubmitting.set(false);
           this.selectedReason.set(null);
+          // No-op en cocina virtual; en fisica imprime la comanda reenviada.
+          this.kitchenTicketPrint.printAfterFire(
+            res?.ticketIds ?? (res?.ticketId != null ? [res.ticketId] : []),
+          );
           if (res?.stock_warnings?.length) {
             this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
           }

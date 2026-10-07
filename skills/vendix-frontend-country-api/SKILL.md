@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Working with country, timezone, department, or city selectors in frontend"
 ---
@@ -40,7 +40,14 @@ The core service at `src/app/core/services/country.service.ts` is a separate sta
 
 ## Rules
 
-- If your form needs Colombia departments/cities, use the non-core service explicitly.
+- **Exception — shipping/billing addresses:** address forms use the backend DANE/Divipola catalog,
+  not api-colombia and not its department/city IDs. `app-address-form-fields` uses searchable
+  department → municipality selectors and persists official names plus the five-digit
+  `municipality_code`. See `vendix-address-geocoding` for endpoints, rehydration, and validation.
+- Other legal-data and general-country forms keep their existing api-colombia selectors and
+  mappings; address-form work must not migrate them to the DANE catalog.
+- For forms that still use the existing Colombia department/city flow, use the non-core service
+  explicitly.
 - If your flow only needs static countries/timezones via observables, the core service may be the better fit.
 - Be explicit in imports to avoid silently pulling the wrong `CountryService`.
 - For OnPush/zoneless components, prefer signal-driven or properly patched async form state instead of legacy `ChangeDetectorRef` habits unless the surrounding component already uses them.

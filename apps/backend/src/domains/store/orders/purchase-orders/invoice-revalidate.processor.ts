@@ -37,7 +37,7 @@ export function mimeFromBytes(buf: Buffer): string | null {
   return null;
 }
 
-function mimeFromKey(key: string, buffer?: Buffer): string {
+export function mimeFromKey(key: string, buffer?: Buffer): string {
   const sniffed = buffer ? mimeFromBytes(buffer) : null;
   if (sniffed) return sniffed;
   const ext = key.split('.').pop()?.toLowerCase() ?? '';

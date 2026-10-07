@@ -1167,6 +1167,17 @@ export class RestaurantSettingsDto {
   @IsOptional()
   @IsBoolean()
   qr_auto_fire?: boolean;
+
+  @ApiProperty({
+    enum: ['virtual', 'physical'],
+    example: 'virtual',
+    required: false,
+    description:
+      'Kitchen mode. `virtual` (default) uses the KDS board; `physical` has no KDS screen: the ticket is printed on paper and dishes are marked delivered by hand.',
+  })
+  @IsOptional()
+  @IsIn(['virtual', 'physical'])
+  kitchen_mode?: 'virtual' | 'physical';
 }
 
 export class FingerprintDeviceConfigDto {

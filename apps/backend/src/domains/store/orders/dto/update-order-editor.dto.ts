@@ -384,7 +384,11 @@ export class UpdateOrderEditorDto {
   @Min(0)
   shipping_cost?: number;
 
-  /** Gross if rate includes tax, base if rate adds tax. Requires shipping_rate_id. */
+  /**
+   * With a configured rate: gross for inclusive tax / base for additive tax.
+   * Without a rate: explicit POS custom price, treated as gross without tax;
+   * requires an active shipping_method_id.
+   */
   @IsOptional()
   @Transform(({ value }) => value == null ? undefined : parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })

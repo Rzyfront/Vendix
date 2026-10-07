@@ -80,6 +80,7 @@
             [activeResolutionLoading]="store.loadingResolutions()"
             documentLabel="Factura de venta"
             [dueDateRequired]="isCredit()"
+            [errors]="documentoErrors()"
             dueDateHelp="Obligatoria cuando la forma de pago es a crédito."
             resolutionPlaceholder="Selecciona una resolución DIAN activa"
           ></vendix-invoice-section-documento>
@@ -546,6 +547,10 @@
             }
           </dl>
 
+          @if (backendPreviewError()) {
+            <p class="text-[11px] text-danger" role="alert">{{ backendPreviewError() }}</p>
+          }
+
           <div class="pt-2 space-y-2">
             <app-button
               type="button"
@@ -568,7 +573,7 @@
               (clicked)="openPrintPreview()"
             >
               <app-icon slot="icon" name="eye" [size]="14"></app-icon>
-              Previsualizar documento
+              Previsualizar totales
             </app-button>
           </div>
         </div>
@@ -600,12 +605,12 @@
   busca.
 -->
 
-<!-- Modal de previsualización del documento impreso (HTML del formato) -->
-<app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización del documento" size="xl">
+<!-- Modal de previsualización de totales (cálculo del backend) -->
+<app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización de totales" size="xl">
   @if (printPreviewLoading()) {
     <div class="flex flex-col items-center justify-center p-12 space-y-4">
       <div class="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-      <p class="text-text-secondary font-medium text-sm">Generando la representación gráfica del documento...</p>
+      <p class="text-text-secondary font-medium text-sm">Calculando los totales...</p>
     </div>
   } @else if (printPreviewError() || previewBlockers().length > 0) {
     <div class="p-6">
@@ -631,26 +636,73 @@
         }
       </app-alert-banner>
     </div>
-  } @else if (printPreviewResult(); as result) {
-    @if (result.html) {
-      <div class="w-full h-[70vh] bg-surface rounded-xl overflow-hidden border border-border">
-        <iframe [srcdoc]="printPreviewSrcdoc()" sandbox="allow-same-origin" class="w-full h-full border-none" title="Print Preview"></iframe>
+  } @else if (backendPreview(); as preview) {
+    <!-- Totales calculados por el backend con el mismo motor con que se firma
+         (fuente de verdad). No asigna consecutivo ni llama a la DIAN. -->
+    <div class="p-4 space-y-4 text-xs">
+      <div class="overflow-x-auto rounded-xl border border-border">
+        <table class="w-full text-left">
+          <thead class="bg-surface-secondary/60 text-text-secondary">
+            <tr>
+              <th class="px-3 py-2">#</th>
+              <th class="px-3 py-2">Descripción</th>
+              <th class="px-3 py-2 text-right">Cant.</th>
+              <th class="px-3 py-2 text-right">Base</th>
+              <th class="px-3 py-2 text-right">Impuestos</th>
+              <th class="px-3 py-2 text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (line of preview.lines; track line.position) {
+              <tr class="border-t border-border/60">
+                <td class="px-3 py-2">{{ line.position }}</td>
+                <td class="px-3 py-2">{{ line.description }}</td>
+                <td class="px-3 py-2 text-right">{{ line.quantity }}</td>
+                <td class="px-3 py-2 text-right">{{ +line.base | currency }}</td>
+                <td class="px-3 py-2 text-right">{{ +line.tax_amount | currency }}</td>
+                <td class="px-3 py-2 text-right font-medium">{{ +line.total | currency }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
       </div>
-    } @else {
-      <!--
-        Paso 7 del plan AIU: respaldo XML cuando el backend no pudo componer
-        el gráfico (`html: null`). El modal ya no queda en blanco.
-      -->
-      <div class="p-4">
-        <app-alert-banner variant="info" class="mb-3 block">
-          No se pudo componer la representación gráfica; se muestra el XML con los datos capturados.
-        </app-alert-banner>
-        <pre
-          class="max-h-[70vh] overflow-auto rounded-xl border border-border bg-slate-950 p-3 text-[11px] leading-tight text-slate-100"
-          role="region"
-          aria-label="XML proyectado"
-        ><code>{{ result.xml }}</code></pre>
-      </div>
-    }
+
+      <dl class="space-y-2 max-w-sm ml-auto">
+        <div class="flex justify-between text-text-secondary">
+          <dt>Base gravable:</dt>
+          <dd class="font-medium text-text-primary">{{ +preview.subtotal | currency }}</dd>
+        </div>
+        @if (+preview.discount_total > 0) {
+          <div class="flex justify-between text-success">
+            <dt>Descuentos:</dt>
+            <dd class="font-medium">{{ +preview.discount_total | currency }}</dd>
+          </div>
+        }
+        @for (row of preview.tax_breakdown; track $index) {
+          <div class="flex justify-between text-text-secondary">
+            <dt>{{ row.tax_type }} {{ row.rate * 100 }}% (base {{ +row.base | currency }}):</dt>
+            <dd class="font-medium text-text-primary">{{ +row.amount | currency }}</dd>
+          </div>
+        }
+        <div class="flex justify-between text-text-secondary">
+          <dt>Total impuestos:</dt>
+          <dd class="font-medium text-text-primary">{{ +preview.tax_total | currency }}</dd>
+        </div>
+        <div class="flex justify-between border-t border-border pt-2 text-sm font-bold text-text-primary">
+          <dt>Total factura:</dt>
+          <dd class="text-primary">{{ +preview.total | currency }}</dd>
+        </div>
+        @if (+preview.withholdings_total > 0) {
+          <div class="flex justify-between text-warning">
+            <dt>Retenciones:</dt>
+            <dd class="font-medium">- {{ +preview.withholdings_total | currency }}</dd>
+          </div>
+          <div class="flex justify-between text-text-secondary">
+            <dt>Neto a girar:</dt>
+            <dd class="font-semibold text-text-primary">{{ +preview.net_after_withholdings | currency }}</dd>
+          </div>
+        }
+      </dl>
+    </div>
   }
 </app-modal>

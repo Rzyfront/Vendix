@@ -1,7 +1,7 @@
 import { Component, DestroyRef, OnInit, inject, computed, signal  } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -33,7 +33,7 @@ import {
     IconComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
-
+    RouterLink,
     OptionsDropdownComponent,],
   styles: [
     `
@@ -175,16 +175,33 @@ import {
       </div>
 
 </div>
-      <!-- DIAN posición panel -->
+      <!-- Preliminary operational IVA estimate, not a DIAN declaration/payable. -->
       <app-card shadow="none" [responsivePadding]="true" class="md:mt-4" overflow="hidden">
-        <div class="flex flex-col gap-1 mb-4">
-          <span class="text-sm font-bold text-[var(--color-text-primary)]">Posición DIAN</span>
-          <span class="text-xs text-[var(--color-text-secondary)]">
-            Lo que la declaración del período cierra, desglosado por figura fiscal.
-          </span>
-        </div>
+        <section role="note" aria-labelledby="iva-estimate-title" aria-describedby="iva-estimate-caveat"
+          class="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+          <div class="flex items-start gap-3">
+            <app-icon name="alert-triangle" [size]="20" class="mt-0.5 shrink-0 text-amber-700"></app-icon>
+            <div class="min-w-0">
+              <h2 id="iva-estimate-title" class="text-sm font-bold md:text-base">Estimación operativa preliminar de IVA</h2>
+              <p id="iva-estimate-caveat" class="mt-1 text-sm leading-relaxed">
+                Es solo una estimación de IVA basada en la operación registrada; no representa el valor final a pagar a la DIAN ni una declaración lista para presentar.
+              </p>
+              <p class="mt-2 text-xs font-semibold">No incluye:</p>
+              <ul class="mt-1 list-disc space-y-1 pl-5 text-xs leading-relaxed">
+                <li>Documentos de proveedores pendientes de recibir o calificar.</li>
+                <li>Anticipos ni créditos fiscales de períodos anteriores.</li>
+                <li>Otras familias de impuestos distintas del IVA.</li>
+              </ul>
+              <a routerLink="/admin/fiscal/declarations"
+                class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-amber-700 px-3 py-2 text-sm font-semibold text-amber-900 underline underline-offset-2 hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-800">
+                Revisar en Fiscal → Declaraciones
+                <app-icon name="arrow-right" [size]="16"></app-icon>
+              </a>
+            </div>
+          </div>
+        </section>
 
-        <!-- Hero figure: net_vat_position with sign convention -->
+        <!-- Hero: net_vat_position is operational IVA estimate only. -->
         <div class="flex items-center gap-3 mb-4 p-4 rounded-xl border"
              [class]="netVatPositionClass()">
           <app-icon name="calculator" [class]="netVatPositionIconClass()"></app-icon>
@@ -534,21 +551,19 @@ export class TaxSummaryComponent implements OnInit {
   }
 
   /**
-   * Sign-convention label for the DIAN posición hero figure.
-   * Positivo: "Saldo a cargo" (store owes the DIAN).
-   * Negativo: "Saldo a favor" (store has a credit).
-   * Cero: "Sin saldo".
+   * Sign-convention label for the preliminary operational IVA estimate.
+   * The words intentionally avoid implying a definitive DIAN payable or credit.
    */
   netVatPositionLabel(): string {
     const pos = this.data()?.net_vat_position ?? 0;
-    if (pos > 0) return 'Saldo a cargo';
-    if (pos < 0) return 'Saldo a favor';
-    return 'Sin saldo';
+    if (pos > 0) return 'Estimado de IVA neto a pagar';
+    if (pos < 0) return 'Estimado de IVA neto a favor';
+    return 'Estimado de IVA neto en cero';
   }
 
   /**
-   * Visual class for the net_vat_position hero — color-coded by sign so the
-   * merchant sees at a glance whether the store owes the DIAN or has a credit.
+   * Visual class for the estimated IVA position hero; color signals direction only,
+   * not a definitive liability or tax-credit determination.
    */
   netVatPositionClass(): string {
     const pos = this.data()?.net_vat_position ?? 0;

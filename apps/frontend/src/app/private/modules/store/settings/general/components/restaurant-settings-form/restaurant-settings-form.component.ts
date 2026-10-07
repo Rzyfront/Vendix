@@ -13,8 +13,11 @@ import { ExpandableCardComponent } from '../../../../../../../shared/components/
 
 export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
 
+export type KitchenMode = 'virtual' | 'physical';
+
 export interface RestaurantSettings {
   enable_table_checkout: boolean;
+  kitchen_mode?: KitchenMode;
   qr_scan_behavior?: QrScanBehavior;
   qr_auto_fire?: boolean;
 }
@@ -400,6 +403,10 @@ export class RestaurantSettingsForm {
     qr_auto_fire: new FormControl<boolean>(false, {
       nonNullable: true,
     }),
+    // Booleano en UI; se persiste como kitchen_mode 'physical' | 'virtual'.
+    kitchen_physical: new FormControl<boolean>(false, {
+      nonNullable: true,
+    }),
   });
 
   get enableTableCheckoutControl(): FormControl<boolean> {
@@ -414,11 +421,21 @@ export class RestaurantSettingsForm {
     return this.form.get('qr_auto_fire') as FormControl<boolean>;
   }
 
+  get kitchenPhysicalControl(): FormControl<boolean> {
+    return this.form.get('kitchen_physical') as FormControl<boolean>;
+  }
+
   constructor() {
     effect(() => {
       const current = this.settings();
       if (current) {
-        this.form.patchValue(current, { emitEvent: false });
+        this.form.patchValue(
+          {
+            ...current,
+            kitchen_physical: current.kitchen_mode === 'physical',
+          },
+          { emitEvent: false },
+        );
         this.syncMirrors();
       }
     });
@@ -427,7 +444,11 @@ export class RestaurantSettingsForm {
   onFieldChange() {
     this.syncMirrors();
     if (this.form.valid) {
-      this.settingsChange.emit(this.form.value as RestaurantSettings);
+      const { kitchen_physical, ...rest } = this.form.value;
+      this.settingsChange.emit({
+        ...rest,
+        kitchen_mode: kitchen_physical ? 'physical' : 'virtual',
+      } as RestaurantSettings);
     }
   }
 

@@ -6,6 +6,8 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { Prisma } from '@prisma/client';
+import { lockOrderLifecycle } from '../../store/orders/order-flow/order-lifecycle-lock.util';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -375,21 +377,21 @@ export class AccountService {
       (order.stores?.store_settings?.settings as any)?.operations
         ?.default_preparation_time_minutes ?? 15;
 
-    // MAX por ítem ACTIVO con la regla exacta guest (variante ?? producto
+    // MAX por ítem ACTIVO físico/preparado (variante ?? producto
     // ?? default tienda). Las líneas canceladas se muestran pero no manejan ETA.
-    const activeItems = order.order_items.filter(
-      (i) => i.cancelled_at == null,
+    const physicalItems = order.order_items.filter(
+      (i) => i.cancelled_at == null && i.products?.product_type !== 'service',
     );
-    const prep_minutes_max = activeItems.length
+    const prep_minutes_max = physicalItems.length
       ? Math.max(
-          ...activeItems.map(
+          ...physicalItems.map(
             (i) =>
               i.product_variants?.preparation_time_minutes ??
               i.products?.preparation_time_minutes ??
               defaultPrep,
           ),
         )
-      : defaultPrep;
+      : null;
 
     // Logo firmado defensivo: si S3 falla, null y la vista usa el fallback.
     let storeLogoUrl: string | null = null;
@@ -500,6 +502,7 @@ export class AccountService {
             amount: p.amount,
             state: p.state,
             method: p.store_payment_method?.system_payment_method?.display_name,
+            method_type: p.store_payment_method?.system_payment_method?.type ?? null,
             paid_at: p.paid_at,
             has_receipt: hasReceipt,
             receipt_content_type: head?.contentType ?? null,
@@ -551,43 +554,54 @@ export class AccountService {
    * 404 ciego: pago ajeno/inexistente y contexto sin usuario/tienda
    * responden el mismo shape de "no existe" sin distinguirlos.
    */
-  private async resolveAccountPayment(paymentId: number) {
+  private async resolveAccountPayment(
+    paymentId: number,
+    prisma: Pick<Prisma.TransactionClient, 'orders'> = this.prisma,
+  ) {
     const context = RequestContextService.getContext();
     const user_id = context?.user_id;
     const store_id = context?.store_id;
+    if (!user_id || !store_id) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
 
-    const payment = await this.prisma.payments.findFirst({
-      where: { id: paymentId },
+    // The order owns authorization. payments.customer_id may be null for valid
+    // OrderFlow payments; nested projection must not impose that denormalized field.
+    const order = await prisma.orders.findFirst({
+      where: { store_id, customer_id: user_id, payments: { some: { id: paymentId } } },
       select: {
-        id: true,
-        order_id: true,
-        state: true,
-        receipt_s3_key: true,
-        receipt_uploaded_at: true,
-        store_payment_method: {
+        id: true, state: true, store_id: true, customer_id: true,
+        payments: {
+          where: { id: paymentId },
           select: {
-            system_payment_method: { select: { type: true } },
+            id: true, order_id: true, state: true, receipt_s3_key: true,
+            receipt_uploaded_at: true,
+            store_payment_method: { select: { system_payment_method: { select: { type: true } } } },
           },
-        },
-        orders: {
-          select: { id: true, state: true, store_id: true, customer_id: true },
         },
       },
     });
-
-    if (!payment || !user_id || !store_id) {
+    const payment = order?.payments[0];
+    if (!order || !payment || order.store_id !== store_id || order.customer_id !== user_id || payment.order_id !== order.id) {
       throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
     }
-    const order = payment.orders;
-    if (
-      !order ||
-      order.store_id !== store_id ||
-      order.customer_id !== user_id
-    ) {
-      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
-    }
-
     return { payment, order };
+  }
+
+  private assertReceiptAllowed(
+    payment: { state: string; store_payment_method?: { system_payment_method?: { type: string } | null } | null },
+    order: { state: string },
+  ): void {
+    if (['cancelled', 'refunded', 'finished', 'delivered'].includes(order.state)) {
+      throw new VendixHttpException(ErrorCodes.PAY_VALIDATE_001, 'Esta orden ya está cerrada y no recibe más comprobantes.');
+    }
+    if (['succeeded', 'captured', 'refunded', 'cancelled'].includes(payment.state)) {
+      throw new VendixHttpException(ErrorCodes.PAY_VALIDATE_001, 'Este pago ya quedó resuelto y no necesita comprobante.');
+    }
+    const method = payment.store_payment_method?.system_payment_method?.type;
+    if (method !== 'bank_transfer' && method !== 'voucher') {
+      throw new VendixHttpException(ErrorCodes.PAY_VALIDATE_001, 'Este medio de pago no recibe comprobante. Solo transferencia y datáfono lo permiten.');
+    }
   }
 
   /**
@@ -631,29 +645,7 @@ export class AccountService {
   }> {
     const { payment, order } = await this.resolveAccountPayment(paymentId);
 
-    const TERMINAL_ORDER_STATES = ['cancelled', 'refunded', 'finished', 'delivered'];
-    const TERMINAL_PAYMENT_STATES = ['succeeded', 'captured', 'refunded', 'cancelled'];
-    if (TERMINAL_ORDER_STATES.includes(order.state as string)) {
-      throw new VendixHttpException(
-        ErrorCodes.PAY_VALIDATE_001,
-        'Esta orden ya está cerrada y no recibe más comprobantes.',
-      );
-    }
-    if (TERMINAL_PAYMENT_STATES.includes(payment.state as string)) {
-      throw new VendixHttpException(
-        ErrorCodes.PAY_VALIDATE_001,
-        'Este pago ya quedó resuelto y no necesita comprobante.',
-      );
-    }
-
-    const methodType =
-      payment.store_payment_method?.system_payment_method?.type ?? null;
-    if (methodType !== 'bank_transfer' && methodType !== 'voucher') {
-      throw new VendixHttpException(
-        ErrorCodes.PAY_VALIDATE_001,
-        'Este medio de pago no recibe comprobante. Solo transferencia y datáfono lo permiten.',
-      );
-    }
+    this.assertReceiptAllowed(payment, order);
 
     if (!file || !file.buffer?.length) {
       throw new VendixHttpException(
@@ -669,7 +661,7 @@ export class AccountService {
       throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
     }
 
-    if (file.size > AccountService.RECEIPT_MAX_BYTES) {
+    if (file.size > AccountService.RECEIPT_MAX_BYTES || file.buffer.length > AccountService.RECEIPT_MAX_BYTES) {
       throw new PayloadTooLargeException(
         'El comprobante supera los 5 MB. Comprime la imagen o el PDF e inténtalo de nuevo.',
       );
@@ -677,22 +669,58 @@ export class AccountService {
 
     const key = await this.uploadAccountReceipt(file, order.store_id);
     const receipt_uploaded_at = new Date();
-    const persisted = await this.prisma.payments.updateMany({
-      where: { id: payment.id, order_id: order.id },
-      data: { receipt_s3_key: key, receipt_uploaded_at },
-    });
-
-    // R8-F4 (espejo guest): `count === 0` no es éxito — se purga el
-    // objeto recién subido y se responde el 404 ciego del binding.
-    if (persisted.count === 0) {
-      try {
-        await this.s3Service.deleteFile(key);
-      } catch (cleanupError) {
-        this.logger.warn(
-          `Orphan receipt cleanup failed for key ${key}: ${(cleanupError as Error)?.message}`,
-        );
+    let callbackCompleted = false;
+    try {
+      await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        try {
+          await lockOrderLifecycle(tx, order.id, order.store_id);
+        } catch (error) {
+          if (error instanceof NotFoundException) {
+            throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+          }
+          throw error;
+        }
+        const fresh = await this.resolveAccountPayment(paymentId, tx);
+        if (fresh.order.id !== order.id || fresh.order.store_id !== order.store_id || fresh.order.customer_id !== order.customer_id) {
+          throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+        }
+        this.assertReceiptAllowed(fresh.payment, fresh.order);
+        const persisted = await tx.orders.update({
+          where: {
+            id: fresh.order.id, store_id: fresh.order.store_id,
+            customer_id: fresh.order.customer_id, state: fresh.order.state,
+          },
+          data: {
+            payments: {
+              updateMany: {
+                where: { id: fresh.payment.id, state: fresh.payment.state, receipt_s3_key: fresh.payment.receipt_s3_key },
+                data: { receipt_s3_key: key, receipt_uploaded_at },
+              },
+            },
+          },
+          select: { payments: { where: { id: paymentId }, select: { receipt_s3_key: true } } },
+        });
+        // Nested updateMany has no count: a successful parent update alone is not
+        // evidence that the receipt CAS actually matched/applied.
+        if (persisted.payments[0]?.receipt_s3_key !== key) {
+          throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+        }
+        callbackCompleted = true;
+      });
+    } catch (error) {
+      const definitelyAborted = error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034';
+      if (!callbackCompleted || definitelyAborted) {
+        try {
+          await this.s3Service.deleteFile(key);
+        } catch (cleanupError) {
+          this.logger.warn(`Orphan receipt cleanup failed for key ${key}: ${(cleanupError as Error)?.message}`);
+        }
+      } else {
+        // Commit acknowledgement may be lost after the callback completed. The
+        // key can already be referenced: leave it for the existing offline purge.
+        this.logger.warn(`Receipt commit outcome uncertain for key ${key}; retained for reconciliation.`);
       }
-      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+      throw error;
     }
 
     return {

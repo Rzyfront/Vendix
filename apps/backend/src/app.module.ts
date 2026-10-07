@@ -49,6 +49,7 @@ import { DnsModule } from './common/services/dns/dns.module';
 import { CorsModule } from './common/cors/cors.module';
 import { BlocklistModule } from './common/services/blocklist/blocklist.module';
 import { RateLimitModule } from './common/services/rate-limit/rate-limit.module';
+import { AiScanJobsModule } from './common/ai-scan-jobs';
 import { InventoryCostingModule } from './domains/store/inventory/shared/inventory-costing.module';
 
 /**
@@ -176,6 +177,7 @@ function resolveThrottleSetting(
     InventoryCostingModule,
     BlocklistModule,
     RateLimitModule,
+    AiScanJobsModule,
   ],
   controllers: [AppController],
   providers: [

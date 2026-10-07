@@ -4,6 +4,10 @@ import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
+  AiScanJobOptions,
+  AiScanJobService,
+} from '../../../../../core/services/ai-scan-job.service';
+import {
   AddStopDto,
   CloseDispatchRouteDto,
   ConfirmRouteSheetDto,
@@ -33,6 +37,7 @@ const CACHE_TTL = 30_000;
 export class PlanillasRutasService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
+  private readonly aiScanJobs = inject(AiScanJobService);
 
   list(query: DispatchRouteQuery = {}): Observable<PaginatedDispatchRoutesResponse> {
     const params = new URLSearchParams();
@@ -271,20 +276,23 @@ export class PlanillasRutasService {
 
   /**
    * Upload a scanned route sheet (image/PDF) for AI extraction.
-   * `POST /store/dispatch-routes/:id/scan` (multipart `file`).
+   * `POST /store/dispatch-routes/:id/scan/async` (multipart `file`): encola el
+   * job `ai-scan` y emite el resultado cuando termina. Los errores se propagan
+   * sin envolver (Error o HttpErrorResponse) para que el consumidor aplique
+   * `parseApiError`.
    */
-  scanSheet(routeId: number, file: File): Observable<RouteSheetScanResult> {
+  scanSheet(
+    routeId: number,
+    file: File,
+    opts?: AiScanJobOptions,
+  ): Observable<RouteSheetScanResult> {
     const formData = new FormData();
     formData.append('file', file);
-    return this.http
-      .post<any>(
-        `${this.apiUrl}/store/dispatch-routes/${routeId}/scan`,
-        formData,
-      )
-      .pipe(
-        map((r) => r.data as RouteSheetScanResult),
-        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
-      );
+    return this.aiScanJobs.enqueueAndWait<RouteSheetScanResult>(
+      `${this.apiUrl}/store/dispatch-routes/${routeId}/scan/async`,
+      formData,
+      opts,
+    );
   }
 
   /**

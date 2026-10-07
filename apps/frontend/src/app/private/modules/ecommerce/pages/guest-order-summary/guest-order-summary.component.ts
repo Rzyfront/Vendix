@@ -49,6 +49,7 @@ export interface GuestOrderItem {
   variant_attributes?: string | null;
   quantity: number;
   unit_price: number;
+  product_type?: 'physical' | 'service' | 'prepared' | null;
   total_price: number;
   tax_amount_item?: number | null;
   image_url?: string | null;
@@ -100,6 +101,7 @@ export interface GuestOrderPayment {
   amount?: number | null;
   paid_at?: string | null;
   method?: string | null;
+  method_type?: string | null;
   has_receipt?: boolean;
   receipt_content_type?: string | null;
 }
@@ -1468,6 +1470,8 @@ export class GuestOrderSummaryComponent implements OnInit {
    */
   readonly embedded = input(false);
   readonly summaryInput = input<GuestOrderSummary | null>(null);
+  readonly physicalProgressAllowed = input(true);
+  readonly purchaseConfirmed = input<boolean | null>(null);
   /**
    * En embebido el padre es dueño de los datos: tras subir un
    * comprobante se emite para que recargue la orden (en guest
@@ -1478,7 +1482,10 @@ export class GuestOrderSummaryComponent implements OnInit {
   readonly summary = computed(
     () => this.summaryInput() ?? this.fetchedSummary(),
   );
-  readonly justPurchased = signal(false);
+  private readonly routePurchaseConfirmed = signal(false);
+  readonly justPurchased = computed(() => this.embedded()
+    ? this.purchaseConfirmed() === true
+    : this.purchaseConfirmed() ?? this.routePurchaseConfirmed());
 
   // Paso 9 — visor de comprobante (patrón admin order-details).
   readonly receiptPreview = signal<GuestReceiptPreview | null>(null);
@@ -1528,7 +1535,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
-    this.justPurchased.set(
+    this.routePurchaseConfirmed.set(
       this.route.snapshot.queryParamMap.get('success') === 'true',
     );
 
@@ -1586,7 +1593,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce
         ?.orders;
     this.voucherPrint.printVoucher(summary, {
-      hidePrepEta: orders?.hide_prep_eta === true,
+      hidePrepEta: !this.physicalProgressAllowed() || orders?.hide_prep_eta === true,
       hideTracking: orders?.hide_tracking_progress === true,
     });
   }
@@ -1804,6 +1811,7 @@ export class GuestOrderSummaryComponent implements OnInit {
   }
 
   etaVisible(): boolean {
+    if (!this.physicalProgressAllowed()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
       return false;
@@ -1818,6 +1826,7 @@ export class GuestOrderSummaryComponent implements OnInit {
    * ausente ⇒ la barra se muestra, se lee con `!== true`.
    */
   trackingShown(): boolean {
+    if (!this.physicalProgressAllowed()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (
       config?.customConfig?.ecommerce?.orders?.hide_tracking_progress === true
@@ -2149,6 +2158,11 @@ export class GuestOrderSummaryComponent implements OnInit {
     const terminalPayment = ['succeeded', 'captured', 'refunded', 'cancelled'];
     if (terminalOrder.includes(orderState)) return false;
     if (terminalPayment.includes(payment.state)) return false;
+    // Account payloads always provide canonical type; preserve legacy standalone
+    // payloads without that additive field, but never infer type from display_name.
+    if (this.embedded() || payment.method_type != null) {
+      return payment.method_type === 'bank_transfer' || payment.method_type === 'voucher';
+    }
     return true;
   }
 
@@ -2165,6 +2179,9 @@ export class GuestOrderSummaryComponent implements OnInit {
     const paymentId = payment.payment_id;
     if (paymentId == null) return;
     if (!this.embedded() && !this.token) return;
+    const order = this.summary()?.order;
+    const currentPayment = order?.payments?.find(p => p.payment_id === paymentId);
+    if (!order || !currentPayment || !this.receiptUploadAllowed(order.state, currentPayment) || this.uploadingReceiptId() !== null) return;
 
     if (file.size > this.RECEIPT_MAX_SIZE) {
       this.toast.error('El archivo supera los 5 MB permitidos.', 'Error');

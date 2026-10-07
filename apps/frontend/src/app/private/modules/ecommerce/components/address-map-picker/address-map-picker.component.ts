@@ -12,6 +12,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { loadMaplibre } from '../../../../../shared/utils/maplibre-loader.util';
 
 /** Simple lat/lng pair used for map center and marker position. */
 interface LatLng {
@@ -60,8 +61,8 @@ class LocateButtonControl {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'maplibregl-ctrl-geolocate';
-    button.setAttribute('aria-label', 'Ubicarme');
-    button.setAttribute('title', 'Ubicarme');
+    button.setAttribute('aria-label', 'Usar mi ubicación actual');
+    button.setAttribute('title', 'Usar mi ubicación actual');
     const icon = document.createElement('span');
     icon.className = 'maplibregl-ctrl-icon';
     icon.setAttribute('aria-hidden', 'true');
@@ -184,28 +185,35 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
 
   constructor() {
     // Re-center the map + (lazily) create the marker when the parent pushes a
-    // coordinate (GPS, forward-geocode, etc.). Guarded until the map has loaded.
+    // coordinate (GPS, forward-geocode, etc.). If its center is cleared, remove
+    // the existing pin too so the control cannot return to stale coordinates.
     effect(() => {
       const next = this.center();
       if (next && this.mapLoaded && this.map) {
         this.ensureMarker(next);
         this.map.flyTo({ center: [next.lng, next.lat], zoom: POINT_ZOOM });
+      } else if (!next && this.map && this.marker) {
+        this.clearMarker();
       }
     });
   }
 
   async ngAfterViewInit(): Promise<void> {
     try {
+      // Shared loader: lazy chunk + v6 worker URL (ESM-only, no default export).
+      this.maplibregl = await loadMaplibre();
+      // The center may change while the lazy MapLibre chunk downloads.
       const start = this.center();
-
-      const maplibreModule = await import('maplibre-gl');
-      this.maplibregl = (maplibreModule as any).default ?? maplibreModule;
 
       this.map = new this.maplibregl.Map({
         container: this.mapContainer().nativeElement,
         style: BASEMAP_STYLE,
         center: start ? [start.lng, start.lat] : [COLOMBIA_CENTER.lng, COLOMBIA_CENTER.lat],
         zoom: start ? POINT_ZOOM : COUNTRY_ZOOM,
+        locale: {
+          'GeolocateControl.FindMyLocation': 'Usar mi ubicación actual',
+          'GeolocateControl.LocationNotAvailable': 'Ubicación no disponible',
+        },
         attributionControl: false,
       });
 
@@ -222,10 +230,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         // actual GPS request so it can show a priming permission modal first
         // when the browser permission is still undecided. GPS must NEVER
         // fire without this explicit click.
-        this.map.addControl(
-          new LocateButtonControl(() => this.locateRequested.emit()),
-          'top-right',
-        );
+        this.map.addControl(this.createLocateButtonControl(), 'top-right');
       } else {
         // Default mode (pre-`locateRequested` behavior): MapLibre's native
         // GeolocateControl resolves GPS itself and drops/moves the marker,
@@ -282,6 +287,11 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       this.map.on('load', () => {
         this.mapLoaded = true;
         this.loading.set(false);
+        // A slow basemap can finish AFTER LOAD_TIMEOUT_MS already raised the
+        // "no se pudo cargar" placeholder. That placeholder is opaque and
+        // absolute over the canvas, so without this the map renders fine
+        // underneath but stays hidden for good. A real `load` wins.
+        this.error.set(false);
         this.clearLoadTimer();
         this.emitMapReady();
         // Let the OSM/OpenFreeMap credit flash briefly (~0.3s) on load so it is
@@ -294,6 +304,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         if (c) {
           this.ensureMarker(c);
           this.map.flyTo({ center: [c.lng, c.lat], zoom: POINT_ZOOM });
+        } else {
+          this.clearMarker();
         }
         // Ensure correct sizing after the container transitions into view.
         this.map.resize();
@@ -333,6 +345,11 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     attrib?.removeAttribute('open');
   }
 
+  /** Delegated GPS control reports the click; the parent owns geolocation. */
+  private createLocateButtonControl(): LocateButtonControl {
+    return new LocateButtonControl(() => this.locateRequested.emit());
+  }
+
   /** Lazily creates the draggable marker on first point, or moves the existing one. */
   private ensureMarker(coord: LatLng): void {
     if (!this.map || !this.maplibregl) return;
@@ -351,6 +368,17 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     } else {
       this.marker.setLngLat([coord.lng, coord.lat]);
     }
+  }
+
+  /** Removes a stale address point without emitting a user location change. */
+  private clearMarker(): void {
+    try {
+      this.marker?.remove?.();
+    } catch {
+      // Ignore a marker already detached by a lost WebGL context.
+    }
+    this.marker = null;
+    this.hasPoint.set(false);
   }
 
   private emitFromMarker(): void {

@@ -392,12 +392,69 @@ export interface SplitFinancialAccount {
   available_to_pay: SplitMoney;
   payment_state: 'unpaid' | 'pending' | 'partial' | 'paid';
   invoice_id: number | null;
-  payments: Array<{ id: number; amount: SplitMoney; state: string; can_confirm?: boolean; next_action?: SplitPaymentNextAction | null }>;
+  invoice: SplitAccountInvoice | null;
+  lines: SplitAccountLine[];
+  payments: SplitAccountPayment[];
+}
+
+export interface SplitAccountInvoice {
+  id: number;
+  invoice_number: string | null;
+  status: string;
+  dian_status: string | null;
+  grand_total: SplitMoney;
+}
+
+export interface SplitAccountLine {
+  id: number;
+  order_item_id: number | null;
+  product_name: string;
+  variant_name: string | null;
+  original_quantity: number | null;
+  share_ratio: string;
+  subtotal: SplitMoney;
+  discount: SplitMoney;
+  tax: SplitMoney;
+  total: SplitMoney;
+}
+
+export interface SplitAccountPayment {
+  id: number;
+  amount: SplitMoney;
+  state: string;
+  payment_method_name: string | null;
+  created_at: string | null;
+  can_confirm: boolean;
+  next_action: SplitPaymentNextAction | unknown;
+}
+
+export type SplitResultMode = 'equal' | 'custom' | 'items';
+
+export interface SplitUndoBlocker {
+  account_id: number;
+  account_label: string;
+  reason: 'payment_registered' | 'invoice_transmitted';
+  amount: SplitMoney | null;
+}
+
+export interface SplitUndoDiscard {
+  account_id: number;
+  account_label: string;
+  invoice_id: number;
+  invoice_number: string | null;
+}
+
+export interface SplitUndo {
+  allowed: boolean;
+  blockers: SplitUndoBlocker[];
+  invoices_to_discard: SplitUndoDiscard[];
 }
 
 export interface SplitResult {
   source_order_id: number;
   split_group_id: number | null;
+  mode: SplitResultMode | null;
+  undo: SplitUndo;
   source_version: string;
   currency: string;
   original_total: SplitMoney;
@@ -413,6 +470,11 @@ export interface SplitSourceItem {
   product_name: string;
   quantity: number;
   cancelled_at?: string | null;
+  /** Opcionales: si el llamador los trae, el panel muestra el total por producto. */
+  final_total_price?: string | number | null;
+  total_price?: string | number | null;
+  unit_price?: string | number | null;
+  variant_name?: string | null;
 }
 
 export interface SplitPaymentNextAction { type?: string; url?: string; message?: string; }

@@ -1,4 +1,5 @@
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
+import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
@@ -536,8 +537,17 @@ export class OrdersService {
     rate: { id: number; type: string; base_cost: unknown } | null,
     orderId: number,
     storeId: number,
+    method?: { id: number; type: string },
   ): Promise<number | null> {
     if (!rate) return null;
+    if (method?.type === 'pickup') {
+      const options = await this.shippingCalculatorService.quotePickupRates(
+        storeId,
+        method.id,
+      );
+      const pickupRate = options.find((option) => option.rate_id === rate.id);
+      return pickupRate ? Number(pickupRate.cost) : null;
+    }
     const options = await this.quoteOrderShippingOptions(orderId, storeId);
     const match = options?.find((o) => o.rate_id === rate.id);
     return match ? Number(match.cost) : null;
@@ -1410,6 +1420,9 @@ export class OrdersService {
         // necesita `invoice_type` para no decir "no es electrónica" de una
         // factura de venta recién creada que todavía no se transmitió.
         invoices: {
+          // Las facturas por cuenta de una división viajan aparte en
+          // `account_invoices`; `invoices[0]` es siempre el documento titular.
+          where: { financial_account_id: null },
           select: {
             id: true,
             invoice_number: true,
@@ -1680,6 +1693,44 @@ export class OrdersService {
     // y mezclarlas cambiaría silenciosamente `hasIssuedSalesInvoice`.
     const activeTitularInvoice = await this.findActiveTitularInvoice(id);
 
+    // División financiera: facturas y pagos por cuenta, en la misma llamada.
+    const financialAccounts = await this.prisma.order_financial_accounts.findMany(
+      {
+        where: { split: { source_order_id: id } },
+        select: { id: true, label: true },
+      },
+    );
+    const accountLabelById = new Map<number, string>(
+      financialAccounts.map((a: any) => [a.id, a.label]),
+    );
+    const accountInvoiceRows = await this.prisma.invoices.findMany({
+      where: {
+        order_id: id,
+        financial_account_id: { not: null },
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: {
+        id: true,
+        invoice_number: true,
+        status: true,
+        dian_status: true,
+        total_amount: true,
+        financial_account_id: true,
+        customer_name: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+    const account_invoices = accountInvoiceRows.map((inv: any) => ({
+      id: inv.id,
+      invoice_number: inv.invoice_number ?? null,
+      status: inv.status,
+      dian_status: inv.dian_status ?? null,
+      grand_total: String(inv.total_amount),
+      financial_account_id: inv.financial_account_id,
+      account_label: accountLabelById.get(inv.financial_account_id) ?? null,
+      customer_name: inv.customer_name ?? null,
+    }));
+
     // order-truth-and-invoice-tz plan — Step 2: additive `available_actions`
     // (order-level) + `items[].available_actions` (item-level). Both are
     // computed through the SAME util predicates
@@ -1692,6 +1743,12 @@ export class OrdersService {
     const orderHasSettledPayment = (order.payments ?? []).some((p: any) =>
       SETTLED_PAYMENT_STATES.has(p.state),
     );
+    // Modo cocina: UNA lectura por orden (no por item). Solo gobierna la
+    // elegibilidad de `deliver` (fisico: sin KDS, entregable desde pending).
+    const kitchenMode = await resolveKitchenMode(
+      this.prisma,
+      (order as any).store_id,
+    );
     const orderItemsWithActions = (order.order_items ?? []).map((item: any) => ({
       ...item,
       available_actions: computeItemActions({
@@ -1703,11 +1760,21 @@ export class OrdersService {
         cancelled_at: item.cancelled_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
+        kitchen_mode: kitchenMode,
       }),
     }));
 
     return {
       ...order,
+      payments: (order.payments ?? []).map((p: any) => ({
+        ...p,
+        financial_account_id: p.financial_account_id ?? null,
+        financial_account_label:
+          p.financial_account_id != null
+            ? (accountLabelById.get(p.financial_account_id) ?? null)
+            : null,
+      })),
+      account_invoices,
       order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
       active_sales_invoice: activeTitularInvoice
@@ -2593,6 +2660,7 @@ export class OrdersService {
           in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
         },
         status: { notIn: ['voided', 'cancelled'] },
+        financial_account_id: null,
       },
       select: { id: true, status: true, customer_id: true },
       orderBy: { id: 'desc' },
@@ -3197,14 +3265,34 @@ export class OrdersService {
 
     // El DTO declara que la orden deja de tener envío: entonces sí, cero.
     const dtoDropsShipment =
-      dto.delivery_type === order_delivery_type_enum.pickup ||
-      dto.delivery_type === order_delivery_type_enum.dine_in;
+      dto.delivery_type === order_delivery_type_enum.dine_in ||
+      (dto.delivery_type === order_delivery_type_enum.pickup &&
+        !dto.shipping_method_id);
+    const customShippingWithoutRate =
+      dto.manual_shipping_price != null && dto.shipping_rate_id == null;
 
     if (dto.manual_shipping_price != null &&
-      (!dto.shipping_method_id || !dto.shipping_rate_id || dtoDropsShipment)) {
+      (!dto.shipping_method_id || dtoDropsShipment)) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
-        'Selecciona una tarifa de domicilio para aplicar su impuesto al costo manual',
+        'Selecciona un método de envío activo para aplicar el costo manual.',
+      );
+    }
+    if (
+      customShippingWithoutRate &&
+      (
+        typeof dto.shipping_method_id !== 'number' ||
+        !Number.isInteger(dto.shipping_method_id) ||
+        dto.shipping_method_id <= 0 ||
+        typeof dto.manual_shipping_price !== 'number' ||
+        !Number.isFinite(dto.manual_shipping_price) ||
+        dto.manual_shipping_price < 0 ||
+        dto.manual_shipping_price !== roundMoney(dto.manual_shipping_price)
+      )
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+        'La tarifa personalizada requiere un método válido y un monto de hasta dos decimales.',
       );
     }
 
@@ -3220,7 +3308,7 @@ export class OrdersService {
       shippingCost = Number.isFinite(persisted) && persisted > 0 ? persisted : 0;
     }
 
-    if (dto.shipping_method_id) {
+    if (dto.shipping_method_id && !dtoDropsShipment) {
       const method = await this.prisma.shipping_methods.findFirst({
         where: { id: dto.shipping_method_id, store_id: storeId, is_active: true },
       });
@@ -3247,8 +3335,10 @@ export class OrdersService {
           'La dirección del alias no pertenece a esta orden.',
         );
       }
-      const shippingAddressId = dto.shipping_address_id ??
-        (editingExistingAlias ? existingOrder.shipping_address_id : null);
+      const shippingAddressId = resolvedDeliveryType === order_delivery_type_enum.pickup
+        ? null
+        : dto.shipping_address_id ??
+          (editingExistingAlias ? existingOrder.shipping_address_id : null);
 
       if (
         (resolvedDeliveryType === order_delivery_type_enum.home_delivery ||
@@ -3348,7 +3438,33 @@ export class OrdersService {
         }
       }
 
-      if (dto.shipping_rate_id) {
+      if (customShippingWithoutRate) {
+        // Opción explícita del POS cuando no hay cotización seleccionable:
+        // el importe es bruto, no lleva copia fiscal y no se reintenta cotizar.
+        shippingCost = roundMoney(dto.manual_shipping_price!);
+      } else if (method.type === 'pickup') {
+        if (dto.manual_shipping_price != null) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'El retiro en tienda debe usar el costo de una tarifa configurada.',
+          );
+        }
+        const pickupOptions = await this.shippingCalculatorService.quotePickupRates(
+          storeId,
+          method.id,
+        );
+        const pickupOption = dto.shipping_rate_id != null
+          ? pickupOptions.find((option) => option.rate_id === dto.shipping_rate_id)
+          : pickupOptions[0];
+        if (!pickupOption) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'Selecciona una tarifa de recogida activa para actualizar el envío.',
+          );
+        }
+        resolvedShippingRateId = pickupOption.rate_id;
+        shippingCost = Number(pickupOption.cost);
+      } else if (dto.shipping_rate_id) {
         const rate = await this.prisma.shipping_rates.findFirst({
           where: {
             id: dto.shipping_rate_id,
@@ -3476,6 +3592,7 @@ export class OrdersService {
     );
     const effectiveShippingCost = dto.shipping_cost ?? shippingCost;
     const shippingUnchanged =
+      !customShippingWithoutRate &&
       !dtoDropsShipment &&
       Math.round(Number(effectiveShippingCost ?? 0) * 100) ===
         persistedShippingCents &&
@@ -4525,10 +4642,15 @@ export class OrdersService {
                 : {}),
           notes: dto.notes ?? existingOrder.notes,
           internal_notes: dto.internal_notes ?? existingOrder.internal_notes,
-          delivery_type: dto.delivery_type ?? existingOrder.delivery_type,
+          delivery_type: resolvedDeliveryType ?? dto.delivery_type ?? existingOrder.delivery_type,
           billing_address_id: dto.billing_address_id ?? existingOrder.billing_address_id,
-          shipping_address_id: dto.shipping_address_id ?? existingOrder.shipping_address_id,
-          shipping_method_id: dto.shipping_method_id ?? existingOrder.shipping_method_id,
+          shipping_address_id:
+            dtoDropsShipment || resolvedDeliveryType === order_delivery_type_enum.pickup
+              ? null
+              : dto.shipping_address_id ?? existingOrder.shipping_address_id,
+          shipping_method_id: dtoDropsShipment
+            ? null
+            : dto.shipping_method_id ?? existingOrder.shipping_method_id,
           // Quitar el envío también suelta la tarifa (antes la conservaba);
           // un método nuevo liga su tarifa resuelta (o ninguna).
           shipping_rate_id: dtoDropsShipment
@@ -4890,14 +5012,16 @@ export class OrdersService {
 
     // Auto-calculate: resolve rate + cost from customer's shipping address
     if (dto.auto_calculate && !dto.shipping_rate_id) {
-      const options = await this.quoteOrderShippingOptions(orderId, storeId);
+      const options = method.type === 'pickup'
+        ? await this.shippingCalculatorService.quotePickupRates(storeId, method.id)
+        : await this.quoteOrderShippingOptions(orderId, storeId);
       if (!options) {
         throw new VendixHttpException(
           ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
         );
       }
 
-      const match = options.find((o) => o.method_id === method.id);
+      const match = options.find((option) => option.method_id === method.id);
       if (!match) {
         throw new VendixHttpException(
           ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
@@ -4921,7 +5045,15 @@ export class OrdersService {
       // Costo esperado de la tarifa (paso 5: helper compartido con
       // `update()`; mismo contrato que
       // `PaymentsService.resolvePosShippingTax`, 16081a2ab).
-      rateCost = await this.resolveExpectedRateCost(rate, orderId, storeId);
+      rateCost = await this.resolveExpectedRateCost(
+        rate,
+        orderId,
+        storeId,
+        method,
+      );
+      if (method.type === 'pickup' && rateCost == null) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
+      }
       if (dto.shipping_cost === undefined) {
         shippingCost = rateCost ?? Number(rate.base_cost);
       }

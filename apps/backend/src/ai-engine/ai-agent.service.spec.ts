@@ -179,6 +179,30 @@ describe('AIAgentService.runAgentStream', () => {
     expect(canUseAIFeature).toHaveBeenCalledWith(42, 'tool_agents');
   });
 
+  it('cuts a degenerate completion: error frame, no text, flagged result', async () => {
+    configureStorePlan(['*']);
+    chat.mockResolvedValue(ok({ content: 'ells'.repeat(1000), model: 'free-x' }));
+    const errorLog = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    const { chunks, result } = await drain({});
+
+    expect(chunks.map((c) => c.type)).toEqual(['error']);
+    expect(chunks[0].error).toBe(
+      'El modelo generó una respuesta inválida y se detuvo. Intenta de nuevo.',
+    );
+    expect(result.degenerate).toBe(true);
+    expect(result.content).toBe('');
+    const logged = JSON.parse(errorLog.mock.calls[0][0] as string);
+    expect(logged).toMatchObject({
+      event: 'VEX_DEGENERATE_OUTPUT',
+      storeId: 42,
+      model: 'free-x',
+      chars: 4000,
+    });
+  });
+
   it('offers only tools in the allowed domain', async () => {
     configureStorePlan(['orders'], ['store:orders:read', 'store:customers:read']);
 
@@ -907,7 +931,7 @@ describe('AIAgentService.runAgentStream', () => {
     expect(consumeExtraQuota).not.toHaveBeenCalled();
   });
 
-  it('(rx3-a) vex proposing turn accumulates 3 writes into ONE plan_approval frame', async () => {
+  it('(rx3-a) vex proposing turn with 3 writes in one iteration proposes ONLY the first as a 1-step plan_approval', async () => {
     const proposal = (tool: string, args: any, token: string, preview: any) =>
       new VendixHttpException(
         ErrorCodes.AI_AGENT_005,
@@ -963,34 +987,38 @@ describe('AIAgentService.runAgentStream', () => {
       },
     });
 
-    // Exactly ONE plan frame for the three writes — never one card per write.
+    // ONE frame, ONE step: only the first write is proposed; the rest are
+    // deferred (neutral tool_result) so the model re-proposes them after the
+    // first approval.
     const approvals = chunks.filter((c) => c.type === 'plan_approval');
     expect(approvals).toHaveLength(1);
     const frame = approvals[0].plan_approval!;
     expect(frame.plan_id).toBe('plan-9');
-    expect(frame.steps).toHaveLength(3);
+    expect(frame.steps).toHaveLength(1);
     expect(frame.steps!.map((s) => [s.step_id, s.tool, s.irreversible])).toEqual(
-      [
-        ['s1', 'create_expense', false],
-        ['s2', 'create_expense', false],
-        ['s3', 'send_invoice_dian', true],
-      ],
+      [['s1', 'create_expense', false]],
     );
     expect(frame.steps![0].arguments).toEqual({ total: 5 });
-    expect(frame.covered_steps).toEqual([1, 2]);
-    expect(frame.reconfirm_steps).toEqual([3]);
-    // Server hashes persisted for approve-time verification (never the
-    // client's re-declaration).
+    expect(frame.covered_steps).toEqual([1]);
+    expect(frame.reconfirm_steps).toEqual([]);
     expect(saveProposedSteps).toHaveBeenCalledWith([
       { order: 1, tool: 'create_expense', args: { total: 5 } },
-      { order: 2, tool: 'create_expense', args: { total: 9 } },
-      { order: 3, tool: 'send_invoice_dian', args: { id: 1 } },
     ]);
     expect(classifyProposedSteps).toHaveBeenCalled();
-    // The turn closes with the plan receipt — no single-step card.
     expect(result.pending_plan?.plan_id).toBe('plan-9');
-    expect(result.pending_plan?.steps).toHaveLength(3);
+    expect(result.pending_plan?.steps).toHaveLength(1);
     expect(result.pending_confirmation).toBeUndefined();
+    // The deferred writes answer neutrally and never become steps.
+    const deferred = chunks.filter(
+      (c) => c.type === 'tool_result' && c.tool?.summary?.startsWith('Pendiente'),
+    );
+    expect(deferred).toHaveLength(2);
+    // The turn pauses on the approval: no second provider call.
+    expect(chat).toHaveBeenCalledTimes(1);
+    // The narration is a single-action ask, never "plan con N pasos".
+    const text = chunks.find((c) => c.type === 'text')!.content!;
+    expect(text).toContain('Necesito tu aprobación');
+    expect(text).not.toContain('plan');
     expect(chunks.map((c) => c.type)).toEqual([
       'tool_call',
       'tool_result',
@@ -1011,10 +1039,10 @@ describe('AIAgentService.runAgentStream', () => {
           ErrorCodes.AI_AGENT_005,
           'requiere confirmación',
           {
-            tool: 'create_expense',
-            arguments: { total: 5 },
-            preview: { target: 'gasto' },
-            confirmation_token: 'tok-1',
+            tool: 'send_invoice_dian',
+            arguments: { id: 1 },
+            preview: { target: 'factura' },
+            confirmation_token: 'tok-2',
           } as any,
         ),
       )
@@ -1023,10 +1051,10 @@ describe('AIAgentService.runAgentStream', () => {
           ErrorCodes.AI_AGENT_005,
           'requiere confirmación',
           {
-            tool: 'send_invoice_dian',
-            arguments: { id: 1 },
-            preview: { target: 'factura' },
-            confirmation_token: 'tok-2',
+            tool: 'create_expense',
+            arguments: { total: 5 },
+            preview: { target: 'gasto' },
+            confirmation_token: 'tok-1',
           } as any,
         ),
       );
@@ -1034,8 +1062,8 @@ describe('AIAgentService.runAgentStream', () => {
       .mockResolvedValueOnce(
         ok({
           tool_calls: [
-            call('c1', 'create_expense', { total: 5 }),
-            call('c2', 'send_invoice_dian', { id: 1 }),
+            call('c1', 'send_invoice_dian', { id: 1 }),
+            call('c2', 'create_expense', { total: 5 }),
           ],
         }),
       )
@@ -1053,8 +1081,8 @@ describe('AIAgentService.runAgentStream', () => {
     expect(approvals[0].plan_approval!.plan_id).toBe('p-local');
     expect(
       approvals[0].plan_approval!.steps!.map((s) => s.irreversible),
-    ).toEqual([false, true]);
-    expect(result.pending_plan?.steps).toHaveLength(2);
+    ).toEqual([true]);
+    expect(result.pending_plan?.steps).toHaveLength(1);
     expect(result.pending_confirmation).toBeUndefined();
   });
 
