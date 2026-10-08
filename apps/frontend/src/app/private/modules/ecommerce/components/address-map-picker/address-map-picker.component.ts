@@ -32,8 +32,10 @@ const COUNTRY_ZOOM = 5;
 const CITY_ZOOM = 12;
 /** Zoom used once an actual point exists, close enough to place the marker. */
 const POINT_ZOOM = 16;
-/** If the basemap has not loaded within this window, treat it as un-renderable. */
-const LOAD_TIMEOUT_MS = 12000;
+/** Primary basemap budget: if no `load` within this window, swap to the fallback. */
+const PRIMARY_TIMEOUT_MS = 6000;
+/** Fallback basemap budget: if it also fails to load, the map is un-renderable. */
+const FALLBACK_TIMEOUT_MS = 8000;
 
 /**
  * Basemap style. OpenFreeMap `bright` (OSM data, KEYLESS, backed by OSMF/Fastly):
@@ -41,6 +43,31 @@ const LOAD_TIMEOUT_MS = 12000;
  * customer can place the marker on the right corner.
  */
 const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
+
+/**
+ * Fallback basemap: inline MapLibre v8 style with a single raster source (CARTO
+ * Voyager, OSM data). No style JSON, glyphs or sprites to fetch, so it survives
+ * the failure of OpenFreeMap's style/vector endpoints. Used at most once per map.
+ */
+const FALLBACK_STYLE = {
+  version: 8,
+  sources: {
+    'carto-voyager': {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+        'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors © CARTO',
+    },
+  },
+  layers: [
+    { id: 'carto-voyager', type: 'raster', source: 'carto-voyager' },
+  ],
+};
 
 /**
  * Custom "locate me" map control. Renders identically to MapLibre's native
@@ -152,6 +179,14 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
    */
   readonly mapReady = output<void>();
   /**
+   * Emitted exactly once when the map could NOT be rendered at all (both the
+   * primary and the fallback basemap failed, or MapLibre/WebGL init threw).
+   * Additive to `mapReady` (which also still fires on that path). Lets the
+   * parent offer its own alternatives; the placeholder already offers a
+   * "Usar mi ubicación" action.
+   */
+  readonly mapFailed = output<void>();
+  /**
    * Emitted when the user clicks the "locate me" control AND `delegateLocate`
    * is `true`. Reports the gesture only — the parent owns the actual
    * `navigator.geolocation` call (and any priming permission modal) so GPS
@@ -178,6 +213,10 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private mapLoaded = false;
   /** Guards the `mapReady` output so it fires exactly once. */
   private mapReadyEmitted = false;
+  /** Guards the `mapFailed` output so it fires exactly once. */
+  private mapFailedEmitted = false;
+  /** True once the one-shot swap to `FALLBACK_STYLE` happened. */
+  private usingFallbackStyle = false;
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   /** Delays collapsing the map credit so it flashes briefly (~0.3s) on load. */
   private attribTimer: ReturnType<typeof setTimeout> | null = null;
@@ -306,7 +345,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         this.emitFromMarker();
       });
 
-      this.map.on('load', () => {
+      const onLoaded = () => {
+        if (this.mapLoaded) return;
         this.mapLoaded = true;
         // A focus that arrived between map construction and `load` was
         // dropped by the effect (mapLoaded was false): frame it now.
@@ -318,7 +358,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
           });
         }
         this.loading.set(false);
-        // A slow basemap can finish AFTER LOAD_TIMEOUT_MS already raised the
+        // A slow basemap can finish AFTER the fallback timeout already raised the
         // "no se pudo cargar" placeholder. That placeholder is opaque and
         // absolute over the canvas, so without this the map renders fine
         // underneath but stays hidden for good. A real `load` wins.
@@ -342,24 +382,86 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         }
         // Ensure correct sizing after the container transitions into view.
         this.map.resize();
-      });
+      };
+      // maplibre-gl 6.12 fires `load` once the (possibly swapped) style has
+      // rendered, also after `setStyle` on a map that had not loaded yet.
+      // `idle` is a belt-and-braces signal in case `load` is skipped; the
+      // handler is idempotent. (`styledata` is NOT used: it fires as soon as
+      // the style JSON parses, before any tile renders.)
+      this.map.on('load', onLoaded);
+      this.map.once('idle', onLoaded);
 
-      // If the basemap never loads (tiles unreachable), fall back to the
-      // placeholder instead of leaving the skeleton spinning forever.
-      this.loadTimer = setTimeout(() => {
-        if (!this.mapLoaded) {
-          this.loading.set(false);
-          this.error.set(true);
-          this.emitMapReady();
-        }
-      }, LOAD_TIMEOUT_MS);
+      // Primary basemap error/timeout → one-shot swap to the raster fallback.
+      // Errors after `load` (single tile 404s) are ignored.
+      this.map.on('error', () => {
+        if (!this.mapLoaded) this.switchToFallbackStyle();
+      });
+      this.armLoadTimer(PRIMARY_TIMEOUT_MS);
     } catch {
       // WebGL unsupported / dynamic import failed / init threw → show the
-      // placeholder; the customer fills the address manually (form still works).
-      this.loading.set(false);
-      this.error.set(true);
-      this.emitMapReady();
+      // actionable placeholder (locate button).
+      this.failMap();
     }
+  }
+
+  /** (Re)starts the load watchdog: first expiry swaps style, second fails the map. */
+  private armLoadTimer(ms: number): void {
+    this.clearLoadTimer();
+    this.loadTimer = setTimeout(() => {
+      this.loadTimer = null;
+      if (this.mapLoaded) return;
+      if (!this.usingFallbackStyle) this.switchToFallbackStyle();
+      else this.failMap();
+    }, ms);
+  }
+
+  /** One-shot swap to `FALLBACK_STYLE`; if it also fails to load, the map fails. */
+  private switchToFallbackStyle(): void {
+    if (this.usingFallbackStyle || this.mapLoaded || !this.map) return;
+    this.usingFallbackStyle = true;
+    try {
+      this.map.setStyle(FALLBACK_STYLE);
+    } catch {
+      this.failMap();
+      return;
+    }
+    this.armLoadTimer(FALLBACK_TIMEOUT_MS);
+  }
+
+  /** Terminal failure: show the placeholder, emit `mapReady` + `mapFailed` once. */
+  private failMap(): void {
+    this.clearLoadTimer();
+    this.loading.set(false);
+    this.error.set(true);
+    this.emitMapReady();
+    if (!this.mapFailedEmitted) {
+      this.mapFailedEmitted = true;
+      this.mapFailed.emit();
+    }
+  }
+
+  /**
+   * Placeholder action when the map failed. Delegated mode only reports the
+   * gesture; otherwise resolves GPS itself and emits `located` (errors ignored:
+   * the parent keeps its manual/other flows).
+   */
+  onFallbackLocate(): void {
+    if (this.delegateLocate()) {
+      this.locateRequested.emit();
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        this.located.emit({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        }),
+      () => {
+        // Ignored on purpose: no map, no pin, nothing else to update.
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
+    );
   }
 
   /**
