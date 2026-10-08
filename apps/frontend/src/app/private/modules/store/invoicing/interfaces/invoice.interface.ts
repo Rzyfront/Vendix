@@ -665,14 +665,6 @@ export interface InvoicePdfResult {
   url: string;
 }
 
-/**
- * Respuesta de `GET /store/invoicing/:id/pdf`.
- *
- * OJO: `invoices.pdf_url` NO es una URL, es una LLAVE S3
- * (`stores/{id}/invoices/{id}/invoice-XXX.pdf`, ver `invoice-pdf.service.ts`).
- * Abrirla directamente desde el navegador produce una ruta relativa rota. Este
- * endpoint es el que la firma; si la factura todavía no tiene PDF, lo genera.
- */
 /** Respuesta de `POST /store/invoicing/:id/deliver` (reenvio por correo). */
 export interface InvoiceDeliverResult {
   invoice_id: number;
@@ -682,6 +674,14 @@ export interface InvoiceDeliverResult {
   message_id?: string;
 }
 
+/**
+ * Respuesta de `GET /store/invoicing/:id/pdf`.
+ *
+ * OJO: `invoices.pdf_url` NO es una URL, es una LLAVE S3
+ * (`stores/{id}/invoices/{id}/invoice-XXX.pdf`, ver `invoice-pdf.service.ts`).
+ * Abrirla directamente desde el navegador produce una ruta relativa rota. Este
+ * endpoint es el que la firma; si la factura todavía no tiene PDF, lo genera.
+ */
 export interface InvoicePdfUrl {
   url: string;
 }

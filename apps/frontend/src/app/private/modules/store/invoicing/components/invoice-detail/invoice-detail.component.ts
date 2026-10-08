@@ -1198,11 +1198,6 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
       </div>
     </app-modal>
 
-    <!-- HERMANO del modal de detalle, no hijo. Metido dentro del cuerpo del
-         detalle, el desplegable del selector —posicionado absoluto— quedaría
-         recortado por el «overflow-y-auto« del modal padre, y el usuario vería
-         media lista de eventos. Acá arriba sólo se monta cuando hay factura, así
-         que «invoiceId« (input requerido) nunca se queda sin valor. -->
     <app-modal
       [(isOpen)]="deliverModalOpen"
       title="Reenviar factura por correo"
@@ -1238,6 +1233,11 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
       </div>
     </app-modal>
 
+    <!-- HERMANO del modal de detalle, no hijo. Metido dentro del cuerpo del
+         detalle, el desplegable del selector —posicionado absoluto— quedaría
+         recortado por el «overflow-y-auto« del modal padre, y el usuario vería
+         media lista de eventos. Acá arriba sólo se monta cuando hay factura, así
+         que «invoiceId« (input requerido) nunca se queda sin valor. -->
     @if (detail(); as inv) {
       <vendix-dian-event-register-modal
         [(isOpen)]="eventModalOpen"
