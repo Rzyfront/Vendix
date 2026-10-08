@@ -91,7 +91,7 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
           <tr>
             <td align="right" style="padding: 0 4px 10px; font-size: 11px; color: #6b7280;">
               Comprobante elaborado y enviado a través de
-              <img src="${VENDIX_LOGO_URL}" alt="Vendix" height="22" style="height: 22px; width: auto; vertical-align: middle; border: 0; margin-left: 4px;">
+              <img src="${VENDIX_LOGO_URL}" alt="Vendix" height="22" style="height: 22px; width: auto; vertical-align: middle; border: 0; margin-left: 4px;"><strong style="color: #111827; font-size: 13px; vertical-align: middle; margin-left: 4px;">Vendix</strong>
             </td>
           </tr>
 
@@ -200,7 +200,7 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
 
           <tr>
             <td align="center" style="padding: 16px 16px 0; font-size: 11px; line-height: 1.5; color: #9ca3af;">
-              Este es un correo automático, por favor no lo respondas. Si tienes preguntas sobre este comprobante, comunícate con ${issuer}.
+              Este es un correo automático. Si tienes preguntas sobre este comprobante, comunícate con ${issuer}.
             </td>
           </tr>
         </table>
@@ -229,6 +229,6 @@ export function generateInvoiceEmailText(data: InvoiceEmailData): string {
   text += '\n\n';
   text += `Comprobante elaborado y enviado a través de Vendix.\n`;
   text += `Si deseas esta funcionalidad, contáctanos: ${VENDIX_SITE_URL}\n\n`;
-  text += `Este es un correo automático, por favor no lo respondas.\n`;
+  text += `Este es un correo automático. Si tienes preguntas sobre este comprobante, comunícate con el emisor.\n`;
   return text;
 }
