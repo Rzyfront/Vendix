@@ -286,6 +286,11 @@ export class CheckoutComponent implements OnInit {
   readonly isColombia = computed(() => this.selected_country_code() === 'CO');
   /** Signal mirror of address_form.validity (FormGroup.valid is not reactive in zoneless). */
   readonly addressFormValid = signal(false);
+  /**
+   * Revision counter bumped on every address_form value change. Reading it in
+   * `currentAddressKey()` makes the (non-reactive) form value trackable.
+   */
+  private readonly addressFormRev = signal(0);
 
   /**
    * Identidad de la línea (producto:variante:tarifa) para el `track` del
@@ -789,6 +794,9 @@ export class CheckoutComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.addressFormValid.set(this.address_form.valid));
     this.addressFormValid.set(this.address_form.valid);
+    this.address_form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.addressFormRev.update((v) => v + 1));
 
     this.checkout_service
       .getInvoicingEligibility()
@@ -1607,6 +1615,7 @@ export class CheckoutComponent implements OnInit {
       }
       cityCtrl?.setValue(city.id, { emitEvent: false });
       this.addressFormValid.set(this.address_form.valid);
+      this.addressFormRev.update((v) => v + 1);
       this.scope_locked.set(true);
       void this.loadScopeFocus(muni);
     } finally {
@@ -2295,6 +2304,8 @@ export class CheckoutComponent implements OnInit {
 
   /** Identidad de la dirección activa de domicilio, o null si no hay. */
   private currentAddressKey(): string | null {
+    // tracked so computeds that derive from the form re-evaluate
+    this.addressFormRev();
     if (this.selected_delivery() !== 'home') return null;
     if (this.use_new_address()) {
       if (!this.address_form.valid) return null;
