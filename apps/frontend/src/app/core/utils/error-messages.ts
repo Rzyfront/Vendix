@@ -1219,6 +1219,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se pudo registrar el cobro. La orden sigue pendiente.',
   ORD_PAY_ALREADY_PAID_001:
     'Esta orden ya está pagada por completo. Actualiza el detalle antes de intentar otro cobro.',
+  ORD_REVIEW_NOT_FOUND: 'No encontramos este pedido.',
+  ORD_REVIEW_ALREADY_EXISTS: 'Ya calificaste esta compra. ¡Gracias!',
+  ORD_REVIEW_ORDER_INVALID_STATE: 'Este pedido no se puede calificar.',
+  ORD_REVIEW_PRODUCT_NOT_IN_ORDER: 'Este producto no hace parte del pedido.',
+  ORD_REVIEW_PRODUCT_NOT_ALLOWED: 'Aún no puedes reseñar este producto.',
 
   // Coupons (QUI-783). El backend rechaza el cupón con estos códigos cuando
   // un cupón aplicado a una venta no puede ser validado server-side (antes
