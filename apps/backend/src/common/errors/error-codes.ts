@@ -4406,6 +4406,33 @@ export const ErrorCodes = {
     devMessage: 'Las reseñas están desactivadas para esta tienda',
   },
 
+  // Reseñas de experiencia de compra (order_reviews)
+  ORD_REVIEW_NOT_FOUND: {
+    code: 'ORD_REVIEW_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Pedido no encontrado para reseñar',
+  },
+  ORD_REVIEW_ALREADY_EXISTS: {
+    code: 'ORD_REVIEW_ALREADY_EXISTS',
+    httpStatus: 409,
+    devMessage: 'Este pedido ya tiene una reseña de experiencia',
+  },
+  ORD_REVIEW_ORDER_INVALID_STATE: {
+    code: 'ORD_REVIEW_ORDER_INVALID_STATE',
+    httpStatus: 400,
+    devMessage: 'Un pedido cancelado o reembolsado no se puede reseñar',
+  },
+  ORD_REVIEW_PRODUCT_NOT_IN_ORDER: {
+    code: 'ORD_REVIEW_PRODUCT_NOT_IN_ORDER',
+    httpStatus: 400,
+    devMessage: 'El producto no hace parte de este pedido',
+  },
+  ORD_REVIEW_PRODUCT_NOT_ALLOWED: {
+    code: 'ORD_REVIEW_PRODUCT_NOT_ALLOWED',
+    httpStatus: 400,
+    devMessage: 'No se puede reseñar este producto en este momento',
+  },
+
   // AI Agent
   AI_AGENT_001: {
     code: 'AI_AGENT_001',
