@@ -410,9 +410,9 @@ export class ReviewsAnalyticsService {
     const capped = truncated ? experiences.slice(0, 10000) : experiences;
 
     const TAG_LABELS: Record<string, string> = {
-      very_easy: 'Súper fácil',
-      normal: 'Normal',
-      difficult: 'Difícil',
+      very_easy: '¡Fue súper fácil!',
+      normal: 'Todo bien, normal',
+      difficult: 'Fue difícil comprar',
     };
     const SOURCE_LABELS: Record<string, string> = {
       order_confirmation: 'Confirmación del pedido',

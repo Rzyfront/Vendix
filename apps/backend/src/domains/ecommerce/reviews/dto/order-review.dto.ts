@@ -29,6 +29,9 @@ const trimOrNull = ({ value }: { value: unknown }) => {
   return trimmed.length ? trimmed : null;
 };
 
+const trimString = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
+
 export class CreateOrderReviewDto {
   @IsInt()
   @Min(1)
@@ -63,10 +66,12 @@ export class CreateOrderProductReviewDto {
   rating: number;
 
   @IsOptional()
+  @Transform(trimString)
   @IsString()
   @MaxLength(255)
   title?: string;
 
+  @Transform(trimString)
   @IsString()
   @MinLength(10)
   @MaxLength(5000)

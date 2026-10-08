@@ -71,22 +71,14 @@ export class ReviewsController {
   @Get('orders')
   @Permissions('store:reviews:read')
   async findAllOrderReviews(@Query() query: OrderReviewsQueryDto) {
-    try {
-      const result = await this.reviewsService.findAllOrderReviews(query);
-      return this.responseService.paginated(
-        result.data,
-        result.meta.total,
-        result.meta.page,
-        result.meta.limit,
-        'Reseñas de experiencia obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las reseñas de experiencia',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.reviewsService.findAllOrderReviews(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Reseñas de experiencia obtenidas exitosamente',
+    );
   }
 
   @Get(':id')
