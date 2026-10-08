@@ -1538,6 +1538,56 @@ export class AnalyticsController {
   }
 
   /**
+   * Paso 8: tendencia conjunta reseñas de producto + experiencia de compra.
+   * Rutas literales (sin :param) declaradas antes de cualquier ruta dinámica.
+   */
+  @Get('reviews/trend')
+  @Permissions('store:analytics:read')
+  async getReviewsTrend(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getReviewsTrend(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('reviews/trend/export')
+  @Permissions('store:analytics:read')
+  async exportReviewsTrend(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { trendRows, experienceRows, tagRows } =
+      await this.reviews_analytics_service.getReviewsTrendForExport(query);
+
+    const trendColumns: ReportColumn[] = [
+      { key: 'period', header: 'Periodo', type: 'text' },
+      { key: 'product_count', header: 'Reseñas productos', type: 'number' },
+      { key: 'product_avg', header: 'Promedio productos', type: 'number' },
+      { key: 'experience_count', header: 'Reseñas experiencia', type: 'number' },
+      { key: 'experience_avg', header: 'Promedio experiencia', type: 'number' },
+    ];
+    const experienceColumns: ReportColumn[] = [
+      { key: 'created_at', header: 'Fecha', type: 'date', tz },
+      { key: 'order_number', header: 'Orden #', type: 'text' },
+      { key: 'customer', header: 'Cliente', type: 'text' },
+      { key: 'rating', header: 'Estrellas', type: 'number' },
+      { key: 'quick_tag', header: 'Etiqueta', type: 'text' },
+      { key: 'comment', header: 'Comentario', type: 'text' },
+      { key: 'source', header: 'Origen', type: 'text' },
+    ];
+    const tagColumns: ReportColumn[] = [
+      { key: 'tag', header: 'Etiqueta', type: 'text' },
+      { key: 'count', header: 'Cantidad', type: 'number' },
+      { key: 'percent', header: '%', type: 'percent' },
+    ];
+
+    await this.emitReport(res, 'resenas-tendencia', tz, [
+      this.toSheet('Tendencia', trendColumns, trendRows, tz),
+      this.toSheet('Experiencias', experienceColumns, experienceRows, tz),
+      this.toSheet('Etiquetas', tagColumns, tagRows, tz),
+    ]);
+  }
+
+  /**
    * QUI-548: reseñas agregadas por producto con promedio, distribución
    * de estrellas, conteo de verificadas/pendientes y fecha de la última.
    * Pantalla (misma fuente que el export: pantalla == archivo).

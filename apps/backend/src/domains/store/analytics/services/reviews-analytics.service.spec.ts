@@ -363,3 +363,86 @@ describe('ReviewsAnalyticsService summary + trend (QUI-629)', () => {
     expect(endDate).toEqual(new Date('2026-07-09T04:59:59.999Z'));
   });
 });
+
+describe('ReviewsAnalyticsService.getReviewsTrend', () => {
+  const QUERY = { date_from: '2026-07-06', date_to: '2026-07-08', granularity: 'day' };
+  let prisma: any;
+  let service: ReviewsAnalyticsService;
+
+  const agg = (count: number, avg: number | null) => ({
+    _count: { _all: count },
+    _avg: { rating: avg },
+  });
+
+  beforeEach(() => {
+    prisma = {
+      reviews: { aggregate: jest.fn(), groupBy: jest.fn() },
+      order_reviews: { aggregate: jest.fn(), groupBy: jest.fn(), findMany: jest.fn() },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+      $queryRaw: jest.fn(),
+      withoutScope: jest.fn(),
+    };
+    prisma.withoutScope.mockReturnValue({ $queryRaw: prisma.$queryRaw });
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 10, is_super_admin: false, is_owner: false });
+    service = new ReviewsAnalyticsService(prisma);
+
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ period: '2026-07-06', avg_rating: '4.5000', review_count: 2n }])
+      .mockResolvedValueOnce([
+        { period: '2026-07-06', avg_rating: '3.0000', review_count: 1n },
+        { period: '2026-07-08', avg_rating: '5.0000', review_count: 3n },
+      ]);
+    prisma.reviews.aggregate
+      .mockResolvedValueOnce(agg(2, 4.5))
+      .mockResolvedValueOnce(agg(0, null));
+    prisma.order_reviews.aggregate
+      .mockResolvedValueOnce(agg(4, 4.25))
+      .mockResolvedValueOnce(agg(1, 3));
+    prisma.reviews.groupBy.mockResolvedValueOnce([
+      { rating: 5, _count: { _all: 1 } },
+      { rating: 4, _count: { _all: 1 } },
+    ]);
+    prisma.order_reviews.groupBy
+      .mockResolvedValueOnce([{ rating: 5, _count: { _all: 3 } }])
+      .mockResolvedValueOnce([
+        { quick_tag: 'very_easy', _count: { _all: 2 } },
+        { quick_tag: null, _count: { _all: 2 } },
+      ]);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('merges both series by period, fills gaps and nulls avg when count is 0', async () => {
+    const r = await service.getReviewsTrend(QUERY as any);
+    expect(r.series).toEqual([
+      { period: '2026-07-06', product_count: 2, product_avg: 4.5, experience_count: 1, experience_avg: 3 },
+      { period: '2026-07-07', product_count: 0, product_avg: null, experience_count: 0, experience_avg: null },
+      { period: '2026-07-08', product_count: 0, product_avg: null, experience_count: 3, experience_avg: 5 },
+    ]);
+    expect(r.totals.product).toEqual({ count: 2, avg: 4.5, previous_count: 0, previous_avg: null });
+    expect(r.totals.experience).toEqual({ count: 4, avg: 4.25, previous_count: 1, previous_avg: 3 });
+    expect(prisma.withoutScope).toHaveBeenCalled();
+  });
+
+  it('returns 5 fixed distribution rows per kind and 4 quick tags including none', async () => {
+    const r = await service.getReviewsTrend(QUERY as any);
+    expect(r.rating_distribution.product).toEqual([
+      { rating: 1, count: 0 }, { rating: 2, count: 0 }, { rating: 3, count: 0 },
+      { rating: 4, count: 1 }, { rating: 5, count: 1 },
+    ]);
+    expect(r.rating_distribution.experience).toHaveLength(5);
+    expect(r.quick_tags).toEqual([
+      { tag: 'very_easy', count: 2 },
+      { tag: 'normal', count: 0 },
+      { tag: 'difficult', count: 0 },
+      { tag: 'none', count: 2 },
+    ]);
+  });
+
+  it('rejects without store context', async () => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(undefined as any);
+    await expect(service.getReviewsTrend(QUERY as any)).rejects.toThrow();
+  });
+});

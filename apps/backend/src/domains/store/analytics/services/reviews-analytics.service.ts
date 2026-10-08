@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto, Granularity } from '../dto/analytics-query.dto';
-import { parseDateRange, getPreviousPeriod } from '../utils/date.util';
+import {
+  parseDateRange,
+  getPreviousPeriod,
+  formatPeriodFromDate,
+} from '../utils/date.util';
+import { fillTimeSeries } from '../utils/fill-time-series.util';
 import {
   resolveStoreTimezone,
   localPeriodSql,
@@ -179,6 +184,280 @@ export class ReviewsAnalyticsService {
       average_rating: Number(row.average_rating),
       review_count: Number(row.review_count),
     }));
+  }
+
+  /**
+   * Paso 8 (reseñas de experiencia): tendencia conjunta de reseñas de producto
+   * (TODOS los estados, decisión del plan) y reseñas de experiencia de compra.
+   * `created_at` de ambas tablas es INSTANTE -> `localPeriodSql` + ventana en
+   * TZ de tienda. Contrato: `ReviewsTrend` en el .contracts.md del plan.
+   */
+  async getReviewsTrend(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const granularity = query.granularity || Granularity.DAY;
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
+      startDate,
+      endDate,
+    );
+
+    const periodProduct = localPeriodSql('r.created_at', tz, granularity);
+    const periodExperience = localPeriodSql('o.created_at', tz, granularity);
+    const raw = this.prisma.withoutScope() as any;
+
+    type Row = { period: string; avg_rating: unknown; review_count: unknown };
+    const [productRows, experienceRows]: [Row[], Row[]] = await Promise.all([
+      raw.$queryRaw`
+        SELECT ${periodProduct} AS period,
+               AVG(r.rating) AS avg_rating,
+               COUNT(*) AS review_count
+        FROM reviews r
+        WHERE r.store_id = ${storeId}
+          AND r.created_at >= ${startDate}
+          AND r.created_at <= ${endDate}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+      raw.$queryRaw`
+        SELECT ${periodExperience} AS period,
+               AVG(o.rating) AS avg_rating,
+               COUNT(*) AS review_count
+        FROM order_reviews o
+        WHERE o.store_id = ${storeId}
+          AND o.created_at >= ${startDate}
+          AND o.created_at <= ${endDate}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+    ]);
+
+    const toNumber = (v: unknown): number => Number(v ?? 0);
+    const avgOrNull = (count: number, avg: unknown): number | null =>
+      count > 0 ? round2(toNumber(avg)) : null;
+
+    const merged = new Map<
+      string,
+      {
+        period: string;
+        product_count: number;
+        product_avg: number | null;
+        experience_count: number;
+        experience_avg: number | null;
+      }
+    >();
+    const emptyPoint = (period: string) => ({
+      period,
+      product_count: 0,
+      product_avg: null as number | null,
+      experience_count: 0,
+      experience_avg: null as number | null,
+    });
+    for (const row of productRows) {
+      const count = toNumber(row.review_count);
+      const point = merged.get(row.period) ?? emptyPoint(row.period);
+      point.product_count = count;
+      point.product_avg = avgOrNull(count, row.avg_rating);
+      merged.set(row.period, point);
+    }
+    for (const row of experienceRows) {
+      const count = toNumber(row.review_count);
+      const point = merged.get(row.period) ?? emptyPoint(row.period);
+      point.experience_count = count;
+      point.experience_avg = avgOrNull(count, row.avg_rating);
+      merged.set(row.period, point);
+    }
+
+    const series = fillTimeSeries(
+      Array.from(merged.values()),
+      startDate,
+      endDate,
+      granularity,
+      {
+        product_count: 0,
+        product_avg: null,
+        experience_count: 0,
+        experience_avg: null,
+      },
+      formatPeriodFromDate,
+      tz,
+    );
+
+    const current = { gte: startDate, lte: endDate }; // tz-audit:ignore — INSTANTE, ventana en TZ de tienda
+    const previous = { gte: previousStartDate, lte: previousEndDate }; // tz-audit:ignore — INSTANTE, ventana en TZ de tienda
+
+    const [
+      prodCur,
+      prodPrev,
+      expCur,
+      expPrev,
+      prodDist,
+      expDist,
+      tagGroups,
+    ] = await Promise.all([
+      this.prisma.reviews.aggregate({
+        where: { store_id: storeId, created_at: current },
+        _avg: { rating: true },
+        _count: { _all: true },
+      }),
+      this.prisma.reviews.aggregate({
+        where: { store_id: storeId, created_at: previous },
+        _avg: { rating: true },
+        _count: { _all: true },
+      }),
+      this.prisma.order_reviews.aggregate({
+        where: { store_id: storeId, created_at: current },
+        _avg: { rating: true },
+        _count: { _all: true },
+      }),
+      this.prisma.order_reviews.aggregate({
+        where: { store_id: storeId, created_at: previous },
+        _avg: { rating: true },
+        _count: { _all: true },
+      }),
+      this.prisma.reviews.groupBy({
+        by: ['rating'],
+        where: { store_id: storeId, created_at: current },
+        _count: { _all: true },
+      }),
+      this.prisma.order_reviews.groupBy({
+        by: ['rating'],
+        where: { store_id: storeId, created_at: current },
+        _count: { _all: true },
+      }),
+      this.prisma.order_reviews.groupBy({
+        by: ['quick_tag'],
+        where: { store_id: storeId, created_at: current },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const totalsOf = (cur: any, prev: any) => {
+      const count = cur._count._all ?? 0;
+      const prevCount = prev._count._all ?? 0;
+      return {
+        count,
+        avg: avgOrNull(count, cur._avg.rating),
+        previous_count: prevCount,
+        previous_avg: avgOrNull(prevCount, prev._avg.rating),
+      };
+    };
+
+    const distributionOf = (groups: Array<{ rating: number; _count: { _all: number } }>) =>
+      ([1, 2, 3, 4, 5] as const).map((rating) => ({
+        rating,
+        count: groups.find((g) => g.rating === rating)?._count._all ?? 0,
+      }));
+
+    const tagCount = (tag: string | null) =>
+      tagGroups.find((g) => (g.quick_tag ?? null) === tag)?._count._all ?? 0;
+
+    return {
+      series,
+      totals: {
+        product: totalsOf(prodCur, prodPrev),
+        experience: totalsOf(expCur, expPrev),
+      },
+      rating_distribution: {
+        product: distributionOf(prodDist),
+        experience: distributionOf(expDist),
+      },
+      quick_tags: [
+        { tag: 'very_easy', count: tagCount('very_easy') },
+        { tag: 'normal', count: tagCount('normal') },
+        { tag: 'difficult', count: tagCount('difficult') },
+        { tag: 'none', count: tagCount(null) },
+      ],
+    };
+  }
+
+  /**
+   * Export de la tendencia: hojas Tendencia / Experiencias / Etiquetas.
+   * Servicio devuelve datos CRUDOS (Date + números); el formato vive en las
+   * columnas del controller.
+   */
+  async getReviewsTrendForExport(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const trend = await this.getReviewsTrend(query);
+
+    const experiences = await this.prisma.order_reviews.findMany({
+      where: {
+        store_id: storeId,
+        created_at: { gte: startDate, lte: endDate },
+      }, // tz-audit:ignore — INSTANTE, ventana en TZ de tienda
+      include: {
+        orders: { select: { order_number: true, customer_alias: true } },
+        customer: { select: { first_name: true, last_name: true } },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 10001,
+    });
+
+    const truncated = experiences.length > 10000;
+    const capped = truncated ? experiences.slice(0, 10000) : experiences;
+
+    const TAG_LABELS: Record<string, string> = {
+      very_easy: 'Súper fácil',
+      normal: 'Normal',
+      difficult: 'Difícil',
+    };
+    const SOURCE_LABELS: Record<string, string> = {
+      order_confirmation: 'Confirmación del pedido',
+      order_detail: 'Detalle del pedido',
+    };
+
+    const experienceRows: Array<Record<string, unknown>> = capped.map((r) => {
+      const fullName = r.customer
+        ? `${r.customer.first_name || ''} ${r.customer.last_name || ''}`.trim()
+        : '';
+      return {
+        created_at: r.created_at,
+        order_number: r.orders?.order_number ?? '',
+        customer: fullName || r.orders?.customer_alias || '',
+        rating: r.rating,
+        quick_tag: r.quick_tag ? TAG_LABELS[r.quick_tag] ?? '' : '',
+        comment: r.comment ?? '',
+        source: SOURCE_LABELS[r.source] ?? r.source,
+      };
+    });
+    if (truncated) {
+      experienceRows.push({
+        created_at: null,
+        order_number: '',
+        customer: 'AVISO: Dataset truncado a 10.000 filas. Refinar filtros para ver el resto.',
+        rating: null,
+        quick_tag: '',
+        comment: '',
+        source: '',
+      });
+    }
+
+    const tagTotal = trend.quick_tags.reduce((sum, t) => sum + t.count, 0);
+    const tagRows = trend.quick_tags.map((t) => ({
+      tag: t.tag === 'none' ? 'Sin etiqueta' : TAG_LABELS[t.tag],
+      count: t.count,
+      percent: tagTotal > 0 ? t.count / tagTotal : 0,
+    }));
+
+    return {
+      trendRows: trend.series,
+      experienceRows,
+      tagRows,
+      truncated,
+    };
   }
 
   async getReviewsForExport(query: AnalyticsQueryDto) {
