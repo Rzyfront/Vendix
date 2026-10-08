@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -17,6 +18,11 @@ import { map, startWith } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import type { IconName } from '../icon/icons.registry';
+import {
+  computeSuggestedTip,
+  isTipPolicyActive,
+  type TipPolicy,
+} from '../../../core/utils/tip-policy.util';
 import { CurrencyInputDirective } from '../../directives/currency-input.directive';
 import { CurrencyFormatService, CurrencyPipe } from '../../pipes/currency';
 import {
@@ -111,6 +117,7 @@ interface MultiLegRowValue {
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    NgTemplateOutlet,
     IconComponent,
     CurrencyPipe,
     CurrencyInputDirective,
@@ -151,6 +158,12 @@ export class PaymentCollectorComponent implements OnInit {
   readonly walletInfo = input<{ balance: number } | null>(null);
   /** Gross product amount for percentage tips; excludes discounts and shipping. */
   readonly tipBase = input<number | null>(null);
+  /**
+   * Política de propinas de la tienda. `null` = comportamiento clásico (el
+   * `allowTip` del contexto manda). Con política, `tipsOn` exige además que
+   * esté activa (propina manual y/o sugerida).
+   */
+  readonly tipPolicy = input<TipPolicy | null>(null);
   /**
    * Seed for the initial mode on reset. Honored only when the resolved config
    * has `allowCredit` (a 'credito' seed on a credit-less config falls back to
@@ -213,8 +226,43 @@ export class PaymentCollectorComponent implements OnInit {
   readonly tipType = signal<'percentage' | 'fixed'>('fixed');
   readonly tipExpanded = signal(false);
   readonly tipWaiterId = signal<number | null>(null);
+  /** Casilla «Pago incluye propina» (propina sugerida). Desmarcada por defecto. */
+  readonly suggestedTipAccepted = signal(false);
+  /**
+   * Última propina ya sumada a los tramos del cobro múltiple. Sirve para
+   * aplicar solo el delta cuando la propina cambia (ver `syncLegsToTip`).
+   */
+  private lastAppliedTipToLegs = 0;
+  /**
+   * La propina está activa: el `allowTip` del contexto es el techo, el cobro
+   * debe ser de contado y, si hay política, ésta debe estar activa.
+   */
+  readonly tipsOn = computed<boolean>(() => {
+    if (!this.config().allowTip || this.mode() !== 'contado') return false;
+    const policy = this.tipPolicy();
+    return policy ? isTipPolicyActive(policy) : true;
+  });
+  /** La tarjeta de propina manual (tipo/monto/mesero) se renderiza. */
+  readonly showManualTip = computed<boolean>(() => {
+    if (!this.tipsOn()) return false;
+    const policy = this.tipPolicy();
+    return policy ? policy.manualEnabled : true;
+  });
+  /** Monto de la propina sugerida sobre la base bruta de productos (0 si no hay). */
+  readonly suggestedTipAmount = computed<number>(() => {
+    const policy = this.tipPolicy();
+    return policy?.suggested
+      ? computeSuggestedTip(policy, this.tipBase() ?? this.effectiveBase())
+      : 0;
+  });
+  /** La propina viaja tal cual la sugerida: casilla marcada y sin editar. */
+  readonly tipFromSuggested = computed<boolean>(() => {
+    const suggested = this.tipPolicy()?.suggested;
+    if (!suggested || !this.suggestedTipAccepted()) return false;
+    return this.tipType() === suggested.type && Number(this.tip()) === suggested.value;
+  });
   readonly tipValidationError = computed<string | null>(() => {
-    if (!this.config().allowTip || this.mode() !== 'contado') return null;
+    if (!this.tipsOn()) return null;
     const raw = Number(this.tip());
     if (!Number.isFinite(raw) || raw < 0) {
       return 'Ingresa una propina válida mayor o igual a cero.';
@@ -265,6 +313,60 @@ export class PaymentCollectorComponent implements OnInit {
     }
     const n = Number(value);
     this.tipWaiterId.set(Number.isFinite(n) && n > 0 ? n : null);
+  }
+
+  /**
+   * Casilla «Pago incluye propina»: aplica (o quita) la propina sugerida.
+   * Handler de evento — nunca effect.
+   */
+  onSuggestedTipToggle(checked: boolean): void {
+    const suggested = this.tipPolicy()?.suggested;
+    if (!suggested) return;
+    this.suggestedTipAccepted.set(checked);
+    if (checked) {
+      this.tipType.set(suggested.type);
+      this.tipControl.setValue(suggested.value);
+      // Con propina manual habilitada el monto queda editable en la tarjeta.
+      if (this.tipPolicy()?.manualEnabled) this.tipExpanded.set(true);
+    } else {
+      this.tipControl.setValue(0);
+      this.tipExpanded.set(false);
+    }
+    this.syncLegsToTip();
+  }
+
+  /** Cambia el tipo de propina (monto / porcentaje) y reajusta los tramos. */
+  setTipType(type: 'percentage' | 'fixed'): void {
+    this.tipType.set(type);
+    this.syncLegsToTip();
+  }
+
+  /**
+   * Red de seguridad del cobro múltiple: cuando la propina cambia después de
+   * repartir el total entre métodos, el delta se suma (o resta) a los últimos
+   * tramos para que `remaining` siga en 0. Solo handlers de evento /
+   * suscripciones: nunca effect.
+   */
+  private syncLegsToTip(): void {
+    if (!this.multiEnabled() || this.legsForm.length === 0) return;
+    const tipNow = this.tipAmount();
+    const delta = this.toCents(tipNow) - this.toCents(this.lastAppliedTipToLegs);
+    this.lastAppliedTipToLegs = tipNow;
+    if (delta === 0) return;
+    const last = this.legsForm.length - 1;
+    if (delta > 0) {
+      const cents = this.toCents(this.legsForm.at(last).controls.amount.value);
+      this.setLegAmount(last, (cents + delta) / 100);
+      return;
+    }
+    let toRemove = -delta;
+    for (let i = last; i >= 0 && toRemove > 0; i--) {
+      const cents = this.toCents(this.legsForm.at(i).controls.amount.value);
+      const take = Math.min(cents, toRemove);
+      if (take <= 0) continue;
+      this.setLegAmount(i, (cents - take) / 100);
+      toRemove -= take;
+    }
   }
 
   // ── Independent state slices (signals) ──────────────────────────────────
@@ -465,7 +567,7 @@ export class PaymentCollectorComponent implements OnInit {
   );
 
   readonly effectiveTotal = computed<number>(
-    () => this.effectiveBase() + (this.config().allowTip && this.mode() === 'contado' ? this.tipAmount() : 0),
+    () => this.effectiveBase() + (this.tipsOn() ? this.tipAmount() : 0),
   );
 
   readonly isCashSelected = computed(() => this.selectedMethod()?.type === PaymentMethodType.CASH);
@@ -714,6 +816,12 @@ export class PaymentCollectorComponent implements OnInit {
       untracked(() => this.resetState());
     });
 
+    // La propina cambió (casilla, tipeo en la tarjeta): reajusta los tramos.
+    // Suscripción, no effect: escribe estado de formulario.
+    this.tipControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.syncLegsToTip());
+
     // Flag genuine operator edits to the cash amount (keypad / typing). Skips
     // programmatic writes guarded by suppressCashEdit. Runs outside any reactive
     // context, so a plain subscription (not an effect) is correct here.
@@ -957,7 +1065,10 @@ export class PaymentCollectorComponent implements OnInit {
     if (on === this.multiEnabled()) return;
     this.multiEnabled.set(on);
     if (on) this.seedFirstLeg();
-    else this.legsForm.clear();
+    else {
+      this.legsForm.clear();
+      this.lastAppliedTipToLegs = 0;
+    }
   }
 
   /** Append a leg pre-filled with the remaining balance (no-op at the cap). */
@@ -1315,6 +1426,8 @@ export class PaymentCollectorComponent implements OnInit {
     const rowId = this.methodRowId(method);
     if (rowId == null) return;
     const total = this.effectiveTotal();
+    // El total sembrado ya incluye la propina vigente.
+    this.lastAppliedTipToLegs = this.tipAmount();
     this.legsForm.push(
       this.createLegGroup({
         storePaymentMethodId: rowId,
@@ -1544,6 +1657,8 @@ export class PaymentCollectorComponent implements OnInit {
     // reactivo: resetState corre dentro de untracked).
     this.multiEnabled.set(false);
     this.legsForm.clear();
+    this.lastAppliedTipToLegs = 0;
+    this.suggestedTipAccepted.set(false);
     this.subStep.set(0);
     this.amountCollapsed.set(false);
     this.manuallyEditedCash.set(false);
@@ -1583,9 +1698,25 @@ export class PaymentCollectorComponent implements OnInit {
     }
   }
 
+  /**
+   * T1 — escribe la propina en el payload. `tip` es el monto RESUELTO (el %
+   * ya aplicado sobre la base); `tipValue` es el valor CRUDO (el % si
+   * `tipType='percentage'`, el monto si 'fixed'). El consumidor traduce
+   * camelCase → snake_case al DTO.
+   */
+  private applyTip(out: PaymentSubmit): void {
+    if (!this.tipsOn() || !((this.tip() || 0) > 0)) return;
+    const tipResolved = this.tipAmount();
+    out.tip = tipResolved;
+    out.tipType = this.tipType();
+    out.tipValue = this.tipType() === 'percentage' ? Number(this.tip()) || 0 : tipResolved;
+    const waiter = this.tipWaiterId();
+    if (waiter != null) out.tipWaiterId = waiter;
+    if (this.tipFromSuggested()) out.tipFromSuggested = true;
+  }
+
   private buildSubmit(): PaymentSubmit {
     const base = this.effectiveBase();
-    const cfg = this.config();
     const customerId = this.customer()?.id ?? null;
 
     if (this.mode() === 'credito') {
@@ -1625,14 +1756,7 @@ export class PaymentCollectorComponent implements OnInit {
         out.amountReceived = cashLeg.amountReceived ?? 0;
         out.change = cashLeg.change ?? 0;
       }
-      if (cfg.allowTip && (this.tip() || 0) > 0) {
-        const tipResolved = this.tipAmount();
-        out.tip = tipResolved;
-        out.tipType = this.tipType();
-        out.tipValue = tipResolved;
-        const waiter = this.tipWaiterId();
-        if (waiter != null) out.tipWaiterId = waiter;
-      }
+      this.applyTip(out);
       if (this.selectedInstallmentId() != null) out.installmentId = this.selectedInstallmentId()!;
       return out;
     }
@@ -1648,21 +1772,7 @@ export class PaymentCollectorComponent implements OnInit {
       method,
     };
 
-    if (cfg.allowTip && (this.tip() || 0) > 0) {
-      // T1 — el monto de la propina que viaja al backend es el RESUELTO
-      // (porcentaje → monto calculado), no el % crudo. El consumidor
-      // (pos-payment-step, table-payment-modal) traduce camelCase → snake_case
-      // al DTO. `tipValue` lleva el mismo monto que `tip` cuando el
-      // modo es 'fixed'; cuando el operador eligió porcentaje, también
-      // lleva el monto resuelto (regla del dueño: la propina pactada
-      // no puede moverse si cambia el subtotal).
-      const tipResolved = this.tipAmount();
-      out.tip = tipResolved;
-      out.tipType = this.tipType();
-      out.tipValue = tipResolved;
-      const waiter = this.tipWaiterId();
-      if (waiter != null) out.tipWaiterId = waiter;
-    }
+    this.applyTip(out);
     if (method.type === PaymentMethodType.CASH) {
       out.amountReceived = this.cashReceived() || 0;
       out.change = this.change();
@@ -1703,14 +1813,7 @@ export class PaymentCollectorComponent implements OnInit {
       customerId,
       method,
     };
-    if (this.config().allowTip && (this.tip() || 0) > 0) {
-      const tipResolved = this.tipAmount();
-      out.tip = tipResolved;
-      out.tipType = this.tipType();
-      out.tipValue = tipResolved;
-      const waiter = this.tipWaiterId();
-      if (waiter != null) out.tipWaiterId = waiter;
-    }
+    this.applyTip(out);
     if (leg.methodType === PaymentMethodType.CASH) {
       out.amountReceived = leg.amountReceived ?? 0;
       out.change = leg.change ?? 0;

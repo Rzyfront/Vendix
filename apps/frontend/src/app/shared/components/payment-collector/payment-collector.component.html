@@ -86,6 +86,9 @@
                 <h3 class="pc-section-label">Método de pago</h3>
               </div>
 
+              <!-- Propina ANTES de repartir el total entre métodos. -->
+              <ng-container *ngTemplateOutlet="tipBlock; context: { sfx: 'stepped' }" />
+
               <!--
                 5b — toggle Un método / Varios métodos. Duplicado consciente
                 en la rama flat (precedente T1): misma estructura, indentación
@@ -349,6 +352,12 @@
             <section class="pc-card pc-total-card">
               <p class="total-label">Total a cobrar</p>
               <p class="total-amount">{{ effectiveTotal() | currency }}</p>
+              @if (tipsOn() && tipAmount() > 0) {
+                <!-- Resumen de solo lectura: la propina se edita en el paso Método. -->
+                <p class="pc-tip-summary">
+                  Incluye propina de {{ tipAmount() | currency }}
+                </p>
+              }
             </section>
 
             <!-- Cash -->
@@ -469,96 +478,6 @@
               </section>
             }
 
-            <!-- Tip -->
-            @if (config().allowTip && mode() === 'contado') {
-              <section class="pc-card" [class.pc-flash-target]="flashSection() === 'tip'">
-                <button
-                  type="button"
-                  class="section-header pc-tip-toggle"
-                  [class.pc-tip-toggle--collapsed]="!tipExpanded()"
-                  [attr.aria-expanded]="tipExpanded()"
-                  aria-controls="pc-tip-fields-stepped"
-                  (click)="tipExpanded.set(!tipExpanded())"
-                >
-                  @if (tipExpanded()) {
-                    <span class="section-indicator"></span>
-                  } @else {
-                    <span class="pc-tip-add-icon"><app-icon name="plus" [size]="18" /></span>
-                  }
-                  <span class="section-title">
-                    @if (tipExpanded()) {
-                      Propina (opcional)
-                    } @else if (tipAmount() > 0) {
-                      Propina · {{ tipAmount() | currency }}
-                    } @else {
-                      Agregar propina
-                    }
-                  </span>
-                  @if (tipExpanded()) {
-                    <app-icon name="chevron-up" [size]="18" />
-                  }
-                </button>
-                <div id="pc-tip-fields-stepped">
-                  @if (tipExpanded()) {
-                    <!--
-                      T1 — toggle Monto / Porcentaje. Va pegado al input
-                      para que el operador cambie el modo sin perder el
-                      foco del dato que está tipeando. mobile-first: las
-                      dos chips caben en 375px sin desbordar; la fila se
-                      envuelve si el viewport es muy estrecho.
-                    -->
-                    <div class="pc-tip-mode" role="tablist">
-                      <button
-                        type="button"
-                        role="tab"
-                        class="pc-tip-mode-btn"
-                        [class.is-active]="tipType() === 'fixed'"
-                        [attr.aria-selected]="tipType() === 'fixed'"
-                        (click)="tipType.set('fixed')"
-                      >
-                        Monto
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        class="pc-tip-mode-btn"
-                        [class.is-active]="tipType() === 'percentage'"
-                        [attr.aria-selected]="tipType() === 'percentage'"
-                        (click)="tipType.set('percentage')"
-                      >
-                        Porcentaje
-                      </button>
-                    </div>
-                    <div class="pc-tip-row">
-                      <span class="pc-tip-suffix">{{ tipSuffix() }}</span>
-                      <input
-                        appCurrencyInput
-                        [currencyDecimals]="tipType() === 'percentage' ? 2 : currencyDecimals()"
-                        [formControl]="tipControl"
-                        [placeholder]="tipType() === 'percentage' ? '0' : '0'"
-                        inputmode="decimal"
-                        class="pc-input"
-                        aria-label="Monto o porcentaje de propina"
-                        (keydown.enter)="handleEnter($event); $event.stopPropagation()"
-                      />
-                    </div>
-                    @if (tipValidationError()) {
-                      <p class="pc-warn">{{ tipValidationError() }}</p>
-                    }
-                    <label class="pc-tip-waiter">
-                      <span>Mesero (opcional)</span>
-                      <app-store-user-select
-                        lookupMode="staff"
-                        placeholder="Buscar mesero..."
-                        [value]="tipWaiterId()"
-                        (valueChange)="tipWaiterId.set($event)"
-                        aria-label="Mesero que recibe la propina"
-                      ></app-store-user-select>
-                    </label>
-                  }
-                </div>
-              </section>
-            }
 
             <!-- Sin botón "Aceptar" in-panel: en el diseño Pencil (frame G0dg6) el
                  monto se confirma con el CTA del footer del shell, que invoca
@@ -720,6 +639,9 @@
     </section>
 
     @if (mode() === 'contado') {
+      <!-- Propina ANTES del bloque de métodos (se reparte el total con propina). -->
+      <ng-container *ngTemplateOutlet="tipBlock; context: { sfx: 'flat' }" />
+
       <!-- Payment-method grid -->
       <section class="pc-card">
         <div class="section-header">
@@ -1066,96 +988,6 @@
         </section>
       }
 
-      <!-- Tip -->
-      @if (config().allowTip && mode() === 'contado') {
-        <section class="pc-card" [class.pc-flash-target]="flashSection() === 'tip'">
-          <button
-            type="button"
-            class="section-header pc-tip-toggle"
-            [class.pc-tip-toggle--collapsed]="!tipExpanded()"
-            [attr.aria-expanded]="tipExpanded()"
-            aria-controls="pc-tip-fields-flat"
-            (click)="tipExpanded.set(!tipExpanded())"
-          >
-            @if (tipExpanded()) {
-              <span class="section-indicator"></span>
-            } @else {
-              <span class="pc-tip-add-icon"><app-icon name="plus" [size]="18" /></span>
-            }
-            <span class="section-title">
-              @if (tipExpanded()) {
-                Propina (opcional)
-              } @else if (tipAmount() > 0) {
-                Propina · {{ tipAmount() | currency }}
-              } @else {
-                Agregar propina
-              }
-            </span>
-            @if (tipExpanded()) {
-              <app-icon name="chevron-up" [size]="18" />
-            }
-          </button>
-          <div id="pc-tip-fields-flat">
-            @if (tipExpanded()) {
-              <!--
-                T1 — duplicado consciente del bloque de la rama `stepped`.
-                Ambas tarjetas son idénticas a propósito: el collector
-                tiene dos layouts (stepped + plano) y la UI de propina
-                debe verse igual en los dos. Si en el futuro cambia el
-                patrón, se cambia en las DOS ramas a la vez.
-              -->
-              <div class="pc-tip-mode" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  class="pc-tip-mode-btn"
-                  [class.is-active]="tipType() === 'fixed'"
-                  [attr.aria-selected]="tipType() === 'fixed'"
-                  (click)="tipType.set('fixed')"
-                >
-                  Monto
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  class="pc-tip-mode-btn"
-                  [class.is-active]="tipType() === 'percentage'"
-                  [attr.aria-selected]="tipType() === 'percentage'"
-                  (click)="tipType.set('percentage')"
-                >
-                  Porcentaje
-                </button>
-              </div>
-              <div class="pc-tip-row">
-                <span class="pc-tip-suffix">{{ tipSuffix() }}</span>
-                <input
-                  appCurrencyInput
-                  [currencyDecimals]="tipType() === 'percentage' ? 2 : currencyDecimals()"
-                  [formControl]="tipControl"
-                  placeholder="0"
-                  inputmode="decimal"
-                  class="pc-input"
-                  aria-label="Monto o porcentaje de propina"
-                  (keydown.enter)="handleEnter($event); $event.stopPropagation()"
-                />
-              </div>
-              @if (tipValidationError()) {
-                <p class="pc-warn">{{ tipValidationError() }}</p>
-              }
-              <label class="pc-tip-waiter">
-                <span>Mesero (opcional)</span>
-                <app-store-user-select
-                  lookupMode="staff"
-                  placeholder="Buscar mesero..."
-                  [value]="tipWaiterId()"
-                  (valueChange)="tipWaiterId.set($event)"
-                  aria-label="Mesero que recibe la propina"
-                ></app-store-user-select>
-              </label>
-            }
-          </div>
-        </section>
-      }
     } @else {
       <!-- Credito -->
       <section class="pc-card">
@@ -1188,3 +1020,128 @@
     }
   }
 </div>
+
+<!--
+  Propina (una sola instancia por layout, vía ngTemplateOutlet).
+  - Con propina sugerida: casilla «Pago incluye propina» (desmarcada por defecto).
+  - Con propina manual habilitada: tarjeta tipo/monto/mesero.
+  `sfx` solo desambigua los ids ('stepped' | 'flat').
+-->
+<ng-template #tipBlock let-sfx="sfx">
+  @if (tipsOn()) {
+    @if (tipPolicy()?.suggested; as sug) {
+      <section class="pc-card pc-tip-suggested" [class.pc-flash-target]="flashSection() === 'tip'">
+        <label class="pc-tip-check">
+          <input
+            type="checkbox"
+            class="pc-tip-check-input"
+            [checked]="suggestedTipAccepted()"
+            (change)="onSuggestedTipToggle($any($event.target).checked)"
+          />
+          <span class="pc-tip-check-body">
+            <span class="pc-tip-check-title">Pago incluye propina</span>
+            <span class="pc-tip-check-desc">
+              @if (sug.type === 'percentage') {
+                Propina sugerida ({{ sug.value }} %): {{ suggestedTipAmount() | currency }}
+              } @else {
+                Propina sugerida: {{ suggestedTipAmount() | currency }}
+              }
+            </span>
+          </span>
+        </label>
+      </section>
+    }
+
+    @if (showManualTip()) {
+      <section class="pc-card" [class.pc-flash-target]="flashSection() === 'tip'">
+        <button
+          type="button"
+          class="section-header pc-tip-toggle"
+          [class.pc-tip-toggle--collapsed]="!tipExpanded()"
+          [attr.aria-expanded]="tipExpanded()"
+          [attr.aria-controls]="'pc-tip-fields-' + sfx"
+          (click)="tipExpanded.set(!tipExpanded())"
+        >
+          @if (tipExpanded()) {
+            <span class="section-indicator"></span>
+          } @else {
+            <span class="pc-tip-add-icon"><app-icon name="plus" [size]="18" /></span>
+          }
+          <span class="section-title">
+            @if (tipExpanded()) {
+              Propina (opcional)
+            } @else if (tipAmount() > 0) {
+              Propina · {{ tipAmount() | currency }}
+            } @else {
+              Agregar propina
+            }
+          </span>
+          @if (tipExpanded()) {
+            <app-icon name="chevron-up" [size]="18" />
+          }
+        </button>
+        <div [id]="'pc-tip-fields-' + sfx">
+          @if (tipExpanded()) {
+            <!--
+              T1 — toggle Monto / Porcentaje, pegado al input para cambiar el
+              modo sin perder el foco. mobile-first: las dos chips caben en
+              375px; la fila se envuelve si el viewport es más estrecho.
+            -->
+            <div class="pc-tip-mode" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                class="pc-tip-mode-btn"
+                [class.is-active]="tipType() === 'fixed'"
+                [attr.aria-selected]="tipType() === 'fixed'"
+                (click)="setTipType('fixed')"
+              >
+                Monto
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="pc-tip-mode-btn"
+                [class.is-active]="tipType() === 'percentage'"
+                [attr.aria-selected]="tipType() === 'percentage'"
+                (click)="setTipType('percentage')"
+              >
+                Porcentaje
+              </button>
+            </div>
+            <div class="pc-tip-row">
+              <span class="pc-tip-suffix">{{ tipSuffix() }}</span>
+              <input
+                appCurrencyInput
+                [currencyDecimals]="tipType() === 'percentage' ? 2 : currencyDecimals()"
+                [formControl]="tipControl"
+                placeholder="0"
+                inputmode="decimal"
+                class="pc-input"
+                aria-label="Monto o porcentaje de propina"
+                (keydown.enter)="handleEnter($event); $event.stopPropagation()"
+              />
+            </div>
+            @if (tipValidationError()) {
+              <p class="pc-warn">{{ tipValidationError() }}</p>
+            }
+            <label class="pc-tip-waiter">
+              <span>Mesero (opcional)</span>
+              <app-store-user-select
+                lookupMode="staff"
+                placeholder="Buscar mesero..."
+                [value]="tipWaiterId()"
+                (valueChange)="tipWaiterId.set($event)"
+                aria-label="Mesero que recibe la propina"
+              ></app-store-user-select>
+            </label>
+          }
+        </div>
+      </section>
+    }
+
+    @if (sfx === 'stepped' && tipAmount() > 0) {
+      <p class="pc-tip-summary">Total con propina: {{ effectiveTotal() | currency }}</p>
+    }
+  }
+</ng-template>
