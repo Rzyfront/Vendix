@@ -684,7 +684,7 @@ describe('InvoiceDeliveryService', () => {
       const html = (emailService.sendEmailWithAttachments as jest.Mock).mock
         .calls[0][2];
       expect(html).toContain('te informa que se generó el siguiente comprobante');
-      expect(html).toContain('https://vendix.online/vlogo.png');
+      expect(html).toContain('https://vendix.online/assets/images/mail/vendix_imagotipo_email.jpg');
     });
 
     it('recibo interno (dian_status not_applicable): asunto y zip legibles, remitente = emisor', async () => {

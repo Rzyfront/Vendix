@@ -40,7 +40,8 @@ function formatCurrency(amount: number, currency: string = 'COP'): string {
   );
 }
 
-const VENDIX_LOGO_URL = 'https://vendix.online/vlogo.png';
+const VENDIX_LOGO_URL =
+  'https://vendix.online/assets/images/mail/vendix_imagotipo_email.jpg';
 const VENDIX_SITE_URL = 'https://vendix.online';
 
 /** Escapa texto de usuario antes de interpolarlo en el HTML del correo. */
@@ -91,7 +92,7 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
           <tr>
             <td align="right" style="padding: 0 4px 10px; font-size: 11px; color: #6b7280;">
               Comprobante elaborado y enviado a través de
-              <img src="${VENDIX_LOGO_URL}" alt="Vendix" height="22" style="height: 22px; width: auto; vertical-align: middle; border: 0; margin-left: 4px;"><strong style="color: #111827; font-size: 13px; vertical-align: middle; margin-left: 4px;">Vendix</strong>
+              <img src="${VENDIX_LOGO_URL}" alt="Vendix" width="76" height="28" style="width: 76px; height: 28px; vertical-align: middle; border: 0; border-radius: 4px; margin-left: 6px;">
             </td>
           </tr>
 
@@ -188,7 +189,7 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
                           Si deseas esta funcionalidad, <a href="${VENDIX_SITE_URL}" style="color: #111827; font-weight: 600;">contáctanos</a>.
                         </td>
                         <td align="right" style="padding: 16px 20px 16px 0; width: 80px;">
-                          <img src="${VENDIX_LOGO_URL}" alt="Vendix" height="20" style="height: 20px; width: auto; border: 0;">
+                          <img src="${VENDIX_LOGO_URL}" alt="Vendix" width="97" height="36" style="width: 97px; height: 36px; border: 0; border-radius: 6px;">
                         </td>
                       </tr>
                     </table>

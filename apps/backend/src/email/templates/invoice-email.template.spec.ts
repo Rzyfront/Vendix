@@ -58,7 +58,7 @@ describe('invoice-email.template (C.7/F-106)', () => {
   it('marca Vendix: sello superior con logo PNG y pie con enlace contáctanos', () => {
     const html = generateInvoiceEmailHtml(data);
     expect(html).toContain('Comprobante elaborado y enviado a través de');
-    expect(html).toContain('src="https://vendix.online/vlogo.png"');
+    expect(html).toContain('src="https://vendix.online/assets/images/mail/vendix_imagotipo_email.jpg"');
     expect(html).toContain('alt="Vendix"');
     expect(html).toContain('Comprobante elaborado y enviado a través de Vendix.');
     expect(html).toContain('Si deseas esta funcionalidad,');
