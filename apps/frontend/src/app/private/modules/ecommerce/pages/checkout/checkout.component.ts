@@ -653,7 +653,7 @@ export class CheckoutComponent implements OnInit {
         // auto-selected/zone-default rate. `hasResolvedCoords` itself reads
         // `coords_version` so this re-evaluates the instant a pin/GPS/geocode
         // resolves.
-        if (!this.hasResolvedCoords() && !this.allowCoordlessQuote()) return;
+        if (!this.hasResolvedCoords()) return;
         const key = this.currentAddressKey();
         if (!key || key === this.shipping_quote_key()) return;
         // Anti-carrera A→B→A (auditoría D.3): solo la última clave programa;
@@ -1010,7 +1010,7 @@ export class CheckoutComponent implements OnInit {
           () =>
             !this.cartHasOnlyServices &&
             this.address_form.valid &&
-            (this.hasResolvedCoords() || this.allowCoordlessQuote()),
+            this.hasResolvedCoords(),
         ),
         takeUntilDestroyed(this.destroyRef),
       )
@@ -1242,9 +1242,6 @@ export class CheckoutComponent implements OnInit {
     if (state === 'granted' || state === 'prompt') {
       void this.requestGeolocation();
     } else {
-      if (state === 'denied' || state === 'unsupported') {
-        this.geolocation_unusable.set(true);
-      }
       this.openWhatsappFallbackIfNeeded();
     }
   }
@@ -1671,7 +1668,6 @@ export class CheckoutComponent implements OnInit {
     if (state === 'granted') {
       void this.requestGeolocation();
     } else if (state === 'denied' || state === 'unsupported') {
-      this.geolocation_unusable.set(true);
       if (!this.openWhatsappFallbackIfNeeded()) {
         this.toast.info(
           'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
@@ -1718,7 +1714,6 @@ export class CheckoutComponent implements OnInit {
         reason === 'permission_denied' ||
         reason === 'unsupported' ||
         reason === 'insecure_context';
-      if (unusable) this.geolocation_unusable.set(true);
       if (unusable && this.openWhatsappFallbackIfNeeded()) {
         // WhatsApp modal opened (location unusable and rate not computable).
       } else {
@@ -2239,22 +2234,7 @@ export class CheckoutComponent implements OnInit {
   /** The address map definitively failed to render (see `onMapFailed`). */
   readonly map_failed = signal(false);
 
-  /** GPS is unusable: permission denied, unsupported or insecure context. */
-  readonly geolocation_unusable = signal(false);
 
-  /**
-   * LAST RESORT so checkout is never fully blocked: map failed AND GPS
-   * unusable AND the store has no WhatsApp fallback. Only then may home
-   * delivery be quoted WITHOUT coordinates; the backend excludes
-   * distance-priced rates and returns zone/fixed ones. If none remain,
-   * `shippingBlockedReason` still blocks with "No hay tarifa de envío...".
-   */
-  readonly allowCoordlessQuote = computed<boolean>(
-    () =>
-      this.map_failed() &&
-      this.geolocation_unusable() &&
-      !this.canUseWhatsappFallback(),
-  );
 
   /**
    * Reason the address/shipping step's Continuar is blocked, or `null` when
@@ -2265,7 +2245,7 @@ export class CheckoutComponent implements OnInit {
     if (this.cartHasOnlyServices || this.selected_delivery() !== 'home') {
       return null;
     }
-    if (!this.hasResolvedCoords() && !this.allowCoordlessQuote()) {
+    if (!this.hasResolvedCoords()) {
       // Owner directive (2026-09-27): copia acortada para caber en el aviso
       // compacto de una sola linea (`.checkout-block-reason`, max 40px).
       return this.map_failed()
@@ -3010,7 +2990,7 @@ export class CheckoutComponent implements OnInit {
       // pin ni GPS) para domicilio, no se cotiza ni se avanza con una tarifa
       // por defecto — defensa en profundidad del mismo bloqueo del botón
       // Continuar (ver `canProceedFromAddressStep`).
-      if (!this.hasResolvedCoords() && !this.allowCoordlessQuote()) {
+      if (!this.hasResolvedCoords()) {
         this.error_message.set(
           'Necesitamos tu ubicación exacta para calcular el envío. Marca el punto en el mapa o usa tu ubicación automática.',
         );
