@@ -1798,6 +1798,18 @@
     }
   }
 
+  // Azul de marca Vendix (no el acento de la tienda): el credito es de Vendix.
+  .footer-section .footer-vendix-credit a.vendix-link,
+  .footer-bottom .footer-powered a.vendix-link {
+    color: #2563eb;
+    font-weight: 600;
+
+    &:hover {
+      color: #1d4ed8;
+      text-decoration: underline;
+    }
+  }
+
   .social-links {
     display: flex;
     gap: 1rem;

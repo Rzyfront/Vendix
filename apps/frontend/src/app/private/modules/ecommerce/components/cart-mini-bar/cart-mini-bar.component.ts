@@ -54,6 +54,7 @@ import { Cart } from '../../services/cart.service';
       </button>
 
       <button type="button" class="checkout-btn" (click)="checkout.emit()">
+        <app-icon name="banknote" [size]="16" />
         Hacer pedido
       </button>
     </div>
@@ -175,6 +176,9 @@ import { Cart } from '../../services/cart.service';
         font-weight: 600;
         white-space: nowrap;
         cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
       }
 
       @keyframes mini-bar-slide-up {
