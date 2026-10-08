@@ -146,6 +146,7 @@ import {
   Invoice,
   RelatedNote,
   CreateCreditNoteDto,
+  PosUvtThreshold,
 } from '../../../invoicing/interfaces/invoice.interface';
 import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.actions';
 import { InvoiceDetailComponent } from '../../../invoicing/components/invoice-detail/invoice-detail.component';
@@ -2387,6 +2388,15 @@ export class OrderDetailsPageComponent {
         next: (response) =>
           this.electronicEmissionLive.set(response?.data?.is_live === true),
         error: () => this.electronicEmissionLive.set(false),
+      });
+
+    // Umbral de 5 UVT: solo informativo. Si falla queda null y no se avisa.
+    this.invoicingService
+      .getPosUvtThreshold()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => this.uvtThreshold.set(response?.data ?? null),
+        error: () => this.uvtThreshold.set(null),
       });
 
     // Mismas trece acciones que `InvoicingEffects.mutationSuccess$` trata como
@@ -6028,6 +6038,27 @@ export class OrderDetailsPageComponent {
    * puede emitirla es prometer algo que el backend va a negar.
    */
   private readonly electronicEmissionLive = signal(false);
+
+  readonly uvtThreshold = signal<PosUvtThreshold | null>(null);
+
+  /**
+   * Aviso INFORMATIVO (nunca bloquea): facturación de producción activa, sin
+   * factura de venta vigente, orden no dividida/cancelada y total sobre 5 UVT.
+   */
+  readonly uvtInvoiceNotice = computed(() => {
+    const order = this.order();
+    const threshold = this.uvtThreshold();
+    if (!order || !threshold?.enforced) return false;
+    const limit = Number(threshold.limit_cop);
+    if (!(limit > 0)) return false;
+    return (
+      this.electronicEmissionLive() &&
+      !order.active_financial_split_id &&
+      !['cancelled', 'refunded'].includes(order.state) &&
+      this.reinvoiceable() &&
+      Number(order.grand_total) > limit
+    );
+  });
 
   /**
    * Visibilidad de la tarjeta FACTURA ELECTRÓNICA del sidebar.

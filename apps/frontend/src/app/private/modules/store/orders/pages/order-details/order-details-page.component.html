@@ -106,6 +106,12 @@
       </div>
     </div>
   }
+  @if (uvtInvoiceNotice()) {
+    <app-alert-banner variant="info" icon="file-text" class="block mb-6">
+      Esta orden necesita factura electrónica porque supera el umbral de 5 UVT
+      ({{ uvtThreshold()?.limit_cop | currency }}).
+    </app-alert-banner>
+  }
   <!-- Bug 7 — banner para órdenes en estado `pending_delivery`. Informa al
        operador que la orden requiere despacho manual + entrega + finalizado
        (el estado ya no se auto-finaliza al cobrar). Los 2 botones wirean a
