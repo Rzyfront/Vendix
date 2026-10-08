@@ -1160,8 +1160,9 @@ export class PaymentInstructionsModalComponent {
   /**
    * Revela la sección de upload cuando el modo obligatorio bloquea el
    * avance: scroll suave + highlight temporal. No cierra el modal.
+   * `highlight: false` = aviso informativo (sin el resaltado de error).
    */
-  private revealUploadSection(): void {
+  private revealUploadSection(opts: { highlight?: boolean } = {}): void {
     if (typeof document !== 'undefined') {
       document
         .querySelector('app-payment-instructions-modal .pi-upload')
@@ -1175,6 +1176,7 @@ export class PaymentInstructionsModalComponent {
       );
       control?.focus({ preventScroll: true });
     }
+    if (opts.highlight === false) return;
     this.uploadHighlighted.set(true);
     setTimeout(() => this.uploadHighlighted.set(false), 1600);
   }
@@ -1191,6 +1193,12 @@ export class PaymentInstructionsModalComponent {
       setTimeout(() => {
         if (this.copiedKey() === field.key) this.copiedKey.set(null);
       }, 1500);
+      // Al copiar el número de cuenta el siguiente paso es pagar y adjuntar
+      // el soporte: lleva la vista a la carga (informativo, sin resaltado de
+      // error). La pausa deja ver el "Copiado" antes del scroll.
+      if (field.key === 'account_number' && !this.currentFile()) {
+        setTimeout(() => this.revealUploadSection({ highlight: false }), 700);
+      }
     } catch {
       // ignore
     }
