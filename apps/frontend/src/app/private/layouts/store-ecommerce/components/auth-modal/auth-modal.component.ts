@@ -656,7 +656,8 @@ export class AuthModalComponent {
     // Default
     return {
       title: 'Error de autenticación',
-      message: error,
+      message:
+        fallbackMessage || 'No pudimos completar la solicitud. Intenta de nuevo.',
     };
   }
 
