@@ -623,6 +623,78 @@
       }
     </div>
 
+    <!-- Propinas -->
+    <div>
+      <div class="block-head">
+        <h4 class="block-title">Propinas</h4>
+        <p class="block-subtitle">
+          Define si el cajero puede registrar la propina del cliente y si se sugiere
+          una al imprimir la cuenta.
+        </p>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="tipsEnabledControl"
+            label="Registrar propinas"
+            description="Permite agregar al cobro la propina que deja el cliente"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+        </div>
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="tipsSuggestedEnabledControl"
+            label="Propina sugerida"
+            description="Se imprime en pre-cuenta y ticket como sugerencia; el cliente decide si la paga"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+        </div>
+      </div>
+
+      @if (tipsSuggestedEnabledControl.value) {
+        <div class="mt-4 p-4 rounded-lg border border-border bg-muted/30">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <app-selector
+              [formControl]="tipsSuggestedTypeControl"
+              label="Tipo de propina sugerida"
+              [options]="tipTypeOptions"
+              (valueChange)="onFieldChange()"
+              size="sm"
+            ></app-selector>
+            @if (tipsSuggestedTypeControl.value === 'fixed') {
+              <app-input
+                [formControl]="tipsSuggestedValueControl"
+                label="Monto sugerido"
+                [currency]="true"
+                placeholder="0"
+                size="sm"
+                (change)="onFieldChange()"
+              ></app-input>
+            } @else {
+              <div class="field">
+                <label class="field__label">Porcentaje sugerido (%)</label>
+                <div class="flex items-center gap-2">
+                  <input
+                    type="number"
+                    [formControl]="tipsSuggestedValueControl"
+                    (change)="onFieldChange()"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    class="field__control"
+                  />
+                  <span class="text-sm text-text-secondary">%</span>
+                </div>
+              </div>
+            }
+          </div>
+          <p class="field__hint">
+            Con 10 %, una cuenta de $50.000 sugiere $5.000 de propina.
+          </p>
+        </div>
+      }
+    </div>
+
     <!-- Business Hours -->
     <div>
       <div class="block-head">
