@@ -742,11 +742,11 @@ export interface GuestOrderSummary {
               </section>
             }
 
-            @if (rs.items.length) {
+            @if (reviewableItems().length) {
               <section class="review-card" aria-label="Reseña tus productos">
                 <h2 class="review-title">Reseña tus productos</h2>
                 <ul class="review-items">
-                  @for (ri of rs.items; track ri.product_id) {
+                  @for (ri of reviewableItems(); track ri.product_id) {
                     <li class="review-item">
                       @if (ri.image_url) {
                         <img class="review-thumb" [src]="ri.image_url" [alt]="ri.product_name" />
@@ -2061,6 +2061,11 @@ export class GuestOrderSummaryComponent implements OnInit {
   // Reseñas (experiencia de compra + productos)
   readonly reviewStatus = signal<OrderReviewStatus | null>(null);
   readonly reviewStars = [1, 2, 3, 4, 5];
+  readonly reviewableItems = computed(() =>
+    (this.reviewStatus()?.items ?? []).filter(
+      (ri) => ri.reason !== 'no_customer' && ri.reason !== 'reviews_disabled',
+    ),
+  );
   readonly showExperienceModal = signal(false);
   readonly showProductModal = signal(false);
   readonly experienceSource = signal<OrderReviewSource>('order_detail');

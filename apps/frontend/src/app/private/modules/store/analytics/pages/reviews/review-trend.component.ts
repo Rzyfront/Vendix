@@ -148,7 +148,7 @@ const TAG_LABELS: Record<string, string> = {
             <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
               <div slot="header" class="results-header flex flex-col">
                 <span class="text-sm font-bold text-[var(--color-text-primary)]">Calificación promedio</span>
-                <span class="text-xs text-[var(--color-text-secondary)]">Solo aprobadas · periodos sin reseñas quedan en blanco</span>
+                <span class="text-xs text-[var(--color-text-secondary)]">Incluye reseñas de producto en cualquier estado de moderación · periodos sin reseñas quedan en blanco</span>
               </div>
               <div class="p-4">
                 @if (loading()) {
