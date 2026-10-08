@@ -1,3 +1,5 @@
+import type { OrderReview } from '../../customers/reviews/models/review.model';
+
 // Order channel types
 export type OrderChannel = 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace';
 
@@ -159,6 +161,8 @@ export interface Order {
   addresses_orders_billing_address_idToaddresses?: Address;
   addresses_orders_shipping_address_idToaddresses?: Address;
   payments?: Payment[];
+  // Reseña de experiencia de compra (null si el cliente aún no calificó).
+  order_review?: OrderReview | null;
   users?: OrderCustomer;
   // Persisted discount snapshots — read-only from backend, never recalculated.
   order_promotions?: OrderPromotionSnapshot[];

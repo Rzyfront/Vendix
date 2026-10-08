@@ -102,6 +102,10 @@ export function pendingKitchenLabelsFromError(error: unknown): string[] {
     return [`${row.product_name}${variant}${quantity}`];
   });
 }
+import {
+  ORDER_REVIEW_QUICK_TAG_LABELS,
+  ORDER_REVIEW_SOURCE_LABELS,
+} from '../../../customers/reviews/models/review.model';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   StickyHeaderComponent,
@@ -791,6 +795,24 @@ export class OrderDetailsPageComponent {
   private vexiHosts = inject(VexiUiHostRegistry);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+
+  // Tarjeta "Experiencia de compra" (solo lectura).
+  readonly orderReview = computed(() => this.order()?.order_review ?? null);
+  readonly reviewStars = [1, 2, 3, 4, 5];
+  readonly reviewQuickTagLabel = computed(() => {
+    const tag = this.orderReview()?.quick_tag;
+    return tag ? ORDER_REVIEW_QUICK_TAG_LABELS[tag] : null;
+  });
+  readonly reviewSourceLabel = computed(() => {
+    const source = this.orderReview()?.source;
+    return source ? ORDER_REVIEW_SOURCE_LABELS[source] : null;
+  });
+  readonly reviewDateLabel = computed(() => {
+    const review = this.orderReview();
+    return review
+      ? formatStoreDateTime(review.created_at, this.settingsFacade.timezone())
+      : '';
+  });
 
   // ── Host de Vexi ──────────────────────────────────────────────────────
   //

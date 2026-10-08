@@ -1828,6 +1828,52 @@
             />
           </app-card>
 
+          <!-- EXPERIENCIA DE COMPRA (solo lectura) -->
+          <app-card shadow="sm" [responsivePadding]="true">
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-2 sm:mb-3"
+            >
+              Experiencia de compra
+            </h2>
+            @if (orderReview(); as review) {
+              <div class="flex flex-col gap-2">
+                <div
+                  class="flex items-center gap-0.5"
+                  role="img"
+                  [attr.aria-label]="review.rating + ' de 5 estrellas'"
+                >
+                  @for (n of reviewStars; track n) {
+                    <app-icon
+                      name="star"
+                      [size]="16"
+                      [class]="n <= review.rating ? 'text-amber-500' : 'text-gray-300'"
+                    />
+                  }
+                </div>
+                @if (reviewQuickTagLabel()) {
+                  <p class="text-sm font-medium text-gray-900">
+                    {{ reviewQuickTagLabel() }}
+                  </p>
+                }
+                @if (review.comment) {
+                  <p class="text-sm text-gray-700 whitespace-pre-line">
+                    {{ review.comment }}
+                  </p>
+                }
+                <p class="text-xs text-gray-500">
+                  {{ reviewDateLabel() }}
+                  @if (reviewSourceLabel()) {
+                    · {{ reviewSourceLabel() }}
+                  }
+                </p>
+              </div>
+            } @else {
+              <p class="text-sm text-gray-500">
+                El cliente aún no ha calificado esta compra.
+              </p>
+            }
+          </app-card>
+
           <!-- 5. FACTURA ELECTRÓNICA -->
           <!-- Acceso rápido a la factura de esta orden con la misma capacidad
                que el módulo de Facturación: los chips de abajo salen de
