@@ -603,6 +603,11 @@ export class CheckoutComponent implements OnInit {
   private autoLocateAttempted = false;
   /** A geocode miss whose warning waits for the first auto-focus to show. */
   private pendingAddressWarning = false;
+  /** Deferred auto-locate (see {@link scheduleAutoLocate}). */
+  private autoLocateTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoLocateBlurCleanup: (() => void) | null = null;
+  /** Address key that failed to geocode when the auto-locate was scheduled. */
+  private autoLocateFailedKey: string | null = null;
 
   constructor(
     private cart_service: CartService,
@@ -620,6 +625,7 @@ export class CheckoutComponent implements OnInit {
       // and a `blur` listener are not rxjs subscriptions and survive destroy
       // on their own — clear them explicitly.
       this.clearPendingAutoMapFocus();
+      this.cancelScheduledAutoLocate();
     });
     this.initForm();
 
@@ -1165,6 +1171,7 @@ export class CheckoutComponent implements OnInit {
             this.handleUnresolvedGeocode();
             return;
           }
+          this.cancelScheduledAutoLocate();
           this.map_center.set(coords);
           this.addressWarning.set(null);
           this.pendingAddressWarning = false;
@@ -1184,8 +1191,6 @@ export class CheckoutComponent implements OnInit {
           // buyer to check the pin — non-blocking, never stops Continuar.
           if (res.precision === 'street') {
             this.focusMapHint('auto');
-            // Only the street resolved, not the full address: ask for GPS too.
-            void this.maybeAutoRequestLocation();
           }
         },
         error: () => {
@@ -1205,7 +1210,8 @@ export class CheckoutComponent implements OnInit {
    * delivery must NEVER fall back to a silent zone rate here — `coords_version`
    * bumping also flips `hasResolvedCoords()` to false, which blocks Continuar
    * and suppresses auto-quoting until the buyer resolves a point (map pin or
-   * GPS).
+   * GPS). The GPS request itself is deferred via {@link scheduleAutoLocate}
+   * so a half-typed address does not trigger the native prompt.
    */
   private handleUnresolvedGeocode(): void {
     this.clearGeocodedCoords();
@@ -1218,13 +1224,72 @@ export class CheckoutComponent implements OnInit {
       this.pendingAddressWarning = true;
     }
     this.focusMapHint('auto');
-    void this.maybeAutoRequestLocation();
+    this.scheduleAutoLocate();
   }
 
   /**
-   * Owner directive: when the written address cannot be located, ask for the
-   * device location AT THE SAME TIME as the orange warning (the app should
-   * always ship geolocated). Acts only once per instance, for home delivery
+   * Deferred GPS request for an address the map could not find. The
+   * forward-geocode runs after every typing pause, so a half-typed address
+   * ("Calle 1") fails even when the final one resolves: asking for GPS right
+   * away popped the native prompt mid-typing. Instead: remember the failed
+   * address key, restart a 1500 ms wait on every new miss (a later resolved
+   * geocode cancels it via {@link cancelScheduledAutoLocate}), and if the
+   * buyer is still typing in a field of this host when it fires, wait for
+   * that field's `blur` (same approach as {@link runAutoMapFocus}).
+   */
+  private scheduleAutoLocate(): void {
+    if (this.autoLocateAttempted) return;
+    this.cancelScheduledAutoLocate();
+    this.autoLocateFailedKey = this.currentAddressKey();
+    this.autoLocateTimer = setTimeout(() => {
+      this.autoLocateTimer = null;
+      this.runScheduledAutoLocate();
+    }, 1500);
+  }
+
+  private runScheduledAutoLocate(): void {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && this.isTextEntryInsideHost(active)) {
+      const onBlur = () => {
+        active.removeEventListener('blur', onBlur);
+        this.autoLocateBlurCleanup = null;
+        // Next tick: `activeElement` is still <body> during `blur`.
+        this.autoLocateTimer = setTimeout(() => {
+          this.autoLocateTimer = null;
+          this.runScheduledAutoLocate();
+        }, 0);
+      };
+      active.addEventListener('blur', onBlur, { once: true });
+      this.autoLocateBlurCleanup = () =>
+        active.removeEventListener('blur', onBlur);
+      return;
+    }
+    if (
+      this.selected_delivery() === 'home' &&
+      !this.hasResolvedCoords() &&
+      this.currentAddressKey() === this.autoLocateFailedKey &&
+      this.autoMapFocusGateOpen()
+    ) {
+      void this.maybeAutoRequestLocation();
+    }
+  }
+
+  /** Cancels the pending auto-locate timer and/or its `blur` listener. */
+  private cancelScheduledAutoLocate(): void {
+    if (this.autoLocateTimer != null) {
+      clearTimeout(this.autoLocateTimer);
+      this.autoLocateTimer = null;
+    }
+    this.autoLocateBlurCleanup?.();
+    this.autoLocateBlurCleanup = null;
+  }
+
+  /**
+   * Owner directive: ask for the device location ONLY when the final address
+   * cannot be found on the map (never when it resolves, including street-level
+   * pins). Called deferred from {@link scheduleAutoLocate} once typing settles
+   * on a still-unlocated address, and with `bypassGate` from `onMapFailed`.
+   * Acts only once per instance, for home delivery
    * and once the minimal address is typed (never prompts on 2 letters).
    * - `granted`/`prompt` → request GPS directly (native browser prompt, no
    *   priming modal).
