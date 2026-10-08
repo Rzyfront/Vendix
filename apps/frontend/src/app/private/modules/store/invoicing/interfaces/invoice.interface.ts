@@ -673,6 +673,15 @@ export interface InvoicePdfResult {
  * Abrirla directamente desde el navegador produce una ruta relativa rota. Este
  * endpoint es el que la firma; si la factura todavía no tiene PDF, lo genera.
  */
+/** Respuesta de `POST /store/invoicing/:id/deliver` (reenvio por correo). */
+export interface InvoiceDeliverResult {
+  invoice_id: number;
+  invoice_number: string;
+  recipient: string;
+  zip_name?: string;
+  message_id?: string;
+}
+
 export interface InvoicePdfUrl {
   url: string;
 }
