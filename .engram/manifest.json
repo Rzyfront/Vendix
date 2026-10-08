@@ -3424,6 +3424,14 @@
       "sessions": 0,
       "memories": 3,
       "prompts": 0
+    },
+    {
+      "id": "ceec5341",
+      "created_by": "rzy",
+      "created_at": "2026-10-08T04:48:46Z",
+      "sessions": 4,
+      "memories": 52,
+      "prompts": 0
     }
   ]
 }
