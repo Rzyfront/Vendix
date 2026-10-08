@@ -55,6 +55,7 @@ import {
   KdsSseService,
   KitchenMutationError,
 } from '../../../kds/services';
+import { PosPreCuentaPrintService } from '../../../../pos/services/pos-pre-cuenta-print.service';
 import { KitchenTicketPrintService } from '../../../kds/services/kitchen-ticket-print.service';
 import type {
   FireConfirmPayload,
@@ -146,6 +147,7 @@ interface SecondaryAction {
 export class TableSessionPageComponent implements OnInit {
   private readonly tablesService = inject(TablesService);
   private readonly kitchenService = inject(KitchenTicketsService);
+  private readonly preCuentaPrint = inject(PosPreCuentaPrintService);
   protected readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private readonly kdsSse = inject(KdsSseService);
   private readonly adminTablesSse = inject(AdminTablesSseService);
@@ -948,6 +950,43 @@ export class TableSessionPageComponent implements OnInit {
   });
 
   /** Boton "Imprimir comanda" (solo cocina fisica): reimprime los tickets de la cuenta. */
+  /** Hay orden con al menos una línea activa: habilita la pre-cuenta. */
+  readonly canPrintPreCuenta = computed(
+    () =>
+      !this.isClosed() &&
+      !!this.session()?.order &&
+      this.items().some((item) => !item.cancelled_at),
+  );
+
+  /** Imprime la pre-cuenta (no fiscal) de la orden abierta de la mesa. */
+  printPreCuenta(): void {
+    const order = this.session()?.order;
+    if (!order) return;
+    const num = (v: unknown): number => Number(v ?? 0) || 0;
+    const orderExtra = order as unknown as {
+      tip_amount?: number | string | null;
+      withholding_amount?: number | string | null;
+    };
+    void this.preCuentaPrint.printPreCuentaDoc({
+      customerName: this.customerName() || null,
+      lines: this.items()
+        .filter((item) => !item.cancelled_at)
+        .map((item) => ({
+          qty: num(item.quantity),
+          name: item.variant_label
+            ? `${item.product_name} - ${item.variant_label}`
+            : item.product_name,
+          total: num(item.total_price),
+        })),
+      subtotal: num(order.subtotal_amount),
+      discount: num(order.discount_amount),
+      taxAmount: num(order.tax_amount),
+      withholding: num(orderExtra.withholding_amount),
+      total: num(order.grand_total),
+      tipAlreadyCharged: num(orderExtra.tip_amount) > 0,
+    });
+  }
+
   printKitchenTickets(): void {
     this.kitchenTicketPrint.printTickets(this.printableTicketIds());
   }
