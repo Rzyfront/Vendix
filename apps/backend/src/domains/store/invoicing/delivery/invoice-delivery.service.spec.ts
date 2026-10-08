@@ -712,6 +712,35 @@ describe('InvoiceDeliveryService', () => {
       expect(result.zip_name).toBe('Factura-FE100.zip');
     });
 
+    it('el pie del correo usa el NIT de la identidad fiscal, no organizations.tax_id', async () => {
+      const { service, emailService } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue({
+              ...withXml,
+              organization: {
+                ...withXml.organization,
+                tax_id: '902056589',
+                fiscal_scope: 'ORGANIZATION',
+                organization_settings: {
+                  settings: { fiscal_data: { nit: '900123456' } },
+                },
+              },
+            }),
+          },
+        },
+      });
+
+      await service.deliver(12, { email: 'cliente@test.com' } as any);
+
+      const [, subject, html] = (
+        emailService.sendEmailWithAttachments as jest.Mock
+      ).mock.calls[0];
+      expect(subject.split(';')[0]).toBe('900123456');
+      expect(html).toContain('900123456');
+      expect(html).not.toContain('902056589');
+    });
+
     it('identidad del emisor irresoluble: cae al asunto, remitente y zip anteriores', async () => {
       const { service, emailService } = createService({
         prisma: {

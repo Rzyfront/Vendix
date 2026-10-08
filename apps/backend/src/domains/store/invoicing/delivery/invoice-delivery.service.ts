@@ -361,7 +361,9 @@ export class InvoiceDeliveryService {
       store_email: org?.email || undefined,
       store_phone: org?.phone || undefined,
       store_address,
-      store_nit: org?.tax_id || undefined,
+      // Mismo NIT que el asunto, el zip y el XML firmado — no `organizations.tax_id`
+      // a pelo, que puede divergir de la identidad fiscal habilitada.
+      store_nit: issuer?.nit || org?.tax_id || undefined,
     };
 
     const html = generateInvoiceEmailHtml(email_data);
