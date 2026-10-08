@@ -67,6 +67,8 @@ const INVOICE_PDF_INCLUDE = {
   },
   // Solo la propina (informativa en el PDF); sin query extra.
   order: { select: { tip_amount: true } },
+  // Factura de cuenta dividida: la propina es la de ESA cuenta, no la de la orden origen.
+  financial_account: { select: { tip_amount: true } },
   customer: {
     select: {
       id: true,
@@ -303,8 +305,8 @@ export class InvoicePdfService {
       tip_amount:
         (invoice.invoice_type === 'sales_invoice' ||
           invoice.invoice_type === 'pos_equivalent_document') &&
-        invoice.order
-          ? Number(invoice.order.tip_amount) || 0
+        (invoice.financial_account || invoice.order)
+          ? Number((invoice.financial_account ?? invoice.order)!.tip_amount) || 0
           : 0,
 
       // DIAN
