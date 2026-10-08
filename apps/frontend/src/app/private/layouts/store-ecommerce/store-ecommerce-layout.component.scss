@@ -1309,7 +1309,7 @@
     .cart-items {
       max-height: 400px;
       overflow-y: auto;
-      padding: 0.75rem;
+      padding: 0.5rem 0.75rem;
 
       // Personalizar scrollbar
       &::-webkit-scrollbar {
@@ -1322,125 +1322,9 @@
       }
     }
 
+    // La fila la pinta app-order-line-item; aquí sólo el espaciado.
     .cart-item {
-      display: flex;
-      gap: 1rem;
-      padding: 0.75rem;
-      border-radius: 12px;
-      transition: background-color 0.2s ease;
-
-      &:hover {
-        background-color: var(--color-background);
-      }
-
-      .item-image {
-        width: 64px;
-        height: 64px;
-        flex-shrink: 0;
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid var(--color-border);
-        background: var(--color-neutral-50);
-
-        img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .placeholder-img {
-          width: 100%;
-          height: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--color-text-muted);
-        }
-      }
-
-      .item-details {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-
-        .item-name {
-          font-size: 0.9rem;
-          font-weight: 600;
-          color: var(--color-text-primary);
-          margin: 0 0 0.25rem 0;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .item-variant {
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: var(--color-text-muted);
-          margin: 0 0 0.15rem 0;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .item-price {
-          font-size: 0.875rem;
-          color: var(--color-text-secondary);
-          margin: 0;
-        }
-
-        .item-controls {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-top: 0.5rem;
-
-          .quantity-controls {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            background: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: 6px;
-            padding: 2px;
-
-            button {
-              width: 24px;
-              height: 24px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              border: none;
-              background: transparent;
-              cursor: pointer;
-              border-radius: 4px;
-              color: var(--color-text-secondary);
-              transition: all 0.2s;
-
-              &:hover {
-                background: var(--color-background);
-                color: var(--color-text-primary);
-              }
-            }
-
-            span {
-              font-size: 0.8rem;
-              font-weight: 600;
-              min-width: 16px;
-              text-align: center;
-            }
-          }
-
-          .remove-btn {
-            &:hover {
-              background: var(--color-error-100) !important;
-              color: var(--color-error-600);
-            }
-          }
-        }
-      }
+      padding: 0.25rem 0;
     }
 
     .empty-cart {
@@ -1984,6 +1868,25 @@
 // Responsive
 // Responsive
 @media (max-width: 1024px) {
+  // El dropdown del carrito era `absolute; right:0` respecto del botón y la
+  // hamburguesa a su derecha lo cortaba. En móvil/tablet se ancla al viewport,
+  // justo bajo el header (60px; 56px en <=640px).
+  .ecommerce-header .cart-container .cart-dropdown {
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    top: var(--ecom-header-h, 60px);
+    width: auto;
+    max-height: calc(100dvh - var(--ecom-header-h, 60px) - 1rem);
+    overflow-y: auto;
+    transform-origin: top center;
+
+    .cart-items {
+      max-height: none;
+      overflow-y: visible;
+    }
+  }
+
   .ecommerce-header {
     // Show mobile logo
     .mobile-logo {
@@ -2024,6 +1927,7 @@
 
 @media (max-width: 640px) {
   .ecommerce-header {
+    --ecom-header-h: 56px;
     padding: 0 0.5rem;
     height: 56px;
 

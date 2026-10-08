@@ -377,6 +377,8 @@ export interface OrderItem {
   variant_sku?: string;
   variant_attributes?: string;
   variant_image_url?: string | null;
+  /** Nota libre del ítem (máx. 200). La escriben POS/ecommerce. */
+  notes?: string | null;
   quantity: number;
   unit_price: number;
   total_price: number;

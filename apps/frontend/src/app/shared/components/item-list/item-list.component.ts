@@ -117,6 +117,11 @@ export class ItemListComponent {
     return '';
   }
 
+  getNote(item: any): string {
+    const transform = this.cardConfig().noteTransform;
+    return transform ? (transform(item) ?? '').trim() : '';
+  }
+
   showAvatar(): boolean {
     const config = this.cardConfig();
     return !!(config.avatarKey || config.avatarFallbackIcon);

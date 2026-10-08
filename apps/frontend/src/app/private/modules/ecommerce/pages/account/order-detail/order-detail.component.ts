@@ -108,6 +108,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
           product_name: i.product_name,
           variant_sku: i.variant_sku ?? null,
           variant_attributes: this.variantAttributesText(i.variant_attributes),
+          notes: (i as { notes?: string | null }).notes ?? null,
           quantity: i.quantity,
           unit_price: Number(i.unit_price_gross ?? i.final_unit_price ?? i.unit_price ?? 0),
           total_price: Number(i.line_total_gross ?? i.final_total_price ?? i.total_price ?? 0),
@@ -171,12 +172,14 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
    * detalle viejo en vez de pintar `[object Object]`.
    */
   private variantAttributesText(variantAttributes: any): string | null {
-    if (typeof variantAttributes === 'string') return variantAttributes || null;
     if (variantAttributes == null) return null;
     const attrs = parseVariantAttributes(variantAttributes);
     if (!attrs.length) return null;
     return attrs
-      .map((a) => (a.name ? `${a.name}: ${a.value}` : a.value))
+      .map((a) => {
+        const name = a.name ? a.name.charAt(0).toUpperCase() + a.name.slice(1) : '';
+        return name ? `${name}: ${a.value}` : a.value;
+      })
       .join(' · ');
   }
 

@@ -21,6 +21,10 @@ import {
   CartService,
 } from '../../modules/ecommerce/services/cart.service';
 import { cartLineKey } from '../../modules/ecommerce/utils/cart-line-key.util';
+import {
+  OrderLineItemComponent,
+  cartItemToLineView,
+} from '../../modules/ecommerce/components/order-line-item/order-line-item.component';
 import { CartMiniBarComponent } from '../../modules/ecommerce/components/cart-mini-bar/cart-mini-bar.component';
 import { CartPromotionsComponent } from '../../modules/ecommerce/components/cart-promotions/cart-promotions.component';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
@@ -106,6 +110,7 @@ interface FooterSettings {
     CurrencyPipe,
     CartPromotionsComponent,
     CartMiniBarComponent,
+    OrderLineItemComponent,
     // Appointment redesign phase 2 — in-app notifications bell for the
     // customer (reagenda aprobada/rechazada, etc.). Auth-gated in template.
     NotificationsDropdownComponent,
@@ -188,6 +193,17 @@ export class StoreEcommerceLayoutComponent {
   cart$ = this.cart_service.cart$;
   readonly cart = toSignal(this.cart$, { initialValue: null as any });
   readonly show_cart_dropdown = signal(false);
+  /** Líneas del dropdown con su vista neutra (recalculada al cambiar el carrito). */
+  readonly cart_lines = computed(() =>
+    ((this.cart()?.items ?? []) as CartItem[]).map((item) => ({
+      item,
+      key: this.cartLineKeyOf(item),
+      view: cartItemToLineView(item),
+    })),
+  );
+  max_quantity_per_item(): number | null {
+    return this.cart_service.getMaxQuantityPerItem() ?? null;
+  }
 
   // Barra mini de carrito (móvil): URL actual alimentada por NavigationEnd.
   readonly current_url = signal(this.router.url);
@@ -572,12 +588,28 @@ export class StoreEcommerceLayoutComponent {
     this.show_user_menu.update((v) => !v);
   }
 
+  /**
+   * En táctil el tap dispara un `mouseenter` emulado ANTES del `click`:
+   * el hover abría el dropdown y el click lo cerraba al instante. El hover
+   * sólo aplica a dispositivos que realmente lo soportan; en táctil manda
+   * únicamente el click (`toggleCart`).
+   */
+  private canHover(): boolean {
+    return (
+      this.is_browser &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches
+    );
+  }
+
   onCartEnter(): void {
+    if (!this.canHover()) return;
     clearTimeout(this.close_timer);
     this.show_cart_dropdown.set(true);
   }
 
   onCartLeave(): void {
+    if (!this.canHover()) return;
     // Zoneless: setTimeout valido para debounce real (300ms evita parpadeo del dropdown).
     // La mutacion del signal show_cart_dropdown dispara CD automaticamente.
     this.close_timer = setTimeout(() => {
@@ -679,6 +711,16 @@ export class StoreEcommerceLayoutComponent {
     ) {
       this.show_user_menu.set(false);
     }
+
+    // Dropdown del carrito: cierra al tocar fuera. Se usa composedPath()
+    // porque al eliminar una línea su nodo ya salió del DOM cuando este
+    // handler corre y `contains()` daría falso.
+    if (this.show_cart_dropdown()) {
+      const cartContainer = document.querySelector('.cart-container');
+      if (cartContainer && !event.composedPath().includes(cartContainer)) {
+        this.show_cart_dropdown.set(false);
+      }
+    }
   }
 
   // Close user menu on Escape key
@@ -686,6 +728,9 @@ export class StoreEcommerceLayoutComponent {
   onEscapeKey(): void {
     if (this.show_user_menu()) {
       this.show_user_menu.set(false);
+    }
+    if (this.show_cart_dropdown()) {
+      this.show_cart_dropdown.set(false);
     }
   }
 

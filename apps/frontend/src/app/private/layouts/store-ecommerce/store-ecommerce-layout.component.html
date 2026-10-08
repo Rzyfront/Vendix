@@ -133,35 +133,16 @@
               <!-- track por line_key: en el carrito invitado `id` vale
                    `product_id`, así que dos presentaciones del mismo producto
                    colisionaban (NG0955). -->
-              @for (item of cart.items; track cartLineKeyOf(item)) {
+              @for (line of cart_lines(); track line.key) {
               <div class="cart-item">
-                <div class="item-image">
-                  @if (item.product.image_url) {
-                  <img [src]="item.product.image_url" [alt]="item.product.name">
-                  } @else {
-                  <div class="placeholder-img">
-                    <app-icon name="image" [size]="16"></app-icon>
-                  </div>
-                  }
-                </div>
-                <div class="item-details">
-                  <p class="item-name">{{ item.product.name }}</p>
-                  @if (item.price_tier; as tier) {
-                  <!-- La presentación elegida tiene que sobrevivir hasta aquí:
-                       sin la etiqueta, dos líneas del mismo producto se ven
-                       idénticas y sólo se distinguen por el precio. -->
-                  <p class="item-variant">{{ tier.label }}</p>
-                  }
-                  <p class="item-price">{{ item.unit_price | currency }}</p>
-
-                  <div class="item-controls">
-                    <app-quantity-control [value]="item.quantity" [min]="1" [size]="'sm'"
-                      (valueChange)="updateCartQuantity(item, $event)"></app-quantity-control>
-                    <app-button variant="ghost" size="xsm" class="remove-btn" (clicked)="removeCartItem(item)">
-                      <app-icon slot="icon" name="trash-2" [size]="14"></app-icon>
-                    </app-button>
-                  </div>
-                </div>
+                <app-order-line-item
+                  [item]="line.view"
+                  mode="editable"
+                  [compact]="true"
+                  [maxQuantity]="max_quantity_per_item()"
+                  (quantityChange)="updateCartQuantity(line.item, $event)"
+                  (remove)="removeCartItem(line.item)"
+                />
               </div>
               }
               } @else {

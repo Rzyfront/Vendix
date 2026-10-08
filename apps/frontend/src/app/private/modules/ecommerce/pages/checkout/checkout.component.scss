@@ -1334,38 +1334,14 @@
 }
 
 .summary-items {
-    max-height: 200px;
+    max-height: 320px;
     overflow-y: auto;
 }
 
+/* Cada línea la pinta app-order-line-item (host con clase summary-item). */
 .summary-item {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-    font-size: var(--fs-sm);
-
-    .item-qty {
-        color: var(--color-text-muted);
-        min-width: 30px;
-    }
-
-    .item-name {
-        flex: 1;
-        color: var(--color-text-primary);
-    }
-
-    /* Presentación de venta elegida ("Rollo 20 m"): sin ella dos líneas del
-       mismo producto se ven idénticas en el resumen del pedido. */
-    .item-tier {
-        display: block;
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-semibold);
-        color: var(--color-text-muted);
-    }
-
-    .item-price {
-        color: var(--color-text-secondary);
-    }
+    display: block;
+    margin-bottom: 0.5rem;
 }
 
 .summary-row {

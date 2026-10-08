@@ -5417,6 +5417,62 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ── Nota por ítem (ver/editar) ──────────────────────────────────────
+  readonly itemNotesMaxLength = 200;
+  readonly noteEditorOpen = signal(false);
+  readonly noteEditorItem = signal<OrderItem | null>(null);
+  readonly noteEditorText = signal('');
+  readonly noteSaving = signal(false);
+
+  /** La nota se edita salvo ítem cancelado u orden cancelada/reembolsada. */
+  canEditItemNotes(item: OrderItem): boolean {
+    const state = this.order()?.state;
+    if (state === 'cancelled' || state === 'refunded') return false;
+    return item.cancelled_at == null;
+  }
+
+  openItemNoteEditor(item: OrderItem): void {
+    if (!this.canEditItemNotes(item)) return;
+    this.noteEditorItem.set(item);
+    this.noteEditorText.set(item.notes ?? '');
+    this.noteEditorOpen.set(true);
+  }
+
+  onNoteEditorInput(event: Event): void {
+    this.noteEditorText.set((event.target as HTMLTextAreaElement).value);
+  }
+
+  closeItemNoteEditor(): void {
+    if (this.noteSaving()) return;
+    this.noteEditorOpen.set(false);
+    this.noteEditorItem.set(null);
+  }
+
+  saveItemNote(): void {
+    if (this.noteSaving()) return;
+    const item = this.noteEditorItem();
+    const orderId = this.order()?.id;
+    if (!item || !orderId) return;
+    const text = this.noteEditorText().trim();
+    this.noteSaving.set(true);
+    this.ordersFlowService
+      .updateItemNotes(orderId, item.id, text === '' ? null : text)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.noteSaving.set(false);
+          this.noteEditorOpen.set(false);
+          this.noteEditorItem.set(null);
+          this.toastService.success('Nota actualizada');
+          this.refreshOrder();
+        },
+        error: (err: unknown) => {
+          this.noteSaving.set(false);
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
   /** Cocina fisica: items con estado de cocina no terminal, entregables a mano. */
   readonly deliverableKitchenItems = computed<OrderItem[]>(() =>
     (this.order()?.order_items ?? []).filter((it) => {

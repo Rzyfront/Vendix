@@ -36,6 +36,7 @@ import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { OrderTrackingProgressComponent } from '../../../../../shared/components/order-tracking-progress/order-tracking-progress.component';
 import { GuestOrderPrintService } from '../../services/guest-order-print.service';
+import { parseVariantAttributes } from '../../../../../shared/utils/variant-attributes.util';
 import { ItemListComponent } from '../../../../../shared/components/item-list/item-list.component';
 import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
 
@@ -49,6 +50,7 @@ export interface GuestOrderItem {
   product_name: string;
   variant_sku?: string | null;
   variant_attributes?: string | null;
+  notes?: string | null;
   quantity: number;
   unit_price: number;
   product_type?: 'physical' | 'service' | 'prepared' | null;
@@ -469,17 +471,23 @@ export interface GuestOrderSummary {
                         </app-badge>
                       }
                     </div>
-                    @if (item.variant_sku || item.variant_attributes) {
+                    @if (item.variant_sku || variantText(item)) {
                       <span class="item-variant">
                         @if (item.variant_sku) {
                           SKU: {{ item.variant_sku }}
                         }
-                        @if (item.variant_sku && item.variant_attributes) {
+                        @if (item.variant_sku && variantText(item)) {
                           ·
                         }
-                        @if (item.variant_attributes) {
-                          {{ item.variant_attributes }}
+                        @if (variantText(item)) {
+                          {{ variantText(item) }}
                         }
+                      </span>
+                    }
+                    @if (noteText(item)) {
+                      <span class="item-note">
+                        <app-icon name="file-text" [size]="11" />
+                        Nota: {{ noteText(item) }}
                       </span>
                     }
                     @if (!isItemCancelled(item)) {
@@ -1121,6 +1129,16 @@ export interface GuestOrderSummary {
       .item-variant {
         font-size: var(--fs-xs);
         color: var(--color-text-muted);
+      }
+
+      .item-note {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.25rem;
+        font-size: var(--fs-xs);
+        font-style: italic;
+        color: var(--color-text-muted);
+        overflow-wrap: anywhere;
       }
 
       .item-qty {
@@ -2185,7 +2203,8 @@ export class GuestOrderSummaryComponent implements OnInit {
       const cancelled = this.isItemCancelled(item);
       const parts: string[] = [];
       if (item.variant_sku) parts.push(`SKU: ${item.variant_sku}`);
-      if (item.variant_attributes) parts.push(item.variant_attributes);
+      const variant = this.variantText(item);
+      if (variant) parts.push(variant);
       if (cancelled && this.hasVisibleCancellationReason(item)) {
         parts.push(String(item.cancellation_reason).trim());
       }
@@ -2201,6 +2220,20 @@ export class GuestOrderSummaryComponent implements OnInit {
     }),
   );
 
+  /** Variante legible ("Color: Rojo · Talla: M"); nunca JSON ni objeto. */
+  variantText(item: { variant_attributes?: unknown }): string {
+    return parseVariantAttributes(item.variant_attributes)
+      .map((a) => {
+        const name = a.name ? a.name.charAt(0).toUpperCase() + a.name.slice(1) : '';
+        return name ? `${name}: ${a.value}` : a.value;
+      })
+      .join(' · ');
+  }
+
+  noteText(item: { notes?: string | null }): string {
+    return typeof item.notes === 'string' ? item.notes.trim() : '';
+  }
+
   readonly itemRowClass = (item: { _cancelled?: boolean }): string =>
     item._cancelled ? 'guest-item-cancelled' : '';
 
@@ -2212,6 +2245,7 @@ export class GuestOrderSummaryComponent implements OnInit {
     titleKey: 'product_name',
     subtitleKey: '_subtitle',
     subtitleTransform: (item) => item._subtitle,
+    noteTransform: (item) => this.noteText(item),
     avatarKey: '_image',
     avatarShape: 'square',
     avatarFallbackIcon: 'package',

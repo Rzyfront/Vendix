@@ -110,6 +110,12 @@
                       {{ getSubtitle(item) }}
                     </p>
                   }
+                  @if (getNote(item)) {
+                    <p class="card-note">
+                      <app-icon name="file-text" [size]="12" />
+                      <span>{{ getNote(item) }}</span>
+                    </p>
+                  }
                 </div>
                 @if (cardConfig().badgeKey && getBadgeValue(item) !== null) {
                   <div class="card-badge-wrap">

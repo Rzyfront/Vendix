@@ -249,6 +249,18 @@
   text-overflow: ellipsis;
 }
 
+.card-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 2px 0 0 0;
+  font-size: var(--fs-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .card-subtitle {
   font-size: var(--fs-sm);
   color: var(--color-text-secondary);

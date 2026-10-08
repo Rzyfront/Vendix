@@ -22,7 +22,12 @@ import {
   FormGroup,
   Validators,
 } from '@angular/forms';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
+import {
+  OrderLineItemComponent,
+  cartItemToLineView,
+} from '../../components/order-line-item/order-line-item.component';
 import { cartLineKey } from '../../utils/cart-line-key.util';
 import { TableContextService } from '../../services/table-context.service';
 import { environment } from '../../../../../../environments/environment';
@@ -113,6 +118,7 @@ const UNLOCATED_ADDRESS_WARNING =
     LocationPermissionModalComponent,
     WhatsappFallbackModalComponent,
     AddressMapPickerComponent,
+    OrderLineItemComponent,
   ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
@@ -156,6 +162,16 @@ const UNLOCATED_ADDRESS_WARNING =
 })
 export class CheckoutComponent implements OnInit {
   readonly cart = signal<Cart | null>(null);
+  /** Líneas del resumen con su vista neutra (nota incluida). */
+  readonly summary_lines = computed(() =>
+    (this.cart()?.items ?? []).map((item) => ({
+      item,
+      key: this.lineKey(item),
+      view: cartItemToLineView(item),
+    })),
+  );
+  /** Línea cuya nota se está guardando (atenúa la fila). */
+  readonly note_saving_key = signal<string | null>(null);
   readonly payment_methods = signal<PaymentMethod[]>([]);
   readonly addresses = signal<Address[]>([]);
 
@@ -291,6 +307,23 @@ export class CheckoutComponent implements OnInit {
    * `currentAddressKey()` makes the (non-reactive) form value trackable.
    */
   private readonly addressFormRev = signal(0);
+
+  onItemNoteChange(item: CartItem, note: string | null): void {
+    const key = this.lineKey(item);
+    this.note_saving_key.set(key);
+    const result = this.cart_service.updateItemNotes(item, note);
+    if (result) {
+      result.subscribe({
+        next: () => this.note_saving_key.set(null),
+        error: (err: unknown) => {
+          this.note_saving_key.set(null);
+          this.toast.error(parseApiError(err).userMessage);
+        },
+      });
+    } else {
+      this.note_saving_key.set(null);
+    }
+  }
 
   /**
    * Identidad de la línea (producto:variante:tarifa) para el `track` del
@@ -3598,6 +3631,7 @@ export class CheckoutComponent implements OnInit {
         // al precio de la presentación por defecto (típicamente la unitaria)
         // y el comprador paga otra cosa de la que eligió.
         price_tier_id: item.price_tier?.id ?? undefined,
+        notes: item.notes?.trim() || undefined,
       })),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
       // Send coupon code as raw string; backend validates and recomputes
@@ -3814,6 +3848,7 @@ export class CheckoutComponent implements OnInit {
         product_variant_id: item.product_variant_id || undefined,
         quantity: item.quantity,
         price_tier_id: item.price_tier?.id ?? undefined,
+        notes: item.notes?.trim() || undefined,
       })),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
       coupon_code: this.coupon_code().trim() || undefined,

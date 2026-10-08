@@ -791,6 +791,36 @@
                       <p class="text-[10px] font-mono text-gray-400 truncate">
                         SKU: {{ item.variant_sku || "N/A" }}@if (parseVariantAttributes(item.variant_attributes); as attrs) {@if (attrs.length) {@for (attr of attrs; track attr.name + attr.value) {<span class="variant-mini-badge">@if (attr.name) {<span>{{ attr.name }}: </span>}{{ attr.value }}</span>}}}
                       </p>
+                      <!-- Nota del ítem: ver + editar -->
+                      @if (item.notes || canEditItemNotes(item)) {
+                        <div class="flex items-start gap-1 mt-0.5 text-[11px] text-gray-500 min-w-0">
+                          @if (item.notes) {
+                            <app-icon name="sticky-note" [size]="12" class="mt-0.5 shrink-0" />
+                            <span class="break-words min-w-0">{{ item.notes }}</span>
+                          }
+                          @if (canEditItemNotes(item)) {
+                            @if (item.notes) {
+                              <button
+                                type="button"
+                                class="shrink-0 p-0.5 text-gray-400 hover:text-primary"
+                                title="Editar nota"
+                                aria-label="Editar nota"
+                                (click)="openItemNoteEditor(item)"
+                              >
+                                <app-icon name="pencil" [size]="12" />
+                              </button>
+                            } @else {
+                              <button
+                                type="button"
+                                class="text-gray-400 hover:text-primary underline-offset-2 hover:underline"
+                                (click)="openItemNoteEditor(item)"
+                              >
+                                + Nota
+                              </button>
+                            }
+                          }
+                        </div>
+                      }
                       <!-- CP-REFUND-FLOW-REDESIGN paso 8 — badge Reembolsado
                            por línea (total o parcial con cantidades) desde la
                            cobertura refund↔NC; la línea facturada no se toca. -->
@@ -2750,6 +2780,37 @@
       [preview]="cancellationPreview()"
       (confirmed)="submitItemCancellation($event)"
     />
+
+    <app-modal
+      [isOpen]="noteEditorOpen()"
+      (isOpenChange)="noteEditorOpen.set($event)"
+      (cancel)="closeItemNoteEditor()"
+      title="Nota del ítem"
+      [subtitle]="noteEditorItem()?.product_name ?? ''"
+      size="sm"
+    >
+      <div class="space-y-1">
+        <textarea
+          rows="4"
+          [attr.maxlength]="itemNotesMaxLength"
+          [value]="noteEditorText()"
+          (input)="onNoteEditorInput($event)"
+          placeholder="Ej. sin cebolla, bien cocido..."
+          class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+        ></textarea>
+        <p class="text-[11px] text-gray-500 text-right">
+          {{ noteEditorText().length }}/{{ itemNotesMaxLength }}
+        </p>
+      </div>
+      <div slot="footer" class="flex items-center justify-end gap-2">
+        <app-button variant="outline" [disabled]="noteSaving()" (clicked)="closeItemNoteEditor()">
+          Cancelar
+        </app-button>
+        <app-button variant="primary" [loading]="noteSaving()" [disabled]="noteSaving()" (clicked)="saveItemNote()">
+          Guardar
+        </app-button>
+      </div>
+    </app-modal>
 
     <app-modal
       [isOpen]="showPaymentReceiptModal()"
