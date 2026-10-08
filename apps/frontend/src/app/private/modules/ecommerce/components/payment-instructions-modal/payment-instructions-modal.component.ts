@@ -1125,6 +1125,7 @@ export class PaymentInstructionsModalComponent {
         this.fileChange.emit(null);
         return;
       }
+      this.errorMsg.set(null);
       this.uploadHighlighted.set(false);
       this.fileChange.emit(result);
     } catch {
