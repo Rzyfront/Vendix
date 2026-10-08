@@ -41,6 +41,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
+import { ImageLightboxComponent } from '../../../../../shared/components/image-lightbox/image-lightbox.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import {
   PriceResolverService,
@@ -78,6 +79,7 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
     QuantityControlComponent,
     ButtonComponent,
     BadgeComponent,
+    ImageLightboxComponent,
     ShareModalComponent,
     EmptyStateComponent,
     CurrencyPipe,
@@ -111,11 +113,21 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
             <!-- Gallery -->
             <div class="product-gallery">
               <div class="main-image-wrapper">
-                <img
-                  [src]="activeImageUrl() || p.image_url"
-                  [alt]="p.name"
-                  class="main-image"
-                />
+                <button
+                  type="button"
+                  class="main-image-btn"
+                  aria-label="Ampliar imagen"
+                  (click)="openImageZoom()"
+                >
+                  <img
+                    [src]="activeImageUrl() || p.image_url"
+                    [alt]="p.name"
+                    class="main-image"
+                  />
+                  <span class="zoom-hint" aria-hidden="true">
+                    <app-icon name="search" [size]="16" />
+                  </span>
+                </button>
               </div>
               @if (p.images && p.images.length > 1) {
                 <div class="thumbnail-list">
@@ -141,32 +153,43 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
             <!-- Info Panel Minimalist -->
             <div class="product-info-panel">
+              <!-- Marca + estado de stock: una sola fila de chips -->
               <div class="brand-line">
                 @if (p.brand) {
                   <span class="brand-name">{{ p.brand.name }}</span>
                 }
+                <div class="stock-minimal">
+                  @if (isOffSchedule()) {
+                    <app-badge variant="warning">
+                      Disponible {{ formatNextAvailable() }}
+                    </app-badge>
+                    @if (nextAvailableDetailed(); as nextInfo) {
+                      <app-next-available-notice [next]="nextInfo" />
+                    }
+                  } @else if (isService()) {
+                    <span class="s-dot service"></span>
+                    <span class="s-text">Servicio disponible</span>
+                  } @else if (isOnDemand()) {
+                    <span class="s-dot on-demand"></span>
+                    <span class="s-text">Disponible bajo pedido</span>
+                  } @else if (displayStock() === 0) {
+                    <span class="s-dot err"></span>
+                    <span class="s-text">Agotado</span>
+                  } @else if (displayStock() <= 5) {
+                    <span class="s-dot warn"></span>
+                    <!-- Con una presentación empaquetada el contador está en
+                         PAQUETES; decir "unidades" ahí engañaría al comprador. -->
+                    <span class="s-text">{{
+                      packSize() > 1 ? 'Pocos paquetes' : 'Pocas unidades'
+                    }}</span>
+                  } @else {
+                    <span class="s-dot"></span>
+                    <span class="s-text">En stock</span>
+                  }
+                </div>
               </div>
 
               <h1 class="product-title">{{ p.name }}</h1>
-
-              @if (p.avg_rating) {
-                <div class="rating-line">
-                  <div class="stars">
-                    @for (s of [1, 2, 3, 4, 5]; track s) {
-                      <app-icon
-                        name="star"
-                        [size]="14"
-                        [class]="
-                          s <= p.avg_rating
-                            ? 'text-warning fill-warning'
-                            : 'text-gray-300'
-                        "
-                      />
-                    }
-                  </div>
-                  <span class="count">({{ p.review_count }})</span>
-                </div>
-              }
 
               @if (prepMinutes(p.preparation_time_minutes); as prepMins) {
                 <div
@@ -251,6 +274,24 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
                       -{{ activePromoDiscount()?.value }}% OFF
                     </span>
                   }
+                    @if (p.avg_rating) {
+                      <div class="rating-line">
+                        <div class="stars">
+                          @for (s of [1, 2, 3, 4, 5]; track s) {
+                            <app-icon
+                              name="star"
+                              [size]="14"
+                              [class]="
+                                s <= p.avg_rating
+                                  ? 'text-warning fill-warning'
+                                  : 'text-gray-300'
+                              "
+                            />
+                          }
+                        </div>
+                        <span class="count">({{ p.review_count }})</span>
+                      </div>
+                    }
                 </div>
 
                 <!-- Dynamic Live Total & Savings breakdown when quantity > 1 or discount is active -->
@@ -372,10 +413,9 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
                         (clicked)="selectVariant(v)"
                       >
                         {{ v.name }}
-                        @if (v.final_price !== p.final_price) {
+                        @if (v.final_price > variantBasePrice()) {
                           <span class="text-[10px] ml-1 opacity-80">
-                            ({{ v.final_price > p.final_price ? '+' : ''
-                            }}{{ v.final_price - p.final_price | currency }})
+                            (+{{ v.final_price - variantBasePrice() | currency }})
                           </span>
                         }
                         @if (!isVariantAvailable(v)) {
@@ -405,21 +445,40 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
                     (valueChange)="quantity.set($event)"
                   />
 
+                  <div class="buy-now-slot">
+                    <app-button
+                      variant="primary"
+                      size="md"
+                      [fullWidth]="true"
+                      customClasses="btn-buy-now"
+                      [disabled]="purchaseDisabled()"
+                      (clicked)="onBuyNow(p)"
+                    >
+                      {{
+                        isService()
+                          ? 'Agendar ahora'
+                          : !isOnDemand() && displayStock() === 0
+                            ? 'Agotado'
+                            : 'Comprar ahora'
+                      }}
+                    </app-button>
+                  </div>
+
                   <app-button
-                    variant="primary"
+                    variant="outline"
                     size="sm"
                     customClasses="btn-cart"
                     [disabled]="purchaseDisabled()"
                     (clicked)="onAddToCart(p)"
                   >
                     <app-icon slot="icon" name="shopping-cart" [size]="18" />
-                    {{
+                    <span class="btn-cart-label">{{
                       isService()
                         ? 'Agendar'
                         : !isOnDemand() && displayStock() === 0
                           ? 'Agotado'
                           : 'Añadir'
-                    }}
+                    }}</span>
                   </app-button>
 
                   <app-button
@@ -440,56 +499,7 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
                     {{ quantity() }} {{ unit.name }}
                   </p>
                 }
-
-                <!-- Buy Now -->
-                <app-button
-                  variant="primary"
-                  size="md"
-                  [fullWidth]="true"
-                  customClasses="btn-buy-now"
-                  [disabled]="purchaseDisabled()"
-                  (clicked)="onBuyNow(p)"
-                >
-                  {{
-                    isService()
-                      ? 'Agendar ahora'
-                      : !isOnDemand() && displayStock() === 0
-                        ? 'Agotado'
-                        : 'Comprar ahora'
-                  }}
-                </app-button>
               }
-
-              <!-- Stock Minimal -->
-              <div class="stock-minimal">
-                @if (isOffSchedule()) {
-                  <app-badge variant="warning">
-                    Disponible {{ formatNextAvailable() }}
-                  </app-badge>
-                  @if (nextAvailableDetailed(); as nextInfo) {
-                    <app-next-available-notice [next]="nextInfo" />
-                  }
-                } @else if (isService()) {
-                  <span class="s-dot service"></span>
-                  <span class="s-text">Servicio disponible</span>
-                } @else if (isOnDemand()) {
-                  <span class="s-dot on-demand"></span>
-                  <span class="s-text">Disponible bajo pedido</span>
-                } @else if (displayStock() === 0) {
-                  <span class="s-dot err"></span>
-                  <span class="s-text">Agotado</span>
-                } @else if (displayStock() <= 5) {
-                  <span class="s-dot warn"></span>
-                  <!-- Con una presentación empaquetada el contador está en
-                       PAQUETES; decir "unidades" ahí engañaría al comprador. -->
-                  <span class="s-text">{{
-                    packSize() > 1 ? 'Pocos paquetes' : 'Pocas unidades'
-                  }}</span>
-                } @else {
-                  <span class="s-dot"></span>
-                  <span class="s-text">En stock</span>
-                }
-              </div>
 
               <!-- Vertical Flow: Categories & Description -->
               <div class="product-content-flow">
@@ -530,6 +540,19 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
               </div>
             </div>
           </div>
+
+          <app-image-lightbox
+            [isOpen]="imageZoomOpen()"
+            [currentImage]="zoomImageUrl()"
+            [alt]="p.name"
+            [title]="p.name"
+            [showInfo]="true"
+            [currentIndex]="zoomIndex()"
+            [totalImages]="zoomGallery().length"
+            (close)="closeImageZoom()"
+            (previous)="zoomStep(-1)"
+            (next)="zoomStep(1)"
+          ></app-image-lightbox>
 
           <!-- Recommendations Carousel -->
           <app-product-carousel
@@ -901,6 +924,38 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
         }
       }
 
+      .main-image-wrapper {
+        position: relative;
+      }
+      .main-image-btn {
+        display: block;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        margin: 0;
+        border: 0;
+        background: transparent;
+        cursor: zoom-in;
+        position: relative;
+      }
+      .zoom-hint {
+        position: absolute;
+        right: 0.6rem;
+        bottom: 0.6rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: var(--color-surface);
+        color: var(--color-text-secondary);
+        border: 1px solid var(--color-border);
+        box-shadow: var(--shadow-sm);
+        opacity: 0.9;
+        pointer-events: none;
+      }
+
       .thumbnail-list {
         display: flex;
         gap: 0.75rem;
@@ -944,6 +999,13 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
         gap: 0.75rem;
       }
 
+      .brand-line {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.5rem 0.75rem;
+        justify-content: space-between;
+      }
       .brand-name {
         font-size: 0.8rem;
         color: var(--color-primary);
@@ -1037,9 +1099,15 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
       .purchase-box {
         display: flex;
+        flex-wrap: wrap;
         gap: 0.75rem;
         margin-top: 0.5rem;
         align-items: center;
+
+        .buy-now-slot {
+          order: 3;
+          flex: 1 1 100%;
+        }
 
         :host ::ng-deep .btn-cart {
           flex: 1;
@@ -1506,11 +1574,7 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
           margin-bottom: 1.5rem;
         }
         .main-image-wrapper {
-          aspect-ratio: 3/2;
           border-radius: var(--radius-lg);
-        }
-        .main-image-wrapper img {
-          padding: 0.75rem;
         }
         .thumbnail-list {
           gap: 0.4rem;
@@ -1590,6 +1654,155 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
           font-size: 0.8rem;
         }
       }
+
+      /* ─── Mobile: foto 1:1 cover + panel compacto + CTA protagonista ─── */
+      @media (max-width: 768px) {
+        .product-main-grid {
+          gap: 0.75rem;
+          margin-bottom: 1.25rem;
+        }
+        .main-image-wrapper {
+          aspect-ratio: 1 / 1;
+          width: 100%;
+        }
+        .main-image-wrapper img.main-image {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          padding: 0;
+        }
+        .thumbnail-list {
+          overflow-x: auto;
+          margin-top: 0.4rem;
+        }
+        .thumbnail-list .thumbnail {
+          flex: 0 0 auto;
+          width: 44px;
+          height: 44px;
+        }
+
+        .product-info-panel {
+          gap: 0.35rem;
+        }
+        .brand-line {
+          gap: 0.25rem 0.5rem;
+          justify-content: flex-start;
+        }
+        .brand-name,
+        .brand-line .stock-minimal {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.15rem 0.5rem;
+          border-radius: var(--radius-pill);
+          background: var(--color-surface);
+          border: 1px solid var(--color-border);
+          font-size: var(--fs-xs);
+          line-height: 1.2;
+        }
+        .product-title {
+          font-size: var(--fs-lg);
+          line-height: 1.25;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .price-section {
+          gap: 0.35rem !important;
+          margin: 0.1rem 0 !important;
+        }
+        .price-line {
+          margin: 0;
+          gap: 0.35rem 0.6rem;
+        }
+        .price-line .rating-line {
+          margin-left: auto;
+          gap: 0.3rem;
+        }
+        .service-info-section {
+          padding: 0.4rem 0.6rem;
+          gap: 0.25rem;
+        }
+        .options-group {
+          gap: 0.35rem;
+        }
+        .attr-group {
+          flex-direction: row;
+          align-items: center;
+          gap: 0.5rem;
+          min-width: 0;
+        }
+        .attr-group-label {
+          flex: 0 0 auto;
+          font-size: 0.65rem;
+        }
+        .variants-btns {
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          gap: 0.35rem;
+          min-width: 0;
+          padding-bottom: 2px;
+          scrollbar-width: none;
+        }
+        .variants-btns::-webkit-scrollbar {
+          display: none;
+        }
+        :host ::ng-deep .v-btn {
+          flex: 0 0 auto;
+          min-height: 30px !important;
+          height: 30px !important;
+          padding: 0 0.7rem !important;
+          font-size: var(--fs-sm);
+          white-space: nowrap;
+        }
+
+        .purchase-box {
+          position: sticky;
+          bottom: 0;
+          z-index: 10;
+          flex-wrap: nowrap;
+          gap: 0.5rem;
+          margin: 0.25rem -0.75rem 0;
+          padding: 0.5rem 0.75rem;
+          background: var(--color-surface);
+          box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+        }
+        .purchase-box .buy-now-slot {
+          order: 2;
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        :host ::ng-deep .purchase-box .btn-cart {
+          order: 3;
+          flex: 0 0 auto;
+          width: 48px !important;
+          min-width: 48px !important;
+          height: 48px !important;
+          padding: 0 !important;
+        }
+        :host ::ng-deep .purchase-box .btn-cart-label {
+          display: none;
+        }
+        :host ::ng-deep .purchase-box .btn-share {
+          display: none;
+        }
+        :host ::ng-deep .btn-buy-now {
+          min-height: 48px !important;
+          height: 48px;
+          padding: 0 1rem;
+          font-size: var(--fs-md, 1rem);
+          font-weight: 700;
+          width: 100%;
+        }
+        .sale-unit-line {
+          margin: 0;
+          font-size: var(--fs-xs);
+        }
+        .product-content-flow {
+          margin-top: 0.5rem;
+          gap: 0.75rem;
+        }
+      }
     `,
   ],
 })
@@ -1664,6 +1877,49 @@ export class ProductDetailComponent implements OnInit {
   activeImageUrl = signal<string | null>(null);
   selectedVariantId = signal<number | null>(null);
   isDescriptionExpanded = signal(false);
+
+  // ── Zoom de la imagen principal (app-image-lightbox) ───────────────────
+  readonly imageZoomOpen = signal(false);
+
+  /** Galería completa; si no hay `images`, solo la imagen del producto. */
+  readonly zoomGallery = computed<string[]>(() => {
+    const p = this.product();
+    if (!p) return [];
+    const urls = (p.images ?? [])
+      .map((img) => img.image_url)
+      .filter((u): u is string => !!u);
+    const active = this.activeImageUrl();
+    if (active && !urls.includes(active)) urls.unshift(active);
+    if (urls.length === 0 && p.image_url) urls.push(p.image_url);
+    return urls;
+  });
+
+  readonly zoomIndex = computed<number>(() => {
+    const idx = this.zoomGallery().indexOf(
+      this.activeImageUrl() ?? this.product()?.image_url ?? '',
+    );
+    return idx >= 0 ? idx : 0;
+  });
+
+  readonly zoomImageUrl = computed<string>(
+    () => this.zoomGallery()[this.zoomIndex()] ?? '',
+  );
+
+  openImageZoom(): void {
+    if (this.zoomGallery().length === 0) return;
+    this.imageZoomOpen.set(true);
+  }
+
+  closeImageZoom(): void {
+    this.imageZoomOpen.set(false);
+  }
+
+  zoomStep(delta: number): void {
+    const gallery = this.zoomGallery();
+    const next = this.zoomIndex() + delta;
+    if (next < 0 || next >= gallery.length) return;
+    this.activeImageUrl.set(gallery[next]);
+  }
   quantity = signal(1);
 
   // ── Multitarifa: presentaciones de venta ────────────────────────────────
@@ -1817,11 +2073,24 @@ export class ProductDetailComponent implements OnInit {
       return groups.every((g) => String(v.attributes[g.name]) === sel[g.name]);
     });
     if (!variant) return null;
-    const diff = variant.final_price - p.final_price;
-    return differsByAtLeastCents(variant.final_price, p.final_price, 2)
-      ? diff
-      : null;
+    const base = this.variantBasePrice();
+    const diff = variant.final_price - base;
+    return differsByAtLeastCents(variant.final_price, base, 2) ? diff : null;
   }
+
+  /**
+   * Referencia del "(+$x)" de cada opcion: la variante mas barata, no el
+   * precio base del producto. Si todas las variantes cuestan lo mismo no se
+   * muestra ninguna diferencia (antes salia "-$550.810" en todas porque el
+   * base del producto no coincidia con ninguna variante).
+   */
+  readonly variantBasePrice = computed((): number => {
+    const p = this.product();
+    const prices = (p?.variants ?? [])
+      .map((v) => Number(v.final_price))
+      .filter((n) => Number.isFinite(n));
+    return prices.length ? Math.min(...prices) : Number(p?.final_price ?? 0);
+  });
 
   // Variant-aware computed signals
   selectedVariant = computed((): ProductVariantDetail | null => {

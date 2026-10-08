@@ -221,6 +221,8 @@ export class StoreEcommerceLayoutComponent {
     if ((this.cart()?.item_count ?? 0) < 2) return false;
     if (this.table_context.isActive()) return false;
     const path = this.current_url().split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+    // El detalle de producto ya trae su propia barra sticky de compra.
+    if (path.startsWith('/products/')) return false;
     return !StoreEcommerceLayoutComponent.MINI_BAR_EXCLUDED_PATHS.some(
       (excluded) => path === excluded || path.startsWith(excluded + '/'),
     );
