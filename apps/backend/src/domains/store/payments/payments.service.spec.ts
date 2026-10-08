@@ -1733,6 +1733,7 @@ describe('PaymentsService', () => {
 
     it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
       const client: any = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      client.stores = { findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }) };
       client.order_items.findMany.mockResolvedValue([{
         id: 7, quantity: 1, total_price: 100000, tax_amount_item: 19000,
         order_item_taxes: [{ id: 70, tax_rate: 0.19, tax_amount: 19000,
@@ -2165,6 +2166,7 @@ describe('PaymentsService', () => {
 
     it('E.6 mesa: calcula 10% del producto bruto sin sumar propina al subtotal o impuesto', async () => {
       const { tx, posUser } = arrangeCashSale();
+      tx.stores = { findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }) };
       const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
       jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
         total_discount: 2000, applied: [],

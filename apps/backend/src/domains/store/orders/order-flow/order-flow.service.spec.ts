@@ -234,9 +234,11 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       tip_amount: 0,
       currency: 'COP',
     };
+    (h.service as any).settingsService = { getSettings: jest.fn().mockResolvedValue({}) };
     const payments: any[] = [];
     jest.spyOn(h.service as any, 'getOrder').mockImplementation(async () => ({
       ...order,
+      stores: { industries: ['restaurant'] },
       state: h.getState(),
       payments,
     }));
@@ -1060,8 +1062,10 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
       ...buildOrder(), customer_id: 44, subtotal_amount: 100000,
       tax_amount: 19000, discount_amount: 2000, shipping_cost: 5000,
       grand_total: 122000, tip_amount: 0,
-      payments: [],
+      payments: [], stores: { industries: ['restaurant'] },
     };
+    (service as any).settingsService = { getSettings: jest.fn().mockResolvedValue({}) };
+
     jest.spyOn(service as any, 'getOrder').mockImplementation(async () => ({ ...orderRow }));
     prismaMock.orders.update = jest.fn(async ({ data }: any) => {
       Object.assign(orderRow, data);
@@ -5915,7 +5919,10 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       store_id: 4,
       customer_id: 44,
       payments: [],
+      stores: { industries: ['restaurant'] },
     };
+    (h.service as any).settingsService = { getSettings: jest.fn().mockResolvedValue({}) };
+
     (h.service as any).getOrder.mockResolvedValueOnce({
       ...orderWithTip,
       grand_total: 100000,

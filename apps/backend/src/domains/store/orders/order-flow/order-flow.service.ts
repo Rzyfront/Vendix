@@ -54,7 +54,11 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma, order_delivery_type_enum, order_state_enum, payment_methods_type_enum, payments_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
-import { resolveTip } from '@common/utils/tip.util';
+import {
+  assertTipAllowed,
+  resolveTip,
+  resolveTipPolicy,
+} from '@common/utils/tip.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FinancialSplitErrors } from 'src/common/errors/financial-split-error-codes';
 import {
@@ -1975,6 +1979,18 @@ export class OrderFlowService {
       const grossProductsBase = roundTipMoney(
         Number(order.subtotal_amount || 0) + Number(order.tax_amount || 0),
       );
+      if (dto.tip_amount || dto.tip_value) {
+        const tipSettings = await this.settingsService.getSettings();
+        assertTipAllowed(
+          dto,
+          resolveTipPolicy(
+            (tipSettings as any)?.pos?.tips,
+            storeIsRestaurant((order as any).stores?.industries),
+          ),
+          grossProductsBase,
+          roundTipMoney,
+        );
+      }
       const incomingTip = resolveTip(
         dto,
         grossProductsBase,

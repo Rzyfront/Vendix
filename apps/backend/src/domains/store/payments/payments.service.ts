@@ -84,7 +84,11 @@ import type { WithholdingResolution } from '../withholding-tax/withholding-flow.
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
-import { resolveTip } from '../../../common/utils/tip.util';
+import {
+  assertTipAllowed,
+  resolveTip,
+  resolveTipPolicy,
+} from '../../../common/utils/tip.util';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 import {
@@ -4743,6 +4747,7 @@ export class PaymentsService {
     // E.6 — el porcentaje usa productos brutos (subtotal + impuesto), nunca
     // envío ni la propina previa. La propina suma al total, pero queda fuera
     // de subtotal_amount y tax_amount; resolveTip ancla el monto pactado.
+    await this.assertPosTipPolicy(tx, dto, dtoStoreId, newSubtotalGross);
     const resolvedTip = resolveTip(dto, newSubtotalGross, (v) =>
       this.roundMoney(v),
     );
@@ -5577,6 +5582,33 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Valida la propina entrante contra `settings.pos.tips` ANTES de cualquier
+   * escritura. Sin propina en el DTO no lee settings ni industria.
+   */
+  private async assertPosTipPolicy(
+    tx: any,
+    dto: CreatePosPaymentDto,
+    storeId: number,
+    grossProductsBase: number,
+  ): Promise<void> {
+    if (!(dto.tip_amount || dto.tip_value)) return;
+    const [settings, storeRow] = await Promise.all([
+      this.settingsService.getSettings(),
+      tx.stores.findUnique({
+        where: { id: storeId },
+        select: { industries: true },
+      }),
+    ]);
+    const policy = resolveTipPolicy(
+      (settings as any)?.pos?.tips,
+      storeIsRestaurant(storeRow?.industries),
+    );
+    assertTipAllowed(dto, policy, grossProductsBase, (v) =>
+      this.roundMoney(v),
+    );
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
@@ -5874,6 +5906,12 @@ export class PaymentsService {
 
         // E.6 — retail shares the table/flow resolver and its gross product
         // base; the tip remains outside taxable subtotal and product tax.
+        await this.assertPosTipPolicy(
+          tx,
+          dto,
+          dtoStoreId,
+          calculatedSubtotalGross,
+        );
         const resolvedTip = resolveTip(dto, calculatedSubtotalGross, (v) =>
           this.roundMoney(v),
         );
