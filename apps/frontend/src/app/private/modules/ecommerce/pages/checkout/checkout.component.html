@@ -967,9 +967,14 @@
                     </p>
                   </div>
                 }
-                <app-button variant="outline" (clicked)="step.set(1)">
-                  <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-                  Cambiar entrega
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  customClasses="delivery-summary__change"
+                  (clicked)="step.set(1)"
+                >
+                  <app-icon slot="icon" name="pencil" [size]="14"></app-icon>
+                  Cambiar
                 </app-button>
               </div>
               @if (

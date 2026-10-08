@@ -1728,6 +1728,12 @@ app-address-map-picker {
 
 .delivery-summary__body {
     flex: 1;
+    min-width: 0;
+}
+
+.delivery-summary app-button {
+    flex: 0 0 auto;
+    align-self: center;
 }
 
 .delivery-summary__title {
@@ -1767,5 +1773,16 @@ app-address-map-picker {
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
         padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+
+        // En la barra fija los dos botones siempre caben en una linea: sin
+        // wrap la fila mide lo que el boton (antes reservaba una segunda
+        // linea vacia de ~52px bajo Anterior/Continuar).
+        .checkout-actions__row {
+            flex-wrap: nowrap;
+
+            > * {
+                flex: 1 1 0;
+            }
+        }
     }
 }
