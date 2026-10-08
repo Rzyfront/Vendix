@@ -495,7 +495,7 @@
     <div class="footer-container">
       <!-- Sección 1: Información de la Tienda -->
       <div class="footer-section">
-        <h4>{{ store_name() }}</h4>
+        <h4>{{ store_display_name() }}</h4>
         <p>{{ getTagline() }}</p>
         @if (hasAboutUs()) {
         <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_about_modal.set(true)">Sobre Nosotros</a>
@@ -505,6 +505,10 @@
           {{ footer_settings()!.store_info!.support_email }}
         </a>
         }
+        <p class="footer-vendix-credit">
+          <a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">Software construido y proveído por&nbsp;</a>
+          <a href="https://vendix.online" target="_blank" rel="noopener" class="vendix-name">Vendix</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">. Para más información, comunícate con nosotros.</a>
+        </p>
       </div>
 
       <!-- Sección 2: Enlaces -->
@@ -570,7 +574,8 @@
       </div>
     </div>
     <div class="footer-bottom">
-      <p>&copy; {{ store_name() }} {{ current_year }}. Todos los derechos reservados.</p>
+      <p>&copy; {{ store_display_name() }} {{ current_year }}. Todos los derechos reservados.</p>
+      <p class="footer-powered">Powered by <a href="https://vendix.online" target="_blank" rel="noopener">Vendix</a></p>
     </div>
   </footer>
 

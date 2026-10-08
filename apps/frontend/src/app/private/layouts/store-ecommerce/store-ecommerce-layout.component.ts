@@ -115,6 +115,14 @@ interface FooterSettings {
 })
 export class StoreEcommerceLayoutComponent {
   readonly store_name = signal('Tienda');
+  readonly store_display_name = computed(() =>
+    this.capitalizeFirst(this.store_name()),
+  );
+  readonly vendix_whatsapp_url =
+    'https://wa.me/573234668500?text=' +
+    encodeURIComponent(
+      'Hola equipo Vendix, vi una tienda en línea hecha con Vendix y quiero más información.',
+    );
   readonly store_logo = signal<string | null>(null);
   readonly show_user_menu = signal(false);
   readonly show_mobile_menu = signal(false);
@@ -1181,5 +1189,13 @@ export class StoreEcommerceLayoutComponent {
 
   getTagline(): string {
     return this.footer_settings()?.store_info?.tagline || 'Tu tienda de confianza';
+  }
+
+  private capitalizeFirst(value: string): string {
+    const name = (value ?? '').trim();
+    if (!name) return name;
+    const second = name.charAt(1);
+    if (second && second !== second.toLowerCase()) return name;
+    return name.charAt(0).toUpperCase() + name.slice(1);
   }
 }

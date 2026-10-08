@@ -1893,6 +1893,27 @@
     }
   }
 
+  .footer-section .footer-vendix-credit {
+    margin-top: 1rem;
+    font-size: var(--fs-xs);
+    color: var(--color-text-secondary);
+
+    a {
+      display: inline;
+      margin-bottom: 0;
+      font-size: inherit;
+      color: inherit;
+
+      &:hover {
+        color: var(--color-primary);
+      }
+    }
+
+    .vendix-name {
+      font-weight: 600;
+    }
+  }
+
   .social-links {
     display: flex;
     gap: 1rem;
@@ -1927,6 +1948,22 @@
       color: var(--color-text-muted);
       margin: 0;
       font-size: 0.75rem;
+    }
+
+    .footer-powered {
+      margin-top: 0.5rem;
+      font-size: var(--fs-xs);
+      color: var(--color-text-secondary);
+
+      a {
+        color: inherit;
+        font-weight: 600;
+        text-decoration: none;
+
+        &:hover {
+          color: var(--color-primary);
+        }
+      }
     }
   }
 }
