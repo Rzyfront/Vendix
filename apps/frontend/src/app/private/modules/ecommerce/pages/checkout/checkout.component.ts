@@ -599,8 +599,11 @@ export class CheckoutComponent implements OnInit {
    * Plain field, not a signal — nothing in the template reads it.
    */
   private autoMapFocusDone = false;
-  /** True once the automatic GPS request was attempted on this instance. */
-  private autoLocateAttempted = false;
+  /**
+   * Address key for which the automatic GPS request was already attempted:
+   * at most one request per distinct address (not per instance).
+   */
+  private autoLocateAttemptedKey: string | null = null;
   /** A geocode miss whose warning waits for the first auto-focus to show. */
   private pendingAddressWarning = false;
   /** Deferred auto-locate (see {@link scheduleAutoLocate}). */
@@ -670,6 +673,18 @@ export class CheckoutComponent implements OnInit {
           void this.refreshShippingQuote(key);
         }, 600);
       });
+    });
+
+    // Owner directive: whenever the "Solo encontramos la calle/el barrio"
+    // badge shows (warning tone) and no pin is confirmed, ask for the device
+    // location — once per distinct address (see `autoLocateAttemptedKey`).
+    // scheduleAutoLocate debounces and restarts on repeated calls.
+    effect(() => {
+      const badge = this.precisionBadge();
+      const pinned = this.pinConfirmed();
+      if (badge?.tone === 'warning' && !pinned) {
+        untracked(() => this.scheduleAutoLocate());
+      }
     });
 
     // Cobertura de municipio único: re-aplica la precarga al activar la
@@ -1243,7 +1258,12 @@ export class CheckoutComponent implements OnInit {
    * that field's `blur` (same approach as {@link runAutoMapFocus}).
    */
   private scheduleAutoLocate(): void {
-    if (this.autoLocateAttempted || this.pinConfirmed()) return;
+    if (
+      this.autoLocateAttemptedKey === (this.currentAddressKey() ?? '__nokey__') ||
+      this.pinConfirmed()
+    ) {
+      return;
+    }
     this.cancelScheduledAutoLocate();
     this.autoLocateFailedKey = this.currentAddressKey();
     this.autoLocateTimer = setTimeout(() => {
@@ -1277,13 +1297,24 @@ export class CheckoutComponent implements OnInit {
     }
     if (
       this.selected_delivery() === 'home' &&
-      (!this.hasResolvedCoords() || this.geocodePrecision() === 'street') &&
+      (!this.hasResolvedCoords() ||
+        this.geocodePrecision() === 'street' ||
+        this.geocodePrecision() === 'area') &&
       !this.pinConfirmed() &&
       this.currentAddressKey() === this.autoLocateFailedKey &&
-      this.autoMapFocusGateOpen()
+      this.autoLocateGateOpen()
     ) {
       void this.maybeAutoRequestLocation();
     }
+  }
+
+  /**
+   * Written-address gate for the auto-locate. A SAVED address is already
+   * complete, and `autoMapFocusGateOpen()` reads the NEW-address form (which
+   * would block it forever), so it is skipped when `!use_new_address()`.
+   */
+  private autoLocateGateOpen(): boolean {
+    return !this.use_new_address() || this.autoMapFocusGateOpen();
   }
 
   /** Cancels the pending auto-locate timer and/or its `blur` listener. */
@@ -1311,12 +1342,13 @@ export class CheckoutComponent implements OnInit {
   private async maybeAutoRequestLocation(
     opts: { bypassGate?: boolean } = {},
   ): Promise<void> {
-    if (this.autoLocateAttempted) return;
+    const attemptKey = this.currentAddressKey() ?? '__nokey__';
+    if (this.autoLocateAttemptedKey === attemptKey) return;
     if (this.selected_delivery() !== 'home') return;
     // `bypassGate`: with the map failed the written-address gate is moot —
     // GPS is the only way left to locate the buyer.
-    if (!opts.bypassGate && !this.autoMapFocusGateOpen()) return;
-    this.autoLocateAttempted = true;
+    if (!opts.bypassGate && !this.autoLocateGateOpen()) return;
+    this.autoLocateAttemptedKey = attemptKey;
     const state = await this.geolocation.getPermissionState();
     if (state === 'granted' || state === 'prompt') {
       void this.requestGeolocation();
@@ -1330,7 +1362,7 @@ export class CheckoutComponent implements OnInit {
    * `<app-address-map-picker>`, emitted once). Without a map the buyer cannot
    * pin a point, so for home delivery without coords GPS is requested right
    * away (bypassing the written-address gate, sharing the single-attempt
-   * `autoLocateAttempted` flag).
+   * `autoLocateAttemptedKey` guard).
    */
   onMapFailed(): void {
     this.map_failed.set(true);
