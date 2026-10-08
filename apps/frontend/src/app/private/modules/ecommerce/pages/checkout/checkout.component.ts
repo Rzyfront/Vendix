@@ -1254,7 +1254,13 @@ export class CheckoutComponent implements OnInit {
 
   private runScheduledAutoLocate(): void {
     const active = document.activeElement;
-    if (active instanceof HTMLElement && this.isTextEntryInsideHost(active)) {
+    // Wait only while the buyer is still typing the ADDRESS line; moving on to
+    // phone/apartment means the address is final, so ask right away.
+    if (
+      active instanceof HTMLElement &&
+      this.isTextEntryInsideHost(active) &&
+      !!active.closest('[formcontrolname="address_line1"]')
+    ) {
       const onBlur = () => {
         active.removeEventListener('blur', onBlur);
         this.autoLocateBlurCleanup = null;
