@@ -36,6 +36,8 @@ import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { OrderTrackingProgressComponent } from '../../../../../shared/components/order-tracking-progress/order-tracking-progress.component';
 import { GuestOrderPrintService } from '../../services/guest-order-print.service';
+import { ItemListComponent } from '../../../../../shared/components/item-list/item-list.component';
+import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
 
 // ============================================================================
 // PAYLOAD CONTRACT — enriched guest order summary endpoint
@@ -190,6 +192,7 @@ export interface GuestOrderSummary {
     ModalComponent,
     FileUploadDropzoneComponent,
     OrderTrackingProgressComponent,
+    ItemListComponent,
   ],
   template: `
     <div class="guest-order-page">
@@ -226,9 +229,19 @@ export interface GuestOrderSummary {
                 {{ justPurchased() ? '¡Pedido confirmado!' : 'Resumen de compra' }}
               </span>
               <h1 class="hero-title">Orden #{{ data.order.order_number }}</h1>
-              <span class="hero-store">{{ data.store?.name || 'Tienda' }}</span>
+              <span class="hero-sub">
+                <span class="hero-store">{{ data.store?.name || 'Tienda' }}</span>
+                <app-badge
+                  class="hero-badge-mobile"
+                  [variant]="getStateVariant(data.order.state)"
+                  size="xs"
+                  badgeStyle="outline"
+                  >{{ getStateLabel(data.order.state) }}</app-badge
+                >
+              </span>
             </span>
             <app-badge
+              class="hero-badge-desktop"
               [variant]="getStateVariant(data.order.state)"
               size="sm"
               badgeStyle="outline"
@@ -249,28 +262,41 @@ export interface GuestOrderSummary {
           <!-- TOOLBAR: acciones a la izquierda, estado del stream a la derecha -->
           <div class="order-toolbar">
             <div class="actions no-print">
-              <app-button variant="outline" (clicked)="print()">
-                <app-icon name="printer" [size]="16" slot="icon" />
-                Imprimir
-              </app-button>
+              <button
+                type="button"
+                class="tool-btn tool-btn--print"
+                aria-label="Imprimir"
+                title="Imprimir"
+                (click)="print()"
+              >
+                <app-icon name="printer" [size]="16" />
+                <span class="tool-btn-text">Imprimir</span>
+              </button>
               @if (whatsappEnabled()) {
-                <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
-                  <app-icon name="message-circle" [size]="16" slot="icon" />
-                  Preguntar por mi pedido
-                </app-button>
+                <button
+                  type="button"
+                  class="tool-btn tool-btn--whatsapp"
+                  (click)="sendToWhatsApp(data)"
+                >
+                  <app-icon name="message-circle" [size]="16" />
+                  <span>Preguntar por mi pedido</span>
+                </button>
               }
             </div>
             @if (sseLiveVisible()) {
               <div
                 class="live-pill"
+                role="status"
                 [class.live-pill--reduced]="sse.prefersReducedMotion()"
                 [attr.data-state]="sse.connectionState()"
+                [attr.aria-label]="sseLiveLabel()"
+                [attr.title]="sseLiveLabel()"
               >
                 <span
                   class="live-dot"
                   [class.is-open]="sse.connectionState() === 'open'"
                 ></span>
-                {{ sseLiveLabel() }}
+                <span class="live-label">{{ sseLiveLabel() }}</span>
               </div>
             }
           </div>
@@ -370,7 +396,7 @@ export interface GuestOrderSummary {
                       <div class="address-row">
                         <span class="address-label">País</span>
                         <span class="address-value">{{
-                          addr.country_code
+                          countryName(addr.country_code)
                         }}</span>
                       </div>
                     }
@@ -403,7 +429,17 @@ export interface GuestOrderSummary {
               <app-icon name="shopping-bag" [size]="18" />
               <h2>Productos</h2>
             </div>
-            <div class="items">
+            <!-- Pantalla: tarjetas compartidas (app-item-list). Impresión:
+                 se conservan las filas originales (.items-print). -->
+            <div class="items-screen">
+              <app-item-list
+                [data]="itemRows()"
+                [cardConfig]="itemCardConfig"
+                [rowClass]="itemRowClass"
+                size="sm"
+              />
+            </div>
+            <div class="items items-print">
               @for (
                 item of data.order.items;
                 track item.product_name + item.variant_sku
@@ -518,6 +554,11 @@ export interface GuestOrderSummary {
                         <span class="payment-method">{{
                           p.method || 'Pago'
                         }}</span>
+                        @if (p.amount != null) {
+                          <span class="payment-amount">{{
+                            p.amount | currency
+                          }}</span>
+                        }
                         <app-badge
                           [variant]="getPaymentStateVariant(p.state)"
                           size="sm"
@@ -527,7 +568,10 @@ export interface GuestOrderSummary {
                       </div>
                       <!-- COMPROBANTE (paso 9): ver si has_receipt, cargar si falta -->
                       @if (p.payment_id != null) {
-                        <div class="payment-receipt">
+                        <div
+                          class="payment-receipt"
+                          [class.payment-receipt--btn]="p.has_receipt"
+                        >
                           @if (p.has_receipt) {
                             <app-button
                               variant="outline"
@@ -1430,8 +1474,307 @@ export interface GuestOrderSummary {
         }
       }
 
+      /* ---- Toolbar buttons ---- */
+      .tool-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        min-height: 40px;
+        padding: 0 0.9rem;
+        border-radius: var(--radius-md);
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-medium);
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+      }
+
+      .tool-btn:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
+      .tool-btn--print {
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+      }
+
+      .tool-btn--whatsapp {
+        border: 1px solid #25d366;
+        background: #25d366;
+        color: #fff;
+      }
+
+      .tool-btn--whatsapp:hover {
+        opacity: 0.9;
+      }
+
+      .payment-amount {
+        display: none;
+      }
+
+      .hero-sub {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-width: 0;
+      }
+
+      .hero-badge-mobile {
+        display: none;
+      }
+
+      /* ---- Pantalla vs impresión de ítems ---- */
+      .items-print {
+        display: none;
+      }
+
+      :host ::ng-deep .guest-item-cancelled .card-title {
+        text-decoration: line-through;
+        text-decoration-thickness: 1.5px;
+      }
+
+      /* ---- Móvil compacto (solo pantalla) ---- */
+      @media (max-width: 640px) {
+        .guest-order-page {
+          padding: 0.5rem;
+        }
+
+        .guest-order-card {
+          padding: 0.75rem;
+        }
+
+        .printable-order {
+          gap: 0.6rem;
+        }
+
+        .order-header-hero {
+          flex-wrap: nowrap;
+          gap: 0.6rem;
+          padding: 0.45rem 0.65rem;
+          max-height: 76px;
+        }
+
+        .hero-badge {
+          width: 34px;
+          height: 34px;
+        }
+
+        .hero-text {
+          flex: 1;
+          gap: 0;
+        }
+
+        .hero-eyebrow {
+          font-size: 9px;
+        }
+
+        .hero-title {
+          font-size: var(--fs-sm);
+          line-height: 1.15;
+          overflow-wrap: anywhere;
+        }
+
+        .hero-sub {
+          flex-wrap: wrap;
+          row-gap: 0.1rem;
+        }
+
+        .hero-store {
+          font-size: var(--fs-xs);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 40vw;
+        }
+
+        .hero-badge-desktop {
+          display: none;
+        }
+
+        .order-header-hero .hero-badge-mobile {
+          display: inline-flex;
+          margin-left: 0;
+        }
+
+        .order-header-hero {
+          max-height: 80px;
+        }
+
+        .success-banner {
+          gap: 0.4rem;
+          padding: 0.5rem 0.65rem;
+          font-size: var(--fs-xs);
+          line-height: 1.25;
+        }
+
+        .success-banner app-icon ::ng-deep svg {
+          width: 14px;
+          height: 14px;
+        }
+
+        .order-toolbar {
+          flex-direction: row;
+          align-items: center;
+          flex-wrap: nowrap;
+          gap: 0.4rem;
+        }
+
+        .order-toolbar .actions {
+          flex: 1;
+          min-width: 0;
+          flex-direction: row;
+          flex-wrap: nowrap;
+          gap: 0.4rem;
+        }
+
+        .tool-btn {
+          min-height: 40px;
+        }
+
+        .tool-btn--print {
+          width: 40px;
+          padding: 0;
+          flex-shrink: 0;
+        }
+
+        .tool-btn-text {
+          display: none;
+        }
+
+        .tool-btn--whatsapp {
+          flex: 1;
+          min-width: 0;
+          padding: 0 0.6rem;
+          font-size: var(--fs-xs);
+          white-space: nowrap;
+        }
+
+        .order-toolbar .live-pill {
+          align-self: center;
+          margin-left: 0;
+          padding: 0.3rem 0.5rem;
+          gap: 0.3rem;
+          font-size: 11px;
+          white-space: nowrap;
+        }
+
+        .meta-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0.4rem 0.75rem;
+          padding: 0.5rem 0.75rem;
+        }
+
+        .meta-cell {
+          gap: 0.1rem;
+        }
+
+        .meta-label {
+          font-size: 10px;
+        }
+
+        .meta-value {
+          font-size: var(--fs-xs);
+        }
+
+        .meta-value.accent {
+          font-size: var(--fs-sm);
+        }
+
+        .eta-banner {
+          gap: 0.4rem;
+          padding: 0.35rem 0.6rem;
+          font-size: var(--fs-xs);
+          line-height: 1.3;
+          align-items: center;
+        }
+
+        .eta-note {
+          font-size: 11px;
+          line-height: 1.3;
+        }
+
+        .eta-banner app-icon ::ng-deep svg {
+          width: 15px;
+          height: 15px;
+        }
+
+        .eta-text {
+          gap: 0;
+        }
+
+        .payment-block {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 0.3rem 0.6rem;
+          padding: 0.5rem 0.7rem;
+        }
+
+        .payment-head {
+          display: contents;
+        }
+
+        .payment-method {
+          grid-column: 1;
+          grid-row: 1;
+          min-width: 0;
+          font-size: var(--fs-sm);
+          overflow-wrap: anywhere;
+        }
+
+        .payment-amount {
+          grid-column: 2;
+          grid-row: 1;
+          display: inline;
+          font-size: var(--fs-sm);
+          font-weight: var(--fw-semibold);
+          color: var(--color-text-primary);
+          white-space: nowrap;
+        }
+
+        .payment-head app-badge {
+          grid-column: 1;
+          grid-row: 2;
+          justify-self: start;
+        }
+
+        .payment-receipt {
+          grid-column: 1 / -1;
+          grid-row: 3;
+          gap: 0.3rem;
+          padding-top: 0.4rem;
+        }
+
+        .payment-receipt--btn {
+          grid-column: 2;
+          grid-row: 2;
+          padding-top: 0;
+          border-top: 0;
+        }
+
+        .section-header {
+          margin-bottom: 0.5rem;
+        }
+
+        .section-header h2 {
+          font-size: var(--fs-base);
+        }
+
+        .totals-panel {
+          padding: 0.75rem;
+        }
+      }
+
       /* ---- Print ---- */
       @media print {
+        .items-screen {
+          display: none !important;
+        }
+        .items-print {
+          display: block !important;
+        }
         .no-print {
           display: none !important;
         }
@@ -1691,7 +2034,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   getPaymentStateLabel(state: string): string {
     const labels: Record<string, string> = {
-      pending: 'Pendiente de confirmación',
+      pending: 'Pendiente',
       authorized: 'Autorizado',
       succeeded: 'Pagado',
       captured: 'Pagado',
@@ -1809,6 +2152,86 @@ export class GuestOrderSummaryComponent implements OnInit {
       addr.phone_number
     );
   }
+
+  /** Nombre del país en español; si no es ISO-2 o falla, el valor original. */
+  countryName(code?: string | null): string {
+    const raw = (code ?? '').trim();
+    if (!/^[A-Za-z]{2}$/.test(raw)) return raw;
+    try {
+      return (
+        new Intl.DisplayNames(['es'], { type: 'region' }).of(
+          raw.toUpperCase(),
+        ) || raw
+      );
+    } catch {
+      return raw;
+    }
+  }
+
+  // ==========================================================================
+  // ÍTEMS — adaptación a app-item-list (tarjetas compartidas)
+  // ==========================================================================
+
+  /** View-model de las líneas para `app-item-list` (no muta el summary). */
+  readonly itemRows = computed(() =>
+    (this.summary()?.order.items ?? []).map((item) => {
+      const cancelled = this.isItemCancelled(item);
+      const parts: string[] = [];
+      if (item.variant_sku) parts.push(`SKU: ${item.variant_sku}`);
+      if (item.variant_attributes) parts.push(item.variant_attributes);
+      if (cancelled && this.hasVisibleCancellationReason(item)) {
+        parts.push(String(item.cancellation_reason).trim());
+      }
+      const ks = this.kitchenStateFor(item);
+      if (ks) parts.push(this.kitchenPrepLine(ks));
+      return {
+        ...item,
+        _image: item.variant_image_url || item.image_url || null,
+        _subtitle: parts.join(' · '),
+        _cancelled: cancelled,
+        _badge: cancelled ? 'cancelled' : null,
+      };
+    }),
+  );
+
+  readonly itemRowClass = (item: { _cancelled?: boolean }): string =>
+    item._cancelled ? 'guest-item-cancelled' : '';
+
+  /**
+   * E2: la línea cancelada oculta precio y total (un número tachado sigue
+   * siendo un número que el ojo suma); el nombre va tachado vía CSS.
+   */
+  readonly itemCardConfig: ItemListCardConfig = {
+    titleKey: 'product_name',
+    subtitleKey: '_subtitle',
+    subtitleTransform: (item) => item._subtitle,
+    avatarKey: '_image',
+    avatarShape: 'square',
+    avatarFallbackIcon: 'package',
+    badgeKey: '_badge',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: () => 'Cancelado',
+    detailKeys: [
+      {
+        key: 'quantity',
+        label: 'Cantidad',
+        transform: (v, item) => (item?._cancelled ? '—' : String(v)),
+      },
+      {
+        key: 'unit_price',
+        label: 'Precio unit.',
+        transform: (v, item) =>
+          item?._cancelled
+            ? '—'
+            : this.currencyService.format(Number(v) || 0),
+      },
+    ],
+    footerKey: 'total_price',
+    footerLabel: 'Total',
+    footerStyle: 'prominent',
+    footerTransform: (v, item) =>
+      item?._cancelled ? '' : this.currencyService.format(Number(v) || 0),
+  };
 
   etaVisible(): boolean {
     if (!this.physicalProgressAllowed()) return false;
