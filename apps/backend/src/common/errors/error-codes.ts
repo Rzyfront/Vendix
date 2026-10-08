@@ -6473,6 +6473,20 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La orden ya está finalizada; usa un reembolso.',
   },
+
+  // Propina gobernada por configuración de la tienda (pos.tips). Con ambos
+  // flags apagados (registrar propinas y propina sugerida) no se acepta
+  // propina > 0; con sólo la sugerida activa, el monto debe ser el sugerido.
+  TIP_NOT_ENABLED_001: {
+    code: 'TIP_NOT_ENABLED_001',
+    httpStatus: 422,
+    devMessage: 'La propina no está habilitada en esta tienda.',
+  },
+  TIP_NOT_SUGGESTED_001: {
+    code: 'TIP_NOT_SUGGESTED_001',
+    httpStatus: 422,
+    devMessage: 'La propina debe ser la sugerida por la tienda.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {
