@@ -45,27 +45,25 @@ const FALLBACK_TIMEOUT_MS = 8000;
 const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 
 /**
- * Fallback basemap: inline MapLibre v8 style with a single raster source (CARTO
- * Voyager, OSM data). No style JSON, glyphs or sprites to fetch, so it survives
- * the failure of OpenFreeMap's style/vector endpoints. Used at most once per map.
+ * Fallback basemap: inline MapLibre v8 style with a single raster source (the
+ * official OpenStreetMap tile server — keyless; CARTO now watermarks keyless
+ * requests with "API KEY REQUIRED"). No style JSON, glyphs or sprites to fetch,
+ * so it survives the failure of OpenFreeMap's style/vector endpoints. Used at
+ * most once per map and only as an emergency fallback (OSMF tile usage policy).
  */
 const FALLBACK_STYLE = {
   version: 8,
   sources: {
-    'carto-voyager': {
+    'osm-raster': {
       type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-        'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-      ],
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
       tileSize: 256,
-      attribution: '© OpenStreetMap contributors © CARTO',
+      maxzoom: 19,
+      attribution: '© OpenStreetMap contributors',
     },
   },
   layers: [
-    { id: 'carto-voyager', type: 'raster', source: 'carto-voyager' },
+    { id: 'osm-raster', type: 'raster', source: 'osm-raster' },
   ],
 };
 
@@ -211,6 +209,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private map: any = null;
   private marker: any = null;
   private mapLoaded = false;
+  /** True once a real basemap tile arrived for the current style. */
+  private tileLoaded = false;
   /** Guards the `mapReady` output so it fires exactly once. */
   private mapReadyEmitted = false;
   /** Guards the `mapFailed` output so it fires exactly once. */
@@ -345,44 +345,14 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         this.emitFromMarker();
       });
 
-      const onLoaded = () => {
-        if (this.mapLoaded) return;
-        this.mapLoaded = true;
-        // A focus that arrived between map construction and `load` was
-        // dropped by the effect (mapLoaded was false): frame it now.
-        const pendingFocus = this.focusArea();
-        if (!this.center() && pendingFocus) {
-          this.map.jumpTo({
-            center: [pendingFocus.lng, pendingFocus.lat],
-            zoom: CITY_ZOOM,
-          });
+      const onLoaded = () => this.handleMapLoaded();
+      // A real tile (not just style JSON) is the only proof the basemap renders.
+      this.map.on('data', (e: any) => {
+        if (e?.dataType === 'source' && e?.tile) {
+          this.tileLoaded = true;
+          if (!this.mapLoaded && this.map?.isStyleLoaded?.()) onLoaded();
         }
-        this.loading.set(false);
-        // A slow basemap can finish AFTER the fallback timeout already raised the
-        // "no se pudo cargar" placeholder. That placeholder is opaque and
-        // absolute over the canvas, so without this the map renders fine
-        // underneath but stays hidden for good. A real `load` wins.
-        this.error.set(false);
-        this.clearLoadTimer();
-        this.emitMapReady();
-        // Let the OSM/OpenFreeMap credit flash briefly (~0.3s) on load so it is
-        // seen, then collapse it to the ⓘ button (maplibre-gl v5 renders it
-        // expanded). Hover or click re-expands it (see the .scss :hover rule and
-        // the native <summary> toggle).
-        this.attribTimer = setTimeout(() => this.minimizeAttribution(), 300);
-        // A point may have arrived during load → make sure it is shown.
-        const c = this.center();
-        if (c) {
-          this.ensureMarker(c);
-          this.map.flyTo({ center: [c.lng, c.lat], zoom: POINT_ZOOM });
-        } else {
-          this.clearMarker();
-          const a = this.focusArea();
-          if (a) this.map.flyTo({ center: [a.lng, a.lat], zoom: CITY_ZOOM });
-        }
-        // Ensure correct sizing after the container transitions into view.
-        this.map.resize();
-      };
+      });
       // maplibre-gl 6.12 fires `load` once the (possibly swapped) style has
       // rendered, also after `setStyle` on a map that had not loaded yet.
       // `idle` is a belt-and-braces signal in case `load` is skipped; the
@@ -405,6 +375,49 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  /**
+   * Marks the map as loaded. Ignored until a real tile arrived: `load`/`idle`
+   * also fire when every tile request failed, which left a blank grey map.
+   */
+  private handleMapLoaded(): void {
+    if (this.mapLoaded || !this.tileLoaded) return;
+    this.mapLoaded = true;
+    // A focus that arrived between map construction and `load` was
+    // dropped by the effect (mapLoaded was false): frame it now.
+    const pendingFocus = this.focusArea();
+    if (!this.center() && pendingFocus) {
+      this.map.jumpTo({
+        center: [pendingFocus.lng, pendingFocus.lat],
+        zoom: CITY_ZOOM,
+      });
+    }
+    this.loading.set(false);
+    // A slow basemap can finish AFTER the fallback timeout already raised the
+    // "no se pudo cargar" placeholder. That placeholder is opaque and
+    // absolute over the canvas, so without this the map renders fine
+    // underneath but stays hidden for good. A real `load` wins.
+    this.error.set(false);
+    this.clearLoadTimer();
+    this.emitMapReady();
+    // Let the OSM/OpenFreeMap credit flash briefly (~0.3s) on load so it is
+    // seen, then collapse it to the ⓘ button (maplibre-gl v5 renders it
+    // expanded). Hover or click re-expands it (see the .scss :hover rule and
+    // the native <summary> toggle).
+    this.attribTimer = setTimeout(() => this.minimizeAttribution(), 300);
+    // A point may have arrived during load → make sure it is shown.
+    const c = this.center();
+    if (c) {
+      this.ensureMarker(c);
+      this.map.flyTo({ center: [c.lng, c.lat], zoom: POINT_ZOOM });
+    } else {
+      this.clearMarker();
+      const a = this.focusArea();
+      if (a) this.map.flyTo({ center: [a.lng, a.lat], zoom: CITY_ZOOM });
+    }
+    // Ensure correct sizing after the container transitions into view.
+    this.map.resize();
+  }
+
   /** (Re)starts the load watchdog: first expiry swaps style, second fails the map. */
   private armLoadTimer(ms: number): void {
     this.clearLoadTimer();
@@ -420,6 +433,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private switchToFallbackStyle(): void {
     if (this.usingFallbackStyle || this.mapLoaded || !this.map) return;
     this.usingFallbackStyle = true;
+    // Primary-style tiles do not count for the fallback.
+    this.tileLoaded = false;
     try {
       this.map.setStyle(FALLBACK_STYLE);
     } catch {

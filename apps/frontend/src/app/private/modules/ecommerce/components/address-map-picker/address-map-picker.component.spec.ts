@@ -81,6 +81,46 @@ describe('AddressMapPickerComponent', () => {
       fixture.destroy();
     }
   });
+  describe('handleMapLoaded', () => {
+    function setup() {
+      TestBed.configureTestingModule({ imports: [AddressMapPickerComponent] });
+      const fixture = TestBed.createComponent(AddressMapPickerComponent);
+      const component = fixture.componentInstance;
+      spyOn(component, 'ngAfterViewInit').and.stub();
+      fixture.detectChanges();
+      const map = {
+        resize: jasmine.createSpy('resize'),
+        jumpTo: jasmine.createSpy('jumpTo'),
+        flyTo: jasmine.createSpy('flyTo'),
+      };
+      const internals = component as unknown as {
+        map: typeof map | null;
+        mapLoaded: boolean;
+        tileLoaded: boolean;
+        handleMapLoaded: () => void;
+      };
+      internals.map = map;
+      return { fixture, component, internals, map };
+    }
+
+    it('does not mark the map loaded when no real tile arrived', () => {
+      const { fixture, internals, map } = setup();
+      internals.tileLoaded = false;
+      internals.handleMapLoaded();
+      expect(internals.mapLoaded).toBeFalse();
+      expect(map.resize).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
+    it('marks the map loaded once a real tile arrived', () => {
+      const { fixture, internals } = setup();
+      internals.tileLoaded = true;
+      internals.handleMapLoaded();
+      expect(internals.mapLoaded).toBeTrue();
+      fixture.destroy();
+    });
+  });
+
   describe('map failure placeholder', () => {
     function setup() {
       TestBed.configureTestingModule({ imports: [AddressMapPickerComponent] });
