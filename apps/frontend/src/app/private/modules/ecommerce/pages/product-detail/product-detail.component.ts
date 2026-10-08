@@ -38,7 +38,6 @@ import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { ImageLightboxComponent } from '../../../../../shared/components/image-lightbox/image-lightbox.component';
@@ -76,7 +75,6 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
     SpinnerComponent,
     ProductQuickViewModalComponent,
     IconComponent,
-    QuantityControlComponent,
     ButtonComponent,
     BadgeComponent,
     ImageLightboxComponent,
@@ -244,54 +242,92 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
               }
 
               <div class="price-section flex flex-col gap-2 my-2">
-                <div class="price-line flex items-baseline flex-wrap gap-2">
-                  @if (displayPriceLabel(); as label) {
-                    <span class="text-sm text-text-muted font-medium mr-1">{{
-                      label
-                    }}</span>
-                  }
-                  <span class="current-price text-2xl md:text-3xl font-extrabold text-text-primary">
-                    {{ (hasActiveDiscount() ? effectiveUnitPrice() : currentUnitPrice()) | currency }}
-                  </span>
-                  @if (selectedPresentation(); as unit) {
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                      / {{ unit.name }}
+                <div class="price-qty-row">
+                  <div class="price-line flex items-baseline flex-wrap gap-2">
+                    @if (displayPriceLabel(); as label) {
+                      <span class="text-sm text-text-muted font-medium mr-1">{{
+                        label
+                      }}</span>
+                    }
+                    <span class="current-price text-2xl md:text-3xl font-extrabold text-text-primary">
+                      {{ (hasActiveDiscount() ? effectiveUnitPrice() : currentUnitPrice()) | currency }}
                     </span>
-                  } @else if (product()?.price_unit; as priceUnit) {
-                    <span class="text-sm text-text-muted font-medium ml-1">{{
-                      priceUnit.label
-                    }}</span>
-                  }
-                  @if (hasActiveDiscount() || directSaleComparePrice() !== null) {
-                    <span
-                      class="original-price text-base text-text-muted line-through opacity-70 ml-1"
-                    >
-                      {{ (hasActiveDiscount() ? currentUnitPrice() : directSaleComparePrice()) | currency }}
-                    </span>
-                  }
-                  @if (hasActiveDiscount() && activePromoDiscount()?.type === 'percentage') {
-                    <span class="savings-pill inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500 text-white shadow-xs">
-                      -{{ activePromoDiscount()?.value }}% OFF
-                    </span>
-                  }
-                    @if (p.avg_rating) {
-                      <div class="rating-line">
-                        <div class="stars">
-                          @for (s of [1, 2, 3, 4, 5]; track s) {
-                            <app-icon
-                              name="star"
-                              [size]="14"
-                              [class]="
-                                s <= p.avg_rating
-                                  ? 'text-warning fill-warning'
-                                  : 'text-gray-300'
-                              "
-                            />
-                          }
-                        </div>
+                    @if (selectedPresentation(); as unit) {
+                      <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                        / {{ unit.name }}
+                      </span>
+                    } @else if (product()?.price_unit; as priceUnit) {
+                      <span class="text-sm text-text-muted font-medium ml-1">{{
+                        priceUnit.label
+                      }}</span>
+                    }
+                    @if (hasActiveDiscount() || directSaleComparePrice() !== null) {
+                      <span
+                        class="original-price text-base text-text-muted line-through opacity-70 ml-1"
+                      >
+                        {{ (hasActiveDiscount() ? currentUnitPrice() : directSaleComparePrice()) | currency }}
+                      </span>
+                    }
+                    @if (hasActiveDiscount() && activePromoDiscount()?.type === 'percentage') {
+                      <span class="savings-pill inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500 text-white shadow-xs">
+                        -{{ activePromoDiscount()?.value }}% OFF
+                      </span>
+                    }
+                      @if (p.avg_rating) {
+                        <div class="rating-line">
+                          <div class="stars">
+                            @for (s of [1, 2, 3, 4, 5]; track s) {
+                              <app-icon
+                                name="star"
+                                [size]="14"
+                                [class]="
+                                  s <= p.avg_rating
+                                    ? 'text-warning fill-warning'
+                                    : 'text-gray-300'
+                                "
+                              />
+                            }
+                          </div>
                         <span class="count">({{ p.review_count }})</span>
                       </div>
                     }
+                  </div>
+                  @if (!hideDineInPurchase()) {
+                    <!-- La cantidad cuenta PAQUETES de la presentación; el hint
+                         "= N u." sólo informa, no multiplica dinero. -->
+                    <div class="qty-stepper">
+                      <div
+                        class="inline-flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+                      >
+                        <button
+                          type="button"
+                          class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-l-lg text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          [disabled]="quantity() <= 1"
+                          aria-label="Disminuir cantidad"
+                          (click)="decQuantity()"
+                        >
+                          <app-icon name="minus" [size]="14"></app-icon>
+                        </button>
+                        <span
+                          class="min-w-[2rem] px-1 text-center text-sm font-semibold tabular-nums text-slate-900"
+                          aria-live="polite"
+                          >{{ quantity() }}</span
+                        >
+                        <button
+                          type="button"
+                          class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-r-lg text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          [disabled]="quantity() >= quantityMax()"
+                          aria-label="Aumentar cantidad"
+                          (click)="incQuantity()"
+                        >
+                          <app-icon name="plus" [size]="14"></app-icon>
+                        </button>
+                      </div>
+                      @if (packSize() > 1) {
+                        <span class="qty-hint">= {{ quantity() * packSize() }} u.</span>
+                      }
+                    </div>
+                  }
                 </div>
 
                 <!-- Dynamic Live Total & Savings breakdown when quantity > 1 or discount is active -->
@@ -432,19 +468,6 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
               <!-- Purchase Section -->
               @if (!hideDineInPurchase()) {
                 <div class="purchase-box">
-                  <!-- La cantidad cuenta PAQUETES de la presentación
-                       elegida: max es available_packages y unitsPerPackage
-                       sólo pinta el hint "= N u.". Nada de esto multiplica
-                       dinero. -->
-                  <app-quantity-control
-                    [value]="quantity()"
-                    [min]="1"
-                    [max]="isOnDemand() ? 999 : displayStock() || 99"
-                    [unitsPerPackage]="packSize()"
-                    [size]="'sm'"
-                    (valueChange)="quantity.set($event)"
-                  />
-
                   <div class="buy-now-slot">
                     <app-button
                       variant="primary"
@@ -1030,6 +1053,29 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
         .count {
           font-size: 0.75rem;
           color: var(--color-text-muted);
+        }
+      }
+
+      .price-qty-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: nowrap;
+        .price-line {
+          flex: 1;
+          min-width: 0;
+        }
+        .qty-stepper {
+          flex: 0 0 auto;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 0.15rem;
+        }
+        .qty-hint {
+          font-size: var(--fs-xs);
+          color: var(--color-text-secondary);
         }
       }
 
@@ -2342,6 +2388,18 @@ export class ProductDetailComponent implements OnInit {
 
     return [];
   });
+
+  readonly quantityMax = computed((): number =>
+    this.isOnDemand() ? 999 : this.displayStock() || 99,
+  );
+
+  decQuantity(): void {
+    this.quantity.set(Math.max(1, this.quantity() - 1));
+  }
+
+  incQuantity(): void {
+    this.quantity.set(Math.min(this.quantityMax(), this.quantity() + 1));
+  }
 
   displayStock = computed((): number => {
     // Con presentación elegida el stock se mide en PAQUETES de ESA
