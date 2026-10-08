@@ -284,6 +284,9 @@ export class TableSessionPageComponent implements OnInit {
     Number(this.session()?.order?.tax_amount ?? 0),
   );
 
+  /** Base bruta de productos para la propina: subtotal + IVA de la orden. */
+  readonly tipBase = computed(() => this.orderSubtotal() + this.orderTax());
+
   readonly orderDiscount = computed(() =>
     Number(this.session()?.order?.discount_amount ?? 0),
   );
@@ -1793,7 +1796,14 @@ export class TableSessionPageComponent implements OnInit {
         total_amount: this.orderTotal(),
         amount_received: payload.amount_received,
         payment_reference: payload.payment_reference,
-        tip_amount: payload.tip_amount,
+        ...(payload.tip_amount != null && payload.tip_amount > 0
+          ? {
+              tip_amount: payload.tip_amount,
+              tip_type: payload.tip_type,
+              tip_value: payload.tip_value,
+              tip_waiter_id: payload.tip_waiter_id ?? undefined,
+            }
+          : {}),
         // QUI-728 (E.1) — el cobro de mesa va a POST /store/payments/pos
         // (CreatePosPaymentDto); el bank_account_id viaja con él.
         bank_account_id: payload.bank_account_id,

@@ -166,6 +166,7 @@ import { DocumentPrintService } from '../../../../../../shared/services/print/do
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../../../dispatch-ticket/models/dispatch-ticket-data.model';
+import { isTipPolicyActive } from '../../../../../../core/utils/tip-policy.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
   shouldAutoPrintDispatchTicket,
@@ -2917,7 +2918,12 @@ export class OrderDetailsPageComponent {
     // `tip_not_allowed_on_installment` en vez de aceptarla en silencio. El
     // modal ya apaga la seccion con `[allowTip]="!isCreditOrder()"`; este guard
     // es la segunda linea, porque un submit puede venir de un estado anterior.
-    if (!isCredit && submit.tip != null && submit.tip > 0) {
+    if (
+      !isCredit &&
+      isTipPolicyActive(this.settingsFacade.tipPolicy()) &&
+      submit.tip != null &&
+      submit.tip > 0
+    ) {
       dto.tip_amount = submit.tip;
       if (submit.tipType != null) dto.tip_type = submit.tipType;
       if (submit.tipValue != null) dto.tip_value = submit.tipValue;

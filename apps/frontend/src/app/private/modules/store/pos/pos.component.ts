@@ -2674,7 +2674,18 @@ export class PosComponent {
         : {}),
       ...(submit.amount != null ? { amount: Number(submit.amount) } : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
-      ...(submit.tip != null ? { tip_amount: Number(submit.tip) } : {}),
+      ...(submit.tip != null && submit.tip > 0
+        ? {
+            tip_amount: Number(submit.tip),
+            ...(submit.tipType != null ? { tip_type: submit.tipType } : {}),
+            ...(submit.tipValue != null
+              ? { tip_value: Number(submit.tipValue) }
+              : {}),
+            ...(submit.tipWaiterId != null
+              ? { tip_waiter_id: Number(submit.tipWaiterId) }
+              : {}),
+          }
+        : {}),
       ...(submit.bankAccountId != null
         ? { bank_account_id: Number(submit.bankAccountId) }
         : {}),
