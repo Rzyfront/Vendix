@@ -903,12 +903,39 @@ const STREET_TYPES = new Set([
   'unclassified',
 ]);
 
+/**
+ * OSM classes/addresstypes for named places (POIs: malls, markets, hospitals,
+ * stations...). A POI result is the place itself, so its point is the
+ * building/venue and counts as 'exact' rather than a neighbourhood-level 'area'.
+ */
+const POI_TYPES = new Set([
+  'shop',
+  'amenity',
+  'building',
+  'tourism',
+  'leisure',
+  'office',
+  'healthcare',
+  'craft',
+  'historic',
+  'man_made',
+  'public_transport',
+  'railway',
+  'aeroway',
+  'emergency',
+  'club',
+  'sport',
+]);
+
 function classifyCandidate(
   candidate: GeocodeCandidate,
 ): 'exact' | 'street' | 'area' | 'admin' {
   const t = (candidate.addresstype || candidate.type || '').toLowerCase();
   if (t === 'house' || candidate.address?.house_number) return 'exact';
   if (STREET_TYPES.has(t) || candidate.class === 'highway') return 'street';
+  const cls = (candidate.class || '').toLowerCase();
+  const at = (candidate.addresstype || '').toLowerCase();
+  if (POI_TYPES.has(cls) || POI_TYPES.has(at)) return 'exact';
   if (AREA_TYPES.has(t)) return 'area';
   if (ADMIN_TYPES.has(t)) return 'admin';
   return 'area';

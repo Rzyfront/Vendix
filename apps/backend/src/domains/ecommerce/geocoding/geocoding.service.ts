@@ -375,7 +375,10 @@ export class GeocodingService {
     // OSM way pair ~15km from the real corner and was cached as
     // 'interpolated' with false confidence) — a v4-cached false-confident
     // corner must not shadow the now-gated, honest result for its 7-day TTL.
-    return `geocode:fwd:v5:${parts.join('|')}`;
+    // v6: bumped from v5 when named OSM places (POIs: shop/amenity/building...)
+    // started classifying as 'exact' instead of 'area' — a v5-cached 'area'
+    // for a POI must not shadow the now-located result for its 7-day TTL.
+    return `geocode:fwd:v6:${parts.join('|')}`;
   }
 
   // ------------------------------------------------------------- Cascade
