@@ -961,6 +961,8 @@ export class PrintLayoutComposerService {
     const showReten = this.isFieldActive(section, 'f_reten');
     const showTip = this.isFieldActive(section, 'f_tip');
     const showTot = this.isFieldActive(section, 'f_tot');
+    const showTipSuggested = this.isFieldActive(section, 'f_tip_suggested');
+    const showTotalWithTip = this.isFieldActive(section, 'f_total_with_tip');
     const showWords = this.isFieldActive(section, 'f_words');
     const showPaym = this.isFieldActive(section, 'f_paym');
     const showRecv = this.isFieldActive(section, 'f_recv');
@@ -1033,6 +1035,29 @@ export class PrintLayoutComposerService {
       ? '<span class="vendix-token-pill" data-token="order.tip_amount">&#123;&#123; money order.tip_amount &#125;&#125;</span>'
       : this.compiler.escapeHtml(totals.tip_amount_formatted || `$${Number(totals.tip_amount || 0).toLocaleString('es-CO')}`);
 
+    // Propina SUGERIDA (informativa): sólo sin propina real cobrada. El TOTAL
+    // pasa a "Total sin propina" salvo etiqueta personalizada del usuario.
+    const hasSuggestedTip =
+      mode !== 'tokenized' &&
+      Number(totals.suggested_tip_amount) > 0 &&
+      !(Number(totals.tip_amount) > 0);
+    const totField = Array.isArray(section?.fields)
+      ? section.fields.find((f: any) => f.id === 'f_tot' || f.key === 'f_tot')
+      : null;
+    const customTotLabel = totField?.custom_label && String(totField.custom_label).trim();
+    const totLabel =
+      hasSuggestedTip && !customTotLabel
+        ? 'Total sin propina'
+        : this.getFieldCustomLabel(section, 'f_tot', 'TOTAL');
+    const suggestedVal = this.compiler.escapeHtml(
+      totals.suggested_tip_amount_formatted ||
+        `$${Number(totals.suggested_tip_amount || 0).toLocaleString('es-CO')}`,
+    );
+    const totalWithTipVal = this.compiler.escapeHtml(
+      totals.total_with_suggested_tip_formatted ||
+        `$${Number(totals.total_with_suggested_tip || 0).toLocaleString('es-CO')}`,
+    );
+
     return `
       <div class="print-section section-totals" data-section-id="sec_totals">
         <div class="totals-table-wrapper">
@@ -1067,8 +1092,18 @@ export class PrintLayoutComposerService {
               <td class="total-val">${tipVal}</td>
             </tr>` : ''}
             ${showTot ? `<tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
-              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tot', 'TOTAL'))}:</td>
+              <td class="total-label">${this.compiler.escapeHtml(totLabel)}:</td>
               <td class="total-val grand-total">${grandVal}</td>
+            </tr>` : ''}
+            ${hasSuggestedTip && showTipSuggested ? `
+            <tr data-element-id="f_tip_suggested" data-section-id="sec_totals" data-token="order.suggested_tip_amount">
+              <td class="total-label">${this.compiler.escapeHtml((Array.isArray(section?.fields) ? String(section.fields.find((f: any) => f.id === 'f_tip_suggested')?.custom_label || '').trim() : '') || totals.suggested_tip_label || 'Propina sugerida')}:</td>
+              <td class="total-val">${suggestedVal}</td>
+            </tr>` : ''}
+            ${hasSuggestedTip && showTotalWithTip ? `
+            <tr data-element-id="f_total_with_tip" data-section-id="sec_totals" data-token="order.total_with_suggested_tip">
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_total_with_tip', 'Total con propina'))}:</td>
+              <td class="total-val">${totalWithTipVal}</td>
             </tr>` : ''}
             ${tipOutside && showTip && Number(totals.tip_amount) > 0 ? `
             <tr data-element-id="f_tip" data-section-id="sec_totals" data-token="order.tip_amount">

@@ -255,6 +255,17 @@ export interface StandardPrintDataModel {
     /** Total fiscal + propina (lo que el cliente pagó). Sólo con `tip_outside_total`. */
     total_paid?: number;
     total_paid_formatted?: string;
+    /**
+     * Propina SUGERIDA (informativa, no cobrada). Sólo se llena cuando la orden
+     * no tiene propina real y la tienda configuró `pos.tips.suggested_*`. No
+     * altera `grand_total`: el compositor la pinta tras el TOTAL.
+     */
+    suggested_tip_amount?: number;
+    suggested_tip_amount_formatted?: string;
+    /** Ej. "Propina sugerida (10%)", o "Propina sugerida" si es monto fijo. */
+    suggested_tip_label?: string;
+    total_with_suggested_tip?: number;
+    total_with_suggested_tip_formatted?: string;
   };
   custom_variables?: Record<string, any>;
 }
