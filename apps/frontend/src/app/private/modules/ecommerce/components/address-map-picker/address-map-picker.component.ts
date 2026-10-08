@@ -393,8 +393,9 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
 
       // Primary basemap error/timeout → one-shot swap to the raster fallback.
       // Errors after `load` (single tile 404s) are ignored.
-      this.map.on('error', () => {
-        if (!this.mapLoaded) this.switchToFallbackStyle();
+      this.map.on('error', (e: any) => {
+        // A single failed tile (`e.tile`) is not a dead basemap: the timer covers it.
+        if (!this.mapLoaded && !e?.tile) this.switchToFallbackStyle();
       });
       this.armLoadTimer(PRIMARY_TIMEOUT_MS);
     } catch {
