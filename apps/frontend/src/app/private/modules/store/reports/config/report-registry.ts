@@ -301,8 +301,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   {
     // Tendencia de reseñas: una fila por periodo con productos y experiencia.
-    // La respuesta es { series, totals, ... }: el adapter de lista debe tomar
-    // `data.series` como filas (ver reporte de la tarea).
     id: 'reviews-trend',
     category: 'reviews',
     title: 'Tendencia de reseñas',
@@ -315,6 +313,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
     trackKey: 'period',
+    rowsPath: 'series',
     columns: [
       { key: 'period', header: 'Periodo', type: 'text' },
       { key: 'product_count', header: 'Reseñas productos', type: 'number', footer: 'sum' },

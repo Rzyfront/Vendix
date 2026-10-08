@@ -51,6 +51,8 @@ export interface ReportDefinition {
   type?: ReportType;
   keyMapping?: Record<string, string>;
   trackKey?: string;
+  /** Toma las filas de data[rowsPath] cuando el endpoint devuelve un objeto. */
+  rowsPath?: string;
   summaryLayout?: SummaryLayoutConfig;
   stats?: ReportStatField[];
   serverPagination?: boolean;
