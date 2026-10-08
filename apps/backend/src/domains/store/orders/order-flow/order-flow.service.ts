@@ -4927,6 +4927,60 @@ export class OrderFlowService {
     });
   }
 
+  /**
+   * Edita `order_items.notes` de un ítem de CUALQUIER orden de la tienda y
+   * copia la nota a sus `kitchen_ticket_items` en `pending` (lo que ya se
+   * disparó a cocina y empezó a prepararse no se reescribe). Tras el commit
+   * avisa por SSE a cada ticket afectado.
+   */
+  async updateItemNotes(
+    orderId: number,
+    orderItemId: number,
+    notes: string | null,
+  ): Promise<{ id: number; notes: string | null }> {
+    const item = await this.prisma.order_items.findFirst({
+      where: { id: orderItemId, order_id: orderId },
+      select: { id: true, cancelled_at: true },
+    });
+    if (!item) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_ITEM_NOTES_NOT_FOUND_001,
+        `Order item #${orderItemId} not found on order #${orderId}`,
+      );
+    }
+    if (item.cancelled_at) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_ITEM_NOTES_CANCELLED_001,
+      );
+    }
+
+    const cleanNotes = notes?.trim() || null;
+
+    const ticketIds = await this.prisma.$transaction(async (tx) => {
+      await tx.order_items.updateMany({
+        where: { id: orderItemId, order_id: orderId },
+        data: { notes: cleanNotes, updated_at: new Date() },
+      });
+      const pending = await tx.kitchen_ticket_items.findMany({
+        where: { order_item_id: orderItemId, status: 'pending' },
+        select: { kitchen_ticket_id: true },
+      });
+      if (pending.length > 0) {
+        await tx.kitchen_ticket_items.updateMany({
+          where: { order_item_id: orderItemId, status: 'pending' },
+          data: { notes: cleanNotes },
+        });
+      }
+      return [...new Set(pending.map((row) => row.kitchen_ticket_id))];
+    });
+
+    for (const ticketId of ticketIds) {
+      await this.kitchenFireService?.emitTicketUpdatedEvent(ticketId);
+    }
+
+    return { id: orderItemId, notes: cleanNotes };
+  }
+
   async cancelOrderItem(
     orderId: number,
     orderItemId: number,

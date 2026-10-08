@@ -539,6 +539,16 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cart not found',
   },
+  ECOM_CART_005: {
+    code: 'ECOM_CART_005',
+    httpStatus: 400,
+    devMessage: 'Cart item update requires quantity or notes',
+  },
+  ECOM_CART_NOTES_001: {
+    code: 'ECOM_CART_NOTES_001',
+    httpStatus: 400,
+    devMessage: 'Item notes cannot contain reserved markers',
+  },
   ECOM_PRODUCT_001: {
     code: 'ECOM_PRODUCT_001',
     httpStatus: 404,
@@ -5901,6 +5911,16 @@ export const ErrorCodes = {
     code: 'ORD_ITEM_CANCEL_PAID_001',
     httpStatus: 409,
     devMessage: 'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+  },
+  ORD_ITEM_NOTES_NOT_FOUND_001: {
+    code: 'ORD_ITEM_NOTES_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Order item not found on this order',
+  },
+  ORD_ITEM_NOTES_CANCELLED_001: {
+    code: 'ORD_ITEM_NOTES_CANCELLED_001',
+    httpStatus: 409,
+    devMessage: 'Cannot edit the notes of a cancelled order item',
   },
   ORD_ITEM_CANCEL_STATE_001: {
     code: 'ORD_ITEM_CANCEL_STATE_001',

@@ -2572,13 +2572,18 @@ export class TableSessionsService {
 
     const cleanNotes = notes?.trim() || null;
 
-    await this.prisma.$transaction(async (tx) => {
+    const affectedTicketIds = await this.prisma.$transaction(async (tx) => {
       await tx.order_items.updateMany({
         where: { id: orderItemId, order_id: session.order_id },
         data: {
           notes: cleanNotes,
           updated_at: new Date(),
         },
+      });
+
+      const pendingTicketItems = await tx.kitchen_ticket_items.findMany({
+        where: { order_item_id: orderItemId, status: 'pending' },
+        select: { kitchen_ticket_id: true },
       });
 
       await tx.kitchen_ticket_items.updateMany({
@@ -2590,7 +2595,16 @@ export class TableSessionsService {
           notes: cleanNotes,
         },
       });
+
+      return [
+        ...new Set(pendingTicketItems.map((row) => row.kitchen_ticket_id)),
+      ];
     });
+
+    // SSE post-commit: el KDS ve la nota nueva sin recargar.
+    for (const ticketId of affectedTicketIds) {
+      await this.kitchenFireService.emitTicketUpdatedEvent(ticketId);
+    }
 
     this.logger.log(
       `Table item notes updated: session=${sessionId} orderItemId=${orderItemId} notes="${cleanNotes ?? ''}"`,

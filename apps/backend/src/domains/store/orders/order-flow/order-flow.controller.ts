@@ -28,6 +28,7 @@ import {
   CreateRefundDto,
   FastTrackOrderDto,
   ReactivateOrderDto,
+  UpdateOrderItemNotesDto,
 } from './dto';
 import { ResolveRefundDto } from './dto/resolve-refund.dto';
 import { ResponseService } from '@common/responses/response.service';
@@ -330,6 +331,28 @@ export class OrderFlowController {
     return this.responseService.success(
       order,
       'Order item delivered successfully',
+    );
+  }
+
+  // Edita la nota de un ítem de CUALQUIER orden (POS, domicilio, ecommerce).
+  // Espejo del endpoint de mesa `updateItemNotes`; propaga al KDS (tickets
+  // `pending`) y avisa por SSE. Mismo permiso que el resto del namespace.
+  @Patch('items/:orderItemId/notes')
+  @Permissions('store:orders:order_flow:create')
+  @HttpCode(HttpStatus.OK)
+  async updateOrderItemNotes(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+    @Body() dto: UpdateOrderItemNotesDto,
+  ) {
+    const result = await this.orderFlowService.updateItemNotes(
+      orderId,
+      orderItemId,
+      dto.notes ?? null,
+    );
+    return this.responseService.success(
+      result,
+      'Order item notes updated successfully',
     );
   }
 

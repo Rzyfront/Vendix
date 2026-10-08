@@ -254,6 +254,38 @@ export class CheckoutService {
     return products_gross >= limit ? 0 : price;
   }
 
+  /**
+   * Usuario autenticado con carrito de backend: la nota que llega en
+   * `dto.items` (emparejada por producto + variante + presentación) manda
+   * sobre la persistida en `cart_items.notes`, así funciona aunque el frontend
+   * aún no haya sincronizado la nota. Sin coincidencia o sin nota en el DTO,
+   * queda la del carrito. Solo toca `notes`; no cambia nada del cálculo.
+   */
+  private static applyDtoItemNotes<T extends object>(
+    cart_items: T[],
+    dto_items?: Array<{
+      product_id: number;
+      product_variant_id?: number | null;
+      price_tier_id?: number | null;
+      notes?: string | null;
+    }>,
+  ): T[] {
+    if (!dto_items?.some((d) => d.notes !== undefined)) return cart_items;
+    return cart_items.map((ci) => {
+      const line = ci as any;
+      const match = dto_items.find(
+        (d) =>
+          d.notes !== undefined &&
+          d.product_id === line.product_id &&
+          (d.product_variant_id ?? null) === (line.product_variant_id ?? null) &&
+          (d.price_tier_id ?? null) === (line.applied_price_tier_id ?? null),
+      );
+      return match
+        ? ({ ...line, notes: match.notes?.trim() || null } as T)
+        : ci;
+    });
+  }
+
   /** Peso del carrito en kg (Σ peso unitario × cantidad, sin peso ⇒ 0). */
   private static cartWeightKg(
     cart_items: ReadonlyArray<{
@@ -1632,7 +1664,13 @@ export class CheckoutService {
 
     // Fallback: if backend cart is empty but frontend sent items, build from DTO
     // This handles the case where localStorage cart was never synced to backend
-    let cart_items = cart?.cart_items || [];
+    const backend_cart_items = cart?.cart_items || [];
+    let cart_items = CheckoutService.applyDtoItemNotes<
+      (typeof backend_cart_items)[number]
+    >(
+      backend_cart_items,
+      dto.items,
+    );
 
     if (
       (is_guest || cart_items.length === 0) &&
@@ -1669,6 +1707,7 @@ export class CheckoutService {
             // nombre que persiste `cart_items` para que la resolución por línea
             // no tenga que saber de qué origen viene el carrito.
             applied_price_tier_id: item.price_tier_id ?? null,
+            notes: item.notes?.trim() || null,
             product,
             product_variant,
           } as any;
@@ -2305,6 +2344,7 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            notes: (item as any).notes?.trim() || null,
             // Snapshot de la presentación aplicada. `stock_units_consumed` queda
             // en null cuando no hubo empaque, para distinguir "no aplica" de
             // "empaque de 1" igual que en el resto de los flujos de venta.
@@ -2720,6 +2760,8 @@ export class CheckoutService {
       quantity: number;
       /** Presentación elegida por el comprador; `null` ⇒ default del producto. */
       applied_price_tier_id?: number | null;
+      /** Nota del comprador para la línea (→ `order_items.notes`). */
+      notes?: string | null;
       product: any;
       product_variant: any;
     }>;
@@ -2759,6 +2801,7 @@ export class CheckoutService {
             // Mismo normalizado que el checkout web: la presentación elegida
             // viaja con el nombre que persiste `cart_items`.
             applied_price_tier_id: item.price_tier_id ?? null,
+            notes: item.notes?.trim() || null,
             product,
             product_variant,
           };
@@ -2783,7 +2826,10 @@ export class CheckoutService {
       });
 
       if (cart && cart.cart_items.length > 0) {
-        cart_items = cart.cart_items;
+        cart_items = CheckoutService.applyDtoItemNotes(
+          cart.cart_items,
+          dto.items,
+        );
         cart_currency = cart.currency;
       } else if (dto.items && dto.items.length > 0) {
         // Fallback: user has items in localStorage but backend cart is empty
@@ -3176,6 +3222,7 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            notes: (item as any).notes?.trim() || null,
             // Snapshot de la presentación aplicada. `stock_units_consumed` queda
             // en null cuando no hubo empaque, para distinguir "no aplica" de
             // "empaque de 1" igual que en el resto de los flujos de venta.

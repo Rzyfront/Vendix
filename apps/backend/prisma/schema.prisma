@@ -3623,6 +3623,9 @@ model cart_items {
   /// extra por linea.
   stock_units_consumed  Int?
 
+  /// Nota libre del comprador para la linea (max 200). Viaja a order_items.notes.
+  notes String?
+
   cart            carts             @relation(fields: [cart_id], references: [id], onDelete: Cascade)
   product         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)

@@ -7,3 +7,4 @@ export * from './create-refund.dto';
 export * from './cancel-payment.dto';
 export * from './fast-track-order.dto';
 export * from './reactivate-order.dto';
+export * from './update-order-item-notes.dto';
