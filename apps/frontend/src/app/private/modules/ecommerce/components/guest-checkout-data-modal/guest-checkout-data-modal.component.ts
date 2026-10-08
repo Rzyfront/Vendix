@@ -106,7 +106,7 @@ export interface GuestCheckoutData {
             Continuar sin datos
           </app-button>
         } @else {
-          <app-button variant="ghost" (clicked)="cancel()">
+          <app-button variant="outline-danger" (clicked)="cancel()">
             Cancelar
           </app-button>
         }
@@ -162,7 +162,9 @@ export interface GuestCheckoutData {
 
       .guest-data-actions {
         display: flex;
-        justify-content: flex-end;
+        flex-wrap: nowrap;
+        justify-content: space-between;
+        align-items: center;
         gap: 0.75rem;
         width: 100%;
       }
@@ -170,10 +172,6 @@ export interface GuestCheckoutData {
       @media (max-width: 640px) {
         .guest-data-grid {
           grid-template-columns: 1fr;
-        }
-
-        .guest-data-actions {
-          flex-direction: column-reverse;
         }
       }
     `,
