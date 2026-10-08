@@ -2165,4 +2165,9 @@
   .ecommerce-layout--table-bar .ecommerce-footer {
     padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
   }
+
+  // Clearance de la barra mini del carrito (52px de alto + holgura).
+  .ecommerce-layout--mini-bar .ecommerce-footer {
+    padding-bottom: calc(52px + 1rem + env(safe-area-inset-bottom, 0px));
+  }
 }

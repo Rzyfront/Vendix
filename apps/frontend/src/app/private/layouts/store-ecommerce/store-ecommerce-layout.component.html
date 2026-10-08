@@ -1,4 +1,8 @@
-<div class="ecommerce-layout" [class.ecommerce-layout--table-bar]="table_context.isActive()">
+<div
+  class="ecommerce-layout"
+  [class.ecommerce-layout--table-bar]="table_context.isActive()"
+  [class.ecommerce-layout--mini-bar]="show_cart_mini_bar()"
+>
   <!-- Header -->
   <header class="ecommerce-header">
     <div class="header-container">
@@ -569,6 +573,14 @@
       <p>&copy; {{ store_name() }} {{ current_year }}. Todos los derechos reservados.</p>
     </div>
   </footer>
+
+  @if (show_cart_mini_bar()) {
+  <app-cart-mini-bar
+    [cart]="cart()"
+    (checkout)="onMiniBarCheckout()"
+    (viewCart)="goToCart()"
+  />
+  }
 </div>
 
 <!-- Overlay for mobile menu -->

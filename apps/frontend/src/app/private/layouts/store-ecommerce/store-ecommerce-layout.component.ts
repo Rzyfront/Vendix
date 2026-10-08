@@ -21,6 +21,7 @@ import {
   CartService,
 } from '../../modules/ecommerce/services/cart.service';
 import { cartLineKey } from '../../modules/ecommerce/utils/cart-line-key.util';
+import { CartMiniBarComponent } from '../../modules/ecommerce/components/cart-mini-bar/cart-mini-bar.component';
 import { CartPromotionsComponent } from '../../modules/ecommerce/components/cart-promotions/cart-promotions.component';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
@@ -104,6 +105,7 @@ interface FooterSettings {
     ModalComponent,
     CurrencyPipe,
     CartPromotionsComponent,
+    CartMiniBarComponent,
     // Appointment redesign phase 2 — in-app notifications bell for the
     // customer (reagenda aprobada/rechazada, etc.). Auth-gated in template.
     NotificationsDropdownComponent,
@@ -178,6 +180,27 @@ export class StoreEcommerceLayoutComponent {
   cart$ = this.cart_service.cart$;
   readonly cart = toSignal(this.cart$, { initialValue: null as any });
   readonly show_cart_dropdown = signal(false);
+
+  // Barra mini de carrito (móvil): URL actual alimentada por NavigationEnd.
+  readonly current_url = signal(this.router.url);
+  private static readonly MINI_BAR_EXCLUDED_PATHS = [
+    '/cart',
+    '/checkout',
+    '/book',
+    '/pedido',
+    '/order',
+    '/factura',
+    '/fila',
+    '/preconsulta',
+  ];
+  readonly show_cart_mini_bar = computed<boolean>(() => {
+    if ((this.cart()?.item_count ?? 0) < 2) return false;
+    if (this.table_context.isActive()) return false;
+    const path = this.current_url().split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+    return !StoreEcommerceLayoutComponent.MINI_BAR_EXCLUDED_PATHS.some(
+      (excluded) => path === excluded || path.startsWith(excluded + '/'),
+    );
+  });
 
   // Wishlist badge observable
   wishlist_badge$ = this.wishlist_service.wishlist$.pipe(
@@ -356,6 +379,7 @@ export class StoreEcommerceLayoutComponent {
         takeUntilDestroyed(this.destroy_ref),
       )
       .subscribe((event) => {
+        this.current_url.set(event.urlAfterRedirects);
         if (this.shouldScrollToTopOnNavigation(event.urlAfterRedirects)) {
           this.scrollToTop();
         }
@@ -568,6 +592,18 @@ export class StoreEcommerceLayoutComponent {
     // La navegación al carrito ahora vive en el header y footer del dropdown.
     this.show_cart_dropdown.set(false);
     this.router.navigate(['/cart']);
+  }
+
+  /** Replica `proceedToCheckout` del carrito: login si hace falta, si no checkout. */
+  onMiniBarCheckout(): void {
+    const requires_registration =
+      !!this.domain_service.getCurrentDomainConfig()?.customConfig?.ecommerce
+        ?.checkout?.require_registration;
+    if (!this.is_authenticated() && requires_registration) {
+      this.store_ui_service.openLoginModal();
+    } else {
+      this.router.navigate(['/checkout']);
+    }
   }
 
   private previous_path: string | null = null;
