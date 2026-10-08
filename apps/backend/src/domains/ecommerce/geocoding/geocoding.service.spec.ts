@@ -700,7 +700,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
 
     await service.forward('Cra 13 # 62-40, Bogotá, Colombia');
     expect(redis.set).toHaveBeenCalledWith(
-      expect.stringContaining('geocode:fwd:v5:'),
+      expect.stringContaining('geocode:fwd:v6:'),
       expect.any(String),
       'EX',
       604800,
@@ -710,7 +710,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
     await service.forward('texto sin formato DANE, Bogotá, Colombia');
     expect(redis.set).toHaveBeenCalledWith(
-      expect.stringContaining('geocode:fwd:v5:'),
+      expect.stringContaining('geocode:fwd:v6:'),
       expect.any(String),
       'EX',
       21600,
@@ -771,7 +771,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     const fwdKeys = new Set(
       redis.set.mock.calls
         .map(([key]) => String(key))
-        .filter((key) => key.startsWith('geocode:fwd:v5:')),
+        .filter((key) => key.startsWith('geocode:fwd:v6:')),
     );
     expect(fwdKeys.size).toBe(1);
     for (const key of fwdKeys) expect(key).not.toContain('bias:');
@@ -786,7 +786,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
 
     const fwdKey = redis.set.mock.calls
       .map(([key]) => String(key))
-      .find((key) => key.startsWith('geocode:fwd:v5:'));
+      .find((key) => key.startsWith('geocode:fwd:v6:'));
     expect(fwdKey).toBeDefined();
     expect(fwdKey).toContain('bias:4.61,-74.10');
   });
