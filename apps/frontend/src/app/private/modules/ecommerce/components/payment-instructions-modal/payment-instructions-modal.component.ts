@@ -747,7 +747,7 @@ type InstructionField = {
         justify-content: space-between;
         align-items: center;
         width: 100%;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
       }
 
       .pi-footer app-button {
@@ -825,8 +825,10 @@ type InstructionField = {
         .pi-row--split {
           grid-template-columns: 1fr;
         }
+        /* Una sola línea: Volver a la izquierda, confirmar a la derecha. */
         .pi-footer app-button {
-          flex: 1 1 100%;
+          min-width: 0;
+          flex: 0 1 auto;
         }
       }
 
