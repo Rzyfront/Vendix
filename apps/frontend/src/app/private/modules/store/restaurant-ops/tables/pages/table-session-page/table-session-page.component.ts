@@ -976,7 +976,7 @@ export class TableSessionPageComponent implements OnInit {
           name: item.variant_label
             ? `${item.product_name} - ${item.variant_label}`
             : item.product_name,
-          total: num(item.total_price),
+          total: num(item.final_total_price ?? item.total_price),
         })),
       subtotal: num(order.subtotal_amount),
       discount: num(order.discount_amount),
