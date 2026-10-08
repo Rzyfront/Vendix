@@ -5593,15 +5593,17 @@ export class PaymentsService {
     grossProductsBase: number,
   ): Promise<void> {
     if (!(dto.tip_amount || dto.tip_value)) return;
-    const [settings, storeRow] = await Promise.all([
-      this.settingsService.getSettings(),
-      tx.stores.findUnique({
-        where: { id: storeId },
-        select: { industries: true },
-      }),
-    ]);
+    // Lectura liviana dentro de la tx: `getSettings()` firma URLs de S3 y
+    // alarga la transacción del cobro (riesgo P2028).
+    const storeRow = await tx.stores.findUnique({
+      where: { id: storeId },
+      select: {
+        industries: true,
+        store_settings: { select: { settings: true } },
+      },
+    });
     const policy = resolveTipPolicy(
-      (settings as any)?.pos?.tips,
+      (storeRow?.store_settings?.settings as any)?.pos?.tips,
       storeIsRestaurant(storeRow?.industries),
     );
     assertTipAllowed(dto, policy, grossProductsBase, (v) =>
