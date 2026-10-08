@@ -1,4 +1,4 @@
-import { Component, computed, effect, input, output, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import {
   ModalComponent,
@@ -9,6 +9,7 @@ import {
 import type { PaymentSubmit } from '../../../../../../../shared/components/index';
 import type { PaymentLeg } from '../../../../../../../shared/components/payment-collector/payment-collector.model';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import {
   PaymentPendingView,
   TablePaymentLeg,
@@ -142,6 +143,14 @@ export class TablePaymentModalComponent {
   readonly mode = input<TablePaymentMode>('pos');
   /** Bill total (order grand_total). Used as the collector's base amount. */
   readonly total = input<number>(0);
+  /**
+   * Base bruta de productos para la propina (subtotal + IVA de la orden, la
+   * misma base que usa el backend). `null` → el collector usa su fallback.
+   */
+  readonly tipBase = input<number | null>(null);
+  private readonly settingsFacade = inject(StoreSettingsFacade);
+  /** Política de propina configurada; el `allowTip` del contexto es el techo. */
+  protected readonly tipPolicy = this.settingsFacade.tipPolicy;
   readonly tableName = input<string>('');
   /** Driven by the parent while the POS payment request is in flight. */
   readonly isProcessing = input<boolean>(false);

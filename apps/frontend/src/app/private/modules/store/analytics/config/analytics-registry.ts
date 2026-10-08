@@ -410,7 +410,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'hand-coins',
   },
 
-  // Reviews (2)
+  // Reviews (3)
   {
     key: 'reviews_summary',
     title: 'Resumen de Reseñas',
@@ -428,6 +428,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/reviews/by-product',
     category: 'reviews',
     icon: 'star',
+  },
+  {
+    key: 'reviews_trend',
+    title: 'Tendencia de reseñas',
+    description: 'Volumen y calificación de reseñas de productos y de experiencia de compra en el tiempo',
+    detailedDescription: 'Evolución de reseñas de productos y de la experiencia de compra: volumen, promedio, distribución de estrellas y reseña rápida.',
+    route: '/admin/analytics/reviews/trend',
+    category: 'reviews',
+    icon: 'trending-up',
   },
 
   // Financial (3)

@@ -542,6 +542,9 @@ export interface PayTableSessionDto {
   payment_reference?: string;
   /** Optional gratuity added on top of the bill (only forwarded when > 0). */
   tip_amount?: number;
+  tip_type?: 'percentage' | 'fixed';
+  tip_value?: number;
+  tip_waiter_id?: number;
   /** QUI-728 (E.1) — cuenta bancaria elegida para transferencia. */
   bank_account_id?: number;
   /**

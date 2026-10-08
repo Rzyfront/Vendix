@@ -176,6 +176,7 @@ export const reportsRoutes: Routes = [
           },
           { path: 'reviews-summary',     data: { reportId: 'reviews-summary' },     loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'reviews-by-product',  data: { reportId: 'reviews-by-product' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'reviews-trend',       data: { reportId: 'reviews-trend' },       loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {

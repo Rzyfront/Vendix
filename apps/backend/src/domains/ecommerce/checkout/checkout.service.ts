@@ -60,10 +60,13 @@ import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
-import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
 import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
+import {
+  ShippingCalculatorService,
+  type AddressScope,
+} from '../../store/shipping/shipping-calculator.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -142,35 +145,6 @@ export class CheckoutService {
     assertCanChargeVat(fiscalData, 'sale');
   }
 
-  /**
-   * Frontera 5 UVT en el storefront (Art. 616-1 ET / Res. 000165 de 2023).
-   *
-   * Se llama ANTES de `orders.create`, no después: una vez creada la orden el
-   * pedido ya existe para el cliente y el comercio, y "corregirlo" implicaría
-   * anularlo. Aquí el rechazo es simplemente un checkout que no procede, con el
-   * detalle que el frontend necesita para pedir el documento del comprador.
-   *
-   * `identified` es TRUE cuando hay un `customer_id` resuelto o cuando el
-   * invitado entregó su número de documento: cualquiera de los dos permite emitir
-   * la factura electrónica nominativa, que es lo único que el umbral exige.
-   */
-  private async assertCheckoutInvoiceThreshold(params: {
-    grand_total: number;
-    identified: boolean;
-    channel: string;
-  }): Promise<void> {
-    const organization_id = RequestContextService.getOrganizationId();
-    if (!organization_id) return;
-
-    await this.fiscalInvoiceThreshold.assertInvoiceNotRequired({
-      organization_id,
-      store_id: RequestContextService.getStoreId() ?? null,
-      total_amount: params.grand_total,
-      has_customer: params.identified,
-      channel: params.channel,
-    });
-  }
-
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly store_prisma: StorePrismaService,
@@ -203,9 +177,6 @@ export class CheckoutService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly couponsService: CouponsService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
-    // Art. 616-1 ET / Res. 000165/2023 — frontera 5 UVT documento equivalente
-    // vs factura electrónica nominativa (compartida con el POS).
-    private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
     // A.4 CP-facturacion-fixes: Idempotency-Key store (same module, no cycle).
     private readonly checkoutIdempotency: CheckoutIdempotencyService,
     // Impuesto opcional por tarifa de envío: copia congelada en la orden.
@@ -216,6 +187,10 @@ export class CheckoutService {
     // servidor al confirmar. `@Optional()` por el mismo motivo; sin él el
     // envío sale a precio de zona.
     @Optional() private readonly shippingDistance?: ShippingDistanceService,
+    // Alcance de dirección (un solo municipio). `@Optional()` por el mismo
+    // motivo; sin él devuelve "sin alcance fijo".
+    @Optional()
+    private readonly shippingCalculator?: ShippingCalculatorService,
   ) {}
 
   /**
@@ -277,6 +252,38 @@ export class CheckoutService {
     const limit = Number(threshold);
     if (!Number.isFinite(limit) || limit < 0) return price;
     return products_gross >= limit ? 0 : price;
+  }
+
+  /**
+   * Usuario autenticado con carrito de backend: la nota que llega en
+   * `dto.items` (emparejada por producto + variante + presentación) manda
+   * sobre la persistida en `cart_items.notes`, así funciona aunque el frontend
+   * aún no haya sincronizado la nota. Sin coincidencia o sin nota en el DTO,
+   * queda la del carrito. Solo toca `notes`; no cambia nada del cálculo.
+   */
+  private static applyDtoItemNotes<T extends object>(
+    cart_items: T[],
+    dto_items?: Array<{
+      product_id: number;
+      product_variant_id?: number | null;
+      price_tier_id?: number | null;
+      notes?: string | null;
+    }>,
+  ): T[] {
+    if (!dto_items?.some((d) => d.notes !== undefined)) return cart_items;
+    return cart_items.map((ci) => {
+      const line = ci as any;
+      const match = dto_items.find(
+        (d) =>
+          d.notes !== undefined &&
+          d.product_id === line.product_id &&
+          (d.product_variant_id ?? null) === (line.product_variant_id ?? null) &&
+          (d.price_tier_id ?? null) === (line.applied_price_tier_id ?? null),
+      );
+      return match
+        ? ({ ...line, notes: match.notes?.trim() || null } as T)
+        : ci;
+    });
   }
 
   /** Peso del carrito en kg (Σ peso unitario × cantidad, sin peso ⇒ 0). */
@@ -723,6 +730,22 @@ export class CheckoutService {
       store_id,
     );
     return { invoicing_enabled: state === 'ACTIVE' };
+  }
+
+  /**
+   * Alcance de la dirección de entrega del storefront: si la tienda envía a
+   * domicilio a un único municipio, el checkout lo precarga y lo muestra como
+   * chip. Delega en `ShippingCalculatorService.resolveAddressScope`.
+   */
+  async getAddressScope(): Promise<AddressScope> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!this.shippingCalculator) {
+      return { single_municipality: null, postal_code_relevant: false };
+    }
+    return this.shippingCalculator.resolveAddressScope(store_id);
   }
 
   /**
@@ -1641,7 +1664,13 @@ export class CheckoutService {
 
     // Fallback: if backend cart is empty but frontend sent items, build from DTO
     // This handles the case where localStorage cart was never synced to backend
-    let cart_items = cart?.cart_items || [];
+    const backend_cart_items = cart?.cart_items || [];
+    let cart_items = CheckoutService.applyDtoItemNotes<
+      (typeof backend_cart_items)[number]
+    >(
+      backend_cart_items,
+      dto.items,
+    );
 
     if (
       (is_guest || cart_items.length === 0) &&
@@ -1678,6 +1707,7 @@ export class CheckoutService {
             // nombre que persiste `cart_items` para que la resolución por línea
             // no tenga que saber de qué origen viene el carrito.
             applied_price_tier_id: item.price_tier_id ?? null,
+            notes: item.notes?.trim() || null,
             product,
             product_variant,
           } as any;
@@ -2232,15 +2262,7 @@ export class CheckoutService {
       ),
     );
 
-    await this.assertCheckoutInvoiceThreshold({
-      grand_total,
-      identified: Boolean(
-        resolved_customer_id || guest_customer?.document_number,
-      ),
-      // Mismo canal que se persiste en la orden (ADR-1: el núcleo no diverge
-      // por canal; el umbral DIAN debe evaluar el canal real).
-      channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
-    });
+    // Sin frontera 5 UVT aquí: decisión de negocio, la venta online nunca se bloquea; el adquiriente se completa después.
 
     // Online/whatsapp para enviar: los platos KDS (`prepared`) se crean con
     // `is_takeaway=true` para que el KDS los muestre "Para llevar" (empacar).
@@ -2322,6 +2344,7 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            notes: (item as any).notes?.trim() || null,
             // Snapshot de la presentación aplicada. `stock_units_consumed` queda
             // en null cuando no hubo empaque, para distinguir "no aplica" de
             // "empaque de 1" igual que en el resto de los flujos de venta.
@@ -2737,6 +2760,8 @@ export class CheckoutService {
       quantity: number;
       /** Presentación elegida por el comprador; `null` ⇒ default del producto. */
       applied_price_tier_id?: number | null;
+      /** Nota del comprador para la línea (→ `order_items.notes`). */
+      notes?: string | null;
       product: any;
       product_variant: any;
     }>;
@@ -2776,6 +2801,7 @@ export class CheckoutService {
             // Mismo normalizado que el checkout web: la presentación elegida
             // viaja con el nombre que persiste `cart_items`.
             applied_price_tier_id: item.price_tier_id ?? null,
+            notes: item.notes?.trim() || null,
             product,
             product_variant,
           };
@@ -2800,7 +2826,10 @@ export class CheckoutService {
       });
 
       if (cart && cart.cart_items.length > 0) {
-        cart_items = cart.cart_items;
+        cart_items = CheckoutService.applyDtoItemNotes(
+          cart.cart_items,
+          dto.items,
+        );
         cart_currency = cart.currency;
       } else if (dto.items && dto.items.length > 0) {
         // Fallback: user has items in localStorage but backend cart is empty
@@ -3127,13 +3156,7 @@ export class CheckoutService {
       ),
     );
 
-    await this.assertCheckoutInvoiceThreshold({
-      grand_total,
-      identified: Boolean(
-        resolved_customer_id || guest_customer?.document_number,
-      ),
-      channel: 'whatsapp',
-    });
+    // Sin frontera 5 UVT aquí: decisión de negocio, la venta online nunca se bloquea; el adquiriente se completa después.
 
     // Online/whatsapp para enviar: los platos KDS (`prepared`) se crean con
     // `is_takeaway=true` para que el KDS los muestre "Para llevar" (empacar).
@@ -3199,6 +3222,7 @@ export class CheckoutService {
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
+            notes: (item as any).notes?.trim() || null,
             // Snapshot de la presentación aplicada. `stock_units_consumed` queda
             // en null cuando no hubo empaque, para distinguir "no aplica" de
             // "empaque de 1" igual que en el resto de los flujos de venta.

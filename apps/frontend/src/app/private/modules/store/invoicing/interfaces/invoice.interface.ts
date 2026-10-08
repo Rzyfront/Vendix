@@ -665,6 +665,15 @@ export interface InvoicePdfResult {
   url: string;
 }
 
+/** Respuesta de `POST /store/invoicing/:id/deliver` (reenvio por correo). */
+export interface InvoiceDeliverResult {
+  invoice_id: number;
+  invoice_number: string;
+  recipient: string;
+  zip_name?: string;
+  message_id?: string;
+}
+
 /**
  * Respuesta de `GET /store/invoicing/:id/pdf`.
  *

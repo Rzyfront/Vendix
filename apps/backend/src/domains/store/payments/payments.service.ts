@@ -84,10 +84,13 @@ import type { WithholdingResolution } from '../withholding-tax/withholding-flow.
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
-import { resolveTip } from '../../../common/utils/tip.util';
+import {
+  assertTipAllowed,
+  resolveTip,
+  resolveTipPolicy,
+} from '../../../common/utils/tip.util';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
-import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import {
   AuditService,
   AuditResource,
@@ -193,9 +196,6 @@ export class PaymentsService {
     // products, so they can be invoked unconditionally on the sale path).
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serialNumbers: InventorySerialNumbersService,
-    // Art. 616-1 ET / Res. 000165/2023 — frontera 5 UVT entre documento
-    // equivalente POS y factura electrónica nominativa.
-    private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
     // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · audit emission for `order.draft_saved`.
     // Only used in the draft short-circuit (no other behavior change). Wired
     // here because `@Global()` AuditModule already exports it, so DI resolves
@@ -1123,42 +1123,7 @@ export class PaymentsService {
           await this.assertImmediatePosSerials(tx, order, createPosPaymentDto.items ?? []);
         }
 
-        // Frontera 5 UVT (Art. 616-1 ET / Res. 000165 de 2023): una venta
-        // anónima por encima de 5 UVT no puede soportarse con el documento
-        // equivalente POS — exige factura electrónica, y para emitirla hay que
-        // identificar al adquiriente.
-        //
-        // Se evalúa AQUÍ, dentro de la transacción y contra el `grand_total`
-        // recalculado por el servidor, por dos razones: (1) el total del DTO es
-        // sugerido y el backend lo recalcula con promociones/cupones, así que
-        // validar el del cliente permitiría declarar menos para pasar el umbral;
-        // (2) un throw en este punto revierte la transacción completa, mientras
-        // que validar después del commit dejaría la venta cerrada y sólo
-        // corregible con nota crédito.
-        //
-        // QUI-673 — la organización SALE DE LA RELACIÓN, no de una columna.
-        // `orders` no tiene `organization_id` (schema.prisma: sólo `store_id` +
-        // la relación `stores`), así que `order.organization_id` valía SIEMPRE
-        // `undefined`. TypeScript no lo veía porque `order` está tipado `any` en
-        // las dos ramas que lo producen. Con `undefined`, la cadena
-        // `assertInvoiceNotRequired` → `FiscalGateService.isAreaEnabled` →
-        // `getFiscalScope` reventaba dentro de Prisma, el gate capturaba el
-        // error y fallaba CERRADO devolviendo `false` con un WARN: el umbral no
-        // se evaluaba en NINGUNA venta POS y el cobro respondía 201 normal.
-        //
-        // Ambas ramas que producen `order` traen `stores` en su `include`
-        // (`createOrUpdateOrderFromPos` y `applyPosPaymentToTableSession`), así
-        // que la relación resuelve la organización sin una consulta extra
-        // dentro de la transacción. El contexto de request queda sólo como red
-        // de seguridad, igual que en `calculateTaxCategoryTaxes`.
-        await this.fiscalInvoiceThreshold.assertInvoiceNotRequired({
-          organization_id:
-            order.stores?.organization_id ?? context?.organization_id,
-          store_id: order.store_id ?? createPosPaymentDto.store_id ?? null,
-          total_amount: order.grand_total ?? 0,
-          has_customer: Boolean(createPosPaymentDto.customer_id),
-          channel: 'pos',
-        });
+        // Sin frontera 5 UVT aquí: decisión de negocio, la venta POS nunca se bloquea; el adquiriente y la factura se completan después.
 
         // Plan KDS fire-flows (B5): the auto-fire result captured inside
         // the larger payment $transaction. Defaults to null when the store
@@ -4782,6 +4747,7 @@ export class PaymentsService {
     // E.6 — el porcentaje usa productos brutos (subtotal + impuesto), nunca
     // envío ni la propina previa. La propina suma al total, pero queda fuera
     // de subtotal_amount y tax_amount; resolveTip ancla el monto pactado.
+    await this.assertPosTipPolicy(tx, dto, dtoStoreId, newSubtotalGross);
     const resolvedTip = resolveTip(dto, newSubtotalGross, (v) =>
       this.roundMoney(v),
     );
@@ -5616,6 +5582,35 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Valida la propina entrante contra `settings.pos.tips` ANTES de cualquier
+   * escritura. Sin propina en el DTO no lee settings ni industria.
+   */
+  private async assertPosTipPolicy(
+    tx: any,
+    dto: CreatePosPaymentDto,
+    storeId: number,
+    grossProductsBase: number,
+  ): Promise<void> {
+    if (!(dto.tip_amount || dto.tip_value)) return;
+    // Lectura liviana dentro de la tx: `getSettings()` firma URLs de S3 y
+    // alarga la transacción del cobro (riesgo P2028).
+    const storeRow = await tx.stores.findUnique({
+      where: { id: storeId },
+      select: {
+        industries: true,
+        store_settings: { select: { settings: true } },
+      },
+    });
+    const policy = resolveTipPolicy(
+      (storeRow?.store_settings?.settings as any)?.pos?.tips,
+      storeIsRestaurant(storeRow?.industries),
+    );
+    assertTipAllowed(dto, policy, grossProductsBase, (v) =>
+      this.roundMoney(v),
+    );
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
@@ -5913,6 +5908,12 @@ export class PaymentsService {
 
         // E.6 — retail shares the table/flow resolver and its gross product
         // base; the tip remains outside taxable subtotal and product tax.
+        await this.assertPosTipPolicy(
+          tx,
+          dto,
+          dtoStoreId,
+          calculatedSubtotalGross,
+        );
         const resolvedTip = resolveTip(dto, calculatedSubtotalGross, (v) =>
           this.roundMoney(v),
         );

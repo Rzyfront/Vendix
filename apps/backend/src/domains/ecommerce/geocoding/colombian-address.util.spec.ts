@@ -403,6 +403,30 @@ describe('selectBestCandidate', () => {
     expect(best?.precision).toBe('exact');
   });
 
+  it('classifies named OSM places (POIs) as exact', () => {
+    expect(
+      selectBestCandidate([
+        candidate({ class: 'shop', type: 'mall', addresstype: 'shop' }),
+      ])?.precision,
+    ).toBe('exact');
+    expect(
+      selectBestCandidate([
+        candidate({ class: 'amenity', type: 'marketplace' }),
+      ])?.precision,
+    ).toBe('exact');
+  });
+
+  it('keeps neighbourhood as area and road as street', () => {
+    expect(
+      selectBestCandidate([candidate({ addresstype: 'neighbourhood' })])
+        ?.precision,
+    ).toBe('area');
+    expect(
+      selectBestCandidate([candidate({ class: 'highway', addresstype: 'road' })])
+        ?.precision,
+    ).toBe('street');
+  });
+
   it('tie-breaks same-rank candidates by importance', () => {
     const candidates = [
       candidate({ addresstype: 'road', importance: 0.2 }),

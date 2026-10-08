@@ -652,6 +652,18 @@ export interface PosSettings {
   cash_register?: CashRegisterSettings;
   barcode_scanner?: BarcodeScannerSettings;
   customer_queue?: CustomerQueueSettings;
+  tips?: TipsSettings;
+}
+
+/** Política de propinas de la tienda (`settings.pos.tips`). */
+export interface TipsSettings {
+  /** Registrar propinas (manual). Sin valor: restaurante=true, resto=false. */
+  enabled?: boolean;
+  /** Propina sugerida (se imprime en pre-cuenta y ticket). */
+  suggested_enabled: boolean;
+  suggested_type: 'percentage' | 'fixed';
+  /** Porcentaje (0-100) o monto fijo. */
+  suggested_value: number;
 }
 
 export interface CustomerQueueSettings {

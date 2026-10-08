@@ -234,9 +234,11 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       tip_amount: 0,
       currency: 'COP',
     };
+    (h.service as any).settingsService = { getSettings: jest.fn().mockResolvedValue({}) };
     const payments: any[] = [];
     jest.spyOn(h.service as any, 'getOrder').mockImplementation(async () => ({
       ...order,
+      stores: { industries: ['restaurant'] },
       state: h.getState(),
       payments,
     }));
@@ -1060,8 +1062,10 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
       ...buildOrder(), customer_id: 44, subtotal_amount: 100000,
       tax_amount: 19000, discount_amount: 2000, shipping_cost: 5000,
       grand_total: 122000, tip_amount: 0,
-      payments: [],
+      payments: [], stores: { industries: ['restaurant'] },
     };
+    (service as any).settingsService = { getSettings: jest.fn().mockResolvedValue({}) };
+
     jest.spyOn(service as any, 'getOrder').mockImplementation(async () => ({ ...orderRow }));
     prismaMock.orders.update = jest.fn(async ({ data }: any) => {
       Object.assign(orderRow, data);
@@ -5915,7 +5919,10 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       store_id: 4,
       customer_id: 44,
       payments: [],
+      stores: { industries: ['restaurant'] },
     };
+    (h.service as any).settingsService = { getSettings: jest.fn().mockResolvedValue({}) };
+
     (h.service as any).getOrder.mockResolvedValueOnce({
       ...orderWithTip,
       grand_total: 100000,
@@ -7932,5 +7939,112 @@ describe('getAvailableActions / canConfirmDelivery — saldo pendiente', () => {
     const order = { grand_total: 100, remaining_balance: 100, payment_form: '1', payments: [] as any[] };
     expect(getUnpaidBalanceForFinish(order)).toBe(100);
     expect(getUnpaidBalanceForFinish(order, 0)).toBe(0);
+  });
+});
+
+describe('OrderFlowService.updateItemNotes — nota por ítem en cualquier orden', () => {
+  const ORDER_ID = 1017;
+  const ITEM_ID = 501;
+
+  const build = (opts: {
+    item?: Record<string, unknown> | null;
+    pendingTickets?: number[];
+  }) => {
+    const txMock: any = {
+      order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      kitchen_ticket_items: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue(
+            (opts.pendingTickets ?? []).map((id) => ({ kitchen_ticket_id: id })),
+          ),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prismaMock: any = {
+      order_items: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(
+            opts.item === undefined
+              ? { id: ITEM_ID, cancelled_at: null }
+              : opts.item,
+          ),
+      },
+      $transaction: jest.fn((cb: any) => cb(txMock)),
+    };
+    const kitchenFireService = {
+      emitTicketUpdatedEvent: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      kitchenFireService as any,
+    );
+    return { service, prismaMock, txMock, kitchenFireService };
+  };
+
+  it('happy path: trims, persists, copies to pending KDS rows and emits once per distinct ticket', async () => {
+    const { service, prismaMock, txMock, kitchenFireService } = build({
+      pendingTickets: [77, 77, 78],
+    });
+
+    const result = await service.updateItemNotes(ORDER_ID, ITEM_ID, '  sin cebolla  ');
+
+    expect(result).toEqual({ id: ITEM_ID, notes: 'sin cebolla' });
+    expect(prismaMock.order_items.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: ITEM_ID, order_id: ORDER_ID } }),
+    );
+    expect(txMock.order_items.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: ITEM_ID, order_id: ORDER_ID },
+        data: expect.objectContaining({ notes: 'sin cebolla' }),
+      }),
+    );
+    expect(txMock.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
+      where: { order_item_id: ITEM_ID, status: 'pending' },
+      data: { notes: 'sin cebolla' },
+    });
+    expect(kitchenFireService.emitTicketUpdatedEvent).toHaveBeenCalledTimes(2);
+    expect(kitchenFireService.emitTicketUpdatedEvent).toHaveBeenCalledWith(77);
+    expect(kitchenFireService.emitTicketUpdatedEvent).toHaveBeenCalledWith(78);
+  });
+
+  it('empty string clears the note and does not emit when no pending ticket exists', async () => {
+    const { service, kitchenFireService } = build({});
+    const result = await service.updateItemNotes(ORDER_ID, ITEM_ID, '');
+    expect(result).toEqual({ id: ITEM_ID, notes: null });
+    expect(kitchenFireService.emitTicketUpdatedEvent).not.toHaveBeenCalled();
+  });
+
+  it('404 ORD_ITEM_NOTES_NOT_FOUND_001 when the item is not on that order, without mutating', async () => {
+    const { service, prismaMock } = build({ item: null });
+    const err: any = await service
+      .updateItemNotes(ORDER_ID, 999, 'x')
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(VendixHttpException);
+    expect(err.errorCode).toBe('ORD_ITEM_NOTES_NOT_FOUND_001');
+    expect(err.getStatus()).toBe(404);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('409 ORD_ITEM_NOTES_CANCELLED_001 when the item is cancelled, without mutating', async () => {
+    const { service, prismaMock } = build({
+      item: { id: ITEM_ID, cancelled_at: new Date() },
+    });
+    const err: any = await service
+      .updateItemNotes(ORDER_ID, ITEM_ID, 'x')
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(VendixHttpException);
+    expect(err.errorCode).toBe('ORD_ITEM_NOTES_CANCELLED_001');
+    expect(err.getStatus()).toBe(409);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });

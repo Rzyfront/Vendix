@@ -170,13 +170,17 @@ export interface PaymentSubmit {
    */
   tipType?: 'percentage' | 'fixed';
   /**
-   * T1 — valor base de la propina. Si `tipType='percentage'`, el %
-   * aplicado (0-100). Si `tipType='fixed'`, el monto (en ese caso
-   * coincide con `tip`). Cuando el collector resuelve el % a monto
-   * antes de emitir, persiste el monto final (regla del dueño: la
+   * T1 — valor CRUDO de la propina. Si `tipType='percentage'`, el %
+   * aplicado (0-100). Si `tipType='fixed'`, el monto (coincide con
+   * `tip`). `tip` siempre lleva el monto ya resuelto (regla del dueño: la
    * propina pactada no puede moverse si cambia el subtotal).
    */
   tipValue?: number;
+  /**
+   * true cuando la propina viaja tal cual la sugerida por la tienda: casilla
+   * «Pago incluye propina» marcada y tipo/valor sin editar.
+   */
+  tipFromSuggested?: boolean;
   /**
    * T1 — id del mesero que recibe la propina. Opcional: el mostrador
    * sin meseros puede cobrar sin este dato. El backend lo persiste

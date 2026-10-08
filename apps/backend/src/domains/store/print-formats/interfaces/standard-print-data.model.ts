@@ -62,6 +62,11 @@ export interface StandardPrintItem {
   notes?: string;
   modifiers?: string[];
   /**
+   * Rótulo de empaque por plato de la comanda de cocina ("ENVÍO" /
+   * "PARA LLEVAR"). Solo `kitchen_ticket` lo llena; vacío = consumo en mesa.
+   */
+  packaging_label?: string;
+  /**
    * CP-DTLP-20260827 (Phase B.4): cantidad despachada del ítem (logística).
    * Solo `dispatch_ticket` la usa hoy; los formatos comerciales siguen con
    * `quantity` como cant. pedida. OPCIONAL para no romper los otros nueve
@@ -140,6 +145,16 @@ export interface StandardPrintDataModel {
      * "Datos del Cliente" (`customer`), porque no es un cliente formal.
      */
     customer_alias?: string;
+    /**
+     * Campos opcionales exclusivos de la comanda de cocina (`kitchen_ticket`).
+     * `is_kitchen_ticket` es la marca con la que el compositor activa su
+     * render específico sin alterar los otros formatos.
+     */
+    is_kitchen_ticket?: boolean;
+    order_number?: string;
+    daily_number?: number;
+    customer_name?: string;
+    service_type_label?: string;
   };
   fiscal?: {
     cufe?: string;
@@ -240,6 +255,17 @@ export interface StandardPrintDataModel {
     /** Total fiscal + propina (lo que el cliente pagó). Sólo con `tip_outside_total`. */
     total_paid?: number;
     total_paid_formatted?: string;
+    /**
+     * Propina SUGERIDA (informativa, no cobrada). Sólo se llena cuando la orden
+     * no tiene propina real y la tienda configuró `pos.tips.suggested_*`. No
+     * altera `grand_total`: el compositor la pinta tras el TOTAL.
+     */
+    suggested_tip_amount?: number;
+    suggested_tip_amount_formatted?: string;
+    /** Ej. "Propina sugerida (10%)", o "Propina sugerida" si es monto fijo. */
+    suggested_tip_label?: string;
+    total_with_suggested_tip?: number;
+    total_with_suggested_tip_formatted?: string;
   };
   custom_variables?: Record<string, any>;
 }

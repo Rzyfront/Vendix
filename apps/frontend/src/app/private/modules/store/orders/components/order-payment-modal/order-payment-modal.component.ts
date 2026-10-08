@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   effect,
+  inject,
   input,
   output,
   untracked,
@@ -26,6 +27,7 @@ import { Order } from '../../interfaces/order.interface';
 import { SETTLED_PAYMENT_STATES_FE } from '../../utils/order-settlement.util';
 import { StorePaymentMethod } from '../../../settings/payments/interfaces/payment-methods.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 /**
  * Contrato congelado con el backend (plan pos-draft-without-cash-session,
@@ -109,6 +111,15 @@ export class OrderPaymentModalComponent {
   readonly paymentSubmitted = output<PaymentSubmit>();
 
   private readonly collector = viewChild<PaymentCollectorComponent>('collector');
+
+  private readonly settingsFacade = inject(StoreSettingsFacade);
+  /** Política de propina configurada (el `allowTip` del template es el techo). */
+  protected readonly tipPolicy = this.settingsFacade.tipPolicy;
+  /** Base bruta de productos (la misma del backend): subtotal + IVA de la orden. */
+  protected readonly tipBase = computed<number>(() => {
+    const order = this.order();
+    return Number(order?.subtotal_amount ?? 0) + Number(order?.tax_amount ?? 0);
+  });
 
   constructor() {
     // Fase 2 (paso 8): en el cobro manual se preselecciona el método del pago

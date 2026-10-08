@@ -136,7 +136,6 @@
     "@types/sharp": "^0.31.1",
     "@types/supertest": "^6.0.2",
     "@types/web-push": "^3.6.4",
-    "@types/xlsx": "^0.0.35",
     "dotenv": "^16.4.7",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",

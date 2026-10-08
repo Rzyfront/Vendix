@@ -161,6 +161,9 @@ export class GlobalPrismaService extends BasePrismaService {
   get reviews() {
     return this.baseClient.reviews;
   }
+  get order_reviews() {
+    return this.baseClient.order_reviews;
+  }
 
   get user_settings() {
     return this.baseClient.user_settings;

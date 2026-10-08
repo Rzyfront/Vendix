@@ -700,7 +700,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
 
     await service.forward('Cra 13 # 62-40, Bogotá, Colombia');
     expect(redis.set).toHaveBeenCalledWith(
-      expect.stringContaining('geocode:fwd:v5:'),
+      expect.stringContaining('geocode:fwd:v6:'),
       expect.any(String),
       'EX',
       604800,
@@ -710,7 +710,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
     await service.forward('texto sin formato DANE, Bogotá, Colombia');
     expect(redis.set).toHaveBeenCalledWith(
-      expect.stringContaining('geocode:fwd:v5:'),
+      expect.stringContaining('geocode:fwd:v6:'),
       expect.any(String),
       'EX',
       21600,
@@ -771,7 +771,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     const fwdKeys = new Set(
       redis.set.mock.calls
         .map(([key]) => String(key))
-        .filter((key) => key.startsWith('geocode:fwd:v5:')),
+        .filter((key) => key.startsWith('geocode:fwd:v6:')),
     );
     expect(fwdKeys.size).toBe(1);
     for (const key of fwdKeys) expect(key).not.toContain('bias:');
@@ -786,7 +786,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
 
     const fwdKey = redis.set.mock.calls
       .map(([key]) => String(key))
-      .find((key) => key.startsWith('geocode:fwd:v5:'));
+      .find((key) => key.startsWith('geocode:fwd:v6:'));
     expect(fwdKey).toBeDefined();
     expect(fwdKey).toContain('bias:4.61,-74.10');
   });
@@ -989,5 +989,48 @@ describe('GeocodingService.forward — Google fallback integration (real GoogleG
     expect(result.source).toBe('osm');
     expect(result.precision).toBe('street');
     expect(result.lat).toBeCloseTo(4.65);
+  });
+});
+
+describe('GeocodingService.municipalityCenter', () => {
+  let service: GeocodingService;
+
+  beforeEach(() => {
+    const redis = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue('OK'),
+    };
+    service = new GeocodingService(
+      redis as never,
+      { geocode: jest.fn().mockResolvedValue(null) } as never,
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('returns the center of the resolved bbox', async () => {
+    const spy = jest
+      .spyOn(service as any, 'resolveMunicipalityBbox')
+      .mockResolvedValue({ south: 11.0, north: 12.0, west: -73.0, east: -72.0 });
+
+    const center = await service.municipalityCenter(' Riohacha ', ' La Guajira ');
+
+    expect(center).toEqual({ lat: 11.5, lng: -72.5 });
+    expect(spy).toHaveBeenCalledWith('Riohacha', 'La Guajira', expect.anything());
+  });
+
+  it('returns null when the bbox cannot be resolved', async () => {
+    jest.spyOn(service as any, 'resolveMunicipalityBbox').mockResolvedValue(null);
+
+    expect(await service.municipalityCenter('Riohacha', null)).toBeNull();
+  });
+
+  it('returns null for an unusable city without resolving anything', async () => {
+    const spy = jest.spyOn(service as any, 'resolveMunicipalityBbox');
+
+    expect(await service.municipalityCenter('  ', 'La Guajira')).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
   });
 });

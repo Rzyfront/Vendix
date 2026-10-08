@@ -38,6 +38,13 @@ export class ReportDataAdapterService {
       return this.adaptAccountsPayableAging(rawData);
     }
 
+    if (report.rowsPath) {
+      const nested = rawData?.data?.[report.rowsPath] ?? rawData?.[report.rowsPath];
+      if (Array.isArray(nested)) {
+        rawData = { data: nested };
+      }
+    }
+
     const normalized = this.normalizeResponse(rawData);
     const reportType = this.resolveType(report, normalized);
 

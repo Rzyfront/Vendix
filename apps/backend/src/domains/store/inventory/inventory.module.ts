@@ -16,6 +16,8 @@ import { SuppliersModule } from './suppliers/suppliers.module';
 import { InventoryAdjustmentsModule } from './adjustments/inventory-adjustments.module';
 import { InventoryController } from './inventory.controller';
 import { InventoryValidationService } from './services/inventory-validation.service';
+import { InventoryStatsService } from './services/inventory-stats.service';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { InventoryIntegrationService } from './shared/services/inventory-integration.service';
 import { StockLevelManager } from './shared/services/stock-level-manager.service';
 import { StockValidatorService } from './shared/services/stock-validator.service';
@@ -35,6 +37,9 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     InventoryAdjustmentsModule,
     InventorySerialNumbersModule,
     PrismaModule,
+    // Solo para reutilizar InventoryAnalyticsService (definición única del
+    // resumen de stock). AnalyticsModule no importa InventoryModule: sin ciclo.
+    AnalyticsModule,
     // O-14 `manage_stock_transfers`: el flujo draft→transit→complete/cancel
     // vive en `StockTransfersService` (que muta vía `StockLevelManager`).
     // Sin ciclo: StockTransfersModule solo importa Prisma/Settings.
@@ -43,6 +48,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
   controllers: [InventoryController],
   providers: [
     InventoryValidationService,
+    InventoryStatsService,
     InventoryIntegrationService,
     StockLevelManager,
     StockValidatorService,

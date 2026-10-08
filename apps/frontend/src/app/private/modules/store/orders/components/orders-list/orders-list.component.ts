@@ -46,6 +46,13 @@ import {
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { OrderPrintService } from '../../services/order-print.service';
 import { OrdersListSseService } from '../../services/orders-list-sse.service';
+import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
+import {
+  summarizeOrderKitchen,
+  kitchenProgressLabel,
+  kitchenStatusLabel,
+} from './order-kitchen-summary.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { environment } from '../../../../../../../environments/environment';
@@ -118,6 +125,9 @@ export class OrdersListComponent {
   // cerramos en `destroyRef.onDestroy` para que el ciclo de vida siga al
   // del componente (no del injector root).
   private ordersListSse = inject(OrdersListSseService);
+  private readonly recoveryBaseline = this.ordersListSse.recoveredConnection();
+  private kitchenTicketsService = inject(KitchenTicketsService);
+  private kitchenTicketPrint = inject(KitchenTicketPrintService);
   // T10 B3 — predicado único de industria (canónica: AuthFacade.isRestaurant).
   // Antes este componente era "presentacional: no consulta AuthFacade"; ese
   // límite se rompe porque la columna Mesa debe responder a la industria del
@@ -184,6 +194,146 @@ export class OrdersListComponent {
    * inyección (:77-82).
    */
   readonly canBulkOperations = input(false);
+
+  /** Permission is resolved by the orders host; visibility stays local to this store. */
+  readonly canCreateKitchenFire = input(false);
+  readonly firingOrderIds = signal<ReadonlySet<number>>(new Set());
+  readonly firedKitchenOrderIds = signal<ReadonlySet<number>>(new Set());
+  readonly staleKitchenOrderIds = signal<ReadonlySet<number>>(new Set());
+  private readonly hydrationVersions = new Map<number, number>();
+  private readonly hydrationQueue: number[] = [];
+  private readonly hydrationInFlight = new Set<number>();
+  private readonly hydrationRetries = new Map<number, number>();
+  private readonly hydrationRetryTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  private listLoadGeneration = 0;
+  readonly canShowKitchenFire = computed(
+    () =>
+      this.isRestaurant() &&
+      this.authFacade.isModuleVisible('restaurant_ops') &&
+      this.canCreateKitchenFire(),
+  );
+
+  readonly kitchenAction: TableAction = {
+    label: (order: Order) => this.kitchenActionLabel(order),
+    tooltip: (order: Order) => this.kitchenActionTooltip(order),
+    tooltipComponent: true,
+    tooltipColor: (order: Order) => this.kitchenTooltipColor(order),
+    icon: 'flame',
+    variant: (order: Order) => this.kitchenStatusColor(order),
+    show: (order: Order) =>
+      this.canShowKitchenFire() && this.kitchenSummary(order).eligibleItems.length > 0,
+    action: (order: Order) => this.firePendingKitchenItems(order),
+  };
+
+  private firePendingKitchenItems(order: Order): void {
+    if (this.staleKitchenOrderIds().has(order.id)) {
+      this.hydrationRetries.set(order.id, 0);
+      this.queueKitchenHydration(order.id);
+      this.toastService.info('Actualizando el estado de cocina…');
+      return;
+    }
+    const summary = this.kitchenSummary(order);
+    if (this.firingOrderIds().has(order.id)) return;
+    if (this.hasKitchenFireStarted(order) || summary.pendingItemIds.length === 0) {
+      return;
+    }
+
+    this.firingOrderIds.update((current) => new Set(current).add(order.id));
+    this.kitchenTicketsService
+      .fireOrderItems({ order_id: order.id, order_item_ids: summary.pendingItemIds })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.firedKitchenOrderIds.update((current) => new Set(current).add(order.id));
+          this.firingOrderIds.update((current) => {
+            const next = new Set(current);
+            next.delete(order.id);
+            return next;
+          });
+          this.toastService.success(`Platos de ${order.order_number} enviados a cocina`);
+          let printFailureReported = false;
+          this.kitchenTicketPrint.printAfterFire(
+            result.kitchen_ticket_ids ?? [result.kitchen_ticket_id],
+            () => {
+              if (printFailureReported) return;
+              printFailureReported = true;
+              this.toastService.warning(
+                `${order.order_number} ya fue enviada a cocina. Abre el detalle de la orden e imprime la comanda; no vuelvas a enviarla.`,
+              );
+            },
+          );
+          if (result.stock_warnings?.length) {
+            this.toastService.warning('La cocina recibió la orden, pero hay advertencias de inventario.');
+          }
+          this.queueKitchenHydration(order.id);
+        },
+        error: (error: unknown) => {
+          this.firingOrderIds.update((current) => {
+            const next = new Set(current);
+            next.delete(order.id);
+            return next;
+          });
+          this.toastService.error(
+            extractApiErrorMessage(error) || 'No se pudo enviar a cocina',
+          );
+          // Reconcile potentially stale row state after conflicts or validation errors.
+          this.queueKitchenHydration(order.id);
+        },
+      });
+  }
+
+  private kitchenSummary(order: Order) {
+    return summarizeOrderKitchen(order.order_items ?? []);
+  }
+
+  private kitchenStatusColor(order: Order): 'warning' | 'muted' | 'order-pending' | 'order-processing' | 'order-ready' | 'order-delivered' | 'order-cancelled' | 'primary' {
+    if (this.staleKitchenOrderIds().has(order.id)) return 'warning';
+    if (this.firingOrderIds().has(order.id)) return 'muted';
+    switch (this.kitchenSummary(order).status) {
+      case 'pending': return 'order-pending';
+      case 'in_preparation': return 'order-processing';
+      case 'ready': return 'order-ready';
+      case 'delivered': return 'order-delivered';
+      case 'cancelled': return 'order-cancelled';
+      default: return 'primary';
+    }
+  }
+
+  private kitchenTooltipColor(order: Order): 'warning' | 'order-pending' | 'order-processing' | 'order-ready' | 'order-delivered' | 'order-cancelled' {
+    if (this.staleKitchenOrderIds().has(order.id)) return 'warning';
+    switch (this.kitchenSummary(order).status) {
+      case 'pending': return 'order-pending';
+      case 'in_preparation': return 'order-processing';
+      case 'ready': return 'order-ready';
+      case 'delivered': return 'order-delivered';
+      default: return 'order-cancelled';
+    }
+  }
+
+  private kitchenActionLabel(order: Order): string {
+    const summary = this.kitchenSummary(order);
+    const progress = `${kitchenStatusLabel(summary.status)} · ${kitchenProgressLabel(summary)}`;
+    if (this.staleKitchenOrderIds().has(order.id)) return `Estado desactualizado · Actualizar · ${order.order_number}`;
+    if (this.firingOrderIds().has(order.id)) return `Enviando · ${progress} · ${order.order_number}`;
+    if (this.hasKitchenFireStarted(order) || summary.pendingItemIds.length === 0) return `Cocina · ${progress} · ${order.order_number}`;
+    if (summary.pendingItemIds.length) return `Enviar a cocina · ${progress} · ${order.order_number}`;
+    return `Cocina · ${progress} · ${order.order_number}`;
+  }
+
+  private kitchenActionTooltip(order: Order): string {
+    const summary = this.kitchenSummary(order);
+    if (this.staleKitchenOrderIds().has(order.id)) return 'No se pudo confirmar el estado de cocina. Activa para reintentar la actualización.';
+    if (this.firingOrderIds().has(order.id)) return 'Envío a cocina en curso';
+    if (!this.hasKitchenFireStarted(order) && summary.pendingItemIds.length) {
+      return `Enviar ${summary.pendingQuantity} unidad(es) pendiente(s) de ${order.order_number}. Estado: ${kitchenStatusLabel(summary.status)}; ${kitchenProgressLabel(summary)}.`;
+    }
+    return `${order.order_number}: ${kitchenStatusLabel(summary.status)}; ${kitchenProgressLabel(summary)}. Solo informativo; no volverá a enviar platos.`;
+  }
+
+  private hasKitchenFireStarted(order: Order): boolean {
+    return this.firedKitchenOrderIds().has(order.id) ||
+      this.kitchenSummary(order).eligibleItems.some((item) => item.inventory_consumed_at_fire === true);
+  }
 
   /** QUI-599: único punto de entrada a la vista de operaciones masivas. */
   navigateToBulkPage(): void {
@@ -472,34 +622,45 @@ export class OrdersListComponent {
     return base;
   });
 
-  actions: TableAction[] = [
-    {
-      label: 'View Details',
-      icon: 'eye',
-      action: (order: Order) => this.viewOrderDetails(order),
-      variant: 'secondary',
-    },
-    {
-      label: 'Imprimir',
-      icon: 'printer',
-      action: (order: Order) =>
-        this.printService.printOrder(order).catch(() => {
-          this.toastService.error(
-            'No se pudo imprimir la orden: reintenta; si persiste, revisa el Hub de formatos de impresión.',
-          );
-        }),
-      variant: 'info',
-      show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
-    },
-    {
-      label: 'Cancel Order',
-      icon: 'x-circle',
-      action: (order: Order) => this.cancelOrder(order),
-      variant: 'danger',
-      show: (order: Order) =>
-        order.cancellation_policy?.can_cancel === true,
-    },
-  ];
+  readonly viewAction: TableAction = {
+    label: 'View Details',
+    icon: 'eye',
+    action: (order: Order) => this.viewOrderDetails(order),
+    variant: 'secondary',
+  };
+
+  readonly printAction: TableAction = {
+    label: 'Imprimir',
+    icon: 'printer',
+    action: (order: Order) =>
+      this.printService.printOrder(order).catch(() => {
+        this.toastService.error(
+          'No se pudo imprimir la orden: reintenta; si persiste, revisa el Hub de formatos de impresión.',
+        );
+      }),
+    variant: 'info',
+    show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
+  };
+
+  readonly cancelAction: TableAction = {
+    label: 'Cancelar orden',
+    icon: 'x-circle',
+    action: (order: Order) => this.cancelOrder(order),
+    variant: 'danger',
+    show: (order: Order) =>
+      order.cancellation_policy?.can_cancel === true,
+  };
+
+  actions: TableAction[] = [this.viewAction, this.printAction, this.cancelAction];
+
+  /** Keep desktop configuration intact and mobile core actions ahead of extras. */
+  readonly mobileActions = computed<TableAction[]>(() => {
+    const core = [this.viewAction, this.printAction, this.cancelAction];
+    return [...core, ...this.actions.filter((action) => !core.includes(action))];
+  });
+  readonly mobileDirectActionsCount = computed(() =>
+    Math.min(4, this.mobileActions().length),
+  );
 
   // Card configuration for mobile
   // T10 B3 — cardConfig ahora es computed. detailKeys incluye Mesa solo
@@ -576,6 +737,8 @@ export class OrdersListComponent {
   });
 
   constructor() {
+    this.actions = [this.kitchenAction, ...this.actions];
+
     // Persistencia de filtros vía URL query params (QUI-778 admin-orders-filters).
     // Patrón canónico: `org-invoice-list.component.ts:373-390`.
     //
@@ -766,12 +929,32 @@ export class OrdersListComponent {
       this.fetchAndPrependLiveOrder(orderId, orderNumber);
     });
 
+    effect(() => {
+      const events = this.ordersListSse.hydrationEvents();
+      if (events.length === 0) return;
+      this.ordersListSse.hydrationEvents.set([]);
+      for (const evt of events) this.queueKitchenHydration(evt.order_id);
+    });
+
+    effect(() => {
+      const recovered = this.ordersListSse.recoveredConnection();
+      if (recovered > this.recoveryBaseline) {
+        // Reconcile exactly once per successful reconnect using the live
+        // filters/page; loadOrders does not alter pagination or scroll.
+        this.loadOrders();
+      }
+    });
+
     // QUI-777: abrir/cerrar el stream al ciclo de vida del componente.
     // root-provided + connect/disconnect manual: si el usuario navega a
     // otra ruta, la suscripción se cierra limpiamente (el subject
     // compartido por tienda decrementa su refcount vía `req.close`).
     this.ordersListSse.connect();
-    this.destroyRef.onDestroy(() => this.ordersListSse.disconnect());
+    this.destroyRef.onDestroy(() => {
+      this.ordersListSse.disconnect();
+      for (const timer of this.hydrationRetryTimers.values()) clearTimeout(timer);
+      this.hydrationRetryTimers.clear();
+    });
 
     this.loadSeen();
     this.http
@@ -1243,6 +1426,7 @@ export class OrdersListComponent {
 
   // Load orders with current filters
   loadOrders(): void {
+    this.listLoadGeneration += 1;
     this.loading.set(true);
 
     this.ordersService
@@ -1317,14 +1501,95 @@ export class OrdersListComponent {
               customer_name: this.resolveCustomerName(order),
             })),
           );
+          const visibleIds = new Set<number>(normalizedOrders.map((order: any) => order.id));
+          this.hydrationQueue.splice(0, this.hydrationQueue.length,
+            ...this.hydrationQueue.filter((id) => visibleIds.has(id)));
+          for (const id of this.hydrationVersions.keys()) {
+            if (visibleIds.has(id) || this.hydrationInFlight.has(id)) continue;
+            this.hydrationVersions.delete(id);
+            this.hydrationRetries.delete(id);
+            const timer = this.hydrationRetryTimers.get(id);
+            if (timer) clearTimeout(timer);
+            this.hydrationRetryTimers.delete(id);
+          }
+          this.staleKitchenOrderIds.set(new Set());
           this.loading.set(false);
+          this.pumpKitchenHydration();
         },
         error: (error: any) => {
           console.error('Error loading orders:', error);
           this.toastService.error('Failed to load orders. Please try again.');
           this.loading.set(false);
+          this.pumpKitchenHydration();
         },
       });
+  }
+
+  private queueKitchenHydration(orderId: number): void {
+    if (!Number.isSafeInteger(orderId) || orderId <= 0 ||
+        !this.orders().some((order) => order.id === orderId)) return;
+    const pendingRetry = this.hydrationRetryTimers.get(orderId);
+    if (pendingRetry) {
+      clearTimeout(pendingRetry);
+      this.hydrationRetryTimers.delete(orderId);
+    }
+    this.hydrationVersions.set(orderId, (this.hydrationVersions.get(orderId) ?? 0) + 1);
+    if (!this.hydrationQueue.includes(orderId) && !this.hydrationInFlight.has(orderId)) {
+      this.hydrationQueue.push(orderId);
+    }
+    this.pumpKitchenHydration();
+  }
+
+  private pumpKitchenHydration(): void {
+    if (this.loading()) return;
+    while (this.hydrationInFlight.size < 3 && this.hydrationQueue.length > 0) {
+      const orderId = this.hydrationQueue.shift()!;
+      if (!this.orders().some((order) => order.id === orderId)) continue;
+      this.hydrationInFlight.add(orderId);
+      const version = this.hydrationVersions.get(orderId) ?? 0;
+      const listGeneration = this.listLoadGeneration;
+      this.ordersService.getOrderById(String(orderId))
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (updated: any) => {
+            if (this.listLoadGeneration === listGeneration &&
+                this.hydrationVersions.get(orderId) === version &&
+                this.orders().some((order) => order.id === orderId) && updated?.id === orderId) {
+              const row = this.normalizeLiveOrderRow(updated);
+              this.orders.update((rows) => rows.map((current) => current.id === orderId ? row : current));
+              this.staleKitchenOrderIds.update((ids) => { const next = new Set(ids); next.delete(orderId); return next; });
+              this.hydrationRetries.delete(orderId);
+            }
+            this.finishKitchenHydration(orderId, version);
+          },
+          error: () => {
+            this.finishKitchenHydration(orderId, version);
+            if (this.hydrationVersions.get(orderId) !== version) return;
+            const retries = this.hydrationRetries.get(orderId) ?? 0;
+            if (!this.orders().some((order) => order.id === orderId)) return;
+            if (retries < 2) {
+              this.hydrationRetries.set(orderId, retries + 1);
+              const timer = setTimeout(() => {
+                this.hydrationRetryTimers.delete(orderId);
+                this.queueKitchenHydration(orderId);
+              }, 500 * (retries + 1));
+              this.hydrationRetryTimers.set(orderId, timer);
+            } else {
+              this.staleKitchenOrderIds.update((ids) => new Set(ids).add(orderId));
+              this.toastService.warning('No se pudo actualizar el estado de cocina. Usa la acción de la orden para reintentar.');
+            }
+          },
+        });
+    }
+  }
+
+  private finishKitchenHydration(orderId: number, completedVersion: number): void {
+    this.hydrationInFlight.delete(orderId);
+    if (this.hydrationVersions.get(orderId) !== completedVersion &&
+        this.orders().some((order) => order.id === orderId) && !this.hydrationQueue.includes(orderId)) {
+      this.hydrationQueue.push(orderId);
+    }
+    this.pumpKitchenHydration();
   }
 
   /**

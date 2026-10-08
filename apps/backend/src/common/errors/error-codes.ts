@@ -539,6 +539,16 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cart not found',
   },
+  ECOM_CART_005: {
+    code: 'ECOM_CART_005',
+    httpStatus: 400,
+    devMessage: 'Cart item update requires quantity or notes',
+  },
+  ECOM_CART_NOTES_001: {
+    code: 'ECOM_CART_NOTES_001',
+    httpStatus: 400,
+    devMessage: 'Item notes cannot contain reserved markers',
+  },
   ECOM_PRODUCT_001: {
     code: 'ECOM_PRODUCT_001',
     httpStatus: 404,
@@ -4396,6 +4406,33 @@ export const ErrorCodes = {
     devMessage: 'Las reseñas están desactivadas para esta tienda',
   },
 
+  // Reseñas de experiencia de compra (order_reviews)
+  ORD_REVIEW_NOT_FOUND: {
+    code: 'ORD_REVIEW_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Pedido no encontrado para reseñar',
+  },
+  ORD_REVIEW_ALREADY_EXISTS: {
+    code: 'ORD_REVIEW_ALREADY_EXISTS',
+    httpStatus: 409,
+    devMessage: 'Este pedido ya tiene una reseña de experiencia',
+  },
+  ORD_REVIEW_ORDER_INVALID_STATE: {
+    code: 'ORD_REVIEW_ORDER_INVALID_STATE',
+    httpStatus: 400,
+    devMessage: 'Un pedido cancelado o reembolsado no se puede reseñar',
+  },
+  ORD_REVIEW_PRODUCT_NOT_IN_ORDER: {
+    code: 'ORD_REVIEW_PRODUCT_NOT_IN_ORDER',
+    httpStatus: 400,
+    devMessage: 'El producto no hace parte de este pedido',
+  },
+  ORD_REVIEW_PRODUCT_NOT_ALLOWED: {
+    code: 'ORD_REVIEW_PRODUCT_NOT_ALLOWED',
+    httpStatus: 400,
+    devMessage: 'No se puede reseñar este producto en este momento',
+  },
+
   // AI Agent
   AI_AGENT_001: {
     code: 'AI_AGENT_001',
@@ -5649,6 +5686,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Todos los items ya fueron enviados a cocina (idempotente)',
   },
+  KITCHEN_FIRE_NOT_ELIGIBLE_001: {
+    code: 'KITCHEN_FIRE_NOT_ELIGIBLE_001',
+    httpStatus: 409,
+    devMessage: 'La orden o uno de sus items no es elegible para enviar a cocina',
+  },
   // QUI-651 — el fire rutea cada item a su estacion y cae en el KDS por defecto
   // cuando el plato no declara uno. Sin KDS por defecto no hay a donde rutear:
   // se falla fuerte en vez de mandar el ticket a un tablero que nadie mira.
@@ -5896,6 +5938,16 @@ export const ErrorCodes = {
     code: 'ORD_ITEM_CANCEL_PAID_001',
     httpStatus: 409,
     devMessage: 'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+  },
+  ORD_ITEM_NOTES_NOT_FOUND_001: {
+    code: 'ORD_ITEM_NOTES_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Order item not found on this order',
+  },
+  ORD_ITEM_NOTES_CANCELLED_001: {
+    code: 'ORD_ITEM_NOTES_CANCELLED_001',
+    httpStatus: 409,
+    devMessage: 'Cannot edit the notes of a cancelled order item',
   },
   ORD_ITEM_CANCEL_STATE_001: {
     code: 'ORD_ITEM_CANCEL_STATE_001',
@@ -6447,6 +6499,20 @@ export const ErrorCodes = {
     code: 'ORD_PAYMENT_CANCEL_FINISHED_001',
     httpStatus: 409,
     devMessage: 'La orden ya está finalizada; usa un reembolso.',
+  },
+
+  // Propina gobernada por configuración de la tienda (pos.tips). Con ambos
+  // flags apagados (registrar propinas y propina sugerida) no se acepta
+  // propina > 0; con sólo la sugerida activa, el monto debe ser el sugerido.
+  TIP_NOT_ENABLED_001: {
+    code: 'TIP_NOT_ENABLED_001',
+    httpStatus: 422,
+    devMessage: 'La propina no está habilitada en esta tienda.',
+  },
+  TIP_NOT_SUGGESTED_001: {
+    code: 'TIP_NOT_SUGGESTED_001',
+    httpStatus: 422,
+    devMessage: 'La propina debe ser la sugerida por la tienda.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

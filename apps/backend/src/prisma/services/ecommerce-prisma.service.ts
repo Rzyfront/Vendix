@@ -15,6 +15,7 @@ export class EcommercePrismaService extends BasePrismaService {
     'tax_rates',
     'legal_documents',
     'reviews',
+    'order_reviews',
   ];
 
   // Modelos que filtran por store_id Y user_id (si hay auth)
@@ -235,6 +236,9 @@ export class EcommercePrismaService extends BasePrismaService {
   }
   get reviews() {
     return this.scoped_client.reviews;
+  }
+  get order_reviews() {
+    return this.scoped_client.order_reviews;
   }
   get review_votes() {
     return this.baseClient.review_votes;

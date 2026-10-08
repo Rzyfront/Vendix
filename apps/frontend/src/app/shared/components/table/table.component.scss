@@ -741,6 +741,36 @@
       }
     }
 
+    &.action-order-pending {
+      color: #374151;
+      background: linear-gradient(135deg, color-mix(in srgb, #f3f4f6 65%, var(--color-surface)), color-mix(in srgb, #f3f4f6 100%, var(--color-surface)));
+      &:hover:not(:disabled) { background: #f3f4f6; }
+    }
+
+    &.action-order-processing {
+      color: #92400e;
+      background: linear-gradient(135deg, color-mix(in srgb, #fef3c7 65%, var(--color-surface)), color-mix(in srgb, #fef3c7 100%, var(--color-surface)));
+      &:hover:not(:disabled) { background: #fef3c7; }
+    }
+
+    &.action-order-ready {
+      color: #065f46;
+      background: linear-gradient(135deg, color-mix(in srgb, #d1fae5 65%, var(--color-surface)), color-mix(in srgb, #d1fae5 100%, var(--color-surface)));
+      &:hover:not(:disabled) { background: #d1fae5; }
+    }
+
+    &.action-order-delivered {
+      color: #075985;
+      background: linear-gradient(135deg, color-mix(in srgb, #e0f2fe 65%, var(--color-surface)), color-mix(in srgb, #e0f2fe 100%, var(--color-surface)));
+      &:hover:not(:disabled) { background: #e0f2fe; }
+    }
+
+    &.action-order-cancelled {
+      color: #b91c1c;
+      background: linear-gradient(135deg, color-mix(in srgb, #fee2e2 65%, var(--color-surface)), color-mix(in srgb, #fee2e2 100%, var(--color-surface)));
+      &:hover:not(:disabled) { background: #fee2e2; }
+    }
+
     // Variante gaming
     &.action-gaming {
       color: var(--color-gaming, #8b5cf6);

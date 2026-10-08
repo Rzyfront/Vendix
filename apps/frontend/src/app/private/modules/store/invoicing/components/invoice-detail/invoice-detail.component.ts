@@ -13,6 +13,7 @@ import {
 } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Actions, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import {
@@ -58,6 +59,7 @@ import {
 } from './invoice-fiscal-status.util';
 import { DianEventRegisterModalComponent } from './dian-event-register-modal.component';
 import { InvoiceNoteCreateComponent } from '../invoice-note-create/invoice-note-create.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -79,6 +81,8 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     NgClass,
     DatePipe,
     ModalComponent,
+    InputComponent,
+    ReactiveFormsModule,
     ButtonComponent,
     IconComponent,
     DianEventRegisterModalComponent,
@@ -1117,6 +1121,15 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                 {{ sending() ? 'Enviando…' : 'Reenviar a la DIAN' }}
               </app-button>
             }
+            @if (canDeliver()) {
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="openDeliverModal()">
+                <app-icon slot="icon" name="mail" [size]="14"></app-icon>
+                Reenviar por correo
+              </app-button>
+            }
             <!-- El pie solo ofrece el atajo cuando la nota SE PUEDE crear; la
                  explicación de por qué (y el par crédito/débito completo) vive
                  arriba, en el bloque «Corrección fiscal», que sí se pinta
@@ -1182,6 +1195,41 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
             Cerrar
           </app-button>
         </div>
+      </div>
+    </app-modal>
+
+    <app-modal
+      [(isOpen)]="deliverModalOpen"
+      title="Reenviar factura por correo"
+      size="sm"
+    >
+      <div class="p-4 space-y-3">
+        <app-input
+          label="Correo electrónico de destino"
+          type="email"
+          placeholder="cliente@empresa.com"
+          [formControl]="deliverEmailControl"
+        ></app-input>
+        @if (deliverEmailControl.touched && deliverEmailControl.invalid) {
+          <p class="text-xs text-red-600">Ingresa un correo válido.</p>
+        }
+      </div>
+      <div slot="footer" class="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+        <app-button
+          variant="outline"
+          class="w-full sm:w-auto"
+          [disabled]="delivering()"
+          (clicked)="deliverModalOpen.set(false)">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          class="w-full sm:w-auto"
+          [loading]="delivering()"
+          [disabled]="delivering()"
+          (clicked)="confirmDeliver()">
+          Enviar
+        </app-button>
       </div>
     </app-modal>
 
@@ -1269,6 +1317,14 @@ export class InvoiceDetailComponent {
 
   /** Modal de nota crédito/débito, y con qué tipo se abre. */
   readonly noteModalOpen = signal(false);
+
+  /** Sub-modal de reenvio por correo (`POST :id/deliver`). */
+  readonly deliverModalOpen = signal(false);
+  readonly delivering = signal(false);
+  readonly deliverEmailControl = new FormControl('', {
+    nonNullable: true,
+    validators: [Validators.required, Validators.email],
+  });
   readonly noteModalType = signal<'credit' | 'debit'>('credit');
 
   /**
@@ -1976,6 +2032,12 @@ export class InvoiceDetailComponent {
   );
 
   /**
+   * Reenvio por correo: el backend solo rechaza `draft` (INVOICING_DELIVERY_002),
+   * pero el paquete util lleva CUFE/QR, que solo existen una vez la DIAN acepta.
+   */
+  readonly canDeliver = computed(() => this.detail()?.status === 'accepted');
+
+  /**
    * REENVÍO. `VALID_TRANSITIONS` del backend autoriza `rejected → sent`, que es
    * la única forma legítima de volver a intentar un documento que la DIAN
    * devolvió (corregido antes, se entiende). No existe endpoint de "resend".
@@ -2317,6 +2379,40 @@ export class InvoiceDetailComponent {
       navigator.clipboard.writeText(cufe);
       this.toast.success('CUFE copiado');
     }
+  }
+
+  openDeliverModal(): void {
+    this.deliverEmailControl.reset(this.acquirerEmail());
+    this.deliverModalOpen.set(true);
+  }
+
+  confirmDeliver(): void {
+    const inv = this.detail();
+    if (!inv || this.delivering()) {
+      return;
+    }
+    this.deliverEmailControl.markAsTouched();
+    if (this.deliverEmailControl.invalid) {
+      return;
+    }
+    this.delivering.set(true);
+    this.invoicingService
+      .deliverInvoice(inv.id, this.deliverEmailControl.value.trim())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.delivering.set(false);
+          this.deliverModalOpen.set(false);
+          this.toast.success(
+            response?.message ||
+              `Factura reenviada a ${response?.data?.recipient ?? 'el correo indicado'}`,
+          );
+        },
+        error: (error: unknown) => {
+          this.delivering.set(false);
+          this.toast.error(describeApiFailure(error).message);
+        },
+      });
   }
 
   /**

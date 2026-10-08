@@ -34,6 +34,7 @@ import { PosScaleService } from '../../../../pos/services/pos-scale.service';
 import { PosCashRegisterService } from '../../../../pos/services/pos-cash-register.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../../shared/components/dialog/dialog.service';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 @Component({
   selector: 'app-pos-settings-form',
@@ -43,6 +44,7 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
     SettingToggleComponent,
     ToggleComponent,
     SelectorComponent,
+    InputComponent,
     AlertBannerComponent,
     BadgeComponent,
     TooltipComponent,
@@ -77,6 +79,7 @@ export class PosSettingsForm implements OnInit {
   readonly cashRegisterEnabled = signal(false);
 
   private destroyRef = inject(DestroyRef);
+  private authFacade = inject(AuthFacade);
 
   constructor(
     private scaleService: PosScaleService,
@@ -92,6 +95,12 @@ export class PosSettingsForm implements OnInit {
           {
             ...current,
             business_hours: current.business_hours || this.getDefaultBusinessHours(),
+            tips: {
+              enabled: current.tips?.enabled ?? this.authFacade.isRestaurant(),
+              suggested_enabled: current.tips?.suggested_enabled ?? false,
+              suggested_type: current.tips?.suggested_type ?? 'percentage',
+              suggested_value: current.tips?.suggested_value ?? 10,
+            },
           },
           { emitEvent: false },
         );
@@ -144,6 +153,12 @@ export class PosSettingsForm implements OnInit {
       max_queue_size: new FormControl<number | null>(null),
       require_email: new FormControl<boolean | null>(null),
     }),
+    tips: new FormGroup({
+      enabled: new FormControl<boolean | null>(null),
+      suggested_enabled: new FormControl<boolean | null>(null),
+      suggested_type: new FormControl<'percentage' | 'fixed'>('percentage'),
+      suggested_value: new FormControl<number | null>(null),
+    }),
   });
 
   daysOfWeek = [
@@ -159,6 +174,11 @@ export class PosSettingsForm implements OnInit {
   scheduleModeOptions: SelectorOption[] = [
     { value: 'continuous', label: 'Continuo' },
     { value: 'custom', label: 'Personalizado' },
+  ];
+
+  tipTypeOptions: SelectorOption[] = [
+    { value: 'percentage', label: 'Porcentaje' },
+    { value: 'fixed', label: 'Monto fijo' },
   ];
 
   readonly MAX_BLOCKS_PER_DAY = 5;
@@ -296,6 +316,25 @@ export class PosSettingsForm implements OnInit {
     return this.form.get(
       'customer_queue.require_email',
     ) as FormControl<boolean>;
+  }
+
+  // Tips getters
+  get tipsEnabledControl(): FormControl<boolean> {
+    return this.form.get('tips.enabled') as FormControl<boolean>;
+  }
+
+  get tipsSuggestedEnabledControl(): FormControl<boolean> {
+    return this.form.get('tips.suggested_enabled') as FormControl<boolean>;
+  }
+
+  get tipsSuggestedTypeControl(): FormControl<'percentage' | 'fixed'> {
+    return this.form.get('tips.suggested_type') as FormControl<
+      'percentage' | 'fixed'
+    >;
+  }
+
+  get tipsSuggestedValueControl(): FormControl<number> {
+    return this.form.get('tips.suggested_value') as FormControl<number>;
   }
 
   get isWebSerialSupported(): boolean {

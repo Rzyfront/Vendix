@@ -4,6 +4,7 @@ import {
   DestroyRef,
   inject,
   signal,
+  computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -26,7 +27,10 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { CartPromotionsComponent } from '../../components/cart-promotions/cart-promotions.component';
-import { CartItemCardComponent } from '../../components/cart-item-card/cart-item-card.component';
+import {
+  OrderLineItemComponent,
+  cartItemToLineView,
+} from '../../components/order-line-item/order-line-item.component';
 import { CartMobileFooterComponent } from '../../components/cart-mobile-footer/cart-mobile-footer.component';
 import {
   CurrencyPipe,
@@ -45,7 +49,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     ProductCarouselComponent,
     ProductQuickViewModalComponent,
     CartPromotionsComponent,
-    CartItemCardComponent,
+    OrderLineItemComponent,
     CartMobileFooterComponent,
     CurrencyPipe,
   ],
@@ -56,6 +60,15 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 export class CartComponent implements OnInit {
   readonly cart = signal<Cart | null>(null);
   readonly is_loading = signal(true);
+
+  /** Línea + su vista neutra, recalculada sólo cuando cambia el carrito. */
+  readonly lines = computed(() =>
+    (this.cart()?.items ?? []).map((item) => ({
+      item,
+      key: this.lineKey(item),
+      view: cartItemToLineView(item),
+    })),
+  );
 
   readonly is_authenticated = signal(false);
   /**
@@ -278,6 +291,22 @@ export class CartComponent implements OnInit {
         item.price_tier?.id ?? null,
       )
     );
+  }
+
+  updateNote(item: CartItem, note: string | null): void {
+    this.updating_line_key.set(this.lineKey(item));
+    const result = this.cart_service.updateItemNotes(item, note);
+    if (result) {
+      result.subscribe({
+        next: () => this.updating_line_key.set(null),
+        error: (err: any) => {
+          this.updating_line_key.set(null);
+          this.toast.error(this.extractErrorMessage(err), 'Error al guardar la nota');
+        },
+      });
+    } else {
+      this.updating_line_key.set(null);
+    }
   }
 
   removeItem(item: CartItem): void {

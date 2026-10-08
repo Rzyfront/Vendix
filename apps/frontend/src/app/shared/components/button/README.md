@@ -30,6 +30,8 @@ Boton configurable con variantes de estilo, tamanos y estados de carga.
 | `showTextWhileLoading` | `boolean`                         | `false`   | Mantiene el texto visible durante loading                                                                                |
 | `fullWidth`            | `boolean`                         | `false`   | Ocupa todo el ancho disponible                                                                                           |
 | `customClasses`        | `string`                          | `''`      | Clases CSS adicionales                                                                                                   |
+| `ariaLabel`            | `string`                          | `''`      | Nombre accesible para botones cuyo texto no es visible                                                                   |
+| `ariaPressed`          | `boolean \| null`                 | -         | Estado de botón toggle; se refleja en el `<button>` interno                                                              |
 
 ## Outputs
 

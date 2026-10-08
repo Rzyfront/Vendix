@@ -27,6 +27,12 @@ import { DIAN_DOCUMENT_TYPES } from '../providers/dian-direct/constants/dian-doc
 // PDF persistido en S3 al momento de emitir (que pudo haber quedado en un
 // formato anterior si la tienda cambió su configuración).
 import { FiscalInvoicePdfRenderService } from '../../print-formats/services/fiscal-invoice-pdf-render.service';
+import {
+  buildDeliverySender,
+  buildDeliverySubject,
+  buildDeliveryZipName,
+  resolveDeliveryIssuerIdentity,
+} from '../utils/dian-delivery-envelope.util';
 import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
 import { writeInvoiceDeliveryEvent } from './invoice-delivery-events.writer';
 import {
@@ -63,17 +69,26 @@ import {
  * código del tipo de documento según tabla 0; nombre comercial; línea de
  * negocio opcional), y (c) un tope de 2 MB por envío.
  *
- * Este endpoint NO implementa (a) ni (b): arma PDF + XML crudo en el zip (no
- * un `AttachedDocument` — el builder ya existe, probado contra el XSD, en
- * `providers/dian-direct/xml/ubl-attached-document.builder.ts`, F.12) y usa un
- * asunto libre («Reenvío de factura ...»). Es a propósito, no un olvido: §9.1
- * gobierna la entrega ORIGINAL al adquiriente registrado en la factura; este
- * endpoint reenvía a un correo ARBITRARIO que el usuario escribe en el DTO,
- * no necesariamente el del adquiriente — no es el mismo acto normativo, y
- * forzarlo a la forma de §9.1 simularía un cumplimiento que no aplica al
- * destinatario real. SÍ se aplica (c) — ver `MAX_ZIP_ATTACHMENT_BYTES` más
- * abajo—, pero como salvaguarda operativa de tamaño de correo, no como
- * cumplimiento DIAN.
+ * Este endpoint NO implementa (a) como la norma lo pide: arma PDF + XML crudo
+ * (+ un `AttachedDocument` propio, ver E.5 más abajo) en el zip. SÍ aplica (c)
+ * — ver `MAX_ZIP_ATTACHMENT_BYTES`—, como salvaguarda operativa de tamaño de
+ * correo, no como cumplimiento DIAN.
+ *
+ * ACTUALIZACIÓN (2026-10-08) — (b) YA NO ES UNA DIVERGENCIA. Antes el asunto
+ * era libre («Reenvío de factura ...») con el argumento de que §9.1 gobierna la
+ * entrega ORIGINAL y no un reenvío a un correo arbitrario. El dueño del
+ * producto pidió explícitamente asunto DIAN también en el reenvío: el asunto
+ * sale ahora `NIT;Razón social;Número;Código tipo;Nombre comercial`
+ * (`buildDianEmailSubject`), con el mismo emisor que el XML firmado. Además:
+ *   · el REMITENTE visible es la razón social del emisor (From = nombre del
+ *     emisor sobre la dirección verificada de la plataforma; Reply-To = correo
+ *     de contacto del emisor), y
+ *   · el zip se nombra con la convención DIAN (`z` + NIT 10 + ppp + aa +
+ *     consecutivo hex 8; ver `dian-delivery-envelope.util.ts` por la decisión
+ *     sobre el consecutivo).
+ * Todo con degradación: si la identidad del emisor no se resuelve, se usa el
+ * asunto legible, el remitente por defecto y el nombre `Factura-{n}.zip`
+ * anteriores — el correo nunca se pierde por un hueco de identidad.
  *
  * CORRECCIÓN (E.10, 2026-08-25): este docblock afirmaba que «HOY no existe
  * en el dominio un flujo de entrega automática al adquiriente». Era falso —
@@ -218,6 +233,20 @@ export class InvoiceDeliveryService {
             phone: true,
             email: true,
             addresses: { take: 1 },
+            // Identidad fiscal del EMISOR para el asunto DIAN, el remitente y
+            // el nombre del zip (misma fuente que el listener y el PDF).
+            fiscal_scope: true,
+            person_type: true,
+            organization_settings: { select: { settings: true } },
+          },
+        },
+        store: {
+          select: {
+            id: true,
+            name: true,
+            legal_name: true,
+            tax_id: true,
+            store_settings: { select: { settings: true } },
           },
         },
         invoice_items: true,
@@ -288,10 +317,29 @@ export class InvoiceDeliveryService {
     // B17 — fecha del reenvío en la zona de la tienda, no la del contenedor.
     const tz = await resolveStoreTimezone(this.prisma, invoice.store_id);
 
+    // Identidad del emisor (NIT, razón social, nombre comercial, contacto).
+    // `null` si no se resuelve: todo lo que depende de ella degrada solo.
+    const issuer = resolveDeliveryIssuerIdentity({
+      organization: invoice.organization as any,
+      store: (invoice as any).store ?? null,
+    });
+    if (!issuer) {
+      this.logger.warn(
+        `Reenvío #${invoice.invoice_number}: identidad fiscal del emisor no resuelta; asunto, remitente y zip usan la forma anterior.`,
+      );
+    }
+
+    // Asunto y zip normativos (§9.1) sólo para el documento ELECTRÓNICO: un
+    // recibo interno (`dian_status = 'not_applicable'`) nunca fue a la DIAN y
+    // conserva la forma legible — misma regla que tenía el listener primario.
+    const dian_issuer =
+      invoice.dian_status === 'not_applicable' ? null : issuer;
+
     const email_data: InvoiceEmailData = {
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
       customer_name,
+      issuer_name: issuer?.legal_name ?? store_name,
       issue_date: this.formatDate(invoice.issue_date, tz),
       due_date: invoice.due_date ? this.formatDate(invoice.due_date, tz) : undefined,
       items: (invoice.invoice_items || []).map((item) => ({
@@ -313,12 +361,39 @@ export class InvoiceDeliveryService {
       store_email: org?.email || undefined,
       store_phone: org?.phone || undefined,
       store_address,
-      store_nit: org?.tax_id || undefined,
+      // Mismo NIT que el asunto, el zip y el XML firmado — no `organizations.tax_id`
+      // a pelo, que puede divergir de la identidad fiscal habilitada.
+      store_nit: issuer?.nit || org?.tax_id || undefined,
     };
 
     const html = generateInvoiceEmailHtml(email_data);
     const text = generateInvoiceEmailText(email_data);
-    const subject = `Reenvío de factura ${invoice.invoice_number} - ${store_name}`;
+    const subject = buildDeliverySubject({
+      issuer: dian_issuer,
+      document_number: invoice.invoice_number,
+      invoice_type: invoice.invoice_type,
+      fallback_subject: `Reenvío de factura ${invoice.invoice_number} - ${store_name}`,
+    });
+    const sender = buildDeliverySender(issuer);
+
+    // `dian_configurations` del NIT dueño: ambiente (sobre AttachedDocument) y
+    // modo de operación (código `ppp` del nombre del zip). Una sola lectura.
+    let dian_config: { environment?: string; operation_mode?: string } | null =
+      null;
+    try {
+      dian_config = await this.prisma.withoutScope().dian_configurations.findFirst({
+        where: {
+          organization_id: invoice.organization_id,
+          configuration_type: 'invoicing',
+        },
+        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+        select: { environment: true, operation_mode: true },
+      });
+    } catch (config_error) {
+      this.logger.warn(
+        `Reenvío #${invoice.invoice_number}: no se pudo leer dian_configurations (${(config_error as Error)?.message ?? config_error}); ambiente 'test' y software propio.`,
+      );
+    }
 
     // 5. PDF + XML + `AttachedDocument` empaquetados en un único .zip — con
     // degradación: si algo falla al traer un adjunto, el correo sale sin esa
@@ -404,17 +479,8 @@ export class InvoiceDeliveryService {
           document_type: string | null;
           verification_digit: string | null;
         } | null;
-        const dian_env_config = await this.prisma.withoutScope()
-          .dian_configurations.findFirst({
-            where: {
-              organization_id: invoice.organization_id,
-              configuration_type: 'invoicing',
-            },
-            orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
-            select: { environment: true },
-          });
         const environment: 'test' | 'production' =
-          dian_env_config?.environment === 'production' ? 'production' : 'test';
+          dian_config?.environment === 'production' ? 'production' : 'test';
 
         const sender: DianEventParty = {
           document_type:
@@ -550,7 +616,13 @@ export class InvoiceDeliveryService {
       }
 
       if (has_zip_content) {
-        zip_name = `Factura-${invoice.invoice_number}.zip`;
+        zip_name = buildDeliveryZipName({
+          issuer: dian_issuer,
+          document_number: invoice.invoice_number,
+          issue_date: fiscalIssueDate(new Date(invoice.issue_date), tz),
+          operation_mode: dian_config?.operation_mode,
+          fallback_name: `Factura-${invoice.invoice_number}.zip`,
+        });
         attachments.push({
           filename: zip_name,
           content: zip_buffer,
@@ -568,8 +640,15 @@ export class InvoiceDeliveryService {
             html,
             attachments,
             text,
+            sender,
           )
-        : await this.email_service.sendEmail(recipient, subject, html, text);
+        : await this.email_service.sendEmail(
+            recipient,
+            subject,
+            html,
+            text,
+            sender,
+          );
 
     // 7. Traza — EXACTAMENTE una fila por intento, éxito o error, ANTES de
     // decidir si esto lanza. `withoutScope()` porque `invoice_delivery_events`

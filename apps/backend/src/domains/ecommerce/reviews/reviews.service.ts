@@ -22,7 +22,7 @@ export class EcommerceReviewsService {
     return { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   }
 
-  private async areReviewsEnabled(): Promise<boolean> {
+  async areReviewsEnabled(): Promise<boolean> {
     const settings = await this.prisma.store_settings.findFirst({
       where: {},
       select: { settings: true },
@@ -37,6 +37,45 @@ export class EcommerceReviewsService {
     if (!(await this.areReviewsEnabled())) {
       throw new VendixHttpException(ErrorCodes.REV_DISABLED_001);
     }
+  }
+
+  /** Límite de reseñas por día por usuario (máx. 3). */
+  async assertDailyLimit(user_id: number): Promise<void> {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const daily_count = await this.prisma.reviews.count({
+      where: { user_id, created_at: { gte: today } },
+    });
+    if (daily_count >= 3) {
+      throw new VendixHttpException(ErrorCodes.REV_RATE_LIMIT_001);
+    }
+  }
+
+  /** Emite `review.created` con el payload estándar (nombre de producto y cliente). */
+  async emitReviewCreated(params: {
+    store_id: number | undefined;
+    review_id: number;
+    product_id: number;
+    rating: number;
+    user_id: number;
+  }): Promise<void> {
+    const product = await this.prisma.products.findFirst({
+      where: { id: params.product_id },
+      select: { name: true },
+    });
+    const user = await this.prisma.users.findFirst({
+      where: { id: params.user_id },
+      select: { first_name: true, last_name: true },
+    });
+    this.event_emitter.emit('review.created', {
+      store_id: params.store_id,
+      review_id: params.review_id,
+      product_id: params.product_id,
+      product_name: product?.name || 'Producto',
+      customer_name:
+        `${user?.first_name || ''} ${user?.last_name || ''}`.trim(),
+      rating: params.rating,
+    });
   }
 
   async getProductReviews(query: ReviewListQueryDto) {
@@ -200,27 +239,7 @@ export class EcommerceReviewsService {
       }
     }
 
-    // Rate limit: max 3 reviews per day
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const daily_count = await this.prisma.reviews.count({
-      where: { user_id, created_at: { gte: today } },
-    });
-    if (daily_count >= 3) {
-      throw new VendixHttpException(ErrorCodes.REV_RATE_LIMIT_001);
-    }
-
-    // Get product name for event
-    const product = await this.prisma.products.findFirst({
-      where: { id: dto.product_id },
-      select: { name: true },
-    });
-
-    // Get user name for event
-    const user = await this.prisma.users.findFirst({
-      where: { id: user_id },
-      select: { first_name: true, last_name: true },
-    });
+    await this.assertDailyLimit(user_id);
 
     // Create review (store_id auto-injected by EcommercePrismaService).
     // `state` se omite a propósito: el @default(pending) del schema Prisma
@@ -239,14 +258,12 @@ export class EcommerceReviewsService {
       },
     });
 
-    this.event_emitter.emit('review.created', {
+    await this.emitReviewCreated({
       store_id: context.store_id,
       review_id: review.id,
       product_id: dto.product_id,
-      product_name: product?.name || 'Producto',
-      customer_name:
-        `${user?.first_name || ''} ${user?.last_name || ''}`.trim(),
       rating: dto.rating,
+      user_id,
     });
 
     return review;

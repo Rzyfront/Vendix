@@ -178,7 +178,12 @@ export function projectFinancialAccountInvoice(
   }
   const shippingTax = resolveAccountShippingTax(account, shipping);
 
-  const items = account.lines.map((line) => {
+  // La propina voluntaria NO hace parte de la factura (no entra al XML): su
+  // línea financiera `tip` sigue en el libro/asiento (pasivo 238005) pero no
+  // se proyecta a línea facturable. La factura cierra a grand_total - propina.
+  const tipAmount = dec(account.tip_amount ?? 0);
+  const billableLines = account.lines.filter((line) => line.kind !== 'tip');
+  const items = billableLines.map((line) => {
     const itemIndex = itemLines.indexOf(line);
     const projected = projection && itemIndex >= 0 ? projection.lines[itemIndex] : null;
     const shippingLine = line.kind === 'shipping' && shippingTax ? shippingTax : null;
@@ -246,12 +251,12 @@ export function projectFinancialAccountInvoice(
   const subtotal = gross.minus(discount);
   const shippingTaxAmount = shippingTax?.tax_amount ?? ZERO;
   if (
-    !total.equals(account.grand_total) ||
+    !total.equals(dec(account.grand_total).minus(tipAmount)) ||
     !subtotal.plus(tax).equals(total) ||
-    !gross.plus(shippingTaxAmount).equals(dec(account.subtotal_amount).plus(account.shipping_cost).plus(account.tip_amount)) ||
+    !gross.plus(shippingTaxAmount).equals(dec(account.subtotal_amount).plus(account.shipping_cost)) ||
     (!projection && (!discount.equals(account.discount_amount) || !tax.equals(dec(account.tax_amount).plus(shippingTaxAmount))))
   ) {
     throw new Error('Financial account snapshot does not balance');
   }
-  return { items, subtotal, discount, tax, total };
+  return { items, subtotal, discount, tax, total, tip_amount: tipAmount };
 }

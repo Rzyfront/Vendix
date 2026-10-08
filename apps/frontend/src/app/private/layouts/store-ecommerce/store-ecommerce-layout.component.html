@@ -1,4 +1,8 @@
-<div class="ecommerce-layout" [class.ecommerce-layout--table-bar]="table_context.isActive()">
+<div
+  class="ecommerce-layout"
+  [class.ecommerce-layout--table-bar]="table_context.isActive()"
+  [class.ecommerce-layout--mini-bar]="show_cart_mini_bar()"
+>
   <!-- Header -->
   <header class="ecommerce-header">
     <div class="header-container">
@@ -129,35 +133,16 @@
               <!-- track por line_key: en el carrito invitado `id` vale
                    `product_id`, así que dos presentaciones del mismo producto
                    colisionaban (NG0955). -->
-              @for (item of cart.items; track cartLineKeyOf(item)) {
+              @for (line of cart_lines(); track line.key) {
               <div class="cart-item">
-                <div class="item-image">
-                  @if (item.product.image_url) {
-                  <img [src]="item.product.image_url" [alt]="item.product.name">
-                  } @else {
-                  <div class="placeholder-img">
-                    <app-icon name="image" [size]="16"></app-icon>
-                  </div>
-                  }
-                </div>
-                <div class="item-details">
-                  <p class="item-name">{{ item.product.name }}</p>
-                  @if (item.price_tier; as tier) {
-                  <!-- La presentación elegida tiene que sobrevivir hasta aquí:
-                       sin la etiqueta, dos líneas del mismo producto se ven
-                       idénticas y sólo se distinguen por el precio. -->
-                  <p class="item-variant">{{ tier.label }}</p>
-                  }
-                  <p class="item-price">{{ item.unit_price | currency }}</p>
-
-                  <div class="item-controls">
-                    <app-quantity-control [value]="item.quantity" [min]="1" [size]="'sm'"
-                      (valueChange)="updateCartQuantity(item, $event)"></app-quantity-control>
-                    <app-button variant="ghost" size="xsm" class="remove-btn" (clicked)="removeCartItem(item)">
-                      <app-icon slot="icon" name="trash-2" [size]="14"></app-icon>
-                    </app-button>
-                  </div>
-                </div>
+                <app-order-line-item
+                  [item]="line.view"
+                  mode="editable"
+                  [compact]="true"
+                  [maxQuantity]="max_quantity_per_item()"
+                  (quantityChange)="updateCartQuantity(line.item, $event)"
+                  (remove)="removeCartItem(line.item)"
+                />
               </div>
               }
               } @else {
@@ -491,7 +476,7 @@
     <div class="footer-container">
       <!-- Sección 1: Información de la Tienda -->
       <div class="footer-section">
-        <h4>{{ store_name() }}</h4>
+        <h4>{{ store_display_name() }}</h4>
         <p>{{ getTagline() }}</p>
         @if (hasAboutUs()) {
         <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_about_modal.set(true)">Sobre Nosotros</a>
@@ -501,6 +486,10 @@
           {{ footer_settings()!.store_info!.support_email }}
         </a>
         }
+        <p class="footer-vendix-credit">
+          <a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">Software construido y proveído por&nbsp;</a>
+          <a href="https://vendix.online" target="_blank" rel="noopener" class="vendix-name vendix-link">Vendix</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">. Para más información, comunícate con nosotros haciendo&nbsp;</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener" class="vendix-link">clic aquí</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">.</a>
+        </p>
       </div>
 
       <!-- Sección 2: Enlaces -->
@@ -566,9 +555,18 @@
       </div>
     </div>
     <div class="footer-bottom">
-      <p>&copy; {{ store_name() }} {{ current_year }}. Todos los derechos reservados.</p>
+      <p>&copy; {{ store_display_name() }} {{ current_year }}. Todos los derechos reservados.</p>
+      <p class="footer-powered">Powered by <a href="https://vendix.online" target="_blank" rel="noopener" class="vendix-link">Vendix</a></p>
     </div>
   </footer>
+
+  @if (show_cart_mini_bar()) {
+  <app-cart-mini-bar
+    [cart]="cart()"
+    (checkout)="onMiniBarCheckout()"
+    (viewCart)="goToCart()"
+  />
+  }
 </div>
 
 <!-- Overlay for mobile menu -->
@@ -810,6 +808,20 @@
         <span>Total</span>
         <span>{{ bill.grand_total | currency }}</span>
       </div>
+      @if (bill.suggested_tip; as tip) {
+      <div class="bill-panel__summary-row" style="opacity: 0.75; font-size: 0.875em;">
+        <span>Total sin propina</span>
+        <span>{{ (bill.balance_due ?? bill.grand_total) | currency }}</span>
+      </div>
+      <div class="bill-panel__summary-row" style="opacity: 0.75; font-size: 0.875em;">
+        <span>{{ tip.label }}</span>
+        <span>{{ tip.amount | currency }}</span>
+      </div>
+      <div class="bill-panel__summary-row" style="opacity: 0.75; font-size: 0.875em;">
+        <span>Total con propina</span>
+        <span>{{ tip.total_with_tip | currency }}</span>
+      </div>
+      }
     </div>
     }
   </div>

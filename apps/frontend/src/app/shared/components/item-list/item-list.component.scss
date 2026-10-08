@@ -249,6 +249,18 @@
   text-overflow: ellipsis;
 }
 
+.card-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 2px 0 0 0;
+  font-size: var(--fs-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .card-subtitle {
   font-size: var(--fs-sm);
   color: var(--color-text-secondary);
@@ -531,6 +543,32 @@
     color: var(--color-info, #3b82f6);
     background: linear-gradient(135deg, color-mix(in srgb, var(--color-info, #3b82f6) 8%, var(--color-surface)), color-mix(in srgb, var(--color-info, #3b82f6) 14%, var(--color-surface)));
     &:hover:not(:disabled) { background: linear-gradient(135deg, color-mix(in srgb, var(--color-info, #3b82f6) 14%, var(--color-surface)), color-mix(in srgb, var(--color-info, #3b82f6) 22%, var(--color-surface))); }
+  }
+
+  &.action-order-pending {
+    color: #374151;
+    background: linear-gradient(135deg, color-mix(in srgb, #f3f4f6 65%, var(--color-surface)), color-mix(in srgb, #f3f4f6 100%, var(--color-surface)));
+    &:hover:not(:disabled) { background: #f3f4f6; }
+  }
+  &.action-order-processing {
+    color: #92400e;
+    background: linear-gradient(135deg, color-mix(in srgb, #fef3c7 65%, var(--color-surface)), color-mix(in srgb, #fef3c7 100%, var(--color-surface)));
+    &:hover:not(:disabled) { background: #fef3c7; }
+  }
+  &.action-order-ready {
+    color: #065f46;
+    background: linear-gradient(135deg, color-mix(in srgb, #d1fae5 65%, var(--color-surface)), color-mix(in srgb, #d1fae5 100%, var(--color-surface)));
+    &:hover:not(:disabled) { background: #d1fae5; }
+  }
+  &.action-order-delivered {
+    color: #075985;
+    background: linear-gradient(135deg, color-mix(in srgb, #e0f2fe 65%, var(--color-surface)), color-mix(in srgb, #e0f2fe 100%, var(--color-surface)));
+    &:hover:not(:disabled) { background: #e0f2fe; }
+  }
+  &.action-order-cancelled {
+    color: #b91c1c;
+    background: linear-gradient(135deg, color-mix(in srgb, #fee2e2 65%, var(--color-surface)), color-mix(in srgb, #fee2e2 100%, var(--color-surface)));
+    &:hover:not(:disabled) { background: #fee2e2; }
   }
 
   // Variant: gaming

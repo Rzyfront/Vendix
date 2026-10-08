@@ -111,6 +111,34 @@
   color: #16a34a;
 }
 
+.amp-error-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-primary, #16a34a);
+  background: transparent;
+  border: 1px solid var(--color-primary, #16a34a);
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--color-primary, #16a34a) 10%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary, #16a34a);
+    outline-offset: 2px;
+  }
+}
+
 /* Emphasized call-to-action badge: dragging the marker is the key action for an
    accurate delivery point, so it gets brand color, an icon and a tinted pill
    instead of muted helper text. */

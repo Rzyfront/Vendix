@@ -9,6 +9,7 @@ import {
   Max,
   IsEnum,
   IsBoolean,
+  Matches,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
@@ -84,3 +85,43 @@ export class CreateReviewResponseDto {
 export class UpdateReviewResponseDto extends PartialType(
   CreateReviewResponseDto,
 ) {}
+
+export enum OrderReviewQuickTagFilter {
+  VERY_EASY = 'very_easy',
+  NORMAL = 'normal',
+  DIFFICULT = 'difficult',
+}
+
+export class OrderReviewsQueryDto {
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 10;
+
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  rating?: number;
+
+  @IsOptional()
+  @IsEnum(OrderReviewQuickTagFilter)
+  quick_tag?: OrderReviewQuickTagFilter;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date_from debe ser YYYY-MM-DD' })
+  date_from?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date_to debe ser YYYY-MM-DD' })
+  date_to?: string;
+}

@@ -279,6 +279,16 @@
                     Imprimir comanda
                   </app-button>
                 }
+                @if (canPrintPreCuenta()) {
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    (clicked)="printPreCuenta()"
+                  >
+                    <app-icon slot="icon" name="printer" [size]="14"></app-icon>
+                    Pre-cuenta
+                  </app-button>
+                }
                 <app-button
                   class="items-card-add"
                   variant="primary"
@@ -805,6 +815,7 @@
     <app-table-payment-modal
       [isOpen]="isPayOpen()"
       [total]="orderTotal()"
+      [tipBase]="tipBase()"
       [tableName]="session()?.table?.name ?? ''"
       [isProcessing]="isPaying()"
       (isOpenChange)="isPayOpen.set($event)"

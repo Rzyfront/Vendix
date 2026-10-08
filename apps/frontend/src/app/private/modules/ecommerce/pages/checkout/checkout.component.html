@@ -99,7 +99,72 @@
              expone); la dirección solo se pide para domicilio (C.2). -->
         @if (step() === 1 && !cartHasOnlyServices) {
           <div class="checkout-section">
-            <h2>¿Cómo quieres recibirlo?</h2>
+            @if (
+              selected_delivery() !== null &&
+              !loading_delivery_options() &&
+              !deliveryPickerOpen()
+            ) {
+              <div
+                class="delivery-collapsed"
+                role="group"
+                aria-label="Forma de entrega seleccionada"
+              >
+                @if (offersHomeDelivery() !== offersPickup()) {
+                  <div class="delivery-collapsed__main delivery-collapsed__main--static">
+                    <app-icon
+                      [name]="selected_delivery() === 'home' ? 'home' : 'store'"
+                      [size]="18"
+                    ></app-icon>
+                    <span class="delivery-collapsed__text">
+                      <span class="delivery-collapsed__title">{{
+                        selected_delivery() === 'home'
+                          ? 'Envío a domicilio'
+                          : 'Recoger en tienda'
+                      }}</span>
+                      <span class="delivery-collapsed__detail">{{
+                        selected_delivery() === 'home'
+                          ? 'Lo llevamos a tu dirección'
+                          : 'Retíralo en el local, sin costo de envío'
+                      }}</span>
+                    </span>
+                  </div>
+                } @else {
+                  <button
+                    type="button"
+                    class="delivery-collapsed__main"
+                    (click)="deliveryPickerOpen.set(true)"
+                    aria-label="Cambiar forma de entrega"
+                  >
+                    <app-icon
+                      [name]="selected_delivery() === 'home' ? 'home' : 'store'"
+                      [size]="18"
+                    ></app-icon>
+                    <span class="delivery-collapsed__text">
+                      <span class="delivery-collapsed__title">{{
+                        selected_delivery() === 'home'
+                          ? 'Envío a domicilio'
+                          : 'Recoger en tienda'
+                      }}</span>
+                      <span class="delivery-collapsed__detail">{{
+                        selected_delivery() === 'home'
+                          ? 'Lo llevamos a tu dirección'
+                          : 'Retíralo en el local, sin costo de envío'
+                      }}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    class="delivery-collapsed__edit"
+                    (click)="deliveryPickerOpen.set(true)"
+                    aria-label="Cambiar forma de entrega"
+                  >
+                    <app-icon name="pencil" [size]="14"></app-icon>
+                  </button>
+                }
+              </div>
+            } @else {
+              <h2>¿Cómo quieres recibirlo?</h2>
+            }
 
             @if (loading_delivery_options()) {
               <div class="shipping-coverage-empty">
@@ -108,7 +173,7 @@
                   Cargando opciones de entrega…
                 </p>
               </div>
-            } @else {
+            } @else if (selected_delivery() === null || deliveryPickerOpen()) {
               <div class="delivery-cards">
                 @if (offersHomeDelivery()) {
                   <div
@@ -239,9 +304,11 @@
                   <app-address-map-picker
                     hintPosition="top"
                     [center]="map_center()"
+                    [focusArea]="scope_focus()"
                     [delegateLocate]="true"
                     (located)="onMapLocated($event)"
                     (locateRequested)="onLocateRequested()"
+                    (mapFailed)="onMapFailed()"
                   />
                 </div>
               </div>
@@ -311,14 +378,26 @@
               <app-address-map-picker
                 hintPosition="top"
                 [center]="map_center()"
+                [focusArea]="scope_focus()"
                 [delegateLocate]="true"
                 (located)="onMapLocated($event)"
                 (locateRequested)="onLocateRequested()"
+                (mapFailed)="onMapFailed()"
               />
               </div>
               </div>
               </div>
               <form [formGroup]="address_form" class="address-form">
+                @if (scope_locked()) {
+                  <div class="scope-chip" role="note">
+                    <app-icon name="map-pin" [size]="18" class="scope-chip__icon"></app-icon>
+                    <div class="scope-chip__body">
+                      <strong class="scope-chip__title">{{ address_scope()?.single_municipality?.city }}, {{ address_scope()?.single_municipality?.state_province }}, Colombia</strong>
+                      <span class="scope-chip__text">Esta tienda únicamente realiza entregas en esta ubicación.</span>
+                    </div>
+                  </div>
+                }
+
                 <app-input
                   label="Direccion"
                   formControlName="address_line1"
@@ -346,72 +425,79 @@
                   [error]="getFieldError('address_line2')"
                 ></app-input>
 
-                <div class="form-row">
-                  <app-selector
-                    label="Pais"
-                    formControlName="country_code"
-                    [options]="countryOptions"
-                    placeholder="Selecciona un pais"
-                    [errorText]="getFieldError('country_code')"
-                    [required]="true"
-                  ></app-selector>
-
-                  @if (isColombia()) {
+                @if (!scope_locked()) {
+                  <div class="form-row">
                     <app-selector
-                      label="Departamento/Estado"
-                      formControlName="state_province"
-                      [options]="departmentOptions"
-                      [placeholder]="
-                        loading_departments()
-                          ? 'Cargando...'
-                          : 'Selecciona un departamento'
-                      "
-                      [errorText]="getFieldError('state_province')"
+                      label="Pais"
+                      formControlName="country_code"
+                      [options]="countryOptions"
+                      placeholder="Selecciona un pais"
+                      [errorText]="getFieldError('country_code')"
                       [required]="true"
                     ></app-selector>
-                  } @else {
-                    <app-input
-                      label="Departamento/Estado"
-                      formControlName="state_province"
-                      placeholder="Departamento o estado"
-                      [control]="address_form.get('state_province')"
-                      [error]="getFieldError('state_province')"
-                      [required]="true"
-                    ></app-input>
-                  }
-                </div>
 
-                <div class="form-row">
-                  @if (isColombia()) {
-                    <app-selector
-                      label="Ciudad"
-                      formControlName="city"
-                      [options]="cityOptions"
-                      [placeholder]="
-                        loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
-                      "
-                      [errorText]="getFieldError('city')"
-                      [required]="true"
-                    ></app-selector>
-                  } @else {
-                    <app-input
-                      label="Ciudad"
-                      formControlName="city"
-                      placeholder="Ciudad"
-                      [control]="address_form.get('city')"
-                      [error]="getFieldError('city')"
-                      [required]="true"
-                    ></app-input>
-                  }
+                    @if (isColombia()) {
+                      <app-selector
+                        label="Departamento/Estado"
+                        formControlName="state_province"
+                        [options]="departmentOptions"
+                        [placeholder]="
+                          loading_departments()
+                            ? 'Cargando...'
+                            : 'Selecciona un departamento'
+                        "
+                        [errorText]="getFieldError('state_province')"
+                        [required]="true"
+                      ></app-selector>
+                    } @else {
+                      <app-input
+                        label="Departamento/Estado"
+                        formControlName="state_province"
+                        placeholder="Departamento o estado"
+                        [control]="address_form.get('state_province')"
+                        [error]="getFieldError('state_province')"
+                        [required]="true"
+                      ></app-input>
+                    }
+                  </div>
+                }
 
-                  <app-input
-                    label="Codigo Postal"
-                    formControlName="postal_code"
-                    placeholder="Codigo postal"
-                    [control]="address_form.get('postal_code')"
-                    [error]="getFieldError('postal_code')"
-                  ></app-input>
-                </div>
+                @if (!scope_locked() || show_postal_code()) {
+                  <div class="form-row">
+                    @if (!scope_locked()) {
+                    @if (isColombia()) {
+                      <app-selector
+                        label="Ciudad"
+                        formControlName="city"
+                        [options]="cityOptions"
+                        [placeholder]="
+                          loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
+                        "
+                        [errorText]="getFieldError('city')"
+                        [required]="true"
+                      ></app-selector>
+                    } @else {
+                      <app-input
+                        label="Ciudad"
+                        formControlName="city"
+                        placeholder="Ciudad"
+                        [control]="address_form.get('city')"
+                        [error]="getFieldError('city')"
+                        [required]="true"
+                      ></app-input>
+                    }
+                    }
+                    @if (show_postal_code()) {
+                    <app-input
+                      label="Codigo Postal"
+                      formControlName="postal_code"
+                      placeholder="Codigo postal"
+                      [control]="address_form.get('postal_code')"
+                      [error]="getFieldError('postal_code')"
+                    ></app-input>
+                    }
+                  </div>
+                }
 
                 <!-- Save address checkbox -->
                 @if (is_authenticated()) {
@@ -627,9 +713,11 @@
                     <app-address-map-picker
                       hintPosition="top"
                       [center]="map_center()"
+                      [focusArea]="scope_focus()"
                       [delegateLocate]="true"
                       (located)="onMapLocated($event)"
                       (locateRequested)="onLocateRequested()"
+                      (mapFailed)="onMapFailed()"
                     />
                   </div>
                   </div>
@@ -693,13 +781,25 @@
                     <app-address-map-picker
                       hintPosition="top"
                       [center]="map_center()"
+                      [focusArea]="scope_focus()"
                       [delegateLocate]="true"
                       (located)="onMapLocated($event)"
                       (locateRequested)="onLocateRequested()"
+                      (mapFailed)="onMapFailed()"
                     />
                   </div>
                   </div>
                   <form [formGroup]="address_form" class="address-form">
+                    @if (scope_locked()) {
+                      <div class="scope-chip" role="note">
+                        <app-icon name="map-pin" [size]="18" class="scope-chip__icon"></app-icon>
+                        <div class="scope-chip__body">
+                          <strong class="scope-chip__title">{{ address_scope()?.single_municipality?.city }}, {{ address_scope()?.single_municipality?.state_province }}, Colombia</strong>
+                          <span class="scope-chip__text">Esta tienda únicamente realiza entregas en esta ubicación.</span>
+                        </div>
+                      </div>
+                    }
+
                     <app-input
                       label="Direccion"
                       formControlName="address_line1"
@@ -717,40 +817,42 @@
                       [error]="getFieldError('address_line2')"
                     ></app-input>
 
-                    <div class="form-row">
-                      <app-selector
-                        label="Pais"
-                        formControlName="country_code"
-                        [options]="countryOptions"
-                        placeholder="Selecciona un pais"
-                        [errorText]="getFieldError('country_code')"
-                        [required]="true"
-                      ></app-selector>
-
-                      @if (isColombia()) {
+                    @if (!scope_locked()) {
+                      <div class="form-row">
                         <app-selector
-                          label="Departamento/Estado"
-                          formControlName="state_province"
-                          [options]="departmentOptions"
-                          [placeholder]="
-                            loading_departments()
-                              ? 'Cargando...'
-                              : 'Selecciona un departamento'
-                          "
-                          [errorText]="getFieldError('state_province')"
+                          label="Pais"
+                          formControlName="country_code"
+                          [options]="countryOptions"
+                          placeholder="Selecciona un pais"
+                          [errorText]="getFieldError('country_code')"
                           [required]="true"
                         ></app-selector>
-                      } @else {
-                        <app-input
-                          label="Departamento/Estado"
-                          formControlName="state_province"
-                          placeholder="Departamento o estado"
-                          [control]="address_form.get('state_province')"
-                          [error]="getFieldError('state_province')"
-                          [required]="true"
-                        ></app-input>
-                      }
-                    </div>
+
+                        @if (isColombia()) {
+                          <app-selector
+                            label="Departamento/Estado"
+                            formControlName="state_province"
+                            [options]="departmentOptions"
+                            [placeholder]="
+                              loading_departments()
+                                ? 'Cargando...'
+                                : 'Selecciona un departamento'
+                            "
+                            [errorText]="getFieldError('state_province')"
+                            [required]="true"
+                          ></app-selector>
+                        } @else {
+                          <app-input
+                            label="Departamento/Estado"
+                            formControlName="state_province"
+                            placeholder="Departamento o estado"
+                            [control]="address_form.get('state_province')"
+                            [error]="getFieldError('state_province')"
+                            [required]="true"
+                          ></app-input>
+                        }
+                      </div>
+                    }
                   </form>
                 }
               </div>
@@ -865,9 +967,14 @@
                     </p>
                   </div>
                 }
-                <app-button variant="outline" (clicked)="step.set(1)">
-                  <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-                  Cambiar entrega
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  customClasses="delivery-summary__change"
+                  (clicked)="step.set(1)"
+                >
+                  <app-icon slot="icon" name="pencil" [size]="14"></app-icon>
+                  Cambiar
                 </app-button>
               </div>
               @if (
@@ -1158,19 +1265,16 @@
               <!-- track por line_key (producto:variante:tarifa): en el
                    carrito invitado `id` vale `product_id`, así que dos
                    presentaciones del mismo producto colisionaban (NG0955). -->
-              @for (item of cart()!.items; track lineKey(item)) {
-                <div class="summary-item">
-                  <span class="item-qty">{{ item.quantity }}x</span>
-                  <span class="item-name">
-                    {{ item.product.name }}
-                    @if (item.price_tier; as tier) {
-                      <span class="item-tier">{{ tier.label }}</span>
-                    }
-                  </span>
-                  <span class="item-price">{{
-                    item.total_price | currency
-                  }}</span>
-                </div>
+              @for (line of summary_lines(); track line.key) {
+                <app-order-line-item
+                  class="summary-item"
+                  [item]="line.view"
+                  mode="readonly"
+                  [compact]="true"
+                  [noteEditable]="true"
+                  [updating]="note_saving_key() === line.key"
+                  (noteChange)="onItemNoteChange(line.item, $event)"
+                />
               }
             </div>
 
@@ -1436,6 +1540,7 @@
     [(selectedBankAccountId)]="selected_bank_account_id"
     [currentFile]="payment_receipt_file()"
     [required]="requiresPaymentReceipt()"
+    [revealUploadToken]="payment_receipt_reveal_token()"
     (isOpenChange)="show_payment_instructions_modal.set($event)"
     (fileChange)="onReceiptFile($event)"
     (confirmed)="onPaymentInstructionsConfirmed()"

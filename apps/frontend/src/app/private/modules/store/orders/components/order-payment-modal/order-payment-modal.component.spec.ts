@@ -1,6 +1,7 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { PaymentSubmit } from '../../../../../../shared/components';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { OrderPaymentModalComponent } from './order-payment-modal.component';
 import type { Payment } from '../../interfaces/order.interface';
 
@@ -22,7 +23,10 @@ describe('OrderPaymentModalComponent credit abonos', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [OrderPaymentModalComponent],
-      providers: [provideZonelessChangeDetection()],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: StoreSettingsFacade, useValue: { tipPolicy: signal(null) } },
+      ],
     })
       .overrideComponent(OrderPaymentModalComponent, {
         set: { template: '', imports: [] },
@@ -90,7 +94,10 @@ describe('OrderPaymentModalComponent Fase 2 (paso 8) — cobro manual', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [OrderPaymentModalComponent],
-      providers: [provideZonelessChangeDetection()],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: StoreSettingsFacade, useValue: { tipPolicy: signal(null) } },
+      ],
     })
       .overrideComponent(OrderPaymentModalComponent, {
         set: { template: '', imports: [] },

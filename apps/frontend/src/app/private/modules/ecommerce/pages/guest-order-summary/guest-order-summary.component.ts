@@ -1,10 +1,13 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   DestroyRef,
   effect,
   inject,
+  input,
   OnInit,
+  output,
   signal,
   untracked,
 } from '@angular/core';
@@ -14,6 +17,7 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { CheckoutService } from '../../services/checkout.service';
+import { AccountService } from '../../services/account.service';
 import { GuestOrderSseService } from '../../services/guest-order-sse.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
@@ -32,19 +36,34 @@ import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { OrderTrackingProgressComponent } from '../../../../../shared/components/order-tracking-progress/order-tracking-progress.component';
 import { GuestOrderPrintService } from '../../services/guest-order-print.service';
+import { parseVariantAttributes } from '../../../../../shared/utils/variant-attributes.util';
+import { ItemListComponent } from '../../../../../shared/components/item-list/item-list.component';
+import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
+import { OrderReviewsService } from '../../services/order-reviews.service';
+import {
+  ORDER_REVIEW_QUICK_TAG_LABELS,
+  OrderReview,
+  OrderReviewSource,
+  OrderReviewStatus,
+  OrderReviewStatusItem,
+} from '../../models/order-review.model';
+import { OrderExperienceReviewModalComponent } from '../../components/order-experience-review-modal/order-experience-review-modal.component';
+import { OrderProductReviewModalComponent } from '../../components/order-product-review-modal/order-product-review-modal.component';
 
 // ============================================================================
 // PAYLOAD CONTRACT — enriched guest order summary endpoint
 // ============================================================================
 
-interface GuestOrderItem {
+export interface GuestOrderItem {
   // CP-853-fix (paso 5): clave por línea para la cocina en vivo (aditivo).
   order_item_id?: number | null;
   product_name: string;
   variant_sku?: string | null;
   variant_attributes?: string | null;
+  notes?: string | null;
   quantity: number;
   unit_price: number;
+  product_type?: 'physical' | 'service' | 'prepared' | null;
   total_price: number;
   tax_amount_item?: number | null;
   image_url?: string | null;
@@ -60,7 +79,7 @@ interface GuestOrderItem {
   cancellation_reason?: string | null;
 }
 
-interface GuestOrderPromotion {
+export interface GuestOrderPromotion {
   name?: string | null;
   code?: string | null;
   type?: string | null;
@@ -69,7 +88,7 @@ interface GuestOrderPromotion {
   discount_amount: number;
 }
 
-interface GuestOrderCoupon {
+export interface GuestOrderCoupon {
   code: string;
   name?: string | null;
   discount_type?: string | null;
@@ -77,7 +96,7 @@ interface GuestOrderCoupon {
   discount_applied: number;
 }
 
-interface GuestOrderAddress {
+export interface GuestOrderAddress {
   address_line1?: string | null;
   address_line2?: string | null;
   city?: string | null;
@@ -87,7 +106,7 @@ interface GuestOrderAddress {
   phone_number?: string | null;
 }
 
-interface GuestOrderPayment {
+export interface GuestOrderPayment {
   // Paso 3 (roku-shop-checkout): `payment_id` identifica el pago para los
   // endpoints guest de comprobante (paso 9); `has_receipt` + content-type
   // alimentan el visor de comprobante.
@@ -96,16 +115,17 @@ interface GuestOrderPayment {
   amount?: number | null;
   paid_at?: string | null;
   method?: string | null;
+  method_type?: string | null;
   has_receipt?: boolean;
   receipt_content_type?: string | null;
 }
 
-interface GuestOrderInvoice {
+export interface GuestOrderInvoice {
   invoice_number: string;
   status: string;
 }
 
-interface GuestOrderData {
+export interface GuestOrderData {
   order_number: string | number;
   state: string;
   channel?: string | null;
@@ -130,7 +150,7 @@ interface GuestOrderData {
   invoice?: GuestOrderInvoice | null;
 }
 
-interface GuestOrderCustomer {
+export interface GuestOrderCustomer {
   first_name?: string;
   last_name?: string;
   document_type?: string;
@@ -139,7 +159,7 @@ interface GuestOrderCustomer {
   phone?: string;
 }
 
-interface GuestOrderStore {
+export interface GuestOrderStore {
   id?: number;
   name?: string;
   logo_url?: string;
@@ -156,7 +176,7 @@ interface GuestReceiptPreview {
   kind: 'image' | 'pdf';
 }
 
-interface GuestOrderSummary {
+export interface GuestOrderSummary {
   token: string;
   order: GuestOrderData;
   customer?: GuestOrderCustomer;
@@ -184,6 +204,9 @@ interface GuestOrderSummary {
     ModalComponent,
     FileUploadDropzoneComponent,
     OrderTrackingProgressComponent,
+    ItemListComponent,
+    OrderExperienceReviewModalComponent,
+    OrderProductReviewModalComponent,
   ],
   template: `
     <div class="guest-order-page">
@@ -220,14 +243,28 @@ interface GuestOrderSummary {
                 {{ justPurchased() ? '¡Pedido confirmado!' : 'Resumen de compra' }}
               </span>
               <h1 class="hero-title">Orden #{{ data.order.order_number }}</h1>
-              <span class="hero-store">{{ data.store?.name || 'Tienda' }}</span>
+              <span class="hero-sub">
+                <span class="hero-store">{{ data.store?.name || 'Tienda' }}</span>
+              </span>
             </span>
-            <app-badge
-              [variant]="getStateVariant(data.order.state)"
-              size="sm"
-              badgeStyle="outline"
-              >{{ getStateLabel(data.order.state) }}</app-badge
-            >
+            <span class="hero-aside">
+              @if (sseLiveVisible()) {
+                <div
+                  class="live-pill"
+                  role="status"
+                  [class.live-pill--reduced]="sse.prefersReducedMotion()"
+                  [attr.data-state]="sse.connectionState()"
+                  [attr.aria-label]="sseLiveLabel()"
+                  [attr.title]="sseLiveLabel()"
+                >
+                  <span
+                    class="live-dot"
+                    [class.is-open]="sse.connectionState() === 'open'"
+                  ></span>
+                  <span class="live-label">{{ sseLiveLabel() }}</span>
+                </div>
+              }
+            </span>
           </div>
 
           <!-- SUCCESS BANNER -->
@@ -243,30 +280,29 @@ interface GuestOrderSummary {
           <!-- TOOLBAR: acciones a la izquierda, estado del stream a la derecha -->
           <div class="order-toolbar">
             <div class="actions no-print">
-              <app-button variant="outline" (clicked)="print()">
-                <app-icon name="printer" [size]="16" slot="icon" />
-                Imprimir
-              </app-button>
+              <button
+                type="button"
+                class="tool-btn tool-btn--print"
+                aria-label="Imprimir"
+                title="Imprimir"
+                (click)="print()"
+              >
+                <app-icon name="printer" [size]="16" />
+                <span class="tool-btn-text">Imprimir</span>
+              </button>
               @if (whatsappEnabled()) {
-                <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
-                  <app-icon name="message-circle" [size]="16" slot="icon" />
-                  Preguntar por mi pedido
-                </app-button>
+                <button
+                  type="button"
+                  class="tool-btn tool-btn--whatsapp"
+                  (click)="sendToWhatsApp(data)"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true">
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                  </svg>
+                  <span>Preguntar por mi pedido</span>
+                </button>
               }
             </div>
-            @if (sseLiveVisible()) {
-              <div
-                class="live-pill"
-                [class.live-pill--reduced]="sse.prefersReducedMotion()"
-                [attr.data-state]="sse.connectionState()"
-              >
-                <span
-                  class="live-dot"
-                  [class.is-open]="sse.connectionState() === 'open'"
-                ></span>
-                {{ sseLiveLabel() }}
-              </div>
-            }
           </div>
 
           <!-- META GRID -->
@@ -341,28 +377,51 @@ interface GuestOrderSummary {
                 <h2>Entrega</h2>
               </div>
               <div class="address-block">
-                @if (addr.address_line1) {
-                  <p class="addr-line strong">{{ addr.address_line1 }}</p>
-                }
-                @if (addr.address_line2) {
-                  <p class="addr-line">{{ addr.address_line2 }}</p>
-                }
-                <p class="addr-line muted">
-                  {{ addr.city
-                  }}@if (addr.state_province) {, {{ addr.state_province }}}@if (
-                    addr.country_code
-                  ) {
-                    · {{ addr.country_code }}}
-                </p>
-                @if (addr.postal_code) {
-                  <p class="addr-line muted">C.P. {{ addr.postal_code }}</p>
-                }
-                @if (addr.phone_number) {
-                  <p class="addr-line muted phone">
-                    <app-icon name="phone" [size]="13" />{{
-                      addr.phone_number
-                    }}
-                  </p>
+                <!-- Tarjeta estilo método de pago: cada parte separada -->
+                @if (hasAddressContent(addr)) {
+                  <div class="address-card">
+                    @if (addressStreet(addr)) {
+                      <div class="address-row">
+                        <span class="address-label">Dirección</span>
+                        <span class="address-value strong">{{
+                          addressStreet(addr)
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.city || addr.state_province) {
+                      <div class="address-row">
+                        <span class="address-label">Ciudad</span>
+                        <span class="address-value">{{
+                          addressCity(addr)
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.country_code) {
+                      <div class="address-row">
+                        <span class="address-label">País</span>
+                        <span class="address-value">{{
+                          countryName(addr.country_code)
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.postal_code) {
+                      <div class="address-row">
+                        <span class="address-label">C.P.</span>
+                        <span class="address-value">{{
+                          addr.postal_code
+                        }}</span>
+                      </div>
+                    }
+                    @if (addr.phone_number) {
+                      <div class="address-row">
+                        <span class="address-label">Teléfono</span>
+                        <span class="address-value phone">
+                          <app-icon name="phone" [size]="13" />
+                          {{ addr.phone_number }}
+                        </span>
+                      </div>
+                    }
+                  </div>
                 }
               </div>
             </section>
@@ -374,7 +433,17 @@ interface GuestOrderSummary {
               <app-icon name="shopping-bag" [size]="18" />
               <h2>Productos</h2>
             </div>
-            <div class="items">
+            <!-- Pantalla: tarjetas compartidas (app-item-list). Impresión:
+                 se conservan las filas originales (.items-print). -->
+            <div class="items-screen">
+              <app-item-list
+                [data]="itemRows()"
+                [cardConfig]="itemCardConfig"
+                [rowClass]="itemRowClass"
+                size="sm"
+              />
+            </div>
+            <div class="items items-print">
               @for (
                 item of data.order.items;
                 track item.product_name + item.variant_sku
@@ -414,17 +483,23 @@ interface GuestOrderSummary {
                         </app-badge>
                       }
                     </div>
-                    @if (item.variant_sku || item.variant_attributes) {
+                    @if (item.variant_sku || variantText(item)) {
                       <span class="item-variant">
                         @if (item.variant_sku) {
                           SKU: {{ item.variant_sku }}
                         }
-                        @if (item.variant_sku && item.variant_attributes) {
+                        @if (item.variant_sku && variantText(item)) {
                           ·
                         }
-                        @if (item.variant_attributes) {
-                          {{ item.variant_attributes }}
+                        @if (variantText(item)) {
+                          {{ variantText(item) }}
                         }
+                      </span>
+                    }
+                    @if (noteText(item)) {
+                      <span class="item-note">
+                        <app-icon name="file-text" [size]="11" />
+                        Nota: {{ noteText(item) }}
                       </span>
                     }
                     @if (!isItemCancelled(item)) {
@@ -467,6 +542,13 @@ interface GuestOrderSummary {
             </div>
           </section>
 
+          <!-- Slot embebido: la cuenta proyecta su tarjeta de envío
+               justo debajo de Productos. En guest standalone no se
+               proyecta nada (vista intacta). -->
+          @if (embedded()) {
+            <ng-content select="[data-slot=after-products]" />
+          }
+
           <!-- MÉTODO DE PAGO (multipago ordenado peor-primero) -->
           @if (paymentsWorstFirst(data.order.payments); as payments) {
             @if (payments.length) {
@@ -482,6 +564,11 @@ interface GuestOrderSummary {
                         <span class="payment-method">{{
                           p.method || 'Pago'
                         }}</span>
+                        @if (p.amount != null) {
+                          <span class="payment-amount">{{
+                            p.amount | currency
+                          }}</span>
+                        }
                         <app-badge
                           [variant]="getPaymentStateVariant(p.state)"
                           size="sm"
@@ -491,7 +578,10 @@ interface GuestOrderSummary {
                       </div>
                       <!-- COMPROBANTE (paso 9): ver si has_receipt, cargar si falta -->
                       @if (p.payment_id != null) {
-                        <div class="payment-receipt">
+                        <div
+                          class="payment-receipt"
+                          [class.payment-receipt--btn]="p.has_receipt"
+                        >
                           @if (p.has_receipt) {
                             <app-button
                               variant="outline"
@@ -621,7 +711,91 @@ interface GuestOrderSummary {
             </div>
           </section>
 
+          <!-- RESEÑAS: experiencia de compra + productos -->
+          @if (reviewStatus(); as rs) {
+            @if (rs.order_review; as myReview) {
+              <section class="review-card" aria-label="Tu calificación">
+                <h2 class="review-title">Tu calificación</h2>
+                <div class="review-stars" [attr.aria-label]="myReview.rating + ' de 5 estrellas'">
+                  @for (n of reviewStars; track n) {
+                    <app-icon
+                      name="star"
+                      [size]="18"
+                      [class]="n <= myReview.rating ? 'text-warning fill-warning' : 'text-gray-300'"
+                    />
+                  }
+                </div>
+                @if (myReview.quick_tag) {
+                  <span class="review-tag">{{ quickTagLabel(myReview.quick_tag) }}</span>
+                }
+                @if (myReview.comment) {
+                  <p class="review-comment">{{ myReview.comment }}</p>
+                }
+              </section>
+            } @else if (rs.can_review_experience) {
+              <section class="review-card" aria-label="Califica tu compra">
+                <h2 class="review-title">Califica tu compra</h2>
+                <p class="review-sub">Cuéntanos cómo fue tu experiencia de compra.</p>
+                <app-button variant="primary" size="sm" (clicked)="openExperienceModal('order_detail')">
+                  Calificar
+                </app-button>
+              </section>
+            }
+
+            @if (reviewableItems().length) {
+              <section class="review-card" aria-label="Reseña tus productos">
+                <h2 class="review-title">Reseña tus productos</h2>
+                <ul class="review-items">
+                  @for (ri of reviewableItems(); track ri.product_id) {
+                    <li class="review-item">
+                      @if (ri.image_url) {
+                        <img class="review-thumb" [src]="ri.image_url" [alt]="ri.product_name" />
+                      } @else {
+                        <span class="review-thumb review-thumb--empty"><app-icon name="image" [size]="16" /></span>
+                      }
+                      <span class="review-item-name">{{ ri.product_name }}</span>
+                      @if (ri.can_review) {
+                        <app-button variant="outline" size="sm" (clicked)="openProductModal(ri)">Reseñar</app-button>
+                      } @else if (ri.review) {
+                        <span class="review-done">
+                          Ya reseñado
+                          <span class="review-stars">
+                            @for (n of reviewStars; track n) {
+                              <app-icon
+                                name="star"
+                                [size]="12"
+                                [class]="n <= ri.review.rating ? 'text-warning fill-warning' : 'text-gray-300'"
+                              />
+                            }
+                          </span>
+                        </span>
+                      } @else if (ri.reason === 'not_delivered') {
+                        <span class="review-hint">Disponible cuando recibas tu pedido</span>
+                      }
+                    </li>
+                  }
+                </ul>
+              </section>
+            }
+          }
+
         </div>
+
+        <app-order-experience-review-modal
+          [(isOpen)]="showExperienceModal"
+          [token]="reviewToken() || null"
+          [orderId]="orderId()"
+          [source]="experienceSource()"
+          (submitted)="onExperienceSubmitted($event)"
+          (dismissed)="onExperienceDismissed()"
+        />
+        <app-order-product-review-modal
+          [(isOpen)]="showProductModal"
+          [token]="reviewToken() || null"
+          [orderId]="orderId()"
+          [item]="productModalItem()"
+          (submitted)="reloadReviewStatus()"
+        />
 
         <!-- VISOR DE COMPROBANTE (paso 9, patrón admin order-details) -->
         <app-modal
@@ -907,6 +1081,50 @@ interface GuestOrderSummary {
         gap: 0.2rem;
       }
 
+      /* Tarjeta de dirección (mismo lenguaje que payment-block). */
+      .address-card {
+        display: flex;
+        flex-direction: column;
+        padding: 0.375rem 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-background);
+      }
+
+      .address-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.5rem 0;
+        font-size: var(--fs-sm);
+      }
+
+      .address-row + .address-row {
+        border-top: 1px solid var(--color-border);
+      }
+
+      .address-label {
+        flex-shrink: 0;
+        color: var(--color-text-secondary);
+      }
+
+      .address-value {
+        min-width: 0;
+        text-align: right;
+        color: var(--color-text-primary);
+      }
+
+      .address-value.strong {
+        font-weight: var(--fw-semibold);
+      }
+
+      .address-value.phone {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
       .addr-line {
         margin: 0;
         color: var(--color-text-primary);
@@ -1009,6 +1227,16 @@ interface GuestOrderSummary {
         color: var(--color-text-muted);
       }
 
+      .item-note {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.25rem;
+        font-size: var(--fs-xs);
+        font-style: italic;
+        color: var(--color-text-muted);
+        overflow-wrap: anywhere;
+      }
+
       .item-qty {
         font-size: var(--fs-sm);
         color: var(--color-text-secondary);
@@ -1022,6 +1250,23 @@ interface GuestOrderSummary {
       }
 
       /* ---- Live pill (paso 9: estado del stream SSE) ---- */
+      .order-header-hero .hero-aside {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        align-self: flex-start;
+        gap: 0.4rem;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+
+      .order-header-hero .live-pill {
+        padding: 0.2rem 0.5rem;
+        gap: 0.3rem;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
       .live-pill {
         display: inline-flex;
         align-items: center;
@@ -1350,8 +1595,307 @@ interface GuestOrderSummary {
         }
       }
 
+      /* ---- Toolbar buttons ---- */
+      .tool-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        min-height: 40px;
+        padding: 0 0.9rem;
+        border-radius: var(--radius-md);
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-medium);
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+      }
+
+      .tool-btn:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
+      .tool-btn--print {
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+      }
+
+      .tool-btn--whatsapp {
+        border: 1px solid #25d366;
+        background: #25d366;
+        color: #fff;
+      }
+
+      .tool-btn--whatsapp:hover {
+        opacity: 0.9;
+      }
+
+      .payment-amount {
+        display: none;
+      }
+
+      .hero-sub {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-width: 0;
+      }
+
+      .hero-badge-mobile {
+        display: none;
+      }
+
+      /* ---- Pantalla vs impresión de ítems ---- */
+      .items-print {
+        display: none;
+      }
+
+      :host ::ng-deep .guest-item-cancelled .card-title {
+        text-decoration: line-through;
+        text-decoration-thickness: 1.5px;
+      }
+
+      /* ---- Móvil compacto (solo pantalla) ---- */
+      @media (max-width: 640px) {
+        .guest-order-page {
+          padding: 0.5rem;
+        }
+
+        .guest-order-card {
+          padding: 0.75rem;
+        }
+
+        .printable-order {
+          gap: 0.6rem;
+        }
+
+        .order-header-hero {
+          flex-wrap: nowrap;
+          gap: 0.6rem;
+          padding: 0.45rem 0.65rem;
+          max-height: 76px;
+        }
+
+        .hero-badge {
+          width: 34px;
+          height: 34px;
+        }
+
+        .hero-text {
+          flex: 1;
+          gap: 0;
+        }
+
+        .hero-eyebrow {
+          font-size: 9px;
+        }
+
+        .hero-title {
+          font-size: var(--fs-sm);
+          line-height: 1.15;
+          overflow-wrap: anywhere;
+        }
+
+        .hero-sub {
+          flex-wrap: wrap;
+          row-gap: 0.1rem;
+        }
+
+        .hero-store {
+          font-size: var(--fs-xs);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 40vw;
+        }
+
+        .hero-badge-desktop {
+          display: none;
+        }
+
+        .order-header-hero .hero-badge-mobile {
+          display: inline-flex;
+          margin-left: 0;
+        }
+
+        .order-header-hero {
+          max-height: 80px;
+        }
+
+        .success-banner {
+          gap: 0.4rem;
+          padding: 0.5rem 0.65rem;
+          font-size: var(--fs-xs);
+          line-height: 1.25;
+        }
+
+        .success-banner app-icon ::ng-deep svg {
+          width: 14px;
+          height: 14px;
+        }
+
+        .order-toolbar {
+          flex-direction: row;
+          align-items: center;
+          flex-wrap: nowrap;
+          gap: 0.4rem;
+        }
+
+        .order-toolbar .actions {
+          flex: 1;
+          min-width: 0;
+          flex-direction: row;
+          flex-wrap: nowrap;
+          gap: 0.4rem;
+        }
+
+        .tool-btn {
+          min-height: 40px;
+        }
+
+        .tool-btn--print {
+          width: 40px;
+          padding: 0;
+          flex-shrink: 0;
+        }
+
+        .tool-btn-text {
+          display: none;
+        }
+
+        .tool-btn--whatsapp {
+          flex: 1;
+          min-width: 0;
+          padding: 0 0.6rem;
+          font-size: var(--fs-xs);
+          white-space: nowrap;
+        }
+
+        .order-toolbar .live-pill {
+          align-self: center;
+          margin-left: 0;
+          padding: 0.3rem 0.5rem;
+          gap: 0.3rem;
+          font-size: 11px;
+          white-space: nowrap;
+        }
+
+        .meta-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0.4rem 0.75rem;
+          padding: 0.5rem 0.75rem;
+        }
+
+        .meta-cell {
+          gap: 0.1rem;
+        }
+
+        .meta-label {
+          font-size: 10px;
+        }
+
+        .meta-value {
+          font-size: var(--fs-xs);
+        }
+
+        .meta-value.accent {
+          font-size: var(--fs-sm);
+        }
+
+        .eta-banner {
+          gap: 0.4rem;
+          padding: 0.35rem 0.6rem;
+          font-size: var(--fs-xs);
+          line-height: 1.3;
+          align-items: center;
+        }
+
+        .eta-note {
+          font-size: 11px;
+          line-height: 1.3;
+        }
+
+        .eta-banner app-icon ::ng-deep svg {
+          width: 15px;
+          height: 15px;
+        }
+
+        .eta-text {
+          gap: 0;
+        }
+
+        .payment-block {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 0.3rem 0.6rem;
+          padding: 0.5rem 0.7rem;
+        }
+
+        .payment-head {
+          display: contents;
+        }
+
+        .payment-method {
+          grid-column: 1;
+          grid-row: 1;
+          min-width: 0;
+          font-size: var(--fs-sm);
+          overflow-wrap: anywhere;
+        }
+
+        .payment-amount {
+          grid-column: 2;
+          grid-row: 1;
+          display: inline;
+          font-size: var(--fs-sm);
+          font-weight: var(--fw-semibold);
+          color: var(--color-text-primary);
+          white-space: nowrap;
+        }
+
+        .payment-head app-badge {
+          grid-column: 1;
+          grid-row: 2;
+          justify-self: start;
+        }
+
+        .payment-receipt {
+          grid-column: 1 / -1;
+          grid-row: 3;
+          gap: 0.3rem;
+          padding-top: 0.4rem;
+        }
+
+        .payment-receipt--btn {
+          grid-column: 2;
+          grid-row: 2;
+          padding-top: 0;
+          border-top: 0;
+        }
+
+        .section-header {
+          margin-bottom: 0.5rem;
+        }
+
+        .section-header h2 {
+          font-size: var(--fs-base);
+        }
+
+        .totals-panel {
+          padding: 0.75rem;
+        }
+      }
+
       /* ---- Print ---- */
       @media print {
+        .items-screen {
+          display: none !important;
+        }
+        .items-print {
+          display: block !important;
+        }
         .no-print {
           display: none !important;
         }
@@ -1363,6 +1907,84 @@ interface GuestOrderSummary {
           border: 0;
         }
       }
+
+      .review-card {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg, 12px);
+        background: var(--color-surface);
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-start;
+      }
+      .review-title {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--color-text-primary);
+      }
+      .review-sub,
+      .review-comment {
+        margin: 0;
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+      }
+      .review-stars {
+        display: inline-flex;
+        gap: 0.125rem;
+      }
+      .review-tag {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--color-primary);
+      }
+      .review-items {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      .review-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      .review-thumb {
+        width: 40px;
+        height: 40px;
+        border-radius: var(--radius-md);
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--color-background);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .review-item-name {
+        flex: 1 1 8rem;
+        min-width: 0;
+        font-size: 0.875rem;
+        color: var(--color-text-primary);
+      }
+      .review-done,
+      .review-hint {
+        font-size: 0.75rem;
+        color: var(--color-text-muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+      }
+      @media print {
+        .review-card {
+          display: none;
+        }
+      }
     `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -1370,6 +1992,7 @@ interface GuestOrderSummary {
 export class GuestOrderSummaryComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly checkoutService = inject(CheckoutService);
+  private readonly accountService = inject(AccountService);
   private readonly tenantFacade = inject(TenantFacade);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
@@ -1378,11 +2001,36 @@ export class GuestOrderSummaryComponent implements OnInit {
   private readonly sanitizer = inject(DomSanitizer);
   /** Público: el template lee `connectionState()` / `prefersReducedMotion()`. */
   readonly sse = inject(GuestOrderSseService);
+  private readonly orderReviews = inject(OrderReviewsService);
 
   readonly loading = signal(true);
   readonly error = signal(false);
-  readonly summary = signal<GuestOrderSummary | null>(null);
-  readonly justPurchased = signal(false);
+  /**
+   * Modo embebido (detalle de cuenta): la orden ya viene cargada por el
+   * padre vía `summaryInput` — no hay token de ruta, fetch, SSE ni
+   * comprobantes (endpoints guest con token). En guest standalone ambos
+   * quedan en default y todo sigue igual.
+   */
+  readonly embedded = input(false);
+  readonly summaryInput = input<GuestOrderSummary | null>(null);
+  readonly physicalProgressAllowed = input(true);
+  /** Embebido: id de la orden para las reseñas (endpoints JWT por orderId). */
+  readonly orderId = input<number | null>(null);
+  readonly purchaseConfirmed = input<boolean | null>(null);
+  /**
+   * En embebido el padre es dueño de los datos: tras subir un
+   * comprobante se emite para que recargue la orden (en guest
+   * standalone se actualiza in-place sin refetch).
+   */
+  readonly receiptUploaded = output<number>();
+  private readonly fetchedSummary = signal<GuestOrderSummary | null>(null);
+  readonly summary = computed(
+    () => this.summaryInput() ?? this.fetchedSummary(),
+  );
+  private readonly routePurchaseConfirmed = signal(false);
+  readonly justPurchased = computed(() => this.embedded()
+    ? this.purchaseConfirmed() === true
+    : this.purchaseConfirmed() ?? this.routePurchaseConfirmed());
 
   // Paso 9 — visor de comprobante (patrón admin order-details).
   readonly receiptPreview = signal<GuestReceiptPreview | null>(null);
@@ -1407,6 +2055,24 @@ export class GuestOrderSummaryComponent implements OnInit {
   private readonly RECEIPT_MAX_SIZE = 5 * 1024 * 1024;
 
   private token = '';
+  /** Token de ruta como signal: lo leen el effect y el template de reseñas. */
+  readonly reviewToken = signal('');
+
+  // Reseñas (experiencia de compra + productos)
+  readonly reviewStatus = signal<OrderReviewStatus | null>(null);
+  readonly reviewStars = [1, 2, 3, 4, 5];
+  readonly reviewableItems = computed(() =>
+    (this.reviewStatus()?.items ?? []).filter(
+      (ri) => ri.reason !== 'no_customer' && ri.reason !== 'reviews_disabled',
+    ),
+  );
+  readonly showExperienceModal = signal(false);
+  readonly showProductModal = signal(false);
+  readonly experienceSource = signal<OrderReviewSource>('order_detail');
+  readonly productModalItem = signal<OrderReviewStatusItem | null>(null);
+  private reviewLoadedKey: string | null = null;
+  private reviewAutoOpenDone = false;
+  private reviewAutoOpenTimer: ReturnType<typeof setTimeout> | null = null;
   private flashTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Signal de moneda: forzamos change detection en el card (data-currency)
@@ -1414,10 +2080,46 @@ export class GuestOrderSummaryComponent implements OnInit {
   readonly currencyCode = this.currencyService.currencyCode;
 
   constructor() {
+    // Reseñas — carga del status una vez por token/orderId cuando hay summary.
+    effect(() => {
+      const summary = this.summary();
+      if (!summary) return;
+      const token = this.reviewToken();
+      const orderId = this.orderId();
+      const base = token ? `t:${token}` : orderId != null ? `o:${orderId}` : null;
+      if (!base) return;
+      const key = `${base}|${summary.order?.state ?? ''}`;
+      untracked(() => {
+        if (this.reviewLoadedKey === key) return;
+        this.reviewLoadedKey = key;
+        this.reloadReviewStatus();
+      });
+    });
+
+    // Reseñas — auto-apertura 1 s después de la confirmación de compra.
+    effect(() => {
+      const status = this.reviewStatus();
+      if (!this.justPurchased() || !status?.can_review_experience) return;
+      untracked(() => {
+        if (this.reviewAutoOpenDone) return;
+        if (this.isReviewDismissed(status.order_id)) return;
+        this.reviewAutoOpenDone = true;
+        this.reviewAutoOpenTimer = setTimeout(() => {
+          this.reviewAutoOpenTimer = null;
+          this.openExperienceModal('order_confirmation');
+        }, 1000);
+      });
+    });
+    this.destroyRef.onDestroy(() => {
+      if (this.reviewAutoOpenTimer) clearTimeout(this.reviewAutoOpenTimer);
+    });
+
     // Paso 9 — fusión SSE→summary. El effect solo depende de los signals
     // vivos del servicio; `summary` se lee/escribe vía `untracked` para no
     // crear un loop (escribir summary no re-dispara el effect).
     effect(() => {
+      // Embebido: sin stream — nada que fusionar.
+      if (this.embedded()) return;
       // Deps deliberadas: cualquier evento vivo re-ejecuta la fusión.
       this.sse.orderState();
       this.sse.deliveryType();
@@ -1430,9 +2132,15 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
-    this.justPurchased.set(
+    this.routePurchaseConfirmed.set(
       this.route.snapshot.queryParamMap.get('success') === 'true',
     );
+
+    // Embebido: sin token de ruta ni fetch — el padre alimenta `summaryInput`.
+    if (this.embedded()) {
+      this.loading.set(false);
+      return;
+    }
 
     const token = this.route.snapshot.paramMap.get('token') || '';
     if (!token) {
@@ -1441,6 +2149,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       return;
     }
     this.token = token;
+    this.reviewToken.set(token);
 
     // Sin token válido no hay suscripción (el servicio también lo exige).
     const storeId =
@@ -1456,7 +2165,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.summary.set(response.data);
+          this.fetchedSummary.set(response.data);
           // El snapshot SSE pudo llegar ANTES que el REST: la fusión del
           // effect ya se saltó ese caso (summary null), así que se re-aplica
           // explícitamente sobre el summary recién llegado.
@@ -1473,6 +2182,70 @@ export class GuestOrderSummaryComponent implements OnInit {
       });
   }
 
+  // ==========================================================================
+  // RESEÑAS
+  // ==========================================================================
+
+  reloadReviewStatus(): void {
+    const token = this.reviewToken();
+    const orderId = this.orderId();
+    const status$ = token
+      ? this.orderReviews.getStatusByToken(token)
+      : orderId != null
+        ? this.orderReviews.getStatusByOrder(orderId)
+        : null;
+    if (!status$) return;
+    status$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (status) => this.reviewStatus.set(status),
+      // Las reseñas son un extra: si falla el status, la tarjeta no se muestra.
+      error: () => this.reviewStatus.set(null),
+    });
+  }
+
+  quickTagLabel(tag: OrderReview['quick_tag']): string {
+    return tag ? ORDER_REVIEW_QUICK_TAG_LABELS[tag] : '';
+  }
+
+  openExperienceModal(source: OrderReviewSource): void {
+    this.experienceSource.set(source);
+    this.showExperienceModal.set(true);
+  }
+
+  openProductModal(item: OrderReviewStatusItem): void {
+    this.productModalItem.set(item);
+    this.showProductModal.set(true);
+  }
+
+  onExperienceSubmitted(review: OrderReview): void {
+    const current = this.reviewStatus();
+    if (current) {
+      this.reviewStatus.set({
+        ...current,
+        order_review: review,
+        can_review_experience: false,
+      });
+    }
+    this.reloadReviewStatus();
+  }
+
+  onExperienceDismissed(): void {
+    const id = this.reviewStatus()?.order_id;
+    if (id == null) return;
+    try {
+      localStorage.setItem(`vx_order_review_dismissed_${id}`, '1');
+    } catch {
+      /* almacenamiento no disponible: se ignora */
+    }
+  }
+
+  private isReviewDismissed(orderId: number): boolean {
+    try {
+      return localStorage.getItem(`vx_order_review_dismissed_${orderId}`) !== null;
+    } catch {
+      return false;
+    }
+  }
+
   print(): void {
     const summary = this.summary();
     if (!summary) return;
@@ -1482,7 +2255,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce
         ?.orders;
     this.voucherPrint.printVoucher(summary, {
-      hidePrepEta: orders?.hide_prep_eta === true,
+      hidePrepEta: !this.physicalProgressAllowed() || orders?.hide_prep_eta === true,
       hideTracking: orders?.hide_tracking_progress === true,
     });
   }
@@ -1580,7 +2353,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   getPaymentStateLabel(state: string): string {
     const labels: Record<string, string> = {
-      pending: 'Pendiente de confirmación',
+      pending: 'Pendiente',
       authorized: 'Autorizado',
       succeeded: 'Pagado',
       captured: 'Pagado',
@@ -1667,7 +2440,136 @@ export class GuestOrderSummaryComponent implements OnInit {
    * Opt-out `ecommerce.orders.hide_prep_eta` (paso 7): ausente ⇒ visible,
    * se lee con `!== true`. Además exige al menos una fuente de ETA.
    */
+  /**
+   * Calle de la dirección fluida: línea1 + línea2 unidas por coma.
+   * Vacío si no hay ninguna (el template omite el separador).
+   */
+  addressStreet(addr: GuestOrderAddress): string {
+    return [addr.address_line1, addr.address_line2]
+      .filter((p) => !!p)
+      .join(', ');
+  }
+
+  /**
+   * Ciudad de la tarjeta de dirección: ciudad + dpto unidos por coma.
+   */
+  addressCity(addr: GuestOrderAddress): string {
+    return [addr.city, addr.state_province]
+      .filter((p) => !!p)
+      .join(', ');
+  }
+
+  /** La tarjeta solo se pinta si hay al menos un dato de dirección. */
+  hasAddressContent(addr: GuestOrderAddress): boolean {
+    return !!(
+      addr.address_line1 ||
+      addr.address_line2 ||
+      addr.city ||
+      addr.state_province ||
+      addr.country_code ||
+      addr.postal_code ||
+      addr.phone_number
+    );
+  }
+
+  /** Nombre del país en español; si no es ISO-2 o falla, el valor original. */
+  countryName(code?: string | null): string {
+    const raw = (code ?? '').trim();
+    if (!/^[A-Za-z]{2}$/.test(raw)) return raw;
+    try {
+      return (
+        new Intl.DisplayNames(['es'], { type: 'region' }).of(
+          raw.toUpperCase(),
+        ) || raw
+      );
+    } catch {
+      return raw;
+    }
+  }
+
+  // ==========================================================================
+  // ÍTEMS — adaptación a app-item-list (tarjetas compartidas)
+  // ==========================================================================
+
+  /** View-model de las líneas para `app-item-list` (no muta el summary). */
+  readonly itemRows = computed(() =>
+    (this.summary()?.order.items ?? []).map((item) => {
+      const cancelled = this.isItemCancelled(item);
+      const parts: string[] = [];
+      if (item.variant_sku) parts.push(`SKU: ${item.variant_sku}`);
+      const variant = this.variantText(item);
+      if (variant) parts.push(variant);
+      if (cancelled && this.hasVisibleCancellationReason(item)) {
+        parts.push(String(item.cancellation_reason).trim());
+      }
+      const ks = this.kitchenStateFor(item);
+      if (ks) parts.push(this.kitchenPrepLine(ks));
+      return {
+        ...item,
+        _image: item.variant_image_url || item.image_url || null,
+        _subtitle: parts.join(' · '),
+        _cancelled: cancelled,
+        _badge: cancelled ? 'cancelled' : null,
+      };
+    }),
+  );
+
+  /** Variante legible ("Color: Rojo · Talla: M"); nunca JSON ni objeto. */
+  variantText(item: { variant_attributes?: unknown }): string {
+    return parseVariantAttributes(item.variant_attributes)
+      .map((a) => {
+        const name = a.name ? a.name.charAt(0).toUpperCase() + a.name.slice(1) : '';
+        return name ? `${name}: ${a.value}` : a.value;
+      })
+      .join(' · ');
+  }
+
+  noteText(item: { notes?: string | null }): string {
+    return typeof item.notes === 'string' ? item.notes.trim() : '';
+  }
+
+  readonly itemRowClass = (item: { _cancelled?: boolean }): string =>
+    item._cancelled ? 'guest-item-cancelled' : '';
+
+  /**
+   * E2: la línea cancelada oculta precio y total (un número tachado sigue
+   * siendo un número que el ojo suma); el nombre va tachado vía CSS.
+   */
+  readonly itemCardConfig: ItemListCardConfig = {
+    titleKey: 'product_name',
+    subtitleKey: '_subtitle',
+    subtitleTransform: (item) => item._subtitle,
+    noteTransform: (item) => this.noteText(item),
+    avatarKey: '_image',
+    avatarShape: 'square',
+    avatarFallbackIcon: 'package',
+    badgeKey: '_badge',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: () => 'Cancelado',
+    detailKeys: [
+      {
+        key: 'quantity',
+        label: 'Cantidad',
+        transform: (v, item) => (item?._cancelled ? '—' : String(v)),
+      },
+      {
+        key: 'unit_price',
+        label: 'Precio unit.',
+        transform: (v, item) =>
+          item?._cancelled
+            ? '—'
+            : this.currencyService.format(Number(v) || 0),
+      },
+    ],
+    footerKey: 'total_price',
+    footerLabel: 'Total',
+    footerStyle: 'prominent',
+    footerTransform: (v, item) =>
+      item?._cancelled ? '' : this.currencyService.format(Number(v) || 0),
+  };
+
   etaVisible(): boolean {
+    if (!this.physicalProgressAllowed()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
       return false;
@@ -1682,6 +2584,7 @@ export class GuestOrderSummaryComponent implements OnInit {
    * ausente ⇒ la barra se muestra, se lee con `!== true`.
    */
   trackingShown(): boolean {
+    if (!this.physicalProgressAllowed()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (
       config?.customConfig?.ecommerce?.orders?.hide_tracking_progress === true
@@ -1827,6 +2730,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   /** La pill solo existe mientras el stream está activo o reintentando. */
   sseLiveVisible(): boolean {
+    if (this.embedded()) return false;
     const state = this.sse.connectionState();
     return (
       state === 'open' ||
@@ -1918,7 +2822,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.markKitchenFlash(changed);
     }
 
-    this.summary.set({ ...current, order });
+    this.fetchedSummary.set({ ...current, order });
   }
 
   private markKitchenFlash(productNames: string[]): void {
@@ -1950,12 +2854,18 @@ export class GuestOrderSummaryComponent implements OnInit {
    */
   async viewReceipt(payment: GuestOrderPayment): Promise<void> {
     const paymentId = payment.payment_id;
-    if (paymentId == null || !this.token) return;
+    if (paymentId == null) return;
+    if (!this.embedded() && !this.token) return;
 
     this.loadingReceiptId.set(paymentId);
     try {
       const res = await firstValueFrom(
-        this.checkoutService.getGuestPaymentReceiptUrl(this.token, paymentId),
+        this.embedded()
+          ? this.accountService.getPaymentReceiptUrl(paymentId)
+          : this.checkoutService.getGuestPaymentReceiptUrl(
+              this.token,
+              paymentId,
+            ),
       );
       this.receiptPreview.set({
         url: res.data.url,
@@ -2001,10 +2911,16 @@ export class GuestOrderSummaryComponent implements OnInit {
     orderState: string,
     payment: GuestOrderPayment,
   ): boolean {
+    // Misma regla en guest y embebido (la cuenta tiene sus endpoints).
     const terminalOrder = ['cancelled', 'refunded', 'finished', 'delivered'];
     const terminalPayment = ['succeeded', 'captured', 'refunded', 'cancelled'];
     if (terminalOrder.includes(orderState)) return false;
     if (terminalPayment.includes(payment.state)) return false;
+    // Account payloads always provide canonical type; preserve legacy standalone
+    // payloads without that additive field, but never infer type from display_name.
+    if (this.embedded() || payment.method_type != null) {
+      return payment.method_type === 'bank_transfer' || payment.method_type === 'voucher';
+    }
     return true;
   }
 
@@ -2019,7 +2935,11 @@ export class GuestOrderSummaryComponent implements OnInit {
     file: File,
   ): Promise<void> {
     const paymentId = payment.payment_id;
-    if (paymentId == null || !this.token) return;
+    if (paymentId == null) return;
+    if (!this.embedded() && !this.token) return;
+    const order = this.summary()?.order;
+    const currentPayment = order?.payments?.find(p => p.payment_id === paymentId);
+    if (!order || !currentPayment || !this.receiptUploadAllowed(order.state, currentPayment) || this.uploadingReceiptId() !== null) return;
 
     if (file.size > this.RECEIPT_MAX_SIZE) {
       this.toast.error('El archivo supera los 5 MB permitidos.', 'Error');
@@ -2036,20 +2956,26 @@ export class GuestOrderSummaryComponent implements OnInit {
     this.uploadingReceiptId.set(paymentId);
     try {
       const res = await firstValueFrom(
-        this.checkoutService.uploadGuestPaymentReceipt(
-          this.token,
+        this.embedded()
+          ? this.accountService.uploadPaymentReceipt(paymentId, file)
+          : this.checkoutService.uploadGuestPaymentReceipt(
+              this.token,
+              paymentId,
+              file,
+            ),
+      );
+      if (this.embedded()) {
+        this.receiptUploaded.emit(paymentId);
+      } else {
+        this.refreshPaymentReceipt(
           paymentId,
-          file,
-        ),
-      );
-      this.refreshPaymentReceipt(
-        paymentId,
-        res.data.has_receipt,
-        res.data.receipt_content_type,
-      );
-      // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
-      // refleja también en el estado vivo para que la fusión no la revierta.
-      this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
+          res.data.has_receipt,
+          res.data.receipt_content_type,
+        );
+        // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
+        // refleja también en el estado vivo para que la fusión no la revierta.
+        this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
+      }
       this.toast.success(
         res.message ??
           'Comprobante recibido. La tienda lo revisará para confirmar tu pago.',
@@ -2073,7 +2999,7 @@ export class GuestOrderSummaryComponent implements OnInit {
   ): void {
     const current = this.summary();
     if (!current) return;
-    this.summary.set({
+    this.fetchedSummary.set({
       ...current,
       order: {
         ...current.order,

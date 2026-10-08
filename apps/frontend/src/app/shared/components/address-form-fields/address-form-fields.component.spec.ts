@@ -22,6 +22,7 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
   let resolveByCode: jasmine.Spy;
   let listByDepartment: jasmine.Spy;
   let forward: jasmine.Spy;
+  let municipalityCenter: jasmine.Spy;
 
   const riohacha = {
     code: '44001', name: 'Riohacha', department_code: '44',
@@ -39,6 +40,9 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
       }]),
     );
     forward = jasmine.createSpy('forward').and.returnValue(of(null));
+    municipalityCenter = jasmine
+      .createSpy('municipalityCenter')
+      .and.returnValue(of({ lat: 11.54, lng: -72.91 }));
     TestBed.configureTestingModule({
       imports: [AddressFormFieldsComponent],
       providers: [
@@ -49,7 +53,7 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
             resolveByName, resolveByCode, setBaseUrl: () => {},
           },
         },
-        { provide: GeocodingService, useValue: { forward, reverse: () => of(null) } },
+        { provide: GeocodingService, useValue: { forward, municipalityCenter, reverse: () => of(null) } },
         {
           provide: CurrencyFormatService,
           useValue: {
@@ -188,6 +192,156 @@ describe('AddressFormFieldsComponent — selectores DANE', () => {
 
     expect(component.form.get('city')!.value).toBe('Riohacha');
     expect(component.form.get('municipality_code')!.value).toBe('44001');
+  });
+
+  it('ubicación fija resuelta: oculta selectores, muestra chip y el form es válido con dirección y teléfono', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    fixture.componentRef.setInput('lockedLocation', {
+      country_code: 'CO', state_province: 'La Guajira', city: 'Riohacha',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    component.form.get('address_line1')!.setValue('Calle 1 # 2-3');
+    component.form.get('phone_number')!.setValue('3001234567');
+    fixture.detectChanges();
+
+    expect(resolveByName).toHaveBeenCalledWith('Riohacha', 'La Guajira');
+    expect(component.isLocked()).toBeTrue();
+    expect(component.form.get('municipality_code')!.value).toBe('44001');
+    expect(component.form.get('city')!.value).toBe('Riohacha');
+    expect(component.form.valid).toBeTrue();
+    expect(fixture.debugElement.query(By.css('.locked-location-chip'))).toBeTruthy();
+    expect(fixture.nativeElement.textContent).toContain('Riohacha, La Guajira · Colombia');
+    // País, departamento y ciudad ocultos.
+    expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(0);
+    // El centroide es solo visual: nunca llega a coordenadas ni a has_location.
+    expect(component.municipalityFocus()).toEqual({ lat: 11.54, lng: -72.91 });
+    expect(municipalityCenter).toHaveBeenCalledWith('Riohacha', 'La Guajira');
+    expect(component.coordsSignal()).toBeNull();
+    expect(component.form.get('latitude')!.value).toBeNull();
+    expect(component.mapCenterHint()).toBeNull();
+  });
+
+  it('ubicación fija que no resuelve: los selectores siguen visibles', async () => {
+    resolveByName.and.returnValue(of(null));
+    fixture.componentRef.setInput('lockedLocation', {
+      country_code: 'CO', state_province: 'La Guajira', city: 'Inexistente',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.isLocked()).toBeFalse();
+    expect(fixture.debugElement.query(By.css('.locked-location-chip'))).toBeNull();
+    expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(3);
+    expect(forward).not.toHaveBeenCalled();
+    expect(municipalityCenter).not.toHaveBeenCalled();
+  });
+
+  const lockInRiohacha = { country_code: 'CO', state_province: 'La Guajira', city: 'Riohacha' };
+
+  it('lock: dirección legacy sin municipality_code de otra ciudad descarta lat/lng', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'Bogotá', country_code: 'CO',
+      latitude: 4.65, longitude: -74.06,
+    });
+    fixture.componentRef.setInput('lockedLocation', lockInRiohacha);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.form.get('city')!.value).toBe('Riohacha');
+    expect(component.form.get('latitude')!.value).toBeNull();
+    expect(component.form.get('longitude')!.value).toBeNull();
+    expect(component.coordsSignal()).toBeNull();
+  });
+
+  it('lock: dirección legacy sin código de la misma ciudad conserva lat/lng', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', city: 'Riohacha', country_code: 'CO',
+      latitude: 11.54, longitude: -72.91,
+    });
+    fixture.componentRef.setInput('lockedLocation', lockInRiohacha);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.form.get('latitude')!.value).toBe(11.54);
+    expect(component.form.get('longitude')!.value).toBe(-72.91);
+  });
+
+  it('lock: aplicar el lock no geocodifica; teclear en line1 lo hace una vez por el debounce', async () => {
+    resolveByName.and.returnValue(of(riohacha));
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      fixture.componentRef.setInput('initialAddress', {
+        address_line1: 'Calle 1 # 2-3', country_code: 'CO',
+      });
+      fixture.componentRef.setInput('lockedLocation', lockInRiohacha);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+      expect(component.isLocked()).toBeTrue();
+      expect(forward).not.toHaveBeenCalled();
+
+      component.form.markAsDirty();
+      component.form.get('address_line1')!.setValue('Calle 5 # 6-7');
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+
+    expect(forward).toHaveBeenCalledTimes(1);
+  });
+
+  it('teléfono prellenado: chip visible, input oculto; Editar muestra el input', async () => {
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', country_code: 'CO', phone_number: '3001234567',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.css('.phone-chip'))).toBeTruthy();
+    expect(fixture.debugElement.query(By.css('input[type="tel"]'))).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('3001234567');
+
+    (fixture.debugElement.query(By.css('button[aria-label="Editar teléfono"]'))
+      .nativeElement as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.phoneEditing()).toBeTrue();
+    expect(fixture.debugElement.query(By.css('.phone-chip'))).toBeNull();
+    expect(fixture.debugElement.query(By.css('input[type="tel"]'))).toBeTruthy();
+    expect(component.form.get('phone_number')!.value).toBe('3001234567');
+  });
+
+  it('sin teléfono: se muestra el input, no el chip', async () => {
+    fixture.componentRef.setInput('initialAddress', {
+      address_line1: 'Calle 1 # 2-3', country_code: 'CO',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.css('.phone-chip'))).toBeNull();
+    expect(fixture.debugElement.query(By.css('input[type="tel"]'))).toBeTruthy();
+  });
+
+  it('sin lockedLocation el comportamiento no cambia', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(resolveByName).not.toHaveBeenCalled();
+    expect(component.isLocked()).toBeFalse();
+    expect(fixture.debugElement.query(By.css('.locked-location-chip'))).toBeNull();
+    expect(fixture.debugElement.queryAll(By.css('app-selector')).length).toBe(3);
   });
 
   it('ignora la lista tardía del departamento anterior', async () => {
@@ -442,5 +596,105 @@ describe('AddressFormFieldsComponent — chip de carga sobre el mapa', () => {
     } finally {
       jasmine.clock().uninstall();
     }
+  });
+});
+
+describe('AddressFormFieldsComponent — mapa tras el debounce (compact vs completo)', () => {
+  let fixture: ComponentFixture<AddressFormFieldsComponent>;
+  let component: AddressFormFieldsComponent;
+  let forward: jasmine.Spy;
+
+  const riohacha = {
+    code: '44001', name: 'Riohacha', department_code: '44',
+    department_name: 'La Guajira', postal_code: '440001',
+  };
+
+  beforeEach(() => {
+    forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 11.54, lng: -72.91, precision: 'exact' }),
+    );
+    TestBed.configureTestingModule({
+      imports: [AddressFormFieldsComponent],
+      providers: [
+        {
+          provide: DianMunicipalityLookupService,
+          useValue: {
+            listDepartments: () => of(ADDRESS_TEST_DEPARTMENTS),
+            listByDepartment: () => of([riohacha]),
+            resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {},
+          },
+        },
+        {
+          provide: GeocodingService,
+          useValue: {
+            forward, reverse: () => of(null),
+            municipalityCenter: () => of({ lat: 11.54, lng: -72.91 }),
+          },
+        },
+        {
+          provide: CurrencyFormatService,
+          useValue: {
+            currencySymbol: signal('$'), currencyFormatStyle: () => 'comma_dot',
+            currencyDecimals: () => 0, loadCurrency: () => {}, format: (v: number) => `$${v}`,
+          },
+        },
+      ],
+    });
+    fixture = TestBed.createComponent(AddressFormFieldsComponent);
+    component = fixture.componentInstance;
+  });
+
+  async function typeLine1(text: string, ms: number): Promise<void> {
+    component.form.get('address_line1')!.setValue(text);
+    jasmine.clock().tick(ms);
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('compact sin dirección: sin mapa ni botón "Más detalles"', async () => {
+    fixture.componentRef.setInput('compact', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Más detalles');
+    expect(fixture.nativeElement.textContent).not.toContain('Abrir mapa');
+  });
+
+  it('compact: el mapa aparece solo tras el debounce, con el pin ubicado', async () => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      fixture.componentRef.setInput('compact', true);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+      component.onDepartmentChange('44');
+      component.onCityChange('44001');
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+      forward.calls.reset();
+
+      component.form.get('address_line1')!.setValue('Calle 5 # 6-7');
+      jasmine.clock().tick(100);
+      fixture.detectChanges();
+      expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeNull();
+
+      await typeLine1('Calle 5 # 6-7', 600);
+      expect(forward).toHaveBeenCalled();
+      expect(component.compactMapRevealed()).toBeTrue();
+      expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeTruthy();
+      expect(component.coordsSignal()).toEqual({ lat: 11.54, lng: -72.91 });
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  it('no compact: conserva el toggle "Abrir mapa" desde el inicio', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Abrir mapa');
+    expect(fixture.debugElement.query(By.css('app-address-map-picker'))).toBeNull();
   });
 });

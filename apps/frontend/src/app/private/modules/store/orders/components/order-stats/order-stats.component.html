@@ -28,11 +28,11 @@
   ></app-stats>
 
   <app-stats
-    title="Ingresos"
-    [value]="formatCurrency(stats().total_revenue)"
-    [smallText]="getGrowthPercentage(stats().revenueGrowthRate || 0) + ' vs mes ant.'"
-    iconName="dollar-sign"
-    iconBgColor="bg-purple-100"
-    iconColor="text-purple-500"
+    title="Canceladas"
+    [value]="formatNumber(stats().cancelled_orders)"
+    [smallText]="formatNumber(stats().refunded_orders) + ' reembolsadas'"
+    iconName="x-circle"
+    iconBgColor="bg-red-100"
+    iconColor="text-red-500"
   ></app-stats>
 </ng-container>

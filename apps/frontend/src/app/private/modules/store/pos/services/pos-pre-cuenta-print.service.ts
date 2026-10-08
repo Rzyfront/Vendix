@@ -2,7 +2,23 @@ import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { DocumentPrintService } from '../../../../../shared/services/print';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import { computeSuggestedTip } from '../../../../../core/utils/tip-policy.util';
 import type { CartState } from './pos-cart.service';
+
+/** Modelo neutro de pre-cuenta (POS o mesa). */
+export interface PreCuentaDoc {
+  title?: string;
+  customerName?: string | null;
+  customerDocument?: string | null;
+  lines: { qty: number; name: string; total: number }[];
+  subtotal: number;
+  discount: number;
+  taxAmount: number;
+  withholding: number;
+  total: number;
+  tipAlreadyCharged?: boolean;
+}
 
 /**
  * PSVERSION0001 paso 6 — impresión de Pre-cuenta.
@@ -37,6 +53,7 @@ export class PosPreCuentaPrintService {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly documentPrint = inject(DocumentPrintService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly storeSettings = inject(StoreSettingsFacade);
 
   /**
    * Imprime la pre-cuenta del `state` dado. El estado se clona mentalmente a
@@ -52,8 +69,47 @@ export class PosPreCuentaPrintService {
     });
   }
 
+  /** Imprime una pre-cuenta armada desde un modelo neutro (p. ej. mesa). */
+  async printPreCuentaDoc(doc: PreCuentaDoc): Promise<void> {
+    await this.documentPrint.print({
+      document: 'pos_ticket',
+      body: this.buildDocBody(doc),
+      title: 'Pre-cuenta',
+      styles: PRE_CUENTA_PRINT_STYLES,
+    });
+  }
+
   /** Plantilla local de pre-cuenta (solo lectura, sin red ni mutaciones). */
   buildBody(state: CartState): string {
+    const customer = state.customer;
+    const summary = state.summary;
+    const withholding = Number(summary?.withholdingAmount ?? 0) || 0;
+    const customerName =
+      customer?.name?.trim() ||
+      [customer?.first_name, customer?.last_name].filter(Boolean).join(' ').trim() ||
+      (customer as any)?.legal_name?.trim() ||
+      customer?.email?.trim() ||
+      '';
+    return this.buildDocBody({
+      customerName,
+      customerDocument: customer?.document_number ?? null,
+      lines: state.items.map((item) => ({
+        qty: item.quantity,
+        name:
+          item.itemType === 'custom'
+            ? (item.description ?? 'Ítem personalizado')
+            : (item.product?.name ?? 'Ítem'),
+        total: Number(item.totalPrice ?? 0) || 0,
+      })),
+      subtotal: Number(summary?.subtotal ?? 0) || 0,
+      discount: Number(summary?.discountAmount ?? 0) || 0,
+      taxAmount: Number(summary?.taxAmount ?? 0) || 0,
+      withholding,
+      total: Math.max(0, (Number(summary?.total ?? 0) || 0) - withholding),
+    });
+  }
+
+  private buildDocBody(doc: PreCuentaDoc): string {
     const fmt = (n: number | null | undefined): string =>
       this.currencyService.format(Number(n ?? 0) || 0);
     const user = this.authFacade.user() as {
@@ -67,14 +123,9 @@ export class PosPreCuentaPrintService {
       [user?.first_name, user?.last_name].filter(Boolean).join(' ') ||
       user?.name ||
       '';
-    const customer = state.customer;
-    const summary = state.summary;
-    const discount = Number(summary?.discountAmount ?? 0) || 0;
-    const withholding = Number(summary?.withholdingAmount ?? 0) || 0;
-    const total = Math.max(
-      0,
-      (Number(summary?.total ?? 0) || 0) - withholding,
-    );
+    const discount = doc.discount;
+    const withholding = doc.withholding;
+    const total = doc.total;
     // Locale explícito (patrón date.util.ts): el toLocaleString() pelado
     // varía según el entorno del navegador.
     const date = new Date().toLocaleString('es-CO', {
@@ -82,35 +133,43 @@ export class PosPreCuentaPrintService {
       timeStyle: 'short',
     });
 
-    const lines = state.items
-      .map((item) => {
-        const name =
-          item.itemType === 'custom'
-            ? (item.description ?? 'Ítem personalizado')
-            : (item.product?.name ?? 'Ítem');
+    const lines = doc.lines
+      .map((line) => {
         return (
-          `<tr><td class="qty">${this.esc(String(item.quantity))} x</td>` +
-          `<td>${this.esc(name)}</td>` +
-          `<td class="amount">${this.esc(fmt(item.totalPrice))}</td></tr>`
+          `<tr><td class="qty">${this.esc(String(line.qty))} x</td>` +
+          `<td>${this.esc(line.name)}</td>` +
+          `<td class="amount">${this.esc(fmt(line.total))}</td></tr>`
         );
       })
       .join('');
 
-    const customerName =
-      customer?.name?.trim() ||
-      [customer?.first_name, customer?.last_name].filter(Boolean).join(' ').trim() ||
-      (customer as any)?.legal_name?.trim() ||
-      customer?.email?.trim() ||
-      '';
+    const customerName = doc.customerName?.trim() ?? '';
     const customerRow =
       customerName !== ''
-        ? `<div class="meta">Cliente: ${this.esc(customerName)}${customer?.document_number ? ` · ${this.esc(customer.document_number)}` : ''}</div>`
+        ? `<div class="meta">Cliente: ${this.esc(customerName)}${doc.customerDocument ? ` · ${this.esc(doc.customerDocument)}` : ''}</div>`
         : '';
 
     const discountRow =
       discount > 0
         ? `<tr><td colspan="2">Descuento aplicado</td><td class="amount">-${this.esc(fmt(discount))}</td></tr>`
         : '';
+    // Propina sugerida: base = productos brutos (subtotal + impuestos, antes
+    // de descuento, sin envío), igual que el backend.
+    const policy = this.storeSettings.tipPolicy();
+    const grossBase = doc.subtotal + doc.taxAmount;
+    const suggestedTip =
+      !doc.tipAlreadyCharged && policy.suggested && grossBase > 0
+        ? computeSuggestedTip(policy, grossBase)
+        : 0;
+    const hasTip = suggestedTip > 0;
+    const tipLabel =
+      policy.suggested?.type === 'percentage'
+        ? `Propina sugerida (${policy.suggested.value} %)`
+        : 'Propina sugerida';
+    const tipRows = hasTip
+      ? `<tr><td colspan="2">${this.esc(tipLabel)}</td><td class="amount">${this.esc(fmt(suggestedTip))}</td></tr>` +
+        `<tr class="total-row"><td colspan="2">Total con propina</td><td class="amount">${this.esc(fmt(total + suggestedTip))}</td></tr>`
+      : '';
     const withholdingRow =
       withholding > 0
         ? `<tr><td colspan="2">Retención</td><td class="amount">-${this.esc(fmt(withholding))}</td></tr>`
@@ -118,18 +177,19 @@ export class PosPreCuentaPrintService {
 
     return (
       `<div class="precuenta">` +
-      `<h1>PRE-CUENTA</h1>` +
+      `<h1>${this.esc(doc.title ?? 'PRE-CUENTA')}</h1>` +
       (storeName !== '' ? `<div class="store">${this.esc(storeName)}</div>` : '') +
       `<div class="meta">${this.esc(date)}${cashier !== '' ? ` · ${this.esc(cashier)}` : ''}</div>` +
       customerRow +
       `<div class="legend">PRE-CUENTA — documento no fiscal</div>` +
       `<table>${lines}</table>` +
       `<table class="totals">` +
-      `<tr><td colspan="2">Subtotal</td><td class="amount">${this.esc(fmt(summary?.subtotal))}</td></tr>` +
+      `<tr><td colspan="2">Subtotal</td><td class="amount">${this.esc(fmt(doc.subtotal))}</td></tr>` +
       discountRow +
-      `<tr><td colspan="2">Impuestos</td><td class="amount">${this.esc(fmt(summary?.taxAmount))}</td></tr>` +
+      `<tr><td colspan="2">Impuestos</td><td class="amount">${this.esc(fmt(doc.taxAmount))}</td></tr>` +
       withholdingRow +
-      `<tr class="total-row"><td colspan="2">TOTAL</td><td class="amount">${this.esc(fmt(total))}</td></tr>` +
+      `<tr class="total-row"><td colspan="2">${hasTip ? 'Total sin propina' : 'TOTAL'}</td><td class="amount">${this.esc(fmt(total))}</td></tr>` +
+      tipRows +
       `</table>` +
       `<div class="foot">Cuenta abierta sujeta a cambios.<br>No constituye factura ni comprobante fiscal.</div>` +
       `</div>`

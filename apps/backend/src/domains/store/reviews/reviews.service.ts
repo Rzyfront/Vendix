@@ -7,7 +7,13 @@ import {
   ReviewQueryDto,
   CreateReviewResponseDto,
   UpdateReviewResponseDto,
+  OrderReviewsQueryDto,
 } from './dto';
+import {
+  resolveStoreTimezone,
+  resolveLocalDateRange,
+  DEFAULT_STORE_TIMEZONE,
+} from '@common/utils/store-timezone.util';
 
 @Injectable()
 export class ReviewsService {
@@ -85,6 +91,81 @@ export class ReviewsService {
         limit,
         totalPages: Math.ceil(total / limit),
       },
+    };
+  }
+
+  async findAllOrderReviews(query: OrderReviewsQueryDto) {
+    const {
+      page = 1,
+      limit = 10,
+      rating,
+      quick_tag,
+      date_from,
+      date_to,
+    } = query;
+    const where: any = {};
+    if (rating) where.rating = rating;
+    if (quick_tag) where.quick_tag = quick_tag;
+
+    if (date_from || date_to) {
+      const store_id = RequestContextService.getContext()?.store_id;
+      const tz = store_id
+        ? await resolveStoreTimezone(this.prisma, store_id)
+        : DEFAULT_STORE_TIMEZONE;
+      // created_at es TIMESTAMP: rango en el día calendario de la tienda.
+      const range: any = {};
+      if (date_from) {
+        range.gte = resolveLocalDateRange(
+          { date_from, date_to: date_from },
+          tz,
+        ).startDate;
+      }
+      if (date_to) {
+        range.lte = resolveLocalDateRange(
+          { date_from: date_to, date_to },
+          tz,
+        ).endDate;
+      }
+      where.created_at = range;
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.order_reviews.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        include: {
+          orders: { select: { order_number: true, customer_alias: true } },
+          customer: { select: { first_name: true, last_name: true } },
+        },
+      }),
+      this.prisma.order_reviews.count({ where }),
+    ]);
+
+    const data = rows.map((r: any) => {
+      const full_name = r.customer
+        ? [r.customer.first_name, r.customer.last_name]
+            .filter(Boolean)
+            .join(' ')
+            .trim()
+        : '';
+      return {
+        id: r.id,
+        order_id: r.order_id,
+        rating: r.rating,
+        quick_tag: r.quick_tag ?? null,
+        comment: r.comment ?? null,
+        source: r.source,
+        created_at: r.created_at,
+        order_number: r.orders?.order_number ?? null,
+        customer_name: full_name || r.orders?.customer_alias || null,
+      };
+    });
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 

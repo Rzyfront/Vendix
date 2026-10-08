@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { buildFromHeader, sanitizeReplyTo } from '../utils/sender.util';
 import {
   EmailProvider,
   EmailResult,
@@ -40,10 +41,15 @@ export class ResendProvider implements EmailProvider {
     subject: string,
     html: string,
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult> {
     try {
+      const reply_to = from ? sanitizeReplyTo(from.email) : undefined;
       const result = await this.resend.emails.send({
-        from: this.config.fromEmail,
+        from: from
+          ? buildFromHeader(from, this.config.fromName, this.config.fromEmail)
+          : this.config.fromEmail,
+        ...(reply_to && { reply_to }),
         to: [to],
         subject,
         html,
@@ -80,10 +86,15 @@ export class ResendProvider implements EmailProvider {
     html: string,
     attachments: EmailAttachment[],
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult> {
     try {
+      const reply_to = from ? sanitizeReplyTo(from.email) : undefined;
       const result = await this.resend.emails.send({
-        from: this.config.fromEmail,
+        from: from
+          ? buildFromHeader(from, this.config.fromName, this.config.fromEmail)
+          : this.config.fromEmail,
+        ...(reply_to && { reply_to }),
         to: [to],
         subject,
         html,

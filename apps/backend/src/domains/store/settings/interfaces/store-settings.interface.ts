@@ -750,6 +750,14 @@ export interface CashRegisterSettings {
   track_non_cash_payments: boolean;
 }
 
+export interface TipsSettings {
+  /** Registrar propinas (captura manual). Sin valor → se resuelve por industria: restaurante=true, resto=false. */
+  enabled?: boolean;
+  suggested_enabled: boolean;
+  suggested_type: 'percentage' | 'fixed';
+  suggested_value: number;
+}
+
 export interface BarcodeScannerSettings {
   enabled: boolean;
 }
@@ -773,6 +781,7 @@ export interface PosSettings {
   allow_refund_without_approval: boolean;
   scale?: ScaleSettings;
   cash_register?: CashRegisterSettings;
+  tips?: TipsSettings;
   barcode_scanner?: BarcodeScannerSettings;
   default_payment_form?: 'contado' | 'credito';
   show_onscreen_keypad: boolean;

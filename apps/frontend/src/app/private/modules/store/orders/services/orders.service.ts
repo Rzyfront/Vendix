@@ -217,6 +217,26 @@ export class OrdersService {
   }
 
   /**
+   * Editar la nota de un ítem desde el detalle de la orden.
+   *
+   * Endpoint: PATCH /api/store/orders/:orderId/flow/items/:orderItemId/notes
+   * con body `{notes}` (máx. 200; `''` o null limpia la nota). Responde
+   * `{id, notes}`. 404 si el ítem no existe, 409 si está cancelado.
+   */
+  updateItemNotes(
+    orderId: number,
+    orderItemId: number,
+    notes: string | null,
+  ): Observable<{ id: number; notes: string | null }> {
+    return this.http
+      .patch<{ id: number; notes: string | null }>(
+        `${this.api_url}/store/orders/${orderId}/flow/items/${orderItemId}/notes`,
+        { notes },
+      )
+      .pipe(map((res) => unwrap<{ id: number; notes: string | null }>(res)));
+  }
+
+  /**
    * Get orders by customer. Backend envelope: `{success, data: Order[], pagination}`.
    */
   getOrdersByCustomer(

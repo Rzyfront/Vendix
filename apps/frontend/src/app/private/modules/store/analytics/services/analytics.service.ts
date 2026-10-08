@@ -150,8 +150,14 @@ export interface PurchaseTrendsSummary {
 // Reviews interfaces
 export interface ReviewsSummary {
   total_reviews: number;
+  /** `null` = no hubo reseñas aprobadas en la ventana. */
+  total_reviews_growth: number | null;
   average_rating: number;
+  /** `null` = no hubo reseñas aprobadas en el período actual o previo. */
+  average_rating_growth: number | null;
   verified_purchases: number;
+  /** % de compras verificadas sobre las aprobadas. `null` = sin aprobadas. */
+  verified_purchase_rate: number | null;
   pending_reviews: number;
   approved_reviews: number;
   rejected_reviews: number;
@@ -163,6 +169,41 @@ export interface ReviewsSummary {
     5: number;
   };
   total_helpful_votes: number;
+}
+
+export interface RatingTrendPoint {
+  period: string;
+  average_rating: number;
+  review_count: number;
+}
+
+// Tendencia de reseñas: productos + experiencia de compra (contrato ReviewsTrend)
+export type ReviewQuickTagKey = 'very_easy' | 'normal' | 'difficult' | 'none';
+
+export interface ReviewsTrendTotals {
+  count: number;
+  avg: number | null;
+  previous_count: number;
+  previous_avg: number | null;
+}
+
+export interface ReviewsTrend {
+  series: Array<{
+    period: string;
+    product_count: number;
+    product_avg: number | null;
+    experience_count: number;
+    experience_avg: number | null;
+  }>;
+  totals: {
+    product: ReviewsTrendTotals;
+    experience: ReviewsTrendTotals;
+  };
+  rating_distribution: {
+    product: Array<{ rating: 1 | 2 | 3 | 4 | 5; count: number }>;
+    experience: Array<{ rating: 1 | 2 | 3 | 4 | 5; count: number }>;
+  };
+  quick_tags: Array<{ tag: ReviewQuickTagKey; count: number }>;
 }
 
 // Reviews por producto (misma fila que el export backend: pantalla == archivo)
@@ -1173,6 +1214,18 @@ export class AnalyticsService {
     );
   }
 
+  getRatingTrend(
+    query: any = {},
+  ): Observable<ApiResponse<RatingTrendPoint[]>> {
+    const cacheKey = `reviews-rating-trend-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<RatingTrendPoint[]>>(
+        this.getApiUrl('reviews/rating-trend'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
   getReviewsByProduct(
     query: any = {},
   ): Observable<ApiResponse<ReviewsByProductRow[]>> {
@@ -1186,6 +1239,24 @@ export class AnalyticsService {
 
   exportReviewsByProduct(query: any = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('reviews/by-product/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  getReviewsTrend(
+    query: any = {},
+  ): Observable<ApiResponse<ReviewsTrend>> {
+    const cacheKey = `reviews-trend-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ReviewsTrend>>(this.getApiUrl('reviews/trend'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  exportReviewsTrend(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('reviews/trend/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

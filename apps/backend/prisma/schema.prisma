@@ -83,6 +83,7 @@ model users {
   refunds                    refunds[]
   refundsResolvedBy          refunds[]                    @relation("refunds_resolved_by")
   reviews                    reviews[]
+  order_reviews              order_reviews[]            @relation("order_reviews_customer")
   // Review system
   review_responses_created   review_responses[]           @relation("review_responses_user")
   review_votes_cast          review_votes[]               @relation("review_votes_user")
@@ -961,6 +962,7 @@ model stores {
   coupons                     coupons[]
   marketing_ad_creatives      marketing_ad_creatives[]
   reviews                     reviews[]
+  order_reviews               order_reviews[]
 
   // QUI-72: roles created with store scope, and per-store role assignments
   roles      roles[]
@@ -1750,6 +1752,8 @@ model orders {
   @@index([store_id, dispatch_pool_at])
   @@index([store_id, created_by_user_id])
   @@index([shipping_tax_rate_id])
+  order_review                order_reviews?
+  product_reviews             reviews[]
 }
 
 model order_installments {
@@ -2463,11 +2467,33 @@ model reviews {
   review_responses  review_responses?
   review_votes      review_votes[]
   review_reports    review_reports[]
+  order_id          Int?
+  orders            orders?           @relation(fields: [order_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([user_id, product_id])
+  @@index([order_id])
   @@index([store_id])
   @@index([product_id, state])
   @@index([user_id])
+}
+
+model order_reviews {
+  id          Int                          @id @default(autoincrement())
+  store_id    Int
+  order_id    Int                          @unique
+  customer_id Int?
+  rating      Int
+  comment     String?                      @db.Text
+  quick_tag   order_review_quick_tag_enum?
+  source      String                       @default("order_detail") @db.VarChar(30)
+  created_at  DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at  DateTime                     @updatedAt @db.Timestamp(6)
+  stores      stores                       @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  orders      orders                       @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer    users?                       @relation("order_reviews_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([store_id, created_at])
+  @@index([customer_id])
 }
 
 model review_responses {
@@ -3623,6 +3649,9 @@ model cart_items {
   /// extra por linea.
   stock_units_consumed  Int?
 
+  /// Nota libre del comprador para la linea (max 200). Viaja a order_items.notes.
+  notes String?
+
   cart            carts             @relation(fields: [cart_id], references: [id], onDelete: Cascade)
   product         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
@@ -4269,6 +4298,12 @@ enum refunds_state_enum {
   completed
   failed
   cancelled
+}
+
+enum order_review_quick_tag_enum {
+  very_easy
+  normal
+  difficult
 }
 
 enum review_state_enum {

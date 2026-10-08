@@ -18,9 +18,25 @@ function fixture() {
 describe('financial account invoice projection', () => {
   it('preserves exact independent totals including retained payment and discounts/tips/shipping', () => {
     const projections = fixture().map((a) => projectFinancialAccountInvoice(a, 'QA-001'));
-    expect(projections.map((p) => p.total.toFixed(2))).toEqual(['2305.00', '3000.00', '7000.00']);
-    expect(projections.reduce((sum, p) => sum + Number(p.total), 0)).toBe(12305);
+    // La propina (600) no hace parte de la factura: Σ facturas + Σ propinas = total de la orden.
+    expect(projections.map((p) => p.total.toFixed(2))).toEqual(['2192.61', '2853.71', '6658.68']);
+    const tips = projections.reduce((sum, p) => sum + Number(p.tip_amount), 0);
+    expect(tips).toBe(600);
+    expect(projections.reduce((sum, p) => sum + Number(p.total), 0) + tips).toBe(12305);
     for (const p of projections) expect(p.subtotal.plus(p.tax).equals(p.total)).toBe(true);
+  });
+  it('cuenta con propina 5000: la línea tip no se proyecta y el total pagable la excluye', () => {
+    const a = fixture()[1];
+    const line = (id: number, kind: string, amount: string) => ({ id, kind, source_order_item_id: null, description: kind, source_snapshot: {}, subtotal_amount: amount, discount_amount: '0.00', tax_amount: '0.00', total_amount: amount, taxes: [] as any[] });
+    const account = {
+      ...a, discount_amount: '0.00', tax_amount: '0.00', subtotal_amount: '10000.00', shipping_cost: '0.00', tip_amount: '5000.00', grand_total: '15000.00',
+      lines: [line(1, 'item', '10000.00'), line(2, 'tip', '5000.00')],
+    };
+    const p = projectFinancialAccountInvoice(account, 'QA');
+    expect(p.items.map((i) => i.data.description)).toEqual([expect.stringContaining('item')]);
+    expect(p.items.some((i) => i.data.description.includes('tip'))).toBe(false);
+    expect(p.total.toFixed(2)).toBe('10000.00');
+    expect(p.tip_amount.toFixed(2)).toBe('5000.00');
   });
   it('represents financial participation explicitly without claiming additional stock units', () => {
     const p = projectFinancialAccountInvoice(fixture()[1], 'QA-001');
@@ -86,6 +102,6 @@ describe('financial account fiscal pipeline (real prevalidator and UBL totals)',
     const xml = doc.end({ prettyPrint: false });
     const xmlReport = DianTotalsValidator.validate(xml);
     expect(xmlReport.violations.map((v) => `${v.rule}: ${v.message}`)).toEqual([]);
-    expect(xml).toContain(`<cbc:PayableAmount currencyID="COP">${account.grand_total}</cbc:PayableAmount>`);
+    expect(xml).toContain(`<cbc:PayableAmount currencyID="COP">${p.total.toFixed(2)}</cbc:PayableAmount>`);
   });
 });

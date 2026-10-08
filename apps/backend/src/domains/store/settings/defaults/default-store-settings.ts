@@ -170,6 +170,14 @@ export function getDefaultStoreSettings(): StoreSettings {
         require_closing_count: true,
         track_non_cash_payments: true,
       },
+      // `enabled` se OMITE a propósito: sin valor la tienda resuelve por
+      // industria (restaurante=true, resto=false). Un `enabled` aquí lo
+      // estamparía en toda fila al hacer merge y anularía ese fallback.
+      tips: {
+        suggested_enabled: false,
+        suggested_type: 'percentage',
+        suggested_value: 10,
+      },
       barcode_scanner: {
         enabled: false,
       },

@@ -25,6 +25,10 @@ import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.
 import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
 import { S3Service } from '@common/services/s3.service';
+import {
+  resolveTip,
+  resolveTipPolicy,
+} from '../../../common/utils/tip.util';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import { normalizeKitchenMode } from '../../store/kitchen-fire/kitchen-mode.util';
@@ -177,6 +181,20 @@ export interface BillView {
    */
   tax_amount: number;
   grand_total: number;
+  /**
+   * Propina SUGERIDA por la tienda (`pos.tips.suggested_*`). Solo informativa:
+   * `payTable` no la aplica. `null` si no hay política sugerida o la orden ya
+   * tiene propina. `amount` se calcula sobre productos brutos (subtotal + IVA);
+   * `total_with_tip` = `balance_due + amount` si queda saldo, o
+   * `grand_total + amount` si la cuenta ya está saldada.
+   */
+  suggested_tip: {
+    label: string;
+    type: 'percentage' | 'fixed';
+    value: number;
+    amount: number;
+    total_with_tip: number;
+  } | null;
   /** Sum of applied (succeeded) payments against this order. */
   total_paid: number;
   /** Outstanding amount the diner still owes (`grand_total − total_paid`). */
@@ -945,6 +963,7 @@ export class EcommerceTablesService {
         currency: true,
         grand_total: true,
         total_paid: true,
+        tip_amount: true,
         // `remaining_balance` exists on the order but is refreshed ONLY when
         // a payment is applied (bumpOrderBalanceInTx); for an unpaid draft
         // tab it stays 0 while items accumulate. We therefore derive the
@@ -1058,6 +1077,46 @@ export class EcommerceTablesService {
     const totalPaid = Number(orderRow?.total_paid ?? 0);
     const balanceDue = Math.max(Math.round((grandTotal - totalPaid) * 100) / 100, 0);
 
+    // Propina sugerida (informativa). Base = productos brutos del bill.
+    let suggestedTip: BillView['suggested_tip'] = null;
+    const existingTip = Number((orderRow as any)?.tip_amount ?? 0);
+    if (!(existingTip > 0)) {
+      const policy = resolveTipPolicy(
+        (orderRow?.stores?.store_settings?.settings as any)?.pos?.tips,
+        true,
+      );
+      if (policy.suggested) {
+        const round2 = (v: number) =>
+          Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100;
+        const grossBase = round2(
+          Number(order?.subtotal_amount ?? 0) +
+            Number((order as any)?.tax_amount ?? 0),
+        );
+        const amount = resolveTip(
+          {
+            tip_type: policy.suggested.type,
+            tip_value: policy.suggested.value,
+          },
+          grossBase,
+          round2,
+        ).amount;
+        if (amount > 0) {
+          suggestedTip = {
+            label:
+              policy.suggested.type === 'percentage'
+                ? `Propina sugerida (${policy.suggested.value}%)`
+                : 'Propina sugerida',
+            type: policy.suggested.type,
+            value: policy.suggested.value,
+            amount,
+            total_with_tip: round2(
+              (balanceDue > 0 ? balanceDue : grandTotal) + amount,
+            ),
+          };
+        }
+      }
+    }
+
     return {
       table: { id: table.id, name: table.name },
       session_id: session.id,
@@ -1068,6 +1127,7 @@ export class EcommerceTablesService {
       grand_total: Number(order?.grand_total ?? 0),
       total_paid: totalPaid,
       balance_due: balanceDue,
+      suggested_tip: suggestedTip,
       currency: orderRow?.currency ?? 'COP',
       prints_vat_breakdown: printsVatBreakdown,
     };

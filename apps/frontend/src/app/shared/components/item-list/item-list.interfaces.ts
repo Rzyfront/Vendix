@@ -52,6 +52,8 @@ export interface ItemListCardConfig {
   subtitleKey?: string;
   /** Optional transform function to compute the subtitle from the full item */
   subtitleTransform?: (item: any) => string;
+  /** Optional secondary note line (italic, small) rendered under the subtitle. Empty = hidden. */
+  noteTransform?: (item: any) => string | null | undefined;
   /** Key path for avatar/image URL */
   avatarKey?: string;
   /** Optional click handler for avatar/image interactions */

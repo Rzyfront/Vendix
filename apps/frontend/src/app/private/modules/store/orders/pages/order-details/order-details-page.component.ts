@@ -102,6 +102,10 @@ export function pendingKitchenLabelsFromError(error: unknown): string[] {
     return [`${row.product_name}${variant}${quantity}`];
   });
 }
+import {
+  ORDER_REVIEW_QUICK_TAG_LABELS,
+  ORDER_REVIEW_SOURCE_LABELS,
+} from '../../../customers/reviews/models/review.model';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   StickyHeaderComponent,
@@ -146,6 +150,7 @@ import {
   Invoice,
   RelatedNote,
   CreateCreditNoteDto,
+  PosUvtThreshold,
 } from '../../../invoicing/interfaces/invoice.interface';
 import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.actions';
 import { InvoiceDetailComponent } from '../../../invoicing/components/invoice-detail/invoice-detail.component';
@@ -161,6 +166,7 @@ import { DocumentPrintService } from '../../../../../../shared/services/print/do
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../../../dispatch-ticket/models/dispatch-ticket-data.model';
+import { isTipPolicyActive } from '../../../../../../core/utils/tip-policy.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
   shouldAutoPrintDispatchTicket,
@@ -790,6 +796,24 @@ export class OrderDetailsPageComponent {
   private vexiHosts = inject(VexiUiHostRegistry);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+
+  // Tarjeta "Experiencia de compra" (solo lectura).
+  readonly orderReview = computed(() => this.order()?.order_review ?? null);
+  readonly reviewStars = [1, 2, 3, 4, 5];
+  readonly reviewQuickTagLabel = computed(() => {
+    const tag = this.orderReview()?.quick_tag;
+    return tag ? ORDER_REVIEW_QUICK_TAG_LABELS[tag] : null;
+  });
+  readonly reviewSourceLabel = computed(() => {
+    const source = this.orderReview()?.source;
+    return source ? ORDER_REVIEW_SOURCE_LABELS[source] : null;
+  });
+  readonly reviewDateLabel = computed(() => {
+    const review = this.orderReview();
+    return review
+      ? formatStoreDateTime(review.created_at, this.settingsFacade.timezone())
+      : '';
+  });
 
   // ── Host de Vexi ──────────────────────────────────────────────────────
   //
@@ -2389,6 +2413,15 @@ export class OrderDetailsPageComponent {
         error: () => this.electronicEmissionLive.set(false),
       });
 
+    // Umbral de 5 UVT: solo informativo. Si falla queda null y no se avisa.
+    this.invoicingService
+      .getPosUvtThreshold()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => this.uvtThreshold.set(response?.data ?? null),
+        error: () => this.uvtThreshold.set(null),
+      });
+
     // Mismas trece acciones que `InvoicingEffects.mutationSuccess$` trata como
     // mutación. No se duplica la lista por gusto: no hay un símbolo exportado
     // que la contenga, y derivarla por convención de nombre ('…Success')
@@ -2885,7 +2918,12 @@ export class OrderDetailsPageComponent {
     // `tip_not_allowed_on_installment` en vez de aceptarla en silencio. El
     // modal ya apaga la seccion con `[allowTip]="!isCreditOrder()"`; este guard
     // es la segunda linea, porque un submit puede venir de un estado anterior.
-    if (!isCredit && submit.tip != null && submit.tip > 0) {
+    if (
+      !isCredit &&
+      isTipPolicyActive(this.settingsFacade.tipPolicy()) &&
+      submit.tip != null &&
+      submit.tip > 0
+    ) {
       dto.tip_amount = submit.tip;
       if (submit.tipType != null) dto.tip_type = submit.tipType;
       if (submit.tipValue != null) dto.tip_value = submit.tipValue;
@@ -5407,6 +5445,62 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ── Nota por ítem (ver/editar) ──────────────────────────────────────
+  readonly itemNotesMaxLength = 200;
+  readonly noteEditorOpen = signal(false);
+  readonly noteEditorItem = signal<OrderItem | null>(null);
+  readonly noteEditorText = signal('');
+  readonly noteSaving = signal(false);
+
+  /** La nota se edita salvo ítem cancelado u orden cancelada/reembolsada. */
+  canEditItemNotes(item: OrderItem): boolean {
+    const state = this.order()?.state;
+    if (state === 'cancelled' || state === 'refunded') return false;
+    return item.cancelled_at == null;
+  }
+
+  openItemNoteEditor(item: OrderItem): void {
+    if (!this.canEditItemNotes(item)) return;
+    this.noteEditorItem.set(item);
+    this.noteEditorText.set(item.notes ?? '');
+    this.noteEditorOpen.set(true);
+  }
+
+  onNoteEditorInput(event: Event): void {
+    this.noteEditorText.set((event.target as HTMLTextAreaElement).value);
+  }
+
+  closeItemNoteEditor(): void {
+    if (this.noteSaving()) return;
+    this.noteEditorOpen.set(false);
+    this.noteEditorItem.set(null);
+  }
+
+  saveItemNote(): void {
+    if (this.noteSaving()) return;
+    const item = this.noteEditorItem();
+    const orderId = this.order()?.id;
+    if (!item || !orderId) return;
+    const text = this.noteEditorText().trim();
+    this.noteSaving.set(true);
+    this.ordersFlowService
+      .updateItemNotes(orderId, item.id, text === '' ? null : text)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.noteSaving.set(false);
+          this.noteEditorOpen.set(false);
+          this.noteEditorItem.set(null);
+          this.toastService.success('Nota actualizada');
+          this.refreshOrder();
+        },
+        error: (err: unknown) => {
+          this.noteSaving.set(false);
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
   /** Cocina fisica: items con estado de cocina no terminal, entregables a mano. */
   readonly deliverableKitchenItems = computed<OrderItem[]>(() =>
     (this.order()?.order_items ?? []).filter((it) => {
@@ -6028,6 +6122,27 @@ export class OrderDetailsPageComponent {
    * puede emitirla es prometer algo que el backend va a negar.
    */
   private readonly electronicEmissionLive = signal(false);
+
+  readonly uvtThreshold = signal<PosUvtThreshold | null>(null);
+
+  /**
+   * Aviso INFORMATIVO (nunca bloquea): facturación de producción activa, sin
+   * factura de venta vigente, orden no dividida/cancelada y total sobre 5 UVT.
+   */
+  readonly uvtInvoiceNotice = computed(() => {
+    const order = this.order();
+    const threshold = this.uvtThreshold();
+    if (!order || !threshold?.enforced) return false;
+    const limit = Number(threshold.limit_cop);
+    if (!(limit > 0)) return false;
+    return (
+      this.electronicEmissionLive() &&
+      !order.active_financial_split_id &&
+      !['cancelled', 'refunded'].includes(order.state) &&
+      this.reinvoiceable() &&
+      Number(order.grand_total) > limit
+    );
+  });
 
   /**
    * Visibilidad de la tarjeta FACTURA ELECTRÓNICA del sidebar.
