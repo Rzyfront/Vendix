@@ -1171,7 +1171,6 @@ export class CheckoutComponent implements OnInit {
             this.handleUnresolvedGeocode();
             return;
           }
-          this.cancelScheduledAutoLocate();
           this.map_center.set(coords);
           this.addressWarning.set(null);
           this.pendingAddressWarning = false;
@@ -1191,6 +1190,12 @@ export class CheckoutComponent implements OnInit {
           // buyer to check the pin — non-blocking, never stops Continuar.
           if (res.precision === 'street') {
             this.focusMapHint('auto');
+            // Only the street resolved, not the full address: still ask for
+            // GPS, deferred until typing settles.
+            this.scheduleAutoLocate();
+          } else {
+            // Good precision (exact/interpolated/intersection): located.
+            this.cancelScheduledAutoLocate();
           }
         },
         error: () => {
@@ -1238,7 +1243,7 @@ export class CheckoutComponent implements OnInit {
    * that field's `blur` (same approach as {@link runAutoMapFocus}).
    */
   private scheduleAutoLocate(): void {
-    if (this.autoLocateAttempted) return;
+    if (this.autoLocateAttempted || this.pinConfirmed()) return;
     this.cancelScheduledAutoLocate();
     this.autoLocateFailedKey = this.currentAddressKey();
     this.autoLocateTimer = setTimeout(() => {
@@ -1266,7 +1271,8 @@ export class CheckoutComponent implements OnInit {
     }
     if (
       this.selected_delivery() === 'home' &&
-      !this.hasResolvedCoords() &&
+      (!this.hasResolvedCoords() || this.geocodePrecision() === 'street') &&
+      !this.pinConfirmed() &&
       this.currentAddressKey() === this.autoLocateFailedKey &&
       this.autoMapFocusGateOpen()
     ) {
@@ -1286,8 +1292,8 @@ export class CheckoutComponent implements OnInit {
 
   /**
    * Owner directive: ask for the device location ONLY when the final address
-   * cannot be found on the map (never when it resolves, including street-level
-   * pins). Called deferred from {@link scheduleAutoLocate} once typing settles
+   * cannot be found on the map or only its street resolved (`street`
+   * precision); never when it resolves well (exact/intersection). Called deferred from {@link scheduleAutoLocate} once typing settles
    * on a still-unlocated address, and with `bypassGate` from `onMapFailed`.
    * Acts only once per instance, for home delivery
    * and once the minimal address is typed (never prompts on 2 letters).
