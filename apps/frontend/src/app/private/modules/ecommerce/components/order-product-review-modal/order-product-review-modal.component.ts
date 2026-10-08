@@ -3,14 +3,16 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   input,
   model,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -23,6 +25,9 @@ import {
   CreateOrderProductReviewDto,
   OrderReviewStatusItem,
 } from '../../models/order-review.model';
+
+const minTrimmedLength = (c: AbstractControl): ValidationErrors | null =>
+  ((c.value ?? '') as string).trim().length >= 10 ? null : { minTrimmed: true };
 
 interface ProductReviewFormControls {
   rating: FormControl<number>;
@@ -45,7 +50,7 @@ interface ProductReviewFormControls {
   template: `
     <app-modal
       [isOpen]="isOpen()"
-      (isOpenChange)="isOpen.set($event)"
+      (isOpenChange)="onOpenChange($event)"
       title="Reseñar producto"
       size="md"
     >
@@ -99,7 +104,7 @@ interface ProductReviewFormControls {
       }
 
       <div slot="footer" class="prv-footer">
-        <app-button variant="outline" (clicked)="isOpen.set(false)">Cancelar</app-button>
+        <app-button variant="outline" (clicked)="onOpenChange(false)">Cancelar</app-button>
         <app-button
           variant="primary"
           [disabled]="!canSubmit()"
@@ -193,7 +198,7 @@ export class OrderProductReviewModalComponent {
     title: new FormControl('', { nonNullable: true, validators: [Validators.maxLength(255)] }),
     comment: new FormControl('', {
       nonNullable: true,
-      validators: [Validators.required, Validators.minLength(10), Validators.maxLength(5000)],
+      validators: [minTrimmedLength, Validators.maxLength(5000)],
     }),
   });
 
@@ -207,6 +212,23 @@ export class OrderProductReviewModalComponent {
     this.form.controls.rating.valueChanges
       .pipe(takeUntilDestroyed())
       .subscribe((v) => this.ratingValue.set(v));
+
+    // Un producto distinto arranca con formulario limpio.
+    effect(() => {
+      this.item();
+      untracked(() => this.resetForm());
+    });
+  }
+
+  private resetForm(): void {
+    this.form.reset({ rating: 0, title: '', comment: '' });
+    this.ratingValue.set(0);
+    this.formValid.set(this.form.valid);
+  }
+
+  onOpenChange(open: boolean): void {
+    this.isOpen.set(open);
+    if (!open && !this.submitting()) this.resetForm();
   }
 
   get ratingControl(): FormControl<number> {
@@ -232,7 +254,7 @@ export class OrderProductReviewModalComponent {
       product_id: it.product_id,
       rating: v.rating,
       comment: v.comment.trim(),
-      ...(title ? { title } : {}),
+      title: title || undefined,
     };
     const request$ = token
       ? this.reviews.createProductReviewByToken(token, dto)
@@ -245,7 +267,7 @@ export class OrderProductReviewModalComponent {
         this.toast.success('Reseña enviada. Se publicará cuando la tienda la apruebe.');
         this.isOpen.set(false);
         this.submitted.emit();
-        this.form.reset({ rating: 0, title: '', comment: '' });
+        this.resetForm();
       },
       error: (err) => {
         this.submitting.set(false);

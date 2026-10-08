@@ -2077,11 +2077,13 @@ export class GuestOrderSummaryComponent implements OnInit {
   constructor() {
     // Reseñas — carga del status una vez por token/orderId cuando hay summary.
     effect(() => {
-      if (!this.summary()) return;
+      const summary = this.summary();
+      if (!summary) return;
       const token = this.reviewToken();
       const orderId = this.orderId();
-      const key = token ? `t:${token}` : orderId != null ? `o:${orderId}` : null;
-      if (!key) return;
+      const base = token ? `t:${token}` : orderId != null ? `o:${orderId}` : null;
+      if (!base) return;
+      const key = `${base}|${summary.order?.state ?? ''}`;
       untracked(() => {
         if (this.reviewLoadedKey === key) return;
         this.reviewLoadedKey = key;

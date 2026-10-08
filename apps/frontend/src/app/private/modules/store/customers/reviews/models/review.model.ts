@@ -123,9 +123,9 @@ export interface OrderReviewFilters {
 }
 
 export const ORDER_REVIEW_QUICK_TAG_LABELS: Record<OrderReviewQuickTag, string> = {
-  very_easy: 'Fue súper fácil',
-  normal: 'Todo normal',
-  difficult: 'Fue difícil',
+  very_easy: '¡Fue súper fácil!',
+  normal: 'Todo bien, normal',
+  difficult: 'Fue difícil comprar',
 };
 
 export const ORDER_REVIEW_SOURCE_LABELS: Record<OrderReviewSource, string> = {

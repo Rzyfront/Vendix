@@ -189,7 +189,11 @@ export class OrderExperienceReviewModalComponent {
   }
 
   toggleTag(tag: OrderReviewQuickTag): void {
-    this.quickTag.set(this.quickTag() === tag ? null : tag);
+    const next = this.quickTag() === tag ? null : tag;
+    this.quickTag.set(next);
+    if (next && this.commentControl.value.trim() === '') {
+      this.commentControl.setValue(ORDER_REVIEW_QUICK_TAG_LABELS[next]);
+    }
   }
 
   onDismiss(): void {
