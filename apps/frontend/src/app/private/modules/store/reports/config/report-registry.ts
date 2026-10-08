@@ -299,6 +299,34 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/reviews/by-product/export',
   },
 
+  {
+    // Tendencia de reseñas: una fila por periodo con productos y experiencia.
+    // La respuesta es { series, totals, ... }: el adapter de lista debe tomar
+    // `data.series` como filas (ver reporte de la tarea).
+    id: 'reviews-trend',
+    category: 'reviews',
+    title: 'Tendencia de reseñas',
+    description: 'Volumen y calificación de reseñas de productos y de experiencia de compra por periodo',
+    detailedDescription:
+      'Por periodo: cantidad y promedio de reseñas de productos y de reseñas de experiencia de compra. El archivo XLSX añade el detalle de experiencias y las etiquetas de reseña rápida.',
+    icon: 'trending-up',
+    route: '/admin/reports/reviews/reviews-trend',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'period',
+    columns: [
+      { key: 'period', header: 'Periodo', type: 'text' },
+      { key: 'product_count', header: 'Reseñas productos', type: 'number', footer: 'sum' },
+      { key: 'product_avg', header: 'Promedio productos', type: 'number' },
+      { key: 'experience_count', header: 'Reseñas experiencia', type: 'number', footer: 'sum' },
+      { key: 'experience_avg', header: 'Promedio experiencia', type: 'number' },
+    ],
+    exportFilename: 'resenas_tendencia',
+    dataEndpoint: 'store/analytics/reviews/trend',
+    exportEndpoint: 'store/analytics/reviews/trend/export',
+  },
+
   // ─── VENTAS (6) ───────────────────────────────────────────────────────────────
 
   {

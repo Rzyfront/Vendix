@@ -177,6 +177,35 @@ export interface RatingTrendPoint {
   review_count: number;
 }
 
+// Tendencia de reseñas: productos + experiencia de compra (contrato ReviewsTrend)
+export type ReviewQuickTagKey = 'very_easy' | 'normal' | 'difficult' | 'none';
+
+export interface ReviewsTrendTotals {
+  count: number;
+  avg: number | null;
+  previous_count: number;
+  previous_avg: number | null;
+}
+
+export interface ReviewsTrend {
+  series: Array<{
+    period: string;
+    product_count: number;
+    product_avg: number | null;
+    experience_count: number;
+    experience_avg: number | null;
+  }>;
+  totals: {
+    product: ReviewsTrendTotals;
+    experience: ReviewsTrendTotals;
+  };
+  rating_distribution: {
+    product: Array<{ rating: 1 | 2 | 3 | 4 | 5; count: number }>;
+    experience: Array<{ rating: 1 | 2 | 3 | 4 | 5; count: number }>;
+  };
+  quick_tags: Array<{ tag: ReviewQuickTagKey; count: number }>;
+}
+
 // Reviews por producto (misma fila que el export backend: pantalla == archivo)
 export interface ReviewsByProductRow {
   product_id: number;
@@ -1214,6 +1243,25 @@ export class AnalyticsService {
       responseType: 'blob',
     });
   }
+
+  getReviewsTrend(
+    query: any = {},
+  ): Observable<ApiResponse<ReviewsTrend>> {
+    const cacheKey = `reviews-trend-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ReviewsTrend>>(this.getApiUrl('reviews/trend'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  exportReviewsTrend(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('reviews/trend/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
   // ==================== FINANCIAL ANALYTICS ====================
 
   getProfitLossSummary(
