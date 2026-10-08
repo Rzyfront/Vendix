@@ -1184,6 +1184,8 @@ export class CheckoutComponent implements OnInit {
           // buyer to check the pin — non-blocking, never stops Continuar.
           if (res.precision === 'street') {
             this.focusMapHint('auto');
+            // Only the street resolved, not the full address: ask for GPS too.
+            void this.maybeAutoRequestLocation();
           }
         },
         error: () => {
