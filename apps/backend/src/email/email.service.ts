@@ -240,6 +240,7 @@ export class EmailService implements OnModuleInit {
     html: string,
     attachments: EmailAttachment[],
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult> {
     try {
       const result = await this.provider.sendEmailWithAttachments(
@@ -248,6 +249,7 @@ export class EmailService implements OnModuleInit {
         html,
         attachments,
         text,
+        from,
       );
 
       if (result.success) {

@@ -1,4 +1,7 @@
-import { generateInvoiceEmailHtml } from './invoice-email.template';
+import {
+  generateInvoiceEmailHtml,
+  generateInvoiceEmailText,
+} from './invoice-email.template';
 
 /**
  * C.7 / F-106 — el correo de factura usa locale es-CO (miles con punto) y
@@ -27,14 +30,64 @@ describe('invoice-email.template (C.7/F-106)', () => {
     expect(html).not.toContain('$119,000');
   });
 
-  it('la fila Impuestos sale con impuesto > 0', () => {
-    expect(generateInvoiceEmailHtml(data)).toContain('Impuestos');
+  it('resumen breve: número, a nombre de, fecha y total a pagar', () => {
+    const html = generateInvoiceEmailHtml(data);
+    expect(html).toContain('Número de comprobante');
+    expect(html).toContain('A nombre de');
+    expect(html).toContain('Fecha');
+    expect(html).toContain('Total a pagar');
+    expect(html).toContain('FEV-1');
   });
 
-  it('la fila Impuestos no sale con impuesto en cero', () => {
-    const html = generateInvoiceEmailHtml({ ...data, tax: 0, total: 100000 });
-    expect(html).not.toContain('>Impuestos<');
-    expect(html).toContain('Subtotal');
-    expect(html).toContain('Total');
+  it('saludo con el adquiriente y frase del emisor', () => {
+    const html = generateInvoiceEmailHtml({
+      ...data,
+      issuer_name: 'PRINT SOLUTIONS SAS',
+    });
+    expect(html).toContain('¡Hola, Cliente!');
+    expect(html).toContain('PRINT SOLUTIONS SAS');
+    expect(html).toContain('te informa que se generó el siguiente comprobante');
+  });
+
+  it('sin issuer_name cae al nombre de la tienda', () => {
+    expect(generateInvoiceEmailHtml(data)).toContain(
+      '<strong>Tienda</strong> te informa',
+    );
+  });
+
+  it('marca Vendix: sello superior con logo PNG y pie con enlace contáctanos', () => {
+    const html = generateInvoiceEmailHtml(data);
+    expect(html).toContain('Comprobante elaborado y enviado a través de');
+    expect(html).toContain('src="https://vendix.online/vlogo.png"');
+    expect(html).toContain('alt="Vendix"');
+    expect(html).toContain('Comprobante elaborado y enviado a través de Vendix.');
+    expect(html).toContain('Si deseas esta funcionalidad,');
+    expect(html).toContain('<a href="https://vendix.online"');
+    expect(html).toContain('contáctanos</a>');
+    expect(html).toContain('correo automático');
+  });
+
+  it('escapa HTML en nombres del adquiriente y emisor', () => {
+    const html = generateInvoiceEmailHtml({
+      ...data,
+      customer_name: '<script>x</script>',
+      issuer_name: 'A & B',
+    });
+    expect(html).not.toContain('<script>x</script>');
+    expect(html).toContain('A &amp; B');
+  });
+
+  it('conserva el CUFE cuando existe', () => {
+    expect(generateInvoiceEmailHtml({ ...data, cufe: 'abc123' })).toContain(
+      'abc123',
+    );
+  });
+
+  it('versión texto equivalente', () => {
+    const text = generateInvoiceEmailText({ ...data, issuer_name: 'Emisor SAS' });
+    expect(text).toContain('¡Hola, Cliente!');
+    expect(text).toContain('Emisor SAS te informa que se generó el siguiente comprobante');
+    expect(text).toContain('Total a pagar: $119.000');
+    expect(text).toContain('https://vendix.online');
   });
 });

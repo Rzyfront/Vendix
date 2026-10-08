@@ -10,6 +10,10 @@
  * - Exige `dian_status='accepted'`.
  * - Destinatario: el explícito, o el email del `platform_acquirer_snapshot`.
  * - Adjuntos: ZIP con XML firmado + PDF (PlatformInvoicePdfService).
+ * - Asunto DIAN (§9.1), remitente = razón social del emisor (la identidad
+ *   fiscal de la organización plataforma, Vendix) y zip con nombre DIAN; ver
+ *   `store/invoicing/utils/dian-delivery-envelope.util.ts`. Si la identidad de
+ *   la plataforma no se resuelve, cae al asunto/remitente/zip anteriores.
  * - NO persiste en `invoice_delivery_events` (FK a `invoices`); deja
  *   `delivered_at/delivered_to` en `fiscal_transmissions.provider_response`
  *   sin pisar el resto.
@@ -28,6 +32,13 @@ import {
   generateInvoiceEmailText,
   InvoiceEmailData,
 } from '../../../../email/templates/invoice-email.template';
+import {
+  buildDeliverySender,
+  buildDeliverySubject,
+  buildDeliveryZipName,
+  DeliveryIssuerIdentity,
+  resolveDeliveryIssuerIdentity,
+} from '../../../store/invoicing/utils/dian-delivery-envelope.util';
 import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
 
 export interface PlatformDeliverResult {
@@ -114,6 +125,8 @@ export class PlatformDeliveryService {
     }
 
     const number = transmission.document_number;
+    const { issuer, operation_mode } =
+      await this.resolvePlatformIssuer(platformOrgId);
     const zip = new AdmZip();
     let has_content = false;
 
@@ -135,7 +148,19 @@ export class PlatformDeliveryService {
       has_content = true;
     }
 
-    const zip_name = has_content ? `Factura-${number}.zip` : null;
+    const issue_date_raw =
+      (invoiceSnap?.issue_date as string | undefined) ??
+      transmission.created_at ??
+      undefined;
+    const zip_name = has_content
+      ? buildDeliveryZipName({
+          issuer,
+          document_number: number,
+          issue_date: issue_date_raw,
+          operation_mode,
+          fallback_name: `Factura-${number}.zip`,
+        })
+      : null;
     const attachments: EmailAttachment[] = has_content
       ? [
           {
@@ -151,6 +176,7 @@ export class PlatformDeliveryService {
       invoice_number: number,
       invoice_type: 'sales_invoice',
       customer_name: acquirer?.legal_name ?? 'Cliente',
+      issuer_name: issuer?.legal_name ?? 'Vendix',
       issue_date: (invoiceSnap?.issue_date as string) ??
         (transmission.created_at
           ? transmission.created_at.toISOString().slice(0, 10)
@@ -175,7 +201,13 @@ export class PlatformDeliveryService {
     };
     const html = generateInvoiceEmailHtml(email_data);
     const text = generateInvoiceEmailText(email_data);
-    const subject = `Factura ${number} - Vendix`;
+    const subject = buildDeliverySubject({
+      issuer,
+      document_number: number,
+      invoice_type: 'sales_invoice',
+      fallback_subject: `Factura ${number} - Vendix`,
+    });
+    const sender = buildDeliverySender(issuer);
 
     const result = attachments.length
       ? await this.email_service.sendEmailWithAttachments(
@@ -184,8 +216,9 @@ export class PlatformDeliveryService {
           html,
           attachments,
           text,
+          sender,
         )
-      : await this.email_service.sendEmail(to, subject, html, text);
+      : await this.email_service.sendEmail(to, subject, html, text, sender);
 
     if (!result.success) {
       throw new VendixHttpException(
@@ -231,5 +264,51 @@ export class PlatformDeliveryService {
       status: 'sent',
       message_id: result.messageId,
     };
+  }
+
+  /**
+   * Identidad fiscal del emisor = la organización plataforma (Vendix), con la
+   * misma fuente que el PDF (`organization_settings.fiscal_data` gana sobre las
+   * columnas). Nunca lanza: sin identidad el correo sale con la forma anterior.
+   */
+  private async resolvePlatformIssuer(platform_org_id: number): Promise<{
+    issuer: DeliveryIssuerIdentity | null;
+    operation_mode: string | null;
+  }> {
+    try {
+      const org = await this.prisma.withoutScope().organizations.findFirst({
+        where: { id: platform_org_id },
+        select: {
+          name: true,
+          legal_name: true,
+          tax_id: true,
+          phone: true,
+          email: true,
+          fiscal_scope: true,
+          document_type: true,
+          person_type: true,
+          organization_settings: { select: { settings: true } },
+        },
+      });
+      const config = await this.prisma
+        .withoutScope()
+        .dian_configurations.findFirst({
+          where: {
+            organization_id: platform_org_id,
+            configuration_type: 'invoicing',
+          },
+          orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+          select: { operation_mode: true },
+        });
+      return {
+        issuer: resolveDeliveryIssuerIdentity({ organization: org as any }),
+        operation_mode: (config?.operation_mode as string | undefined) ?? null,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo resolver la identidad fiscal de la plataforma para el correo: ${(error as Error)?.message ?? error}`,
+      );
+      return { issuer: null, operation_mode: null };
+    }
   }
 }
