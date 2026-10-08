@@ -687,6 +687,31 @@ describe('InvoiceDeliveryService', () => {
       expect(html).toContain('https://vendix.online/vlogo.png');
     });
 
+    it('recibo interno (dian_status not_applicable): asunto y zip legibles, remitente = emisor', async () => {
+      const { service, emailService } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest
+              .fn()
+              .mockResolvedValue({ ...withXml, dian_status: 'not_applicable' }),
+          },
+        },
+      });
+
+      const result = await service.deliver(12, {
+        email: 'cliente@test.com',
+      } as any);
+
+      const call = (emailService.sendEmailWithAttachments as jest.Mock).mock
+        .calls[0];
+      expect(call[1]).toMatch(/^Reenvío de factura FE100/);
+      expect(call[5]).toEqual({
+        name: 'Vendix Demo SAS',
+        email: 'facturas@demo.test',
+      });
+      expect(result.zip_name).toBe('Factura-FE100.zip');
+    });
+
     it('identidad del emisor irresoluble: cae al asunto, remitente y zip anteriores', async () => {
       const { service, emailService } = createService({
         prisma: {

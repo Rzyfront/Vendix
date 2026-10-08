@@ -329,6 +329,12 @@ export class InvoiceDeliveryService {
       );
     }
 
+    // Asunto y zip normativos (§9.1) sólo para el documento ELECTRÓNICO: un
+    // recibo interno (`dian_status = 'not_applicable'`) nunca fue a la DIAN y
+    // conserva la forma legible — misma regla que tenía el listener primario.
+    const dian_issuer =
+      invoice.dian_status === 'not_applicable' ? null : issuer;
+
     const email_data: InvoiceEmailData = {
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
@@ -361,7 +367,7 @@ export class InvoiceDeliveryService {
     const html = generateInvoiceEmailHtml(email_data);
     const text = generateInvoiceEmailText(email_data);
     const subject = buildDeliverySubject({
-      issuer,
+      issuer: dian_issuer,
       document_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
       fallback_subject: `Reenvío de factura ${invoice.invoice_number} - ${store_name}`,
@@ -609,7 +615,7 @@ export class InvoiceDeliveryService {
 
       if (has_zip_content) {
         zip_name = buildDeliveryZipName({
-          issuer,
+          issuer: dian_issuer,
           document_number: invoice.invoice_number,
           issue_date: fiscalIssueDate(new Date(invoice.issue_date), tz),
           operation_mode: dian_config?.operation_mode,
