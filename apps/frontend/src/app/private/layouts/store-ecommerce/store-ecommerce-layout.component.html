@@ -808,6 +808,20 @@
         <span>Total</span>
         <span>{{ bill.grand_total | currency }}</span>
       </div>
+      @if (bill.suggested_tip; as tip) {
+      <div class="bill-panel__summary-row" style="opacity: 0.75; font-size: 0.875em;">
+        <span>Total sin propina</span>
+        <span>{{ (bill.balance_due ?? bill.grand_total) | currency }}</span>
+      </div>
+      <div class="bill-panel__summary-row" style="opacity: 0.75; font-size: 0.875em;">
+        <span>{{ tip.label }}</span>
+        <span>{{ tip.amount | currency }}</span>
+      </div>
+      <div class="bill-panel__summary-row" style="opacity: 0.75; font-size: 0.875em;">
+        <span>Total con propina</span>
+        <span>{{ tip.total_with_tip | currency }}</span>
+      </div>
+      }
     </div>
     }
   </div>

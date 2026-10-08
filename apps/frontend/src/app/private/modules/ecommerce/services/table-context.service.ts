@@ -265,6 +265,14 @@ export interface TableBill {
    * `tax_amount` sea positivo (regla anti-huérfana §5.3).
    */
   prints_vat_breakdown?: boolean;
+  /** Propina sugerida informativa (no se paga por QR). null si no aplica. */
+  suggested_tip?: {
+    label: string;
+    type: 'percentage' | 'fixed';
+    value: number;
+    amount: number;
+    total_with_tip: number;
+  } | null;
 }
 
 interface TableBillResponse {

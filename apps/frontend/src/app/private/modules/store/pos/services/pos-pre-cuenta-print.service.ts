@@ -2,6 +2,8 @@ import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { DocumentPrintService } from '../../../../../shared/services/print';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import { computeSuggestedTip } from '../../../../../core/utils/tip-policy.util';
 import type { CartState } from './pos-cart.service';
 
 /**
@@ -37,6 +39,7 @@ export class PosPreCuentaPrintService {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly documentPrint = inject(DocumentPrintService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly storeSettings = inject(StoreSettingsFacade);
 
   /**
    * Imprime la pre-cuenta del `state` dado. El estado se clona mentalmente a
@@ -111,6 +114,25 @@ export class PosPreCuentaPrintService {
       discount > 0
         ? `<tr><td colspan="2">Descuento aplicado</td><td class="amount">-${this.esc(fmt(discount))}</td></tr>`
         : '';
+    // Propina sugerida: base = productos brutos (subtotal + impuestos, antes
+    // de descuento, sin envío), igual que el backend.
+    const policy = this.storeSettings.tipPolicy();
+    const grossBase =
+      (Number(summary?.subtotal ?? 0) || 0) +
+      (Number(summary?.taxAmount ?? 0) || 0);
+    const suggestedTip =
+      policy.suggested && grossBase > 0
+        ? computeSuggestedTip(policy, grossBase)
+        : 0;
+    const hasTip = suggestedTip > 0;
+    const tipLabel =
+      policy.suggested?.type === 'percentage'
+        ? `Propina sugerida (${policy.suggested.value} %)`
+        : 'Propina sugerida';
+    const tipRows = hasTip
+      ? `<tr><td colspan="2">${this.esc(tipLabel)}</td><td class="amount">${this.esc(fmt(suggestedTip))}</td></tr>` +
+        `<tr class="total-row"><td colspan="2">Total con propina</td><td class="amount">${this.esc(fmt(total + suggestedTip))}</td></tr>`
+      : '';
     const withholdingRow =
       withholding > 0
         ? `<tr><td colspan="2">Retención</td><td class="amount">-${this.esc(fmt(withholding))}</td></tr>`
@@ -129,7 +151,8 @@ export class PosPreCuentaPrintService {
       discountRow +
       `<tr><td colspan="2">Impuestos</td><td class="amount">${this.esc(fmt(summary?.taxAmount))}</td></tr>` +
       withholdingRow +
-      `<tr class="total-row"><td colspan="2">TOTAL</td><td class="amount">${this.esc(fmt(total))}</td></tr>` +
+      `<tr class="total-row"><td colspan="2">${hasTip ? 'Total sin propina' : 'TOTAL'}</td><td class="amount">${this.esc(fmt(total))}</td></tr>` +
+      tipRows +
       `</table>` +
       `<div class="foot">Cuenta abierta sujeta a cambios.<br>No constituye factura ni comprobante fiscal.</div>` +
       `</div>`
