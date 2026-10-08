@@ -7,6 +7,7 @@ import { GuestOrderSummaryComponent, GuestOrderSummary, GuestOrderPayment } from
 import { AccountService } from '../../services/account.service';
 import { CheckoutService } from '../../services/checkout.service';
 import { GuestOrderSseService } from '../../services/guest-order-sse.service';
+import { OrderReviewsService } from '../../services/order-reviews.service';
 import { GuestOrderPrintService } from '../../services/guest-order-print.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -53,6 +54,7 @@ describe('GuestOrderSummaryComponent embedded physical/purchase/receipt gates', 
       { provide: CurrencyFormatService, useValue: { currencyCode: signal('COP'), loadCurrency: jasmine.createSpy('loadCurrency') } },
       { provide: DomSanitizer, useValue: { bypassSecurityTrustResourceUrl: (value: string) => value } },
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ token: 'guest-token' }), get queryParamMap() { return convertToParamMap(queryParams); } } } },
+      { provide: OrderReviewsService, useValue: { getStatusByToken: () => throwError(() => new Error('reviews off')), getStatusByOrder: () => throwError(() => new Error('reviews off')) } },
       { provide: GuestOrderSseService, useValue: { ...sse, orderState: signal(null), deliveryType: signal(null), kitchenByProduct: signal({}), paymentsLive: signal([]), eta: signal(null), connectionState: signal('idle'), prefersReducedMotion: signal(false) } },
     ] });
     // Shallow view only: actual component inputs/computed/effect/lifecycle are

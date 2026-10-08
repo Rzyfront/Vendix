@@ -1649,6 +1649,7 @@ describe('PaymentCollectorComponent.handleEnter — CP-pos-checkout-enter-focus'
       set: {
         imports: [
           ReactiveFormsModule,
+          NgTemplateOutlet,
           IconStub,
           CurrencyStubPipe,
           CurrencyInputStub,

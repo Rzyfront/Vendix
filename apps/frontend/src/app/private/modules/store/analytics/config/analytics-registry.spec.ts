@@ -37,8 +37,8 @@ describe('AnalyticsRegistry', () => {
   });
 
   describe('ANALYTICS_VIEWS', () => {
-    it('should have 35 views', () => {
-      expect(ANALYTICS_VIEWS).toHaveSize(38);
+    it('should have 39 views', () => {
+      expect(ANALYTICS_VIEWS).toHaveSize(39);
     });
 
     it('should have unique keys', () => {
@@ -74,9 +74,9 @@ describe('AnalyticsRegistry', () => {
       expect(dispatchViews).toHaveSize(3);
     });
 
-    it('should have reviews with 2 views', () => {
+    it('should have reviews with 3 views', () => {
       const reviewsViews = getViewsByCategory('reviews');
-      expect(reviewsViews).toHaveSize(2);
+      expect(reviewsViews).toHaveSize(3);
       expect(reviewsViews.some(v => v.key === 'reviews_by_product')).toBe(true);
       reviewsViews.forEach(v => expect(v.category).toBe('reviews'));
     });

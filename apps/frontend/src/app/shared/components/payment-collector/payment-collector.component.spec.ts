@@ -664,8 +664,12 @@ describe('PaymentCollectorComponent — restaurant tip amount', () => {
     fixture.detectChanges();
     component.setMultiEnabled(true);
     component.tipType.set('percentage');
+    // La propina cambia tras repartir: syncLegsToTip absorbe el delta en el
+    // último tramo, así que los tramos siguen cuadrando contra el total con propina.
     component.tipControl.setValue(10);
-    expect(component.remaining()).toBe(11900);
+    expect(component.tipAmount()).toBe(11900);
+    expect(component.remaining()).toBe(0);
+    expect(component.isMultiValid()).toBeTrue();
     component.setLegAmount(0, 116900);
     expect(component.remaining()).toBe(0);
     expect(component.isMultiValid()).toBeTrue();
@@ -698,7 +702,8 @@ describe('PaymentCollectorComponent — collapsed optional tip section', () => {
     fixture.componentRef.setInput('layout', layout);
     fixture.detectChanges();
     if (layout === 'stepped') {
-      component.goToSubStep(component.montoIndex());
+      // La propina vive en el paso Método (antes de repartir el total).
+      component.goToSubStep(component.modoOffset());
       fixture.detectChanges();
     }
   }
