@@ -2,16 +2,19 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   input,
   model,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { FileUploadDropzoneComponent } from '../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
+import { compressReceiptImage } from '../../../../../shared/utils/compress-receipt-image';
 import {
   PaymentMethod,
   BankAccountOption,
@@ -210,14 +213,17 @@ type InstructionField = {
                 </button>
               </div>
             } @else {
-              <div class="pi-dropzone-wrap">
+              <div class="pi-dropzone-wrap" tabindex="-1">
                 <app-file-upload-dropzone
                   label="Toca aquí o arrastra tu comprobante"
-                  helperText="JPG, PNG, WebP o PDF · máx. 5 MB"
+                  helperText="Imagen (JPG, PNG, WEBP, HEIC…) o PDF · máx. 5 MB"
                   icon="upload-cloud"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  accept="image/*,.heic,.heif,application/pdf"
                   (fileSelected)="onFile($event)"
                 />
+                @if (processing()) {
+                  <p class="pi-processing" role="status">Optimizando imagen…</p>
+                }
               </div>
             }
 
@@ -242,6 +248,7 @@ type InstructionField = {
         <app-button
           variant="primary"
           size="md"
+          [disabled]="processing()"
           (clicked)="onConfirm()"
         >
           <app-icon
@@ -573,6 +580,13 @@ type InstructionField = {
       }
 
       /* ---------- UPLOAD ---------- */
+      .pi-processing {
+        margin: 0.5rem 0 0;
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary, #6b7280);
+        text-align: center;
+      }
+
       .pi-upload-hint {
         font-size: 0.75rem;
         line-height: 1.35;
@@ -889,6 +903,12 @@ export class PaymentInstructionsModalComponent {
   readonly required = input(false);
 
   /**
+   * Token incremental del padre: cada cambio (> 0) pide revelar y enfocar la
+   * sección de carga cuando el soporte es obligatorio y falta.
+   */
+  readonly revealUploadToken = input<number>(0);
+
+  /**
    * Catálogo de cuentas activas del método actual (provisto por el padre).
    * Si está vacío, el modal renderiza las `payment_instructions` legacy
    * del método (`PaymentMethod.payment_instructions`).
@@ -909,13 +929,22 @@ export class PaymentInstructionsModalComponent {
   readonly errorMsg = signal<string | null>(null);
   readonly copiedKey = signal<string | null>(null);
   readonly uploadHighlighted = signal(false);
+  readonly processing = signal(false);
 
-  private readonly ALLOWED_MIME = [
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-    'application/pdf',
-  ];
+  constructor() {
+    effect(() => {
+      const token = this.revealUploadToken();
+      const open = this.isOpen();
+      const missing = this.required() && !this.currentFile();
+      if (token > 0 && open && missing) {
+        // setTimeout (not afterNextRender): the modal opens with an animation
+        // and the section may not be laid out yet on the next render, so we
+        // wait for it to settle before scrolling.
+        untracked(() => setTimeout(() => this.revealUploadSection(), 350));
+      }
+    });
+  }
+
   private readonly MAX_SIZE = 5 * 1024 * 1024;
 
   readonly isVoucher = computed(() => this.method()?.type === 'voucher');
@@ -1064,20 +1093,48 @@ export class PaymentInstructionsModalComponent {
     return all.filter((f) => f.value && f.value.toString().trim().length > 0);
   });
 
-  onFile(file: File): void {
-    if (file.size > this.MAX_SIZE) {
-      this.errorMsg.set('El archivo supera los 5 MB permitidos.');
+  async onFile(file: File): Promise<void> {
+    const name = file.name.toLowerCase();
+    const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf');
+    const isImage =
+      file.type.startsWith('image/') || /\.(heic|heif)$/.test(name);
+
+    if (!isPdf && !isImage) {
+      this.errorMsg.set('Formato no admitido. Usa una imagen (JPG, PNG, WEBP, HEIC…) o PDF.');
       this.fileChange.emit(null);
       return;
     }
-    if (!this.ALLOWED_MIME.includes(file.type)) {
-      this.errorMsg.set('Formato no admitido. Usa JPG, PNG, WebP o PDF.');
-      this.fileChange.emit(null);
+    if (isPdf) {
+      if (file.size > this.MAX_SIZE) {
+        this.errorMsg.set('El archivo supera los 5 MB permitidos.');
+        this.fileChange.emit(null);
+        return;
+      }
+      this.errorMsg.set(null);
+      this.uploadHighlighted.set(false);
+      this.fileChange.emit(file);
       return;
     }
+
     this.errorMsg.set(null);
-    this.uploadHighlighted.set(false);
-    this.fileChange.emit(file);
+    this.processing.set(true);
+    try {
+      const result = await compressReceiptImage(file);
+      if (result.size > this.MAX_SIZE) {
+        this.errorMsg.set('El archivo supera los 5 MB permitidos.');
+        this.fileChange.emit(null);
+        return;
+      }
+      this.uploadHighlighted.set(false);
+      this.fileChange.emit(result);
+    } catch {
+      this.errorMsg.set(
+        'No pudimos leer la imagen, intenta con otra o con una captura de pantalla.',
+      );
+      this.fileChange.emit(null);
+    } finally {
+      this.processing.set(false);
+    }
   }
 
   onRemoveFile(): void {
@@ -1106,6 +1163,14 @@ export class PaymentInstructionsModalComponent {
       document
         .querySelector('app-payment-instructions-modal .pi-upload')
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Focus the upload control after the smooth scroll starts, without
+      // jumping the viewport, so it is visible and focused on mobile.
+      // The dropzone's own controls are not focusable (div + hidden input),
+      // so the wrapper carries tabindex="-1" and takes the focus.
+      const control = document.querySelector<HTMLElement>(
+        'app-payment-instructions-modal .pi-upload .pi-dropzone-wrap, app-payment-instructions-modal .pi-upload .pi-remove-btn',
+      );
+      control?.focus({ preventScroll: true });
     }
     this.uploadHighlighted.set(true);
     setTimeout(() => this.uploadHighlighted.set(false), 1600);

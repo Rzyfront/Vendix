@@ -1538,6 +1538,7 @@
     [(selectedBankAccountId)]="selected_bank_account_id"
     [currentFile]="payment_receipt_file()"
     [required]="requiresPaymentReceipt()"
+    [revealUploadToken]="payment_receipt_reveal_token()"
     (isOpenChange)="show_payment_instructions_modal.set($event)"
     (fileChange)="onReceiptFile($event)"
     (confirmed)="onPaymentInstructionsConfirmed()"

@@ -377,6 +377,8 @@ export class CheckoutComponent implements OnInit {
   // Payment instructions modal + receipt file (bank_transfer / voucher)
   readonly show_payment_instructions_modal = signal(false);
   readonly payment_receipt_file = signal<File | null>(null);
+  /** Bumped to ask the payment modal to scroll to and focus the receipt upload. */
+  readonly payment_receipt_reveal_token = signal(0);
   readonly payment_instructions_acknowledged = signal(false);
   readonly selectedPaymentMethodObj = computed(
     () =>
@@ -3221,6 +3223,7 @@ export class CheckoutComponent implements OnInit {
           'Debes subir el soporte de pago para continuar.',
           'Soporte requerido',
         );
+        this.payment_receipt_reveal_token.update((v) => v + 1);
         this.show_payment_instructions_modal.set(true);
         return;
       }
@@ -3477,6 +3480,7 @@ export class CheckoutComponent implements OnInit {
         'Debes subir el soporte de pago para finalizar la compra.',
         'Soporte requerido',
       );
+      this.payment_receipt_reveal_token.update((v) => v + 1);
       this.show_payment_instructions_modal.set(true);
       return;
     }
