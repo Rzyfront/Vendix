@@ -1479,6 +1479,18 @@ export class OrdersService {
         refunds: {
           select: { state: true, amount: true },
         },
+        // Reseña de experiencia de compra (null si no existe).
+        order_review: {
+          select: {
+            id: true,
+            order_id: true,
+            rating: true,
+            quick_tag: true,
+            comment: true,
+            source: true,
+            created_at: true,
+          },
+        },
         shipping_method: {
           select: {
             id: true,
