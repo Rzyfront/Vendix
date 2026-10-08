@@ -39,6 +39,16 @@ import { GuestOrderPrintService } from '../../services/guest-order-print.service
 import { parseVariantAttributes } from '../../../../../shared/utils/variant-attributes.util';
 import { ItemListComponent } from '../../../../../shared/components/item-list/item-list.component';
 import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
+import { OrderReviewsService } from '../../services/order-reviews.service';
+import {
+  ORDER_REVIEW_QUICK_TAG_LABELS,
+  OrderReview,
+  OrderReviewSource,
+  OrderReviewStatus,
+  OrderReviewStatusItem,
+} from '../../models/order-review.model';
+import { OrderExperienceReviewModalComponent } from '../../components/order-experience-review-modal/order-experience-review-modal.component';
+import { OrderProductReviewModalComponent } from '../../components/order-product-review-modal/order-product-review-modal.component';
 
 // ============================================================================
 // PAYLOAD CONTRACT — enriched guest order summary endpoint
@@ -195,6 +205,8 @@ export interface GuestOrderSummary {
     FileUploadDropzoneComponent,
     OrderTrackingProgressComponent,
     ItemListComponent,
+    OrderExperienceReviewModalComponent,
+    OrderProductReviewModalComponent,
   ],
   template: `
     <div class="guest-order-page">
@@ -699,7 +711,91 @@ export interface GuestOrderSummary {
             </div>
           </section>
 
+          <!-- RESEÑAS: experiencia de compra + productos -->
+          @if (reviewStatus(); as rs) {
+            @if (rs.order_review; as myReview) {
+              <section class="review-card" aria-label="Tu calificación">
+                <h2 class="review-title">Tu calificación</h2>
+                <div class="review-stars" [attr.aria-label]="myReview.rating + ' de 5 estrellas'">
+                  @for (n of reviewStars; track n) {
+                    <app-icon
+                      name="star"
+                      [size]="18"
+                      [class]="n <= myReview.rating ? 'text-warning fill-warning' : 'text-gray-300'"
+                    />
+                  }
+                </div>
+                @if (myReview.quick_tag) {
+                  <span class="review-tag">{{ quickTagLabel(myReview.quick_tag) }}</span>
+                }
+                @if (myReview.comment) {
+                  <p class="review-comment">{{ myReview.comment }}</p>
+                }
+              </section>
+            } @else if (rs.can_review_experience) {
+              <section class="review-card" aria-label="Califica tu compra">
+                <h2 class="review-title">Califica tu compra</h2>
+                <p class="review-sub">Cuéntanos cómo fue tu experiencia de compra.</p>
+                <app-button variant="primary" size="sm" (clicked)="openExperienceModal('order_detail')">
+                  Calificar
+                </app-button>
+              </section>
+            }
+
+            @if (rs.items.length) {
+              <section class="review-card" aria-label="Reseña tus productos">
+                <h2 class="review-title">Reseña tus productos</h2>
+                <ul class="review-items">
+                  @for (ri of rs.items; track ri.product_id) {
+                    <li class="review-item">
+                      @if (ri.image_url) {
+                        <img class="review-thumb" [src]="ri.image_url" [alt]="ri.product_name" />
+                      } @else {
+                        <span class="review-thumb review-thumb--empty"><app-icon name="image" [size]="16" /></span>
+                      }
+                      <span class="review-item-name">{{ ri.product_name }}</span>
+                      @if (ri.can_review) {
+                        <app-button variant="outline" size="sm" (clicked)="openProductModal(ri)">Reseñar</app-button>
+                      } @else if (ri.review) {
+                        <span class="review-done">
+                          Ya reseñado
+                          <span class="review-stars">
+                            @for (n of reviewStars; track n) {
+                              <app-icon
+                                name="star"
+                                [size]="12"
+                                [class]="n <= ri.review.rating ? 'text-warning fill-warning' : 'text-gray-300'"
+                              />
+                            }
+                          </span>
+                        </span>
+                      } @else if (ri.reason === 'not_delivered') {
+                        <span class="review-hint">Disponible cuando recibas tu pedido</span>
+                      }
+                    </li>
+                  }
+                </ul>
+              </section>
+            }
+          }
+
         </div>
+
+        <app-order-experience-review-modal
+          [(isOpen)]="showExperienceModal"
+          [token]="reviewToken() || null"
+          [orderId]="orderId()"
+          [source]="experienceSource()"
+          (submitted)="onExperienceSubmitted($event)"
+          (dismissed)="onExperienceDismissed()"
+        />
+        <app-order-product-review-modal
+          [(isOpen)]="showProductModal"
+          [token]="reviewToken() || null"
+          [orderId]="orderId()"
+          [item]="productModalItem()"
+          (submitted)="reloadReviewStatus()"
+        />
 
         <!-- VISOR DE COMPROBANTE (paso 9, patrón admin order-details) -->
         <app-modal
@@ -1811,6 +1907,84 @@ export interface GuestOrderSummary {
           border: 0;
         }
       }
+
+      .review-card {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg, 12px);
+        background: var(--color-surface);
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-start;
+      }
+      .review-title {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--color-text-primary);
+      }
+      .review-sub,
+      .review-comment {
+        margin: 0;
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+      }
+      .review-stars {
+        display: inline-flex;
+        gap: 0.125rem;
+      }
+      .review-tag {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--color-primary);
+      }
+      .review-items {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      .review-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      .review-thumb {
+        width: 40px;
+        height: 40px;
+        border-radius: var(--radius-md);
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--color-background);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .review-item-name {
+        flex: 1 1 8rem;
+        min-width: 0;
+        font-size: 0.875rem;
+        color: var(--color-text-primary);
+      }
+      .review-done,
+      .review-hint {
+        font-size: 0.75rem;
+        color: var(--color-text-muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+      }
+      @media print {
+        .review-card {
+          display: none;
+        }
+      }
     `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -1827,6 +2001,7 @@ export class GuestOrderSummaryComponent implements OnInit {
   private readonly sanitizer = inject(DomSanitizer);
   /** Público: el template lee `connectionState()` / `prefersReducedMotion()`. */
   readonly sse = inject(GuestOrderSseService);
+  private readonly orderReviews = inject(OrderReviewsService);
 
   readonly loading = signal(true);
   readonly error = signal(false);
@@ -1839,6 +2014,8 @@ export class GuestOrderSummaryComponent implements OnInit {
   readonly embedded = input(false);
   readonly summaryInput = input<GuestOrderSummary | null>(null);
   readonly physicalProgressAllowed = input(true);
+  /** Embebido: id de la orden para las reseñas (endpoints JWT por orderId). */
+  readonly orderId = input<number | null>(null);
   readonly purchaseConfirmed = input<boolean | null>(null);
   /**
    * En embebido el padre es dueño de los datos: tras subir un
@@ -1878,6 +2055,19 @@ export class GuestOrderSummaryComponent implements OnInit {
   private readonly RECEIPT_MAX_SIZE = 5 * 1024 * 1024;
 
   private token = '';
+  /** Token de ruta como signal: lo leen el effect y el template de reseñas. */
+  readonly reviewToken = signal('');
+
+  // Reseñas (experiencia de compra + productos)
+  readonly reviewStatus = signal<OrderReviewStatus | null>(null);
+  readonly reviewStars = [1, 2, 3, 4, 5];
+  readonly showExperienceModal = signal(false);
+  readonly showProductModal = signal(false);
+  readonly experienceSource = signal<OrderReviewSource>('order_detail');
+  readonly productModalItem = signal<OrderReviewStatusItem | null>(null);
+  private reviewLoadedKey: string | null = null;
+  private reviewAutoOpenDone = false;
+  private reviewAutoOpenTimer: ReturnType<typeof setTimeout> | null = null;
   private flashTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Signal de moneda: forzamos change detection en el card (data-currency)
@@ -1885,6 +2075,38 @@ export class GuestOrderSummaryComponent implements OnInit {
   readonly currencyCode = this.currencyService.currencyCode;
 
   constructor() {
+    // Reseñas — carga del status una vez por token/orderId cuando hay summary.
+    effect(() => {
+      if (!this.summary()) return;
+      const token = this.reviewToken();
+      const orderId = this.orderId();
+      const key = token ? `t:${token}` : orderId != null ? `o:${orderId}` : null;
+      if (!key) return;
+      untracked(() => {
+        if (this.reviewLoadedKey === key) return;
+        this.reviewLoadedKey = key;
+        this.reloadReviewStatus();
+      });
+    });
+
+    // Reseñas — auto-apertura 1 s después de la confirmación de compra.
+    effect(() => {
+      const status = this.reviewStatus();
+      if (!this.justPurchased() || !status?.can_review_experience) return;
+      untracked(() => {
+        if (this.reviewAutoOpenDone) return;
+        if (this.isReviewDismissed(status.order_id)) return;
+        this.reviewAutoOpenDone = true;
+        this.reviewAutoOpenTimer = setTimeout(() => {
+          this.reviewAutoOpenTimer = null;
+          this.openExperienceModal('order_confirmation');
+        }, 1000);
+      });
+    });
+    this.destroyRef.onDestroy(() => {
+      if (this.reviewAutoOpenTimer) clearTimeout(this.reviewAutoOpenTimer);
+    });
+
     // Paso 9 — fusión SSE→summary. El effect solo depende de los signals
     // vivos del servicio; `summary` se lee/escribe vía `untracked` para no
     // crear un loop (escribir summary no re-dispara el effect).
@@ -1920,6 +2142,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       return;
     }
     this.token = token;
+    this.reviewToken.set(token);
 
     // Sin token válido no hay suscripción (el servicio también lo exige).
     const storeId =
@@ -1950,6 +2173,70 @@ export class GuestOrderSummaryComponent implements OnInit {
           this.loading.set(false);
         },
       });
+  }
+
+  // ==========================================================================
+  // RESEÑAS
+  // ==========================================================================
+
+  reloadReviewStatus(): void {
+    const token = this.reviewToken();
+    const orderId = this.orderId();
+    const status$ = token
+      ? this.orderReviews.getStatusByToken(token)
+      : orderId != null
+        ? this.orderReviews.getStatusByOrder(orderId)
+        : null;
+    if (!status$) return;
+    status$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (status) => this.reviewStatus.set(status),
+      // Las reseñas son un extra: si falla el status, la tarjeta no se muestra.
+      error: () => this.reviewStatus.set(null),
+    });
+  }
+
+  quickTagLabel(tag: OrderReview['quick_tag']): string {
+    return tag ? ORDER_REVIEW_QUICK_TAG_LABELS[tag] : '';
+  }
+
+  openExperienceModal(source: OrderReviewSource): void {
+    this.experienceSource.set(source);
+    this.showExperienceModal.set(true);
+  }
+
+  openProductModal(item: OrderReviewStatusItem): void {
+    this.productModalItem.set(item);
+    this.showProductModal.set(true);
+  }
+
+  onExperienceSubmitted(review: OrderReview): void {
+    const current = this.reviewStatus();
+    if (current) {
+      this.reviewStatus.set({
+        ...current,
+        order_review: review,
+        can_review_experience: false,
+      });
+    }
+    this.reloadReviewStatus();
+  }
+
+  onExperienceDismissed(): void {
+    const id = this.reviewStatus()?.order_id;
+    if (id == null) return;
+    try {
+      localStorage.setItem(`vx_order_review_dismissed_${id}`, '1');
+    } catch {
+      /* almacenamiento no disponible: se ignora */
+    }
+  }
+
+  private isReviewDismissed(orderId: number): boolean {
+    try {
+      return localStorage.getItem(`vx_order_review_dismissed_${orderId}`) !== null;
+    } catch {
+      return false;
+    }
   }
 
   print(): void {

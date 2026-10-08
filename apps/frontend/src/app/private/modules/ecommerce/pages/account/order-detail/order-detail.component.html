@@ -34,6 +34,7 @@
       [summaryInput]="guestSummary()"
       [physicalProgressAllowed]="hasPhysicalItems()"
       [purchaseConfirmed]="is_new_order()"
+      [orderId]="order.id"
       (receiptUploaded)="loadOrder(order.id)"
     >
       <!-- Tarjeta de envío proyectada en el slot del guest: queda
