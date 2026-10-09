@@ -6,12 +6,14 @@ import {
   computed,
   DestroyRef,
   PLATFORM_ID,
+  effect,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterModule } from '@angular/router';
-import { CommonModule, DecimalPipe } from '@angular/common';
+import { CommonModule, DecimalPipe, DOCUMENT } from '@angular/common';
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser';
 import { isPlatformBrowser } from '@angular/common';
+import { buildVendixStructuredData } from './vendix-landing-structured-data';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { ModalComponent } from '../../../shared/components/modal/modal.component';
 import type { IconName } from '../../../shared/components/icon/icons.registry';
@@ -270,6 +272,7 @@ export class VendixLandingComponent implements OnInit {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly document = inject(DOCUMENT);
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private publicPlansService = inject(PublicPlansService);
@@ -607,6 +610,29 @@ export class VendixLandingComponent implements OnInit {
     return prices.length > 0 ? Math.min(...prices) : MIN_MONTHLY_PRICE_COP;
   });
 
+  /**
+   * JSON-LD de Vendix: solo en navegador (index.html/prerender sirven también a
+   * los storefronts de los tenants). Upsert de un único <script id>.
+   */
+  private readonly structuredDataEffect = effect(() => {
+    if (!this.isBrowser) return;
+    const prices = this.plans()
+      .filter((p) => p.billing_cycle === 'monthly')
+      .map((p) => Number(p.base_price))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const min = prices.length > 0 ? Math.min(...prices) : null;
+    const json = JSON.stringify(buildVendixStructuredData(min));
+
+    let script = this.document.getElementById('vendix-jsonld');
+    if (!script) {
+      script = this.document.createElement('script');
+      script.setAttribute('type', 'application/ld+json');
+      script.id = 'vendix-jsonld';
+      this.document.head.appendChild(script);
+    }
+    script.textContent = json;
+  });
+
   // Dynamic Available Cycles computed strictly from loaded API plans
   readonly availableCycles = computed(() => {
     const p = this.sellablePlans();
@@ -768,6 +794,11 @@ export class VendixLandingComponent implements OnInit {
     this.destroyRef.onDestroy(() => this.stopSectorRotation());
     this.destroyRef.onDestroy(() => this.teardownHeroWindow());
     this.destroyRef.onDestroy(() => this.clearVexiTimer());
+    if (this.isBrowser) {
+      this.destroyRef.onDestroy(() =>
+        this.document.getElementById('vendix-jsonld')?.remove(),
+      );
+    }
   }
 
   fetchPublicPlans(): void {
