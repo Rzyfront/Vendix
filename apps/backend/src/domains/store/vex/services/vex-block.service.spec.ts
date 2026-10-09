@@ -130,7 +130,7 @@ describe('VexBlockService', () => {
       const text =
         kind === 'plain'
           ? 'Ventas café ☕\n'.repeat(1000)
-          : '\u0000'.repeat(9000) + 'fin';
+          : String.fromCharCode(0).repeat(9000) + 'fin';
       const created = await service.create({
         conversation_id: 1,
         kind: 'markdown',
@@ -303,6 +303,49 @@ describe('VexBlockService', () => {
     expect(
       result.tools_used.filter((t) => t.name === 'vex_block_read').length,
     ).toBeGreaterThan(1);
+  });
+
+  it.each([
+    { text_offset: 1.5 },
+    { text_offset: true },
+    { text_limit: 'not a number' },
+    { text_limit: [] },
+  ])(
+    'registry rejects invalid text cursor args %j before calling the reader',
+    async (args) => {
+      const registry = new AIToolRegistry({} as any);
+      registry.registerMany(createVexBlockTools({ blocks: service }));
+      const read = jest.spyOn(service, 'readPaged');
+      const result = JSON.parse(
+        await registry.executeTool('vex_block_read', {
+          block_id: 'blk_1',
+          ...args,
+        }),
+      );
+      expect(result.error).toBeTruthy();
+      expect(read).not.toHaveBeenCalled();
+      read.mockRestore();
+    },
+  );
+
+  it('retains registry numeric-string coercion and bounds text in the reader', async () => {
+    const created = await service.create({
+      conversation_id: 1,
+      kind: 'markdown',
+      data: { text: 'x'.repeat(7000) },
+    });
+    const registry = new AIToolRegistry({} as any);
+    registry.registerMany(createVexBlockTools({ blocks: service }));
+    const result = JSON.parse(
+      await registry.executeTool('vex_block_read', {
+        block_id: created.id,
+        text_offset: '5',
+        text_limit: '99999',
+      }),
+    );
+    expect(result.data.text_offset).toBe(5);
+    expect(result.data.text.length).toBe(3000);
+    expect(result.data.next_offset).toBe(3005);
   });
 
   it('rejects tables without columns and enforces the 5000-row cap', async () => {
