@@ -771,6 +771,7 @@ export class VendixLandingComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.initializeCommercialAnalytics();
     // Tenant config listener
     this.tenantConfig.set({
       branding: {
@@ -798,6 +799,56 @@ export class VendixLandingComponent implements OnInit {
       this.destroyRef.onDestroy(() =>
         this.document.getElementById('vendix-jsonld')?.remove(),
       );
+    }
+  }
+
+  private initializeCommercialAnalytics(): void {
+    if (!this.isBrowser) return;
+    if (
+      !['vendix.online', 'www.vendix.online'].includes(window.location.hostname) ||
+      window.location.pathname !== '/'
+    ) return;
+
+    // Analytics must never become a dependency of the landing or app startup.
+    try {
+      const measurementId = 'G-1N43GNPS5Q';
+      const analyticsWindow = window as Window & {
+        dataLayer?: unknown[];
+        gtag?: (...args: unknown[]) => void;
+        'ga-disable-G-1N43GNPS5Q'?: boolean;
+      };
+      analyticsWindow['ga-disable-G-1N43GNPS5Q'] = false;
+      this.destroyRef.onDestroy(() => {
+        analyticsWindow['ga-disable-G-1N43GNPS5Q'] = true;
+      });
+      analyticsWindow.dataLayer ??= [];
+      analyticsWindow.gtag ??= function () {
+        analyticsWindow.dataLayer!.push(arguments);
+      };
+
+      if (!document.getElementById('vendix-commercial-analytics')) {
+        analyticsWindow.gtag('js', new Date());
+        const script = document.createElement('script');
+        script.id = 'vendix-commercial-analytics';
+        script.async = true;
+        script.src = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
+        document.head.appendChild(script);
+      }
+      analyticsWindow.gtag('config', measurementId, {
+        send_page_view: false,
+        page_location: window.location.origin + '/',
+        page_referrer: document.referrer.split(/[?#]/)[0],
+        cookie_domain: window.location.hostname,
+        allow_google_signals: false,
+        allow_ad_personalization_signals: false,
+      });
+      analyticsWindow.gtag('event', 'page_view', {
+        send_to: measurementId,
+        page_location: window.location.origin + '/',
+        page_title: 'Vendix — Web comercial',
+      });
+    } catch {
+      // A blocked tag must not prevent rendering, pricing or navigation.
     }
   }
 
@@ -1406,4 +1457,3 @@ export class VendixLandingComponent implements OnInit {
     this.demoPlaying.set(false);
   }
 }
-
