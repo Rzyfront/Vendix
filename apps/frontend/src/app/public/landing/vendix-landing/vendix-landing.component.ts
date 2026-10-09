@@ -616,7 +616,7 @@ export class VendixLandingComponent implements OnInit {
    */
   private readonly structuredDataEffect = effect(() => {
     if (!this.isBrowser) return;
-    const prices = this.plans()
+    const prices = this.sellablePlans()
       .filter((p) => p.billing_cycle === 'monthly')
       .map((p) => Number(p.base_price))
       .filter((n) => Number.isFinite(n) && n > 0);
