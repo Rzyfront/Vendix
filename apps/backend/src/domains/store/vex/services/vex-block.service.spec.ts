@@ -1,3 +1,6 @@
+import { AIAgentService } from '../../../../ai-engine/ai-agent.service';
+import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
+import { createVexBlockTools } from '../../../../ai-engine/tools/domains/vex-blocks.tools';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VexBlockService } from './vex-block.service';
 
@@ -119,6 +122,187 @@ describe('VexBlockService', () => {
     const page = await service.readPaged(created.id, 2, 2);
     expect(page.total_rows).toBe(3);
     expect(page.rows).toEqual([{ total: 3 }]);
+  });
+
+  it.each(['plain', 'escaped'])(
+    'reconstructs long %s markdown by cursor without recursive compaction',
+    async (kind) => {
+      const text =
+        kind === 'plain'
+          ? 'Ventas café ☕\n'.repeat(1000)
+          : '\u0000'.repeat(9000) + 'fin';
+      const created = await service.create({
+        conversation_id: 1,
+        kind: 'markdown',
+        data: { text },
+      });
+      const read = createVexBlockTools({ blocks: service }).find(
+        (t) => t.name === 'vex_block_read',
+      )!;
+      let offset = 0;
+      let reconstructed = '';
+      let pages = 0;
+      while (true) {
+        const envelope = await read.handler!(
+          { block_id: created.id, text_offset: offset },
+          {} as any,
+        );
+        expect(envelope.length).toBeLessThan(6000);
+        const { data } = JSON.parse(envelope);
+        expect(data.kind).toBe('markdown');
+        expect(data.total_chars).toBe(text.length);
+        expect(data.text_offset).toBe(offset);
+        expect(data.text.length).toBeLessThanOrEqual(3000);
+        reconstructed += data.text;
+        pages++;
+        if (!data.has_more) {
+          expect(data.next_offset).toBeNull();
+          break;
+        }
+        expect(data.next_offset).toBeGreaterThan(offset);
+        offset = data.next_offset;
+        expect(pages).toBeLessThan(100);
+      }
+      expect(pages).toBeGreaterThan(1);
+      expect(reconstructed).toBe(text);
+      const end = await service.readPaged(created.id, 1, 50, {
+        offset: text.length + 10,
+      });
+      expect(end).toMatchObject({
+        text: '',
+        has_more: false,
+        next_offset: null,
+      });
+    },
+  );
+
+  it.each([
+    { offset: -9, limit: 999999 },
+    { offset: NaN, limit: Infinity },
+    { offset: 0.9, limit: 1.9 },
+  ])('clamps malformed text reader bounds %j', async (options) => {
+    const text = 'x'.repeat(7000);
+    const created = await service.create({
+      conversation_id: 1,
+      kind: 'markdown',
+      data: { text },
+    });
+    const page = await service.readPaged(created.id, 1, 50, options);
+    expect(page.text_offset).toBe(0);
+    expect(page.text!.length).toBeGreaterThan(0);
+    expect(page.text!.length).toBeLessThanOrEqual(3000);
+    expect(page.next_offset).toBe(page.text!.length);
+  });
+
+  it('markdown cursor reads still fail closed for another store or conversation owner', async () => {
+    const created = await service.create({
+      conversation_id: 1,
+      kind: 'markdown',
+      data: { text: 'privado' },
+    });
+    getStoreId.mockReturnValue(999);
+    await expect(
+      service.readPaged(created.id, 1, 50, { offset: 0 }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
+    getStoreId.mockReturnValue(7);
+    getContext.mockReturnValue({ user_id: 999, store_id: 7 });
+    await expect(
+      service.readPaged(created.id, 1, 50, { offset: 0 }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
+    getContext.mockReturnValue({ store_id: 7 });
+    await expect(service.readPaged(created.id)).rejects.toMatchObject({
+      errorCode: 'SYS_NOT_FOUND_001',
+    });
+  });
+
+  it('real loop compaction → real block sink → real read tool recovers the original JSON', async () => {
+    const raw = JSON.stringify({
+      data: Array.from({ length: 400 }, (_, id) => ({
+        id,
+        name: `café ${id}`,
+      })),
+    });
+    expect(raw.length).toBeGreaterThan(6000);
+    const registry = new AIToolRegistry({} as any);
+    const initialRead = jest.fn().mockResolvedValue(raw);
+    registry.register({
+      name: 'read_dataset',
+      domain: 'probe',
+      readOnly: true,
+      description: 'Leer',
+      parameters: { type: 'object' },
+      handler: initialRead,
+    });
+    registry.registerMany(createVexBlockTools({ blocks: service }));
+    let recovered = '';
+    let callId = 0;
+    const toolCall = (name: string, args: any) => ({
+      success: true,
+      content: '',
+      usage: { totalTokens: 1 },
+      tool_calls: [
+        {
+          id: `c${++callId}`,
+          type: 'function',
+          function: { name, arguments: JSON.stringify(args) },
+        },
+      ],
+    });
+    const chat = jest.fn(async (messages: any[]) => {
+      const last = messages.at(-1);
+      if (last.role !== 'tool') return toolCall('read_dataset', {});
+      const result = JSON.parse(last.content);
+      if (result.block_id)
+        return toolCall('vex_block_read', {
+          block_id: result.block_id,
+          text_offset: 0,
+        });
+      recovered += result.data.text;
+      if (result.data.has_more)
+        return toolCall('vex_block_read', {
+          block_id: result.data.block_id,
+          text_offset: result.data.next_offset,
+        });
+      return {
+        success: true,
+        content: 'Datos recuperados',
+        usage: { totalTokens: 1 },
+      };
+    });
+    const save = jest.fn(
+      async (input: any) => (await service.create(input)).id,
+    );
+    const loop = new AIAgentService(
+      { chat } as any,
+      {} as any,
+      registry,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {
+        canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }),
+        getAIFeatureConfig: jest
+          .fn()
+          .mockResolvedValue({ tools_allowed: ['*'] }),
+        checkExtraQuota: jest.fn().mockResolvedValue({ exceeded: false }),
+        consumeExtraQuota: jest.fn(),
+        consumeAIQuota: jest.fn(),
+      } as any,
+    );
+    const result = await loop.runAgent({
+      goal: 'Leer todo',
+      agent_key: 'vex',
+      conversation_id: 1,
+      block_sink: { save },
+    });
+    expect(result.success).toBe(true);
+    expect(result.content).toBe('Datos recuperados');
+    expect(recovered).toBe(raw);
+    expect(JSON.parse(recovered).data).toHaveLength(400);
+    expect(initialRead).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(
+      result.tools_used.filter((t) => t.name === 'vex_block_read').length,
+    ).toBeGreaterThan(1);
   });
 
   it('rejects tables without columns and enforces the 5000-row cap', async () => {

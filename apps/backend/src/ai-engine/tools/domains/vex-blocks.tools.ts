@@ -22,7 +22,9 @@ export interface VexBlockToolDeps {
  *
  * Registration is owned by wave 2 (wiring) — this factory only declares.
  */
-export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredTool[] {
+export function createVexBlockTools({
+  blocks,
+}: VexBlockToolDeps): RegisteredTool[] {
   const conversationIdOf = (args: Record<string, any>): number | null => {
     const id = Number(args.conversation_id);
     return Number.isInteger(id) && id > 0 ? id : null;
@@ -56,7 +58,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
           title: { type: 'string', description: 'Título de la tabla.' },
           columns: {
             type: 'array',
-            description: 'Columnas: [{key, label}]. key es el campo de cada fila.',
+            description:
+              'Columnas: [{key, label}]. key es el campo de cada fila.',
             items: {
               type: 'object',
               properties: {
@@ -188,7 +191,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
           },
           delta: {
             type: 'number',
-            description: 'Variación frente al periodo anterior, en fracción (0.12 = +12 %).',
+            description:
+              'Variación frente al periodo anterior, en fracción (0.12 = +12 %).',
           },
           hint: {
             type: 'string',
@@ -349,18 +353,32 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
       domain: 'vex_blocks',
       readOnly: true,
       description:
-        'Lee las filas guardadas de un bloque de tabla, paginadas. Úsala cuando la persona se refiere a datos que ya mostraste ("esas filas", "esa tabla") en vez de adivinarlos o pedirlos de nuevo. Pagina hasta cubrir lo que necesites; no asumas el total.',
+        'Recupera un bloque guardado sin repetir la consulta. Para tablas devuelve rows con page/page_size. Para markdown (incluidos resultados compactados) devuelve text por fragmentos: empieza en text_offset=0 y continúa con next_offset hasta has_more=false. total_chars NO es un total de registros. Un fragmento puede contener solo parte de un JSON: reúne el texto completo antes de interpretarlo como dataset. No asumas totales desde páginas parciales.',
       parameters: {
         type: 'object',
         properties: {
           block_id: {
             type: 'string',
-            description: 'Identificador devuelto por vex_render_table.',
+            description:
+              'Identificador de un bloque renderizado o block_id de un resultado compactado.',
           },
           page: { type: 'number', description: 'Página, desde 1.' },
           page_size: {
             type: 'number',
             description: 'Filas por página (máximo 500).',
+          },
+          text_offset: {
+            type: 'integer',
+            minimum: 0,
+            description:
+              'Solo markdown: posición de texto, desde 0. Para continuar usa next_offset.',
+          },
+          text_limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 3000,
+            description:
+              'Solo markdown: máximo de caracteres por fragmento (por defecto 3000). Puede devolver menos para mantener la respuesta acotada.',
           },
         },
         required: ['block_id'],
@@ -371,8 +389,20 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
             String(args.block_id),
             Number(args.page) || 1,
             Number(args.page_size) || 50,
+            {
+              offset:
+                args.text_offset === undefined
+                  ? undefined
+                  : Number(args.text_offset),
+              limit:
+                args.text_limit === undefined
+                  ? undefined
+                  : Number(args.text_limit),
+            },
           );
-          return JSON.stringify(buildToolSuccessEnvelope('vex_block_read', page));
+          return JSON.stringify(
+            buildToolSuccessEnvelope('vex_block_read', page),
+          );
         } catch (error: any) {
           return JSON.stringify(
             buildToolErrorEnvelope(
@@ -447,7 +477,8 @@ export function createVexBlockTools({ blocks }: VexBlockToolDeps): RegisteredToo
             group_by: args.group_by,
             aggregate: args.aggregate,
           });
-          const rows = ((block.data as Record<string, any>)?.rows ?? []) as unknown[];
+          const rows = ((block.data as Record<string, any>)?.rows ??
+            []) as unknown[];
           return JSON.stringify(
             buildToolSuccessEnvelope('vex_block_transform', {
               block_id: block.id,
