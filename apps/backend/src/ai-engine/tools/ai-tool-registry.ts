@@ -138,6 +138,13 @@ export class AIToolRegistry {
       .map((t) => this.toDefinition(t));
   }
 
+  /** Scope entries are canonical names/aliases or domains, never permissions. */
+  matchesScope(toolName: string, scope: ReadonlySet<string>): boolean {
+    const name = this.canonicalName(toolName);
+    const tool = this.get(name);
+    return !!tool && (scope.has(name) || scope.has(tool.domain));
+  }
+
   /**
    * Agent-scoped catalog: permission-filtered tools further narrowed by the
    * agent row (`ai_agents.allowed_tools` / `ai_agents.denied_tools`).
@@ -160,11 +167,10 @@ export class AIToolRegistry {
     return Array.from(this.tools.values())
       .filter((t) => {
         if (!this.isPermitted(t, userPermissions)) return false;
-        const name = this.canonicalName(t.name);
-        if (allowed && !allowed.has(name) && !allowed.has(t.domain)) {
+        if (allowed && !this.matchesScope(t.name, allowed)) {
           return false;
         }
-        if (denied.has(name) || denied.has(t.domain)) return false;
+        if (this.matchesScope(t.name, denied)) return false;
         return true;
       })
       .map((t) => this.toDefinition(t));
@@ -178,7 +184,9 @@ export class AIToolRegistry {
    */
   getReadOnlyDefinitions(userPermissions?: string[]): AIToolDefinition[] {
     return Array.from(this.tools.values())
-      .filter((t) => t.readOnly === true && this.isPermitted(t, userPermissions))
+      .filter(
+        (t) => t.readOnly === true && this.isPermitted(t, userPermissions),
+      )
       .map((t) => this.toDefinition(t));
   }
 
@@ -480,11 +488,7 @@ export class AIToolRegistry {
         );
       }
 
-      const token = await this.confirmations.issue(
-        name,
-        args,
-        context.user_id,
-      );
+      const token = await this.confirmations.issue(name, args, context.user_id);
 
       throw new VendixHttpException(
         ErrorCodes.AI_AGENT_005,

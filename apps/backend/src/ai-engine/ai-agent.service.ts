@@ -664,9 +664,7 @@ export class AIAgentService {
     }>,
   ): string {
     const labelOf = (tool: string, preview: unknown): string => {
-      const p = preview as
-        | { label?: unknown; target?: unknown }
-        | undefined;
+      const p = preview as { label?: unknown; target?: unknown } | undefined;
       const label =
         typeof p?.label === 'string' && p.label.trim()
           ? p.label.trim().charAt(0).toLowerCase() + p.label.trim().slice(1)
@@ -1003,7 +1001,9 @@ export class AIAgentService {
     // Not `const`: a declared plan widens it mid-turn (see PLANNED_MAX_ITERATIONS).
     // The row value comes from superadmin (`ai_agents.max_iterations`); absent,
     // the agent default holds (Vex 40, everyone else 10).
-    const baseDefault = isVex ? VEX_MAX_ITERATIONS : this.DEFAULT_MAX_ITERATIONS;
+    const baseDefault = isVex
+      ? VEX_MAX_ITERATIONS
+      : this.DEFAULT_MAX_ITERATIONS;
     let maxIterations = params.max_iterations || baseDefault;
     // Plan-amplified budget: the row value (or the agent default) plus the
     // plan headroom, capped at the superadmin absolute max. `Math.min`, not a
@@ -1059,7 +1059,8 @@ export class AIAgentService {
       (params.agent_allowed_tools?.length ?? 0) > 0 ||
       (params.agent_denied_tools?.length ?? 0) > 0;
     const permissionTools =
-      hasAgentScope && typeof this.toolRegistry.getAgentDefinitions === 'function'
+      hasAgentScope &&
+      typeof this.toolRegistry.getAgentDefinitions === 'function'
         ? this.toolRegistry.getAgentDefinitions(authScopes, {
             allowed_tools: params.agent_allowed_tools,
             denied_tools: params.agent_denied_tools,
@@ -1078,18 +1079,21 @@ export class AIAgentService {
     const toolDefinitions =
       planAllowed === null || planAllowed.has('*')
         ? permissionTools
-        : permissionTools.filter((tool) => {
-            const name = this.toolRegistry.canonicalName(tool.function.name);
-            const domain = this.toolRegistry.get(name)?.domain;
-            return (
-              planAllowed.has(name) ||
-              (domain !== undefined && planAllowed.has(domain))
-            );
-          });
+        : permissionTools.filter((tool) =>
+            this.toolRegistry.matchesScope(tool.function.name, planAllowed),
+          );
 
-    // Filter tools if specific ones requested
-    const filteredTools = params.tools?.length
-      ? toolDefinitions.filter((t) => params.tools!.includes(t.function.name))
+    // The caller's narrowing uses the SAME domain/name/alias semantics as the
+    // agent row. Exact-name filtering here used to erase authorized domains.
+    const requestedScope = params.tools?.length
+      ? new Set(
+          params.tools.map((name) => this.toolRegistry.canonicalName(name)),
+        )
+      : null;
+    const filteredTools = requestedScope
+      ? toolDefinitions.filter((tool) =>
+          this.toolRegistry.matchesScope(tool.function.name, requestedScope),
+        )
       : toolDefinitions;
 
     // The plan tools are the loop's own scaffolding, not tenant capability: with
@@ -1764,11 +1768,10 @@ export class AIAgentService {
                   );
                 }
                 if (approved === 'ok') {
-                  const singleUse =
-                    await params.plan_approval.issueSingleUse(
-                      toolName,
-                      toolArgs,
-                    );
+                  const singleUse = await params.plan_approval.issueSingleUse(
+                    toolName,
+                    toolArgs,
+                  );
                   const appliedRaw = await this.toolRegistry.executeTool(
                     toolName,
                     toolArgs,
@@ -2032,11 +2035,14 @@ export class AIAgentService {
         };
       }
 
+      // The last iteration may itself have used the remaining clock budget.
+      // Do not start a new inference just to narrate an already-expired turn.
+      timedOut ||= Date.now() - startTime - waitedMs >= timeoutMs;
       if (timedOut) {
         this.logger.warn(`Agent timed out after ${iteration} iterations`);
       }
 
-      // Iterations exhausted (or timed out).
+      // Iterations exhausted with clock budget remaining.
       //
       // This used to throw AI_AGENT_001, which surfaced to the person as a raw
       // error at the exact moment Vexi had worked hardest — ten rounds of
@@ -2048,36 +2054,40 @@ export class AIAgentService {
       // away. With no tool to call it can only answer in words, which is
       // exactly the pessimistic-but-human close the situation calls for.
       // Failing THAT, the fallback below is still a sentence, never an error.
-      messages.push({
-        role: 'user',
-        content:
-          'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo; si no, dile con naturalidad que no diste con lo que buscaba y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
-      });
-
       let closing = '';
-      try {
-        const lastCall = params.app_key
-          ? await this.aiEngine.run(
-              params.app_key,
-              params.variables,
-              messages,
-              {},
-            )
-          : params.config_id
-            ? await this.aiEngine.chatWith(params.config_id, messages, {})
-            : await this.aiEngine.chat(messages, {});
+      if (!timedOut) {
+        messages.push({
+          role: 'user',
+          content:
+            'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo; si no, dile con naturalidad que no diste con lo que buscaba y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
+        });
 
-        totalTokens += lastCall?.usage?.totalTokens ?? 0;
-        closing = (lastCall?.content ?? '').trim();
-      } catch (closingError: any) {
-        this.logger.warn(
-          `Agent closing turn failed: ${closingError?.message ?? 'unknown'}`,
-        );
+        try {
+          const lastCall = params.app_key
+            ? await this.aiEngine.run(
+                params.app_key,
+                params.variables,
+                messages,
+                {},
+              )
+            : params.config_id
+              ? await this.aiEngine.chatWith(params.config_id, messages, {})
+              : await this.aiEngine.chat(messages, {});
+
+          totalTokens += lastCall?.usage?.totalTokens ?? 0;
+          closing = (lastCall?.content ?? '').trim();
+        } catch (closingError: any) {
+          this.logger.warn(
+            `Agent closing turn failed: ${closingError?.message ?? 'unknown'}`,
+          );
+        }
       }
 
       const content =
         closing ||
-        'Estuve buscando por varios lados y no logré dar con lo que necesitas. ¿Me lo describes de otra forma o me das algún dato más para intentarlo de nuevo?';
+        (timedOut
+          ? 'No alcancé a completar tu solicitud en este turno. Puedes pedirme que continúe; no voy a dar por terminado lo que aún no he verificado.'
+          : 'Estuve buscando por varios lados y no logré dar con lo que necesitas. ¿Me lo describes de otra forma o me das algún dato más para intentarlo de nuevo?');
 
       yield { type: 'text', content };
 
