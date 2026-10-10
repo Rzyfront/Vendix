@@ -3,7 +3,7 @@ import { Controller, Get } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { createRequire } from 'node:module';
-import request from 'supertest';
+import request = require('supertest');
 
 // Resolve from Swagger itself: the ordinary backend js-yaml remains on v4.
 const swaggerRequire = createRequire(require.resolve('@nestjs/swagger/package.json'));

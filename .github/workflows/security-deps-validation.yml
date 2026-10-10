@@ -1,0 +1,217 @@
+name: Security Dependencies (web and backend)
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'package*.json'
+      - 'apps/backend/**'
+      - 'apps/frontend/**'
+      - 'scripts/security-*'
+      - 'docs/security/**'
+      - '.github/workflows/security-deps-validation.yml'
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: 'Baseline commit before remediation (use a full SHA)'
+        required: true
+        default: '7c095ce66ce551c7cd7a0f5c62fc87b11e223ad6'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-deps-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASELINE_REF: ${{ github.event.pull_request.base.sha || inputs.baseline_ref }}
+  NODE_OPTIONS: '--max-old-space-size=4096'
+
+jobs:
+  lock-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - run: node scripts/security-deps-check.cjs --baseline "$BASELINE_REF"
+
+  standalone-defaults:
+    name: Strict standalone installation (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - run: npm install --global npm@11.19.0 --ignore-scripts --no-audit --no-fund
+      - name: Verify npm ci with Docker peer defaults (no fallback)
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/strict"
+          cp "apps/$APP/package.json" "apps/$APP/package-lock.json" "$RUNNER_TEMP/strict/"
+          npm --prefix "$RUNNER_TEMP/strict" ci --workspaces=false --legacy-peer-deps=false --ignore-scripts --no-audit --no-fund
+
+  backend-suites:
+    name: Backend suites (${{ matrix.layout }}, shard ${{ matrix.shard }}/8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        layout: [workspace, standalone]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASELINE_REF }}
+          path: baseline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - run: npm install --global npm@11.19.0 --ignore-scripts --no-audit --no-fund
+      - run: bash scripts/security-ci-prepare.sh baseline backend "${{ matrix.layout }}"
+      - run: bash scripts/security-ci-prepare.sh candidate backend "${{ matrix.layout }}"
+      - run: node scripts/security-deps-runtime-check.cjs backend "${{ matrix.layout }}" "$CANDIDATE_APP"
+      - name: Generate Prisma explicitly in both checkouts
+        run: |
+          (cd "$BASELINE_APP" && npm exec --yes=false -- prisma generate)
+          (cd "$CANDIDATE_APP" && npm exec --yes=false -- prisma generate)
+      - name: Full Jest suite, baseline and candidate (bounded shards)
+        env:
+          LAYOUT: ${{ matrix.layout }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/security-results"
+          for revision in baseline candidate; do
+            if [[ "$revision" == baseline ]]; then app=$BASELINE_APP; else app=$CANDIDATE_APP; fi
+            report="$GITHUB_WORKSPACE/security-results/$LAYOUT-$revision-$SHARD.json"
+            log="$GITHUB_WORKSPACE/security-results/$LAYOUT-$revision-$SHARD.log"
+            status=0
+            (cd "$app" && timeout --kill-after=30s 80m npm run test -- --ci --runInBand --shard="$SHARD/8" --json --outputFile="$report") > "$log" 2>&1 || status=$?
+            echo "$status" > "$GITHUB_WORKSPACE/security-results/$LAYOUT-$revision-$SHARD.exit"
+            # Assertion failures (exit 1) are compared across all shards in the gate.
+            # Missing reports, timeouts and crashes are NEVER accepted as baseline failures.
+            [[ "$status" -le 1 && -s "$report" ]] || exit 1
+          done
+      - name: Standalone coverage YAML contract
+        if: matrix.layout == 'standalone' && matrix.shard == 1
+        run: node --test "$CANDIDATE_APP/scripts/security-coverage.test.cjs"
+      - name: Backend compilation (baseline and candidate)
+        if: matrix.shard == 1
+        run: |
+          final_status=0
+          for revision in baseline candidate; do
+            if [[ "$revision" == baseline ]]; then app=$BASELINE_APP; else app=$CANDIDATE_APP; fi
+            status=0
+            (cd "$app" && timeout --kill-after=30s 15m npm run build) > "security-results/${{ matrix.layout }}-$revision-build.log" 2>&1 || status=$?
+            echo "Backend $revision build: exit=$status" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$revision" == baseline && "$status" != 0 ]]; then
+              echo '**Baseline build RED — see logs; NOT PASS.**' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if [[ "$revision" == candidate && "$status" != 0 ]]; then final_status=1; fi
+          done
+          exit "$final_status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-backend-${{ matrix.layout }}-${{ matrix.shard }}
+          path: security-results/
+          if-no-files-found: error
+          retention-days: 14
+
+  backend-regression-gate:
+    needs: backend-suites
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: security-backend-*
+          path: security-results
+          merge-multiple: true
+      - run: node scripts/security-jest-compare.cjs security-results workspace
+      - run: node scripts/security-jest-compare.cjs security-results standalone
+      - name: Require all test/build jobs to finish
+        env:
+          RESULT: ${{ needs.backend-suites.result }}
+        run: test "$RESULT" = success
+
+  frontend-suites:
+    name: Frontend suites and CSS (${{ matrix.layout }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    strategy:
+      fail-fast: false
+      matrix:
+        layout: [workspace, standalone]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASELINE_REF }}
+          path: baseline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - run: npm install --global npm@11.19.0 --ignore-scripts --no-audit --no-fund
+      - run: bash scripts/security-ci-prepare.sh baseline frontend "${{ matrix.layout }}"
+      - run: bash scripts/security-ci-prepare.sh candidate frontend "${{ matrix.layout }}"
+      - run: node scripts/security-deps-runtime-check.cjs frontend "${{ matrix.layout }}" "$CANDIDATE_APP"
+      - name: Differential CSS and focused dependency contracts
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/security-results"
+          # Same fixtures, OLD dependencies. No baseline manifest/lock changes.
+          mkdir -p "$BASELINE_APP/scripts"
+          cp apps/frontend/scripts/security-css.test.cjs "$BASELINE_APP/scripts/security-css.test.cjs"
+          node "$BASELINE_APP/scripts/security-css.test.cjs" --snapshot "$GITHUB_WORKSPACE/security-results/css-baseline.json"
+          SECURITY_CSS_BASELINE="$GITHUB_WORKSPACE/security-results/css-baseline.json" node --test "$CANDIDATE_APP/scripts/security-css.test.cjs"
+      - name: Complete frontend suite and compilation, baseline and candidate
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/security-results"
+          final_status=0
+          for revision in baseline candidate; do
+            if [[ "$revision" == baseline ]]; then app=$BASELINE_APP; else app=$CANDIDATE_APP; fi
+            for check in tests build; do
+              status=0
+              if [[ "$check" == tests ]]; then
+                (cd "$app" && timeout --kill-after=30s 15m npm run test -- --watch=false --browsers=ChromeHeadlessNoSandbox) > "security-results/$revision-tests.log" 2>&1 || status=$?
+              else
+                # Real browser bundle without SSR/prerender worker pools.
+                (cd "$app" && timeout --kill-after=30s 15m npm run build -- --configuration=buildcheck) > "security-results/$revision-build.log" 2>&1 || status=$?
+              fi
+              echo "Frontend $revision $check: exit=$status" >> "$GITHUB_STEP_SUMMARY"
+              echo "$status" > "security-results/$revision-$check.exit"
+              if [[ "$revision" == baseline && "$status" != 0 ]]; then
+                echo '**Baseline RED/incomplete — see uploaded logs; NOT PASS.**' >> "$GITHUB_STEP_SUMMARY"
+              fi
+              # No machine-readable Karma baseline: fail closed on ANY candidate failure.
+              if [[ "$revision" == candidate && "$status" != 0 ]]; then final_status=1; fi
+            done
+          done
+          exit "$final_status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-frontend-${{ matrix.layout }}
+          path: security-results/
+          if-no-files-found: error
+          retention-days: 14
