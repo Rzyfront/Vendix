@@ -4,10 +4,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { S3Service } from '../../../../common/services/s3.service';
-import {
-  isS3Key,
-  isSafeS3Key,
-} from '../../../../common/helpers/s3-url.helper';
+import { isS3Key, isSafeS3Key } from '../../../../common/helpers/s3-url.helper';
 
 export type VexBlockKind =
   | 'table'
@@ -31,6 +28,10 @@ export const MAX_BLOCK_ROWS = 5000;
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 500;
+const DEFAULT_TEXT_LIMIT = 3000;
+// Leave room for the envelope below the agent's 6000-char compaction boundary.
+// Escaped JSON can be much larger than the raw substring (e.g. control chars).
+const MAX_TEXT_JSON_CHARS = 4000;
 const MAX_BLOCKS_PER_CONVERSATION = 100;
 /** Selected rows folded into the next turn's goal before truncation. */
 const MAX_SELECTION_ROWS_IN_CONTEXT = 50;
@@ -74,7 +75,10 @@ export interface VexBlockTransform {
   filter?: Array<{ field: string; op: string; value: unknown }>;
   sort?: Array<{ field: string; direction?: 'asc' | 'desc' }>;
   group_by?: string;
-  aggregate?: { field: string; function: 'sum' | 'avg' | 'count' | 'min' | 'max' };
+  aggregate?: {
+    field: string;
+    function: 'sum' | 'avg' | 'count' | 'min' | 'max';
+  };
 }
 
 export interface VexBlockInteraction {
@@ -213,7 +217,9 @@ export class VexBlockService {
         'Bloque no encontrado.',
       );
     if (userId === undefined || userId === null) throw notFound();
-    const row = await this.blocks.findFirst({ where: { id, store_id: storeId } });
+    const row = await this.blocks.findFirst({
+      where: { id, store_id: storeId },
+    });
     if (!row) throw notFound();
     const conversation = await this.prisma.ai_conversations.findFirst({
       where: { id: row.conversation_id, user_id: userId },
@@ -382,7 +388,7 @@ export class VexBlockService {
   }
 
   /**
-   * Paged read of a block's rows for a later turn. The model never receives
+   * Paged read of rows or a bounded fragment of saved markdown. The model never receives
    * the whole dataset blindly — it pages through it, exactly as a person
    * would scroll the rendered table.
    */
@@ -390,6 +396,7 @@ export class VexBlockService {
     id: string,
     page = 1,
     pageSize = DEFAULT_PAGE_SIZE,
+    textOptions: { offset?: number; limit?: number } = {},
   ): Promise<{
     block_id: string;
     kind: VexBlockKind;
@@ -399,10 +406,18 @@ export class VexBlockService {
     total_rows: number;
     rows: Array<Record<string, any>>;
     selection: Array<Record<string, any>>;
+    text?: string;
+    text_offset?: number;
+    total_chars?: number;
+    has_more?: boolean;
+    next_offset?: number | null;
   }> {
     const row = await this.getById(id);
     const rows = this.rowsOf(row);
-    const size = Math.min(Math.max(pageSize || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+    const size = Math.min(
+      Math.max(pageSize || DEFAULT_PAGE_SIZE, 1),
+      MAX_PAGE_SIZE,
+    );
     const current = Math.max(page || 1, 1);
     const start = (current - 1) * size;
     const last = isRecord(row.spec) ? row.spec.last_interaction : undefined;
@@ -412,7 +427,7 @@ export class VexBlockService {
       payload && Array.isArray(payload.selection)
         ? payload.selection.filter(isRecord)
         : [];
-    return {
+    const result = {
       block_id: row.id,
       kind: row.kind,
       version: row.version,
@@ -421,6 +436,42 @@ export class VexBlockService {
       total_rows: rows.length,
       rows: rows.slice(start, start + size),
       selection,
+    };
+    if (row.kind !== 'markdown') return result;
+
+    const fullText = typeof row.data?.text === 'string' ? row.data.text : '';
+    const offset = Number.isFinite(textOptions.offset)
+      ? Math.max(0, Math.trunc(textOptions.offset!))
+      : 0;
+    const limit = Number.isFinite(textOptions.limit)
+      ? Math.min(
+          DEFAULT_TEXT_LIMIT,
+          Math.max(1, Math.trunc(textOptions.limit!)),
+        )
+      : DEFAULT_TEXT_LIMIT;
+    let text = fullText.slice(offset, offset + limit);
+    // Use a cursor, not fixed page arithmetic: escaped fragments can consume
+    // fewer characters than requested, and next_offset must never skip data.
+    if (JSON.stringify(text).length > MAX_TEXT_JSON_CHARS) {
+      let low = 0;
+      let high = text.length;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (JSON.stringify(text.slice(0, mid)).length <= MAX_TEXT_JSON_CHARS)
+          low = mid;
+        else high = mid - 1;
+      }
+      text = text.slice(0, low);
+    }
+    const nextOffset = offset + text.length;
+    const hasMore = nextOffset < fullText.length;
+    return {
+      ...result,
+      text,
+      text_offset: offset,
+      total_chars: fullText.length,
+      has_more: hasMore,
+      next_offset: hasMore ? nextOffset : null,
     };
   }
 
@@ -495,9 +546,7 @@ export class VexBlockService {
    * a guess. Selections travel whole (the turn may have to total them) but
    * capped: past 50 rows the model gets the count and reads the block.
    */
-  async recentSelections(
-    conversationId: number,
-  ): Promise<
+  async recentSelections(conversationId: number): Promise<
     Array<{
       block_id: string;
       kind: VexBlockKind;
@@ -571,7 +620,10 @@ export class VexBlockService {
    * still-unlinked rows, so a retried turn can never steal another message's
    * blocks. Returns how many rows were linked.
    */
-  async attachToMessage(blockIds: string[], messageId: number): Promise<number> {
+  async attachToMessage(
+    blockIds: string[],
+    messageId: number,
+  ): Promise<number> {
     if (blockIds.length === 0) return 0;
     const storeId = this.storeIdOrThrow();
     const { count } = await this.blocks.updateMany({
@@ -607,7 +659,9 @@ export class VexBlockService {
       case 'chart': {
         const errors: string[] = [];
         if (typeof spec.chart_type !== 'string' || !spec.chart_type) {
-          errors.push('spec.chart_type es obligatorio (bar, line, pie, area, radar, scatter, gauge).');
+          errors.push(
+            'spec.chart_type es obligatorio (bar, line, pie, area, radar, scatter, gauge).',
+          );
         }
         if (!Array.isArray(data.series) || data.series.length === 0) {
           errors.push('data.series debe ser una lista no vacía.');
@@ -632,9 +686,14 @@ export class VexBlockService {
           !isS3Key(data.s3_key) ||
           !isSafeS3Key(data.s3_key)
         ) {
-          errors.push('data.s3_key debe ser una clave S3 válida (nunca una URL firmada).');
+          errors.push(
+            'data.s3_key debe ser una clave S3 válida (nunca una URL firmada).',
+          );
         }
-        if (kind === 'file' && (typeof data.filename !== 'string' || !data.filename)) {
+        if (
+          kind === 'file' &&
+          (typeof data.filename !== 'string' || !data.filename)
+        ) {
           errors.push('data.filename es obligatorio.');
         }
         return errors;
@@ -709,13 +768,29 @@ export class VexBlockService {
       case 'neq':
         return field !== value;
       case 'gt':
-        return typeof field === 'number' && typeof value === 'number' && field > value;
+        return (
+          typeof field === 'number' &&
+          typeof value === 'number' &&
+          field > value
+        );
       case 'gte':
-        return typeof field === 'number' && typeof value === 'number' && field >= value;
+        return (
+          typeof field === 'number' &&
+          typeof value === 'number' &&
+          field >= value
+        );
       case 'lt':
-        return typeof field === 'number' && typeof value === 'number' && field < value;
+        return (
+          typeof field === 'number' &&
+          typeof value === 'number' &&
+          field < value
+        );
       case 'lte':
-        return typeof field === 'number' && typeof value === 'number' && field <= value;
+        return (
+          typeof field === 'number' &&
+          typeof value === 'number' &&
+          field <= value
+        );
       case 'contains':
         return (
           typeof field === 'string' &&
@@ -753,7 +828,9 @@ export class VexBlockService {
           value = numbers.reduce((a, b) => a + b, 0);
           break;
         case 'avg':
-          value = numbers.length ? numbers.reduce((a, b) => a + b, 0) / numbers.length : 0;
+          value = numbers.length
+            ? numbers.reduce((a, b) => a + b, 0) / numbers.length
+            : 0;
           break;
         case 'count':
           value = bucket.length;
@@ -767,7 +844,10 @@ export class VexBlockService {
       }
       out.push(
         groupBy
-          ? { [groupBy]: key, [`${aggregate.function}_${aggregate.field}`]: value }
+          ? {
+              [groupBy]: key,
+              [`${aggregate.function}_${aggregate.field}`]: value,
+            }
           : { [`${aggregate.function}_${aggregate.field}`]: value },
       );
     }

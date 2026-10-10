@@ -128,10 +128,11 @@ Disallow: /
 
     const urls = [
       { path: '/', priority: '1.0', changefreq: 'weekly' },
-      { path: '/#features', priority: '0.8', changefreq: 'monthly' },
-      { path: '/#solutions', priority: '0.8', changefreq: 'monthly' },
-      { path: '/#pricing', priority: '0.9', changefreq: 'monthly' },
-      { path: '/#early-access', priority: '0.9', changefreq: 'monthly' },
+      { path: '/ayuda', priority: '0.6', changefreq: 'monthly' },
+      { path: '/pqr', priority: '0.4', changefreq: 'monthly' },
+      { path: '/legal/terminos', priority: '0.3', changefreq: 'yearly' },
+      { path: '/legal/privacidad', priority: '0.3', changefreq: 'yearly' },
+      { path: '/legal/cookies', priority: '0.3', changefreq: 'yearly' },
     ];
 
     return this.buildSitemapXml(base_url, urls, now);

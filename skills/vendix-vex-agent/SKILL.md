@@ -2,14 +2,14 @@
 name: vendix-vex-agent
 description: >
   Vex, the full-screen business-managing agent for owner/admin: agent-as-a-row with
-  denied_tools, whole-plan approval with single-use plan tokens, manipulable UI
+  denied_tools, single-step approval with legacy plan-token compatibility, manipulable UI
   blocks persisted server-side, and the three-legged vex_agent gate. Trigger: When
   working on /admin/vex, Vex UI blocks, plan approval, denied_tools, or the
   vex_agent subscription feature.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Working with the Vex full-screen business agent (/admin/vex)"
@@ -32,7 +32,7 @@ Vex is the second agent on the existing engine, not new infrastructure: row
 `agent_key='vex'` from its own full-screen view (`/admin/vex`). It reuses
 `AIAgentService`, `AIToolRegistry`, the endpoint bridge, confirmations,
 attachments, queue and audit from Vexi. This skill governs what is Vex-only:
-the managed-row identity with `denied_tools`, whole-plan approval, UI blocks,
+the managed-row identity with `denied_tools`, single-step approval, UI blocks,
 and the `vex_agent` gate. It does not govern the shared loop, the bridge, or
 the Vexi dock — those stay in their own skills.
 
@@ -76,31 +76,24 @@ Rules that are not stylistic:
 3. Never reintroduce `ui_context` into the Vex snapshot: the turn would pay
    for screen state the agent cannot act on.
 
-## Pattern 2 — Whole-plan approval, one click for the reversible
+## Pattern 2 — One write per approval; plan-token compatibility is not policy
 
-When Vex proposes a plan, the backend runs `preview` on every write step and
-emits a `plan_approval` frame with all diffs. One approval
-(`POST store/vex/plans/:id/approve`) mints a single-use plan token (TTL 15
-min) bound to user + plan + ORDERED step hashes over `(tool, canonical args)`
-— order matters, "create then send" is a different approval than "send then
-create". Each step redeems independently through one Lua compare-and-consume;
-a retry of step 2 never re-runs step 1.
+The current hidden-plan flow (`20261002150000_vex_hidden_plan_prompt`) proposes
+**one business write per turn**. The first proposal closes the turn in one
+`plan_approval` frame; a second write in the same model response is deferred.
+The plan stays internal, and continuation uses its stored state. Do not tell the
+user that a whole workflow has been approved or applied after one card.
 
-Outcomes that route to the step's own card (`AI_AGENT_005` with a fresh
-single-use token, same details shape as `executeTool`): `irreversible` (step
-flagged `irreversible: true`, or its domain in the shared
-`IRREVERSIBLE_DOMAIN_SEGMENTS` — single-sourced from `IRREVERSIBLE_DOMAINS`
-in `capability-registry.service.ts`, never mirrored), `unknown_step` (args
-drifted after approval),
-`replayed` (step already ran), `missing`/`mismatch` (expired token or wrong
-user/plan). On `ok` the controller mints an inner single-use token for exactly
-this tool+args and executes through `executeTool()`, so permissions are
-re-checked on the way through and the write lands in the audit with
-`agent_key: 'vex'`.
+`PlanApprovalService` and `POST store/vex/plans/:id/approve` still support existing
+plan tokens (TTL 15 min, ordered canonical argument hashes). That compatibility
+must not be removed casually, but it does NOT authorize new grouped-approval
+policy. Tokens are single-use, user/plan-bound, and authorize no permission bypass.
+An irreversible or drifted/missing/replayed step returns to its own confirmation
+card; execution still traverses `executeTool` with fresh permission checks.
 
-**Anti-pattern:** auto-executing a plan without the token, or widening
-`covered` to irreversible steps "because the plan was approved". The plan
-token authorizes nothing by itself.
+**Anti-pattern:** restoring multi-write collection or auto-executing the remaining
+plan because an earlier step was approved. Grouped approval requires an explicit
+product/security decision and compatibility tests, not a latency optimization.
 
 ## Pattern 3 — UI blocks stay queryable server-side
 
@@ -108,7 +101,11 @@ A block is data the model rendered that later turns can read and transform:
 `vex_render_table|chart|kpi|image|file` validate the payload and persist it to
 `ai_ui_blocks` (store-scoped, registered on `StorePrismaService`), emitting a
 `ui_block {block_id, kind, spec, data}` frame; `vex_block_read` pages data
-back (default 50, max 500); `vex_block_transform` applies
+back (tables: default 50 rows, max 500). Markdown results use `text_offset`
+(default 0) / `text_limit` (default and max 3000), with `text`, `total_chars`,
+`has_more` and `next_offset`. Follow the returned cursor: escaped content can
+shorten a chunk. `total_chars` is NOT a record count; text fragments may be partial
+JSON. Table paging remains unchanged. `vex_block_transform` applies
 filter/sort/group/aggregate and versions the block. All seven tools are
 `readOnly`: persisting a block is agent scratch state, not a business write.
 
@@ -178,7 +175,7 @@ All five are enforced by specs, not by convention.
    (backed by `PlanApprovalService` + `VexiPlanStateService`) and
    `block_sink` (backed by `VexBlockService` with
    `conversation_id`/`message_id`); vexi turns receive neither. The loop
-   accumulates every write proposal of the turn and emits **one**
+   records only the first write proposal and emits **one single-step**
    `plan_approval` frame (`plan_id` + steps), saving hashes via
    `setStepHashes`; results > 6000 chars persist as real blocks through the
    sink instead of being dropped by compaction. Wire specs assert the args
@@ -215,7 +212,7 @@ provider only) and the block-backed compaction from Pattern 3. Measure on
 |------|-----|
 | Agent row | `psql "$DATABASE_URL" -c "select key, app_key, max_iterations from ai_agents where key='vex'"` — 25 `ui_*` in `denied_tools` |
 | Deny filter | `npx jest --runInBand src/ai-engine/ai-agent.service.spec.ts` — `ui_navigate` absent from vex catalog, present for vexi |
-| Plan approval | `npx jest --runInBand src/domains/store/vex/services/plan-approval.service.spec.ts` — 1 approval runs 3 reversibles; drifted args and `send_invoice_dian` reconfirm; token replay rejected |
+| Plan approval | `npx jest --runInBand src/domains/store/vex/services/plan-approval.service.spec.ts` — legacy token coverage plus the single-step loop policy; drifted args and `send_invoice_dian` reconfirm; token replay rejected |
 | Irreversible coverage | `npx jest --runInBand src/ai-engine/tools/irreversible-coverage.spec.ts` — fails if a dangerous-domain write lacks `irreversible: true` (check by reverting `close_cash_session` locally) |
 | Offered-catalog guard | `npx jest --runInBand src/ai-engine/ai-agent.service.spec.ts` — simulated `ui_navigate` call in a vex turn → `AI_AGENT_TOOL_NOT_ALLOWED`, 0 `executeTool`/client dispatches |
 | Wiring | `npx jest --runInBand src/domains/store/ai-chat/ai-chat.plan.spec.ts` — vex turn receives `plan_approval` + `block_sink`, vexi receives neither; closing message persists `metadata.blocks/plan` |
@@ -224,6 +221,14 @@ provider only) and the block-backed compaction from Pattern 3. Measure on
 | Thread split | list `?agent_key=vex` shows only Vex threads; Vexi list excludes them |
 | Caching | provider spec asserts `cache_control`; `ai_engine_logs.usage` shows `cache_read_input_tokens` > 0 |
 | E2E | Playwright on `/admin/vex`: plan card approve → applied; irreversible step asks again; select block rows → "suma las seleccionadas" answers the correct total |
+
+## Process And Measurement
+
+See `docs/vex-agent-improvement-process.md`. Keep approvals, tenant isolation,
+quota controls and UI honesty unchanged while optimizing. Context compaction is
+useful only if the real loop→sink→reader recovers the payload; a mocked sink alone
+cannot prove it. Measure calls, serialized context, cache usage and latency by
+phase before claiming performance gains.
 
 ## Related Skills
 

@@ -164,6 +164,15 @@
     },
     "socket.io-adapter": {
       "ws": "^8.21.0"
+    },
+    "@nestjs/swagger": {
+      "js-yaml": "5.4.1"
+    },
+    "express": {
+      "proxy-addr": "2.0.8"
+    },
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "4.3.2"
     }
   },
   "jest": {
