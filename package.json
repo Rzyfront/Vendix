@@ -85,6 +85,9 @@
     },
     "express": {
       "proxy-addr": "2.0.8"
+    },
+    "@angular/cli": {
+      "@modelcontextprotocol/sdk": "1.31.0"
     }
   }
 }
