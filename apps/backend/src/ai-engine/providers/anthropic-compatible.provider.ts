@@ -57,52 +57,101 @@ export class AnthropicCompatibleProvider implements AIProvider {
     });
   }
 
+  /** The Messages API has no `tool` role: preserve the ReAct history as blocks. */
+  private transformMessages(messages: AIMessage[]): Anthropic.MessageParam[] {
+    const transformed: Anthropic.MessageParam[] = [];
+    for (const message of messages) {
+      if (message.role === 'system') continue;
+      const role = message.role === 'tool' ? 'user' : message.role;
+      const content: Anthropic.ContentBlockParam[] = [];
+      if (message.role === 'tool') {
+        if (!message.tool_call_id) {
+          throw new Error('Tool result is missing tool_call_id');
+        }
+        content.push({
+          type: 'tool_result',
+          tool_use_id: message.tool_call_id,
+          content: this.transformContentForAnthropic(message.content),
+          ...(this.isToolError(message.content) && { is_error: true }),
+        });
+      } else {
+        const body = this.transformContentForAnthropic(message.content);
+        if (typeof body === 'string') {
+          // Tool-only assistant turns must not contain an empty text block.
+          if (body) content.push({ type: 'text', text: body });
+        } else {
+          content.push(...body);
+        }
+        for (const call of message.tool_calls ?? []) {
+          const input: unknown = JSON.parse(call.function.arguments);
+          if (!input || typeof input !== 'object' || Array.isArray(input)) {
+            throw new Error(`Tool call ${call.id} arguments must be an object`);
+          }
+          content.push({
+            type: 'tool_use',
+            id: call.id,
+            name: call.function.name,
+            input,
+          });
+        }
+      }
+      const previous = transformed[transformed.length - 1];
+      // Multiple tool calls in one assistant turn require ONE user message
+      // containing all results, ahead of any follow-up user text.
+      if (previous?.role === role && Array.isArray(previous.content)) {
+        previous.content.push(...content);
+      } else {
+        transformed.push({ role, content });
+      }
+    }
+    return transformed;
+  }
+
+  private isToolError(content: AIMessage['content']): boolean {
+    if (typeof content !== 'string') return false;
+    try {
+      const result = JSON.parse(content);
+      return result?.success === false || result?.status === 'error' ||
+        (typeof result?.error === 'string' && result.error.length > 0);
+    } catch {
+      return content.startsWith('Error:');
+    }
+  }
+
+  private transformSystem(
+    messages: AIMessage[],
+    options?: AIRequestOptions,
+  ): Anthropic.TextBlockParam[] {
+    const prompts = messages.filter((m) => m.role === 'system').map((m) =>
+      typeof m.content === 'string' ? m.content : m.content
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text ?? '').join('\n'),
+    );
+    // An explicit prompt overrides the base prompt, not runtime restrictions,
+    // active plans or pending confirmations carried by subsequent systems.
+    if (options?.systemPrompt) {
+      if (prompts.length) prompts[0] = options.systemPrompt;
+      else prompts.push(options.systemPrompt);
+    }
+    return prompts.filter(Boolean).map((text, index) => ({
+      type: 'text',
+      text,
+      // Cache the stable base separately; dynamic instructions remain visible.
+      ...(index === 0 && { cache_control: { type: 'ephemeral' as const } }),
+    }));
+  }
+
   async chat(
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
     try {
-      const systemMsg = messages.find((m) => m.role === 'system');
-      const systemPrompt =
-        options?.systemPrompt ||
-        (systemMsg
-          ? typeof systemMsg.content === 'string'
-            ? systemMsg.content
-            : undefined
-          : undefined);
-      const userMessages = messages.filter((m) => m.role !== 'system');
-
-      const transformedMessages = userMessages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: this.transformContentForAnthropic(m.content) as any,
-      }));
-
-      // Debug: log message structure for multimodal requests
-      for (const msg of transformedMessages) {
-        if (Array.isArray(msg.content)) {
-          const types = msg.content.map((c: any) => c.type);
-          const imagePart = msg.content.find((c: any) => c.type === 'image');
-          console.log(
-            `[AnthropicProvider] Message role=${msg.role}, content types=${JSON.stringify(types)}, hasImage=${!!imagePart}, imageSourceType=${imagePart?.source?.type}, mediaType=${imagePart?.source?.media_type}, dataLength=${imagePart?.source?.data?.length ?? 0}`,
-          );
-        }
-      }
+      const system = this.transformSystem(messages, options);
+      const transformedMessages = this.transformMessages(messages);
 
       const response = await this.client.messages.create({
         model: options?.model || this.config.modelId,
-        // Prompt caching (Vex step 5): with 240+ tools the system prompt +
-        // tool definitions dominate every iteration. Both blocks are marked
-        // ephemeral so the second iteration of a turn reads them from cache.
-        // Anthropic caches by prefix: system first, then the LAST tool block.
-        ...(systemPrompt && {
-          system: [
-            {
-              type: 'text' as const,
-              text: systemPrompt,
-              cache_control: { type: 'ephemeral' as const },
-            },
-          ],
-        }),
+        ...(system.length && { system }),
         messages: transformedMessages,
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
@@ -205,33 +254,12 @@ export class AnthropicCompatibleProvider implements AIProvider {
     options?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
     try {
-      const systemMsgStream = messages.find((m) => m.role === 'system');
-      const systemPrompt =
-        options?.systemPrompt ||
-        (systemMsgStream
-          ? typeof systemMsgStream.content === 'string'
-            ? systemMsgStream.content
-            : undefined
-          : undefined);
-      const userMessages = messages.filter((m) => m.role !== 'system');
+      const system = this.transformSystem(messages, options);
 
       const stream = this.client.messages.stream({
         model: options?.model || this.config.modelId,
-        // Same ephemeral marking as `chat()`: the streamed turns of an agent
-        // loop re-send the same prefix on every iteration.
-        ...(systemPrompt && {
-          system: [
-            {
-              type: 'text' as const,
-              text: systemPrompt,
-              cache_control: { type: 'ephemeral' as const },
-            },
-          ],
-        }),
-        messages: userMessages.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: this.transformContentForAnthropic(m.content) as any,
-        })),
+        ...(system.length && { system }),
+        messages: this.transformMessages(messages),
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
         temperature:

@@ -321,7 +321,10 @@ describe('vex-blocks.tools · render + read/transform', () => {
         conversation_id: 42,
         kind: 'image',
         spec: {},
-        data: { s3_key: 'vexi-generated/stores/7/abc.png', alt: 'logo generado' },
+        data: {
+          s3_key: 'vexi-generated/stores/7/abc.png',
+          alt: 'logo generado',
+        },
       });
       expect(answer.data.block_id).toBe('blk_1');
       expect(answer.data.kind).toBe('image');
@@ -390,10 +393,49 @@ describe('vex-blocks.tools · render + read/transform', () => {
         page_size: 50,
       });
 
-      expect(blocks.readPaged).toHaveBeenCalledWith('blk_1', 1, 50);
+      expect(blocks.readPaged).toHaveBeenCalledWith('blk_1', 1, 50, {
+        offset: undefined,
+        limit: undefined,
+      });
       expect(answer.tool).toBe('vex_block_read');
       expect(answer.data.total_rows).toBe(2);
       expect(answer.data.rows).toHaveLength(2);
+    });
+
+    it('passes markdown cursor and limit to the reader without treating them as row pages', async () => {
+      const { blocks, tools } = buildTools();
+      blocks.readPaged.mockResolvedValueOnce({
+        kind: 'markdown',
+        text: 'contenido',
+        text_offset: 3000,
+        total_chars: 7000,
+        has_more: true,
+        next_offset: 3009,
+      });
+      const answer = await run(tools, 'vex_block_read', {
+        block_id: 'blk_1',
+        text_offset: 3000,
+        text_limit: 1500,
+      });
+      expect(blocks.readPaged).toHaveBeenCalledWith('blk_1', 1, 50, {
+        offset: 3000,
+        limit: 1500,
+      });
+      expect(answer.data).toEqual({
+        kind: 'markdown',
+        text: 'contenido',
+        text_offset: 3000,
+        total_chars: 7000,
+        has_more: true,
+        next_offset: 3009,
+      });
+      const schema = getTool(tools, 'vex_block_read').parameters.properties
+        .text_limit;
+      expect(schema).toMatchObject({
+        type: 'integer',
+        minimum: 1,
+        maximum: 3000,
+      });
     });
 
     it('(c) bloque inexistente → sobre de error guiado', async () => {

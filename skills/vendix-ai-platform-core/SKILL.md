@@ -8,7 +8,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Working with AIEngineService core methods"
@@ -80,6 +80,25 @@ Common errors: `AI_APP_001`, `AI_APP_003`, `AI_CONFIG_001`, `AI_PROVIDER_002`, `
 - Yields `{ type: 'error', error }` for failures instead of throwing in most cases.
 - Consumes quota only when the final chunk is `done`.
 - Logs after completion, but current logging does not emit `ai.request.completed` and logs `model` as `undefined`.
+
+## Agent History Contract (Anthropic)
+
+`chat()` and `chatStream()` share normalization. Never cast the internal `tool`
+role into a native message: assistant `tool_calls` become `tool_use` blocks and
+consecutive results become one user message of `tool_result` blocks, correlated
+by ID. Tool-only assistant turns omit empty text. Structured error envelopes and
+`Error:` results carry `is_error`; a pending confirmation is not an error.
+
+Preserve **every** system message in order. `options.systemPrompt` overrides only
+the first/base prompt, not runtime scopes, active plans or pending approvals.
+Cache the base system and last tool definition; this is a request hint, not proof
+of cache hits or provider support. Malformed historical tool arguments and missing
+result IDs fail before SDK invocation; do not replace them with `{}`.
+
+Verification: `anthropic-compatible.provider.spec.ts` asserts two-round payloads,
+chat/stream parity, system overrides, multimodal content and grouped IDs. No live
+provider call is needed for the contract; actual latency/cache hits need runtime
+measurements. See `docs/vex-agent-improvement-process.md` for the rollout gate.
 
 ## Rate Limit
 

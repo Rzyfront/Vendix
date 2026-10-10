@@ -150,7 +150,9 @@ describe('ai-tool-registry · T3 validación en el borde', () => {
     // Sin contexto de request no hay permisos concedidos.
     await expect(
       registry.executeTool('gated_probe', { order_id: 1 }),
-    ).rejects.toMatchObject({ errorCode: 'AI_AGENT_004' } as Partial<VendixHttpException>);
+    ).rejects.toMatchObject({
+      errorCode: 'AI_AGENT_004',
+    } as Partial<VendixHttpException>);
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -269,13 +271,13 @@ describe('ai-tool-registry · T2 versionado + alias + envelope', () => {
       version: '1',
       data: { order_id: 3 },
     });
-    expect(
-      buildToolSuccessEnvelope('get_order', { order_id: 3 }, '2'),
-    ).toEqual({
-      tool: 'get_order',
-      version: '2',
-      data: { order_id: 3 },
-    });
+    expect(buildToolSuccessEnvelope('get_order', { order_id: 3 }, '2')).toEqual(
+      {
+        tool: 'get_order',
+        version: '2',
+        data: { order_id: 3 },
+      },
+    );
   });
 
   it('envelope de error porta tool + version + error + next_step', () => {
@@ -321,9 +323,7 @@ describe('ai-tool-registry · T5 deprecación + remoción', () => {
 
   function buildRegistry() {
     const registry = new AIToolRegistry(confirmations as any);
-    const handler = jest
-      .fn()
-      .mockResolvedValue(JSON.stringify({ ok: true }));
+    const handler = jest.fn().mockResolvedValue(JSON.stringify({ ok: true }));
     registry.register({
       name: 'get_order_v2',
       domain: 'orders',
@@ -502,5 +502,46 @@ describe('ai-tool-registry · RX2 denied_tools con alcance de agente', () => {
     );
     expect(scoped).not.toContain('ui_navigate');
     expect(scoped).toEqual(['list_orders']);
+  });
+});
+
+describe('ai-tool-registry · consistent scope matching', () => {
+  it('canonical names, aliases and domains match without granting missing permissions', () => {
+    const registry = new AIToolRegistry({} as any);
+    registry.register({
+      name: 'list_orders',
+      domain: 'orders',
+      readOnly: true,
+      requiredPermissions: ['orders:read'],
+      description: 'Órdenes',
+      parameters: { type: 'object' },
+      handler: jest.fn(),
+    });
+    registry.registerAlias('fetch_orders', 'list_orders');
+    for (const allowed of ['orders', 'list_orders', 'fetch_orders']) {
+      expect(
+        registry.getAgentDefinitions(['orders:read'], {
+          allowed_tools: [allowed],
+        }),
+      ).toHaveLength(1);
+      expect(
+        registry.getAgentDefinitions([], { allowed_tools: [allowed] }),
+      ).toHaveLength(0);
+      for (const denied of ['orders', 'list_orders', 'fetch_orders']) {
+        expect(
+          registry.getAgentDefinitions(['orders:read'], {
+            allowed_tools: [allowed],
+            denied_tools: [denied],
+          }),
+        ).toHaveLength(0);
+      }
+    }
+    expect(
+      registry.matchesScope('default_api.fetch_orders', new Set(['orders'])),
+    ).toBe(true);
+    expect(registry.matchesScope('missing', new Set(['missing']))).toBe(false);
+    expect(registry.matchesScope('list_orders', new Set(['customers']))).toBe(
+      false,
+    );
   });
 });
