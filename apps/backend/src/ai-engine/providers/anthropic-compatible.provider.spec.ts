@@ -309,7 +309,7 @@ describe('AnthropicCompatibleProvider ReAct history contract', () => {
         }],
       }];
       expect((await provider.chat(messages)).success).toBe(false);
-      const chunks = [];
+      const chunks: import('../interfaces/ai-provider.interface').AIStreamChunk[] = [];
       for await (const chunk of provider.chatStream(messages)) chunks.push(chunk);
       expect(chunks.map((c) => c.type)).toEqual(['error']);
       expect(create).not.toHaveBeenCalled();
