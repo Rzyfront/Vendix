@@ -63,3 +63,34 @@ if (process.argv[2] === '--snapshot') {
     assert.equal(typeof cliRequire('@modelcontextprotocol/sdk/server/mcp.js').McpServer, 'function');
   });
 }
+
+if (process.argv[2] !== '--snapshot') {
+  test('each CSS consumer parses complex selectors with parser 7 contracts', () => {
+    const selectors = '.a\\:b[data-kind="x"]:not(.off), :is(.x, .y) > .z';
+    for (const parent of ['tailwindcss', 'postcss-nested', '@tailwindcss/typography']) {
+      const parentRequire = parent === 'postcss-nested'
+        ? createRequire(tailwindRequire.resolve('postcss-nested/package.json'))
+        : createRequire(appRequire.resolve(parent + '/package.json'));
+      const parser = parentRequire('postcss-selector-parser');
+      assert.equal(parser().processSync(selectors), selectors);
+      const ast = parser().astSync(selectors);
+      let attributes = 0;
+      ast.walkAttributes(() => { attributes += 1; });
+      assert.equal(attributes, 1);
+    }
+  });
+
+  test('bounded adversarial selector terminates in a child process', () => {
+    const { spawnSync } = require('node:child_process');
+    const parserPath = tailwindRequire.resolve('postcss-selector-parser');
+    const source = `const parser = require(${JSON.stringify(parserPath)});
+      const selectors = [':not('.repeat(32) + '.x' + ')'.repeat(32),
+        '[data-x="' + 'x'.repeat(4096) + '"]', '.a\\\\:b'.repeat(512)];
+      for (const selector of selectors) parser().astSync(selector);`;
+    const child = spawnSync(process.execPath, ['--max-old-space-size=128', '-e', source], {
+      timeout: 5000, maxBuffer: 64 * 1024, encoding: 'utf8',
+    });
+    assert.ifError(child.error);
+    assert.equal(child.status, 0, child.stderr);
+  });
+}
