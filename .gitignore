@@ -54,6 +54,7 @@ GITHUB_SECRET_INSTRUCTIONS.txt
 # Local-only planning and output artifacts
 /plans/
 /outputs/
+/output/
 
 # Local dev artifacts (scripts, screenshots de referencia, etc.)
 # No deben commitearse — son temporales del dev local.
