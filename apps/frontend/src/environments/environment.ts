@@ -2,6 +2,8 @@ export const environment = {
   production: true,
   apiUrl: 'https://api.vendix.online/api',
   vendixDomain: 'vendix.online',
+  // GA4 de la portada comercial (solo vendix.online, ver VendixLandingComponent)
+  commercialAnalyticsId: 'G-1N43GNPS5Q',
 
   // Configuración para producción
   debugDomainDetection: false,

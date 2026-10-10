@@ -30,6 +30,7 @@ import {
 import { VexiToolTraceComponent } from '../../../shared/components/vexi-dock/vexi-tool-trace.component';
 import type { ToolStep } from '../../../core/store/vexi/vexi.actions';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../environments/environment';
 import {
   PublicPlansService,
   PublicPlan,
@@ -250,6 +251,15 @@ const DEMO_ORIGINS = [
   'https://www.youtube.com',
   'https://i.ytimg.com',
   'https://fonts.gstatic.com',
+];
+
+const COMMERCIAL_CAMPAIGN_PARAMS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'gclid',
 ];
 
 @Component({
@@ -803,7 +813,8 @@ export class VendixLandingComponent implements OnInit {
   }
 
   private initializeCommercialAnalytics(): void {
-    if (!this.isBrowser) return;
+    const measurementId = environment.commercialAnalyticsId;
+    if (!this.isBrowser || !measurementId) return;
     if (
       !['vendix.online', 'www.vendix.online'].includes(window.location.hostname) ||
       window.location.pathname !== '/'
@@ -811,15 +822,15 @@ export class VendixLandingComponent implements OnInit {
 
     // Analytics must never become a dependency of the landing or app startup.
     try {
-      const measurementId = 'G-1N43GNPS5Q';
-      const analyticsWindow = window as Window & {
-        dataLayer?: unknown[];
-        gtag?: (...args: unknown[]) => void;
-        'ga-disable-G-1N43GNPS5Q'?: boolean;
-      };
-      analyticsWindow['ga-disable-G-1N43GNPS5Q'] = false;
+      const disableKey = `ga-disable-${measurementId}`;
+      const analyticsWindow = window as unknown as Window &
+        Record<string, unknown> & {
+          dataLayer?: unknown[];
+          gtag?: (...args: unknown[]) => void;
+        };
+      analyticsWindow[disableKey] = false;
       this.destroyRef.onDestroy(() => {
-        analyticsWindow['ga-disable-G-1N43GNPS5Q'] = true;
+        analyticsWindow[disableKey] = true;
       });
       analyticsWindow.dataLayer ??= [];
       analyticsWindow.gtag ??= function () {
@@ -834,9 +845,21 @@ export class VendixLandingComponent implements OnInit {
         script.src = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
         document.head.appendChild(script);
       }
+
+      // Keep only campaign parameters so GA4 can attribute the visit; any other
+      // query param is dropped to avoid leaking tokens or personal data.
+      const params = new URLSearchParams(window.location.search);
+      const campaignQuery = COMMERCIAL_CAMPAIGN_PARAMS.filter((key) =>
+        params.has(key),
+      )
+        .map((key) => `${key}=${encodeURIComponent(params.get(key)!)}`)
+        .join('&');
+      const pageLocation =
+        window.location.origin + '/' + (campaignQuery ? `?${campaignQuery}` : '');
+
       analyticsWindow.gtag('config', measurementId, {
         send_page_view: false,
-        page_location: window.location.origin + '/',
+        page_location: pageLocation,
         page_referrer: document.referrer.split(/[?#]/)[0],
         cookie_domain: window.location.hostname,
         allow_google_signals: false,
@@ -844,7 +867,7 @@ export class VendixLandingComponent implements OnInit {
       });
       analyticsWindow.gtag('event', 'page_view', {
         send_to: measurementId,
-        page_location: window.location.origin + '/',
+        page_location: pageLocation,
         page_title: 'Vendix — Web comercial',
       });
     } catch {
