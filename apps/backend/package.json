@@ -164,6 +164,12 @@
     },
     "socket.io-adapter": {
       "ws": "^8.21.0"
+    },
+    "@nestjs/swagger": {
+      "js-yaml": "5.4.1"
+    },
+    "express": {
+      "proxy-addr": "2.0.8"
     }
   },
   "jest": {

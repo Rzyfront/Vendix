@@ -81,6 +81,9 @@
         },
         "socket.io-adapter": {
             "ws": "^8.21.0"
+        },
+        "express": {
+            "proxy-addr": "2.0.8"
         }
     }
 }
