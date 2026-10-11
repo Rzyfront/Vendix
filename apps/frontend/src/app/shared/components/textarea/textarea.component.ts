@@ -30,26 +30,26 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
       @if (label()) {
-        <label
-          [for]="textareaId"
-          [class]="labelClasses"
-          class="label-with-tooltip"
-          >
-          <span>{{ label() }}</span>
-          @if (tooltipText()) {
-            <app-tooltip [content]="tooltipText()" position="top">
-              <span class="help-icon">
-                <app-icon name="help-circle" [size]="14"></app-icon>
-              </span>
-            </app-tooltip>
-          }
-          @if (required()) {
-            <span class="text-[var(--color-text-primary)] ml-1"
-              >*</span
-              >
+        <div class="label-with-tooltip">
+          <label [for]="textareaId" [class]="labelClasses">
+            <span>{{ label() }}</span>
+            @if (required()) {
+              <span class="text-[var(--color-text-primary)] ml-1" aria-hidden="true">*</span>
             }
           </label>
-        }
+          @if (tooltipText()) {
+            <app-tooltip [content]="tooltipText()" position="top">
+              <button
+                type="button"
+                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
+                [attr.aria-label]="'Ayuda para ' + label()"
+              >
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </button>
+            </app-tooltip>
+          }
+        </div>
+      }
     
         <!-- Textarea wrapper -->
         <div class="relative">
@@ -106,6 +106,10 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
       display: flex;
       align-items: center;
       gap: 0.25rem;
+    }
+
+    .label-with-tooltip label {
+      margin-bottom: 0;
     }
 
     .help-icon {

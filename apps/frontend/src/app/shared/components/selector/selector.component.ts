@@ -54,7 +54,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           <label [class]="labelClasses + ' !mb-0'" [for]="id()">
             <span>{{ label() }}</span>
             @if (required()) {
-              <span class="text-[var(--color-text-primary)] ml-0.5">*</span>
+              <span class="text-[var(--color-text-primary)] ml-0.5" aria-hidden="true">*</span>
             }
           </label>
           @if (tooltipText()) {

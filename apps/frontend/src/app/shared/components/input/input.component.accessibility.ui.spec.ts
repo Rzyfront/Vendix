@@ -12,6 +12,7 @@ describe('InputComponent accessible help and password controls source guards', (
     expect(source).toContain('focus-visible:outline-[var(--color-text-primary)]');
     expect(source).toContain('</label>\n          @if (tooltipText()) {');
     expect(source).toContain('[attr.aria-required]="required() ? \'true\' : null"');
+    expect(source).toContain('aria-hidden="true">*</span>');
     expect(source).toContain('focus-visible:outline-offset-2');
     expect(source).toContain("'focus-visible:outline-[var(--color-text-primary)]'");
     expect(source).toContain('mt-2 text-sm text-[var(--color-text-primary)]');

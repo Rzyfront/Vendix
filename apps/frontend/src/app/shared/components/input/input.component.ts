@@ -57,7 +57,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
           <label [for]="inputId()" [class]="labelClasses">
             <span>{{ label() }}</span>
             @if (required()) {
-              <span class="text-[var(--color-text-primary)] ml-1">*</span>
+              <span class="text-[var(--color-text-primary)] ml-1" aria-hidden="true">*</span>
             }
           </label>
           @if (tooltipText()) {
