@@ -286,9 +286,8 @@ interface PersistedTestResult {
       <app-steps-line
         [steps]="stepsConfig"
         [currentStep]="activeStep()"
-        [clickable]="!configurationTypeLocked()"
+        [clickable]="false"
         [size]="configurationTypeLocked() ? 'sm' : 'md'"
-        (stepClicked)="activeStep.set($event)"
       ></app-steps-line>
 
       <!-- ═══ Step 1: Credentials ═══ -->
@@ -432,14 +431,14 @@ interface PersistedTestResult {
             ></app-input>
           </form>
           <div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">
-            <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" (clicked)="cancelled.emit()">
+            <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="cancelled.emit()">
               Cancelar
             </app-button>
             <div class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
               <!-- Already-saved credentials must not force a pointless PATCH just
                    to move forward. -->
               @if (selectedConfig()) {
-                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(1)">
+                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" [disabled]="mutating()" (clicked)="activeStep.set(1)">
                   Continuar sin cambios
                   <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                 </app-button>
@@ -556,7 +555,7 @@ interface PersistedTestResult {
                 ></app-input>
               </form>
               <div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">
-                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(0)">
+                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(0)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
@@ -564,7 +563,7 @@ interface PersistedTestResult {
                   <!-- A stored certificate is enough to keep going: forcing a
                        re-upload turned this step into a dead end. -->
                   @if (hasCertificate() && !selectedFile()) {
-                    <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(2)">
+                    <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" [disabled]="mutating()" (clicked)="activeStep.set(2)">
                       Continuar
                       <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                     </app-button>
@@ -622,6 +621,7 @@ interface PersistedTestResult {
                 <button
                   type="button"
                   (click)="setEnvironment('test')"
+                  [disabled]="mutating()"
                   [attr.aria-pressed]="selectedEnvironment() === 'test'"
                   class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
                   [ngClass]="{
@@ -649,7 +649,7 @@ interface PersistedTestResult {
                 <button
                   type="button"
                   (click)="setEnvironment('production')"
-                  [disabled]="!testSetPassed()"
+                  [disabled]="!testSetPassed() || mutating()"
                   [attr.aria-pressed]="selectedEnvironment() === 'production'"
                   class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
                   [ngClass]="{
@@ -727,7 +727,14 @@ interface PersistedTestResult {
                     </div>
                   }
 
-                  @if (readiness()) {
+                  @if (readinessError()) {
+                    <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
+                      <span>{{ readinessError() }}</span>
+                      <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
+                    </div>
+                  } @else if (loadingReadiness()) {
+                    <p role="status" class="text-sm text-text-secondary">Consultando los requisitos de producción…</p>
+                  } @else if (readiness()) {
                     <!--
                       Tres grupos, no una lista plana: lo que el comercio puede
                       hacer hoy, lo que solo la DIAN puede resolver, y las alertas
@@ -805,10 +812,11 @@ interface PersistedTestResult {
                         }
                       </div>
                     }
-                  } @else if (!loadingReadiness()) {
-                    <p class="text-xs text-text-secondary">
-                      Verifica los requisitos para saber si ya puedes emitir facturas reales.
-                    </p>
+                  } @else {
+                    <div role="status" class="flex flex-wrap items-center justify-between gap-2 text-xs text-text-secondary">
+                      <span>No hay un informe de preparación disponible.</span>
+                      <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Consultar requisitos</app-button>
+                    </div>
                   }
 
                   @if (!alreadyInProduction()) {
@@ -817,7 +825,7 @@ interface PersistedTestResult {
                         variant="primary"
                         size="sm"
                         (clicked)="promoteToProduction()"
-                        [disabled]="promoting() || readiness()?.ready !== true"
+                        [disabled]="mutating() || readiness()?.ready !== true"
                         [loading]="promoting()"
                       >
                         <app-icon slot="icon" name="shield-check" [size]="14"></app-icon>
@@ -829,14 +837,14 @@ interface PersistedTestResult {
               }
 
               <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(1)">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(1)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
                 <app-button customClasses="min-h-11"
                   variant="primary"
                   (clicked)="saveEnvironment()"
-                  [disabled]="savingEnvironment()"
+                  [disabled]="mutating()"
                   [loading]="savingEnvironment()"
                 >
                   {{ selectedEnvironment() === selectedConfig()!.environment ? 'Continuar' : 'Guardar Ambiente' }}
@@ -877,20 +885,34 @@ interface PersistedTestResult {
           @if (selectedConfig()) {
             <div class="space-y-4">
               <div class="space-y-3 mb-4">
-                <app-selector size="lg"
-                  label="Resolucion para el set de pruebas"
-                  [options]="resolutionOptions()"
-                  [ngModel]="selectedResolutionId()"
-                  (ngModelChange)="selectedResolutionId.set($event)"
-                  placeholder="Seleccione una resolucion"
-                  tooltipText="Elige la resolución de habilitación asociada al set que vas a enviar."
-                ></app-selector>
+                @if (resolutionsError()) {
+                  <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
+                    <span>{{ resolutionsError() }}</span>
+                    <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadResolutions()">Reintentar</app-button>
+                  </div>
+                } @else if (resolutionsLoading()) {
+                  <p role="status" class="text-sm text-text-secondary">Consultando resoluciones de facturación…</p>
+                } @else if (!resolutions().length) {
+                  <div role="status" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 text-sm text-text-secondary">
+                    <span>No hay resoluciones disponibles para ejecutar el set de pruebas.</span>
+                    <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadResolutions()">Consultar resoluciones</app-button>
+                  </div>
+                } @else {
+                  <app-selector size="lg"
+                    label="Resolucion para el set de pruebas"
+                    [options]="resolutionOptions()"
+                    [ngModel]="selectedResolutionId()"
+                    (ngModelChange)="selectedResolutionId.set($event)"
+                    placeholder="Seleccione una resolucion"
+                    tooltipText="Elige la resolución de habilitación asociada al set que vas a enviar."
+                  ></app-selector>
+                }
               </div>
               <div class="flex flex-wrap items-center gap-3">
                 <app-button customClasses="min-h-11"
                   variant="outline"
                   (clicked)="testConnection()"
-                  [disabled]="testingConnection()"
+                  [disabled]="mutating()"
                   [loading]="testingConnection()"
                 >
                   <app-icon slot="icon" name="wifi" [size]="14"></app-icon>
@@ -899,7 +921,7 @@ interface PersistedTestResult {
                 <app-button customClasses="min-h-11"
                   variant="primary"
                   (clicked)="runTestSet()"
-                  [disabled]="runningTestSet() || !selectedResolutionId() || testSetState() === 'pending' || testSetState() === 'passed'"
+                  [disabled]="mutating() || !selectedResolutionId() || resolutionsLoading() || !!resolutionsError() || !resolutions().length || testSetState() === 'pending' || testSetState() === 'passed'"
                   [loading]="runningTestSet()"
                 >
                   <app-icon slot="icon" name="play" [size]="14"></app-icon>
@@ -911,7 +933,7 @@ interface PersistedTestResult {
                   <app-button customClasses="min-h-11"
                     variant="outline"
                     (clicked)="checkTestSetStatus(false)"
-                    [disabled]="checkingStatus()"
+                    [disabled]="mutating()"
                     [loading]="checkingStatus()"
                   >
                     <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
@@ -1280,11 +1302,11 @@ interface PersistedTestResult {
               }
 
               <div class="flex items-center justify-between pt-4 border-t border-border">
-                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(2)">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(2)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
-                <app-button customClasses="min-h-11" variant="primary" size="sm" (clicked)="activeStep.set(4)">
+                <app-button customClasses="min-h-11" variant="primary" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(4)">
                   Registros
                   <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                 </app-button>
@@ -1350,7 +1372,7 @@ interface PersistedTestResult {
             (pageChange)="onAuditPageChange($event)"
           ></app-pagination>
           <div class="flex items-center justify-end pt-4 border-t border-border">
-            <app-button customClasses="min-h-11" variant="primary" size="sm" (clicked)="finish()">
+            <app-button customClasses="min-h-11" variant="primary" size="sm" [disabled]="mutating()" (clicked)="finish()">
               <app-icon slot="icon" name="check" [size]="14"></app-icon>
               Finalizar
             </app-button>
@@ -1409,6 +1431,8 @@ export class DianConfigWizardComponent {
   readonly runningTestSet = signal(false);
   readonly testResult = signal<DianTestResult | null>(null);
   readonly resolutions = signal<InvoiceResolution[]>([]);
+  readonly resolutionsLoading = signal(false);
+  readonly resolutionsError = signal<string | null>(null);
   readonly resolutionOptions = computed<SelectorOption[]>(() =>
     this.resolutions().map((resolution) => ({
       value: resolution.id,
@@ -1438,7 +1462,13 @@ export class DianConfigWizardComponent {
   // Step 3 (production transition)
   readonly readiness = signal<DianProductionReadiness | null>(null);
   readonly loadingReadiness = signal(false);
+  readonly readinessError = signal<string | null>(null);
   readonly promoting = signal(false);
+  readonly mutating = computed(() =>
+    this.savingCredentials() || this.uploadingCertificate() || this.savingEnvironment() ||
+    this.testingConnection() || this.runningTestSet() || this.checkingStatus() ||
+    this.diagnosing() || this.abandoning() || this.promoting(),
+  );
 
   // Step 5
   readonly auditLogs = signal<DianAuditLog[]>([]);
@@ -1936,6 +1966,10 @@ export class DianConfigWizardComponent {
     this.pollAttempts.set(0);
     this.pollExhausted.set(false);
     this.readiness.set(null);
+    this.readinessError.set(null);
+    this.loadingReadiness.set(false);
+    this.resolutionsError.set(null);
+    this.resolutionsLoading.set(false);
   }
 
   private patchCredentialsForm(cfg: DianConfig): void {
@@ -2068,6 +2102,7 @@ export class DianConfigWizardComponent {
 
   // ── Step 3: Environment + production transition ───────────
   setEnvironment(env: 'test' | 'production'): void {
+    if (this.mutating()) return;
     // Production is not a free choice: DIAN only authorizes real emission after
     // the test set passes. Selecting it earlier would produce a 412 on save, so
     // the option is refused up front with the reason.
@@ -2082,6 +2117,7 @@ export class DianConfigWizardComponent {
   }
 
   saveEnvironment(): void {
+    if (this.mutating()) return;
     const cfg = this.selectedConfig();
     if (!cfg) return;
 
@@ -2115,16 +2151,19 @@ export class DianConfigWizardComponent {
     const cfg = this.selectedConfig();
     if (!cfg) return;
     this.loadingReadiness.set(true);
+    this.readinessError.set(null);
     this.invoicingService
       .getDianProductionReadiness(cfg.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           this.readiness.set(response?.data ?? response ?? null);
+          this.readinessError.set(null);
           this.loadingReadiness.set(false);
         },
         error: () => {
           this.readiness.set(null);
+          this.readinessError.set('No se pudieron consultar los requisitos de producción.');
           this.loadingReadiness.set(false);
         },
       });
@@ -2166,16 +2205,24 @@ export class DianConfigWizardComponent {
   }
 
   // ── Step 4: Test connection ───────────────────────────────
-  private loadResolutions(): void {
+  loadResolutions(): void {
+    this.resolutionsLoading.set(true);
+    this.resolutionsError.set(null);
     this.invoicingService.getResolutions()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const list: InvoiceResolution[] = response?.data || [];
           this.resolutions.set(list);
+          this.resolutionsError.set(null);
+          this.resolutionsLoading.set(false);
           this.reconcileSelectedResolution();
         },
-        error: () => this.resolutions.set([]),
+        error: () => {
+          this.resolutions.set([]);
+          this.resolutionsError.set('No se pudieron consultar las resoluciones de facturación.');
+          this.resolutionsLoading.set(false);
+        },
       });
   }
 
@@ -2806,6 +2853,7 @@ export class DianConfigWizardComponent {
   }
 
   finish(): void {
+    if (this.mutating()) return;
     const cfg = this.selectedConfig();
     if (cfg) this.saved.emit(cfg);
     this.cancelled.emit();

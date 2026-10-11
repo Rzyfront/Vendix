@@ -117,6 +117,31 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(source).toContain('this.auditLogFilters.set({ page: 1, limit: 20 })');
   });
 
+  it('blocks modal exit and wizard navigation only during mutations', () => {
+    expect(source).toContain('readonly mutating = computed(() =>');
+    for (const mutation of [
+      'savingCredentials', 'uploadingCertificate', 'savingEnvironment', 'testingConnection',
+      'runningTestSet', 'checkingStatus', 'diagnosing', 'abandoning', 'promoting',
+    ]) {
+      expect(source).toContain(`this.${mutation}()`);
+    }
+    expect(source).toContain('[clickable]="false"');
+    expect(source).not.toContain('(stepClicked)=');
+    expect(source).toContain('[disabled]="mutating()" (clicked)="cancelled.emit()"');
+    expect(source).toMatch(/finish\(\): void \{\s*if \(this\.mutating\(\)\) return;/);
+  });
+
+  it('shows explicit loading, error and empty states for readiness and resolutions', () => {
+    expect(source).toContain('readonly readinessError = signal<string | null>(null)');
+    expect(source).toContain('readonly resolutionsLoading = signal(false)');
+    expect(source).toContain('readonly resolutionsError = signal<string | null>(null)');
+    expect(source).toContain('Consultando los requisitos de producción');
+    expect(source).toContain('Consultando resoluciones de facturación');
+    expect(source).toContain('No hay resoluciones disponibles para ejecutar el set de pruebas.');
+    expect(source).toContain('(clicked)="loadResolutions()"');
+    expect(source).toContain('No se pudieron consultar las resoluciones de facturación.');
+  });
+
   it('uses 16px shared form controls and a compact stepper when the axis is locked', () => {
     expect(source.match(/<app-(?:input|selector) size="lg"/g)).toHaveLength(10);
     expect(source).toContain('[size]="configurationTypeLocked() ? \'sm\' : \'md\'"');

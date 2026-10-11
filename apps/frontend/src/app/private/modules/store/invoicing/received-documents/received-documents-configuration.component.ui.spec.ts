@@ -34,6 +34,15 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).toContain('this.readinessRequest?.unsubscribe()');
   });
 
+  it('blocks reception-modal closure only for child mutations or buyer-event submission', () => {
+    expect(wizard).toContain('readonly busy = computed(() =>');
+    expect(wizard).toContain('!!this.dianWizard()?.mutating()');
+    expect(wizard).toContain('!!this.eventActivation()?.submitLoading()');
+    expect(wizard).not.toContain('wizard.polling()');
+    expect(wizard).not.toContain('wizard.loadingReadiness()');
+    expect(wizard).not.toContain('wizard.loadingAuditLogs()');
+  });
+
   it('reuses only current DIAN own-invoicing state and manual wizard, without secrets or false readiness', () => {
     expect(wizard).toContain("axis.configuration_type === 'invoicing'");
     expect(wizard).toContain('<vendix-dian-config-wizard');

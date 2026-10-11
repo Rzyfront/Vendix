@@ -238,16 +238,9 @@ export class ReceivedDocumentsConfigurationWizardComponent {
   readonly softwareIdControl = new FormControl('', { nonNullable: true });
   private readonly eventActivation = viewChild(ReceivedBuyerEventActivationComponent);
   private readonly dianWizard = viewChild(DianConfigWizardComponent);
-  readonly busy = computed(() => {
-    const wizard = this.dianWizard();
-    const wizardSaving = wizard && [
-      wizard.savingCredentials(), wizard.uploadingCertificate(), wizard.savingEnvironment(),
-      wizard.testingConnection(), wizard.runningTestSet(), wizard.loadingTestSet(),
-      wizard.checkingStatus(), wizard.polling(), wizard.diagnosing(), wizard.abandoning(),
-      wizard.loadingReadiness(), wizard.promoting(), wizard.loadingAuditLogs(),
-    ].some(Boolean);
-    return !!wizardSaving || !!this.eventActivation()?.submitLoading();
-  });
+  readonly busy = computed(() =>
+    !!this.dianWizard()?.mutating() || !!this.eventActivation()?.submitLoading(),
+  );
   readonly canCloseModal = (): boolean => !this.busy();
 
   private readinessRequest?: Subscription;

@@ -28,6 +28,16 @@ describe('DIAN configuration reception entry UI source guards', () => {
     expect(component).toContain('iconBgColor="bg-warning/10"');
   });
 
+  it('guards wizard modal closure during mutations and masks loading stats', () => {
+    expect(component).toContain('private readonly dianWizard = viewChild(DianConfigWizardComponent)');
+    expect(component).toContain('readonly canCloseWizard = (): boolean => !this.dianWizard()?.mutating()');
+    expect(component).toContain('[canClose]="canCloseWizard"');
+    expect(component).toContain('slot="footer"');
+    expect(component).toContain('[disabled]="!canCloseWizard()"');
+    expect(component).toContain('if (!this.canCloseWizard()) return;');
+    expect(component.match(/\[loading\]="loading\(\)"/g)).toHaveLength(4);
+  });
+
   it('preserves scope/read-only honesty and hides reception for superadmin', () => {
     expect(component).toMatch(/@if\s*\(!isSuperAdmin\(\)\s*&&/i);
     expect(component).toContain("this.auth.hasPermission('invoicing:received:read')");

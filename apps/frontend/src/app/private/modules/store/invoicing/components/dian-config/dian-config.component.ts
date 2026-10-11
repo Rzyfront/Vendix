@@ -5,6 +5,7 @@ import {
   inject,
   input,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -90,6 +91,7 @@ interface AxisStats {
           <app-stats
             title="Habilitaciones"
             [value]="s.total"
+            [loading]="loading()"
             smallText="Documentos que la DIAN habilita por separado"
             iconName="shield"
             iconBgColor="bg-primary/10"
@@ -99,6 +101,7 @@ interface AxisStats {
           <app-stats
             title="Habilitadas"
             [value]="s.enabled"
+            [loading]="loading()"
             smallText="Aprobadas por la DIAN"
             iconName="check-circle"
             iconBgColor="bg-success/10"
@@ -108,6 +111,7 @@ interface AxisStats {
           <app-stats
             title="En producción"
             [value]="s.production"
+            [loading]="loading()"
             smallText="Emitiendo documentos reales"
             iconName="globe"
             iconBgColor="bg-info/10"
@@ -117,6 +121,7 @@ interface AxisStats {
           <app-stats
             title="Sin configurar"
             [value]="s.notStarted"
+            [loading]="loading()"
             smallText="Todavía no emiten electrónicamente"
             iconName="alert-triangle"
             iconBgColor="bg-warning/10"
@@ -222,6 +227,7 @@ interface AxisStats {
         size="lg"
         [dialog]="true"
         [closeOnBackdrop]="false"
+        [canClose]="canCloseWizard"
         (cancel)="onWizardCancelled()"
       >
         @if (isWizardOpen()) {
@@ -234,6 +240,11 @@ interface AxisStats {
             (cancelled)="onWizardCancelled()"
           ></vendix-dian-config-wizard>
         }
+        <div slot="footer" class="flex justify-end">
+          <app-button customClasses="min-h-11" variant="outline" [disabled]="!canCloseWizard()" (clicked)="onWizardCancelled()">
+            Cerrar
+          </app-button>
+        </div>
       </app-modal>
     </div>
   `,
@@ -277,6 +288,8 @@ export class DianConfigComponent {
   readonly selectedConfig = signal<DianConfig | null>(null);
   readonly wizardConfigurationType = signal<DianConfigurationType | null>(null);
   readonly initialStep = signal(0);
+  private readonly dianWizard = viewChild(DianConfigWizardComponent);
+  readonly canCloseWizard = (): boolean => !this.dianWizard()?.mutating();
 
   /**
    * ¿La ruta de esta pantalla tiene detalle por eje?
@@ -448,6 +461,7 @@ export class DianConfigComponent {
   }
 
   onWizardCancelled(): void {
+    if (!this.canCloseWizard()) return;
     this.isWizardOpen.set(false);
     this.selectedConfig.set(null);
     this.wizardConfigurationType.set(null);
