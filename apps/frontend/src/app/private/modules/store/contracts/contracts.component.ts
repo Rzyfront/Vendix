@@ -38,12 +38,12 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
     InputsearchComponent,
   ],
   template: `
-    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_.inputsearch-wrapper]:!min-h-11">
+    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_select]:!min-h-11 [&_.inputsearch-wrapper]:!min-h-11">
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total de contratos"
           [value]="totalItems()"
-          smallText="Total global"
+          smallText="Total de resultados"
           iconName="file-text"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
@@ -183,8 +183,9 @@ export class ContractsComponent {
   readonly search = signal('');
   readonly statusFilter = signal('');
   readonly filterValues = signal<FilterValues>({ status: null });
-  readonly page = signal(1);
-  readonly limit = signal(10);
+  readonly filters = signal({ page: 1, limit: 10 });
+  readonly page = computed(() => this.filters().page);
+  readonly limit = computed(() => this.filters().limit);
   readonly totalItems = signal(0);
   readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.limit()));
 
@@ -276,7 +277,7 @@ export class ContractsComponent {
       }
       this.contracts.set(result.data ?? []);
       this.totalItems.set(result.pagination?.total ?? 0);
-      this.page.set(result.pagination?.page ?? this.page());
+      this.filters.update((filters) => ({ ...filters, page: result.pagination?.page ?? filters.page }));
     });
     this.reload();
   }
@@ -287,7 +288,7 @@ export class ContractsComponent {
 
   onSearch(term: string): void {
     this.search.set(term ?? '');
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.reload();
   }
 
@@ -295,7 +296,7 @@ export class ContractsComponent {
     const status = (event.target as HTMLSelectElement).value;
     this.statusFilter.set(status);
     this.filterValues.set({ status: status || null });
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.reload();
   }
 
@@ -303,7 +304,7 @@ export class ContractsComponent {
     const status = typeof values['status'] === 'string' ? values['status'] : '';
     this.statusFilter.set(status);
     this.filterValues.set({ status: status || null });
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.reload();
   }
 
@@ -311,7 +312,7 @@ export class ContractsComponent {
     this.search.set('');
     this.statusFilter.set('');
     this.filterValues.set({ status: null });
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.reload();
   }
 
@@ -328,7 +329,7 @@ export class ContractsComponent {
   }
 
   onPageChange(page: number): void {
-    this.page.set(page);
+    this.filters.update((filters) => ({ ...filters, page }));
     this.reload();
   }
 

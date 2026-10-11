@@ -39,7 +39,7 @@ describe('ContractsComponent — listado remoto', () => {
     fixture.detectChanges();
   });
 
-  it('consulta página 1 del servidor, conserva total global y no deriva total del slice', () => {
+  it('consulta página 1 del servidor, conserva total remoto y no deriva total del slice', () => {
     service.getContracts.and.returnValue(of(page([
       { id: 1, contract_number: 'CT-1', status: 'active', grand_total: null },
     ], 51)));
@@ -48,7 +48,7 @@ describe('ContractsComponent — listado remoto', () => {
     expect(service.getContracts).toHaveBeenCalledWith({ page: 1, limit: 10 });
     expect(fixture.componentInstance.totalItems()).toBe(51);
     expect(fixture.nativeElement.textContent).toContain('En esta página');
-    expect(fixture.nativeElement.textContent).toContain('Total global');
+    expect(fixture.nativeElement.textContent).toContain('Total de resultados');
     expect(fixture.nativeElement.querySelector('app-responsive-data-view')).toBeTruthy();
     service.getContracts.and.returnValue(of(page([
       { id: 51, contract_number: 'CT-51', status: 'active', grand_total: 100 },
@@ -56,6 +56,10 @@ describe('ContractsComponent — listado remoto', () => {
     fixture.componentInstance.onPageChange(6);
     fixture.detectChanges();
     expect(service.getContracts).toHaveBeenCalledWith({ page: 6, limit: 10 });
+    expect(fixture.componentInstance.filters()).toEqual({ page: 6, limit: 10 });
+    expect(fixture.componentInstance.page()).toBe(6);
+    expect(fixture.componentInstance.limit()).toBe(10);
+    expect(fixture.componentInstance.totalItems()).toBe(51);
     expect(fixture.componentInstance.contracts()[0].contract_number).toBe('CT-51');
   });
 
@@ -172,7 +176,7 @@ describe('ContractsComponent — listado remoto', () => {
   });
 
   it('resetea a página 1 al filtrar desde OptionsDropdown y sincroniza clear con búsqueda', () => {
-    fixture.componentInstance.page.set(4);
+    fixture.componentInstance.filters.update((filters) => ({ ...filters, page: 4 }));
     service.getContracts.and.returnValue(of(page([])));
     fixture.componentInstance.onSearch('obra');
     fixture.componentInstance.onFilterChange({ status: 'active' });
@@ -182,5 +186,8 @@ describe('ContractsComponent — listado remoto', () => {
     expect(fixture.componentInstance.statusFilter()).toBe('');
     expect(fixture.componentInstance.filterValues()).toEqual({ status: null });
     expect(service.getContracts).toHaveBeenCalledWith({ page: 1, limit: 10 });
+    expect(fixture.componentInstance.filters()).toEqual({ page: 1, limit: 10 });
+    expect(fixture.componentInstance.page()).toBe(1);
+    expect(fixture.componentInstance.limit()).toBe(10);
   });
 });
