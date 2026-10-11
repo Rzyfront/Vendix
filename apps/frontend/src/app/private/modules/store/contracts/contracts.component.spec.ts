@@ -48,6 +48,8 @@ describe('ContractsComponent — listado remoto', () => {
     expect(service.getContracts).toHaveBeenCalledWith({ page: 1, limit: 10 });
     expect(fixture.componentInstance.totalItems()).toBe(51);
     expect(fixture.nativeElement.textContent).toContain('En esta página');
+    expect(fixture.nativeElement.textContent).toContain('Total global');
+    expect(fixture.nativeElement.querySelector('app-responsive-data-view')).toBeTruthy();
     service.getContracts.and.returnValue(of(page([
       { id: 51, contract_number: 'CT-51', status: 'active', grand_total: 100 },
     ], 51, 6)));
@@ -97,14 +99,25 @@ describe('ContractsComponent — listado remoto', () => {
     expect(fixture.nativeElement.textContent).toContain('Cotizar contrato');
   });
 
-  it('ofrece CTA sólo a construction con permisos requeridos (o superadmin) y navega al modo contrato', async () => {
+  it('renderiza el dropdown estándar y ofrece Cotizar contrato sólo con industria y permisos vigentes', async () => {
+    service.getContracts.and.returnValue(of(page([
+      { id: 1, contract_number: 'CT-1', status: 'active', grand_total: 100 },
+    ])));
+    fixture.componentInstance.reload();
     fixture.detectChanges();
-    const button = Array.from(fixture.nativeElement.querySelectorAll('button'))
+    expect(fixture.nativeElement.querySelectorAll('app-options-dropdown').length).toBe(1);
+
+    const actionsTrigger = fixture.nativeElement.querySelector('button[aria-label="Acciones"]') as HTMLButtonElement;
+    expect(actionsTrigger).toBeTruthy();
+    actionsTrigger.click();
+    fixture.detectChanges();
+    const action = Array.from(fixture.nativeElement.querySelectorAll('button'))
       .find((node: any) => node.textContent.includes('Cotizar contrato')) as HTMLButtonElement;
-    expect(button).toBeTruthy();
+    expect(action).toBeTruthy();
     const router = TestBed.inject(Router);
     const navigateSpy = spyOn(router, 'navigate').and.returnValue(Promise.resolve(true));
-    fixture.componentInstance.startContractQuotation();
+    action.click();
+    fixture.detectChanges();
     expect(navigateSpy).toHaveBeenCalledWith(['/admin/orders/quotations'], { queryParams: { destination: 'contract' } });
 
     authStub.userPermissions.set([]);
@@ -113,16 +126,22 @@ describe('ContractsComponent — listado remoto', () => {
     expect(fixture.nativeElement.textContent).not.toContain('Cotizar contrato');
     authStub.userRoles.set(['super_admin']);
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Cotizar contrato');
+    expect(fixture.componentInstance.dropdownActions().length).toBe(1);
     authStub.storeIndustries.set([]);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).not.toContain('Cotizar contrato');
   });
 
-  it('resetea a página 1 al cambiar un filtro remoto', () => {
+  it('resetea a página 1 al filtrar desde OptionsDropdown y sincroniza clear con búsqueda', () => {
     fixture.componentInstance.page.set(4);
     service.getContracts.and.returnValue(of(page([])));
-    fixture.componentInstance.onStatusChange({ target: { value: 'active' } } as any);
-    expect(service.getContracts).toHaveBeenCalledWith({ page: 1, limit: 10, status: 'active' });
+    fixture.componentInstance.onSearch('obra');
+    fixture.componentInstance.onFilterChange({ status: 'active' });
+    expect(service.getContracts).toHaveBeenCalledWith({ page: 1, limit: 10, search: 'obra', status: 'active' });
+    fixture.componentInstance.clearFilters();
+    expect(fixture.componentInstance.search()).toBe('');
+    expect(fixture.componentInstance.statusFilter()).toBe('');
+    expect(fixture.componentInstance.filterValues()).toEqual({ status: null });
+    expect(service.getContracts).toHaveBeenCalledWith({ page: 1, limit: 10 });
   });
 });

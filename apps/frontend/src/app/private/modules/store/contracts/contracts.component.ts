@@ -1,47 +1,49 @@
 import { Component, DestroyRef, inject, signal, computed } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, catchError, of, switchMap } from 'rxjs';
 import { ContractsService, ContractApiError } from './services/contracts.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
-import {
-  Contract,
-  CONTRACT_STATUS_LABELS,
-} from './interfaces/contract.interface';
-import { CardComponent } from '../../../../shared/components/card/card.component';
-import { ButtonComponent } from '../../../../shared/components/button/button.component';
-import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import { SpinnerComponent } from '../../../../shared/components/spinner/spinner.component';
-import { EmptyStateComponent } from '../../../../shared/components/empty-state/empty-state.component';
+import { Contract, CONTRACT_STATUS_LABELS } from './interfaces/contract.interface';
 import { AlertBannerComponent } from '../../../../shared/components/alert-banner/alert-banner.component';
-import { StatsComponent } from '../../../../shared/components/stats/stats.component';
-import { PaginationComponent } from '../../../../shared/components/pagination/pagination.component';
+import { ButtonComponent } from '../../../../shared/components/button/button.component';
+import { CardComponent } from '../../../../shared/components/card/card.component';
+import { EmptyStateComponent } from '../../../../shared/components/empty-state/empty-state.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
-import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
+import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
+import { PaginationComponent } from '../../../../shared/components/pagination/pagination.component';
+import { ResponsiveDataViewComponent } from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import { SpinnerComponent } from '../../../../shared/components/spinner/spinner.component';
+import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import type { ItemListCardConfig } from '../../../../shared/components/item-list/item-list.interfaces';
+import type { DropdownAction, FilterConfig, FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import type { TableAction, TableColumn } from '../../../../shared/components/table/table.component';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-contracts',
   standalone: true,
   imports: [
-    RouterLink,
+    FormsModule,
     CardComponent,
     ButtonComponent,
-    IconComponent,
-    SpinnerComponent,
+    OptionsDropdownComponent,
+    ResponsiveDataViewComponent,
     EmptyStateComponent,
     AlertBannerComponent,
+    SpinnerComponent,
     StatsComponent,
     PaginationComponent,
     InputsearchComponent,
-    CurrencyPipe,
   ],
   template: `
     <div class="w-full">
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
-          title="Contratos"
-          [value]="contracts().length"
-          smallText="En esta página"
+          title="Total de contratos"
+          [value]="totalItems()"
+          smallText="Total global"
           iconName="file-text"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
@@ -56,42 +58,55 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
           iconColor="text-emerald-500"
           [loading]="loading()"
         ></app-stats>
+        <app-stats
+          title="Borradores"
+          [value]="draftCount()"
+          smallText="En esta página"
+          iconName="file-text"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-500"
+          [loading]="loading()"
+        ></app-stats>
+        <app-stats
+          title="Facturados"
+          [value]="invoicedCount()"
+          smallText="En esta página"
+          iconName="receipt"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          [loading]="loading()"
+        ></app-stats>
       </div>
 
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+            <h2 class="text-[13px] font-bold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary">
               Contratos ({{ totalItems() }})
             </h2>
-            <div class="flex items-center gap-2 w-full md:w-auto">
+            <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
               <app-inputsearch
                 class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                placeholder="Buscar por número o notas..."
+                size="sm"
+                placeholder="Buscar contratos..."
+                ariaLabel="Buscar contratos por número, objeto o notas"
+                [ngModel]="search()"
                 (searchChange)="onSearch($event)"
               />
-              @if (canCreateContractQuotation()) {
-                <app-button variant="primary" size="sm" (clicked)="startContractQuotation()">
-                  Cotizar contrato
-                </app-button>
-              }
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [actions]="dropdownActions()"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues()"
+                [isLoading]="loading()"
+                triggerIcon="more-horizontal"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              />
             </div>
-            <label class="sr-only" for="contract-status-filter">Filtrar por estado</label>
-            <select
-              id="contract-status-filter"
-              class="w-full md:w-44 rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary"
-              [value]="statusFilter()"
-              (change)="onStatusChange($event)"
-            >
-              <option value="">Todos los estados</option>
-              <option value="draft">Borrador</option>
-              <option value="active">Vigente</option>
-              <option value="invoiced">Facturado</option>
-              <option value="cancelled">Cancelado</option>
-            </select>
           </div>
         </div>
 
@@ -124,35 +139,18 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
               (actionClick)="startContractQuotation()"
             ></app-empty-state>
           } @else {
-            <div class="flex flex-col gap-2">
-              @for (contract of contracts(); track contract.id) {
-                <a
-                  [routerLink]="['/admin/orders/contracts', contract.id]"
-                  class="p-3 sm:p-4 bg-[var(--color-surface)] rounded-xl border border-border hover:border-gray-300 transition-colors block"
-                  [attr.aria-label]="'Ver contrato ' + contract.contract_number"
-                >
-                  <div class="flex items-center gap-3">
-                    <div class="flex-1 min-w-0">
-                      <p class="text-sm sm:text-base font-semibold text-gray-900 truncate">
-                        {{ contract.contract_number }}
-                      </p>
-                      @if (contract.contract_object) {
-                        <p class="text-xs text-gray-500 truncate mt-0.5">{{ contract.contract_object }}</p>
-                      }
-                    </div>
-                    <span class="text-[11px] font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700 flex-shrink-0">
-                      {{ statusLabel(contract) }}
-                    </span>
-                    @if (contract.grand_total !== null && contract.grand_total !== undefined) {
-                      <span class="font-bold text-gray-900 text-sm sm:text-base font-mono flex-shrink-0">
-                        {{ contract.grand_total | currency }}
-                      </span>
-                    }
-                    <app-icon name="arrow-right" [size]="16" class="text-gray-300 flex-shrink-0"></app-icon>
-                  </div>
-                </a>
-              }
-            </div>
+            <app-responsive-data-view
+              [data]="contracts()"
+              [columns]="columns"
+              [actions]="rowActions"
+              [cardConfig]="cardConfig"
+              [loading]="loading()"
+              [sortable]="false"
+              rowLabelKey="contract_number"
+              emptyTitle="Sin contratos"
+              emptyDescription="Aún no hay contratos de obra. Se crean al aceptar una cotización con destino contrato."
+              (rowClick)="openContract($event)"
+            ></app-responsive-data-view>
           }
           <app-pagination
             [currentPage]="page()"
@@ -170,6 +168,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
 })
 export class ContractsComponent {
   private readonly contractsService = inject(ContractsService);
+  private readonly currencyService = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
   private readonly authFacade = inject(AuthFacade);
@@ -180,12 +179,15 @@ export class ContractsComponent {
   readonly loadError = signal<string | null>(null);
   readonly search = signal('');
   readonly statusFilter = signal('');
+  readonly filterValues = signal<FilterValues>({ status: null });
   readonly page = signal(1);
   readonly limit = signal(10);
   readonly totalItems = signal(0);
   readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.limit()));
 
   readonly activeCount = computed(() => this.contracts().filter((c) => c.status === 'active').length);
+  readonly draftCount = computed(() => this.contracts().filter((c) => c.status === 'draft').length);
+  readonly invoicedCount = computed(() => this.contracts().filter((c) => c.status === 'invoiced').length);
   readonly hasActiveFilters = computed(() => !!this.search().trim() || !!this.statusFilter());
   readonly canCreateContractQuotation = computed(() => {
     const permissions = this.authFacade.userPermissions();
@@ -194,6 +196,65 @@ export class ContractsComponent {
     return this.authFacade.storeIndustries().includes('construction') &&
       (isSuperAdmin || (permissions.includes('store:quotations:create') && permissions.includes('store:contracts:create')));
   });
+
+  readonly filterConfigs: FilterConfig[] = [{
+    key: 'status',
+    label: 'Estado',
+    type: 'select',
+    options: [
+      { value: '', label: 'Todos los estados' },
+      { value: 'draft', label: 'Borrador' },
+      { value: 'active', label: 'Vigente' },
+      { value: 'invoiced', label: 'Facturado' },
+      { value: 'cancelled', label: 'Cancelado' },
+    ],
+  }];
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => this.canCreateContractQuotation() ? [{
+    label: 'Cotizar contrato',
+    icon: 'file-text',
+    action: 'contract-quotation',
+    variant: 'primary',
+  }] : []);
+
+  readonly columns: TableColumn[] = [
+    { key: 'contract_number', label: 'Contrato', priority: 0 },
+    {
+      key: 'contract_object', label: 'Objeto', priority: 2, defaultValue: 'No configurado',
+      transform: (value: string | null | undefined) => value || 'No configurado',
+    },
+    {
+      key: 'status', label: 'Estado', priority: 1, badge: true,
+      badgeConfig: { type: 'status', size: 'sm' },
+      badgeTransform: (value: Contract['status']) => CONTRACT_STATUS_LABELS[value] || value,
+      transform: (value: Contract['status']) => CONTRACT_STATUS_LABELS[value] || value,
+    },
+    {
+      key: 'grand_total', label: 'Total congelado', align: 'right', priority: 1, defaultValue: 'No configurado',
+      transform: (value: number | null | undefined) => this.formatMoney(value),
+    },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'contract_number',
+    subtitleKey: 'contract_object',
+    badgeKey: 'status',
+    badgeConfig: { type: 'status' as const, size: 'sm' as const },
+    badgeTransform: (value: Contract['status']) => CONTRACT_STATUS_LABELS[value] || value,
+    detailKeys: [
+      { key: 'quotation_id', label: 'Cotización origen', transform: (value: number | null | undefined) => value == null ? 'No configurado' : `#${value}` },
+    ],
+    footerKey: 'grand_total',
+    footerLabel: 'Total congelado',
+    footerTransform: (value: number | null | undefined) => this.formatMoney(value),
+  };
+
+  readonly rowActions: TableAction[] = [{
+    label: 'Ver contrato',
+    icon: 'eye',
+    variant: 'primary',
+    action: (contract: Contract) => this.openContract(contract),
+  }];
 
   constructor() {
     this.queryRequests.pipe(
@@ -227,9 +288,39 @@ export class ContractsComponent {
   }
 
   onStatusChange(event: Event): void {
-    this.statusFilter.set((event.target as HTMLSelectElement).value);
+    const status = (event.target as HTMLSelectElement).value;
+    this.statusFilter.set(status);
+    this.filterValues.set({ status: status || null });
     this.page.set(1);
     this.reload();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    const status = typeof values['status'] === 'string' ? values['status'] : '';
+    this.statusFilter.set(status);
+    this.filterValues.set({ status: status || null });
+    this.page.set(1);
+    this.reload();
+  }
+
+  clearFilters(): void {
+    this.search.set('');
+    this.statusFilter.set('');
+    this.filterValues.set({ status: null });
+    this.page.set(1);
+    this.reload();
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'contract-quotation') this.startContractQuotation();
+  }
+
+  openContract(contract: Contract): void {
+    void this.router.navigate(['/admin/orders/contracts', contract.id]);
+  }
+
+  formatMoney(value: number | null | undefined): string {
+    return value === null || value === undefined ? 'No configurado' : this.currencyService.format(value);
   }
 
   onPageChange(page: number): void {
