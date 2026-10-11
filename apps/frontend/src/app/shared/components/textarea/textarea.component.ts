@@ -44,7 +44,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
             </app-tooltip>
           }
           @if (required()) {
-            <span class="text-[var(--color-destructive)] ml-1"
+            <span class="text-[var(--color-text-primary)] ml-1"
               >*</span
               >
             }
@@ -62,6 +62,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
             [rows]="rows()"
             [class]="textareaClasses"
             [style]="customStyle()"
+            [attr.aria-required]="required() ? 'true' : null"
             [attr.aria-invalid]="!!getValidationError()"
             [attr.aria-describedby]="getValidationError() ? errorId : null"
             (input)="onInput($event)"
@@ -73,7 +74,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
         <!-- Helper text -->
         @if (helperText() && !getValidationError()) {
           <p
-            class="mt-2 text-sm text-[var(--color-text-secondary)]"
+            class="mt-2 text-sm text-[var(--color-text-primary)]"
             >
             {{ helperText() }}
           </p>
@@ -84,7 +85,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
           <p
             [id]="errorId"
             role="alert"
-            class="mt-2 text-sm text-[var(--color-destructive)]"
+            class="mt-2 text-sm text-[var(--color-text-primary)]"
             >
             {{ getValidationError() }}
           </p>
@@ -108,7 +109,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     }
 
     .help-icon {
-      color: var(--color-text-muted);
+      color: var(--color-text-primary);
       cursor: help;
       position: relative;
       display: inline-flex;
@@ -116,7 +117,15 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     }
 
     .help-icon:hover {
-      color: var(--color-primary);
+      color: var(--color-text-primary);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .help-icon,
+      textarea {
+        animation: none;
+        transition: none;
+      }
     }
   `],
 })
@@ -177,7 +186,7 @@ export class TextareaComponent implements ControlValueAccessor {
         'text-[11px]',
         'uppercase',
         'tracking-[0.05em]',
-        'text-[var(--color-text-muted)]',
+        'text-[var(--color-text-primary)]',
         this.customLabelClass(),
       ]
         .filter(Boolean)
@@ -202,7 +211,7 @@ export class TextareaComponent implements ControlValueAccessor {
       'transition-colors',
       'duration-200',
       'focus:outline-none',
-      'placeholder:text-text-muted',
+      'placeholder:text-[var(--color-text-primary)]',
     ];
 
     const control = this.control();

@@ -54,14 +54,14 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           <label [class]="labelClasses + ' !mb-0'" [for]="id()">
             <span>{{ label() }}</span>
             @if (required()) {
-              <span class="text-[var(--color-destructive)] ml-0.5">*</span>
+              <span class="text-[var(--color-text-primary)] ml-0.5">*</span>
             }
           </label>
           @if (tooltipText()) {
             <app-tooltip [content]="tooltipText()!" position="top">
               <button
                 type="button"
-                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
                 [attr.aria-label]="'Ayuda para ' + label()"
               >
                 <app-icon name="help-circle" [size]="14"></app-icon>
@@ -85,7 +85,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
               >
               <span
                 class="flex-1 truncate"
-                [style.color]="selectedValue() == null ? 'var(--color-text-secondary)' : 'var(--color-text-primary)'"
+                [style.color]="'var(--color-text-primary)'"
                 >
                 {{ selectedLabel() || placeholder() }}
               </span>
@@ -110,7 +110,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
                     [ngModel]="searchTerm()"
                     (ngModelChange)="onSearch($event)"
                     class="w-full px-3 py-1.5 text-sm border border-border rounded-lg
-                           hover:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-primary)]
+                           hover:border-[var(--color-primary)] focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-primary)] focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-primary)]
                            bg-[var(--color-surface)] text-[var(--color-text-primary)]"
                     placeholder="Buscar..."
                     />
@@ -157,7 +157,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
                         >{{ option.label }}</span>
                       @if (option.description) {
                         <span
-                          class="text-xs text-[var(--color-text-secondary)] truncate whitespace-nowrap overflow-hidden max-w-[40%] shrink-0"
+                          class="text-xs text-[var(--color-text-primary)] truncate whitespace-nowrap overflow-hidden max-w-[40%] shrink-0"
                           [title]="option.description"
                           >
                           {{ option.description }}
@@ -166,7 +166,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
                     </button>
                   }
                   @if (filteredOptions().length === 0) {
-                    <div class="px-3 py-4 text-center text-sm text-[var(--color-text-secondary)]">
+                    <div class="px-3 py-4 text-center text-sm text-[var(--color-text-primary)]">
                       No se encontraron opciones
                     </div>
                   }
@@ -181,13 +181,14 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
               [class]="selectClasses"
               [disabled]="isDisabled()"
               [required]="required()"
+              [attr.aria-required]="required() ? 'true' : null"
               [ngModel]="selectedValue()"
               (ngModelChange)="onModelChange($event)"
               (blur)="onBlur()"
               (focus)="onFocus()"
               >
               @if (placeholder()) {
-                <option [ngValue]="null" disabled selected class="text-text-muted">
+                <option [ngValue]="null" disabled selected class="text-text-primary">
                   {{ placeholder() }}
                 </option>
               }
@@ -210,7 +211,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
         @if (helpText() || errorText()) {
           <div class="mt-1 text-sm">
             @if (helpText() && !errorText()) {
-              <span class="text-[var(--color-text-secondary)]">
+              <span class="text-[var(--color-text-primary)]">
                 {{ helpText() }}
               </span>
             }
@@ -447,7 +448,7 @@ export class SelectorComponent implements ControlValueAccessor {
         'text-[11px]',
         'uppercase',
         'tracking-[0.05em]',
-        'text-[var(--color-text-muted)]',
+        'text-[var(--color-text-primary)]',
         this.isDisabled() ? 'opacity-50 cursor-not-allowed' : '',
       ]
         .filter(Boolean)
@@ -478,6 +479,10 @@ export class SelectorComponent implements ControlValueAccessor {
       'transition-colors',
       'duration-200',
       'focus:outline-none',
+      'focus-visible:outline',
+      'focus-visible:outline-2',
+      'focus-visible:outline-offset-2',
+      'focus-visible:outline-[var(--color-text-primary)]',
       'bg-[var(--color-surface,#fff)]',
       'text-[var(--color-text-primary)]',
     ];
@@ -545,7 +550,7 @@ export class SelectorComponent implements ControlValueAccessor {
   }
 
   get iconClasses(): string {
-    return ['absolute', 'right-3', 'top-1/2', '-translate-y-1/2', 'pointer-events-none', 'text-[var(--color-text-secondary)]'].filter(Boolean).join(' ');
+    return ['absolute', 'right-3', 'top-1/2', '-translate-y-1/2', 'pointer-events-none', 'text-[var(--color-text-primary)]'].filter(Boolean).join(' ');
   }
 
   get placeholderClasses(): string {
