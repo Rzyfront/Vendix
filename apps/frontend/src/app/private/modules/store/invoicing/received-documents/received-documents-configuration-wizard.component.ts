@@ -29,10 +29,9 @@ import {
 } from '../../../../../shared/components/index';
 import { DianConfigApiService } from '../../../../../shared/services/dian';
 import type { DianConfig } from '../interfaces/invoice.interface';
-import type { DianConfigurationType, FiscalReadinessAxis, FiscalReadinessResponse } from '../../../../../shared/components/dian';
+import type { FiscalReadinessAxis, FiscalReadinessResponse } from '../../../../../shared/components/dian';
 import { DIAN_ENABLEMENT_STATUS_LABELS } from '../../../../../shared/components/dian';
 import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
-import { DianConfigWizardComponent } from '../components/dian-config/dian-config-wizard.component';
 import { ReceivedBuyerEventActivationComponent } from './received-buyer-event-activation.component';
 import type { ReceivedDocumentsScope } from './received-documents.interface';
 
@@ -49,7 +48,6 @@ const RECEPTION_STEPS: StepsLineItem[] = [
   imports: [
     ButtonComponent,
     CardComponent,
-    DianConfigWizardComponent,
     IconComponent,
     InputComponent,
     ModalComponent,
@@ -74,8 +72,23 @@ const RECEPTION_STEPS: StepsLineItem[] = [
     >
       @if (!scopeEligible()) {
         <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary" role="note">{{ scopeBlockMessage() }}</p>
+      } @else if (!canRead()) {
+        <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary" role="note">No tienes permiso para consultar la configuración de recepción de documentos de esta tienda.</p>
       } @else {
-      <div class="space-y-4">
+        @if (readinessLoading()) {
+          <p class="text-sm text-text-secondary" role="status">Consultando el estado fiscal…</p>
+        } @else if (readinessError()) {
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary" role="alert">
+            <span>{{ readinessError() }}</span>
+            <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
+          </div>
+        } @else if (!receptionActive()) {
+          <div class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary" role="note">
+            <p>Primero activa la configuración DIAN y la facturación electrónica de tu tienda</p>
+            <a routerLink="/admin/invoicing/dian-config" (click)="close()" class="mt-3 inline-flex min-h-11 items-center justify-center rounded-lg px-3 font-medium underline focus:outline-none focus:ring-2 focus:ring-primary/50">Ir a configuración DIAN</a>
+          </div>
+        } @else {
+        <div class="space-y-4">
         <app-steps-line [steps]="steps" [currentStep]="step()" [clickable]="false" size="sm" />
         @if (step() === 0) {
           <section aria-labelledby="reception-dian-step" class="space-y-4">
@@ -86,28 +99,7 @@ const RECEPTION_STEPS: StepsLineItem[] = [
               </app-tooltip>
             </div>
 
-            @if (showDianWizard()) {
-              <div class="rounded-lg border border-border p-3">
-                <p class="mb-3 text-sm text-text-secondary">Completa o continúa la configuración de facturación electrónica con los datos entregados por la DIAN. Las credenciales se usan dentro del asistente existente y no se presentan como texto de estado.</p>
-                <vendix-dian-config-wizard
-                  [initialConfig]="selectedConfig()"
-                  [initialStep]="0"
-                  [configurationType]="invoicingType"
-                  [configurationTypeLocked]="true"
-                  [takenConfigurationTypes]="takenConfigurationTypes()"
-                  (saved)="onDianConfigSaved($event)"
-                  (cancelled)="onDianWizardCancelled()"
-                />
-              </div>
-            } @else if (readinessLoading()) {
-              <p class="text-sm text-text-secondary" role="status">Consultando el estado fiscal…</p>
-            } @else if (readinessError()) {
-              <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary" role="alert">
-                <span>{{ readinessError() }}</span>
-                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
-              </div>
-            } @else {
-              @if (invoicingAxis(); as axis) {
+            @if (invoicingAxis(); as axis) {
                 <div class="grid gap-3 sm:grid-cols-2">
                   <app-card [responsive]="true" [responsivePadding]="true">
                     <p class="text-xs font-medium uppercase tracking-wide text-text-secondary">Software DIAN</p>
@@ -138,15 +130,6 @@ const RECEPTION_STEPS: StepsLineItem[] = [
               <div class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary" role="note">
                 Guardar datos no significa que DIAN haya habilitado la recepción ni que Vendix descargue documentos desde DIAN. La importación disponible es manual desde la bandeja.
               </div>
-              @if (canConfigureDian()) {
-                <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="!canConfigureDian() || busy()" (clicked)="openDianWizard()">
-                  <span slot="icon"><app-icon name="settings" [size]="16" /></span>
-                  {{ invoicingAxis()?.config_id === null ? 'Configurar DIAN propia' : 'Revisar configuración DIAN' }}
-                </app-button>
-              } @else {
-                <p class="text-sm text-text-secondary" role="note">Modo consulta o sin permiso de escritura DIAN: no puedes cambiar la configuración desde esta sesión.</p>
-              }
-            }
           </section>
         } @else if (step() === 1) {
           <section aria-labelledby="reception-events-step" class="space-y-3">
@@ -183,19 +166,18 @@ const RECEPTION_STEPS: StepsLineItem[] = [
         }
       </div>
       }
+      }
 
       <div slot="footer" class="flex flex-col-reverse justify-between gap-2 sm:flex-row sm:items-center">
         <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="busy()" (clicked)="close()">Cerrar</app-button>
-        <div class="flex flex-col-reverse gap-2 sm:flex-row">
-          @if (showDianWizard()) {
-            <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="busy()" (clicked)="onDianWizardCancelled()">Volver al resumen DIAN</app-button>
-          } @else {
-            <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="!scopeEligible() || step() === 0 || busy()" (clicked)="previousStep()">Anterior</app-button>
+        @if (receptionActive()) {
+          <div class="flex flex-col-reverse gap-2 sm:flex-row">
+            <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="step() === 0 || busy()" (clicked)="previousStep()">Anterior</app-button>
             @if (step() < steps.length - 1) {
-              <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="!scopeEligible() || busy()" (clicked)="nextStep()">Continuar</app-button>
+              <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="busy()" (clicked)="nextStep()">Continuar</app-button>
             }
-          }
-        </div>
+          </div>
+        }
       </div>
     </app-modal>
   `,
@@ -211,24 +193,28 @@ export class ReceivedDocumentsConfigurationWizardComponent {
   readonly scopeReady = input(true);
   readonly readOnly = input(false);
   readonly steps = RECEPTION_STEPS;
-  readonly invoicingType: DianConfigurationType = 'invoicing';
   readonly step = signal(0);
   readonly readinessLoading = signal(false);
   readonly readinessError = signal<string | null>(null);
   readonly readiness = signal<FiscalReadinessResponse | null>(null);
   readonly selectedConfig = signal<DianConfig | null>(null);
-  readonly showDianWizard = signal(false);
   readonly isSuperAdmin = computed(() => {
     const roles = this.auth.userRoles();
     return roles.includes('super_admin') || roles.includes('SUPER_ADMIN');
   });
   readonly scopeEligible = computed(() => this.scope() === 'store' && this.scopeReady() && !this.isSuperAdmin());
   readonly canRead = computed(() => this.scopeEligible() && this.auth.hasPermission(`${this.permissionPrefix()}:read`));
-  readonly canConfigureDian = computed(() => this.scopeEligible() && !this.readOnly() && this.auth.hasPermission('invoicing:write'));
   readonly invoicingAxis = computed(() => this.readiness()?.axes.find((axis) => axis.configuration_type === 'invoicing') ?? null);
-  readonly takenConfigurationTypes = computed<DianConfigurationType[]>(() =>
-    (this.readiness()?.axes ?? []).filter((axis) => axis.config_id !== null).map((axis) => axis.configuration_type),
-  );
+  readonly receptionActive = computed(() => {
+    const axis = this.invoicingAxis();
+    const config = this.selectedConfig();
+    return axis?.config_id !== null && axis?.config_id !== undefined
+      && axis.environment === 'production'
+      && axis.enablement_status === 'enabled'
+      && config?.id === axis.config_id
+      && config.environment === 'production'
+      && config.enablement_status === 'enabled';
+  });
   readonly safeSoftwareId = computed(() => this.selectedConfig()?.software_id ?? null);
   readonly certificateExpiry = computed(() => this.selectedConfig()?.certificate_expiry ?? null);
   readonly hasCertificate = computed(() => {
@@ -237,10 +223,7 @@ export class ReceivedDocumentsConfigurationWizardComponent {
   });
   readonly softwareIdControl = new FormControl('', { nonNullable: true });
   private readonly eventActivation = viewChild(ReceivedBuyerEventActivationComponent);
-  private readonly dianWizard = viewChild(DianConfigWizardComponent);
-  readonly busy = computed(() =>
-    !!this.dianWizard()?.mutating() || !!this.eventActivation()?.submitLoading(),
-  );
+  readonly busy = computed(() => !!this.eventActivation()?.submitLoading());
   readonly canCloseModal = (): boolean => !this.busy();
 
   private readinessRequest?: Subscription;
@@ -279,7 +262,7 @@ export class ReceivedDocumentsConfigurationWizardComponent {
     });
   }
 
-  loadReadiness(preserveConfig = false): void {
+  loadReadiness(): void {
     if (!this.isOpen() || !this.scopeEligible() || !this.canRead()) return;
     this.readinessRequest?.unsubscribe();
     this.configRequest?.unsubscribe();
@@ -287,10 +270,9 @@ export class ReceivedDocumentsConfigurationWizardComponent {
     this.readinessLoading.set(true);
     this.readinessError.set(null);
     this.readiness.set(null);
-    if (!preserveConfig) {
-      this.selectedConfig.set(null);
-      this.softwareIdControl.setValue('');
-    }
+    this.selectedConfig.set(null);
+    this.softwareIdControl.setValue('');
+    this.step.set(0);
     this.readinessRequest = this.api.getFiscalReadiness().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response: unknown) => {
         if (generation !== this.generation) return;
@@ -324,27 +306,13 @@ export class ReceivedDocumentsConfigurationWizardComponent {
     });
   }
 
-  onDianConfigSaved(config: DianConfig): void {
-    if (!this.scopeEligible() || !this.canConfigureDian()) return;
-    this.selectedConfig.set(config);
-    this.softwareIdControl.setValue(config.software_id);
-    // Save only proves persistence. Re-read backend readiness before displaying the current status.
-    this.loadReadiness(true);
-  }
-
-  onDianWizardCancelled(): void {
-    if (this.busy() || !this.scopeEligible()) return;
-    this.showDianWizard.set(false);
-    this.loadReadiness();
-  }
-
   nextStep(): void {
-    if (this.busy() || !this.scopeEligible()) return;
+    if (this.busy() || !this.receptionActive()) return;
     if (this.step() < this.steps.length - 1) this.step.update((current) => current + 1);
   }
 
   previousStep(): void {
-    if (this.busy() || !this.scopeEligible()) return;
+    if (this.busy() || !this.receptionActive()) return;
     if (this.step() > 0) this.step.update((current) => current - 1);
   }
 
@@ -352,11 +320,6 @@ export class ReceivedDocumentsConfigurationWizardComponent {
     if (!this.canCloseModal()) return;
     this.isOpen.set(false);
     this.onClose();
-  }
-
-  openDianWizard(): void {
-    if (!this.canConfigureDian() || this.busy()) return;
-    this.showDianWizard.set(true);
   }
 
   scopeBlockMessage(): string {
@@ -400,7 +363,6 @@ export class ReceivedDocumentsConfigurationWizardComponent {
     this.readiness.set(null);
     this.selectedConfig.set(null);
     this.softwareIdControl.setValue('');
-    this.showDianWizard.set(false);
     this.step.set(0);
   }
 }
