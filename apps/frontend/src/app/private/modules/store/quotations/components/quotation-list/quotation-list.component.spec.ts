@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { DeferBlockBehavior, DeferBlockState, TestBed } from '@angular/core/testing';
 import { QuotationListComponent } from './quotation-list.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { Quotation } from '../../interfaces/quotation.interface';
@@ -23,6 +23,7 @@ describe('QuotationListComponent — destination actions', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [QuotationListComponent],
+      deferBlockBehavior: DeferBlockBehavior.Manual,
       providers: [{ provide: CurrencyFormatService, useValue: { format: (value: number) => String(value) } }],
     });
   });
@@ -123,6 +124,82 @@ describe('QuotationListComponent — destination actions', () => {
     clearButton.click();
     fixture.detectChanges();
     expect(clearAllFilters).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('keeps read-only detail actions available in desktop and mobile for accepted and contracted quotes', async () => {
+    const accepted = row({ id: 3, quotation_number: 'COT-3', status: 'accepted' });
+    const contracted = row({ id: 4, quotation_number: 'COT-4', status: 'contracted', destination: 'contract' });
+    const fixture = TestBed.createComponent(QuotationListComponent);
+    fixture.componentRef.setInput('quotations', [accepted, contracted]);
+    fixture.componentRef.setInput('canMutateQuotation', false);
+    fixture.componentRef.setInput('canConvertToOrder', false);
+    fixture.componentRef.setInput('canCreateFromQuotation', false);
+    fixture.componentRef.setInput('canUpdateContractQuotation', false);
+    fixture.componentRef.setInput('canDeleteQuotation', false);
+    fixture.detectChanges();
+    for (const block of await fixture.getDeferBlocks()) {
+      await block.render(DeferBlockState.Complete);
+    }
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    const details: Quotation[] = [];
+    const accept = jasmine.createSpy('accept');
+    const convert = jasmine.createSpy('convert');
+    component.viewDetail.subscribe((item) => details.push(item));
+    component.accept.subscribe(accept);
+    component.convert.subscribe(convert);
+
+    const desktopButtons = fixture.nativeElement.querySelectorAll(
+      'app-table button[aria-label^="Ver detalle"]',
+    ) as NodeListOf<HTMLButtonElement>;
+    const mobileButtons = fixture.nativeElement.querySelectorAll(
+      'app-item-list button[aria-label^="Ver detalle"]',
+    ) as NodeListOf<HTMLButtonElement>;
+    expect(desktopButtons.length).toBe(2);
+    expect(mobileButtons.length).toBe(2);
+    [...desktopButtons, ...mobileButtons].forEach((button) => button.click());
+    fixture.detectChanges();
+
+    expect(details.map((item) => item.id)).toEqual([3, 4, 3, 4]);
+    expect(accept).not.toHaveBeenCalled();
+    expect(convert).not.toHaveBeenCalled();
+    expect(component.actions[0].label).toBe('Ver detalle');
+    expect(component.actions[0].icon).toBe('eye');
+    expect(component.actions[0].variant).toBe('info');
+    expect(component.columns.map((column) => column.priority)).toEqual([0, 1, 1, 1, 2, 3]);
+    expect(component.columns[1].defaultValue).toBe('Sin cliente');
+    expect(component.filterOptions[0].options?.[0]).toEqual({ label: 'Todos', value: '' });
+    fixture.destroy();
+  });
+
+  it('shows a list error retry banner whose native button only emits a reload request', () => {
+    const fixture = TestBed.createComponent(QuotationListComponent);
+    fixture.componentRef.setInput('quotations', []);
+    fixture.componentRef.setInput('loadError', 'No fue posible cargar cotizaciones.');
+    fixture.detectChanges();
+    const refresh = jasmine.createSpy('refresh');
+    const accept = jasmine.createSpy('accept');
+    const convert = jasmine.createSpy('convert');
+    fixture.componentInstance.refresh.subscribe(refresh);
+    fixture.componentInstance.accept.subscribe(accept);
+    fixture.componentInstance.convert.subscribe(convert);
+
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain(
+      'No fue posible cargar cotizaciones.',
+    );
+    expect(fixture.nativeElement.querySelector('app-empty-state')).toBeNull();
+    const retryButton = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: any) => button.textContent.includes('Reintentar')) as HTMLButtonElement;
+    expect(retryButton).toBeTruthy();
+    expect(retryButton.textContent).toContain('Reintentar');
+    retryButton.click();
+    fixture.detectChanges();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(accept).not.toHaveBeenCalled();
+    expect(convert).not.toHaveBeenCalled();
     fixture.destroy();
   });
 });

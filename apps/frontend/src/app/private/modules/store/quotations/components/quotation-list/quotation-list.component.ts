@@ -2,6 +2,8 @@ import { Component, input, output, computed, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import { ResponsiveDataViewComponent } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
@@ -26,6 +28,8 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   standalone: true,
   imports: [
     CardComponent,
+    AlertBannerComponent,
+    ButtonComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
@@ -51,7 +55,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
-              class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              class="flex-1 md:w-64 shadow-[var(--shadow-sm)] md:shadow-none rounded-[10px]"
               size="sm"
               placeholder="Buscar cotización..."
               ariaLabel="Buscar cotizaciones"
@@ -61,7 +65,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
             />
 
             <app-options-dropdown
-              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              class="shadow-[var(--shadow-sm)] md:shadow-none rounded-[10px]"
               [actions]="dropdownActions()"
               [filters]="filterOptions"
               [filterValues]="filterValues()"
@@ -79,13 +83,26 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
         <div class="p-4 md:p-6 text-center">
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            aria-hidden="true"
           ></div>
-          <p class="mt-2 text-text-secondary">Cargando cotizaciones...</p>
+          <p class="mt-2 text-text-secondary" aria-hidden="true">Cargando cotizaciones...</p>
+          <span class="sr-only" role="status" aria-live="polite">Cargando cotizaciones...</span>
+        </div>
+      }
+
+      @if (!loading() && loadError()) {
+        <div class="px-2 py-3 md:px-4">
+          <app-alert-banner variant="danger" tone="token" heading="No se pudieron cargar las cotizaciones">
+            {{ loadError() }}
+            <div bannerActions class="mt-3">
+              <app-button variant="outline" customClasses="min-h-11" (clicked)="refresh.emit()">Reintentar</app-button>
+            </div>
+          </app-alert-banner>
         </div>
       }
 
       <!-- Data View -->
-      @if (!loading() && quotations().length === 0) {
+      @if (!loading() && !loadError() && quotations().length === 0) {
         <app-empty-state
           icon="file-text"
           title="No se encontraron cotizaciones"
@@ -97,7 +114,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
         />
       }
 
-      @if (!loading() && quotations().length > 0) {
+      @if (!loading() && !loadError() && quotations().length > 0) {
         <div class="px-2 pb-2 pt-3 md:p-4">
           <app-responsive-data-view
             [data]="quotations()"
@@ -130,6 +147,7 @@ export class QuotationListComponent {
 
   quotations = input.required<Quotation[]>();
   loading = input<boolean>(false);
+  loadError = input('');
   showContractAction = input(false);
   canCreateQuotation = input(false);
   canReadProfiles = input(false);
@@ -159,6 +177,7 @@ export class QuotationListComponent {
   filterChange = output<FilterValues>();
   clearAllFilters = output<void>();
   pageChange = output<number>();
+  refresh = output<void>();
 
   filterOptions: FilterConfig[] = [
     {
@@ -167,6 +186,7 @@ export class QuotationListComponent {
       type: 'select',
       placeholder: 'Todos',
       options: [
+        { label: 'Todos', value: '' },
         { label: 'Borrador', value: 'draft' },
         { label: 'Enviada', value: 'sent' },
         { label: 'Aceptada', value: 'accepted' },
@@ -204,10 +224,12 @@ export class QuotationListComponent {
   }
 
   columns: TableColumn[] = [
-    { key: 'quotation_number', label: 'Número', sortable: true },
+    { key: 'quotation_number', label: 'Número', sortable: true, priority: 0 },
     {
       key: 'customer',
       label: 'Cliente',
+      priority: 1,
+      defaultValue: 'Sin cliente',
       transform: (_, item) =>
         item.customer
           ? `${item.customer.first_name} ${item.customer.last_name}`
@@ -216,6 +238,7 @@ export class QuotationListComponent {
     {
       key: 'status',
       label: 'Estado',
+      priority: 1,
       badge: true,
       badgeConfig: { type: 'status' },
       transform: (v: string) => this.getStatusLabel(v),
@@ -223,18 +246,21 @@ export class QuotationListComponent {
     {
       key: 'grand_total',
       label: 'Total',
+      priority: 1,
       align: 'right',
       transform: (v: number) => this.currencyService.format(v || 0),
     },
     {
       key: 'valid_until',
       label: 'Válida hasta',
+      priority: 2,
       transform: (v: string) =>
         v ? formatDateOnlyUTC(v) : '-',
     },
     {
       key: 'created_at',
       label: 'Fecha',
+      priority: 3,
       transform: (v: string) => new Date(v).toLocaleDateString('es-CO'),
     },
   ];
@@ -269,6 +295,12 @@ export class QuotationListComponent {
   };
 
   actions: TableAction[] = [
+    {
+      label: 'Ver detalle',
+      icon: 'eye',
+      variant: 'info',
+      action: (item: Quotation) => this.viewDetail.emit(item),
+    },
     {
       label: 'Enviar',
       icon: 'send',
