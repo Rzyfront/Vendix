@@ -152,7 +152,7 @@ const RECEPTION_STEPS: StepsLineItem[] = [
           <section aria-labelledby="reception-events-step" class="space-y-3">
             <div class="flex items-start gap-2">
               <h2 id="reception-events-step" class="text-base font-semibold text-text-primary">Habilitación del comprador y eventos</h2>
-              <app-tooltip content="La consulta de readiness no transmite eventos. Una solicitud pasa a revisión y no equivale a aprobación DIAN.">
+              <app-tooltip content="Consultar los requisitos pendientes no transmite eventos. La solicitud pasa a revisión, pero no significa aprobación de la DIAN.">
                 <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre eventos del comprador"><app-icon name="info" [size]="16" /></button>
               </app-tooltip>
             </div>
@@ -368,7 +368,7 @@ export class ReceivedDocumentsConfigurationWizardComponent {
 
   scopeBlockMessage(): string {
     if (this.isSuperAdmin()) return 'La recepción no está disponible en perfiles superadmin.';
-    if (this.scope() !== 'store') return 'Este asistente solo opera sobre la entidad fiscal de tienda; no ejecuta consultas desde el rail de tienda para una organización.';
+    if (this.scope() !== 'store') return 'La recepción de una organización se configura desde su propio panel. Este asistente solo atiende entidades fiscales de tienda.';
     return 'Selecciona una entidad fiscal de tienda para usar esta configuración.';
   }
 

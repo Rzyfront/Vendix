@@ -95,25 +95,25 @@
             formControlName="dian_configuration_id"
             (valueChange)="onConfigurationSelection($event)"
           />
-          <app-tooltip content="El backend devuelve una lista de referencia limitada a 100 configuraciones; el NIT debe corresponder a la entidad fiscal actual.">
+          <app-tooltip content="Se muestran hasta 100 configuraciones disponibles para elegir. El NIT debe corresponder a la entidad fiscal actual.">
             <button type="button" class="mt-6 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda para elegir configuración DIAN"><app-icon name="info" [size]="16" /></button>
           </app-tooltip>
         </div>
         @if (selectedConfigurationWarning(); as warning) {
           <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary" role="note">{{ warning }}</p>
         }
-        @if (data.configurations_truncated) { <p class="text-xs text-warning">La lista está limitada a las primeras 100 configuraciones (límite del backend).</p> }
+        @if (data.configurations_truncated) { <p class="text-xs text-warning">Se muestran hasta 100 configuraciones.</p> }
       }
 
       @if (!hasUsableEvidence(data)) {
-        <div class="rounded-lg border border-border p-3 text-sm text-text-secondary">No hay evidencia con artefacto disponible en esta página. <a class="font-medium text-primary underline" routerLink="/admin/fiscal">Agrega o revisa evidencia fiscal</a>.</div>
+        <div class="rounded-lg border border-border p-3 text-sm text-text-secondary">No hay evidencias con archivo de respaldo en esta página. <a class="font-medium text-primary underline" routerLink="/admin/fiscal">Agrega o revisa evidencia fiscal</a>.</div>
       } @else {
         <div class="flex items-start gap-2">
           <app-selector
             class="min-w-0 flex-1"
             id="buyer-event-evidence"
             size="lg"
-            label="Evidencia con artefacto"
+            label="Evidencia con archivo de respaldo"
             placeholder="Selecciona evidencia"
             [required]="true"
             [disabled]="submitLoading()"
@@ -121,7 +121,7 @@
             formControlName="evidence_id"
             (valueChange)="onEvidenceSelection($event)"
           />
-          <app-tooltip content="Solo se ofrecen evidencias de esta página que tienen un artefacto asociado. El backend pagina las opciones; usa las páginas siguientes si falta un documento.">
+          <app-tooltip content="Se muestran evidencias por páginas; cada opción tiene un archivo de respaldo. Si falta una, revisa las páginas siguientes.">
             <button type="button" class="mt-6 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda para elegir evidencia"><app-icon name="info" [size]="16" /></button>
           </app-tooltip>
         </div>
