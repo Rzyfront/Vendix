@@ -17,4 +17,11 @@ describe('ButtonComponent keyboard focus source guards', () => {
     expect(source).toContain('(click)="handleClick($event)"');
     expect(source).toContain('readonly clicked = output<Event>();');
   });
+
+  it('keeps projected action text in the accessible name while visually hiding it during loading', () => {
+    expect(source).toContain('<span class="btn-text" [class.sr-only]="loading() && !showTextWhileLoading()">');
+    expect(source).toContain('<ng-content></ng-content>');
+    expect(source).not.toContain('@if (!loading() || showTextWhileLoading())');
+    expect(source).not.toContain('[attr.aria-hidden]');
+  });
 });

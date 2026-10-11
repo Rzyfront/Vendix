@@ -57,9 +57,9 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
           </svg>
         }
         <span class="btn-icon flex-shrink-0"><ng-content select="[slot=icon]"></ng-content></span>
-        @if (!loading() || showTextWhileLoading()) {
-          <span class="btn-text"><ng-content></ng-content></span>
-        }
+        <span class="btn-text" [class.sr-only]="loading() && !showTextWhileLoading()">
+          <ng-content></ng-content>
+        </span>
       </div>
     </button>
     `,
