@@ -52,4 +52,32 @@ describe('item-list action touch target source guards', () => {
     }
     expect(styles).toContain('outline: 2px solid var(--color-text-primary);');
   });
+
+  it('keeps all mobile card metadata readable and uses the theme shadow token', () => {
+    const mobileStyles = styles.split('@media (max-width: 767px)')[1]?.split('// Nota:')[0] ?? '';
+    const mobileSubtitle = mobileStyles.match(/\.card-subtitle\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    const mobileDetailLabel = mobileStyles.match(/\.detail-label\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    const mobileFooterLabel = mobileStyles.match(/\.footer-label\s*\{([\s\S]*?)\n    \}/)?.[1] ?? '';
+    const mobileCard = mobileStyles.match(/\.item-card\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
+
+    for (const block of [mobileSubtitle, mobileDetailLabel, mobileFooterLabel]) {
+      expect(block).toContain('color: var(--color-text-primary);');
+      expect(block).not.toMatch(/color:\s*var\(--color-neutral-(?:400|500)\)/);
+    }
+    expect(mobileCard).toContain('box-shadow: var(--shadow-sm);');
+    expect(mobileCard).not.toContain('rgba(0, 0, 0, 0.05)');
+  });
+
+  it('allows long detail values to wrap inside three equal card columns', () => {
+    const gridStyles = styles.match(/\.card-details-grid\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const detailItemStyles = styles.match(/\.detail-item\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const detailValueWrapStyles = styles.match(/\.detail-value-wrap\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const detailValueStyles = styles.match(/\.detail-value\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+    expect(gridStyles).toContain('grid-template-columns: repeat(3, minmax(0, 1fr));');
+    expect(detailItemStyles).toContain('min-width: 0;');
+    expect(detailValueWrapStyles).toContain('min-width: 0;');
+    expect(detailValueStyles).toContain('min-width: 0;');
+    expect(detailValueStyles).toContain('overflow-wrap: anywhere;');
+  });
 });
