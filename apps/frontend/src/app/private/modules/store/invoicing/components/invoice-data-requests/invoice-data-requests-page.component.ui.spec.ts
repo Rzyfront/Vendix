@@ -84,7 +84,7 @@ describe('invoice data requests UI source contract', () => {
     expect(source).toContain('this.summaryError.set(true)');
     expect(source.match(/\[value\]="summaryError\(\) \? '—' : summary\(\)\./g)).toHaveLength(4);
     expect(source).toContain('role="status"');
-    expect(source).toContain('Actualizar opciones para reintentar');
+    expect(source).toContain('Actualizar en el menú de opciones para reintentar');
   });
 
   it('distinguishes load errors from empty results and handles stale searches/pages', () => {
