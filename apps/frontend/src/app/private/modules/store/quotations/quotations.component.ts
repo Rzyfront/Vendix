@@ -30,7 +30,7 @@ import { FilterValues } from '../../../../shared/components/options-dropdown/opt
     QuotationFormModalComponent,
   ],
   template: `
-    <div class="w-full">
+    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_.inputsearch-wrapper]:!min-h-11">
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
@@ -77,6 +77,7 @@ import { FilterValues } from '../../../../shared/components/options-dropdown/opt
       <app-quotation-list
         [quotations]="quotations()"
         [loading]="loading()"
+        [loadError]="loadError()"
         [showContractAction]="canCreateContractQuotation()"
         [canCreateQuotation]="canCreateQuotation()"
         [canReadProfiles]="canReadQuotationProfiles()"
@@ -105,6 +106,7 @@ import { FilterValues } from '../../../../shared/components/options-dropdown/opt
         (filterChange)="onFilterChange($event)"
         (clearAllFilters)="clearFilters()"
         (pageChange)="onPageChange($event)"
+        (refresh)="loadQuotations()"
       ></app-quotation-list>
 
       @if (quotationModalOpen()) {
@@ -138,6 +140,7 @@ export class QuotationsComponent {
   });
   quotations = signal<Quotation[]>([]);
   loading = signal(false);
+  readonly loadError = signal('');
   statsLoading = signal(false);
   quotationModalOpen = signal(false);
   selectedQuotation = signal<Quotation | null>(null);
@@ -222,6 +225,7 @@ export class QuotationsComponent {
   loadQuotations(): void {
     const requestId = ++this.quotationRequestId;
     this.loading.set(true);
+    this.loadError.set('');
     const query: QuotationQuery = {
       page: this.page(),
       limit: this.limit(),
@@ -240,9 +244,12 @@ export class QuotationsComponent {
           this.totalItems.set(response.pagination.total);
           this.loading.set(false);
         },
-        error: () => {
+        error: (error) => {
           if (requestId !== this.quotationRequestId) return;
-          this.toastService.error('Error al cargar cotizaciones');
+          const message = extractApiErrorMessage(error);
+          const errorMessage = message || 'Error al cargar cotizaciones';
+          this.loadError.set(errorMessage);
+          this.toastService.error(errorMessage);
           this.loading.set(false);
         },
       });

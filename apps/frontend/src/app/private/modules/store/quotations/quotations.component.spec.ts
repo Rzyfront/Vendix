@@ -24,7 +24,7 @@ class StatsStubComponent {
 
 @Component({ selector: 'app-quotation-list', standalone: true, template: '' })
 class QuotationListStubComponent {
-  quotations = input<Quotation[]>([]); loading = input(false); showContractAction = input(false);
+  quotations = input<Quotation[]>([]); loading = input(false); loadError = input(''); showContractAction = input(false);
   canCreateQuotation = input(false); canReadProfiles = input(false); canCreateFromQuotation = input(false);
   canConvertToOrder = input(false); canMutateQuotation = input(false); canUpdateContractQuotation = input(false);
   canDeleteQuotation = input(false);
@@ -35,7 +35,7 @@ class QuotationListStubComponent {
   duplicate = output<Quotation>(); deleteQuotation = output<Quotation>(); edit = output<Quotation>();
   create = output<void>(); createContract = output<void>(); createFromQuotation = output<Quotation>();
   manageProfiles = output<void>(); search = output<string>(); filterChange = output<FilterValues>();
-  clearAllFilters = output<void>(); pageChange = output<number>();
+  clearAllFilters = output<void>(); pageChange = output<number>(); refresh = output<void>();
 }
 
 @Component({ selector: 'app-quotation-form-modal', standalone: true, template: '' })
@@ -264,6 +264,35 @@ describe('QuotationsComponent — contract quotation flow', () => {
     expect(component.quotations().map((item) => item.id)).toEqual([22]);
     expect(component.totalItems()).toBe(1);
     expect(component.loading()).toBeFalse();
+    fixture.destroy();
+  });
+
+  it('exposes a retryable list error and clears it when quotations reload successfully', () => {
+    quotations.getQuotations.and.returnValues(
+      throwError(() => new Error('Servicio no disponible')),
+      of({ data: [quotation({ id: 44 })], pagination: { total: 1, page: 1, limit: 50, totalPages: 1 } }),
+    );
+    const fixture = create();
+    const component = fixture.componentInstance;
+    expect(component.loadError()).toContain('Servicio no disponible');
+    expect(component.quotations()).toEqual([]);
+
+    component.loadQuotations();
+
+    expect(component.loadError()).toBe('');
+    expect(component.quotations().map((item) => item.id)).toEqual([44]);
+    expect(quotations.getQuotations).toHaveBeenCalledTimes(2);
+    fixture.destroy();
+  });
+
+  it('scopes mobile touch-target and form-text overrides to the quotations screen root', () => {
+    const fixture = create();
+    const root = fixture.nativeElement.querySelector('div.w-full') as HTMLDivElement;
+    expect(root.classList.contains('[&_button]:min-h-11')).toBeTrue();
+    expect(root.classList.contains('[&_button]:min-w-11')).toBeTrue();
+    expect(root.classList.contains('[&_input]:!text-base')).toBeTrue();
+    expect(root.classList.contains('[&_select]:!text-base')).toBeTrue();
+    expect(root.classList.contains('[&_.inputsearch-wrapper]:!min-h-11')).toBeTrue();
     fixture.destroy();
   });
 });
