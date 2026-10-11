@@ -574,12 +574,14 @@ describe('credit-notes · saldo acreditable acumulado (INVOICING_CREDIT_NOTE_001
     const ledger: LedgerRow[] = [];
     const prisma = createPrismaMock({
       invoices: ['findFirst', 'findMany', 'create'],
+      dian_document_events: ['findFirst'],
       products: ['findMany'],
       product_variants: ['findMany'],
       store_settings: ['findFirst'],
     });
 
     prisma.invoices.findFirst.mockResolvedValue(parent);
+    prisma.dian_document_events.findFirst.mockResolvedValue(null);
     prisma.store_settings.findFirst.mockResolvedValue(null);
     prisma.invoices.findMany.mockImplementation(
       async ({ where }: { where: Record<string, unknown> }) =>
