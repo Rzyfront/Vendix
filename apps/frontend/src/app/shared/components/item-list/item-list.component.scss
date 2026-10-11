@@ -853,6 +853,14 @@
   }
 }
 
+@media (max-width: 479px) {
+  // Preserve readable widths when an avatar consumes part of the card row.
+  // Cards without avatars keep the shared three-column detail layout.
+  .card-avatar-wrapper + .card-main-content .card-details-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 // Nota: El bloque [data-theme="dark"] para .status-badge fue eliminado.
 // La inversión de escalas neutral/success/warning/error/info ya la realiza
 // el bloque global [data-theme="dark"] en styles.scss, por lo que era redundante.

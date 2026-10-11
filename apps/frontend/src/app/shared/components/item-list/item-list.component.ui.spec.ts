@@ -80,4 +80,13 @@ describe('item-list action touch target source guards', () => {
     expect(detailValueStyles).toContain('min-width: 0;');
     expect(detailValueStyles).toContain('overflow-wrap: anywhere;');
   });
+
+  it('uses two columns only for avatar cards on very narrow screens', () => {
+    const baseGridStyles = styles.match(/\.card-details-grid\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const narrowStyles = styles.split('@media (max-width: 479px)')[1] ?? '';
+    const avatarGridStyles = narrowStyles.match(/\.card-avatar-wrapper\s*\+\s*\.card-main-content\s+\.card-details-grid\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+    expect(baseGridStyles).toContain('grid-template-columns: repeat(3, minmax(0, 1fr));');
+    expect(avatarGridStyles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+  });
 });
