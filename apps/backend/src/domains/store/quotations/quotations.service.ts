@@ -51,6 +51,7 @@ import {
   type FrozenQuotationProfile,
   type QuotationContractEconomicSnapshot,
 } from './quotation-contract-economics';
+import { buildQuotationContractPresentation } from './quotation-contract-presentation';
 import type { ProfileContractCostLine } from '../invoicing/profiles/profile-contract-economics';
 import type { QuotationProfileConfig } from '../backend-quotations-profiles/quotation-profile-config';
 
@@ -1474,6 +1475,9 @@ export class QuotationsService {
 
   private async sendQuotationEmail(quotation: any): Promise<void> {
     const storeName = await this.getStoreName();
+    const contractPresentation = quotation.destination === 'contract'
+      ? buildQuotationContractPresentation(quotation.contract_economic_snapshot, quotation)
+      : null;
     const html = generateQuotationEmailHtml({
       quotation_number: quotation.quotation_number,
       customer_name: `${quotation.customer.first_name} ${quotation.customer.last_name}`,
@@ -1498,6 +1502,10 @@ export class QuotationsService {
       notes: quotation.notes,
       terms_and_conditions: quotation.terms_and_conditions,
       store_name: storeName,
+      ...(contractPresentation ? { contract_presentation: contractPresentation } : {}),
+      ...(quotation.destination === 'contract' && !contractPresentation
+        ? { presentation_warning: 'Esta cotización contractual es anterior al guardado de economía fiscal congelada; los importes mostrados son los originales de la cotización y no se reinterpretaron.' }
+        : {}),
     });
 
     await this.emailService.sendEmail(

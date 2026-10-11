@@ -12,6 +12,7 @@ import { mapUserAddress } from '../lib/customer-address';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-07: cotización
 // declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+import { buildQuotationContractPresentation } from '../../quotations/quotation-contract-presentation';
 
 /**
  * Etiquetas de `quotation_status_enum` en español. Mismo diccionario de siete
@@ -29,6 +30,15 @@ const QUOTATION_STATE_LABELS: Record<string, string> = {
   converted: 'Convertida',
   cancelled: 'Cancelada',
 };
+
+function formatContractCop(value: number): string {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
 
 @Injectable()
 export class QuotationDataProvider implements IDocumentDataProvider {
@@ -90,7 +100,12 @@ export class QuotationDataProvider implements IDocumentDataProvider {
     const storeAddr = store.addresses?.[0] || ({} as any);
     const customer = quot.customer;
 
-    const items = (quot.quotation_items || []).map((it: any, idx: number) => ({
+    const contractPresentation = quot.destination === 'contract'
+      ? buildQuotationContractPresentation(quot.contract_economic_snapshot, quot)
+      : null;
+    const legacyContract = quot.destination === 'contract' && !contractPresentation;
+
+    const legacyItems = (quot.quotation_items || []).map((it: any, idx: number) => ({
       index: idx + 1,
       product_name: it.product_name || 'Ítem',
       variant_sku: it.variant_sku || undefined,
@@ -122,11 +137,37 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       notes: it.notes || undefined,
     }));
 
-    const subtotal = Number(quot.subtotal_amount || 0);
-    const discount = Number(quot.discount_amount || 0);
-    const tax = Number(quot.tax_amount || 0);
-    const shipping = Number(quot.shipping_cost || 0);
-    const grandTotal = Number(quot.grand_total || subtotal - discount + tax + shipping);
+    const items = contractPresentation
+      ? contractPresentation.lines.map((line, idx) => {
+          const tax = line.taxes[0];
+          return {
+            index: idx + 1,
+            product_name: line.description,
+            quantity: line.quantity,
+            unit_price: line.unit_price,
+            unit_price_formatted: line.unit_price_formatted,
+            discount_amount: line.discount_amount,
+            discount_formatted: line.discount_amount > 0
+              ? `−${line.discount_amount_formatted}`
+              : undefined,
+            tax_rate: tax?.tax_rate,
+            tax_amount: tax?.tax_amount,
+            tax_name: tax ? `${tax.tax_name} · DIAN ${tax.dian_tax_code}` : undefined,
+            tax_type: tax?.tax_type,
+            total_price: line.net_base,
+            total_price_formatted: line.net_base_formatted,
+            notes: line.taxes.length > 1
+              ? line.taxes.map((item) => `DIAN ${item.dian_tax_code} ${item.tax_name} ${item.tax_rate_formatted}: ${item.tax_amount_formatted}`).join(' · ')
+              : undefined,
+          };
+        })
+      : legacyItems;
+
+    const subtotal = contractPresentation?.gross_subtotal ?? Number(quot.subtotal_amount || 0);
+    const discount = contractPresentation?.discount_total ?? Number(quot.discount_amount || 0);
+    const tax = contractPresentation?.tax_total ?? Number(quot.tax_amount || 0);
+    const shipping = contractPresentation ? 0 : Number(quot.shipping_cost || 0);
+    const grandTotal = contractPresentation?.grand_total ?? Number(quot.grand_total || subtotal - discount + tax + shipping);
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, store.logo_url, this.logger);
 
     return {
@@ -165,11 +206,27 @@ export class QuotationDataProvider implements IDocumentDataProvider {
         state: quot.status,
         state_label: QUOTATION_STATE_LABELS[quot.status] || quot.status,
         channel: quot.channel || undefined,
-        notes: quot.notes || undefined,
+        notes: contractPresentation
+          ? [
+              `Objeto contractual: ${contractPresentation.contract_object}`,
+              `Perfil de facturación: ${contractPresentation.invoice_profile_name} · versión ${contractPresentation.invoice_profile_version}`,
+              ...(contractPresentation.due_date_formatted
+                ? [`Vencimiento acordado: ${contractPresentation.due_date_formatted}`]
+                : []),
+              ...(contractPresentation.agreed_notes
+                ? [`Notas acordadas: ${contractPresentation.agreed_notes}`]
+                : []),
+              ...(contractPresentation.source_cost_details.length
+                ? [`Detalle de costos de origen (ya incluido; no sumar nuevamente): ${contractPresentation.source_cost_details.map((line) => `${line.description} (${line.quantity} × ${line.unit_price_formatted} − ${line.discount_amount_formatted} = ${line.net_base_formatted})`).join('; ')}`]
+                : []),
+            ].join('\n')
+          : legacyContract
+            ? [quot.notes || '', 'Aviso: cotización contractual sin economía congelada; se muestra la cotización original sin reinterpretarla.'].filter(Boolean).join('\n')
+            : quot.notes || undefined,
         // `internal_notes` NO se expone: es la nota interna del vendedor y el
         // papel va al cliente. `terms_and_conditions` sí, porque es la letra
         // pequeña de la oferta.
-        terms_and_conditions: quot.terms_and_conditions || undefined,
+        terms_and_conditions: contractPresentation?.terms_and_conditions || quot.terms_and_conditions || undefined,
       },
       // C.2 (ADR-12) — declaración fija de negocio (G-07): cotización siempre
       // sobre base gravable; el gate de IVA se resuelve con org/store ya en
@@ -177,19 +234,34 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       money_basis: 'taxable_base',
       prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
-      taxes: this.aggregateTaxes(quot.quotation_items),
+      taxes: contractPresentation
+        ? contractPresentation.tax_summary.map((tax) => ({
+            name: `${tax.tax_name} · DIAN ${tax.dian_tax_code}`,
+            rate: tax.tax_rate,
+            base_amount: tax.taxable_amount,
+            tax_amount: tax.tax_amount,
+            base_formatted: tax.taxable_amount_formatted,
+            tax_formatted: tax.tax_amount_formatted,
+            tax_type: tax.tax_type,
+          }))
+        : this.aggregateTaxes(quot.quotation_items),
       totals: {
         subtotal,
-        subtotal_formatted: `$${subtotal.toLocaleString('es-CO')}`,
+        subtotal_formatted: contractPresentation?.gross_subtotal_formatted ?? `$${subtotal.toLocaleString('es-CO')}`,
         discount_total: discount,
-        discount_total_formatted: `$${discount.toLocaleString('es-CO')}`,
+        discount_total_formatted: contractPresentation?.discount_total_formatted ?? `$${discount.toLocaleString('es-CO')}`,
         shipping_total: shipping,
-        shipping_total_formatted: `$${shipping.toLocaleString('es-CO')}`,
+        shipping_total_formatted: contractPresentation
+          ? formatContractCop(shipping)
+          : `$${shipping.toLocaleString('es-CO')}`,
         tax_total: tax,
-        tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
+        tax_total_formatted: contractPresentation?.tax_total_formatted ?? `$${tax.toLocaleString('es-CO')}`,
         grand_total: grandTotal,
-        grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
+        grand_total_formatted: contractPresentation?.grand_total_formatted ?? `$${grandTotal.toLocaleString('es-CO')}`,
       },
+      ...(contractPresentation
+        ? { custom_variables: { contract_presentation: contractPresentation } }
+        : {}),
     };
   }
 
