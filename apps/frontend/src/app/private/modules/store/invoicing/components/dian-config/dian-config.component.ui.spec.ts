@@ -38,6 +38,16 @@ describe('DIAN configuration reception entry UI source guards', () => {
     expect(component.match(/\[loading\]="loading\(\)"/g)).toHaveLength(4);
   });
 
+  it('does not render failed readiness as zero stats and uses readable error copy', () => {
+    for (const stat of ['total', 'enabled', 'production', 'notStarted']) {
+      expect(component).toContain(`[value]="loadError() ? '—' : s.${stat}"`);
+    }
+    expect(component).toContain('class="text-sm text-text-primary">{{ message }}</p>');
+    expect(component).toContain('iconColor="text-success"');
+    expect(component).toContain('iconColor="text-info"');
+    expect(component).toContain('iconColor="text-warning"');
+  });
+
   it('preserves scope/read-only honesty and hides reception for superadmin', () => {
     expect(component).toMatch(/@if\s*\(!isSuperAdmin\(\)\s*&&/i);
     expect(component).toContain("this.auth.hasPermission('invoicing:received:read')");

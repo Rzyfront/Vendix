@@ -102,7 +102,7 @@ const RECEPTION_STEPS: StepsLineItem[] = [
             } @else if (readinessLoading()) {
               <p class="text-sm text-text-secondary" role="status">Consultando el estado fiscal…</p>
             } @else if (readinessError()) {
-              <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary" role="alert">
                 <span>{{ readinessError() }}</span>
                 <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
               </div>

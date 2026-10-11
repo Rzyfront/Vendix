@@ -30,6 +30,7 @@ import {
   nitFormatValidator,
 } from '../../../../../../shared/utils/dian-validators';
 import { nitDvValidator } from '../../../../../../shared/utils/nit.util';
+import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { pollAsyncJob } from '../../../../../../core/utils/async-job-poll.util';
 import {
@@ -42,6 +43,7 @@ import {
 } from '../../interfaces/invoice.interface';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
@@ -155,15 +157,6 @@ interface DianAuditLogPageResponse {
   meta?: { total?: number | null } | null;
 }
 
-function formatAuditDateTime(value: string | null | undefined): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('es-CO', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).format(date);
-}
 
 /** Visual state of the test-set panel. */
 type TestSetState = 'idle' | 'running' | 'pending' | 'passed' | 'rejected';
@@ -271,6 +264,7 @@ interface PersistedTestResult {
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
+    CardComponent,
     InputComponent,
     IconComponent,
     TooltipComponent,
@@ -403,7 +397,7 @@ interface PersistedTestResult {
               nitControl.touched &&
               nitDvControl.touched
             ) {
-              <p class="text-xs text-error font-medium">{{ nitDvMessage }}</p>
+              <p class="text-xs text-text-primary font-medium">{{ nitDvMessage }}</p>
             }
             <app-input size="lg"
               label="Software ID"
@@ -476,7 +470,7 @@ interface PersistedTestResult {
             Suba su certificado digital (.p12) para firmar las facturas electronicas.
           </p>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-text-primary text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe guardar las credenciales en el Paso 1.
@@ -486,14 +480,14 @@ interface PersistedTestResult {
           @if (selectedConfig()) {
             <div class="space-y-4">
               @if (selectedConfig()!.certificate_s3_key) {
-                <div class="p-3 rounded-lg bg-success-light border border-success text-success text-sm">
+                <div class="p-3 rounded-lg bg-success-light border border-success text-text-primary text-sm">
                   <div class="flex items-center gap-2">
                     <app-icon name="check-circle" [size]="16"></app-icon>
                     <span>Certificado cargado</span>
                   </div>
                   @if (selectedConfig()!.certificate_expiry) {
                     @if (isCertExpired()) {
-                      <div class="mt-1 text-xs text-error font-medium">
+                      <div class="mt-1 text-xs text-text-primary font-medium">
                         Vencido el {{ selectedConfig()!.certificate_expiry | date:'dd/MM/yyyy':'UTC' }}
                       </div>
                     } @else {
@@ -608,7 +602,7 @@ interface PersistedTestResult {
             </app-tooltip>
           </div>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-text-primary text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe guardar las credenciales en el Paso 1.
@@ -675,7 +669,7 @@ interface PersistedTestResult {
                     Envia facturas reales a la DIAN. Solo active despues de completar la habilitacion.
                   </p>
                   @if (!testSetPassed()) {
-                    <p class="text-xs text-warning pl-6 mt-2 flex items-start gap-1">
+                    <p class="text-xs text-text-primary pl-6 mt-2 flex items-start gap-1">
                       <app-icon name="lock" [size]="12" class="mt-0.5"></app-icon>
                       Disponible cuando la DIAN apruebe tu set de pruebas.
                     </p>
@@ -718,7 +712,7 @@ interface PersistedTestResult {
                   </div>
 
                   @if (alreadyInProduction()) {
-                    <div class="p-3 rounded-lg bg-success-light border border-success text-success text-sm flex items-start gap-2">
+                    <div class="p-3 rounded-lg bg-success-light border border-success text-text-primary text-sm flex items-start gap-2">
                       <app-icon name="check-circle" [size]="16" class="mt-0.5"></app-icon>
                       <span>
                         Esta configuración ya está emitiendo facturas electrónicas
@@ -728,7 +722,7 @@ interface PersistedTestResult {
                   }
 
                   @if (readinessError()) {
-                    <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
+                    <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary">
                       <span>{{ readinessError() }}</span>
                       <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
                     </div>
@@ -784,7 +778,7 @@ interface PersistedTestResult {
 
                     @if (readinessWarnings().length) {
                       <div class="space-y-1.5">
-                        <p class="text-[11px] font-semibold uppercase tracking-wide text-warning">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-primary">
                           Avisos ({{ readinessWarnings().length }})
                         </p>
                         @for (check of readinessWarnings(); track check.key) {
@@ -875,7 +869,7 @@ interface PersistedTestResult {
             Verifique la conexion con la DIAN y ejecute el set de pruebas de habilitacion.
           </p>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-text-primary text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe completar los pasos anteriores.
@@ -886,7 +880,7 @@ interface PersistedTestResult {
             <div class="space-y-4">
               <div class="space-y-3 mb-4">
                 @if (resolutionsError()) {
-                  <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
+                  <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary">
                     <span>{{ resolutionsError() }}</span>
                     <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadResolutions()">Reintentar</app-button>
                   </div>
@@ -954,11 +948,11 @@ interface PersistedTestResult {
                       [size]="18"
                       [class]="testResult()!.success ? 'text-success' : 'text-error'"
                     ></app-icon>
-                    <span class="text-sm font-medium" [class]="testResult()!.success ? 'text-success' : 'text-error'">
+                    <span class="text-sm font-medium" [class]="'text-text-primary'">
                       {{ testResult()!.success ? 'Conexion exitosa' : 'Error de conexion' }}
                     </span>
                   </div>
-                  <div class="text-xs space-y-1 pl-6" [class]="testResult()!.success ? 'text-success' : 'text-error'">
+                  <div class="text-xs space-y-1 pl-6" [class]="'text-text-primary'">
                     <div>{{ testResult()!.message }}</div>
                     <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Producción' }}</div>
                     <div>Tiempo de respuesta: {{ testResult()!.response_time_ms }}ms</div>
@@ -1011,7 +1005,7 @@ interface PersistedTestResult {
                     <div class="min-w-0">
                       <p
                         class="text-sm font-medium"
-                        [class]="testSetStalled() ? 'text-warning' : 'text-[var(--color-info)]'"
+                        [class]="'text-text-primary'"
                       >
                         {{ testSetState() === 'running'
                           ? 'Generando, firmando y enviando el set de habilitación…'
@@ -1058,7 +1052,7 @@ interface PersistedTestResult {
                       <div class="flex items-start gap-2">
                         <app-icon name="clock" [size]="16" class="text-warning mt-0.5 shrink-0"></app-icon>
                         <div class="min-w-0 space-y-1">
-                          <p class="text-xs font-semibold text-warning">
+                          <p class="text-xs font-semibold text-text-primary">
                             {{ notePhase()!.deferred_count }} nota(s) quedaron sin transmitir
                           </p>
                           <!-- El texto viene del backend: es quien sabe cuantas
@@ -1100,7 +1094,7 @@ interface PersistedTestResult {
                        No aplica a un lote estancado: ahí "seguir consultando" es
                        precisamente lo que ya se demostró inútil. -->
                   @if (pollExhausted() && !testSetStalled()) {
-                    <div class="p-3 rounded-lg bg-warning-light border border-warning text-xs text-warning space-y-2">
+                    <div class="p-3 rounded-lg bg-warning-light border border-warning text-xs text-text-primary space-y-2">
                       <div class="flex items-start gap-2">
                         <app-icon name="clock" [size]="14" class="mt-0.5 shrink-0"></app-icon>
                         <span>
@@ -1218,7 +1212,7 @@ interface PersistedTestResult {
                       [size]="18"
                       [class]="testSetState() === 'passed' ? 'text-success' : 'text-error'"
                     ></app-icon>
-                    <span class="text-sm font-medium" [class]="testSetState() === 'passed' ? 'text-success' : 'text-error'">
+                    <span class="text-sm font-medium" [class]="'text-text-primary'">
                       {{ testSetResult()!.message }}
                     </span>
                   </div>
@@ -1265,7 +1259,7 @@ interface PersistedTestResult {
                   <!-- Per-document DIAN errors: the only actionable output of a rejection. -->
                   @if (testSetResult()!.error_messages?.length) {
                     <div class="mt-3 p-3 rounded bg-[var(--color-surface)] border border-error/40 max-h-48 overflow-y-auto">
-                      <p class="text-xs font-semibold text-error mb-1">
+                      <p class="text-xs font-semibold text-text-primary mb-1">
                         Errores reportados por la DIAN
                       </p>
                       <ul class="list-disc pl-4 space-y-0.5 text-xs text-text-secondary">
@@ -1278,7 +1272,7 @@ interface PersistedTestResult {
 
                   @if (testSetState() === 'passed') {
                     <div class="mt-3 p-3 rounded bg-[var(--color-surface)] border border-success/40 text-xs text-text-secondary">
-                      <p class="font-semibold text-success mb-1">Siguiente paso</p>
+                      <p class="font-semibold text-text-primary mb-1">Siguiente paso</p>
                       La DIAN habilitó tu NIT como facturador electrónico. Solicita la
                       Autorización de Numeración de Facturación en Muisca, regístrala
                       como resolución y luego activa producción en el paso de Ambiente.
@@ -1340,7 +1334,7 @@ interface PersistedTestResult {
               variant="outline"
               size="sm"
               (clicked)="loadAuditLogs()"
-              [loading]="loadingAuditLogs()"
+                  [loading]="loadingAuditLogs()"
             >
               <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
               Actualizar
@@ -1349,28 +1343,32 @@ interface PersistedTestResult {
           @if (auditLogsError()) {
             <div role="alert" class="flex items-start gap-2 p-3 rounded-lg border border-error/30 bg-error-light">
               <app-icon name="alert-circle" [size]="16" class="text-error shrink-0 mt-0.5"></app-icon>
-              <p class="text-sm text-error">{{ auditLogsError() }}</p>
+              <p class="text-sm text-text-primary">{{ auditLogsError() }}</p>
             </div>
           }
-          <app-responsive-data-view
-            [data]="auditLogs()"
-            [columns]="auditLogColumns"
-            [cardConfig]="auditLogCardConfig"
-            [loading]="loadingAuditLogs()"
-            [sortable]="false"
-            emptyIcon="file-text"
-            [emptyTitle]="auditLogsError() ? 'No se pudo cargar el historial' : 'No hay registros de operaciones'"
-            [emptyDescription]="auditLogsError() ? 'Actualiza para reintentar.' : 'Las operaciones realizadas con esta configuración aparecerán aquí.'"
-            [showEmptyRefresh]="true"
-            (emptyRefreshClick)="loadAuditLogs()"
-          ></app-responsive-data-view>
-          <app-pagination
-            [currentPage]="auditLogPage()"
-            [totalPages]="auditLogTotalPages()"
-            [total]="auditLogTotalItems()"
-            [limit]="auditLogFilters().limit"
-            (pageChange)="onAuditPageChange($event)"
-          ></app-pagination>
+          <app-card [responsive]="true" [padding]="false">
+            <div class="px-2 pb-2 pt-3 md:p-4">
+              <app-responsive-data-view
+                [data]="auditLogs()"
+                [columns]="auditLogColumns"
+                [cardConfig]="auditLogCardConfig"
+                [loading]="loadingAuditLogs()"
+                [sortable]="false"
+                emptyIcon="file-text"
+                [emptyTitle]="auditLogsError() ? 'No se pudo cargar el historial' : 'No hay registros de operaciones'"
+                [emptyDescription]="auditLogsError() ? 'Actualiza para reintentar.' : 'Las operaciones realizadas con esta configuración aparecerán aquí.'"
+                [showEmptyRefresh]="true"
+                (emptyRefreshClick)="loadAuditLogs()"
+              ></app-responsive-data-view>
+              <app-pagination
+                [currentPage]="auditLogPage()"
+                [totalPages]="auditLogTotalPages()"
+                [total]="auditLogTotalItems()"
+                [limit]="auditLogFilters().limit"
+                (pageChange)="onAuditPageChange($event)"
+              ></app-pagination>
+            </div>
+          </app-card>
           <div class="flex items-center justify-end pt-4 border-t border-border">
             <app-button customClasses="min-h-11" variant="primary" size="sm" [disabled]="mutating()" (clicked)="finish()">
               <app-icon slot="icon" name="check" [size]="14"></app-icon>
@@ -1480,6 +1478,7 @@ export class DianConfigWizardComponent {
     Math.max(1, Math.ceil(this.auditLogTotalItems() / this.auditLogFilters().limit)),
   );
   readonly auditLogPage = computed(() => this.auditLogFilters().page);
+  readonly auditLogTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   private auditLogsSubscription?: Subscription;
 
   // ── Typed Forms ───────────────────────────────────────────
@@ -1923,11 +1922,11 @@ export class DianConfigWizardComponent {
   getEnablementStatusClass(status: string): string {
     const classes: Record<string, string> = {
       not_started: 'bg-[var(--color-surface-secondary)] text-text-secondary',
-      testing: 'bg-warning-light text-warning',
-      test_set_passed: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
-      enabled: 'bg-success-light text-success',
-      suspended: 'bg-error-light text-error',
-      expired: 'bg-error-light text-error',
+      testing: 'bg-warning-light text-text-primary',
+      test_set_passed: 'bg-[var(--color-info-light)] text-text-primary',
+      enabled: 'bg-success-light text-text-primary',
+      suspended: 'bg-error-light text-text-primary',
+      expired: 'bg-error-light text-text-primary',
     };
     return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
@@ -2768,7 +2767,7 @@ export class DianConfigWizardComponent {
     },
     {
       key: 'created_at', label: 'Fecha y hora', align: 'right', priority: 1,
-      transform: (value) => formatAuditDateTime(value == null ? null : String(value)),
+      transform: (value) => value ? formatStoreDateTime(String(value), this.auditLogTimezone) || '—' : '—',
     },
   ];
 
@@ -2796,7 +2795,7 @@ export class DianConfigWizardComponent {
       },
       {
         key: 'created_at', label: 'Fecha y hora', icon: 'calendar',
-        transform: (value) => formatAuditDateTime(value == null ? null : String(value)),
+        transform: (value) => value ? formatStoreDateTime(String(value), this.auditLogTimezone) || '—' : '—',
       },
     ],
   };
@@ -2814,7 +2813,10 @@ export class DianConfigWizardComponent {
     this.auditLogsError.set(null);
     this.auditLogsSubscription = this.invoicingService
       .getDianAuditLogs(this.auditLogFilters().page, this.auditLogFilters().limit, configId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        map((response: unknown): DianAuditLogPageResponse => response as DianAuditLogPageResponse),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
         next: (response: DianAuditLogPageResponse) => {
           this.auditLogs.set(response?.data ?? []);

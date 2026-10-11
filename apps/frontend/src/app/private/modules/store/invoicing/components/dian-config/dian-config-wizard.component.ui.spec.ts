@@ -101,7 +101,9 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(source).toContain("key: 'error_message'");
     expect(source).toContain("key: 'duration_ms'");
     expect(source).toContain("key: 'created_at'");
-    expect(source).toContain('formatAuditDateTime');
+    expect(source).toContain('formatStoreDateTime(String(value), this.auditLogTimezone)');
+    expect(source).toContain('readonly auditLogTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone');
+    expect(source).not.toContain('function formatAuditDateTime');
   });
 
   it('cancels stale audit requests, auto-loads only for a saved config on step five, and exposes retries', () => {
@@ -140,6 +142,26 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(source).toContain('No hay resoluciones disponibles para ejecutar el set de pruebas.');
     expect(source).toContain('(clicked)="loadResolutions()"');
     expect(source).toContain('No se pudieron consultar las resoluciones de facturación.');
+  });
+
+  it('keeps semantic body copy readable and preserves decorative icon colors', () => {
+    const bodyTags = [...source.matchAll(/<(?:p|span|div)\b[^>]*>/g)].map(([tag]) => tag);
+    for (const tag of bodyTags) {
+      expect(tag).not.toMatch(/\btext-(?:warning|success|error|info)\b/);
+      expect(tag).not.toMatch(/text-\[var\(--color-(?:warning|success|error|info)\)\]/);
+    }
+    expect(source).toContain("[class]=\"testResult()!.success ? 'text-success' : 'text-error'\"");
+    expect(source).toContain("[class]=\"testSetState() === 'passed' ? 'text-success' : 'text-error'\"");
+    expect(source).toContain("enabled: 'bg-success-light text-text-primary'");
+    expect(source).toContain("suspended: 'bg-error-light text-text-primary'");
+    expect(source).toContain('class="text-sm text-text-primary">{{ auditLogsError() }}</p>');
+  });
+
+  it('wraps the audit responsive list and adjacent pager in the shared compact card', () => {
+    expect(source).toContain('<app-card [responsive]="true" [padding]="false">');
+    expect(source).toContain('<div class="px-2 pb-2 pt-3 md:p-4">');
+    expect(source).toMatch(/<\/app-responsive-data-view>\s*<app-pagination/);
+    expect(source).toContain('map((response: unknown): DianAuditLogPageResponse => response as DianAuditLogPageResponse)');
   });
 
   it('uses 16px shared form controls and a compact stepper when the axis is locked', () => {

@@ -90,7 +90,7 @@ interface AxisStats {
         @if (stats(); as s) {
           <app-stats
             title="Habilitaciones"
-            [value]="s.total"
+            [value]="loadError() ? '—' : s.total"
             [loading]="loading()"
             smallText="Documentos que la DIAN habilita por separado"
             iconName="shield"
@@ -100,7 +100,7 @@ interface AxisStats {
           ></app-stats>
           <app-stats
             title="Habilitadas"
-            [value]="s.enabled"
+            [value]="loadError() ? '—' : s.enabled"
             [loading]="loading()"
             smallText="Aprobadas por la DIAN"
             iconName="check-circle"
@@ -110,7 +110,7 @@ interface AxisStats {
           ></app-stats>
           <app-stats
             title="En producción"
-            [value]="s.production"
+            [value]="loadError() ? '—' : s.production"
             [loading]="loading()"
             smallText="Emitiendo documentos reales"
             iconName="globe"
@@ -120,7 +120,7 @@ interface AxisStats {
           ></app-stats>
           <app-stats
             title="Sin configurar"
-            [value]="s.notStarted"
+            [value]="loadError() ? '—' : s.notStarted"
             [loading]="loading()"
             smallText="Todavía no emiten electrónicamente"
             iconName="alert-triangle"
@@ -146,7 +146,7 @@ interface AxisStats {
           </div>
         } @else if (loadError(); as message) {
           <app-card>
-            <p class="text-sm text-[var(--color-error)]">{{ message }}</p>
+            <p class="text-sm text-text-primary">{{ message }}</p>
           </app-card>
         } @else {
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
