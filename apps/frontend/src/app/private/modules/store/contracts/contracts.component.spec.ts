@@ -99,6 +99,45 @@ describe('ContractsComponent — listado remoto', () => {
     expect(fixture.nativeElement.textContent).toContain('Cotizar contrato');
   });
 
+  it('renderiza los valores congelados ausentes como No configurado en tarjetas móviles sin mutar el DTO y conserva cero', () => {
+    const source = [
+      { id: 1, contract_number: 'CT-NULL', status: 'active', contract_object: null, quotation_id: null, grand_total: null },
+      { id: 2, contract_number: 'CT-ZERO', status: 'draft', contract_object: '', quotation_id: 0, grand_total: 0 },
+    ];
+    service.getContracts.and.returnValue(of(page(source)));
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+
+    const cards = Array.from(fixture.nativeElement.querySelectorAll('.item-card')) as HTMLElement[];
+    expect(cards.length).toBe(2);
+    expect(cards[0].textContent).toContain('No configurado');
+    expect(Array.from(cards[0].querySelectorAll('.detail-value')).map((node) => node.textContent?.trim()))
+      .toContain('No configurado');
+    expect(cards[0].querySelector('.footer-value')?.textContent?.trim()).toBe('No configurado');
+    expect(cards[1].textContent).toContain('#0');
+    expect(cards[1].textContent).toContain('0');
+    expect(source[0].contract_object).toBeNull();
+    expect(source[0].quotation_id).toBeNull();
+    expect(source[0].grand_total).toBeNull();
+  });
+
+  it('expone el estado de carga y habilita limpiar filtros en resultados filtrados vacíos', () => {
+    const pending = new Subject<any>();
+    service.getContracts.and.returnValue(pending.asObservable());
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+    const status = fixture.nativeElement.querySelector('[role="status"][aria-live="polite"]');
+    expect(status).toBeTruthy();
+    expect(status.textContent).toContain('Cargando contratos');
+
+    service.getContracts.and.returnValue(of(page([])));
+    fixture.componentInstance.onSearch('sin coincidencias');
+    fixture.detectChanges();
+    const clearButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
+      .find((button: any) => button.textContent.includes('Limpiar Filtros')) as HTMLButtonElement;
+    expect(clearButton).toBeTruthy();
+  });
+
   it('renderiza el dropdown estándar y ofrece Cotizar contrato sólo con industria y permisos vigentes', async () => {
     service.getContracts.and.returnValue(of(page([
       { id: 1, contract_number: 'CT-1', status: 'active', grand_total: 100 },

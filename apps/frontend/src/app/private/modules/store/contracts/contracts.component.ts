@@ -38,7 +38,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
     InputsearchComponent,
   ],
   template: `
-    <div class="w-full">
+    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_.inputsearch-wrapper]:!min-h-11">
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total de contratos"
@@ -88,15 +88,15 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
             </h2>
             <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
               <app-inputsearch
-                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                class="flex-1 md:w-64 shadow-[var(--shadow-sm)] md:shadow-none rounded-[10px]"
                 size="sm"
                 placeholder="Buscar contratos..."
-                ariaLabel="Buscar contratos por número, objeto o notas"
+                ariaLabel="Buscar contratos por número o notas"
                 [ngModel]="search()"
                 (searchChange)="onSearch($event)"
               />
               <app-options-dropdown
-                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                class="shadow-[var(--shadow-sm)] md:shadow-none rounded-[10px]"
                 [actions]="dropdownActions()"
                 [filters]="filterConfigs"
                 [filterValues]="filterValues()"
@@ -112,11 +112,12 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
 
         <div class="px-2 pb-2 pt-3 md:p-4">
           @if (loading()) {
-            <div class="flex items-center justify-center py-20">
+            <div class="flex items-center justify-center py-20" role="status" aria-live="polite">
               <app-spinner size="lg"></app-spinner>
+              <span class="sr-only">Cargando contratos</span>
             </div>
           } @else if (loadError()) {
-            <app-alert-banner variant="danger" heading="No se pudieron cargar los contratos">
+            <app-alert-banner variant="danger" tone="token" heading="No se pudieron cargar los contratos">
               {{ loadError() }}
               <div bannerActions class="mt-2">
                 <app-button variant="outline" size="sm" (clicked)="reload()">Reintentar</app-button>
@@ -128,6 +129,8 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
               title="Sin resultados"
               description="No hay contratos que coincidan con la búsqueda o el estado seleccionado."
               [showActionButton]="false"
+              [showClearFilters]="true"
+              (clearFiltersClick)="clearFilters()"
             ></app-empty-state>
           } @else if (contracts().length === 0) {
             <app-empty-state
@@ -237,15 +240,16 @@ export class ContractsComponent {
 
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'contract_number',
-    subtitleKey: 'contract_object',
+    subtitleTransform: (item: Contract) => item.contract_object || 'No configurado',
     badgeKey: 'status',
     badgeConfig: { type: 'status' as const, size: 'sm' as const },
     badgeTransform: (value: Contract['status']) => CONTRACT_STATUS_LABELS[value] || value,
     detailKeys: [
-      { key: 'quotation_id', label: 'Cotización origen', transform: (value: number | null | undefined) => value == null ? 'No configurado' : `#${value}` },
+      { key: 'quotation_id', label: 'Cotización origen', defaultValue: 'No configurado', transform: (value: number | null | undefined) => value == null ? 'No configurado' : `#${value}` },
     ],
     footerKey: 'grand_total',
     footerLabel: 'Total congelado',
+    footerDefaultValue: 'No configurado',
     footerTransform: (value: number | null | undefined) => this.formatMoney(value),
   };
 
