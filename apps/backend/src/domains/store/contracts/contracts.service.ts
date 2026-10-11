@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, type invoices } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -67,25 +67,64 @@ export class ContractsService {
     private readonly profilesService: QuotationProfilesService,
   ) {}
 
-  private readonly CONTRACT_INCLUDE = {
-    quotation: {
-      select: {
-        id: true,
-        quotation_number: true,
-        destination: true,
-        status: true,
+  private contractInclude() {
+    const context = RequestContextService.getContext();
+    return {
+      quotation: {
+        select: {
+          id: true,
+          quotation_number: true,
+          destination: true,
+          status: true,
+        },
       },
-    },
-    customer: {
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        email: true,
-        phone: true,
+      customer: {
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+          phone: true,
+        },
       },
+      invoices: {
+        where: {
+          status: { notIn: ['cancelled', 'voided'] },
+          // Relation filters are explicit even though the outer contract query
+          // is scoped: a nested relation must never expose another tenant's row.
+          store_id: context?.store_id ?? -1,
+          organization_id: context?.organization_id ?? -1,
+        },
+        select: {
+          id: true,
+          invoice_number: true,
+          status: true,
+          total_amount: true,
+          dian_status: true,
+        },
+        take: 1,
+        orderBy: [
+          { created_at: 'desc' },
+          { id: 'desc' },
+        ],
+      },
+    } satisfies Prisma.contractsInclude;
+  }
+
+  /** Return a singular, minimal active invoice rather than Prisma's list. */
+  private withInvoice<
+    T extends {
+      invoices?: Array<
+        Pick<
+          invoices,
+          'id' | 'invoice_number' | 'status' | 'total_amount' | 'dian_status'
+        >
+      >;
     },
-  };
+  >(row: T) {
+    const { invoices, ...contract } = row;
+    return { ...contract, invoice: invoices?.[0] ?? null };
+  }
 
   /**
    * C.2 (FB-07) — listado paginado con el mismo envoltorio
@@ -121,13 +160,13 @@ export class ContractsService {
         skip,
         take: limit,
         orderBy: { created_at: 'desc' },
-        include: this.CONTRACT_INCLUDE,
+        include: this.contractInclude(),
       }),
       this.prisma.contracts.count({ where }),
     ]);
 
     return {
-      data,
+      data: data.map((contract) => this.withInvoice(contract)),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -139,7 +178,7 @@ export class ContractsService {
   async findOne(id: number) {
     const contract = await this.prisma.contracts.findFirst({
       where: { id },
-      include: this.CONTRACT_INCLUDE,
+      include: this.contractInclude(),
     });
     if (!contract) {
       throw new VendixHttpException(
@@ -148,7 +187,7 @@ export class ContractsService {
         { contract_id: id },
       );
     }
-    return contract;
+    return this.withInvoice(contract);
   }
 
   /**
@@ -175,11 +214,12 @@ export class ContractsService {
     }
     // Misma disciplina que `quotations.transition`: lectura scopeada
     // primero (404 ajeno) y escritura sobre el id ya verificado.
-    return this.prisma.contracts.update({
+    const updated = await this.prisma.contracts.update({
       where: { id },
       data: { status, updated_at: new Date() },
-      include: this.CONTRACT_INCLUDE,
+      include: this.contractInclude(),
     });
+    return this.withInvoice(updated);
   }
 
   async createFromQuotation(quotation_id: number) {
@@ -207,7 +247,11 @@ export class ContractsService {
     // generico. Va ANTES de los gates de destino/estado: el reintento sobre
     // una cotizacion ya contratada debe resolver a la ficha, no a un 422.
     const existing = await this.prisma.contracts.findFirst({
-      where: { quotation_id },
+      where: {
+        quotation_id,
+        store_id: scope.store_id,
+        organization_id: scope.organization_id,
+      },
     });
     if (existing) throw this.alreadyContracted(quotation_id, existing.id);
 
@@ -249,33 +293,107 @@ export class ContractsService {
     // ADR-03: el contrato congela la version VIGENTE del perfil. Sin perfil
     // (cotizo desde cero) el snapshot guarda `profile: null` y los totales
     // mandan. `resolveForQuotation` valida el tenant (ERR-04 si es ajeno).
-    const profile = (quotation as any).profile_id
-      ? await this.profilesService.resolveForQuotation(
-          (quotation as any).profile_id,
-        )
-      : null;
-
-    const snapshot = buildContractSnapshot(quotation, profile as any);
-
     try {
       // El cliente de `$transaction` es el BASE (sin extension de scoping):
       // todo `where` lleva `store_id` a mano y la creacion inyecta el tenant
       // explicito (misma disciplina que `QuotationProfilesService`).
-      return await this.prisma
+      const created = await this.prisma
         .withoutScope()
-        .$transaction(async (tx: any) => {
+        .$transaction(async (tx: Prisma.TransactionClient) => {
+          const prefix = contractNumberPrefix();
+          // A dedicated namespace + store + daily series serializes contract
+          // number allocation without colliding with other domains' locks.
+          await tx.$executeRaw`
+            SELECT pg_advisory_xact_lock(
+              ${scope.store_id}::int,
+              hashtext(${'contracts:number:' + prefix})::int
+            )
+          `;
+
+          // Re-read after obtaining the lock. Creation and cancellation both
+          // race on this authoritative accepted-state check.
+          const currentQuotation = await tx.quotations.findFirst({
+            where: {
+              id: quotation_id,
+              store_id: scope.store_id,
+              store: { is: { organization_id: scope.organization_id } },
+            } satisfies Prisma.quotationsWhereInput,
+            include: { quotation_items: true },
+          });
+          if (!currentQuotation) {
+            throw new NotFoundException('Cotización no encontrada');
+          }
+
           // Idempotencia capa 2 (dentro de la transaccion): cierra la
           // carrera entre la comprobacion previa y el INSERT.
           const raced = await tx.contracts.findFirst({
-            where: { quotation_id },
+            where: {
+              quotation_id,
+              store_id: scope.store_id,
+              organization_id: scope.organization_id,
+            },
             select: { id: true },
           });
           if (raced) throw this.alreadyContracted(quotation_id, raced.id);
 
-          const prefix = contractNumberPrefix();
+          if (currentQuotation.destination !== 'contract') {
+            throw new VendixHttpException(ErrorCodes.QUOTE_DESTINATION_001);
+          }
+          if (currentQuotation.status !== 'accepted') {
+            throw new VendixHttpException(
+              ErrorCodes.QUOTE_CONVERT_STATUS_001,
+              'La cotización debe estar aceptada para crear el contrato.',
+              {
+                quotation_id,
+                current_status: currentQuotation.status,
+                required_status: 'accepted',
+              },
+            );
+          }
+          if (!currentQuotation.customer_id) {
+            throw new VendixHttpException(
+              ErrorCodes.QUOTE_CONVERT_CUSTOMER_001,
+              'La cotización debe tener un cliente para crear el contrato.',
+              { quotation_id },
+            );
+          }
+
+          // Transition first, conditionally. If cancellation won the race,
+          // count=0 aborts the transaction before any contract INSERT.
+          const marked = await tx.quotations.updateMany({
+            where: {
+              id: quotation_id,
+              store_id: scope.store_id,
+              store: { is: { organization_id: scope.organization_id } },
+              destination: 'contract',
+              status: 'accepted',
+            } satisfies Prisma.quotationsWhereInput,
+            data: { status: 'contracted', updated_at: new Date() },
+          });
+          if (marked.count !== 1) {
+            throw new VendixHttpException(
+              ErrorCodes.QUOTE_CONVERT_STATUS_001,
+              'La cotización dejó de estar aceptada antes de crear el contrato.',
+              { quotation_id, required_status: 'accepted' },
+            );
+          }
+
+          // Preserve current-profile snapshot behavior for this P0 change;
+          // freezing the quoted profile is explicitly a separate P1 item.
+          const profile = (currentQuotation as any).profile_id
+            ? await this.profilesService.resolveForQuotation(
+                (currentQuotation as any).profile_id,
+              )
+            : null;
+          const snapshot = buildContractSnapshot(
+            currentQuotation,
+            profile as any,
+          );
+
           const last = await tx.contracts.findFirst({
             where: {
               store_id: scope.store_id,
+              organization_id: scope.organization_id,
               contract_number: { startsWith: prefix },
             },
             orderBy: { contract_number: 'desc' },
@@ -292,49 +410,38 @@ export class ContractsService {
               store_id: scope.store_id,
               quotation_id,
               contract_number,
-              customer_id: quotation.customer_id,
+              customer_id: currentQuotation.customer_id,
               status: 'draft',
-              subtotal_amount: quotation.subtotal_amount,
-              discount_amount: quotation.discount_amount,
-              tax_amount: quotation.tax_amount,
-              grand_total: quotation.grand_total,
+              subtotal_amount: currentQuotation.subtotal_amount,
+              discount_amount: currentQuotation.discount_amount,
+              tax_amount: currentQuotation.tax_amount,
+              grand_total: currentQuotation.grand_total,
               snapshot,
-              profile_id: (quotation as any).profile_id ?? null,
+              profile_id: (currentQuotation as any).profile_id ?? null,
               profile_version: profile
                 ? (profile as any).current_version ?? null
                 : null,
-              notes: quotation.notes ?? null,
+              notes: currentQuotation.notes ?? null,
               created_by: scope.user_id ?? null,
               updated_at: new Date(),
             },
-            include: this.CONTRACT_INCLUDE,
+            include: this.contractInclude(),
           });
-
-          // La cotizacion solo marca estado (ADR-04): `accepted->contracted`
-          // queda reservado al flujo de contratos. `updateMany` con filtro
-          // de tenant (escritura scope-safe) + conteo verificado.
-          const marked = await tx.quotations.updateMany({
-            where: { id: quotation_id, store_id: scope.store_id },
-            data: {
-              status: 'contracted' as any,
-              updated_at: new Date(),
-            },
-          });
-          if (marked.count === 0) {
-            throw new NotFoundException(
-              'Cotización no encontrada para marcar el contrato',
-            );
-          }
 
           return contract;
         });
+      return this.withInvoice(created);
     } catch (error) {
       // Idempotencia capa 3 (red de la red): si el UNIQUE de
       // `quotation_id` choco dentro de la transaccion, el contrato ya
       // existe — se responde el mismo 409 con la ficha real.
       if (this.isUniqueViolation(error)) {
         const winner = await this.prisma.contracts.findFirst({
-          where: { quotation_id },
+          where: {
+            quotation_id,
+            store_id: scope.store_id,
+            organization_id: scope.organization_id,
+          },
           select: { id: true },
         });
         if (winner) throw this.alreadyContracted(quotation_id, winner.id);

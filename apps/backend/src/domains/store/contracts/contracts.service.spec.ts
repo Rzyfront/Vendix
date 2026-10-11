@@ -1,5 +1,6 @@
 import { ContractsService, ContractStatus } from './contracts.service';
 import { VendixHttpException } from 'src/common/errors';
+import { RequestContextService } from '@common/context/request-context.service';
 
 /**
  * C.2 (FB-07, ERR-06) — lectura y transiciones sin base de datos: el
@@ -18,16 +19,19 @@ describe('ContractsService lectura y transiciones (C.2)', () => {
     {} as any,
   );
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    jest.clearAllMocks();
+  });
 
   it('findAll devuelve el envoltorio { data, pagination } del frontend', async () => {
-    contractsMock.findMany.mockResolvedValue([{ id: 1 }]);
+    contractsMock.findMany.mockResolvedValue([{ id: 1, invoices: [] }]);
     contractsMock.count.mockResolvedValue(25);
 
     const result = await service.findAll({ page: 2, limit: 10 });
 
     expect(result).toEqual({
-      data: [{ id: 1 }],
+      data: [{ id: 1, invoice: null }],
       pagination: { total: 25, page: 2, limit: 10, totalPages: 3 },
     });
     expect(contractsMock.findMany).toHaveBeenCalledWith(
@@ -67,6 +71,55 @@ describe('ContractsService lectura y transiciones (C.2)', () => {
     expect(JSON.stringify(error.getResponse())).toContain('999');
   });
 
+  it('expone solo la factura activa mínima y limita la relación por tenant', async () => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      store_id: 12,
+      organization_id: 34,
+    } as any);
+    contractsMock.findFirst.mockResolvedValue({
+      id: 8,
+      invoices: [
+        {
+          id: 91,
+          invoice_number: 'FV-91',
+          status: 'draft',
+          total_amount: '123.00',
+          dian_status: 'not_applicable',
+        },
+      ],
+    });
+
+    const contract = await service.findOne(8);
+
+    expect(contract).toEqual({
+      id: 8,
+      invoice: {
+        id: 91,
+        invoice_number: 'FV-91',
+        status: 'draft',
+        total_amount: '123.00',
+        dian_status: 'not_applicable',
+      },
+    });
+    const include = contractsMock.findFirst.mock.calls[0][0].include;
+    expect(include.invoices).toMatchObject({
+      where: {
+        store_id: 12,
+        organization_id: 34,
+        status: { notIn: ['cancelled', 'voided'] },
+      },
+      take: 1,
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        invoice_number: true,
+        status: true,
+        total_amount: true,
+        dian_status: true,
+      },
+    });
+  });
+
   it.each([
     ['draft', 'active'],
     ['draft', 'cancelled'],
@@ -74,14 +127,14 @@ describe('ContractsService lectura y transiciones (C.2)', () => {
     ['active', 'cancelled'],
   ])('permite %s -> %s', async (from, to) => {
     contractsMock.findFirst.mockResolvedValue({ id: 5, status: from });
-    contractsMock.update.mockResolvedValue({ id: 5, status: to });
+    contractsMock.update.mockResolvedValue({ id: 5, status: to, invoices: [] });
 
     const result = await service.updateStatus(
       5,
       to as ContractStatus,
     );
 
-    expect(result).toEqual({ id: 5, status: to });
+    expect(result).toEqual({ id: 5, status: to, invoice: null });
     expect(contractsMock.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 5 },

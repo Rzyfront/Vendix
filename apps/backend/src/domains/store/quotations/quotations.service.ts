@@ -332,7 +332,7 @@ export class QuotationsService {
       orderBy.created_at = 'desc';
     }
 
-    const [data, total] = await Promise.all([
+    const [rawData, total] = await Promise.all([
       this.prisma.quotations.findMany({
         where,
         skip,
@@ -342,6 +342,7 @@ export class QuotationsService {
       }),
       this.prisma.quotations.count({ where }),
     ]);
+    const data = await this.withContractReferences(rawData);
 
     return {
       data,
@@ -355,7 +356,48 @@ export class QuotationsService {
       include: this.QUOTATION_INCLUDE,
     });
     if (!quotation) throw new NotFoundException('Cotización no encontrada');
-    return quotation;
+    return (await this.withContractReferences([quotation]))[0];
+  }
+
+  /** Attach only tenant-owned contract references; to-one relation includes
+   * cannot apply a nested WHERE, so query the relation with an explicit scope. */
+  private async withContractReferences<
+    T extends { id: number; status?: string },
+  >(rows: T[]) {
+    const context = RequestContextService.getContext();
+    const quotationIds = rows
+      .filter((row) => row.status === 'contracted')
+      .map((row) => row.id);
+    if (!quotationIds.length || !context?.store_id || !context.organization_id) {
+      return rows.map((row) => ({ ...row, contract: null }));
+    }
+    const contracts = await this.prisma.contracts.findMany({
+      where: {
+        quotation_id: { in: quotationIds },
+        store_id: context.store_id,
+        organization_id: context.organization_id,
+      },
+      select: {
+        quotation_id: true,
+        id: true,
+        contract_number: true,
+        status: true,
+      },
+    });
+    const byQuotationId = new Map(
+      contracts.map((contract) => [
+        contract.quotation_id,
+        {
+          id: contract.id,
+          contract_number: contract.contract_number,
+          status: contract.status,
+        },
+      ]),
+    );
+    return rows.map((row) => ({
+      ...row,
+      contract: byQuotationId.get(row.id) ?? null,
+    }));
   }
 
   async update(id: number, updateQuotationDto: UpdateQuotationDto) {
@@ -537,11 +579,24 @@ export class QuotationsService {
         `No se puede cancelar una cotización en estado "${quotation.status}"`,
       );
     }
-    return this.prisma.quotations.update({
-      where: { id },
+    const context = RequestContextService.getContext();
+    const marked = await this.prisma.quotations.updateMany({
+      where: {
+        id,
+        status: quotation.status,
+        ...(context?.store_id && { store_id: context.store_id }),
+        ...(context?.organization_id && {
+          store: { is: { organization_id: context.organization_id } },
+        }),
+      } satisfies Prisma.quotationsWhereInput,
       data: { status: quotation_status_enum.cancelled, updated_at: new Date() },
-      include: this.QUOTATION_INCLUDE,
     });
+    if (marked.count !== 1) {
+      throw new BadRequestException(
+        'La cotización cambió de estado y ya no puede cancelarse.',
+      );
+    }
+    return this.findOne(id);
   }
 
   async convertToOrder(id: number) {
