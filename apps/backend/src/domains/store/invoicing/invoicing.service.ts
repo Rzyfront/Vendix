@@ -62,7 +62,6 @@ import {
 } from '../../../common/utils/store-timezone.util';
 import { resolveUneceUnitCode } from '../products/services/uom-uncefact.util';
 import {
-  AiuSettings,
   DEFAULT_ECOMMERCE_AUTO_EMIT,
   DEFAULT_POS_AUTO_EMIT,
   DEFAULT_POS_DIAN_FAILURE_POLICY,
@@ -107,6 +106,7 @@ import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapt
 import { normalizeNit } from '../../../common/utils/nit.util';
 import {
   buildContractAiuDraft,
+  ContractAiuDraft,
   ContractAiuSnapshot,
 } from './contract-invoice';
 import {
@@ -1937,7 +1937,6 @@ export class InvoicingService {
       calculated.header_taxes,
       calculated.lines,
     );
-
     const invoice = await this.prisma.invoices.create({
       data: {
         organization_id: context.organization_id,
@@ -4104,7 +4103,6 @@ export class InvoicingService {
     const accounting_entity_id =
       await this.resolveAccountingEntityIdForContext(context);
 
-    // Lectura scopeada (`findFirst`, no `findUnique`: ver C.1).
     const contract = await this.prisma.contracts.findFirst({
       where: { id: contract_id },
     });
@@ -4115,54 +4113,64 @@ export class InvoicingService {
         { contract_id },
       );
     }
-
-    // Idempotencia capa 1: la factura existente manda a la factura, no a un
-    // error generico. Va ANTES del gate de estado, igual que en C.1.
     await this.assertNoContractInvoice(this.prisma, contract_id);
-
     if (contract.status !== 'active') {
       throw contractNotReadyForInvoice(contract.id, contract.status);
     }
 
-    // Precarga pura desde el snapshot (ADR-03): 422 ANTES de numerar cuando
-    // el contrato no trae A/I/U o la cotizacion no trae tarifas.
+    // Everything that can reject the frozen agreement runs before number
+    // allocation. This source is immutable quote data, never a current profile,
+    // product price, tenant AIU setting, or quotation notes fallback.
     const draft = buildContractAiuDraft(
       contract.snapshot as unknown as ContractAiuSnapshot,
       contract.contract_number,
       contract.id,
     );
+    await this.assertFrozenContractInvoiceProfile(draft.invoice_profile);
+    const config = draft.invoice_profile.config;
+    const profile_issues = validateInvoiceProfileConfig(config, {
+      operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
+    });
+    if (profile_issues.length > 0) {
+      throw buildProfileConfigException(profile_issues, {
+        profile_id: draft.invoice_profile.profile_id,
+        operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
+      });
+    }
 
     const items: CreateInvoiceItemDto[] = draft.lines.map((line) => ({
       description: line.description,
       quantity: line.quantity,
       unit_price: line.unit_price,
       discount_amount: line.discount_amount,
-      aiu_component: line.aiu_component,
+      unit_code: line.unit_code,
+      account_code: line.account_code,
+      aiu_component: line.aiu_component ?? undefined,
       taxes: line.taxes.map((tax) => ({
         tax_name: tax.tax_name,
         tax_rate: tax.tax_rate,
-        // QUI-INC — el tipo sale del MISMO objeto que aporta nombre y tarifa
-        // (`ContractAiuDraftLine.taxes[]`, derivado del snapshot del contrato),
-        // no de un literal escrito acá. Hoy el borrador sólo emite `iva`
-        // —`ContractAiuSnapshotItem` guarda `tax_rate` y NO `tax_type`, así que
-        // el carril AIU no tiene de dónde tipar otra cosa—, pero el día que lo
-        // guarde, la factura lo seguirá en vez de sobrescribirlo con IVA.
         tax_type: tax.tax_type as TaxFiscalType,
+        is_inclusive: tax.is_inclusive,
       })),
     }));
 
-    // MISMO orden que `create()`: regimen y recalculado ANTES del
-    // consecutivo — todo lo que rechaza lo hace sin gastar numeracion DIAN.
-    // Sin perfil de facturacion: el regimen sale del ajuste de la tienda
-    // (flujo manual) y `assertAiuBaseMatchesProfileMatrix` no tiene matriz
-    // contra la que contrastar.
     const aiu_context = await this.resolveAiuContext(
       DIAN_INVOICE_OPERATION_TYPES.AIU,
       items,
       draft.contract_object,
-      undefined,
-      undefined,
+      config.aiu,
     );
+    this.assertAiuBaseMatchesProfileMatrix(
+      config,
+      aiu_context.aiu,
+      DIAN_INVOICE_OPERATION_TYPES.AIU,
+      draft.invoice_profile.profile_id,
+    );
+
+    // Contract line inputs are already historical, direct economic snapshots.
+    // They have no product ids or tax_rate_ids, so this performs no catalog
+    // price/tax resolution and the canonical calculator reads their frozen
+    // amounts/rates directly.
     const line_snapshots = await this.resolveLinePricingSnapshots(items);
     const calculated = this.recalculateDocument(
       items,
@@ -4170,58 +4178,106 @@ export class InvoicingService {
       'invoice:create-from-contract',
       aiu_context.aiu,
       undefined,
-      // B.1 (F-063).
       {
         store_id: context.store_id ?? null,
         organization_id: context.organization_id ?? null,
       },
     );
+    this.assertContractCalculationMatchesFrozen(
+      draft.economic.calculation,
+      calculated,
+      contract.id,
+    );
 
-    // El adquiriente es el cliente del contrato (C.1 lo exige al crear).
-    // Paridad con `createFromSalesOrder`: nombre con `legal_name` primero y
-    // documento de la ficha; la emision congela desde estas columnas.
-    const customer = contract.customer_id
-      ? await this.prisma.users.findFirst({
-          where: { id: contract.customer_id },
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            legal_name: true,
-            document_type: true,
-            document_number: true,
-          },
-        })
-      : null;
-    const customer_name = customer
-      ? (customer.legal_name?.trim() ||
-        `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
-        undefined)
-      : undefined;
+    if (contract.customer_id == null) {
+      throw new VendixHttpException(
+        ErrorCodes.CUST_FIND_001,
+        'El contrato no tiene un cliente contractual. Revisa la siguiente revisión de cotización contractual antes de facturar.',
+        { contract_id },
+      );
+    }
+    // `users` getter is the base client, not store-scoped. Match the customer
+    // lookup contract explicitly so a legacy/foreign customer id is
+    // indistinguishable from a missing one and never leaks across stores.
+    const customer = await this.prisma.users.findFirst({
+      where: {
+        id: contract.customer_id,
+        organization_id: Number(context.organization_id),
+        store_users: { some: { store_id: Number(context.store_id) } },
+        user_roles: { some: { roles: { name: 'customer' } } },
+      },
+      select: CUSTOMER_FOR_INVOICE_SELECT,
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.CUST_FIND_001,
+        'El cliente del contrato no está disponible en esta tienda. Revisa una nueva revisión de cotización contractual del tenant antes de facturar.',
+        { contract_id },
+      );
+    }
+    const customer_snapshot = this.buildCustomerSnapshotFromFicha(customer);
+    const acquirer = resolveAcquirerRail({
+      document_type: customer_snapshot?.customer_document_type,
+      document_number: customer_snapshot?.customer_tax_id,
+      legal_name: customer?.legal_name,
+      first_name: customer?.first_name,
+      last_name: customer?.last_name,
+    });
+    const nit_split = this.splitInvoiceCustomerNitDv({
+      document_type: customer_snapshot?.customer_document_type,
+      document_number: customer_snapshot?.customer_tax_id,
+      verification_digit: customer_snapshot?.customer_verification_digit,
+    });
 
-    const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber({
-        document_type: 'sales_invoice',
-        accounting_entity_id,
-      });
+    const invoice_type = config.dian.document_type ?? 'sales_invoice';
+    const issue_date = new Date();
+    const foreign_currency =
+      config.currency?.declare_foreign === true
+        ? config.currency.code ?? undefined
+        : undefined;
+    const exchange_rate = await this.resolveExchangeRateForDocument({
+      foreign_currency,
+      issue_date: issue_date.toISOString(),
+    });
+    const foreign_total_amount =
+      foreign_currency && exchange_rate != null && Number(exchange_rate) > 0
+        ? new Prisma.Decimal(calculated.totals.total_amount)
+            .dividedBy(new Prisma.Decimal(exchange_rate))
+            .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN)
+        : null;
+    const payment_form = config.dian.payment_method_code ?? undefined;
+    const due_date = this.resolveDueDate(
+      { due_date: draft.due_date ?? undefined, payment_form },
+      issue_date,
+    );
 
-    // Un solo tributo (el IVA heredado) ⇒ fila agregada de cabecera, igual
-    // que en `create()`. La construccion lo garantiza; si algun dia no, el
-    // camino multi-tributo de abajo lo cubre fuera de la transaccion, como
-    // hace `create()`.
     const split_line_taxes = this.needsPersistedLineTaxes(
       calculated.header_taxes,
       calculated.lines,
     );
+    const preferred_resolution_id = await this.resolvePreferredContractResolution(
+      config.dian.resolution_id,
+      accounting_entity_id,
+      this.toFiscalDocumentType(invoice_type),
+      config.dian.resolution_number,
+    );
+    const invoice_notes = config.dian.header_notes?.filter(Boolean).join(' ') || undefined;
 
     try {
-      // El cliente de `$transaction` es el BASE (sin extension de scoping):
-      // todo `where` lleva el tenant a mano (misma disciplina que
-      // `ContractsService.createFromQuotation`).
       const invoice = await this.prisma.withoutScope().$transaction(
         async (tx: any) => {
-          // Idempotencia capa 2 (dentro de la transaccion): cierra la
-          // carrera entre la comprobacion previa y el INSERT.
+          // Same lock tuple and order as ContractsService.updateStatus. This
+          // serializes creation against cancellation; never consume the DIAN
+          // number until the locked, tenant-scoped state and idempotency check
+          // pass. The generator may use its own DB connection while this lock
+          // remains held on the contract row.
+          await tx.$queryRaw`
+            SELECT id FROM contracts
+            WHERE id = ${contract_id}
+              AND store_id = ${context.store_id}
+              AND organization_id = ${context.organization_id}
+            FOR UPDATE
+          `;
           const fresh = await tx.contracts.findFirst({
             where: {
               id: contract_id,
@@ -4236,37 +4292,62 @@ export class InvoicingService {
               { contract_id },
             );
           }
-          await this.assertNoContractInvoice(tx, contract_id);
           if (fresh.status !== 'active') {
             throw contractNotReadyForInvoice(fresh.id, fresh.status);
           }
+          if (
+            this.canonicalJson(fresh.snapshot) !== this.canonicalJson(contract.snapshot)
+          ) {
+            throw new VendixHttpException(
+              ErrorCodes.INVOICING_CALC_001,
+              'El acuerdo económico del contrato cambió durante la preparación de la factura. Vuelve a cargar el contrato antes de intentarlo otra vez.',
+              { contract_id },
+            );
+          }
+          await this.assertNoContractInvoice(tx, contract_id);
 
-          const created_invoice = await tx.invoices.create({
+          const { invoice_number, resolution_id } =
+            await this.invoice_number_generator.generateNextNumber({
+              resolution_id: preferred_resolution_id,
+              document_type: this.toFiscalDocumentType(invoice_type),
+              accounting_entity_id,
+            });
+
+          const created = await tx.invoices.create({
             data: {
               organization_id: context.organization_id,
               store_id: context.store_id,
               accounting_entity_id,
-              fiscal_document_type: 'sales_invoice',
+              fiscal_document_type: this.toFiscalDocumentType(invoice_type),
               invoice_number,
-              invoice_type: 'sales_invoice',
+              invoice_type,
               status: 'draft',
               customer_id: contract.customer_id,
-              customer_name,
-              customer_tax_id: customer?.document_number || undefined,
-              customer_document_type: customer?.document_type || undefined,
-              // DB-05: el vinculo contrato→factura (el UNIQUE parcial lo
-              // respalda en base).
+              customer_name:
+                acquirer.identity.name ?? customer_snapshot?.customer_name ?? undefined,
+              customer_tax_id: nit_split.document_number ?? undefined,
+              customer_address: customer_snapshot?.customer_address ?? undefined,
+              customer_email: customer_snapshot?.customer_email ?? undefined,
+              customer_phone: customer_snapshot?.customer_phone ?? undefined,
+              customer_document_type:
+                customer_snapshot?.customer_document_type ?? undefined,
+              customer_verification_digit:
+                nit_split.verification_digit ?? undefined,
+              customer_tax_regime:
+                customer_snapshot?.customer_tax_regime ?? undefined,
+              customer_fiscal_responsibilities:
+                customer_snapshot?.customer_fiscal_responsibilities ?? undefined,
+              customer_person_type:
+                (customer_snapshot?.customer_person_type as
+                  | 'NATURAL'
+                  | 'JURIDICA'
+                  | undefined) ?? undefined,
               contract_id: contract.id,
               resolution_id,
-              // `cbc:CustomizationID` '09': nace AIU, no hay otro tipo.
               operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
-              // SNAPSHOTS AIU con lo que se valido (ver `create()`): objeto,
-              // regimen, piso efectivo y matriz contra el snapshot.
               aiu_contract_object: aiu_context.contract_object,
               aiu_regime: aiu_context.aiu
-                ? this.regimeStringFromTaxableBasis(
-                    aiu_context.aiu.taxable_basis,
-                  )
+                ? this.regimeStringFromTaxableBasis(aiu_context.aiu.taxable_basis)
                 : undefined,
               aiu_minimum_percent: aiu_context.aiu
                 ? this.resolveAiuMinimumPercent(aiu_context.aiu)
@@ -4278,6 +4359,8 @@ export class InvoicingService {
                     'invoice:create-from-contract',
                   )
                 : undefined,
+              profile_id: draft.invoice_profile.profile_id,
+              profile_version: draft.invoice_profile.version,
               subtotal_amount: new Prisma.Decimal(
                 calculated.totals.total_before_tax,
               ),
@@ -4287,9 +4370,16 @@ export class InvoicingService {
               tax_amount: new Prisma.Decimal(calculated.totals.tax_amount),
               total_amount: new Prisma.Decimal(calculated.totals.total_amount),
               currency: 'COP',
-              issue_date: new Date(),
+              foreign_currency: foreign_currency ?? null,
+              foreign_total_amount,
+              exchange_rate: exchange_rate ?? null,
+              exchange_rate_date: foreign_currency ? issue_date : null,
+              payment_form,
+              payment_means_code: config.dian.payment_means_code ?? undefined,
+              due_date,
+              issue_date,
               created_by_user_id: context.user_id,
-              notes: contract.notes ?? undefined,
+              notes: invoice_notes || undefined,
               invoice_items: {
                 create: items.map((item, index) =>
                   this.buildInvoiceItemCreateInput(
@@ -4303,8 +4393,8 @@ export class InvoicingService {
                 ? {}
                 : {
                     invoice_taxes: {
-                      create: calculated.header_taxes.map((t) =>
-                        this.buildInvoiceTaxCreateInput(t),
+                      create: calculated.header_taxes.map((tax) =>
+                        this.buildInvoiceTaxCreateInput(tax),
                       ),
                     },
                   }),
@@ -4312,67 +4402,41 @@ export class InvoicingService {
             include: INVOICE_INCLUDE,
           });
 
-          // Atomico con la factura: el contrato pasa a `invoiced` en la
-          // MISMA transaccion. `updateMany` con filtro de tenant + estado
-          // (escritura scope-safe) y conteo verificado: si otro hilo
-          // facturo primero, el conteo es 0 y se resuelve al 409.
-          const marked = await tx.contracts.updateMany({
-            where: {
-              id: contract.id,
-              store_id: context.store_id,
-              status: 'active',
-            },
-            data: { status: 'invoiced', updated_at: new Date() },
-          });
-          if (marked.count === 0) {
-            const winner = await this.findActiveContractInvoice(
+          // Contract drafts are immutable economics. Persist their detail tax
+          // rows in the same transaction as the header/items so no incomplete
+          // draft can escape and then be impossible to repair via update().
+          if (split_line_taxes) {
+            await this.persistLineTaxes(
+              created.id,
+              calculated.lines.map((line) => line.taxes),
+              calculated.header_taxes,
               tx,
-              contract_id,
             );
-            if (winner) {
-              throw contractAlreadyInvoiced(
-                contract_id,
-                winner.id,
-                winner.invoice_number,
-              );
-            }
-            throw contractNotReadyForInvoice(contract.id, fresh.status);
+            return (
+              (await tx.invoices.findFirst({
+                where: { id: created.id },
+                include: INVOICE_INCLUDE,
+              })) ?? created
+            );
           }
-
-          return created_invoice;
+          return created;
         },
       );
 
-      let created = invoice;
-      if (split_line_taxes) {
-        await this.persistLineTaxes(
-          invoice.id,
-          calculated.lines.map((line) => line.taxes),
-          calculated.header_taxes,
-        );
-        created =
-          (await this.prisma.invoices.findFirst({
-            where: { id: invoice.id },
-            include: INVOICE_INCLUDE,
-          })) ?? invoice;
-      }
+      const created = invoice;
 
       this.event_emitter.emit('invoice.created', {
         invoice_id: created.id,
         invoice_number: created.invoice_number,
-        invoice_type: 'sales_invoice',
+        invoice_type,
         source: 'contract',
         contract_id,
       });
-
       this.logger.log(
         `Invoice ${created.invoice_number} created from contract #${contract_id}`,
       );
       return created;
     } catch (error) {
-      // Idempotencia capa 3 (red de la red): si el UNIQUE parcial de
-      // `contract_id` choco dentro de la transaccion, la factura ya existe
-      // — se responde el mismo 409 con la factura real.
       if (this.isUniqueViolation(error)) {
         const winner = await this.findActiveContractInvoice(
           this.prisma,
@@ -4388,6 +4452,191 @@ export class InvoicingService {
       }
       throw error;
     }
+  }
+
+  private async assertFrozenContractInvoiceProfile(
+    frozen: ContractAiuDraft['invoice_profile'],
+  ): Promise<void> {
+    const profile = await this.prisma.invoice_profiles.findFirst({
+      where: { id: frozen.profile_id },
+      select: { id: true, operation_type: true },
+    });
+    if (!profile) throw profileNotFound(frozen.profile_id);
+    if (profile.operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_008,
+        'El perfil congelado de la cotización ya no corresponde a una operación AIU (09). No se puede reinterpretar el acuerdo como otra operación.',
+        {
+          profile_id: frozen.profile_id,
+          profile_operation_type: profile.operation_type,
+          invoice_operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
+        },
+      );
+    }
+
+    // This is an immutable historical version lookup, intentionally not a
+    // read of current_version and not gated by the profile's current state.
+    const historical = await this.prisma.invoice_profile_versions.findFirst({
+      where: { profile_id: frozen.profile_id, version: frozen.version },
+      select: { version: true, config: true },
+    });
+    if (
+      !historical ||
+      this.canonicalJson(historical.config) !== this.canonicalJson(frozen.config)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `La versión ${frozen.version} del perfil AIU #${frozen.profile_id} no coincide con la configuración congelada en el contrato. La factura se detuvo para no cambiar el acuerdo ni usar una versión vigente diferente.`,
+        { profile_id: frozen.profile_id, profile_version: frozen.version },
+      );
+    }
+  }
+
+  private canonicalJson(value: unknown): string {
+    const sort = (entry: unknown): unknown => {
+      if (Array.isArray(entry)) return entry.map(sort);
+      if (entry && typeof entry === 'object') {
+        return Object.fromEntries(
+          Object.entries(entry as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, child]) => [key, sort(child)]),
+        );
+      }
+      return entry;
+    };
+    return JSON.stringify(sort(value));
+  }
+
+  private assertContractCalculationMatchesFrozen(
+    frozen: InvoiceCalculatorResult,
+    actual: InvoiceCalculatorResult,
+    contract_id: number,
+  ): void {
+    const mismatch = (field: string): never => {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `La factura recalculada no coincide con los importes AIU congelados de la cotización del contrato ${contract_id} (${field}). No se consumió numeración. Crea una nueva revisión económica y vuelve a aceptar el acuerdo.`,
+        { contract_id, field },
+      );
+    };
+    const equalMoney = (left: unknown, right: unknown) => {
+      try {
+        return new Prisma.Decimal(String(left ?? 0)).equals(
+          new Prisma.Decimal(String(right ?? 0)),
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    const totalFields: Array<keyof InvoiceCalculatorResult['totals']> = [
+      'gross_subtotal',
+      'discount_amount',
+      'total_before_tax',
+      'tax_amount',
+      'tax_iva',
+      'tax_inc',
+      'tax_ica',
+      'tax_other',
+      'tax_inclusive_amount',
+      'total_amount',
+      'withholding_amount',
+      'prepaid_amount',
+    ];
+    for (const field of totalFields) {
+      if (!equalMoney(frozen.totals[field], actual.totals[field])) {
+        mismatch(`totals.${field}`);
+      }
+    }
+    if (frozen.lines.length !== actual.lines.length) mismatch('líneas');
+    for (let index = 0; index < frozen.lines.length; index++) {
+      const expected = frozen.lines[index];
+      const recalculated = actual.lines[index];
+      if (
+        expected.description !== recalculated.description ||
+        expected.aiu_component !== recalculated.aiu_component ||
+        expected.omit_tax_total !== recalculated.omit_tax_total
+      ) {
+        mismatch(`líneas[${index}].clasificación`);
+      }
+      const lineMoneyFields = [
+        'gross_amount',
+        'discount_amount',
+        'net_entered_amount',
+        'line_extension_amount',
+        'taxable_amount',
+        'tax_amount',
+        'total_amount',
+      ] as const;
+      for (const field of lineMoneyFields) {
+        if (!equalMoney(expected[field], recalculated[field])) {
+          mismatch(`líneas[${index}].${field}`);
+        }
+      }
+      if (expected.taxes.length !== recalculated.taxes.length) {
+        mismatch(`líneas[${index}].impuestos`);
+      }
+      for (let taxIndex = 0; taxIndex < expected.taxes.length; taxIndex++) {
+        const expectedTax = expected.taxes[taxIndex];
+        const actualTax = recalculated.taxes[taxIndex];
+        if (
+          expectedTax.tax_name !== actualTax.tax_name ||
+          expectedTax.tax_type !== actualTax.tax_type ||
+          expectedTax.dian_tax_code !== actualTax.dian_tax_code ||
+          expectedTax.rate_basis !== actualTax.rate_basis ||
+          expectedTax.is_inclusive !== actualTax.is_inclusive ||
+          !equalMoney(expectedTax.tax_rate, actualTax.tax_rate) ||
+          !equalMoney(expectedTax.taxable_amount, actualTax.taxable_amount) ||
+          !equalMoney(expectedTax.tax_amount, actualTax.tax_amount)
+        ) {
+          mismatch(`líneas[${index}].impuestos[${taxIndex}]`);
+        }
+      }
+    }
+    if (Boolean(frozen.aiu) !== Boolean(actual.aiu)) mismatch('resumen AIU');
+    if (frozen.aiu && actual.aiu) {
+      if (frozen.aiu.taxable_basis !== actual.aiu.taxable_basis) {
+        mismatch('aiu.taxable_basis');
+      }
+      for (const field of [
+        'contract_value',
+        'aiu_value',
+        'taxable_base',
+        'minimum_base',
+      ] as const) {
+        if (!equalMoney(frozen.aiu[field], actual.aiu[field])) {
+          mismatch(`aiu.${field}`);
+        }
+      }
+    }
+  }
+
+  private async resolvePreferredContractResolution(
+    preferred_id: number | null | undefined,
+    accounting_entity_id: number,
+    document_type: string,
+    preferred_number: string | null | undefined,
+  ): Promise<number | undefined> {
+    if (preferred_id == null) return undefined;
+    const now = new Date();
+    const preferred = await this.prisma.invoice_resolutions.findFirst({
+      where: {
+        id: preferred_id,
+        accounting_entity_id,
+        document_type,
+        is_active: true,
+        valid_from: { lte: now },
+        valid_to: { gte: now },
+      },
+      select: { id: true, current_number: true, range_to: true },
+    });
+    if (preferred && preferred.current_number < preferred.range_to) {
+      return preferred.id;
+    }
+    this.logger.warn(
+      `Perfil AIU prefería la resolución ${preferred_number ?? preferred_id}, pero no está vigente/disponible para accounting_entity_id=${accounting_entity_id}; se usará la resolución vigente automática.`,
+    );
+    return undefined;
   }
 
   /**
@@ -4449,6 +4698,51 @@ export class InvoicingService {
 
   async update(id: number, dto: UpdateInvoiceDto) {
     const invoice = await this.findOne(id);
+    if (invoice.contract_id != null) {
+      const frozenContractFields = [
+        'items',
+        'taxes',
+        'profile_id',
+        'operation_type',
+        'aiu_contract_object',
+        'aiu_accounting_model',
+        'aiu_taxable_basis',
+        'aiu_enforce_minimum_base',
+        'aiu_minimum_base_percent',
+        'customer_id',
+        'customer_name',
+        'customer_tax_id',
+        'customer_address',
+        'customer_email',
+        'customer_phone',
+        'customer_document_type',
+        'customer_verification_digit',
+        'customer_tax_regime',
+        'customer_fiscal_responsibilities',
+        'customer_person_type',
+        'due_date',
+        'payment_form',
+        'payment_means_code',
+        'currency',
+        'foreign_currency',
+        'foreign_total_amount',
+        'exchange_rate',
+        'exchange_rate_date',
+        'withholding_amount',
+        'withholdings',
+        'notes',
+      ];
+      const attempted = frozenContractFields.filter((key) =>
+        Object.prototype.hasOwnProperty.call(dto, key),
+      );
+      if (attempted.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_001,
+          `La factura del contrato hereda una economía, perfil, base fiscal, cliente y condiciones congeladas del acuerdo. No se pueden editar desde la factura (${attempted.join(', ')}). Crea una nueva revisión contractual antes de facturar otra vez.`,
+          { invoice_id: id, contract_id: invoice.contract_id, fields: attempted },
+        );
+      }
+    }
     if (invoice.financial_account_id) {
       const economicKeys = ['items','taxes','customer_id','inline_customer','order_id','discount_amount','shipping_amount','withholding_amount','withholdings','operation_type','profile_id'];
       if (economicKeys.some((key) => Object.prototype.hasOwnProperty.call(dto, key))) {
@@ -5381,14 +5675,10 @@ export class InvoicingService {
    * devuelve los ids de las líneas hasta que el INSERT termina, y
    * `invoice_taxes.invoice_item_id` los necesita. De ahí la segunda escritura.
    *
-   * NO se envuelve en `$transaction`: el cliente de Prisma que entrega
-   * `$transaction` es el BASE, sin la extensión de scoping, y `invoices` es un
-   * modelo store-scoped cuyo `store_id` inyecta precisamente esa extensión.
-   * Meter la creación del documento en una transacción lo escribiría sin
-   * tenant. El riesgo que queda —fallar entre las dos escrituras y dejar un
-   * BORRADOR sin filas de impuesto— es acotado y recuperable: el documento
-   * todavía no tiene CUFE ni se transmitió, y volver a guardarlo recalcula y
-   * reescribe los tributos por completo.
+   * La ruta histórica usa el Prisma store-scoped por defecto. La emisión desde
+   * contrato puede pasar el cliente transaccional BASE: allí header/items ya
+   * incluyen `store_id` explícito y las filas tributarias se confirman o
+   * revierten junto con el borrador económico inmutable.
    *
    * ## El alineamiento por posición
    *
@@ -5403,8 +5693,9 @@ export class InvoicingService {
     invoice_id: number,
     line_taxes: DocumentLineTaxes,
     fallback_header_taxes: InvoiceTaxRowInput[],
+    client: any = this.prisma,
   ): Promise<void> {
-    const items = await this.prisma.invoice_items.findMany({
+    const items = await client.invoice_items.findMany({
       where: { invoice_id },
       select: { id: true },
       orderBy: { id: 'asc' },
@@ -5441,7 +5732,7 @@ export class InvoicingService {
     // `createMany` y no `create` anidado: `invoice_taxes` es un modelo
     // RELACIONAL en el scoping de tienda (se filtra por `invoice.store_id` en
     // lectura), así que el create pasa sin que la extensión le inyecte nada.
-    const written = await this.prisma.invoice_taxes.createMany({ data: rows });
+    const written = await client.invoice_taxes.createMany({ data: rows });
 
     // B.1 (F-023) — verificación de lectura del segundo paso: si el
     // `createMany` no persistió nada habiendo filas que escribir, el
@@ -5494,30 +5785,18 @@ export class InvoicingService {
     }
 
     const due_date = new Date(dto.due_date);
-    if (due_date < issue_date) {
+    if (
+      Number.isNaN(due_date.getTime()) ||
+      due_date.toISOString().slice(0, 10) < issue_date.toISOString().slice(0, 10)
+    ) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
-        `La fecha de vencimiento (${dto.due_date}) es anterior a la fecha de emisión. Corrige una de las dos.`,
+        `La fecha de vencimiento (${dto.due_date}) no es válida o es anterior a la fecha de emisión. Corrige una de las dos.`,
       );
     }
     return due_date;
   }
 
-  /**
-   * Lee `store_settings.invoicing.aiu` de la tienda en contexto.
-   *
-   * Devuelve `{}` cuando la tienda no tiene la sección: los defaults viven en
-   * `resolveAiuContext`, no acá, para que exista un solo sitio donde consultar
-   * qué se asume cuando el comerciante no ha configurado nada.
-   *
-   * La sección se escribe por `PATCH /store/settings`: está registrada en
-   * `KNOWN_SECTIONS` (`settings.service.ts`) **y** declarada como
-   * `InvoicingSettingsDto` en `UpdateSettingsDto`. Hacen falta las dos — el
-   * sanitizador descarta lo que no esté en la lista respondiendo 200 igual, y el
-   * `ValidationPipe` corre con `whitelist: true` y borra lo que el DTO no
-   * declare. Si alguien quita cualquiera de las dos, el régimen AIU vuelve a ser
-   * inescribible sin que ningún error lo delate.
-   */
   /**
    * Que toda tarifa referenciada EXISTA y sea de este tenant — antes de tomar
    * el consecutivo.
@@ -5774,25 +6053,8 @@ export class InvoicingService {
   }
 
   /**
-   * Vista de SÓLO LECTURA de la configuración AIU efectiva, para que el
-   * formulario instruya al comerciante con la regla que de verdad se le va a
-   * aplicar.
-   *
-   * Devuelve los valores YA RESUELTOS con los mismos defaults del motor
-   * (`resolveAiuContext` + `InvoiceCalculatorService`), no lo crudo del JSON:
-   * una tienda que nunca tocó la sección debe ver `et_462_1` con piso del 10 %,
-   * que es lo que efectivamente va a calcular, y no tres campos vacíos que
-   * sugieren que el AIU no está configurado.
-   *
-   * `note_valid` anticipa la única validación que hoy bloquea la emisión sin
-   * que el usuario pueda adivinarla desde el modal: la regla CAV03 exige que la
-   * nota de la línea de Administración —prefijo obligatorio incluido— mida
-   * entre 20 y 5.000 caracteres, y el objeto del contrato vive en la
-   * configuración de la tienda, no en el documento. Sin este dato el usuario
-   * captura la factura completa y sólo descubre el problema al validar.
-   *
-   * No expone nada sensible: el objeto del contrato es un texto que viaja en el
-   * XML público de la factura.
+   * Legacy read-only endpoint. It returns explicit document defaults only;
+   * it never reads `store_settings.invoicing.aiu`.
    */
   async getAiuSettingsView(): Promise<{
     regime: 'et_462_1' | 'decreto_1372_1992';
@@ -5806,24 +6068,21 @@ export class InvoicingService {
     note_min_length: number;
     note_max_length: number;
     note_prefix: string;
-    /** `true` cuando la tienda nunca guardó la sección `invoicing.aiu`. */
+    /** Always true: the removed settings section no longer owns these values. */
     is_default: boolean;
   }> {
-    const context = this.getContext();
-    const settings = await this.loadAiuSettings(context.store_id);
-
-    const regime = settings.regime ?? 'et_462_1';
-    const contract_object = (settings.contract_object || '').trim();
+    this.getContext();
+    // Legacy settings stay stored for data compatibility but no longer control
+    // fiscal behavior. The document/profile is the source of truth.
+    const regime = 'et_462_1' as const;
+    const contract_object = '';
     const note = buildAiuNote(contract_object);
 
     return {
       regime,
       contract_object,
-      // `!== false` y no `?? true`: replica literalmente la condición del
-      // calculador (`aiu.enforce_minimum_base !== false`), donde cualquier
-      // valor distinto de `false` explícito activa el piso.
-      enforce_minimum_base: settings.enforce_minimum_base !== false,
-      minimum_base_percent: Number(settings.minimum_base_percent ?? 10),
+      enforce_minimum_base: true,
+      minimum_base_percent: 10,
       note,
       note_length: note.length,
       note_valid:
@@ -5832,21 +6091,8 @@ export class InvoicingService {
       note_min_length: DIAN_AIU_NOTE_MIN_LENGTH,
       note_max_length: DIAN_AIU_NOTE_MAX_LENGTH,
       note_prefix: DIAN_AIU_NOTE_PREFIX,
-      is_default: settings.regime === undefined,
+      is_default: true,
     };
-  }
-
-  private async loadAiuSettings(store_id?: number): Promise<AiuSettings> {
-    if (typeof store_id !== 'number') return {};
-
-    const row = await this.prisma.store_settings.findUnique({
-      where: { store_id },
-      select: { settings: true },
-    });
-
-    const settings = row?.settings as Record<string, any> | null;
-    const aiu = settings?.invoicing?.aiu;
-    return aiu && typeof aiu === 'object' ? (aiu as AiuSettings) : {};
   }
 
   /**
@@ -6352,9 +6598,7 @@ export class InvoicingService {
     operation_type: string | null | undefined,
     items: Array<{ aiu_component?: string | null }>,
     /**
-     * Objeto del contrato declarado en ESTE documento. Gana sobre el de la
-     * tienda, que pasa a ser el valor por defecto. Una empresa de servicios
-     * tiene varios contratos AIU y hasta ahora sólo podía describir uno.
+     * Objeto explícito declarado en ESTE documento/acuerdo.
      */
     invoice_contract_object?: string | null,
     /**
@@ -6365,10 +6609,10 @@ export class InvoicingService {
      */
     profile_aiu?: ProfileAiuConfig | null,
     /**
-     * C.7 — los TRES controles que el perfil/tienda congelan pero que ESTE
+     * C.7 — los TRES controles que el perfil/documento congela pero que ESTE
      * documento puede apartar: base gravable, exigencia del piso y su
      * porcentaje. MISMA precedencia que `invoice_contract_object`: ganan
-     * sobre `profile_aiu`/`store_settings`, que pasan a ser el default.
+     * sobre `profile_aiu`/los defaults del documento.
      * Ausencia de cualquiera de los tres ⇒ lo que diga la fuente, NUNCA un
      * valor fijo — ver `resolveAiuTaxableBasis`, la única función que decide
      * la ausencia de `taxable_basis` en todo el archivo.
@@ -6404,46 +6648,29 @@ export class InvoicingService {
       return {};
     }
 
-    const context = this.getContext();
-
-    // FUENTE DE LA CONFIGURACIÓN — el perfil gana, y cuando gana la tienda no
-    // se consulta.
-    //
-    // El `??` corta el `await`: con perfil NO hay lectura de `store_settings`,
-    // ni como respaldo. Es deliberado y es el punto entero del congelado. Un
-    // merge «perfil sobre tienda» sería peor que no tener perfiles: un campo que
-    // el perfil no declare se rellenaría con configuración VIVA, así que el
-    // documento quedaría mitad congelado y mitad no, sin que nada lo indique.
-    // Si a la configuración del perfil le falta algo que la emisión necesita,
-    // eso es un defecto del contrato `InvoiceProfileConfig` y se arregla ahí
-    // —con su validador y su versión de contrato—, no tapándolo acá.
+    // Fuente fiscal: configuración congelada del perfil o defaults explícitos
+    // del documento manual. Legacy `store_settings.invoicing.aiu` permanece en
+    // BD para compatibilidad, pero ya no se lee ni influye en facturación.
     const source: {
       regime?: ProfileAiuConfig['regime'];
       taxable_basis?: AiuTaxableBasis | null;
       contract_object?: string;
       enforce_minimum_base?: boolean;
       minimum_base_percent?: number | string;
-      /**
-       * D.4 — sólo `ProfileAiuConfig` los declara. `AiuSettings` (el ajuste de
-       * tienda, sin perfil) sigue siendo de 2 valores —ver el comentario de
-       * arriba— y no tiene sección de reparto A/I/U: no se le puede añadir acá
-       * sin tocar `store-settings.interface.ts`, fuera de mi territorio esta
-       * sesión. Por eso `components`/`components_basis` sólo llegan al motor
-       * cuando el documento se emite bajo un perfil (`profile_aiu` presente);
-       * sin perfil, `explodeAiuContratoLine` cae en su fallback conservador
-       * (todo Utilidad) y una línea 'contrato' manual sigue tributando de más,
-       * nunca de menos.
-       */
+      /** Full frozen profile components; document defaults have no A/I/U split. */
       components?: ProfileAiuConfig['components'];
       components_basis?: AiuComponentsBasis | null;
-    } = profile_aiu ?? (await this.loadAiuSettings(context.store_id));
+    } = profile_aiu ?? {
+      regime: 'et_462_1',
+      contract_object: '',
+      enforce_minimum_base: true,
+      minimum_base_percent: '10.00',
+    };
 
-    // `loadAiuSettings` (ajuste de tienda) es de 2 valores y nunca declara
-    // `taxable_basis`: «subtotal» sólo llega vía perfil, nunca como default de
-    // tienda — ver el docblock de `getAiuSettingsView`. Con perfil, si éste no
-    // trae `taxable_basis` (snapshot de antes de este campo), se deriva de su
-    // `regime` sin reescribir nada.
-    // Precedencia documento → perfil/tienda, MISMA regla que `contract_object`
+    // Con perfil, si no trae `taxable_basis` (snapshot previo al campo), se
+    // deriva del régimen congelado. Sin perfil, el fallback es el default
+    // explícito del documento, nunca una preferencia tenant viva.
+    // Precedencia documento → perfil/default, MISMA regla que `contract_object`
     // dos líneas más abajo. `resolveAiuTaxableBasis` es la MISMA función que
     // usa el perfil para resolver su propia ausencia — no se escribe un
     // cuarto punto de decisión: si el documento no manda `taxable_basis`, se
@@ -6480,11 +6707,9 @@ export class InvoicingService {
       // declare por factura), así que las dos salidas reales son: escribirlo en
       // ESTA factura, o ponérselo al perfil.
       const guidance = profile_aiu
-        ? `Descríbelo en el campo «Objeto del contrato» de esta factura, o edita el perfil ` +
-          `de facturación para que lo traiga. La configuración de la tienda NO se usa cuando ` +
-          `la factura se emite bajo un perfil: lo que gobierna es la versión congelada del perfil.`
-        : `Descríbelo en el campo «Objeto del contrato» de esta factura o, si es siempre el mismo, ` +
-          `en la configuración de facturación de la tienda.`;
+        ? `El objeto acordado debe estar en el snapshot del contrato o en el perfil de facturación congelado. ` +
+          `La configuración general de la tienda no es fuente fiscal de facturas AIU.`
+        : `Completa el objeto del contrato en esta factura. La configuración general de la tienda no es fuente fiscal de facturas AIU.`;
       throw new VendixHttpException(
         ErrorCodes.INVOICING_AIU_002,
         `El objeto del contrato AIU falta o no tiene la longitud que exige la DIAN: la nota de la ` +
@@ -6496,7 +6721,7 @@ export class InvoicingService {
           has_contract_object: !!contract_object,
           // Qué fuente gobernó. Sin esto el frontend no puede saber a qué
           // pantalla mandar al usuario, y adivinarlo es la mitad del defecto.
-          config_source: profile_aiu ? 'profile' : 'store_settings',
+          config_source: profile_aiu ? 'profile' : 'document_default',
         },
       );
     }
