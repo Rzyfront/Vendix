@@ -3,21 +3,24 @@
     <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-2">
         <h2 id="buyer-event-title" class="text-base font-semibold text-text-primary">Eventos electrónicos del comprador</h2>
+        <app-tooltip content="La solicitud de revisión conserva control de versión y evidencia. El estado verificado no transmite eventos por sí mismo.">
+          <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre la habilitación del comprador"><app-icon name="info" [size]="16" /></button>
+        </app-tooltip>
         @if (!loading() && status()) {
           <span class="rounded-full bg-surface-secondary px-2.5 py-1 text-xs font-medium text-text-secondary">{{ stateLabel() }}</span>
         }
       </div>
       <p class="mt-1 text-sm text-text-secondary">{{ statusMessage() }}</p>
     </div>
-    @if (canConfigure()) {
-      <button type="button" class="min-h-11 shrink-0 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="!scopeReady() || loading() || !status()" (click)="openRequest()">Solicitar revisión</button>
+    @if (canConfigure() && !(embedded() && inlineRequest())) {
+      <app-button variant="primary" size="md" [disabled]="!scopeReady() || loading() || !status() || isBusy()" (clicked)="openRequest()">Solicitar revisión</app-button>
     }
   </div>
 
   @if (loading()) { <p class="mt-3 text-sm text-text-secondary" role="status">Consultando habilitación…</p> }
   @if (loadError()) {
     <div class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">
-      <span>{{ loadError() }}</span><button type="button" class="min-h-11 rounded-md border border-error/30 px-3 font-medium" (click)="reloadStatus()">Recargar estado</button>
+      <span>{{ loadError() }}</span><app-button variant="outline" size="sm" (clicked)="reloadStatus()">Recargar estado</app-button>
     </div>
   }
   @if (status() && !loading()) {
@@ -43,75 +46,109 @@
       }
     </ul>
   }
-  <p class="mt-3 border-t border-border pt-3 text-xs text-text-secondary">La fuente de recepción automática se configura en Conexiones; la bandeja y la captura manual no requieren habilitación de eventos.</p>
+  <p class="mt-3 border-t border-border pt-3 text-xs text-text-secondary">El evento 034 es solo de consulta; la configuración no transmite eventos legales.</p>
+
+  @if (embedded() && inlineRequest()) {
+    <div class="mt-4 rounded-lg border border-border p-3">
+      <ng-container [ngTemplateOutlet]="requestForm" />
+      <div class="mt-4 flex flex-col-reverse justify-end gap-2 sm:flex-row">
+        <app-button variant="outline" size="md" [disabled]="submitLoading()" (clicked)="closeInlineRequest()">Cancelar</app-button>
+        <app-button variant="primary" size="md" [disabled]="!canSubmit()" [loading]="submitLoading()" (clicked)="submit()">Enviar solicitud</app-button>
+      </div>
+    </div>
+  }
 </section>
 
-<app-modal [(isOpen)]="open" title="Solicitar revisión de eventos" subtitle="Selecciona la configuración, evidencia y códigos para revisión." size="lg" [dialog]="true" [canClose]="canCloseModal" (cancel)="onModalChange(false)">
-  <div class="space-y-4">
+@if (!embedded()) {
+  <app-modal [(isOpen)]="open" title="Solicitar revisión de eventos" subtitle="Selecciona la configuración, evidencia y códigos para revisión." size="lg" [dialog]="true" [canClose]="canCloseModal" (cancel)="onModalChange(false)">
+    <ng-container [ngTemplateOutlet]="requestForm" />
+    <div slot="footer" class="flex flex-col-reverse justify-end gap-2 sm:flex-row">
+      <app-button variant="outline" size="md" [disabled]="submitLoading()" (clicked)="onModalChange(false)">Cancelar</app-button>
+      <app-button variant="primary" size="md" [disabled]="!canSubmit()" [loading]="submitLoading()" (clicked)="submit()">Enviar solicitud</app-button>
+    </div>
+  </app-modal>
+}
+
+<ng-template #requestForm>
+  <div class="space-y-4" [formGroup]="form">
     <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary">Enviar esta solicitud no significa aprobación de la DIAN ni transmite eventos legales.</p>
     @if (optionsError()) {
-      <div role="alert" class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">{{ optionsError() }} <button type="button" class="ml-2 min-h-11 underline" (click)="loadOptions(page())">Reintentar</button></div>
+      <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
+        <span>{{ optionsError() }}</span><app-button variant="outline" size="sm" (clicked)="loadOptions(page())">Reintentar</app-button>
+      </div>
     }
     @if (optionsLoading()) { <p role="status" class="text-sm text-text-secondary">Cargando opciones…</p> }
     @if (options(); as data) {
       @if (data.dian_configurations.length === 0) {
         <div class="rounded-lg border border-border p-3 text-sm text-text-secondary">No hay configuraciones DIAN disponibles. <a class="font-medium text-primary underline" routerLink="/admin/invoicing/dian-config">Configura DIAN</a>.</div>
       } @else {
-        <fieldset class="space-y-2">
-          <legend class="text-sm font-semibold text-text-primary">Configuración DIAN <span aria-hidden="true">*</span></legend>
-          @if (data.configurations_truncated) { <p class="text-xs text-warning">La lista está limitada a las primeras 100 configuraciones.</p> }
-          @for (config of data.dian_configurations; track config.id) {
-            <label class="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
-              <input class="mt-1 h-4 w-4 accent-primary" type="radio" name="buyer-event-config" [checked]="form.controls.dian_configuration_id.value === config.id" (change)="form.controls.dian_configuration_id.setValue(config.id)" />
-              <span class="min-w-0 text-sm text-text-primary"><span class="font-medium">{{ config.name }}</span> · {{ config.environment === 'production' ? 'Producción' : 'Pruebas' }} · {{ config.enablement_status }}
-                @if (configWarning(config); as warning) { <span class="mt-1 block text-xs text-warning">{{ warning }}</span> }
-              </span>
-            </label>
-          }
-        </fieldset>
+        <div class="flex items-start gap-2">
+          <app-selector
+            class="min-w-0 flex-1"
+            id="buyer-event-config"
+            size="lg"
+            label="Configuración DIAN"
+            placeholder="Selecciona una configuración"
+            [required]="true"
+            [disabled]="submitLoading()"
+            [options]="configurationOptions()"
+            formControlName="dian_configuration_id"
+            (valueChange)="onConfigurationSelection($event)"
+          />
+          <app-tooltip content="El backend devuelve una lista de referencia limitada a 100 configuraciones; el NIT debe corresponder a la entidad fiscal actual.">
+            <button type="button" class="mt-6 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda para elegir configuración DIAN"><app-icon name="info" [size]="16" /></button>
+          </app-tooltip>
+        </div>
+        @if (data.configurations_truncated) { <p class="text-xs text-warning">La lista está limitada a las primeras 100 configuraciones (límite del backend).</p> }
       }
 
       @if (!hasUsableEvidence(data)) {
         <div class="rounded-lg border border-border p-3 text-sm text-text-secondary">No hay evidencia con artefacto disponible en esta página. <a class="font-medium text-primary underline" routerLink="/admin/fiscal">Agrega o revisa evidencia fiscal</a>.</div>
-      }
-      @if (data.total > 0) {
-        <fieldset class="space-y-2">
-          <legend class="text-sm font-semibold text-text-primary">Evidencia con artefacto <span aria-hidden="true">*</span></legend>
-          @for (item of data.evidence; track item.id) {
-            <label class="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border p-3" [class.opacity-50]="!item.has_artifact">
-              <input class="mt-1 h-4 w-4 accent-primary" type="radio" name="buyer-event-evidence" [disabled]="!item.has_artifact" [checked]="evidenceSelected(item.id)" (change)="selectEvidence(item)" />
-              <span class="text-sm text-text-primary">{{ evidenceLabel(item.evidence_type) }} · {{ formatDate(item.created_at) }} @if (!item.has_artifact) { <span class="text-xs text-warning">Sin artefacto</span> }</span>
-            </label>
-          }
-        </fieldset>
-      }
-      @if (pageCount() > 1) {
-        <div class="flex items-center justify-between gap-2 text-sm text-text-secondary">
-          <button type="button" class="min-h-11 rounded-md border border-border px-3 disabled:opacity-50" [disabled]="page() <= 1 || optionsLoading()" (click)="loadOptions(page() - 1)">Anterior</button>
-          <span>Página {{ page() }} de {{ pageCount() }}</span>
-          <button type="button" class="min-h-11 rounded-md border border-border px-3 disabled:opacity-50" [disabled]="page() >= pageCount() || optionsLoading()" (click)="loadOptions(page() + 1)">Siguiente</button>
+      } @else {
+        <div class="flex items-start gap-2">
+          <app-selector
+            class="min-w-0 flex-1"
+            id="buyer-event-evidence"
+            size="lg"
+            label="Evidencia con artefacto"
+            placeholder="Selecciona evidencia"
+            [required]="true"
+            [disabled]="submitLoading()"
+            [options]="evidenceOptions()"
+            formControlName="evidence_id"
+            (valueChange)="onEvidenceSelection($event)"
+          />
+          <app-tooltip content="Solo se ofrecen evidencias de esta página que tienen un artefacto asociado. El backend pagina las opciones; usa las páginas siguientes si falta un documento.">
+            <button type="button" class="mt-6 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda para elegir evidencia"><app-icon name="info" [size]="16" /></button>
+          </app-tooltip>
         </div>
       }
+      <div [class.pointer-events-none]="submitLoading()" [class.opacity-50]="submitLoading()" [attr.aria-disabled]="submitLoading()">
+        <app-pagination [currentPage]="page()" [totalPages]="pageCount()" [total]="data.total" [limit]="data.limit" infoStyle="page" (pageChange)="loadOptions($event)" />
+      </div>
 
       <fieldset class="space-y-2">
-        <legend class="text-sm font-semibold text-text-primary">Códigos para revisión <span aria-hidden="true">*</span></legend>
+        <legend class="flex items-center gap-2 text-sm font-semibold text-text-primary">Códigos para revisión <span aria-hidden="true">*</span>
+          <app-tooltip content="Los códigos marcados se incluyen en la solicitud de revisión. No se envían eventos al comprador desde esta pantalla.">
+            <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre códigos de evento"><app-icon name="info" [size]="16" /></button>
+          </app-tooltip>
+        </legend>
         @for (code of eventCodes; track code) {
-          <label class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-border p-3 text-sm text-text-primary">
-            <input class="h-4 w-4 accent-primary" type="checkbox" [checked]="isCodeSelected(code)" (change)="onCodeChange(code, $event)" />
-            {{ code }} · {{ codeLabel(code) }}
-          </label>
+          <div class="flex min-h-11 items-center gap-3 rounded-lg border border-border p-3 text-sm text-text-primary">
+            <app-toggle [checked]="isCodeSelected(code)" [disabled]="submitLoading()" [ariaLabel]="code + ' · ' + codeLabel(code)" (changed)="toggleCode(code, $event)" />
+            <span>{{ code }} · {{ codeLabel(code) }}</span>
+            <app-tooltip [content]="codeTooltip(code)">
+              <button type="button" class="ml-auto inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" [attr.aria-label]="'Ayuda sobre el código ' + code"><app-icon name="info" [size]="14" /></button>
+            </app-tooltip>
+          </div>
         }
       </fieldset>
     }
     @if (submitError()) {
       <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
         <span>{{ submitError() }}</span>
-        @if (conflict()) { <button type="button" class="min-h-11 rounded-md border border-error/30 px-3 font-medium" (click)="reloadStatus()">Recargar estado</button> }
+        @if (conflict()) { <app-button variant="outline" size="sm" (clicked)="reloadStatus()">Recargar estado</app-button> }
       </div>
     }
   </div>
-  <div slot="footer" class="flex flex-col-reverse justify-end gap-2 sm:flex-row">
-    <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-primary" [disabled]="submitLoading()" (click)="onModalChange(false)">Cancelar</button>
-    <button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" [disabled]="!canSubmit()" (click)="submit()">{{ submitLoading() ? 'Enviando…' : 'Enviar solicitud' }}</button>
-  </div>
-</app-modal>
+</ng-template>

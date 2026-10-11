@@ -2,9 +2,10 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, injec
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { NgTemplateOutlet } from '@angular/common';
 import { forkJoin, startWith, Subscription, finalize } from 'rxjs';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
-import { IconComponent, ModalComponent, ToastService } from '../../../../../shared/components/index';
+import { ButtonComponent, IconComponent, ModalComponent, PaginationComponent, SelectorComponent, ToggleComponent, TooltipComponent, ToastService, type SelectorOption } from '../../../../../shared/components/index';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
 import type { ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedBuyerEventActivationService } from './received-buyer-event-activation.service';
@@ -20,7 +21,7 @@ type ActivationForm = FormGroup<{ dian_configuration_id: FormControl<number | nu
 @Component({
   selector: 'app-received-buyer-event-activation',
   standalone: true,
-  imports: [IconComponent, ModalComponent, ReactiveFormsModule, RouterLink],
+  imports: [ButtonComponent, IconComponent, ModalComponent, NgTemplateOutlet, PaginationComponent, ReactiveFormsModule, RouterLink, SelectorComponent, ToggleComponent, TooltipComponent],
   templateUrl: './received-buyer-event-activation.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -29,6 +30,8 @@ export class ReceivedBuyerEventActivationComponent {
   readonly selectedStoreId = input<number | null>(null);
   readonly scopeReady = input(true);
   readonly readOnly = input(false);
+  /** Inline mode is used inside the received-documents setup wizard to avoid a nested modal. */
+  readonly embedded = input(false);
   readonly eventCodes = CODES;
   private readonly api = inject(ReceivedBuyerEventActivationService);
   private readonly auth = inject(AuthFacade);
@@ -39,6 +42,7 @@ export class ReceivedBuyerEventActivationComponent {
   readonly loading = signal(false);
   readonly loadError = signal<string | null>(null);
   readonly open = signal(false);
+  readonly inlineRequest = signal(false);
   readonly options = signal<BuyerEventOptionsView | null>(null);
   readonly selectedEvidence = signal<BuyerEventOptionsView['evidence'][number] | null>(null);
   readonly optionsLoading = signal(false);
@@ -48,6 +52,16 @@ export class ReceivedBuyerEventActivationComponent {
   readonly submitError = signal<string | null>(null);
   readonly conflict = signal(false);
   readonly configurationsTruncated = computed(() => this.options()?.configurations_truncated ?? false);
+  // Pagination exception: evidence is returned as a server-paginated page. DIAN configurations are a bounded reference list capped at 100 by the backend; do not pretend that the cap is full pagination.
+  readonly configurationOptions = computed<SelectorOption[]>(() => (this.options()?.dian_configurations ?? []).map((config) => ({
+    value: config.id,
+    label: `${config.name} · ${config.environment === 'production' ? 'Producción' : 'Pruebas'} · ${config.enablement_status}`,
+    description: this.configWarning(config) ?? undefined,
+  })));
+  readonly evidenceOptions = computed<SelectorOption[]>(() => (this.options()?.evidence ?? []).filter((item) => item.has_artifact).map((item) => ({
+    value: item.id,
+    label: `${this.evidenceLabel(item.evidence_type)} · ${this.formatDate(item.created_at)}`,
+  })));
   readonly canConfigure = computed(() => !this.readOnly() && this.auth.hasPermission(`${this.scope() === 'store' ? 'invoicing' : 'organization:invoicing'}:received:events:configure`));
   readonly approvedCodes = computed(() => CODES.filter((code) => this.status()?.event_codes.includes(code) ?? false));
   readonly readyCodes = computed(() => this.approvedCodes().filter((code) => this.codeStates().some((item) => item.code === code && item.readiness.ready)).length);
@@ -65,6 +79,7 @@ export class ReceivedBuyerEventActivationComponent {
   private contextKey = '';
   private generation = 0;
   readonly canCloseModal = (): boolean => !this.submitLoading();
+  isBusy(): boolean { return this.submitLoading(); }
 
   constructor() {
     effect(() => {
@@ -77,8 +92,10 @@ export class ReceivedBuyerEventActivationComponent {
   }
 
   openRequest(): void {
-    if (!this.canConfigure() || !this.scopeReady() || !this.status()) return;
-    this.open.set(true); this.loadOptions(1);
+    if (!this.canConfigure() || !this.scopeReady() || !this.status() || this.submitLoading() || this.inlineRequest() || this.open()) return;
+    if (this.embedded()) this.inlineRequest.set(true);
+    else this.open.set(true);
+    this.loadOptions(1);
   }
   onModalChange(isOpen: boolean): void {
     if (isOpen && (!this.canConfigure() || !this.scopeReady())) return;
@@ -86,7 +103,13 @@ export class ReceivedBuyerEventActivationComponent {
     this.open.set(isOpen);
     if (!isOpen) this.resetModal();
   }
+  closeInlineRequest(): void {
+    if (!this.embedded() || this.submitLoading()) return;
+    this.inlineRequest.set(false);
+    this.resetModal();
+  }
   toggleCode(code: ReceivedBuyerEventCode, checked: boolean): void {
+    if (this.submitLoading()) return;
     const selected = this.form.controls.event_codes.value.filter((value) => value !== code);
     this.form.controls.event_codes.setValue(checked ? [...selected, code] : selected);
     this.form.controls.event_codes.markAsTouched();
@@ -97,9 +120,19 @@ export class ReceivedBuyerEventActivationComponent {
     this.selectedEvidence.set(evidence);
     this.form.controls.evidence_id.setValue(evidence.id);
   }
+  onConfigurationSelection(value: string | number | null): void {
+    if (this.submitLoading()) return;
+    this.form.controls.dian_configuration_id.setValue(value === null ? null : Number(value));
+  }
+  onEvidenceSelection(value: string | number | null): void {
+    if (this.submitLoading()) return;
+    const evidenceId = value === null ? null : Number(value);
+    const evidence = this.options()?.evidence.find((item) => item.id === evidenceId);
+    if (evidence) this.selectEvidence(evidence);
+  }
   onCodeChange(code: ReceivedBuyerEventCode, event: Event): void { this.toggleCode(code, (event.target as HTMLInputElement).checked); }
   loadOptions(page: number): void {
-    if (!this.canConfigure() || !this.scopeReady()) return;
+    if (!this.canConfigure() || !this.scopeReady() || this.submitLoading()) return;
     this.optionsRequest?.unsubscribe();
     const generation = this.generation;
     this.optionsLoading.set(true); this.optionsError.set(null); this.page.set(page);
@@ -116,7 +149,7 @@ export class ReceivedBuyerEventActivationComponent {
     const generation = this.generation;
     this.submitLoading.set(true); this.submitError.set(null); this.conflict.set(false);
     this.submitRequest = this.api.request(this.scope(), this.apiStoreId(), { expected_version: this.status()!.version, dian_configuration_id: raw.dian_configuration_id, evidence_id: raw.evidence_id, event_codes: raw.event_codes }).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { if (generation === this.generation) this.submitLoading.set(false); })).subscribe({
-      next: () => { if (generation !== this.generation) return; this.toast.success('Solicitud enviada para revisión. Esto no implica aprobación de la DIAN ni transmite eventos legales.'); this.resetModal(); this.open.set(false); this.loadStatus(); },
+      next: () => { if (generation !== this.generation) return; this.toast.success('Solicitud enviada para revisión. Esto no implica aprobación de la DIAN ni transmite eventos legales.'); this.resetModal(); this.open.set(false); this.inlineRequest.set(false); this.loadStatus(); },
       error: (error: unknown) => {
         if (generation !== this.generation) return;
         if (this.statusCode(error) === 409) { this.conflict.set(true); this.submitError.set('El estado cambió en el servidor. Recarga el estado antes de continuar.'); return; }
@@ -127,7 +160,7 @@ export class ReceivedBuyerEventActivationComponent {
   reloadStatus(): void {
     const wasConflict = this.conflict();
     this.submitError.set(null);
-    if (wasConflict) { this.resetModal(); this.open.set(false); }
+    if (wasConflict) { this.resetModal(); this.open.set(false); this.inlineRequest.set(false); }
     this.loadStatus();
   }
   pageCount(): number { const data = this.options(); return data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1; }
@@ -156,9 +189,10 @@ export class ReceivedBuyerEventActivationComponent {
   evidenceSelected(id: number): boolean { return this.form.controls.evidence_id.value === id; }
   isApproved(code: ReceivedBuyerEventCode): boolean { return this.approvedCodes().includes(code); }
   formatDate(date: string | null): string { return date ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeZone: 'America/Bogota' }).format(new Date(date)) : 'Fecha no disponible'; }
+  codeTooltip(code: ReceivedBuyerEventCode): string { return `${code} · ${this.codeLabel(code)}. Se incluirá en la solicitud de revisión; esta configuración nunca transmite el evento.`; }
   private resetForContext(scope: ReceivedDocumentsScope | null, storeId: number | null): void {
     this.generation++; this.statusRequest?.unsubscribe(); this.optionsRequest?.unsubscribe(); this.submitRequest?.unsubscribe();
-    this.status.set(null); this.codeStates.set([]); this.loading.set(false); this.loadError.set(null); this.options.set(null); this.selectedEvidence.set(null); this.optionsLoading.set(false); this.optionsError.set(null); this.open.set(false); this.submitLoading.set(false); this.submitError.set(null); this.conflict.set(false); this.resetForm();
+    this.status.set(null); this.codeStates.set([]); this.loading.set(false); this.loadError.set(null); this.options.set(null); this.selectedEvidence.set(null); this.optionsLoading.set(false); this.optionsError.set(null); this.open.set(false); this.inlineRequest.set(false); this.submitLoading.set(false); this.submitError.set(null); this.conflict.set(false); this.resetForm();
     if (scope && this.scopeReady()) this.loadStatus(scope, storeId ?? undefined);
   }
   private loadStatus(scope = this.scope(), storeId = this.apiStoreId()): void {
