@@ -125,6 +125,7 @@ import {
   exceptionToFinding,
 } from '../utils/exception-to-finding.util';
 import { tryResolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
+import { assertNoteOriginalHasNoAcceptedRadianEvent } from '../utils/invoice-radian-note-coherence';
 
 /**
  * Re-export del hallazgo unificado. La definición vive en
@@ -4201,6 +4202,13 @@ export class InvoiceFlowService {
 
   async send(id: number) {
     const invoice = await this.getInvoice(id);
+    await assertNoteOriginalHasNoAcceptedRadianEvent(this.prisma, {
+      note_type: invoice.invoice_type,
+      related_invoice_id: invoice.related_invoice_id,
+      organization_id: invoice.organization_id,
+      store_id: invoice.store_id,
+      accounting_entity_id: invoice.accounting_entity_id,
+    });
     await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'sent');
     await this.assertOrderPaidForEmission(invoice);
