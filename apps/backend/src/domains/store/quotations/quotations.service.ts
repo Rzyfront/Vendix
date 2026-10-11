@@ -23,6 +23,16 @@ import {
 } from '../products/services/tier-snapshot.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { TaxesService } from '../taxes/taxes.service';
+import { ProfilesService } from '../invoicing/profiles/profiles.service';
+import { normalizeAndAssertProfileConfig } from '../invoicing/profiles/invoice-profile-config.validator';
+import { DIAN_INVOICE_OPERATION_TYPES } from '../invoicing/providers/dian-direct/constants/dian-document-types';
+import { resolveAiuComponentsBasis } from '../invoicing/profiles/invoice-profile-config.contract';
+import {
+  buildAiuNote,
+  DIAN_AIU_NOTE_MAX_LENGTH,
+  DIAN_AIU_NOTE_MIN_LENGTH,
+} from '../invoicing/providers/dian-direct/xml/ubl-common.builder';
+import { dianLineExtension } from '../invoicing/utils/dian-money.util';
 import {
   matchesCatalogPrice,
   resolveQuotationLine,
@@ -35,6 +45,14 @@ import {
   normalizePriceUnitLines,
   resolveLineTotal,
 } from '../products/services/price-unit.util';
+import {
+  buildQuotationContractEconomicSnapshot,
+  type FrozenInvoiceProfile,
+  type FrozenQuotationProfile,
+  type QuotationContractEconomicSnapshot,
+} from './quotation-contract-economics';
+import type { ProfileContractCostLine } from '../invoicing/profiles/profile-contract-economics';
+import type { QuotationProfileConfig } from '../backend-quotations-profiles/quotation-profile-config';
 
 /**
  * Total BRUTO de cada línea, antes del descuento.
@@ -92,6 +110,7 @@ export class QuotationsService {
     private readonly emailService: EmailService,
     private readonly profilesService: QuotationProfilesService,
     private readonly taxesService?: TaxesService,
+    private readonly invoiceProfilesService?: ProfilesService,
   ) {}
 
   // VALID_TRANSITIONS state machine
@@ -156,6 +175,11 @@ export class QuotationsService {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    if (createQuotationDto.destination === 'contract') {
+      return this.createContractQuotation(createQuotationDto, context, store_id);
+    }
+    this.assertNoContractEconomicsFields(createQuotationDto);
 
     const quotation_number = await this.generateQuotationNumber(store_id);
 
@@ -291,6 +315,129 @@ export class QuotationsService {
     return quotation;
   }
 
+  /** Contract quotes use direct-cost lines and a frozen billing-profile engine. */
+  private async createContractQuotation(
+    dto: CreateQuotationDto,
+    context: NonNullable<ReturnType<typeof RequestContextService.getContext>>,
+    store_id: number,
+  ) {
+    if (!context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    await this.assertContractCustomer(dto.customer_id, context.organization_id, store_id);
+    const snapshot = await this.resolveContractEconomicsSnapshot({
+      invoice_profile_id: dto.invoice_profile_id,
+      profile_id: dto.profile_id,
+      contract_object: dto.contract_object,
+      due_date: dto.due_date,
+      aiu_value: dto.aiu_value,
+      items: dto.items ?? [],
+    });
+    const quotation_number = await this.generateQuotationNumber(store_id);
+    const quotationProfileConfig = snapshot.quotation_profile?.config ?? null;
+    const pickText = (
+      own: string | undefined | null,
+      fromProfile?: string | null,
+    ) =>
+      own !== undefined && own !== null && own !== ''
+        ? own
+        : (fromProfile ?? own ?? null);
+    const validityDays = quotationProfileConfig?.validity_days;
+    const validUntil =
+      dto.valid_until != null && dto.valid_until !== ''
+        ? new Date(dto.valid_until)
+        : validityDays != null && validityDays > 0
+          ? new Date(Date.now() + validityDays * 86400000)
+          : null;
+    const totals = snapshot.calculation.totals;
+
+    const quotation = await this.prisma.quotations.create({
+      data: {
+        store_id,
+        customer_id: dto.customer_id,
+        quotation_number,
+        status: quotation_status_enum.draft,
+        destination: 'contract',
+        profile_id: dto.profile_id ?? null,
+        invoice_profile_id: snapshot.invoice_profile.profile_id,
+        invoice_profile_version: snapshot.invoice_profile.version,
+        contract_economic_snapshot: this.toContractSnapshotJson(snapshot),
+        channel:
+          (dto.channel as Prisma.quotationsCreateInput['channel']) || 'pos',
+        subtotal_amount: new Prisma.Decimal(totals.gross_subtotal),
+        discount_amount: new Prisma.Decimal(totals.discount_amount),
+        tax_amount: new Prisma.Decimal(totals.tax_amount),
+        grand_total: new Prisma.Decimal(totals.total_amount),
+        valid_until: validUntil,
+        notes: pickText(dto.notes, quotationProfileConfig?.notes),
+        internal_notes: dto.internal_notes,
+        terms_and_conditions: pickText(
+          dto.terms_and_conditions,
+          quotationProfileConfig?.payment_terms,
+        ),
+        created_by_user_id: context.user_id,
+        updated_at: new Date(),
+        quotation_items: {
+          create: this.contractCostQuotationItems(dto.items ?? []),
+        },
+      },
+      include: this.QUOTATION_INCLUDE,
+    });
+
+    this.eventEmitter.emit('quotation.created', {
+      store_id,
+      quotation_id: quotation.id,
+      quotation_number: quotation.quotation_number,
+    });
+    return quotation;
+  }
+
+  async previewContractEconomics(dto: {
+    quotation_id?: number;
+    invoice_profile_id?: number;
+    contract_object?: string;
+    due_date?: string;
+    aiu_value?: number;
+    items?: CreateQuotationDto['items'];
+  }) {
+    let quotation: any = null;
+    if (dto.quotation_id != null) {
+      quotation = await this.findOne(dto.quotation_id);
+      if (quotation.destination !== 'contract') {
+        throw new BadRequestException(
+          'La vista previa de economía AIU sólo aplica a cotizaciones de contrato.',
+        );
+      }
+      if (quotation.status !== quotation_status_enum.draft) {
+        throw new BadRequestException(
+          'Solo se puede previsualizar la economía de un contrato en borrador.',
+        );
+      }
+    }
+
+    const existingSnapshot = quotation
+      ? this.readContractEconomicSnapshot(quotation.contract_economic_snapshot)
+      : null;
+    const items =
+      dto.items ??
+      (quotation?.quotation_items.map((item: any) => ({
+        ...item,
+        unit_price: Number(item.unit_price),
+        discount_amount: Number(item.discount_amount ?? 0),
+      })) as CreateQuotationDto['items'] | undefined) ??
+      [];
+    return this.resolveContractEconomicsSnapshot({
+      invoice_profile_id: dto.invoice_profile_id,
+      profile_id: quotation?.profile_id ?? undefined,
+      contract_object: dto.contract_object,
+      due_date: dto.due_date,
+      aiu_value: dto.aiu_value,
+      items,
+      existing_snapshot: existingSnapshot,
+      quotation_profile: existingSnapshot?.quotation_profile,
+    });
+  }
+
   async findAll(query: QuotationQueryDto) {
     const {
       page = 1,
@@ -421,6 +568,11 @@ export class QuotationsService {
       );
     }
 
+    if (quotation.destination === 'contract') {
+      return this.updateContractQuotation(id, quotation, updateQuotationDto);
+    }
+    this.assertNoContractEconomicsFields(updateQuotationDto);
+
     // If items are provided, delete and recreate
     if (updateQuotationDto.items) {
       const ctx = RequestContextService.getContext();
@@ -530,6 +682,125 @@ export class QuotationsService {
         updated_at: new Date(),
       },
       include: this.QUOTATION_INCLUDE,
+    });
+  }
+
+  private async updateContractQuotation(
+    id: number,
+    quotation: any,
+    dto: UpdateQuotationDto,
+  ) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    await this.assertContractCustomer(
+      dto.customer_id ?? quotation.customer_id,
+      context.organization_id,
+      context.store_id,
+    );
+    const existingSnapshot = this.readContractEconomicSnapshot(
+      quotation.contract_economic_snapshot,
+    );
+    if (!existingSnapshot && dto.invoice_profile_id == null) {
+      throw new BadRequestException(
+        'Esta cotización de contrato no tiene economía congelada. Selecciona explícitamente un perfil AIU para recalcularla.',
+      );
+    }
+
+    const items =
+      dto.items ??
+      (quotation.quotation_items.map((item: any) => ({
+        ...item,
+        unit_price: Number(item.unit_price),
+        discount_amount: Number(item.discount_amount ?? 0),
+      })) as CreateQuotationDto['items']);
+    const recalculate =
+      !existingSnapshot ||
+      dto.items !== undefined ||
+      dto.invoice_profile_id !== undefined ||
+      dto.contract_object !== undefined ||
+      dto.aiu_value !== undefined ||
+      dto.due_date !== undefined;
+    const snapshot = recalculate
+      ? await this.resolveContractEconomicsSnapshot({
+          invoice_profile_id: dto.invoice_profile_id,
+          profile_id: quotation.profile_id ?? undefined,
+          contract_object:
+            dto.contract_object ?? existingSnapshot?.contract_object,
+          due_date: dto.due_date ?? existingSnapshot?.due_date,
+          // A stored snapshot's `aiu_value` is a calculated output for
+          // contract-basis profiles. The resolver only reuses it as an input
+          // when the frozen profile explicitly uses an AIU-based component
+          // basis.
+          aiu_value: dto.aiu_value,
+          items,
+          existing_snapshot: existingSnapshot,
+          quotation_profile: existingSnapshot?.quotation_profile,
+        })
+      : existingSnapshot;
+
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      // Raw transaction clients are unscoped: CAS includes both tenant anchors
+      // and the draft state before any line deletion/recreation.
+      const locked = await tx.quotations.updateMany({
+        where: {
+          id,
+          store_id: context.store_id,
+          status: quotation_status_enum.draft,
+          updated_at: quotation.updated_at,
+          store: { is: { organization_id: context.organization_id } },
+        },
+        data: { updated_at: now },
+      });
+      if (locked.count !== 1) {
+        throw new BadRequestException(
+          'La cotización dejó de ser un borrador editable; vuelve a cargarla antes de guardar.',
+        );
+      }
+
+      if (dto.items !== undefined) {
+        await tx.quotation_items.deleteMany({ where: { quotation_id: id } });
+      }
+
+      const data: Prisma.quotationsUncheckedUpdateInput = {
+        customer_id: dto.customer_id,
+        channel: dto.channel as Prisma.quotationsUncheckedUpdateInput['channel'],
+        valid_until:
+          dto.valid_until !== undefined
+            ? dto.valid_until
+              ? new Date(dto.valid_until)
+              : null
+            : undefined,
+        notes: dto.notes,
+        internal_notes: dto.internal_notes,
+        terms_and_conditions: dto.terms_and_conditions,
+        updated_at: now,
+        ...(recalculate && snapshot
+          ? {
+              contract_economic_snapshot: this.toContractSnapshotJson(snapshot),
+              invoice_profile_id: snapshot.invoice_profile.profile_id,
+              invoice_profile_version: snapshot.invoice_profile.version,
+              subtotal_amount: new Prisma.Decimal(
+                snapshot.calculation.totals.gross_subtotal,
+              ),
+              discount_amount: new Prisma.Decimal(
+                snapshot.calculation.totals.discount_amount,
+              ),
+              tax_amount: new Prisma.Decimal(snapshot.calculation.totals.tax_amount),
+              grand_total: new Prisma.Decimal(snapshot.calculation.totals.total_amount),
+            }
+          : {}),
+        ...(dto.items !== undefined
+          ? { quotation_items: { create: this.contractCostQuotationItems(dto.items) } }
+          : {}),
+      };
+      return tx.quotations.update({
+        where: { id },
+        data,
+        include: this.QUOTATION_INCLUDE,
+      });
     });
   }
 
@@ -767,6 +1038,14 @@ export class QuotationsService {
         status: quotation_status_enum.draft,
         // A.1: el duplicado hereda el destino (fijado al crear, no editable).
         destination: (quotation as any).destination ?? 'sale',
+        profile_id:
+          (quotation as any).destination === 'contract'
+            ? quotation.profile_id ?? null
+            : undefined,
+        contract_economic_snapshot:
+          quotation.contract_economic_snapshot ?? Prisma.DbNull,
+        invoice_profile_id: quotation.invoice_profile_id ?? null,
+        invoice_profile_version: quotation.invoice_profile_version ?? null,
         channel: quotation.channel,
         subtotal_amount: quotation.subtotal_amount,
         discount_amount: quotation.discount_amount,
@@ -832,6 +1111,367 @@ export class QuotationsService {
   }
 
   // Private helpers
+  private assertNoContractEconomicsFields(
+    dto: Pick<
+      CreateQuotationDto,
+      'invoice_profile_id' | 'contract_object' | 'aiu_value' | 'due_date'
+    >,
+  ): void {
+    if (
+      dto.invoice_profile_id !== undefined ||
+      dto.contract_object !== undefined ||
+      dto.aiu_value !== undefined ||
+      dto.due_date !== undefined
+    ) {
+      throw new BadRequestException(
+        'Los campos de economía AIU sólo se admiten en cotizaciones con destino contrato.',
+      );
+    }
+  }
+
+  private async assertContractCustomer(
+    customer_id: number | null | undefined,
+    organization_id: number,
+    store_id: number,
+  ): Promise<void> {
+    if (customer_id == null) {
+      throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    }
+    const customer = await this.prisma.users.findFirst({
+      where: {
+        id: customer_id,
+        organization_id,
+        store_users: { some: { store_id } },
+        user_roles: { some: { roles: { name: 'customer' } } },
+      },
+      select: { id: true },
+    });
+    if (!customer) throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+  }
+
+  private async resolveContractEconomicsSnapshot(input: {
+    invoice_profile_id?: number;
+    profile_id?: number;
+    contract_object?: string | null;
+    due_date?: string | null;
+    aiu_value?: string | number;
+    items: CreateQuotationDto['items'];
+    existing_snapshot?: QuotationContractEconomicSnapshot | null;
+    quotation_profile?: FrozenQuotationProfile | null;
+  }): Promise<QuotationContractEconomicSnapshot> {
+    if (!input.items.length) {
+      throw new BadRequestException(
+        'Agrega al menos una línea de costo directo para cotizar el contrato.',
+      );
+    }
+    if (input.items.length > 100) {
+      throw new BadRequestException(
+        'Una cotización de contrato admite hasta 100 líneas de costo directo.',
+      );
+    }
+    await this.assertContractItemReferences(input.items);
+
+    const invoiceProfile =
+      input.invoice_profile_id != null
+        ? await this.resolveInvoiceProfileSnapshot(input.invoice_profile_id)
+        : (input.existing_snapshot?.invoice_profile ?? null);
+    if (!invoiceProfile) {
+      throw new BadRequestException(
+        'Selecciona un perfil de facturación AIU para definir impuestos y condiciones del contrato.',
+      );
+    }
+
+    const quotationProfile =
+      input.quotation_profile ??
+      input.existing_snapshot?.quotation_profile ??
+      (input.profile_id != null
+        ? await this.resolveQuotationProfileSnapshot(input.profile_id)
+        : null);
+    const costLines = this.contractCostLines(input.items);
+    const componentsBasis = resolveAiuComponentsBasis(
+      invoiceProfile.config.aiu,
+    );
+    const aiuConfig = invoiceProfile.config.aiu;
+    const pureAiuNoSumada =
+      aiuConfig?.accounting_model === 'no_sumada' &&
+      Object.values(aiuConfig.components ?? {}).reduce(
+        (sum, value) => sum + Number(value || 0),
+        0,
+      ) === 100 &&
+      costLines.every(
+        (line) => Number(line.unit_price) === 0 && Number(line.discount_amount ?? 0) === 0,
+      );
+    const aiu_value =
+      input.aiu_value ??
+      (componentsBasis === 'aiu' || pureAiuNoSumada
+        ? input.existing_snapshot?.aiu_value
+        : undefined);
+    return buildQuotationContractEconomicSnapshot({
+      frozen_at: new Date().toISOString(),
+      invoice_profile: invoiceProfile,
+      quotation_profile: quotationProfile,
+      contract_object:
+        input.contract_object ?? input.existing_snapshot?.contract_object,
+      due_date: input.due_date ?? input.existing_snapshot?.due_date,
+      aiu_value,
+      cost_lines: costLines,
+    });
+  }
+
+  private async resolveInvoiceProfileSnapshot(
+    profile_id: number,
+  ): Promise<FrozenInvoiceProfile> {
+    if (!this.invoiceProfilesService) {
+      throw new Error(
+        'ProfilesService must be provided by QuotationsModule to quote contracts.',
+      );
+    }
+    // ProfilesService.findOne uses the store-scoped Prisma client. A foreign
+    // profile and a missing profile therefore have the same non-enumerating 404.
+    const profile = await this.invoiceProfilesService.findOne(profile_id);
+    if (profile.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_006,
+        'El perfil de facturación AIU está inactivo. Actívalo antes de usarlo en una cotización.',
+        { profile_id, operation_type: profile.operation_type },
+      );
+    }
+    if (profile.operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_008,
+        'La cotización de contrato requiere un perfil de operación AIU (09).',
+        {
+          profile_id,
+          profile_operation_type: profile.operation_type,
+          required_operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
+        },
+      );
+    }
+    const version = profile.version;
+    if (!version || version.version !== profile.current_version) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_009,
+        'El perfil AIU no tiene una versión vigente comprometida. Guarda el perfil antes de cotizar.',
+        { profile_id, current_version: profile.current_version },
+      );
+    }
+    const config = normalizeAndAssertProfileConfig(version.config, {
+      operation_type: profile.operation_type,
+      profile_id,
+    });
+    if (
+      config.dian.document_type != null &&
+      config.dian.document_type !== 'sales_invoice'
+    ) {
+      throw new BadRequestException(
+        'La cotización de contrato requiere un perfil para factura de venta electrónica.',
+      );
+    }
+    return {
+      profile_id: profile.id,
+      version: version.version,
+      name: profile.name,
+      config,
+    };
+  }
+
+  private async resolveQuotationProfileSnapshot(
+    profile_id: number,
+  ): Promise<FrozenQuotationProfile> {
+    const profile = await this.profilesService.resolveForQuotation(profile_id);
+    const version = profile.version;
+    if (!version || version.version !== profile.current_version) {
+      throw new BadRequestException(
+        'El perfil de cotización no tiene una versión vigente; guárdalo antes de usarlo.',
+      );
+    }
+    return {
+      profile_id: profile.id,
+      version: version.version,
+      config: profile.current_config as QuotationProfileConfig,
+    };
+  }
+
+  private contractCostLines(
+    items: CreateQuotationDto['items'],
+  ): ProfileContractCostLine[] {
+    return items.map((item, index) => {
+      const unit_price = this.normalizeContractMoney(item.unit_price);
+      const quantity = Number(item.quantity);
+      const discount_amount = this.normalizeContractMoney(
+        item.discount_amount ?? 0,
+      );
+      if (
+        !Number.isFinite(Number(unit_price)) ||
+        Number(unit_price) < 0 ||
+        !Number.isFinite(quantity) ||
+        quantity <= 0 ||
+        !Number.isFinite(Number(discount_amount)) ||
+        Number(discount_amount) < 0
+      ) {
+        throw new BadRequestException(
+          `La línea ${index + 1} requiere cantidad, costo y descuento no negativos válidos.`,
+        );
+      }
+      const net = Number(
+        dianLineExtension({ quantity, unit_price, discount_amount }),
+      );
+      if (!Number.isFinite(net) || net < 0) {
+        throw new BadRequestException(
+          `El descuento de la línea ${index + 1} supera su costo directo.`,
+        );
+      }
+      return {
+        description: item.product_name,
+        quantity,
+        unit_price,
+        discount_amount,
+      };
+    });
+  }
+
+  private normalizeContractMoney(value: number | string): string {
+    return new Prisma.Decimal(value)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+      .toFixed(2);
+  }
+
+  private async assertContractItemReferences(
+    items: CreateQuotationDto['items'],
+  ): Promise<void> {
+    const productIds = Array.from(
+      new Set(items.flatMap((item) => (item.product_id ? [item.product_id] : []))),
+    );
+    const variantIds = Array.from(
+      new Set(
+        items.flatMap((item) =>
+          item.product_variant_id ? [item.product_variant_id] : [],
+        ),
+      ),
+    );
+    const [products, variants] = await Promise.all([
+      productIds.length
+        ? this.prisma.products.findMany({
+            where: { id: { in: productIds } },
+            select: { id: true },
+          })
+        : Promise.resolve([] as Array<{ id: number }>),
+      variantIds.length
+        ? this.prisma.product_variants.findMany({
+            where: { id: { in: variantIds } },
+            select: { id: true, product_id: true },
+          })
+        : Promise.resolve([] as Array<{ id: number; product_id: number }>),
+    ]);
+    if (products.length !== productIds.length || variants.length !== variantIds.length) {
+      throw new BadRequestException(
+        'Una o más referencias de producto no existen en esta tienda.',
+      );
+    }
+    const variantById = new Map(variants.map((variant) => [variant.id, variant]));
+    for (const item of items) {
+      if (item.product_variant_id == null) continue;
+      const variant = variantById.get(item.product_variant_id);
+      if (!variant || (item.product_id != null && variant.product_id !== item.product_id)) {
+        throw new BadRequestException(
+          'La variante indicada no pertenece al producto de esta línea.',
+        );
+      }
+    }
+  }
+
+  private contractCostQuotationItems(items: CreateQuotationDto['items']) {
+    return items.map((item) => {
+      const unit_price = this.normalizeContractMoney(item.unit_price);
+      const discount_amount = this.normalizeContractMoney(
+        item.discount_amount ?? 0,
+      );
+      return {
+        product_id: item.product_id ?? null,
+        product_variant_id: item.product_variant_id ?? null,
+        product_name: item.product_name,
+        variant_sku: item.variant_sku ?? null,
+        quantity: item.quantity,
+        unit_price,
+        discount_amount,
+        // Contract quotes preserve direct cost only; fiscal rules and generated
+        // A/I/U lines live in contract_economic_snapshot, never product taxes.
+        tax_rate: null,
+        tax_amount_item: null,
+        total_price: dianLineExtension({
+          quantity: item.quantity,
+          unit_price,
+          discount_amount,
+        }),
+        notes: item.notes ?? null,
+        applied_price_tier_id: null,
+        applied_price_tier_name_snapshot: null,
+        stock_units_consumed: null,
+        price_unit_quantity: null,
+        updated_at: new Date(),
+      };
+    });
+  }
+
+  private readContractEconomicSnapshot(
+    value: unknown,
+  ): QuotationContractEconomicSnapshot | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const candidate = value as Record<string, unknown>;
+    if (
+      candidate.schema_version !== 1 ||
+      typeof candidate.frozen_at !== 'string' ||
+      typeof candidate.contract_object !== 'string' ||
+      !(candidate.due_date === null || typeof candidate.due_date === 'string') ||
+      !candidate.invoice_profile ||
+      typeof candidate.invoice_profile !== 'object' ||
+      !Array.isArray(candidate.invoice_lines) ||
+      !candidate.calculation ||
+      typeof candidate.calculation !== 'object'
+    ) {
+      return null;
+    }
+    return value as QuotationContractEconomicSnapshot;
+  }
+
+  private toContractSnapshotJson(
+    snapshot: QuotationContractEconomicSnapshot,
+  ): Prisma.InputJsonValue {
+    // Prisma JSON columns accept JSON primitives/objects, not class instances
+    // like Decimal; stringify also strips any absent optional fields.
+    return JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue;
+  }
+
+  private assertContractQuotationAiuNote(snapshotValue: unknown): void {
+    const snapshot = this.readContractEconomicSnapshot(snapshotValue);
+    if (!snapshot) {
+      throw new BadRequestException(
+        'No se puede enviar o aceptar esta cotización de contrato: falta la economía AIU congelada. Elige un perfil de facturación AIU y vuelve a guardar el borrador.',
+      );
+    }
+    const note = buildAiuNote(snapshot.contract_object);
+    if (
+      note.length < DIAN_AIU_NOTE_MIN_LENGTH ||
+      note.length > DIAN_AIU_NOTE_MAX_LENGTH
+    ) {
+      throw new BadRequestException(
+        `No se puede enviar o aceptar la cotización: el objeto del contrato debe generar una nota AIU de ${DIAN_AIU_NOTE_MIN_LENGTH} a ${DIAN_AIU_NOTE_MAX_LENGTH} caracteres contando el prefijo DIAN.`,
+      );
+    }
+  }
+
+  private assertContractDueDate(snapshotValue: unknown): void {
+    const snapshot = this.readContractEconomicSnapshot(snapshotValue);
+    if (
+      snapshot?.invoice_profile.config.dian.payment_method_code === '2' &&
+      !snapshot.due_date
+    ) {
+      throw new BadRequestException(
+        'No se puede enviar o aceptar esta cotización de contrato a crédito sin una fecha de vencimiento acordada.',
+      );
+    }
+  }
+
   private async sendQuotationEmail(quotation: any): Promise<void> {
     const storeName = await this.getStoreName();
     const html = generateQuotationEmailHtml({
@@ -893,6 +1533,19 @@ export class QuotationsService {
         `No se puede cambiar de "${quotation.status}" a "${newStatus}"`,
       );
     }
+    if (
+      quotation.destination === 'contract' &&
+      (newStatus === 'sent' || newStatus === 'accepted')
+    ) {
+      this.assertContractQuotationAiuNote(quotation.contract_economic_snapshot);
+      this.assertContractDueDate(quotation.contract_economic_snapshot);
+      return this.transitionContractQuotation(
+        id,
+        quotation,
+        newStatus,
+        extraData,
+      );
+    }
     return this.prisma.quotations.update({
       where: { id },
       data: {
@@ -902,6 +1555,38 @@ export class QuotationsService {
       },
       include: this.QUOTATION_INCLUDE,
     });
+  }
+
+  private async transitionContractQuotation(
+    id: number,
+    quotation: any,
+    newStatus: string,
+    extraData: Record<string, any>,
+  ) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const marked = await this.prisma.quotations.updateMany({
+      where: {
+        id,
+        status: quotation.status,
+        updated_at: quotation.updated_at,
+        store_id: context.store_id,
+        store: { is: { organization_id: context.organization_id } },
+      },
+      data: {
+        status: newStatus as quotation_status_enum,
+        ...extraData,
+        updated_at: new Date(),
+      },
+    });
+    if (marked.count !== 1) {
+      throw new BadRequestException(
+        'La cotización cambió mientras se validaba su economía AIU. Recárgala y revisa el borrador antes de continuar.',
+      );
+    }
+    return this.findOne(id);
   }
 
   /**

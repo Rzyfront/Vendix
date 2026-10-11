@@ -8,8 +8,10 @@ import {
   ValidateNested,
   IsDateString,
   IsEnum,
+  Matches,
   Max,
   Min,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { quotation_destination_enum } from '@prisma/client';
@@ -96,6 +98,32 @@ export class CreateQuotationDto {
     message: 'destination debe ser sale, contract u other',
   })
   destination?: quotation_destination_enum;
+
+  /** Perfil fiscal congelado que dará impuestos y configuración AIU al contrato. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  invoice_profile_id?: number;
+
+  /** Objeto contractual que quedará congelado en la economía AIU. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(4900)
+  contract_object?: string;
+
+  /** Utilidad AIU declarada para el contrato, en moneda base. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  aiu_value?: number;
+
+  /** Fecha de vencimiento acordada para el contrato AIU, no una preferencia de tienda. */
+  @IsOptional()
+  @IsDateString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'due_date debe tener formato YYYY-MM-DD.',
+  })
+  due_date?: string;
 
   /**
    * F-003 (FB-05) — Perfil opcional. Sin el campo, `forbidNonWhitelisted`
