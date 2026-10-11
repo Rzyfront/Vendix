@@ -50,26 +50,25 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
   template: `
     <div [class]="containerClasses">
       @if (label()) {
-        <label
-          [class]="labelClasses"
-          [for]="id()"
-          class="label-with-tooltip"
-          >
-          <span>{{ label() }}</span>
-          @if (tooltipText()) {
-            <app-tooltip [content]="tooltipText()!" position="top">
-              <span class="help-icon">
-                <app-icon name="help-circle" [size]="14"></app-icon>
-              </span>
-            </app-tooltip>
-          }
-          @if (required()) {
-            <span
-              class="text-[var(--color-destructive)] ml-0.5"
-              >*</span
-              >
+        <div class="label-with-tooltip">
+          <label [class]="labelClasses + ' !mb-0'" [for]="id()">
+            <span>{{ label() }}</span>
+            @if (required()) {
+              <span class="text-[var(--color-destructive)] ml-0.5">*</span>
             }
           </label>
+          @if (tooltipText()) {
+            <app-tooltip [content]="tooltipText()!" position="top">
+              <button
+                type="button"
+                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                [attr.aria-label]="'Ayuda para ' + label()"
+              >
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </button>
+            </app-tooltip>
+          }
+        </div>
         }
 
         @if (searchable()) {

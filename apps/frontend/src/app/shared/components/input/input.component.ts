@@ -53,27 +53,29 @@ export type InputSize = 'sm' | 'md' | 'lg';
     <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
       @if (label()) {
-        <label
-          [for]="inputId()"
-          [class]="labelClasses"
-          class="label-with-tooltip"
-        >
-          <span>{{ label() }}</span>
+        <div class="label-with-tooltip">
+          <label [for]="inputId()" [class]="labelClasses">
+            <span>{{ label() }}</span>
+            @if (required()) {
+              <span class="text-[var(--color-destructive)] ml-1">*</span>
+            }
+          </label>
           @if (tooltipText()) {
             <app-tooltip
               [content]="tooltipText()"
               [position]="tooltipPosition()"
               [visible]="tooltipVisible()"
             >
-              <span class="help-icon">
+              <button
+                type="button"
+                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                [attr.aria-label]="'Ayuda para ' + label()"
+              >
                 <app-icon name="help-circle" [size]="14"></app-icon>
-              </span>
+              </button>
             </app-tooltip>
           }
-          @if (required()) {
-            <span class="text-[var(--color-destructive)] ml-1">*</span>
-          }
-        </label>
+        </div>
       }
 
       <!-- Input wrapper -->
@@ -116,12 +118,13 @@ export type InputSize = 'sm' | 'md' | 'lg';
         @if (type() === 'password') {
           <button
             type="button"
-            class="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 focus:outline-none"
+            class="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors duration-200 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+            [disabled]="isDisabled()"
             (click)="togglePasswordVisibility()"
             [attr.aria-label]="
               showPassword() ? 'Ocultar contraseña' : 'Mostrar contraseña'
             "
-            tabindex="-1"
+            [attr.aria-pressed]="showPassword()"
           >
             <!-- Eye icon (show password) -->
             @if (!showPassword()) {
@@ -215,6 +218,10 @@ export type InputSize = 'sm' | 'md' | 'lg';
         display: flex;
         align-items: center;
         gap: 0.25rem;
+      }
+
+      .label-with-tooltip label {
+        margin-bottom: 0;
       }
 
       .help-icon {
@@ -412,7 +419,7 @@ export class InputComponent implements ControlValueAccessor {
       : basePadding[this.size()].pl;
     const rightPadding =
       this.suffixIcon() || this.type() === 'password'
-        ? ['pr-10']
+        ? ['pr-12']
         : basePadding[this.size()].pr;
 
     let variantClasses: string[];
