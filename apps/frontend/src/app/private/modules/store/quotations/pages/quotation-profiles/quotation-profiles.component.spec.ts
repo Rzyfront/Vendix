@@ -176,6 +176,57 @@ describe('QuotationProfilesComponent', () => {
     expect(service.clone).toHaveBeenCalledTimes(1);
   });
 
+  it('bridges clone form status to the button and guards Escape while cloning, then allows cancel and clean reopen', async () => {
+    await setup();
+    const component = fixture.componentInstance;
+    component.openClone(profile);
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    const cloneDialog = Array.from(root.querySelectorAll('[role="dialog"]')).find((dialog) => dialog.textContent?.includes('Clonar perfil'));
+    expect(cloneDialog?.getAttribute('aria-modal')).toBe('true');
+    expect(cloneDialog?.getAttribute('aria-labelledby')).toBeTruthy();
+    const cloneButton = Array.from(cloneDialog?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Clonar')) as HTMLButtonElement;
+    expect(cloneButton.disabled).toBeFalse();
+    component.cloneForm.controls.name.setValue('');
+    component.cloneForm.controls.name.markAsTouched();
+    await fixture.whenStable();
+    expect(component.cloneNameError()).toBe('El nombre es obligatorio.');
+    expect(cloneDialog?.textContent).toContain('El nombre es obligatorio.');
+    component.cloneForm.controls.name.setValue('x'.repeat(151));
+    component.cloneForm.controls.name.markAsTouched();
+    await fixture.whenStable();
+    expect(component.cloneNameError()).toBe('Máximo 150 caracteres.');
+    expect(cloneDialog?.textContent).toContain('Máximo 150 caracteres.');
+
+    component.cloneForm.controls.name.setValue('Copia válida');
+    await fixture.whenStable();
+    expect(cloneButton.disabled).toBeFalse();
+
+    const pendingClone = new Subject<QuotationProfile>();
+    service.clone.and.returnValue(pendingClone);
+    component.clone();
+    await fixture.whenStable();
+    expect(component.cloneLoading()).toBeTrue();
+    expect(cloneButton.disabled).toBeTrue();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(component.cloneOpen()).toBeTrue();
+    component.clone();
+    expect(service.clone).toHaveBeenCalledTimes(1);
+
+    pendingClone.error(new Error('fallo de red'));
+    await fixture.whenStable();
+    expect(component.cloneLoading()).toBeFalse();
+    expect(component.cloneError()).toContain('fallo de red');
+    const cancelButton = Array.from(cloneDialog?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Cancelar')) as HTMLButtonElement;
+    cancelButton.click();
+    await fixture.whenStable();
+    expect(component.cloneOpen()).toBeFalse();
+    component.openClone(profile);
+    await fixture.whenStable();
+    expect(component.cloneError()).toBe('');
+    expect(component.cloneForm.controls.name.value).toBe('Obra (copia)');
+  });
+
   it('does not fetch or show profile actions when read permission is missing', async () => {
     await setup({});
     expect(service.getProfiles).not.toHaveBeenCalled();

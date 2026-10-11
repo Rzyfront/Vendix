@@ -2,8 +2,8 @@ import { Component, computed, DestroyRef, inject, OnDestroy, OnInit, signal, vie
 import { DatePipe, JsonPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { finalize, Observable } from 'rxjs';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { finalize, Observable, startWith } from 'rxjs';
 import { Router } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -32,7 +32,7 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
   standalone: true,
   imports: [FormsModule, ReactiveFormsModule, DatePipe, JsonPipe, AlertBannerComponent, ButtonComponent, CardComponent, EmptyStateComponent, InputComponent, InputsearchComponent, ModalComponent, OptionsDropdownComponent, PaginationComponent, ResponsiveDataViewComponent, StatsComponent, QuotationProfileFormModalComponent],
   template: `
-    <div class="w-full">
+    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_.inputsearch-wrapper]:!min-h-11">
       @if (canRead()) {
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           <app-stats title="Perfiles" [value]="total()" [loading]="isLoading()" smallText="Total de perfiles" iconName="file-text" iconBgColor="bg-blue-100" iconColor="text-blue-600" />
@@ -42,7 +42,7 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
         </div>
       }
 
-      @if (!canRead()) { <div class="m-3 rounded-xl border p-6 text-center" role="alert">No tienes permiso para consultar perfiles de cotización.</div> } @else {
+      @if (!canRead()) { <app-alert-banner class="m-3" variant="danger" tone="token">No tienes permiso para consultar perfiles de cotización.</app-alert-banner> } @else {
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
@@ -92,14 +92,13 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
       }
       }
       <app-quotation-profile-form-modal (saved)="onSaved()"></app-quotation-profile-form-modal>
-    </div>
 
-    <app-modal [(isOpen)]="cloneOpen" title="Clonar perfil" subtitle="El clon conserva una configuración independiente." size="sm" [dialog]="true" [closeOnEscape]="!cloneLoading()" [showCloseButton]="!cloneLoading()">
+    <app-modal [(isOpen)]="cloneOpen" title="Clonar perfil" subtitle="El clon conserva una configuración independiente." size="sm" [dialog]="true" [canClose]="canCloseClone" [closeOnEscape]="!cloneLoading()" [showCloseButton]="!cloneLoading()">
       <form [formGroup]="cloneForm" (ngSubmit)="clone()" class="space-y-3">
-        <app-input label="Nombre del nuevo perfil *" formControlName="name" [maxlength]="150" [error]="cloneNameError()"></app-input>
+        <app-input label="Nombre del nuevo perfil *" formControlName="name" [maxlength]="150" customClasses="!min-h-11 !text-base" [error]="cloneNameError()"></app-input>
         @if (cloneError()) { <p class="text-sm text-[var(--color-error)]" role="alert">{{ cloneError() }}</p> }
       </form>
-      <div slot="footer" class="flex justify-end gap-2"><app-button variant="outline" [disabled]="cloneLoading()" (clicked)="cloneOpen.set(false)">Cancelar</app-button><app-button variant="primary" [loading]="cloneLoading()" [disabled]="cloneForm.invalid || cloneLoading()" (clicked)="clone()">Clonar</app-button></div>
+      <div slot="footer" class="flex justify-end gap-2"><app-button variant="outline" customClasses="min-h-11" [disabled]="cloneLoading()" (clicked)="cloneOpen.set(false)">Cancelar</app-button><app-button variant="primary" customClasses="min-h-11" [loading]="cloneLoading()" [disabled]="cloneFormStatus() !== 'VALID' || cloneLoading()" (clicked)="clone()">Clonar</app-button></div>
     </app-modal>
 
     <app-modal [(isOpen)]="versionConfigOpen" title="Configuración guardada" subtitle="Valores registrados en esta versión del perfil." size="md" [dialog]="true">
@@ -109,8 +108,9 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
           <pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 text-xs text-text-primary">{{ selected.config | json }}</pre>
         </div>
       }
-      <div slot="footer" class="flex justify-end"><app-button variant="outline" (clicked)="versionConfigOpen.set(false)">Cerrar</app-button></div>
+      <div slot="footer" class="flex justify-end"><app-button variant="outline" customClasses="min-h-11" (clicked)="versionConfigOpen.set(false)">Cerrar</app-button></div>
     </app-modal>
+    </div>
   `,
 })
 export class QuotationProfilesComponent implements OnInit, OnDestroy {
@@ -153,6 +153,9 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
   readonly cloneError = signal('');
   readonly cloneSource = signal<number | null>(null);
   readonly cloneForm = inject(FormBuilder).nonNullable.group({ name: ['', [Validators.required, Validators.maxLength(150)]] });
+  readonly cloneFormStatus = toSignal(this.cloneForm.statusChanges.pipe(startWith(this.cloneForm.status)), { initialValue: this.cloneForm.status });
+  readonly cloneFormEvents = toSignal(this.cloneForm.events, { initialValue: null });
+  readonly canCloseClone = (): boolean => !this.cloneLoading();
   readonly formModal = viewChild(QuotationProfileFormModalComponent);
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   private loadSequence = 0;
@@ -188,6 +191,7 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'current_version',
+    subtitleTransform: (profile: QuotationProfile) => `Versión ${profile.current_version}`,
     avatarFallbackIcon: 'file-text',
     avatarShape: 'square',
     badgeKey: 'state',
@@ -307,7 +311,14 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
     this.cloneOpen.set(true);
   }
 
-  cloneNameError(): string { return this.cloneForm.controls.name.touched && this.cloneForm.controls.name.hasError('maxlength') ? 'Máximo 150 caracteres.' : ''; }
+  cloneNameError(): string {
+    this.cloneFormEvents();
+    const control = this.cloneForm.controls.name;
+    if (!control.touched) return '';
+    if (control.hasError('required')) return 'El nombre es obligatorio.';
+    if (control.hasError('maxlength')) return 'Máximo 150 caracteres.';
+    return '';
+  }
   clone(): void {
     if (!this.canCreate()) return;
     if (this.cloneLoading()) return;
