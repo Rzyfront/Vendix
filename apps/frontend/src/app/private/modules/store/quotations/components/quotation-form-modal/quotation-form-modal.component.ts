@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError, map } from 'rxjs';
@@ -11,23 +11,21 @@ import {
   QuotationProfileCatalogEntry,
 } from '../../interfaces/quotation.interface';
 import { QuotationsService } from '../../services/quotations.service';
+import { QuotationProfilesService } from '../../services/quotation-profiles.service';
+import type { QuotationProfile, QuotationProfileConfig } from '../../interfaces/quotation-profile.interface';
 import { PosProductService, Product } from '../../../pos/services/pos-product.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import {
-  ModalComponent,
-  ButtonComponent,
-  InputComponent,
-  TextareaComponent,
-  IconComponent,
-} from '../../../../../../shared/components';
-import {
-  PriceTier,
-  ProductPriceTierOverride,
-  PriceTierCacheService,
-  PriceTierSelectorComponent,
-} from '../../../price-tiers';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import type { PriceTier, ProductPriceTierOverride } from '../../../price-tiers/interfaces/price-tier.interface';
+import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
+import { PriceTierSelectorComponent } from '../../../price-tiers/components/price-tier-selector/price-tier-selector.component';
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import {
   estimateNetBase,
   parseTaxRateFraction,
@@ -129,6 +127,9 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                 (change)="onProfileSelect($event)"
               >
                 <option value="">Sin perfil — cotizar desde cero</option>
+                @if (savedProfileFallback(); as savedProfile) {
+                  <option [value]="savedProfile.id">{{ savedProfile.label }}</option>
+                }
                 @for (profile of quotationProfiles(); track profile.id) {
                   <option [value]="profile.id">
                     {{ profile.name }}{{ profile.is_default ? ' (predeterminado)' : '' }}
@@ -137,15 +138,22 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
               </select>
               @if (selectedProfile()) {
                 <p class="text-xs" style="color: var(--color-text-secondary);">
-                  Con este perfil la cotización nace precargada (objeto y condiciones del perfil).
+                  Configuración vigente del perfil como referencia; no modifica líneas ni total.
                 </p>
+                @if (selectedProfileDetail(); as profileDetail) {
+                  <div class="rounded-md border p-2 text-xs" style="border-color: var(--color-border); color: var(--color-text-secondary);">
+                    <p>Versión {{ profileDetail.current_version }} · Vigencia {{ profileDetail.current_config?.validity_days ?? 'No configurada' }} días</p>
+                    <p>Administración {{ profileDetail.current_config?.admin_percent ?? 'No configurado' }}% · Imprevistos {{ profileDetail.current_config?.contingency_percent ?? 'No configurado' }}% · Utilidad {{ profileDetail.current_config?.profit_percent ?? 'No configurada' }}%</p>
+                    <p>Porcentajes informativos; no se agregan al total de la cotización.</p>
+                  </div>
+                }
               }
             }
           </div>
 
           <!-- Customer Search -->
           <div class="space-y-1">
-            <label class="text-sm font-medium text-text-primary">Cliente (opcional)</label>
+            <label class="text-sm font-medium text-text-primary">Cliente @if (form.get('destination')?.value === 'contract') { (obligatorio) } @else { (opcional) }</label>
 
             @if (selectedCustomer()) {
               <div class="flex items-center justify-between rounded-md px-3 py-2 text-sm"
@@ -194,6 +202,9 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                   </div>
                 }
               </div>
+            }
+            @if (customerRequiredError()) {
+              <p class="text-xs text-red-600">Selecciona un cliente para cotizar un contrato.</p>
             }
           </div>
 
@@ -466,13 +477,13 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
       <div slot="footer">
         <div class="flex items-center justify-end gap-3 rounded-b-xl border-t p-3"
              style="background: var(--color-background); border-color: var(--color-border);">
-          <app-button variant="outline" (clicked)="onClose()">
+          <app-button variant="outline" [disabled]="isSaving()" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSave()"
-            [disabled]="itemsArray.length === 0"
+            [disabled]="itemsArray.length === 0 || isSaving()"
             [loading]="isSaving()"
           >
             {{ quotation() ? 'Actualizar' : 'Crear' }} Cotización
@@ -482,9 +493,11 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
     </app-modal>
   `,
 })
-export class QuotationFormModalComponent {
+export class QuotationFormModalComponent implements OnInit {
   /** Input: existing quotation for edit mode, null for create mode */
   readonly quotation = input<Quotation | null>(null);
+  readonly initialDestination = input<QuotationDestination>('sale');
+  readonly saving = input(false);
 
   /** Output: emits the DTO when the user clicks save */
   readonly save = output<CreateQuotationDto>();
@@ -493,12 +506,14 @@ export class QuotationFormModalComponent {
   readonly close = output<void>();
 
   private readonly fb = inject(FormBuilder);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly http = inject(HttpClient);
   private readonly posProductService = inject(PosProductService);
   private readonly priceTierCache = inject(PriceTierCacheService);
   private readonly priceResolver = inject(PriceResolverService);
   private readonly authFacade = inject(AuthFacade);
   private readonly quotationsService = inject(QuotationsService);
+  private readonly profilesService = inject(QuotationProfilesService);
   private readonly apiUrl = environment.apiUrl;
 
   /** Active tiers loaded once when the modal opens (if user has permission). */
@@ -538,6 +553,15 @@ export class QuotationFormModalComponent {
   readonly profilesError = signal(false);
   /** Perfil elegido (para aviso de precarga); null = cotizar desde cero. */
   readonly selectedProfile = signal<QuotationProfileCatalogEntry | null>(null);
+  readonly selectedProfileDetail = signal<QuotationProfile | null>(null);
+  private profileRequestId = 0;
+  readonly customerRequiredError = signal(false);
+  readonly savedProfileFallback = computed(() => {
+    const quotation = this.quotation();
+    const profileId = quotation?.profile_id;
+    if (profileId == null || this.quotationProfiles().some((profile) => profile.id === profileId)) return null;
+    return { id: profileId, label: `Perfil #${profileId} (guardado)` };
+  });
 
   /** Opciones de destino (valor fijo al crear, bloqueado al editar). */
   readonly destinationOptions: { value: QuotationDestination; label: string }[] = [
@@ -561,7 +585,8 @@ export class QuotationFormModalComponent {
   readonly pendingVariantProduct = signal<any>(null);
   readonly selectedVariantId = signal<number | null>(null);
 
-  readonly isSaving = signal(false);
+  readonly isSaving = computed(() => this.saving() || this.submitPending());
+  private readonly submitPending = signal(false);
 
   /** Summary signals — updated manually when items change */
   readonly subtotalAmount = signal(0);
@@ -587,7 +612,7 @@ export class QuotationFormModalComponent {
     if (this.canApplyPricingTier()) {
       this.priceTierCache
         .getActiveTiers()
-        .pipe(takeUntilDestroyed())
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (tiers) => this.availableTiers.set(tiers || []),
           error: () => this.availableTiers.set([]),
@@ -607,7 +632,7 @@ export class QuotationFormModalComponent {
               catchError(() => of({ data: [] })),
             );
         }),
-        takeUntilDestroyed(),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         const data = res?.data?.data || res?.data || res || [];
@@ -626,7 +651,7 @@ export class QuotationFormModalComponent {
             catchError(() => of([] as any[])),
           );
         }),
-        takeUntilDestroyed(),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((products) => {
         this.productResults.set(products);
@@ -635,9 +660,9 @@ export class QuotationFormModalComponent {
     // B.2 (FB-03): catalogo de perfiles activos. Un 404/500 (B.1 en curso) no
     // bloquea: el formulario cotiza desde cero igual que hoy.
     this.profilesLoading.set(true);
-    this.quotationsService
-      .getQuotationProfileCatalog()
-      .pipe(takeUntilDestroyed())
+    this.profilesService
+      .getCatalog()
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (profiles) => {
           const list = Array.isArray(profiles) ? profiles : [];
@@ -656,10 +681,19 @@ export class QuotationFormModalComponent {
         },
       });
 
-    // Populate form when editing an existing quotation
+  }
+
+  ngOnInit(): void {
+    if (!this.quotation()) {
+      this.form.patchValue({ destination: this.initialDestination() });
+    }
+    // Populate after Angular has bound the input; reading it in the constructor
+    // observes only the input's default and silently opens edit as create.
     const q = this.quotation();
     if (q) {
-      this.selectedCustomer.set(q.customer || null);
+      this.selectedCustomer.set(q.customer || (q.customer_id
+        ? { id: q.customer_id, first_name: 'Cliente asociado', last_name: '' }
+        : null));
       this.form.patchValue({
         destination: (q.destination as QuotationDestination | undefined) || 'sale',
         profile_id: q.profile_id != null ? String(q.profile_id) : '',
@@ -723,6 +757,7 @@ export class QuotationFormModalComponent {
 
   selectCustomer(customer: any): void {
     this.selectedCustomer.set(customer);
+    this.customerRequiredError.set(false);
     this.customerSearchTerm.set('');
     this.customerResults.set([]);
   }
@@ -740,25 +775,39 @@ export class QuotationFormModalComponent {
    */
   onProfileSelect(event: Event): void {
     const raw = (event.target as HTMLSelectElement).value;
+    const requestId = ++this.profileRequestId;
     if (!raw) {
       this.selectedProfile.set(null);
+      this.selectedProfileDetail.set(null);
       return;
     }
     const profile = this.quotationProfiles().find((p) => String(p.id) === raw) || null;
     this.selectedProfile.set(profile);
+    this.selectedProfileDetail.set(null);
     if (!profile || profile.id == null) return;
-    this.quotationsService
-      .getQuotationProfileDetail(Number(profile.id))
-      .pipe(takeUntilDestroyed())
+    this.profilesService
+      .getProfile(Number(profile.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (detail) => {
-          const config = (detail as any)?.current_config ?? {};
+          if (requestId !== this.profileRequestId || this.selectedProfile()?.id !== profile.id) return;
+          this.selectedProfileDetail.set(detail);
+          if (this.isEditMode()) return;
+          const config: QuotationProfileConfig = detail.current_config ?? {};
           const patch: Record<string, string> = {};
-          if (config.notes && !this.form.get('notes')?.value) {
+          const notesControl = this.form.get('notes');
+          const termsControl = this.form.get('terms_and_conditions');
+          const validUntilControl = this.form.get('valid_until');
+          if (config.notes && notesControl?.pristine && !notesControl.value) {
             patch['notes'] = config.notes;
           }
-          if (config.payment_terms && !this.form.get('terms_and_conditions')?.value) {
+          if (config.payment_terms && termsControl?.pristine && !termsControl.value) {
             patch['terms_and_conditions'] = config.payment_terms;
+          }
+          if (config.validity_days !== undefined && validUntilControl?.pristine && !validUntilControl.value) {
+            const validUntil = new Date();
+            validUntil.setDate(validUntil.getDate() + config.validity_days);
+            patch['valid_until'] = toLocalDateString(validUntil);
           }
           if (Object.keys(patch).length > 0) {
             this.form.patchValue(patch);
@@ -983,9 +1032,17 @@ export class QuotationFormModalComponent {
   // ── Save ──
 
   onSave(): void {
-    if (this.itemsArray.length === 0) return;
-
-    this.isSaving.set(true);
+    if (this.itemsArray.length === 0 || this.isSaving()) return;
+    if (this.itemsArray.invalid) {
+      this.itemsArray.markAllAsTouched();
+      return;
+    }
+    if (this.form.getRawValue().destination === 'contract' && !this.selectedCustomer()) {
+      this.customerRequiredError.set(true);
+      return;
+    }
+    this.customerRequiredError.set(false);
+    this.submitPending.set(true);
 
     const formValue = this.form.value;
     // B.2: el <select> nativo entrega string; '' = sin perfil (se omite, FB-05).
@@ -1022,12 +1079,15 @@ export class QuotationFormModalComponent {
     };
 
     this.save.emit(dto);
-    // Parent handles the API call; reset saving state after emit.
-    // If parent needs async feedback, it can control the modal visibility.
-    this.isSaving.set(false);
+    // Keep a same-tick latch for rapid duplicate clicks. The parent input is
+    // authoritative while the request is in flight; a microtask also releases
+    // this latch if the parent receives a synchronous error before input change
+    // detection has observed `saving=true`.
+    queueMicrotask(() => this.submitPending.set(false));
   }
 
   onClose(): void {
+    if (this.isSaving()) return;
     this.close.emit();
   }
 
@@ -1185,7 +1245,7 @@ export class QuotationFormModalComponent {
     if (this.productOverrides()[productId]) return;
     this.priceTierCache
       .getProductOverrides(productId)
-      .pipe(takeUntilDestroyed())
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (overrides) =>
           this.productOverrides.update((current) => ({

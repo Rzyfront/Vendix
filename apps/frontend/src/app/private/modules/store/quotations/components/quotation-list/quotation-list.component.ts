@@ -55,6 +55,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
               (searchChange)="search.emit($event)"
             />
 
+            @if (canCreateQuotation()) {
             <app-button
               variant="outline"
               size="md"
@@ -64,6 +65,33 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
             >
               <app-icon slot="icon" name="plus" [size]="18"></app-icon>
             </app-button>
+            }
+            @if (showContractAction()) {
+              <app-button
+                variant="primary"
+                size="md"
+                customClasses="shrink-0"
+                (clicked)="createContract.emit()"
+                title="Cotizar contrato"
+                aria-label="Cotizar contrato"
+              >
+                <app-icon slot="icon" name="file-text" [size]="18"></app-icon>
+                <span class="hidden sm:inline">Cotizar contrato</span>
+              </app-button>
+            }
+            @if (canReadProfiles()) {
+              <app-button
+                variant="outline"
+                size="md"
+                customClasses="shrink-0"
+                (clicked)="manageProfiles.emit()"
+                title="Administrar perfiles de cotización"
+                aria-label="Administrar perfiles de cotización"
+              >
+                <app-icon slot="icon" name="settings" [size]="18"></app-icon>
+                <span class="hidden lg:inline">Perfiles</span>
+              </app-button>
+            }
 
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
@@ -107,6 +135,14 @@ export class QuotationListComponent {
 
   quotations = input.required<Quotation[]>();
   loading = input<boolean>(false);
+  showContractAction = input(false);
+  canCreateQuotation = input(false);
+  canReadProfiles = input(false);
+  canCreateFromQuotation = input(false);
+  canConvertToOrder = input(false);
+  canMutateQuotation = input(false);
+  canUpdateContractQuotation = input(false);
+  canDeleteQuotation = input(false);
 
   viewDetail = output<Quotation>();
   send = output<Quotation>();
@@ -118,6 +154,9 @@ export class QuotationListComponent {
   deleteQuotation = output<Quotation>();
   edit = output<Quotation>();
   create = output<void>();
+  createContract = output<void>();
+  createFromQuotation = output<Quotation>();
+  manageProfiles = output<void>();
   search = output<string>();
   filterChange = output<FilterValues>();
 
@@ -134,6 +173,7 @@ export class QuotationListComponent {
         { label: 'Rechazada', value: 'rejected' },
         { label: 'Expirada', value: 'expired' },
         { label: 'Convertida', value: 'converted' },
+        { label: 'Contratada', value: 'contracted' },
         { label: 'Cancelada', value: 'cancelled' },
       ],
     },
@@ -162,6 +202,7 @@ export class QuotationListComponent {
           rejected: '#ef4444',
           expired: '#f59e0b',
           converted: '#8b5cf6',
+          contracted: '#0f766e',
           cancelled: '#6b7280',
         },
       },
@@ -221,21 +262,21 @@ export class QuotationListComponent {
       icon: 'send',
       variant: 'primary',
       action: (item: Quotation) => this.send.emit(item),
-      show: (item: Quotation) => item.status === 'draft',
+      show: (item: Quotation) => this.canMutateQuotation() && item.status === 'draft',
     },
     {
       label: 'Aceptar',
       icon: 'check-circle',
       variant: 'success',
       action: (item: Quotation) => this.accept.emit(item),
-      show: (item: Quotation) => item.status === 'sent',
+      show: (item: Quotation) => this.canMutateQuotation() && item.status === 'sent',
     },
     {
       label: 'Rechazar',
       icon: 'x-circle',
       variant: 'danger',
       action: (item: Quotation) => this.reject.emit(item),
-      show: (item: Quotation) => item.status === 'sent',
+      show: (item: Quotation) => this.canMutateQuotation() && item.status === 'sent',
     },
     {
       label: 'Convertir a Orden',
@@ -246,36 +287,44 @@ export class QuotationListComponent {
         item.status === 'accepted'
           ? 'Convertir a orden'
           : 'Primero acepta la cotización para convertirla en orden',
-      show: (item: Quotation) =>
-        ['draft', 'sent', 'accepted'].includes(item.status),
+      show: (item: Quotation) => this.canConvertToOrder() &&
+        (item.destination === undefined || item.destination === 'sale') && item.status === 'accepted',
+    },
+    {
+      label: 'Crear contrato',
+      icon: 'file-text',
+      variant: 'success',
+      action: (item: Quotation) => this.createFromQuotation.emit(item),
+      show: (item: Quotation) => this.canCreateFromQuotation() && item.destination === 'contract' && item.status === 'accepted',
     },
     {
       label: 'Editar',
       icon: 'edit',
       variant: 'info',
       action: (item: Quotation) => this.edit.emit(item),
-      show: (item: Quotation) => item.status === 'draft',
+      show: (item: Quotation) => item.status === 'draft' &&
+        (item.destination === 'contract' ? this.canUpdateContractQuotation() : this.canMutateQuotation()),
     },
     {
       label: 'Duplicar',
       icon: 'copy',
       variant: 'ghost',
       action: (item: Quotation) => this.duplicate.emit(item),
+      show: () => this.canCreateQuotation(),
     },
     {
       label: 'Cancelar',
       icon: 'ban',
       variant: 'danger',
       action: (item: Quotation) => this.cancel.emit(item),
-      show: (item: Quotation) =>
-        ['draft', 'sent', 'accepted'].includes(item.status),
+      show: (item: Quotation) => this.canMutateQuotation() && ['draft', 'sent', 'accepted'].includes(item.status),
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
       action: (item: Quotation) => this.deleteQuotation.emit(item),
-      show: (item: Quotation) => item.status === 'draft',
+      show: (item: Quotation) => this.canDeleteQuotation() && item.status === 'draft',
     },
   ];
 
@@ -287,6 +336,7 @@ export class QuotationListComponent {
       rejected: 'Rechazada',
       expired: 'Expirada',
       converted: 'Convertida',
+      contracted: 'Contratada',
       cancelled: 'Cancelada',
     };
     return labels[status] || status;

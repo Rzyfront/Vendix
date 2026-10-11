@@ -1,4 +1,4 @@
-export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted' | 'cancelled';
+export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted' | 'contracted' | 'cancelled';
 
 /** B.2 (FB-01 parcial-destination): destino fijo al crear, jamas editable. Default `sale`. */
 export type QuotationDestination = 'sale' | 'contract' | 'other';
@@ -63,6 +63,7 @@ export interface Quotation {
   rejected_at?: string;
   converted_at?: string;
   converted_order_id?: number;
+  contract?: { id: number; contract_number: string; status: string } | null;
   created_by_user_id?: number;
   created_at: string;
   updated_at: string;

@@ -1,5 +1,5 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
@@ -7,6 +7,10 @@ import { DialogService } from '../../../../shared/components/dialog/dialog.servi
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import { QuotationsService } from './services/quotations.service';
 import { QuotationListComponent } from './components/quotation-list/quotation-list.component';
+import { QuotationFormModalComponent } from './components/quotation-form-modal/quotation-form-modal.component';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { CreateQuotationDto, QuotationDestination } from './interfaces/quotation.interface';
+import { ContractsService } from '../contracts/services/contracts.service';
 import {
   Quotation,
   QuotationStats,
@@ -19,6 +23,7 @@ import {
   imports: [
     StatsComponent,
     QuotationListComponent,
+    QuotationFormModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -68,6 +73,14 @@ import {
       <app-quotation-list
         [quotations]="quotations()"
         [loading]="loading()"
+        [showContractAction]="canCreateContractQuotation()"
+        [canCreateQuotation]="canCreateQuotation()"
+        [canReadProfiles]="canReadQuotationProfiles()"
+        [canCreateFromQuotation]="canCreateContractFromQuotation()"
+        [canConvertToOrder]="canConvertToOrder()"
+        [canMutateQuotation]="canUpdateQuotation()"
+        [canUpdateContractQuotation]="canUpdateContractQuotation()"
+        [canDeleteQuotation]="canDeleteQuotation()"
         (viewDetail)="onViewDetail($event)"
         (send)="onSend($event)"
         (accept)="onAccept($event)"
@@ -78,9 +91,22 @@ import {
         (deleteQuotation)="onDelete($event)"
         (edit)="onEdit($event)"
         (create)="navigateToQuotationMode()"
+        (createContract)="openQuotationModal('contract')"
+        (createFromQuotation)="createContractFromAccepted($event)"
+        (manageProfiles)="navigateToQuotationProfiles()"
         (search)="onSearch($event)"
         (filterChange)="onFilterChange($event)"
       ></app-quotation-list>
+
+      @if (quotationModalOpen()) {
+        <app-quotation-form-modal
+          [quotation]="selectedQuotation()"
+          [initialDestination]="initialDestination()"
+          [saving]="savingQuotation()"
+          (save)="saveQuotation($event)"
+          (close)="closeQuotationModal()"
+        ></app-quotation-form-modal>
+      }
 
 
     </div>
@@ -92,6 +118,9 @@ export class QuotationsComponent {
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private destroyRef = inject(DestroyRef);
+  private route = inject(ActivatedRoute);
+  private authFacade = inject(AuthFacade);
+  private contractsService = inject(ContractsService);
 
   stats = signal<QuotationStats>({
     total: 0, pending: 0, conversion_rate: 0, average_value: 0,
@@ -100,6 +129,45 @@ export class QuotationsComponent {
   quotations = signal<Quotation[]>([]);
   loading = signal(false);
   statsLoading = signal(false);
+  quotationModalOpen = signal(false);
+  selectedQuotation = signal<Quotation | null>(null);
+  initialDestination = signal<QuotationDestination>('sale');
+  savingQuotation = signal(false);
+  private readonly contractCreationLocks = new Set<number>();
+  readonly canCreateContractQuotation = computed(() =>
+    this.authFacade.storeIndustries().includes('construction') &&
+    (this.isSuperAdmin() || (this.authFacade.userPermissions().includes('store:quotations:create') &&
+    this.authFacade.userPermissions().includes('store:contracts:create'))),
+  );
+  readonly canCreateQuotation = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:create') || this.isSuperAdmin(),
+  );
+  readonly canCreateContractFromQuotation = computed(() =>
+    this.authFacade.storeIndustries().includes('construction') &&
+    (this.authFacade.userPermissions().includes('store:contracts:create') || this.isSuperAdmin()),
+  );
+  readonly canUpdateContractQuotation = computed(() =>
+    this.authFacade.storeIndustries().includes('construction') &&
+    (this.authFacade.userPermissions().includes('store:quotations:update') &&
+    this.authFacade.userPermissions().includes('store:quotations:read:one') || this.isSuperAdmin()),
+  );
+  readonly canConvertToOrder = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:convert') || this.isSuperAdmin(),
+  );
+  readonly canUpdateQuotation = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:update') || this.isSuperAdmin(),
+  );
+  readonly canDeleteQuotation = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:delete') || this.isSuperAdmin(),
+  );
+  readonly canReadQuotationProfiles = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:read') || this.isSuperAdmin(),
+  );
+
+  private isSuperAdmin(): boolean {
+    const roles = this.authFacade.userRoles();
+    return roles.includes('super_admin') || roles.includes('SUPER_ADMIN');
+  }
 
   searchTerm = '';
   statusFilter = '';
@@ -107,6 +175,16 @@ export class QuotationsComponent {
   constructor() {
     this.loadStats();
     this.loadQuotations();
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      if (params.get('destination') !== 'contract' || !this.canCreateContractQuotation()) return;
+      this.openQuotationModal('contract');
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { destination: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
+    });
   }
 
   formatCurrency(value: number): string {
@@ -208,6 +286,11 @@ export class QuotationsComponent {
   }
 
   async onConvert(q: Quotation): Promise<void> {
+    if (!this.canConvertToOrder()) return;
+    if (q.destination !== undefined && q.destination !== 'sale') {
+      this.toastService.error('Solo las cotizaciones de venta pueden convertirse en orden.');
+      return;
+    }
     const blockedMessage = this.getConvertBlockedMessage(q);
     if (blockedMessage) {
       this.toastService.error(blockedMessage);
@@ -258,13 +341,122 @@ export class QuotationsComponent {
   }
 
   onEdit(q: Quotation): void {
-    this.router.navigate(['/admin/pos'], {
-      queryParams: { mode: 'quotation', editQuotation: q.id },
-    });
+    if (q.destination === 'contract') {
+      if (q.status !== 'draft' || !this.canUpdateContractQuotation()) return;
+      this.quotationsService.getQuotationById(q.id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (fullQuotation) => {
+            this.selectedQuotation.set(fullQuotation);
+            this.initialDestination.set('contract');
+            this.quotationModalOpen.set(true);
+          },
+          error: (err) => this.showQuotationError(err, 'Error al cargar la cotización'),
+        });
+      return;
+    }
+    if (!this.canUpdateQuotation()) return;
+    this.router.navigate(['/admin/pos'], { queryParams: { mode: 'quotation', editQuotation: q.id } });
   }
 
   navigateToQuotationMode(): void {
     this.router.navigate(['/admin/pos'], { queryParams: { mode: 'quotation' } });
+  }
+
+  navigateToQuotationProfiles(): void {
+    if (!this.canReadQuotationProfiles()) return;
+    this.router.navigate(['/admin/orders/quotations/profiles']);
+  }
+
+  openQuotationModal(destination: QuotationDestination = 'sale'): void {
+    if (destination === 'contract' && !this.canCreateContractQuotation()) return;
+    this.selectedQuotation.set(null);
+    this.initialDestination.set(destination);
+    this.quotationModalOpen.set(true);
+  }
+
+  closeQuotationModal(): void {
+    if (this.savingQuotation()) return;
+    this.quotationModalOpen.set(false);
+    this.selectedQuotation.set(null);
+  }
+
+  saveQuotation(dto: CreateQuotationDto): void {
+    if (this.savingQuotation()) return;
+    const editing = this.selectedQuotation();
+    if (editing) {
+      const editableContract = editing.destination === 'contract' && editing.status === 'draft' && this.canUpdateContractQuotation();
+      if (editing.destination === 'contract' ? !editableContract : !this.canUpdateQuotation()) {
+        this.toastService.error('No tienes permiso para editar esta cotización.');
+        return;
+      }
+    } else if (!this.canCreateQuotation()) {
+      this.toastService.error('No tienes permiso para crear cotizaciones.');
+      return;
+    }
+    if (!editing && dto.destination === 'contract' && !this.canCreateContractQuotation()) {
+      this.toastService.error('No tienes permiso para cotizar contratos en esta tienda.');
+      return;
+    }
+    const destination = editing?.destination ?? dto.destination ?? 'sale';
+    if (destination === 'contract' && !(dto.customer_id ?? editing?.customer_id)) {
+      this.toastService.error('Selecciona un cliente para cotizar un contrato');
+      return;
+    }
+    this.savingQuotation.set(true);
+    const updateDto = { ...dto };
+    delete updateDto.destination;
+    delete updateDto.profile_id;
+    const request$ = editing
+      ? this.quotationsService.updateQuotation(editing.id, updateDto)
+      : this.quotationsService.createQuotation(dto);
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (savedQuotation) => {
+        this.toastService.success(editing ? 'Cotización actualizada' : 'Cotización creada');
+        this.savingQuotation.set(false);
+        this.quotationModalOpen.set(false);
+        this.selectedQuotation.set(null);
+        this.refresh();
+        this.router.navigate(['/admin/orders/quotations', savedQuotation.id]);
+      },
+      error: (err) => {
+        this.savingQuotation.set(false);
+        this.showQuotationError(err, 'Error al guardar cotización');
+      },
+    });
+  }
+
+  async createContractFromAccepted(q: Quotation): Promise<void> {
+    if (!this.canCreateContractFromQuotation() || q.destination !== 'contract' || q.status !== 'accepted' || this.contractCreationLocks.has(q.id)) return;
+    this.contractCreationLocks.add(q.id);
+    const confirmed = await this.dialogService.confirm({
+      title: 'Crear contrato',
+      message: `¿Crear un contrato desde la cotización ${q.quotation_number}?`,
+      confirmText: 'Crear contrato',
+      cancelText: 'Volver',
+    });
+    if (!confirmed) {
+      this.contractCreationLocks.delete(q.id);
+      return;
+    }
+    this.contractsService.createFromQuotation(q.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (contract) => {
+          this.refresh();
+          this.router.navigate(['/admin/orders/contracts', contract.id]);
+        },
+        error: (err) => {
+          this.contractCreationLocks.delete(q.id);
+          const contractId = Number(err?.details?.contract_id);
+          if (err?.code === 'QUOTE_CONTRACT_001' && Number.isInteger(contractId) && contractId > 0) {
+            this.refresh();
+            this.router.navigate(['/admin/orders/contracts', contractId]);
+            return;
+          }
+          this.showQuotationError(err, 'Error al crear el contrato');
+        },
+      });
   }
 
   private refresh(): void {
