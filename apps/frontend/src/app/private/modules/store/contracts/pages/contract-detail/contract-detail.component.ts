@@ -7,6 +7,8 @@ import { ContractsService, ContractApiError } from '../../services/contracts.ser
 import {
   Contract,
   ContractStatus,
+  ContractTransitionTarget,
+  ContractInvoiceRef,
   CONTRACT_STATUS_LABELS,
   CONTRACT_TRANSITIONS,
   CONTRACT_STATUS_ERROR_CODE,
@@ -34,11 +36,9 @@ const STATUS_BADGE_COLORS: Record<ContractStatus, StickyHeaderBadgeColor> = {
 };
 
 /** Accionabilidad por transicion: que hace cada boton antes de pulsarlo. */
-const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hint: string }> = {
-  draft: { label: 'Volver a borrador', icon: 'rotate-ccw', hint: '' },
+const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: string; hint: string }> = {
   active: { label: 'Activar contrato', icon: 'check-circle', hint: 'Cambia el estado administrativo del contrato.' },
-  invoiced: { label: 'Marcar facturado', icon: 'file-text', hint: 'Solo cambia el estado administrativo; no confirma emisión o aceptación fiscal.' },
-  cancelled: { label: 'Cancelar contrato', icon: 'x-circle', hint: 'La cotización origen conserva su trazabilidad.' },
+  cancelled: { label: 'Cancelar contrato', icon: 'x-circle', hint: 'Solo está disponible si no hay una factura activa.' },
 };
 
 @Component({
@@ -104,7 +104,7 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
               }
             </app-card>
 
-            <app-card title="Ítems de la cotización congelada" shadow="sm" [responsivePadding]="true">
+            <app-card title="Líneas de costo directo de la cotización congelada" shadow="sm" [responsivePadding]="true">
               @if (contract()!.items?.length) {
                 <div class="space-y-3">
                   @for (item of contract()!.items; track $index) {
@@ -132,6 +132,97 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
               }
             </app-card>
 
+            <app-card title="Economía AIU congelada" shadow="sm" [responsivePadding]="true">
+              @if (contract()!.economic; as economic) {
+                <div class="space-y-3">
+                  @if (economic.invoice_profile) {
+                    <div class="rounded-lg border border-border p-3">
+                      <p class="font-semibold text-gray-900">Perfil de facturación congelado</p>
+                      <p class="text-sm text-text-secondary">
+                        {{ economic.invoice_profile.name || ('Perfil #' + (economic.invoice_profile.profile_id ?? 'No configurado')) }}
+                        · versión {{ economic.invoice_profile.version ?? 'No configurada · revisar' }}
+                      </p>
+                      <dl class="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                        <div><dt class="text-text-secondary">Base gravable</dt><dd>{{ taxableBasisLabel(economic.invoice_profile.taxable_basis) }}</dd></div>
+                        <div><dt class="text-text-secondary">Base de componentes</dt><dd>{{ componentsBasisLabel(economic.invoice_profile.components_basis) }}</dd></div>
+                        <div><dt class="text-text-secondary">Modelo de contabilización</dt><dd>{{ accountingModelLabel(economic.invoice_profile.accounting_model) }}</dd></div>
+                      </dl>
+                      @if (economic.invoice_profile.components) {
+                        <dl class="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                          <div><dt class="text-text-secondary">Administración</dt><dd>{{ formatPct(economic.invoice_profile.components['administracion']) }}</dd></div>
+                          <div><dt class="text-text-secondary">Imprevistos</dt><dd>{{ formatPct(economic.invoice_profile.components['imprevistos']) }}</dd></div>
+                          <div><dt class="text-text-secondary">Utilidad</dt><dd>{{ formatPct(economic.invoice_profile.components['utilidad']) }}</dd></div>
+                        </dl>
+                      }
+                    </div>
+                  } @else {
+                    <app-alert-banner variant="warning" heading="Perfil de facturación no configurado">
+                      El snapshot económico no conserva el perfil de facturación. Revisa o crea una cotización de contrato nueva con una configuración explícita; no se usa el perfil vigente ni se calculan valores por defecto.
+                    </app-alert-banner>
+                  }
+
+                  <dl class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+                    <div><dt class="text-text-secondary">Costo directo congelado</dt><dd class="font-semibold">{{ economic.direct_cost !== null ? (economic.direct_cost | currency) : 'No configurado · revisar' }}</dd></div>
+                    <div><dt class="text-text-secondary">AIU congelado</dt><dd class="font-semibold">{{ economic.aiu_value !== null ? (economic.aiu_value | currency) : 'No configurado · revisar' }}</dd></div>
+                    <div><dt class="text-text-secondary">Valor del contrato</dt><dd class="font-semibold">{{ economic.contract_value !== null ? (economic.contract_value | currency) : 'No configurado · revisar' }}</dd></div>
+                  </dl>
+                  @if (economic.aiu?.components?.length) {
+                    <dl class="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                      @for (component of economic.aiu!.components; track component.component) {
+                        <div><dt class="text-text-secondary">{{ economicBucketLabel(component.component) }}</dt><dd class="font-semibold">{{ component.amount !== null ? (component.amount | currency) : 'No configurado · revisar' }}</dd></div>
+                      }
+                    </dl>
+                  }
+
+                  @if (economic.invoice_lines.length > 0) {
+                    <div class="space-y-2">
+                      <h3 class="text-sm font-semibold text-gray-900">Desglose económico fiscal congelado</h3>
+                      @for (line of economic.invoice_lines; track $index) {
+                        <div class="rounded-lg border border-border p-3">
+                          <div class="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <p class="font-semibold text-gray-900">{{ line.description }}</p>
+                              <p class="text-xs text-text-secondary">{{ economicBucketLabel(line.bucket) }}</p>
+                            </div>
+                            <span class="font-semibold">{{ line.total_amount !== null ? (line.total_amount | currency) : 'No configurado · revisar' }}</span>
+                          </div>
+                          <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-4">
+                            <div><dt>Cantidad</dt><dd>{{ line.quantity ?? 'No configurado · revisar' }}</dd></div>
+                            <div><dt>Precio unitario</dt><dd>{{ line.unit_price !== null ? (line.unit_price | currency) : 'No configurado · revisar' }}</dd></div>
+                            <div><dt>Descuento</dt><dd>{{ line.discount_amount !== null ? (line.discount_amount | currency) : 'No configurado · revisar' }}</dd></div>
+                            <div><dt>Base de línea</dt><dd>{{ line.base_amount !== null ? (line.base_amount | currency) : 'No configurado · revisar' }}</dd></div>
+                          </dl>
+                          <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
+                            <span>Impuestos de línea: {{ line.tax_amount !== null ? (line.tax_amount | currency) : 'No configurado · revisar' }}</span>
+                            @for (tax of line.taxes; track $index) {
+                            <span>{{ tax.tax_name }}{{ economicTaxRate(tax.tax_rate, tax.rate_basis) !== null ? ' ' + economicTaxRate(tax.tax_rate, tax.rate_basis) : '' }}: {{ tax.tax_amount !== null ? (tax.tax_amount | currency) : 'No configurado · revisar' }}</span>
+                            }
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  } @else {
+                    <p class="text-sm text-text-secondary">No hay líneas económicas fiscales congeladas. Revisa el snapshot antes de usarlo para facturación.</p>
+                  }
+
+                  @if (economic.totals) {
+                    <dl class="grid grid-cols-2 gap-2 border-t border-border pt-3 text-sm sm:grid-cols-4">
+                      <div><dt class="text-text-secondary">Base total</dt><dd class="font-semibold">{{ economic.totals.total_before_tax !== null ? (economic.totals.total_before_tax | currency) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Impuestos totales</dt><dd class="font-semibold">{{ economic.totals.tax_amount !== null ? (economic.totals.tax_amount | currency) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Descuentos</dt><dd class="font-semibold">{{ economic.totals.discount_amount !== null ? (economic.totals.discount_amount | currency) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Total congelado</dt><dd class="font-bold">{{ economic.totals.total_amount !== null ? (economic.totals.total_amount | currency) : 'No configurado · revisar' }}</dd></div>
+                    </dl>
+                  } @else {
+                    <p class="text-sm text-text-secondary">Totales del cálculo: No configurado · revisar.</p>
+                  }
+                </div>
+              } @else {
+                <app-alert-banner variant="warning" heading="Snapshot económico no disponible">
+                  Este contrato histórico no conserva perfil ni desglose económico congelado. No se puede generar una factura AIU desde configuración vigente o importes inferidos; crea una cotización de contrato nueva o revisada con su perfil de facturación.
+                </app-alert-banner>
+              }
+            </app-card>
+
             <app-card title="Administración, Imprevistos y Utilidad (AIU)" shadow="sm" [responsivePadding]="true">
               <dl class="space-y-2.5 text-sm">
                 <div class="flex justify-between items-center">
@@ -149,13 +240,13 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
               </dl>
               @if (contract()!.profile) {
                 <p class="mt-3 text-xs text-text-secondary">
-                  Perfil congelado {{ contract()!.profile!.profile_id !== null ? ('#' + contract()!.profile!.profile_id) : 'ID no configurado' }} · versión {{ contract()!.profile!.version ?? 'No configurada' }}.
+                  Perfil de facturación congelado {{ contract()!.profile!.name || ('#' + (contract()!.profile!.profile_id ?? 'No configurado')) }} · versión {{ contract()!.profile!.version ?? 'No configurada · revisar' }}.
                 </p>
               } @else {
-                <p class="mt-3 text-xs text-text-secondary">El snapshot no incluye un perfil de cotización.</p>
+                <p class="mt-3 text-xs text-text-secondary">El snapshot no incluye un perfil de facturación congelado.</p>
               }
               <p class="mt-2 text-xs text-text-secondary">
-                Los valores son informativos. Este flujo es administrativo; la economía contractual y la validación fiscal para facturar siguen pendientes de definición.
+                Las participaciones A/I/U provienen únicamente del perfil de facturación congelado. Un perfil de cotización no se usa como fuente fiscal.
               </p>
             </app-card>
 
@@ -205,6 +296,7 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                     @if (contract()!.invoice) {
                       <a
                         routerLink="/admin/invoicing/invoices"
+                        [queryParams]="{ invoiceId: contract()!.invoice!.id }"
                         class="hover:underline font-medium"
                         style="color: var(--color-primary);"
                         [attr.aria-label]="'Ver factura AIU del contrato ' + contract()!.contract_number"
@@ -250,9 +342,9 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                   {{ contract()!.invoice!.invoice_number || ('Factura #' + contract()!.invoice!.id) }} · estado administrativo: {{ contract()!.invoice!.status || 'No disponible' }} · estado fiscal: {{ contract()!.invoice!.dian_status || 'No disponible' }}.
                 </p>
                 <div class="mt-3">
-                  <app-button variant="outline" [fullWidth]="true" (clicked)="goToInvoices()">
+                  <app-button variant="outline" [fullWidth]="true" (clicked)="goToInvoices(contract()!.invoice!.id)">
                     <app-icon slot="icon" name="receipt" size="16"></app-icon>
-                    Ver factura AIU
+                    Ver factura AIU #{{ contract()!.invoice!.id }}
                   </app-button>
                 </div>
               } @else if (canGenerateInvoice()) {
@@ -273,7 +365,13 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                 </p>
               } @else {
                 <p class="text-sm text-text-secondary">
-                  Disponible cuando el contrato esté vigente.
+                  @if (contract()!.status === 'active' && (!contract()!.economic || !contract()!.economic!.invoice_profile?.config)) {
+                    No se puede facturar: falta el perfil y el snapshot económico congelado. Revisa o crea una cotización de contrato nueva con un perfil de facturación explícito.
+                  } @else if (contract()!.status === 'active' && contract()!.invoice) {
+                    Hay una factura activa; resuélvela antes de generar otra.
+                  } @else {
+                    Disponible cuando el contrato esté vigente y conserve una factura AIU.
+                  }
                 </p>
               }
             </app-card>
@@ -300,7 +398,7 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                 }
               } @else {
                 <div class="text-[10px] text-center text-text-secondary font-bold uppercase tracking-widest bg-[var(--color-surface)] py-3 rounded-xl border border-dashed border-border">
-                  Estado terminal: sin transiciones disponibles
+                  {{ contract()!.status === 'active' && contract()!.invoice ? 'Factura activa: resuélvela antes de cancelar el contrato.' : 'Estado terminal: sin transiciones disponibles' }}
                 </div>
               }
             </app-card>
@@ -355,7 +453,7 @@ export class ContractDetailComponent {
   readonly contract = signal<Contract | null>(null);
   readonly loading = signal(true);
   readonly loadError = signal<string | null>(null);
-  readonly transitionLoading = signal<ContractStatus | null>(null);
+  readonly transitionLoading = signal<ContractTransitionTarget | null>(null);
   readonly transitionError = signal<string | null>(null);
   readonly generatingInvoice = signal(false);
   readonly invoiceError = signal<string | null>(null);
@@ -371,22 +469,32 @@ export class ContractDetailComponent {
   });
 
   /** C.2: solo las transiciones validas para el estado actual se habilitan. */
-  readonly validTransitions = computed<ContractStatus[]>(() => {
+  readonly validTransitions = computed<ContractTransitionTarget[]>(() => {
     const c = this.contract();
-    return c ? [...(CONTRACT_TRANSITIONS[c.status] ?? [])] : [];
+    return c
+      ? [...(CONTRACT_TRANSITIONS[c.status] ?? [])].filter(
+          (target) => !(target === 'cancelled' && c.invoice),
+        )
+      : [];
   });
 
   /** D.2 (FB-08/FB-09): el boton solo vive en contrato vigente sin factura. */
   readonly canGenerateInvoice = computed(() => {
     const c = this.contract();
-    return c ? canGenerateContractInvoice(c.status, c.invoice) : false;
+    return c
+      ? canGenerateContractInvoice(
+          c.status,
+          c.invoice,
+          c.economic?.schema_version === 1 && c.economic.invoice_profile?.config !== null && c.economic.invoice_profile?.config !== undefined,
+        )
+      : false;
   });
 
   readonly transitionHint = computed(() => {
     const c = this.contract();
     if (!c || this.validTransitions().length === 0) return '';
     if (c.status === 'draft') return 'Al activar, el contrato pasa a estado administrativo vigente.';
-    if (c.status === 'active') return 'Marcar facturado solo actualiza el estado administrativo; cancelar lo anula conservando la trazabilidad.';
+    if (c.status === 'active') return 'La facturación no cambia este estado; “Facturado” solo se muestra tras la aceptación fiscal de la DIAN.';
     return '';
   });
 
@@ -450,12 +558,50 @@ export class ContractDetailComponent {
     this.reload();
   }
 
-  transitionMeta(target: ContractStatus): { label: string; icon: string } {
+  transitionMeta(target: ContractTransitionTarget): { label: string; icon: string } {
     return TRANSITION_META[target];
   }
 
   formatPct(value: number | null | undefined): string {
-    return value === null || value === undefined ? '—' : `${value}%`;
+    return value === null || value === undefined ? 'No configurado · revisar' : `${value}%`;
+  }
+
+  taxableBasisLabel(value: string | null): string {
+    switch (value) {
+      case 'aiu': return 'AIU';
+      case 'utilidad': return 'Utilidad';
+      case 'subtotal': return 'Subtotal';
+      default: return 'No configurado · revisar';
+    }
+  }
+
+  componentsBasisLabel(value: string | null): string {
+    if (value === 'contract') return 'Porcentaje del contrato';
+    if (value === 'aiu') return 'Porcentaje del AIU';
+    return 'No configurado · revisar';
+  }
+
+  accountingModelLabel(value: string | null): string {
+    if (value === 'sumada') return 'Sumada';
+    if (value === 'no_sumada') return 'No sumada';
+    return 'No configurado · revisar';
+  }
+
+  economicBucketLabel(value: string | null): string {
+    const labels: Record<string, string> = {
+      administracion: 'Administración',
+      imprevistos: 'Imprevistos',
+      utilidad: 'Utilidad',
+      costo: 'Costo directo',
+      contrato: 'Contrato',
+    };
+    return value ? labels[value] ?? value : 'Componente no configurado · revisar';
+  }
+
+  economicTaxRate(value: number | null, rateBasis: string | null): string | null {
+    if (value === null) return null;
+    const percent = rateBasis === 'fraction' ? value * 100 : value;
+    return Number.isFinite(percent) ? `${percent}%` : null;
   }
 
   /** Quotation item tax_rate is canonicalized as a fraction (0.19 = 19%). */
@@ -482,8 +628,11 @@ export class ContractDetailComponent {
   }
 
   /** D.2: apertura del borrador AIU en el modulo de facturacion. */
-  goToInvoices(): void {
-    void this.router.navigate(['/admin/invoicing/invoices']);
+  goToInvoices(invoiceId?: number): void {
+    void this.router.navigate(
+      ['/admin/invoicing/invoices'],
+      invoiceId ? { queryParams: { invoiceId } } : undefined,
+    );
   }
 
   reload(): void {
@@ -531,7 +680,13 @@ export class ContractDetailComponent {
   generateInvoice(): void {
     const current = this.contract();
     if (!current || this.generatingInvoice()) return;
-    if (!canGenerateContractInvoice(current.status, current.invoice)) return;
+    if (!current.economic || current.economic.schema_version !== 1 || !current.economic.invoice_profile?.config) {
+      const message = 'No se puede generar una factura: falta el snapshot económico y el perfil de facturación congelados. Revisa o crea una cotización de contrato nueva con una configuración explícita.';
+      this.invoiceError.set(message);
+      this.toastService.error(message);
+      return;
+    }
+    if (!canGenerateContractInvoice(current.status, current.invoice, true)) return;
     this.generatingInvoice.set(true);
     this.invoiceError.set(null);
     this.contractsService
@@ -542,26 +697,42 @@ export class ContractDetailComponent {
       )
       .subscribe({
         next: (result) => {
-          const updated = result?.contract && typeof result.contract === 'object' ? (result.contract as Contract) : null;
-          const created = result?.invoice && typeof result.invoice === 'object'
-            ? result.invoice
-            : result && typeof result.id === 'number' && ('invoice_number' in result || 'status' in result)
-              ? result
-              : null;
-          if (updated && updated.status) {
-            this.contract.set(updated);
-          } else if (created) {
-            this.contract.set({ ...current, invoice: created, status: 'invoiced' });
-          } else {
-            this.quietReload();
+          const payload = result !== null && typeof result === 'object' ? result as Record<string, unknown> : null;
+          const created = payload?.['invoice'] && typeof payload['invoice'] === 'object'
+            ? payload['invoice'] as Record<string, unknown>
+            : payload;
+          const createdId = typeof created?.['id'] === 'number' && Number.isSafeInteger(created['id'])
+            ? created['id'] as number
+            : null;
+          const createdStatus = typeof created?.['status'] === 'string' ? created['status'] : null;
+          const createdInvoice: ContractInvoiceRef | null = createdId !== null
+            ? {
+                id: createdId,
+                invoice_number: typeof created?.['invoice_number'] === 'string' ? created['invoice_number'] : undefined,
+                status: createdStatus ?? undefined,
+                total_amount: typeof created?.['total_amount'] === 'number'
+                  ? created['total_amount']
+                  : typeof created?.['total_amount'] === 'string' && created['total_amount'].trim() !== '' && Number.isFinite(Number(created['total_amount']))
+                    ? Number(created['total_amount'])
+                    : null,
+                dian_status: typeof created?.['dian_status'] === 'string' ? created['dian_status'] : null,
+              }
+            : null;
+          if (createdInvoice) {
+            // Keep the backend's status effective; creating a draft never marks
+            // the contract invoiced. The follow-up read is the source of truth.
+            this.contract.set({ ...current, invoice: createdInvoice });
           }
-          const label = created?.invoice_number ?? created?.id ?? null;
+          this.quietReload();
+          const label = createdInvoice?.invoice_number ?? createdInvoice?.id ?? null;
           this.toastService.success(
             label
-              ? `Borrador ${label} listo para revisar y emitir`
-              : 'Borrador AIU generado: listo para revisar y emitir',
+              ? createdStatus === 'draft'
+                ? `Borrador ${label} listo para revisar y emitir`
+                : `Factura ${label} creada (estado: ${createdStatus})`
+              : 'Solicitud de factura procesada; consulta el estado actualizado del contrato.',
           );
-          this.goToInvoices();
+          this.goToInvoices(createdInvoice?.id);
         },
         error: (err: ContractApiError | Error) => {
           const status = err instanceof ContractApiError ? err.status : null;
@@ -586,7 +757,7 @@ export class ContractDetailComponent {
    * conserva el ultimo estado consistente.
    */
   onTransition(targetId: string): void {
-    const target = targetId as ContractStatus;
+    const target = targetId as ContractTransitionTarget;
     const current = this.contract();
     if (!current || this.transitionLoading() !== null) return;
     if (!this.validTransitions().includes(target)) {

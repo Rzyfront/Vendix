@@ -7,9 +7,14 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   Contract,
+  ContractStatus,
   ContractLineView,
   ContractInvoiceRef,
-  ContractStatus,
+  ContractEconomicLineView,
+  ContractEconomicTotalsView,
+  ContractProfileView,
+  ContractQuotationProfileView,
+  ContractTransitionTarget,
   ContractStatusTransitionDto,
   PaginatedContractsResponse,
 } from '../interfaces/contract.interface';
@@ -72,14 +77,119 @@ function isContractSnapshot(value: Record<string, unknown> | null): value is Rec
   return typeof value?.['frozen_at'] === 'string' && !!quotation;
 }
 
+function readText(record: Record<string, unknown> | null, key: string): string | null {
+  return typeof record?.[key] === 'string' ? record[key] as string : null;
+}
+
+/** Convert the frozen quote economics for display only; never recompute totals. */
+function mapEconomicSnapshot(value: unknown): Contract['economic'] {
+  const economic = asRecord(value);
+  if (!economic || finiteAmount(economic['schema_version']) !== 1) return null;
+
+  const invoiceProfile = asRecord(economic['invoice_profile']);
+  const profileConfig = asRecord(invoiceProfile?.['config']);
+  const aiuConfig = asRecord(profileConfig?.['aiu']);
+  const componentShares = asRecord(aiuConfig?.['components']);
+  const components: Record<string, number | null> | null = componentShares
+    ? Object.fromEntries(Object.entries(componentShares).map(([key, share]) => [key, finiteAmount(share)]))
+    : null;
+  const calculation = asRecord(economic['calculation']);
+  const rawTotals = asRecord(calculation?.['totals']);
+  const totals: ContractEconomicTotalsView | null = rawTotals ? {
+    gross_subtotal: finiteAmount(rawTotals['gross_subtotal']),
+    discount_amount: finiteAmount(rawTotals['discount_amount']),
+    total_before_tax: finiteAmount(rawTotals['total_before_tax']),
+    tax_amount: finiteAmount(rawTotals['tax_amount']),
+    tax_iva: finiteAmount(rawTotals['tax_iva']),
+    tax_inc: finiteAmount(rawTotals['tax_inc']),
+    tax_ica: finiteAmount(rawTotals['tax_ica']),
+    tax_other: finiteAmount(rawTotals['tax_other']),
+    total_amount: finiteAmount(rawTotals['total_amount']),
+  } : null;
+  const aiuSummary = asRecord(calculation?.['aiu']);
+  const rawComponents = Array.isArray(aiuSummary?.['components']) ? aiuSummary['components'] : [];
+  const aiu = aiuSummary ? {
+    contract_value: finiteAmount(aiuSummary['contract_value']),
+    aiu_value: finiteAmount(aiuSummary['aiu_value']),
+    taxable_base: finiteAmount(aiuSummary['taxable_base']),
+    minimum_base: finiteAmount(aiuSummary['minimum_base']),
+    components: rawComponents.flatMap((value) => {
+      const component = asRecord(value);
+      if (!component) return [];
+      const name = readText(component, 'component') ?? readText(component, 'bucket');
+      return name ? [{ component: name, amount: finiteAmount(component['amount'] ?? component['value']) }] : [];
+    }),
+  } : null;
+  const rawInvoiceLines = Array.isArray(economic['invoice_lines']) ? economic['invoice_lines'] : [];
+  const calculationLines = Array.isArray(calculation?.['lines']) ? calculation['lines'] : [];
+  const invoiceLines: ContractEconomicLineView[] = rawInvoiceLines.flatMap((value, index) => {
+    const line = asRecord(value);
+    if (!line) return [];
+    const calculated = asRecord(calculationLines[index]);
+    const rawTaxes = Array.isArray(calculated?.['taxes']) ? calculated['taxes'] : [];
+    const taxes = rawTaxes.flatMap((value) => {
+      const tax = asRecord(value);
+      const name = readText(tax, 'tax_name');
+      return tax && name ? [{
+        tax_name: name,
+        tax_type: readText(tax, 'tax_type'),
+        tax_rate: finiteAmount(tax['tax_rate']),
+        rate_basis: readText(tax, 'rate_basis'),
+        tax_amount: finiteAmount(tax['tax_amount']),
+      }] : [];
+    });
+    return [{
+      description: readText(line, 'description') ?? 'Línea económica sin descripción',
+      bucket: readText(line, 'bucket') ?? readText(line, 'aiu_component'),
+      quantity: finiteAmount(line['quantity']),
+      unit_price: finiteAmount(line['unit_price']),
+      discount_amount: finiteAmount(line['discount_amount']),
+      base_amount: finiteAmount(calculated?.['line_extension_amount']),
+      tax_amount: finiteAmount(calculated?.['tax_amount']),
+      total_amount: finiteAmount(calculated?.['total_amount']),
+      taxes,
+    }];
+  });
+  const quoteProfile = asRecord(economic['quotation_profile']);
+  const quotationProfile: ContractQuotationProfileView | null = quoteProfile ? {
+    profile_id: finiteAmount(quoteProfile['profile_id']),
+    version: finiteAmount(quoteProfile['version']),
+    config: asRecord(quoteProfile['config']),
+  } : null;
+  const profile: ContractProfileView | null = invoiceProfile ? {
+    profile_id: finiteAmount(invoiceProfile['profile_id']),
+    version: finiteAmount(invoiceProfile['version']),
+    name: readText(invoiceProfile, 'name'),
+    config: profileConfig,
+    // Absence stays visible; never call profile normalizers/default resolvers here.
+    taxable_basis: readText(aiuConfig, 'taxable_basis') ?? readText(aiuConfig, 'regime'),
+    components_basis: readText(aiuConfig, 'components_basis'),
+    accounting_model: readText(aiuConfig, 'accounting_model'),
+    components,
+  } : null;
+
+  return {
+    schema_version: 1,
+    contract_object: readText(economic, 'contract_object'),
+    direct_cost: finiteAmount(economic['direct_cost']),
+    contract_value: finiteAmount(economic['contract_value']),
+    aiu_value: finiteAmount(economic['aiu_value']),
+    invoice_profile: profile,
+    quotation_profile: quotationProfile,
+    invoice_lines: invoiceLines,
+    totals,
+    aiu,
+  };
+}
+
 function mapContractDto(value: unknown): Contract {
   const dto = asRecord(value);
   if (!dto) throw new Error('Respuesta de contrato inválida.');
   const rawSnapshot = asRecord(dto['snapshot']);
   const snapshot = isContractSnapshot(rawSnapshot) ? rawSnapshot : null;
   const quotation = asRecord(rawSnapshot?.['quotation']);
-  const profile = asRecord(rawSnapshot?.['profile']);
-  const config = asRecord(profile?.['config']);
+  const quotationProfileData = asRecord(rawSnapshot?.['profile']);
+  const economic = mapEconomicSnapshot(asRecord(rawSnapshot?.['economic']));
   const invoiceDto = asRecord(dto['invoice']);
   const snapshotItems = Array.isArray(quotation?.['items']) ? quotation['items'] : null;
   const rowItems = Array.isArray(dto['items']) ? dto['items'] : [];
@@ -113,11 +223,15 @@ function mapContractDto(value: unknown): Contract {
       status === null) {
     throw new Error('La respuesta del contrato no contiene sus datos de identificación.');
   }
-  const profileId = finiteAmount(profile?.['profile_id']);
-  const profileVersion = finiteAmount(profile?.['version']);
-  const profileView = profile
-    ? { profile_id: profileId, version: profileVersion, config }
-    : null;
+  const profileId = finiteAmount(dto['profile_id'] ?? quotationProfileData?.['profile_id']);
+  const profileVersion = finiteAmount(dto['profile_version'] ?? quotationProfileData?.['version']);
+  const quotationProfile: ContractQuotationProfileView | null = quotationProfileData
+    ? {
+        profile_id: finiteAmount(quotationProfileData['profile_id']),
+        version: finiteAmount(quotationProfileData['version']),
+        config: asRecord(quotationProfileData['config']),
+      }
+    : economic?.quotation_profile ?? null;
   const invoiceId = finiteAmount(invoiceDto?.['id']);
   const invoice: ContractInvoiceRef | null = invoiceDto && invoiceId !== null ? {
     id: invoiceId,
@@ -133,11 +247,15 @@ function mapContractDto(value: unknown): Contract {
     quotation_number: typeof quotationDto['quotation_number'] === 'string' ? quotationDto['quotation_number'] : '',
     status: typeof quotationDto['status'] === 'string' ? quotationDto['status'] : undefined,
   } : null;
-  const explicitObject = typeof dto['contract_object'] === 'string' ? dto['contract_object'] : null;
-  const snapshotObject = typeof rawSnapshot?.['contract_object'] === 'string' ? rawSnapshot['contract_object'] :
-    typeof quotation?.['contract_object'] === 'string' ? quotation['contract_object'] : null;
+  const administrativeStatusValue = dto['administrative_status'];
+  const administrativeStatus: ContractStatus | null = typeof administrativeStatusValue === 'string' &&
+    ['draft', 'active', 'invoiced', 'cancelled'].includes(administrativeStatusValue)
+      ? administrativeStatusValue as ContractStatus
+      : null;
   const readText = (record: Record<string, unknown> | null, key: string): string | null =>
     typeof record?.[key] === 'string' ? record[key] as string : null;
+  const totals = economic?.totals;
+  const profileComponents = economic?.invoice_profile?.components;
 
   return {
     snapshot,
@@ -147,21 +265,32 @@ function mapContractDto(value: unknown): Contract {
     contract_number: contractNumber,
     status,
     quotation_id: quotationId,
-    contract_object: snapshotObject ?? explicitObject,
-    administration_percentage: finiteAmount(rawSnapshot ? config?.['admin_percent'] : dto['administration_percentage']),
-    contingency_percentage: finiteAmount(rawSnapshot ? config?.['contingency_percent'] : dto['contingency_percentage']),
-    profit_percentage: finiteAmount(rawSnapshot ? config?.['profit_percent'] : dto['profit_percentage']),
-    subtotal_amount: pickAmount(quotation?.['subtotal_amount'], dto['subtotal_amount']),
-    discount_amount: pickAmount(quotation?.['discount_amount'], dto['discount_amount']),
-    tax_amount: pickAmount(quotation?.['tax_amount'], dto['tax_amount']),
-    grand_total: pickAmount(quotation?.['grand_total'], dto['grand_total']),
+    contract_object: economic?.contract_object ?? null,
+    // Keep explicit top-level legacy display values for historical rows only;
+    // quotation-profile config is never a fiscal source and frozen economics win.
+    administration_percentage: economic
+      ? profileComponents?.['administracion'] ?? null
+      : finiteAmount(dto['administration_percentage']),
+    contingency_percentage: economic
+      ? profileComponents?.['imprevistos'] ?? null
+      : finiteAmount(dto['contingency_percentage']),
+    profit_percentage: economic
+      ? profileComponents?.['utilidad'] ?? null
+      : finiteAmount(dto['profit_percentage']),
+    subtotal_amount: economic ? totals?.gross_subtotal ?? null : pickAmount(quotation?.['subtotal_amount'], dto['subtotal_amount']),
+    discount_amount: economic ? totals?.discount_amount ?? null : pickAmount(quotation?.['discount_amount'], dto['discount_amount']),
+    tax_amount: economic ? totals?.tax_amount ?? null : pickAmount(quotation?.['tax_amount'], dto['tax_amount']),
+    grand_total: economic ? totals?.total_amount ?? null : pickAmount(quotation?.['grand_total'], dto['grand_total']),
     notes: rawSnapshot ? readText(quotation, 'notes') : readText(dto, 'notes'),
     terms_and_conditions: rawSnapshot ? readText(quotation, 'terms_and_conditions') : readText(dto, 'terms_and_conditions'),
     valid_until: rawSnapshot ? readText(quotation, 'valid_until') : readText(dto, 'valid_until'),
     items,
-    profile: profileView,
+    economic,
+    profile: economic?.invoice_profile ?? null,
+    quotation_profile: quotationProfile,
     profile_id: profileId,
     profile_version: profileVersion,
+    administrative_status: administrativeStatus,
     invoice,
     quotation: quotationRef,
     created_at: readText(dto, 'created_at'),
@@ -232,11 +361,11 @@ export class ContractsService {
   }
 
   /**
-   * FB-07 + ERR-06: transicion de estado (`draft->active->invoiced`,
-   * `*->cancelled`). Una transicion invalida responde 422
+   * P1.4 + ERR-06: transición administrativa. `invoiced` deriva de aceptación
+   * fiscal y nunca se envía mediante PATCH. Una transición inválida responde 422
    * `CONTRACT_STATUS_001` y el error conserva el codigo para pintarlo.
    */
-  transitionContractStatus(id: number, status: ContractStatus): Observable<Contract> {
+  transitionContractStatus(id: number, status: ContractTransitionTarget): Observable<Contract> {
     const dto: ContractStatusTransitionDto = { status };
     return this.http.patch<unknown>(`${this.apiUrl}/store/contracts/${id}`, dto).pipe(
       map((r) => mapContractDto(unwrapResponse(r))),

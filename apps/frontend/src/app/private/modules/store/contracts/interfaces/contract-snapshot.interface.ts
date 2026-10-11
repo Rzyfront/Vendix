@@ -11,7 +11,44 @@ export interface ContractSnapshotItem {
   [key: string]: unknown;
 }
 
+export interface ContractSnapshotInvoiceProfile {
+  profile_id?: number;
+  version?: number;
+  name?: string;
+  config?: Record<string, unknown> | null;
+}
+
+export interface ContractSnapshotEconomicLine extends Record<string, unknown> {
+  description?: string;
+  bucket?: string;
+  aiu_component?: string | null;
+  quantity?: number | string;
+  unit_price?: number | string;
+  discount_amount?: number | string | null;
+  taxes?: unknown[];
+}
+
+/** Exact, immutable economic snapshot copied from the accepted quotation. */
+export interface ContractSnapshotEconomic {
+  schema_version?: number;
+  frozen_at?: string | null;
+  invoice_profile?: ContractSnapshotInvoiceProfile | null;
+  quotation_profile?: {
+    profile_id?: number;
+    version?: number;
+    config?: Record<string, unknown> | null;
+  } | null;
+  contract_object?: string | null;
+  direct_cost?: number | string | null;
+  contract_value?: number | string | null;
+  aiu_value?: number | string | null;
+  invoice_lines?: ContractSnapshotEconomicLine[];
+  calculation?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
 export interface ContractSnapshot {
+  schema_version?: number;
   frozen_at?: string | null;
   quotation?: {
     id?: number;
@@ -43,4 +80,5 @@ export interface ContractSnapshot {
       [key: string]: unknown;
     } | null;
   } | null;
+  economic?: ContractSnapshotEconomic | null;
 }
