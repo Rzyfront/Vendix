@@ -1,23 +1,23 @@
 import { Component, DestroyRef, inject, signal, computed } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { finalize } from 'rxjs';
+import { Subject, catchError, of, switchMap } from 'rxjs';
 import { ContractsService, ContractApiError } from './services/contracts.service';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import {
   Contract,
   CONTRACT_STATUS_LABELS,
 } from './interfaces/contract.interface';
-import {
-  CardComponent,
-  ButtonComponent,
-  IconComponent,
-  SpinnerComponent,
-  EmptyStateComponent,
-  AlertBannerComponent,
-  StatsComponent,
-} from '../../../../shared/components';
+import { CardComponent } from '../../../../shared/components/card/card.component';
+import { ButtonComponent } from '../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { SpinnerComponent } from '../../../../shared/components/spinner/spinner.component';
+import { EmptyStateComponent } from '../../../../shared/components/empty-state/empty-state.component';
+import { AlertBannerComponent } from '../../../../shared/components/alert-banner/alert-banner.component';
+import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import { PaginationComponent } from '../../../../shared/components/pagination/pagination.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
-import { CurrencyPipe } from '../../../../shared/pipes';
+import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-contracts',
@@ -31,6 +31,7 @@ import { CurrencyPipe } from '../../../../shared/pipes';
     EmptyStateComponent,
     AlertBannerComponent,
     StatsComponent,
+    PaginationComponent,
     InputsearchComponent,
     CurrencyPipe,
   ],
@@ -40,7 +41,7 @@ import { CurrencyPipe } from '../../../../shared/pipes';
         <app-stats
           title="Contratos"
           [value]="contracts().length"
-          smallText="Contratos de obra"
+          smallText="En esta página"
           iconName="file-text"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
@@ -49,7 +50,7 @@ import { CurrencyPipe } from '../../../../shared/pipes';
         <app-stats
           title="Vigentes"
           [value]="activeCount()"
-          smallText="En ejecución"
+          smallText="En esta página"
           iconName="check-circle"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
@@ -64,15 +65,33 @@ import { CurrencyPipe } from '../../../../shared/pipes';
         >
           <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
             <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-              Contratos ({{ filteredContracts().length }})
+              Contratos ({{ totalItems() }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
                 class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                placeholder="Buscar por número u objeto..."
+                placeholder="Buscar por número o notas..."
                 (searchChange)="onSearch($event)"
               />
+              @if (canCreateContractQuotation()) {
+                <app-button variant="primary" size="sm" (clicked)="startContractQuotation()">
+                  Cotizar contrato
+                </app-button>
+              }
             </div>
+            <label class="sr-only" for="contract-status-filter">Filtrar por estado</label>
+            <select
+              id="contract-status-filter"
+              class="w-full md:w-44 rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary"
+              [value]="statusFilter()"
+              (change)="onStatusChange($event)"
+            >
+              <option value="">Todos los estados</option>
+              <option value="draft">Borrador</option>
+              <option value="active">Vigente</option>
+              <option value="invoiced">Facturado</option>
+              <option value="cancelled">Cancelado</option>
+            </select>
           </div>
         </div>
 
@@ -88,16 +107,25 @@ import { CurrencyPipe } from '../../../../shared/pipes';
                 <app-button variant="outline" size="sm" (clicked)="reload()">Reintentar</app-button>
               </div>
             </app-alert-banner>
-          } @else if (filteredContracts().length === 0) {
+          } @else if (contracts().length === 0 && hasActiveFilters()) {
+            <app-empty-state
+              icon="search"
+              title="Sin resultados"
+              description="No hay contratos que coincidan con la búsqueda o el estado seleccionado."
+              [showActionButton]="false"
+            ></app-empty-state>
+          } @else if (contracts().length === 0) {
             <app-empty-state
               icon="file-text"
               title="Sin contratos"
               description="Aún no hay contratos de obra. Se crean al aceptar una cotización con destino contrato."
-              [showActionButton]="false"
+              [showActionButton]="canCreateContractQuotation()"
+              actionButtonText="Cotizar contrato"
+              (actionClick)="startContractQuotation()"
             ></app-empty-state>
           } @else {
             <div class="flex flex-col gap-2">
-              @for (contract of filteredContracts(); track contract.id) {
+              @for (contract of contracts(); track contract.id) {
                 <a
                   [routerLink]="['/admin/orders/contracts', contract.id]"
                   class="p-3 sm:p-4 bg-[var(--color-surface)] rounded-xl border border-border hover:border-gray-300 transition-colors block"
@@ -115,15 +143,25 @@ import { CurrencyPipe } from '../../../../shared/pipes';
                     <span class="text-[11px] font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700 flex-shrink-0">
                       {{ statusLabel(contract) }}
                     </span>
-                    <span class="font-bold text-gray-900 text-sm sm:text-base font-mono flex-shrink-0">
-                      {{ contract.grand_total || 0 | currency }}
-                    </span>
+                    @if (contract.grand_total !== null && contract.grand_total !== undefined) {
+                      <span class="font-bold text-gray-900 text-sm sm:text-base font-mono flex-shrink-0">
+                        {{ contract.grand_total | currency }}
+                      </span>
+                    }
                     <app-icon name="arrow-right" [size]="16" class="text-gray-300 flex-shrink-0"></app-icon>
                   </div>
                 </a>
               }
             </div>
           }
+          <app-pagination
+            [currentPage]="page()"
+            [totalPages]="totalPages()"
+            [total]="totalItems()"
+            [limit]="limit()"
+            infoStyle="range"
+            (pageChange)="onPageChange($event)"
+          ></app-pagination>
         </div>
       </app-card>
     </div>
@@ -133,25 +171,48 @@ import { CurrencyPipe } from '../../../../shared/pipes';
 export class ContractsComponent {
   private readonly contractsService = inject(ContractsService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly queryRequests = new Subject<{ page: number; limit: number; search?: string; status?: string }>();
 
   readonly contracts = signal<Contract[]>([]);
   readonly loading = signal(true);
   readonly loadError = signal<string | null>(null);
   readonly search = signal('');
+  readonly statusFilter = signal('');
+  readonly page = signal(1);
+  readonly limit = signal(10);
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.limit()));
 
   readonly activeCount = computed(() => this.contracts().filter((c) => c.status === 'active').length);
-
-  readonly filteredContracts = computed(() => {
-    const term = this.search().trim().toLowerCase();
-    if (!term) return this.contracts();
-    return this.contracts().filter(
-      (c) =>
-        c.contract_number.toLowerCase().includes(term) ||
-        (c.contract_object ?? '').toLowerCase().includes(term),
-    );
+  readonly hasActiveFilters = computed(() => !!this.search().trim() || !!this.statusFilter());
+  readonly canCreateContractQuotation = computed(() => {
+    const permissions = this.authFacade.userPermissions();
+    const roles = this.authFacade.userRoles();
+    const isSuperAdmin = roles.includes('super_admin') || roles.includes('SUPER_ADMIN');
+    return this.authFacade.storeIndustries().includes('construction') &&
+      (isSuperAdmin || (permissions.includes('store:quotations:create') && permissions.includes('store:contracts:create')));
   });
 
   constructor() {
+    this.queryRequests.pipe(
+      switchMap((query) => this.contractsService.getContracts(query).pipe(
+        catchError((error: ContractApiError | Error) => of({ requestError: error })),
+      )),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe((result) => {
+      this.loading.set(false);
+      if ('requestError' in result) {
+        this.contracts.set([]);
+        this.totalItems.set(0);
+        this.loadError.set(result.requestError?.message ?? 'Error al cargar los contratos');
+        return;
+      }
+      this.contracts.set(result.data ?? []);
+      this.totalItems.set(result.pagination?.total ?? 0);
+      this.page.set(result.pagination?.page ?? this.page());
+    });
     this.reload();
   }
 
@@ -161,20 +222,34 @@ export class ContractsComponent {
 
   onSearch(term: string): void {
     this.search.set(term ?? '');
+    this.page.set(1);
+    this.reload();
+  }
+
+  onStatusChange(event: Event): void {
+    this.statusFilter.set((event.target as HTMLSelectElement).value);
+    this.page.set(1);
+    this.reload();
+  }
+
+  onPageChange(page: number): void {
+    this.page.set(page);
+    this.reload();
+  }
+
+  startContractQuotation(): void {
+    if (!this.canCreateContractQuotation()) return;
+    void this.router.navigate(['/admin/orders/quotations'], { queryParams: { destination: 'contract' } });
   }
 
   reload(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.contractsService
-      .getContracts({ limit: 50 })
-      .pipe(
-        finalize(() => this.loading.set(false)),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe({
-        next: (res) => this.contracts.set(res?.data ?? []),
-        error: (err: ContractApiError | Error) => this.loadError.set(err?.message ?? 'Error al cargar los contratos'),
-      });
+    this.queryRequests.next({
+      page: this.page(),
+      limit: this.limit(),
+      ...(this.search().trim() && { search: this.search().trim() }),
+      ...(this.statusFilter() && { status: this.statusFilter() }),
+    });
   }
 }
