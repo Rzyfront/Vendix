@@ -114,7 +114,7 @@
     border-color: var(--color-destructive);
 
     &:focus {
-      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+      box-shadow: 0 0 0 2px rgba(var(--color-error-rgb), 0.2);
     }
   }
 
@@ -336,7 +336,7 @@
 
 .inputsearch-wrapper.inputsearch-wrapper-error:focus-within {
   border-color: var(--color-destructive);
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+  box-shadow: 0 0 0 2px rgba(var(--color-error-rgb), 0.2);
 }
 
 // Responsive design is now handled via mobile-first in size classes above

@@ -385,13 +385,13 @@ export class InputComponent implements ControlValueAccessor {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
-        'bg-[rgba(239,68,68,0.1)]',
+        'bg-[rgba(var(--color-error-rgb),0.1)]',
       ];
     } else if (control?.valid && control?.touched && control?.value) {
       stateClasses = [
         'border-[var(--color-primary)]',
         'focus:border-[var(--color-primary)]',
-        'bg-[rgba(126,215,165,0.1)]',
+        'bg-[rgba(var(--color-success-rgb),0.1)]',
       ];
     } else {
       stateClasses = [
@@ -436,7 +436,7 @@ export class InputComponent implements ControlValueAccessor {
         'focus:bg-[var(--color-surface)]',
         'focus:shadow-[0_0_0_2px_var(--color-ring)]',
         control?.invalid && control?.touched
-          ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
+          ? 'focus:shadow-[0_0_0_2px_rgba(var(--color-error-rgb),0.3)]'
           : '',
       ];
     } else {

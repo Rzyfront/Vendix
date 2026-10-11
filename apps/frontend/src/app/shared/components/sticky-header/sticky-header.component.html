@@ -1,6 +1,6 @@
 <div
   [ngClass]="{
-    'border-b border-gray-200 shadow-sm rounded-b-lg mb-2 md:mb-3': true,
+    'border-b border-border shadow-sm rounded-b-lg mb-2 md:mb-3': true,
     'bg-surface/95 backdrop-blur-sm -mx-2 md:-mx-4': variant() === 'default',
     'bg-surface/80 backdrop-blur-md': variant() === 'glass',
   }"
@@ -97,13 +97,13 @@
           [queryParams]="backQueryParams()"
           size="xsm"
           ariaLabel="Volver"
-          customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-gray-200"
+          customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-border"
         >
           <app-icon
             slot="icon"
             name="arrow-left"
             size="16"
-            class="md:!w-[18px] md:!h-[18px] text-gray-500"
+            class="md:!w-[18px] md:!h-[18px] text-text-secondary"
           ></app-icon>
         </app-button>
       }
@@ -117,7 +117,7 @@
           <app-icon
             [name]="icon()"
             size="20"
-            class="text-primary-600"
+            class="text-primary"
           ></app-icon>
         </div>
 
@@ -125,7 +125,7 @@
         <div class="sticky-header-title-stack flex flex-col min-w-0">
           <div class="flex items-center gap-2">
             <h1
-              class="sticky-header-title text-base md:text-lg font-bold text-gray-900 truncate"
+              class="sticky-header-title text-base md:text-lg font-bold text-text-primary truncate"
             >
               {{ title() }}
             </h1>
@@ -151,7 +151,7 @@
           <!-- Subtitle - Hidden on very small screens, visible from sm -->
           @if (subtitle()) {
             <p
-              class="sticky-header-subtitle hidden sm:block text-xs text-gray-500 font-medium truncate"
+              class="sticky-header-subtitle hidden sm:block text-xs text-text-secondary font-medium truncate"
             >
               {{ subtitle() }}
             </p>
@@ -164,7 +164,7 @@
     <div class="flex items-center gap-2 md:gap-4 flex-shrink-0">
       <!-- Metadata -->
       @if (metadataContent()) {
-        <div class="hidden md:block text-xs text-gray-400 italic">
+        <div class="hidden md:block text-xs text-text-secondary italic">
           {{ metadataContent() }}
         </div>
       }
@@ -181,7 +181,7 @@
               (clicked)="onActionClick(action.id)"
               size="xsm"
               [iconOnlyMobile]="!!action.icon"
-              customClasses="!rounded-[10px] !h-9 !w-9 !px-0 font-bold shadow-sm shadow-primary-200 active:scale-95 transition-all md:!rounded-lg md:!h-9 md:!px-3 md:!w-auto"
+              customClasses="!rounded-[10px] !h-9 !w-9 !px-0 font-bold shadow-sm shadow-[var(--shadow-sm)] active:scale-95 transition-all md:!rounded-lg md:!h-9 md:!px-3 md:!w-auto"
             >
               @if (action.icon) {
                 <app-icon
