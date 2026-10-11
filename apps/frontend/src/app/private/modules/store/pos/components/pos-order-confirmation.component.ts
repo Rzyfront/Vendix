@@ -378,7 +378,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
           <!-- Separador visual entre categorías -->
           <div class="confirm-footer-sep"></div>
     
-          @if (orderData()?.isShippingSale && orderId) {
+          @if (derivedIsShippingSale() && orderId) {
             <app-button variant="ghost" size="md" (clicked)="dispatchOrder()" [loading]="dispatching()" title="Enviar la orden a despacho">
               <app-icon name="send" [size]="16" slot="icon" ></app-icon>
               <span class="hidden sm:inline">Despachar</span>

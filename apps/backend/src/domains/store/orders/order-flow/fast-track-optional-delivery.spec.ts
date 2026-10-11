@@ -1,4 +1,4 @@
-import { PaymentType } from '@prisma/client';
+import { PaymentType } from './dto';
 import { OrderFlowService } from './order-flow.service';
 
 describe('OrderFlowService.fastTrackOrder — confirmación opcional de entrega', () => {
