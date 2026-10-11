@@ -6676,6 +6676,7 @@ model invoice_profile_versions {
   creator users?           @relation("invoice_profile_versions_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   invoices invoices[]
+  quotations quotations[] @relation("quotation_invoice_profile_version")
 
   @@unique([profile_id, version])
   @@index([profile_id, created_at])
@@ -7897,11 +7898,17 @@ model quotations {
   /// para preservar cotizaciones históricas sin reescritura; nunca es una
   /// referencia viva al perfil.
   contract_economic_snapshot Json?
+  /// Versión inmutable del perfil de facturación usada al cotizar el contrato.
+  /// Separada del `profile_id` de cotización: este ancla conserva la versión
+  /// económica/fiscal aunque el perfil cambie o su cabeza avance.
+  invoice_profile_id      Int?
+  invoice_profile_version Int?
   created_at           DateTime?             @default(now()) @db.Timestamp(6)
   updated_at           DateTime?             @default(now()) @db.Timestamp(6)
 
   quotation_items quotation_items[]
   profile         quotation_profiles? @relation(fields: [profile_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice_profile_snapshot invoice_profile_versions? @relation("quotation_invoice_profile_version", fields: [invoice_profile_id, invoice_profile_version], references: [profile_id, version], onDelete: Restrict, onUpdate: Restrict, map: "quotations_invoice_profile_id_invoice_profile_version_fkey")
   store           stores            @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   customer        users?            @relation("quotations_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   converted_order orders?           @relation(fields: [converted_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -7912,6 +7919,7 @@ model quotations {
   @@unique([store_id, quotation_number])
   @@index([store_id, quotation_number])
   @@index([store_id, status])
+  @@index([invoice_profile_id, invoice_profile_version])
   @@index([customer_id])
 }
 
