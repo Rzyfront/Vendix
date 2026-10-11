@@ -6,23 +6,20 @@ import { finalize, Observable } from 'rxjs';
 import { QuotationsService } from '../../services/quotations.service';
 import { QuotationPrintService } from '../../services/quotation-print.service';
 import { Quotation, QuotationStatus } from '../../interfaces/quotation.interface';
-import {
-  StickyHeaderComponent,
-  IconComponent,
-  SpinnerComponent,
-  TimelineComponent,
-  DialogService,
-  ToastService,
-  CardComponent,
-  ButtonComponent,
-} from '../../../../../../shared/components';
-import type {
-  StickyHeaderActionButton,
-  StickyHeaderBadgeColor,
-  TimelineStep,
-} from '../../../../../../shared/components';
-import { CurrencyPipe } from '../../../../../../shared/pipes';
+import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import type { StickyHeaderActionButton, StickyHeaderBadgeColor } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+import { TimelineComponent } from '../../../../../../shared/components/timeline/timeline.component';
+import type { TimelineStep } from '../../../../../../shared/components/timeline/timeline.interfaces';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ContractsService } from '../../../contracts/services/contracts.service';
 
 const STATUS_LABELS: Record<QuotationStatus, string> = {
   draft: 'Borrador',
@@ -31,6 +28,7 @@ const STATUS_LABELS: Record<QuotationStatus, string> = {
   rejected: 'Rechazada',
   expired: 'Expirada',
   converted: 'Convertida',
+  contracted: 'Contratada',
   cancelled: 'Cancelada',
 };
 
@@ -41,6 +39,7 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
   rejected: 'red',
   expired: 'yellow',
   converted: 'green',
+  contracted: 'green',
   cancelled: 'gray',
 };
 
@@ -215,6 +214,11 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
             <!-- Timeline / History -->
             <app-card title="Línea de Tiempo" shadow="sm" [responsivePadding]="true">
               <app-timeline class="block pt-1" [steps]="timelineSteps()" [collapsible]="true"></app-timeline>
+              @if (quotation()!.status === 'contracted' && quotation()!.contract) {
+                <a [routerLink]="['/admin/orders/contracts', quotation()!.contract!.id]" class="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline">
+                  Ver contrato {{ quotation()!.contract!.contract_number }}
+                </a>
+              }
             </app-card>
 
           </div>
@@ -372,11 +376,27 @@ export class QuotationDetailComponent {
   private readonly dialogService = inject(DialogService);
   private readonly toastService = inject(ToastService);
   private readonly printService = inject(QuotationPrintService);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly contractsService = inject(ContractsService);
 
   readonly quotation = signal<Quotation | null>(null);
   readonly loading = signal(true);
   readonly actionLoading = signal<string | null>(null);
   readonly processAllEnabled = signal(false);
+  private readonly contractCreationInProgress = signal(false);
+  readonly canCreateContract = computed(() =>
+    this.authFacade.storeIndustries().includes('construction') &&
+    (this.authFacade.userPermissions().includes('store:contracts:create') ||
+      this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN')),
+  );
+  readonly canConvertToOrder = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:convert') ||
+      this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN'),
+  );
+  readonly canMutateQuotation = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:update') ||
+      this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN'),
+  );
 
   readonly statusLabel = computed(() => {
     const q = this.quotation();
@@ -398,7 +418,7 @@ export class QuotationDetailComponent {
         label: 'Enviar',
         variant: 'primary' as const,
         icon: 'send',
-        visible: q.status === 'draft',
+        visible: this.canMutateQuotation() && q.status === 'draft',
         loading: currentAction === 'send',
         disabled: currentAction !== null,
       },
@@ -407,7 +427,7 @@ export class QuotationDetailComponent {
         label: 'Aceptar',
         variant: 'primary' as const,
         icon: 'check-circle',
-        visible: q.status === 'sent',
+        visible: this.canMutateQuotation() && q.status === 'sent',
         loading: currentAction === 'accept',
         disabled: currentAction !== null,
       },
@@ -416,7 +436,7 @@ export class QuotationDetailComponent {
         label: 'Rechazar',
         variant: 'danger' as const,
         icon: 'x-circle',
-        visible: q.status === 'sent',
+        visible: this.canMutateQuotation() && q.status === 'sent',
         loading: currentAction === 'reject',
         disabled: currentAction !== null,
       },
@@ -425,8 +445,17 @@ export class QuotationDetailComponent {
         label: 'Convertir a Orden',
         variant: 'primary' as const,
         icon: 'shopping-cart',
-        visible: ['draft', 'sent', 'accepted'].includes(q.status),
+        visible: this.canConvertToOrder() && (q.destination === undefined || q.destination === 'sale') && q.status === 'accepted',
         loading: currentAction === 'convert',
+        disabled: currentAction !== null,
+      },
+      {
+        id: 'create-contract',
+        label: 'Crear contrato',
+        variant: 'primary' as const,
+        icon: 'file-text',
+        visible: this.canCreateContract() && q.destination === 'contract' && q.status === 'accepted',
+        loading: currentAction === 'create-contract',
         disabled: currentAction !== null,
       },
       {
@@ -434,7 +463,7 @@ export class QuotationDetailComponent {
         label: 'Duplicar',
         variant: 'outline' as const,
         icon: 'copy',
-        visible: true,
+        visible: this.authFacade.userPermissions().includes('store:quotations:create') || this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN'),
         loading: currentAction === 'duplicate',
         disabled: currentAction !== null,
       },
@@ -443,7 +472,7 @@ export class QuotationDetailComponent {
         label: 'Cancelar',
         variant: 'outline-danger' as const,
         icon: 'x-circle',
-        visible: ['draft', 'sent', 'accepted'].includes(q.status),
+        visible: this.canMutateQuotation() && ['draft', 'sent', 'accepted'].includes(q.status),
         loading: currentAction === 'cancel',
         disabled: currentAction !== null,
       },
@@ -456,7 +485,7 @@ export class QuotationDetailComponent {
 
   readonly canProcessAll = computed(() => {
     const q = this.quotation();
-    return !!q && ['draft', 'sent', 'accepted'].includes(q.status);
+    return !!q && this.canMutateQuotation() && this.canConvertToOrder() && (q.destination === undefined || q.destination === 'sale') && ['draft', 'sent', 'accepted'].includes(q.status);
   });
 
   readonly timelineSteps = computed<TimelineStep[]>(() => {
@@ -528,11 +557,17 @@ export class QuotationDetailComponent {
         description: q.converted_order ? `Orden ${q.converted_order.order_number}` : undefined,
       });
     } else if (q.status === 'accepted') {
+      if (q.destination === 'contract') {
+        steps.push({ key: 'contract', label: 'Pendiente de contrato', status: 'upcoming', variant: 'default' });
+      } else if (q.destination !== 'other') {
+        steps.push({ key: 'convert', label: 'Pendiente de conversión', status: 'upcoming', variant: 'default' });
+      }
+    }
+
+    if (q.status === 'contracted') {
       steps.push({
-        key: 'convert',
-        label: 'Pendiente de conversión',
-        status: 'upcoming',
-        variant: 'default',
+        key: 'contracted', label: 'Contrato creado', status: 'completed', variant: 'success',
+        description: q.contract ? `Contrato ${q.contract.contract_number}` : undefined,
       });
     }
 
@@ -584,6 +619,9 @@ export class QuotationDetailComponent {
         break;
       case 'convert':
         this.onConvert();
+        break;
+      case 'create-contract':
+        this.onCreateContract();
         break;
       case 'cancel':
         this.onCancel();
@@ -652,6 +690,12 @@ export class QuotationDetailComponent {
   }
 
   private async onConvert(): Promise<void> {
+    if (!this.canConvertToOrder()) return;
+    const quotation = this.quotation();
+    if (!quotation || (quotation.destination !== undefined && quotation.destination !== 'sale')) {
+      this.toastService.error('Solo las cotizaciones de venta pueden convertirse en orden.');
+      return;
+    }
     const blockedMessage = this.getConvertBlockedMessage();
     if (blockedMessage) {
       this.toastService.error(blockedMessage);
@@ -669,6 +713,38 @@ export class QuotationDetailComponent {
     this.performAction('convert', () =>
       this.quotationsService.convertToOrder(this.quotation()!.id),
     );
+  }
+
+  private async onCreateContract(): Promise<void> {
+    const q = this.quotation();
+    if (!q || !this.canCreateContract() || q.destination !== 'contract' || q.status !== 'accepted' || this.contractCreationInProgress()) return;
+    this.contractCreationInProgress.set(true);
+    const confirmed = await this.dialogService.confirm({
+      title: 'Crear contrato',
+      message: `¿Crear un contrato desde la cotización ${q.quotation_number}?`,
+      confirmText: 'Crear contrato',
+      cancelText: 'Volver',
+    });
+    if (!confirmed) {
+      this.contractCreationInProgress.set(false);
+      return;
+    }
+    this.actionLoading.set('create-contract');
+    this.contractsService.createFromQuotation(q.id)
+      .pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.actionLoading.set(null)))
+      .subscribe({
+        next: (contract) => this.router.navigate(['/admin/orders/contracts', contract.id]),
+        error: (error) => {
+          this.contractCreationInProgress.set(false);
+          const contractId = Number(error?.details?.contract_id);
+          if (error?.code === 'QUOTE_CONTRACT_001' && Number.isInteger(contractId) && contractId > 0) {
+            this.quotationsService.invalidateCache();
+            this.router.navigate(['/admin/orders/contracts', contractId]);
+            return;
+          }
+          this.toastService.error(extractApiErrorMessage(error));
+        },
+      });
   }
 
   private onDuplicate(): void {
@@ -691,7 +767,7 @@ export class QuotationDetailComponent {
 
   async onProcessAll(): Promise<void> {
     const q = this.quotation();
-    if (!q) return;
+    if (!q || !this.canMutateQuotation() || !this.canConvertToOrder() || (q.destination !== undefined && q.destination !== 'sale')) return;
 
     const blockedMessage = this.getProcessAllBlockedMessage(q);
     if (blockedMessage) {
@@ -753,7 +829,7 @@ export class QuotationDetailComponent {
 
   private getConvertBlockedMessage(): string | null {
     const q = this.quotation();
-    if (!q || q.status === 'accepted') {
+    if (!q || ((q.destination === undefined || q.destination === 'sale') && q.status === 'accepted')) {
       return null;
     }
 
@@ -769,6 +845,7 @@ export class QuotationDetailComponent {
   }
 
   private getProcessAllBlockedMessage(q: Quotation): string | null {
+    if (q.destination !== undefined && q.destination !== 'sale') return 'El proceso completo solo aplica a cotizaciones de venta.';
     if (!['draft', 'sent', 'accepted'].includes(q.status)) {
       return 'Solo las cotizaciones en borrador, enviadas o aceptadas pueden procesarse en este flujo.';
     }

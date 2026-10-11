@@ -170,6 +170,9 @@ export class QuotationsService {
   }
 
   processCompleteQuotation(quotation: Quotation): Observable<Quotation> {
+    if (quotation.destination !== undefined && quotation.destination !== 'sale') {
+      return throwError(() => new Error('El procesamiento completo solo aplica a cotizaciones de venta.'));
+    }
     let flow$: Observable<Quotation> = of(quotation);
 
     if (quotation.status === 'draft') {
