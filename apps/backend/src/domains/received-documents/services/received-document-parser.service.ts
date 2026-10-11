@@ -243,6 +243,7 @@ export class ReceivedDocumentParserService {
     const issueDate = this.date(this.text(this.child(root, 'IssueDate', XML_NS.cbc)));
     const dueDateText = this.text(this.child(root, 'DueDate', XML_NS.cbc));
     const dueDate = dueDateText ? this.date(dueDateText) : undefined;
+    const paymentCondition = this.paymentCondition(root, warnings);
     const currency =
       this.text(this.child(root, 'DocumentCurrencyCode', XML_NS.cbc)) || '';
     const key = this.text(this.child(root, 'UUID', XML_NS.cbc)) || undefined;
@@ -362,6 +363,7 @@ export class ReceivedDocumentParserService {
       document_key: key,
       issue_date: issueDate ?? '',
       due_date: dueDate,
+      payment_condition: paymentCondition,
       currency,
       subtotal_amount: this.moneyString(subtotal),
       discount_amount: this.moneyString(discount),
@@ -386,6 +388,50 @@ export class ReceivedDocumentParserService {
         document_key_format_valid: keyValid,
       },
     };
+  }
+
+  /**
+   * PaymentMeans/ID represents DIAN's payment condition (1 cash, 2 credit).
+   * PaymentMeansCode describes the instrument and is intentionally ignored.
+   * PaymentTerms is considered only when its own text says contado/crédito.
+   */
+  private paymentCondition(
+    root: XmlElement,
+    warnings: Issue[],
+  ): NormalizedReceivedDocument['payment_condition'] {
+    const candidates: Array<'cash' | 'credit'> = [];
+    for (const means of this.children(root, 'PaymentMeans', XML_NS.cac)) {
+      const rawId = this.text(this.child(means, 'ID', XML_NS.cbc));
+      if (!rawId) continue;
+      if (rawId === '1') candidates.push('cash');
+      else if (rawId === '2') candidates.push('credit');
+    }
+    for (const terms of this.children(root, 'PaymentTerms', XML_NS.cac)) {
+      const explicitTerms = [
+        ...this.children(terms, 'Note', XML_NS.cbc),
+        ...this.children(terms, 'PaymentMeansID', XML_NS.cbc),
+      ];
+      for (const element of explicitTerms) {
+        const value = this.text(element)
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, ' ')
+          .replace(/^(?:condicion(?: de pago)?|forma de pago)\s*:\s*/, '');
+        if (['contado', 'cash', 'pago de contado'].includes(value)) candidates.push('cash');
+        else if (['credito', 'credit', 'pago a credito'].includes(value)) candidates.push('credit');
+      }
+    }
+    const unique = [...new Set(candidates)];
+    if (unique.length > 1) {
+      warnings.push(this.issue(
+        'PAYMENT_CONDITION_AMBIGUOUS',
+        'La condición de pago declarada en PaymentMeans/PaymentTerms está ausente o es ambigua/conflictiva; no se infirió contado o crédito.',
+      ));
+      return 'unknown';
+    }
+    return unique[0] ?? 'unknown';
   }
 
   private parseItem(
@@ -621,7 +667,7 @@ export class ReceivedDocumentParserService {
     return {
       document_type: 'non_electronic', invoice_number: '', issuer_tax_id: '', issuer_name: '',
       receiver_tax_id: '', receiver_name: '', issue_date: '', currency: '', subtotal_amount: '0.00',
-      discount_amount: '0.00', tax_amount: '0.00', total_amount: '0.00', items: [], taxes: [],
+      discount_amount: '0.00', payment_condition: 'unknown', tax_amount: '0.00', total_amount: '0.00', items: [], taxes: [],
       validation: { errors: [this.issue(code, message)], warnings, has_signature: false, document_key_format_valid: false },
     };
   }
