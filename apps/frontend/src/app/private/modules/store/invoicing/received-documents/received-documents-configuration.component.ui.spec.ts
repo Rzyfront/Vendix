@@ -76,7 +76,17 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).toContain('[embedded]="true"');
     expect(activation).toContain('readonly embedded = input(false)');
     expect(activation).toContain('expected_version: this.status()!.version');
-    expect(activation).toContain('this.api.getOptions(this.scope(), this.apiStoreId(), page)');
+    expect(activation).toContain('readonly filters = signal({ page: 1, limit: 25 })');
+    expect(activation).toContain('readonly page = computed(() => this.filters().page)');
+    expect(activation).toContain('readonly totalItems = computed(() => this.options()?.total ?? 0)');
+    expect(activation).toContain('readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.filters().limit))');
+    expect(activation).toContain('this.api.getOptions(this.scope(), this.apiStoreId(), page, limit)');
+    expect(activation).toContain('Number.isInteger(responseLimit) && responseLimit > 0');
+    expect(activation).toContain('pageCount(): number { return this.totalPages(); }');
+    expect(activation.match(/this.filters.update\(\(current\) => \(\{ \.\.\.current, page: 1 \}\)\);/g)).toHaveLength(2);
+    const statusMessage = activation.match(/statusMessage\(\): string \{([\s\S]*?)\n  \}\n  blockers\(/)?.[1] ?? '';
+    expect(statusMessage).toContain("if (this.loading()) return 'Consultando habilitación…';");
+    expect(statusMessage.indexOf('if (this.loading())')).toBeLessThan(statusMessage.indexOf('if (!this.status())'));
     expect(activation).toContain('this.auth.hasPermission');
     expect(activation).toContain('this.statusCode(error) === 409');
     expect(activation).toContain('getReadiness(scope, code, storeId)');

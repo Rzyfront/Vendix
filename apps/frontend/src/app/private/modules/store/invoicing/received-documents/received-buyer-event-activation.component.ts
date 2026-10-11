@@ -48,7 +48,10 @@ export class ReceivedBuyerEventActivationComponent {
   readonly selectedEvidence = signal<BuyerEventOptionsView['evidence'][number] | null>(null);
   readonly optionsLoading = signal(false);
   readonly optionsError = signal<string | null>(null);
-  readonly page = signal(1);
+  readonly filters = signal({ page: 1, limit: 25 });
+  readonly page = computed(() => this.filters().page);
+  readonly totalItems = computed(() => this.options()?.total ?? 0);
+  readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.filters().limit));
   readonly submitLoading = signal(false);
   readonly submitError = signal<string | null>(null);
   readonly conflict = signal(false);
@@ -149,9 +152,18 @@ export class ReceivedBuyerEventActivationComponent {
     if (!this.canConfigure() || !this.scopeReady() || this.submitLoading()) return;
     this.optionsRequest?.unsubscribe();
     const generation = this.generation;
-    this.optionsLoading.set(true); this.optionsError.set(null); this.page.set(page);
-    this.optionsRequest = this.api.getOptions(this.scope(), this.apiStoreId(), page).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { if (generation === this.generation) this.optionsLoading.set(false); })).subscribe({
-      next: (response) => { if (generation === this.generation) this.options.set(response.data); },
+    const { limit } = this.filters();
+    this.optionsLoading.set(true); this.optionsError.set(null);
+    this.filters.update((current) => ({ ...current, page }));
+    this.optionsRequest = this.api.getOptions(this.scope(), this.apiStoreId(), page, limit).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { if (generation === this.generation) this.optionsLoading.set(false); })).subscribe({
+      next: (response) => {
+        if (generation !== this.generation) return;
+        this.options.set(response.data);
+        const responseLimit = response.data.limit;
+        if (Number.isInteger(responseLimit) && responseLimit > 0) {
+          this.filters.update((current) => ({ ...current, limit: responseLimit }));
+        }
+      },
       error: (error: unknown) => { if (generation === this.generation) { this.options.set(null); this.optionsError.set(describeApiFailure(error).message || 'No se pudieron cargar las opciones.'); } },
     });
   }
@@ -177,8 +189,9 @@ export class ReceivedBuyerEventActivationComponent {
     if (wasConflict) { this.resetModal(); this.open.set(false); this.inlineRequest.set(false); }
     this.loadStatus();
   }
-  pageCount(): number { const data = this.options(); return data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1; }
+  pageCount(): number { return this.totalPages(); }
   statusMessage(): string {
+    if (this.loading()) return 'Consultando habilitación…';
     if (!this.scopeReady()) return 'Selecciona una tienda fiscal para consultar la habilitación.';
     if (!this.status()) return 'No se pudo cargar el estado.';
     const approvedCount = this.approvedCodes().length;
@@ -219,6 +232,7 @@ export class ReceivedBuyerEventActivationComponent {
   codeTooltip(code: ReceivedBuyerEventCode): string { return `${code} · ${this.codeLabel(code)}. Se incluirá en la solicitud de revisión; esta configuración nunca transmite el evento.`; }
   private resetForContext(scope: ReceivedDocumentsScope | null, storeId: number | null): void {
     this.generation++; this.statusRequest?.unsubscribe(); this.optionsRequest?.unsubscribe(); this.submitRequest?.unsubscribe();
+    this.filters.update((current) => ({ ...current, page: 1 }));
     this.status.set(null); this.codeStates.set([]); this.loading.set(false); this.loadError.set(null); this.options.set(null); this.selectedEvidence.set(null); this.optionsLoading.set(false); this.optionsError.set(null); this.open.set(false); this.inlineRequest.set(false); this.submitLoading.set(false); this.submitError.set(null); this.conflict.set(false); this.resetForm();
     if (scope && this.scopeReady()) this.loadStatus(scope, storeId ?? undefined);
   }
@@ -241,7 +255,7 @@ export class ReceivedBuyerEventActivationComponent {
     });
   }
   private resetForm(): void { this.form.reset({ dian_configuration_id: null, evidence_id: null, event_codes: [] }); this.form.markAsPristine(); this.form.markAsUntouched(); }
-  private resetModal(): void { this.optionsRequest?.unsubscribe(); this.options.set(null); this.selectedEvidence.set(null); this.optionsError.set(null); this.optionsLoading.set(false); this.submitError.set(null); this.conflict.set(false); this.page.set(1); this.resetForm(); }
+  private resetModal(): void { this.optionsRequest?.unsubscribe(); this.options.set(null); this.selectedEvidence.set(null); this.optionsError.set(null); this.optionsLoading.set(false); this.submitError.set(null); this.conflict.set(false); this.filters.update((current) => ({ ...current, page: 1 })); this.resetForm(); }
   private apiStoreId(): number | undefined { return this.scope() === 'organization' ? this.selectedStoreId() ?? undefined : undefined; }
   private hasSelectedValidOptions(): boolean {
     const options = this.options(); const raw = this.form.getRawValue();
