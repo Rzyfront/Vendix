@@ -489,6 +489,7 @@ describe('PaymentsService', () => {
         expect(result).toMatchObject({
           order: { id: 1124 },
           previousTableStatus: previousStatus,
+          created: false,
         });
       },
     );
@@ -510,6 +511,7 @@ describe('PaymentsService', () => {
       expect(apply).toHaveBeenCalledTimes(1);
       expect(apply.mock.calls[0][1]).toMatchObject({ table_session_id: 107 });
       expect(result.previousTableStatus).toBeUndefined();
+      expect(result.created).toBe(false);
     });
   });
 
@@ -1565,6 +1567,7 @@ describe('PaymentsService', () => {
       subtotal_amount: 1000, tax_amount: 0,
     };
     const tx = (found: any = order, paid: any = null) => ({
+      $queryRaw: jest.fn().mockResolvedValue([]),
       orders: {
         findFirst: jest.fn().mockResolvedValue(found),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -1705,6 +1708,61 @@ describe('PaymentsService', () => {
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
     });
 
+    it('assigns a fresh POS order to the locked active session of its cashier', async () => {
+      const client: any = tx(null);
+      client.$queryRaw.mockResolvedValue([{ id: 73 }]);
+      client.orders.create.mockResolvedValue({
+        ...order, id: 42, state: 'draft', store_id: 1,
+        order_items: [], stores: { id: 1 },
+      });
+      jest.spyOn(service as any, 'generateOrderNumber').mockResolvedValue('POS-42');
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      const result = await (service as any).createOrUpdateOrderFromPos(
+        client, dto({ order_id: undefined, is_draft: true, requires_payment: false }), user,
+      );
+
+      expect(result.created).toBe(true);
+      expect(client.$queryRaw).toHaveBeenCalledTimes(1);
+      const lockSql = client.$queryRaw.mock.calls[0][0].join('?');
+      expect(lockSql).toContain('SELECT id');
+      expect(lockSql).toContain('store_id = ?');
+      expect(lockSql).toContain('opened_by = ?');
+      expect(lockSql).toContain("status = 'open'");
+      expect(lockSql).toContain('FOR UPDATE');
+      expect(client.$queryRaw.mock.calls[0].slice(1)).toEqual([1, user.id]);
+      expect(client.orders.create.mock.calls[0][0].data.origin_cash_session_id).toBe(73);
+    });
+
+    it('preserves the existing origin when adopting an order from the editor', async () => {
+      const client: any = tx({ ...order, origin_cash_session_id: 29 });
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      const result = await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+
+      expect(result.created).toBe(false);
+      expect(client.$queryRaw).not.toHaveBeenCalled();
+      expect(client.orders.update.mock.calls[0][0].data).not.toHaveProperty('origin_cash_session_id');
+    });
+
     describe.each([
       // [cupón bruto, base neta esperada, impuesto, descuento base, total]
       ['100 % coupon', 1190, 0, 0, 1000, 0],
@@ -1804,6 +1862,7 @@ describe('PaymentsService', () => {
         customer_alias: 'Portería torre B', customer_id: null,
         shipping_address_snapshot: snapshot,
       }));
+      expect(client.orders.create.mock.calls[0][0].data).not.toHaveProperty('origin_cash_session_id');
     });
 
     it('F.2 reuses the adopted alias draft orphan row instead of leaking a second address', async () => {
@@ -4517,10 +4576,6 @@ describe('PaymentsService', () => {
           order_number: order.order_number,
           state: 'finished',
         });
-      jest
-        .spyOn(service as any, 'recordCashRegisterMovement')
-        .mockResolvedValue(undefined);
-
       const result = await service.processPosPayment(buildPosDto(), posUser);
 
       expect(project).toHaveBeenCalledTimes(1);
@@ -4586,103 +4641,6 @@ describe('PaymentsService', () => {
       );
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('processing_mode'),
-      );
-    });
-  });
-
-  describe('recordCashRegisterMovement — el POS no registra en caja cobros digitales pending (paso 7)', () => {
-    // Casos directos sobre el helper privado: el fan-out post-commit le pasa
-    // la proyección (`status`, no `state`) y el `store_payment_method_id` del
-    // tramo en el DTO. Caja habilitada con rastreo de no-efectivo para que
-    // solo los guards bajo prueba puedan omitir el movimiento.
-    const posUser: any = {
-      id: 1,
-      email: 'cajero@example.com',
-      organization_id: 1,
-    };
-
-    const arrangeCashRegister = (methodType: string) => {
-      (settingsService.getSettings as jest.Mock).mockResolvedValue({
-        checkout: { require_customer_data: false },
-        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
-      });
-      (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({
-        id: 5,
-      });
-      (prisma as any).store_payment_methods = {
-        findFirst: jest.fn(async () => ({
-          id: 9,
-          system_payment_method: {
-            type: methodType,
-            processing_mode: payment_processing_mode_enum.DIRECT,
-          },
-        })),
-      };
-    };
-
-    const recordSaleMovement = () =>
-      movementsService.recordSaleMovement as jest.Mock;
-
-    it('POS wompi pendiente → recordSaleMovement no se llama', async () => {
-      arrangeCashRegister('wompi');
-
-      await (service as any).recordCashRegisterMovement(
-        { store_id: 1, store_payment_method_id: 9 },
-        { id: 4242 },
-        { id: 7, amount: 100000, status: 'pending' },
-        posUser,
-      );
-
-      expect(recordSaleMovement()).not.toHaveBeenCalled();
-    });
-
-    it('wallet succeeded → tampoco escribe: la pasarela queda fuera de caja', async () => {
-      // Fila cruda (`state`, no `status`): p. ej. el débito wallet de un
-      // cobro multimétodo que sí liquidó en banda.
-      arrangeCashRegister('wallet');
-
-      await (service as any).recordCashRegisterMovement(
-        { store_id: 1, store_payment_method_id: 11 },
-        { id: 4242 },
-        { id: 8, amount: 80000, state: 'succeeded' },
-        posUser,
-      );
-
-      expect(recordSaleMovement()).not.toHaveBeenCalled();
-    });
-
-    it('efectivo pendiente → no escribe: la promesa no es dinero en caja', async () => {
-      arrangeCashRegister('cash');
-
-      await (service as any).recordCashRegisterMovement(
-        { store_id: 1, store_payment_method_id: 9 },
-        { id: 4242 },
-        { id: 7, amount: 100000, status: 'pending' },
-        posUser,
-      );
-
-      expect(recordSaleMovement()).not.toHaveBeenCalled();
-    });
-
-    it('POS efectivo succeeded → sí escribe el sale (no-regresión)', async () => {
-      arrangeCashRegister('cash');
-
-      await (service as any).recordCashRegisterMovement(
-        { store_id: 1, store_payment_method_id: 9 },
-        { id: 4242 },
-        { id: 7, amount: 100000, status: 'succeeded' },
-        posUser,
-      );
-
-      expect(recordSaleMovement()).toHaveBeenCalledTimes(1);
-      expect(recordSaleMovement()).toHaveBeenCalledWith(
-        5,
-        expect.objectContaining({
-          amount: 100000,
-          payment_method: 'cash',
-          order_id: 4242,
-          payment_id: 7,
-        }),
       );
     });
   });
@@ -4805,6 +4763,11 @@ describe('PaymentsService', () => {
             where?.id != null ? (methodsById[where.id] ?? null) : cashMethodRow,
           ),
         },
+        cash_register_sessions: {
+          findFirst: jest.fn().mockResolvedValue({ id: 5 }),
+        },
+        cash_register_movements: { create: jest.fn().mockResolvedValue({}) },
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 5 }]),
         payments: {
           create: jest.fn(async ({ data, include }: any) => {
             const row = {
@@ -5128,55 +5091,63 @@ describe('PaymentsService', () => {
       expect(orderPaid.payment_id).toBe(orderPaid.payment_ids[0]);
     });
 
-    it('registra un movimiento de caja por tramo, cada uno contra su método', async () => {
-      arrangeMultiLegSale();
+    it('bloquea la sesión y registra un movimiento por tramo dentro de la transacción', async () => {
+      const { tx } = arrangeMultiLegSale();
       // Caja habilitada con rastreo de no-efectivo: sin el flag, el tramo
       // de transferencia se omite por diseño (no es under-test aquí).
       (settingsService.getSettings as jest.Mock).mockResolvedValue({
         checkout: { require_customer_data: false },
         pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
       });
-      (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({
-        id: 5,
-      });
-      // Post-commit: la resolución del tipo sale por el prisma real, no el tx.
-      (prisma as any).store_payment_methods = {
-        findFirst: jest.fn(async ({ where }: any) =>
-          where?.id != null ? (methodsById[where.id] ?? null) : null,
-        ),
-      };
-
       await service.processPosPayment(buildMultiDto(), posUser);
-      // `recordCashRegisterMovement` es fire-and-forget (`.catch`, sin await):
-      // vaciar la cola de microtareas antes de assertar sus efectos.
-      await new Promise((resolve) => setImmediate(resolve));
-
-      const recordSaleMovement =
-        movementsService.recordSaleMovement as jest.Mock;
-      expect(recordSaleMovement).toHaveBeenCalledTimes(2);
-      expect(recordSaleMovement).toHaveBeenNthCalledWith(
+      expect(tx.cash_register_sessions.findFirst).toHaveBeenCalledWith({
+        where: { store_id: 1, opened_by: posUser.id, status: 'open' },
+        select: { id: true },
+      });
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(2);
+      expect(tx.cash_register_movements.create).toHaveBeenNthCalledWith(
         1,
-        5,
-        expect.objectContaining({
-          amount: 20000,
-          payment_method: 'cash',
-          order_id: 4242,
-        }),
+        { data: expect.objectContaining({ session_id: 5, store_id: 1, user_id: 1, type: 'sale', amount: 20000, payment_method: 'cash', order_id: 4242, payment_id: 7 }) },
       );
-      expect(recordSaleMovement).toHaveBeenNthCalledWith(
+      expect(tx.cash_register_movements.create).toHaveBeenNthCalledWith(
         2,
-        5,
-        expect.objectContaining({
-          amount: 80000,
-          payment_method: 'bank_transfer',
-          order_id: 4242,
-        }),
+        { data: expect.objectContaining({ session_id: 5, store_id: 1, user_id: 1, type: 'sale', amount: 80000, payment_method: 'bank_transfer', order_id: 4242, payment_id: 8 }) },
       );
-      // Cada movimiento apunta a su propia fila de pago.
-      const movementPaymentIds = recordSaleMovement.mock.calls.map(
-        (call: any) => call[1].payment_id,
+      const movementPaymentIds = tx.cash_register_movements.create.mock.calls.map(
+        (call: any) => call[0].data.payment_id,
       );
       expect(new Set(movementPaymentIds).size).toBe(2);
+    });
+
+    it('revierte el pago si no encuentra una sesión abierta para registrar el movimiento', async () => {
+      const { tx } = arrangeMultiLegSale();
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
+      });
+      tx.cash_register_sessions.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.processPosPayment(buildMultiDto(), posUser),
+      ).rejects.toThrow('No hay una caja abierta para registrar el pago.');
+
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('revierte el pago si la sesión se cerró antes de obtener el lock', async () => {
+      const { tx } = arrangeMultiLegSale();
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
+      });
+      tx.$queryRaw.mockResolvedValue([]);
+
+      await expect(
+        service.processPosPayment(buildMultiDto(), posUser),
+      ).rejects.toThrow('La caja ya no está abierta para registrar el pago.');
+
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
     });
 
     it('mesa con cobro previo rechaza 409 POS_TABLE_SESSION_ALREADY_CHARGED sin crear filas (QUI-704)', async () => {

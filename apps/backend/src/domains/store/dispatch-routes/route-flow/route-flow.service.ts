@@ -744,7 +744,29 @@ export class RouteFlowService {
       order_id: number | null;
     } | null = null;
 
+    const paymentInput = !stopIsPrepaid && (collected > 0 || anticipo > 0)
+      ? {
+          store_id,
+          organization_id: undefined,
+          route_id: id,
+          stop_id: stopId,
+          dispatch_note_id: stop.dispatch_note_id,
+          customer_id: stop.dispatch_note.customer_id,
+          sales_order_id: stop.dispatch_note.sales_order_id,
+          amount: collected + anticipo,
+          payment_method: dto.payment_method || 'cash',
+          user_id,
+          withholding_breakdown: dto.withholding_breakdown,
+        }
+      : null;
+    let cashMovementEvent: Awaited<
+      ReturnType<CashSettlementService['recordCashMovement']>
+    > = null;
+
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (paymentInput) {
+        cashMovementEvent = await this.cashSettlement.recordCashMovement(tx, paymentInput);
+      }
       const updated_stop = await tx.dispatch_route_stops.update({
         where: { id: stopId },
         data: {
@@ -807,20 +829,11 @@ export class RouteFlowService {
 
     // Emit domain events to drive accounting / AR / notifications.
     // Only for non-prepaid stops with actual collection (DERIVED prepaid).
+    this.cashSettlement.emitCashMovementRecorded(cashMovementEvent);
     if (!stopIsPrepaid) {
-      if (collected > 0 || anticipo > 0) {
-        await this.cashSettlement.emitPaymentReceived({
-          store_id,
-          organization_id: undefined, // resolved in cashSettlement
-          route_id: id,
-          stop_id: stopId,
-          dispatch_note_id: stop.dispatch_note_id,
-          customer_id: stop.dispatch_note.customer_id,
-          sales_order_id: stop.dispatch_note.sales_order_id,
-          amount: collected + anticipo,
-          payment_method: dto.payment_method || 'cash',
-          user_id,
-          withholding_breakdown: dto.withholding_breakdown,
+      if (paymentInput) {
+        await this.cashSettlement.emitPaymentReceived(paymentInput, {
+          cashMovementHandled: true,
         });
       }
       // No hay rama de venta a crédito: una parada entregada está cobrada al

@@ -44,6 +44,8 @@ describe('OrdersBulkController — HTTP destination validation', () => {
   const bulkService = {
     bulkTransition: jest.fn(),
     previewTransition: jest.fn(),
+    previewCashSessionFinish: jest.fn(),
+    finishCashSessionOrders: jest.fn(),
   };
   const transitionResult = {
     total: 1,
@@ -92,7 +94,9 @@ describe('OrdersBulkController — HTTP destination validation', () => {
                 name:
                   fixture === 'bulk' || fixture === 'inactive'
                     ? 'store:orders:bulk_update'
-                    : 'store:orders:create',
+                    : fixture === 'cash-close'
+                      ? 'store:cash_registers:close_session'
+                      : 'store:orders:create',
                 path: pathOnly ? req.path : '/api/store/orders',
                 method: 'POST',
                 status: fixture === 'inactive' ? 'inactive' : 'active',
@@ -138,6 +142,14 @@ describe('OrdersBulkController — HTTP destination validation', () => {
     jest.clearAllMocks();
     bulkService.bulkTransition.mockResolvedValue(transitionResult);
     bulkService.previewTransition.mockResolvedValue(previewResult);
+    bulkService.previewCashSessionFinish.mockResolvedValue({
+      session_id: 8,
+      total: 1,
+      eligible: 1,
+      ineligible: 0,
+      fingerprint: 'a'.repeat(64),
+      items: [],
+    });
   });
 
   afterAll(async () => {
@@ -310,6 +322,60 @@ describe('OrdersBulkController — HTTP destination validation', () => {
       });
     },
   );
+
+  it('requires the explicit close-session permission name on cash preview', async () => {
+    const body = {
+      session_id: 8,
+      orders: [{ id: 41, version: '2026-10-07T10:00:00.000Z', fingerprint: 'a'.repeat(64) }],
+    };
+    const allowed = await request(app.getHttpServer())
+      .post('/api/store/orders/bulk/cash-session-preview')
+      .set('x-test-permission', 'cash-close')
+      .send(body);
+
+    expect(allowed.status).toBe(200);
+    expect(bulkService.previewCashSessionFinish).toHaveBeenCalledWith(
+      expect.objectContaining(body),
+    );
+
+    bulkService.previewCashSessionFinish.mockClear();
+    const createOnly = await request(app.getHttpServer())
+      .post('/api/store/orders/bulk/cash-session-preview')
+      .set('x-test-permission', 'create')
+      .send(body);
+    expect(createOnly.status).toBe(403);
+    expect(bulkService.previewCashSessionFinish).not.toHaveBeenCalled();
+  });
+
+  it('finalizes cash-session orders only with close-session permission and the dedicated seam', async () => {
+    const result = { finished: 1, order_ids: [41], idempotent: false };
+    bulkService.finishCashSessionOrders.mockResolvedValueOnce(result);
+    const body = {
+      session_id: 8,
+      orders: [{ id: 41, version: '2026-10-07T10:00:00.000Z', fingerprint: 'a'.repeat(64) }],
+      fingerprint: 'b'.repeat(64),
+      reason: 'Cierre de caja',
+    };
+    const allowed = await request(app.getHttpServer())
+      .post('/api/store/orders/bulk/cash-session-finish')
+      .set('x-test-permission', 'cash-close')
+      .send(body);
+
+    expect(allowed.status).toBe(200);
+    expect(allowed.body).toMatchObject({ success: true, data: result });
+    expect(bulkService.finishCashSessionOrders).toHaveBeenCalledWith(
+      expect.objectContaining(body),
+    );
+
+    bulkService.finishCashSessionOrders.mockClear();
+    const createOnly = await request(app.getHttpServer())
+      .post('/api/store/orders/bulk/cash-session-finish')
+      .set('x-test-permission', 'create')
+      .send(body);
+    expect(createOnly.status).toBe(403);
+    expect(createOnly.body.error_code).toBe('AUTH_PERM_001');
+    expect(bulkService.finishCashSessionOrders).not.toHaveBeenCalled();
+  });
 
   it('preserves HTTP 200 for partial failures after a valid transition request', async () => {
     const partial = {

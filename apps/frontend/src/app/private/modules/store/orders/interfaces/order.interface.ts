@@ -957,6 +957,8 @@ export interface PayOrderResponse {
  * pay (optional if already paid) -> ship -> deliver -> finish in one call.
  */
 export interface FastTrackOrderDto {
+  /** Leave the order dispatched and awaiting delivery confirmation when false. */
+  confirm_delivery?: boolean;
   payment?: PayOrderDto;
   ship?: ShipOrderDto;
   deliver?: DeliverOrderDto;

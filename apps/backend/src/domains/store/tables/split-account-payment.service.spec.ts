@@ -324,6 +324,26 @@ describe('SplitAccountPaymentService', () => {
     expect(movements[0].payment_id).toBe(2);
   });
 
+  it('locks the cash session before the order and rolls back if the session lock fails', async () => {
+    settings.getSettings.mockResolvedValue({
+      pos: { cash_register: { enabled: true, require_session_for_sales: true } },
+    });
+    sessions.getActiveSession.mockResolvedValue({ id: 50 });
+    db.$queryRaw.mockResolvedValueOnce([]);
+
+    await expect(service.pay(100, 11, makeRequest())).rejects.toThrow(
+      'sesión de caja cambió',
+    );
+
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(db.$queryRaw.mock.calls[0][0].join('')).toContain(
+      'cash_register_sessions',
+    );
+    expect(db.orders.findFirst).not.toHaveBeenCalled();
+    expect(db.payments.create).not.toHaveBeenCalled();
+    expect(movements).toHaveLength(0);
+  });
+
   it('caja activa + track_non_cash_payments off: transferencia con sesión registra movimiento sale bank_transfer', async () => {
     settings.getSettings.mockResolvedValue({
       pos: {
@@ -549,6 +569,25 @@ describe('SplitAccountPaymentService', () => {
       'payment.received',
       expect.objectContaining({ user_id: 15 }),
     );
+  });
+
+  it('reconciliation locks the original cash session before the source order', async () => {
+    settings.getSettings.mockResolvedValue({
+      pos: { cash_register: { enabled: true, require_session_for_sales: true } },
+    });
+    sessions.getActiveSession.mockResolvedValue({ id: 50 });
+    events.emitAsync.mockRejectedValueOnce(new Error('retry reconciliation'));
+    await service.pay(100, 11, makeRequest());
+
+    db.$queryRaw.mockClear();
+    await service.reconcilePayment(2);
+
+    expect(db.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(db.$queryRaw.mock.calls[0][0].join('')).toContain(
+      'cash_register_sessions',
+    );
+    expect(db.$queryRaw.mock.calls[1][0].join('')).toContain('FROM orders');
+    expect(movements).toHaveLength(1);
   });
 
   it('never attributes replay to a different organization actor', async () => {
