@@ -88,6 +88,7 @@ import type {
 } from './profiles/invoice-profile-config.contract';
 import { buildProfileConfigException } from './profiles/invoice-profile-config.validator';
 import { profileNotFound } from './profiles/profile-errors';
+import { ProfileAccountingValidator } from './profiles/profile-accounting.validator';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import {
   buildWithholdingAccountRole,
@@ -938,6 +939,8 @@ export class InvoicingService {
     // `withholding_calculations` sigue siendo de `InvoiceFlowService` en la
     // aceptación. Ver la nota de `resolveWithholdingAmount`.
     private readonly withholdingFlow: WithholdingFlowService,
+    /** Optional in TS to keep existing unit-test construction source-compatible; Nest resolves it from ProfilesModule. */
+    private readonly profileAccountingValidator?: ProfileAccountingValidator,
   ) {}
 
   /**
@@ -4139,6 +4142,19 @@ export class InvoicingService {
         operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
       });
     }
+    if (!this.profileAccountingValidator) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_INTERNAL_001,
+        'No está disponible la validación de cuentas del perfil congelado. La factura contractual se detuvo sin consumir numeración.',
+        { contract_id, profile_id: draft.invoice_profile.profile_id },
+      );
+    }
+    await this.profileAccountingValidator.assertAccountsUsable(config, {
+      organization_id: Number(context.organization_id),
+      store_id: Number(context.store_id),
+      operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
+      profile_id: draft.invoice_profile.profile_id,
+    });
 
     const items: CreateInvoiceItemDto[] = draft.lines.map((line) => ({
       description: line.description,

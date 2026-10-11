@@ -5,6 +5,7 @@ import { buildQuotationContractEconomicSnapshot } from '../quotations/quotation-
 import { buildDefaultAiuProfileConfig } from './profiles/invoice-profile-config.contract';
 import { InvoicingService } from './invoicing.service';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
+import { ProfileAccountingValidator } from './profiles/profile-accounting.validator';
 
 const CONTEXT = {
   user_id: 9,
@@ -17,6 +18,7 @@ const CONTEXT = {
 function frozenContract(
   overrides: Record<string, unknown> = {},
   profileContractObject = 'Construcción de bodega industrial',
+  profileCostAccount = '4135',
 ) {
   const config = buildDefaultAiuProfileConfig('Construcción de bodega industrial');
   config.aiu!.contract_object = profileContractObject;
@@ -28,7 +30,7 @@ function frozenContract(
     { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00', taxable_basis: 'aiu' },
   ];
   config.accounting!.revenue_account_by_bucket = {
-    costo: '4135',
+    costo: profileCostAccount,
     administracion: '4140',
     imprevistos: '4145',
     utilidad: '4150',
@@ -102,9 +104,11 @@ function serviceFixture(options: {
   historicalConfig?: any;
   profile?: any;
   profileContractObject?: string;
+  profileCostAccount?: string;
+  chartAccounts?: Array<{ code: string; accepts_entries: boolean }>;
   failLineTaxPersist?: boolean;
 } = {}) {
-  const source = frozenContract({}, options.profileContractObject);
+  const source = frozenContract({}, options.profileContractObject, options.profileCostAccount);
   const contract = options.contract ?? source.row;
   const freshContract = options.freshContract ?? contract;
   const sequence: string[] = [];
@@ -192,6 +196,14 @@ function serviceFixture(options: {
     users: { findFirst: jest.fn(async () => customer) },
     products: { findMany: jest.fn(async () => []) },
     product_variants: { findMany: jest.fn(async () => []) },
+    chart_of_accounts: {
+      findMany: jest.fn(async () => options.chartAccounts ?? [
+        { code: '4135', accepts_entries: true },
+        { code: '4140', accepts_entries: true },
+        { code: '4145', accepts_entries: true },
+        { code: '4150', accepts_entries: true },
+      ]),
+    },
     store_settings: { findUnique: jest.fn(async () => { throw new Error('live AIU settings read'); }) },
     withoutScope: jest.fn(() => ({
       $transaction: async (callback: (client: any) => Promise<any>) => {
@@ -211,11 +223,24 @@ function serviceFixture(options: {
     }),
   };
   const eventEmitter = { emit: jest.fn() };
+  const fiscalScopeForAccounting = {
+    getFiscalScope: jest.fn(async () => 'STORE'),
+    findFiscalAccountingEntityId: jest.fn(async () => 77),
+  };
+  const profileAccountingValidator = new ProfileAccountingValidator(
+    prisma,
+    fiscalScopeForAccounting as any,
+  );
+  const accountGate = jest.spyOn(profileAccountingValidator, 'assertAccountsUsable');
   const service = new InvoicingService(
     prisma,
     generator as any,
     eventEmitter as any,
-    { resolveAccountingEntityForFiscal: jest.fn(async () => ({ id: 77 })) } as any,
+    {
+      resolveAccountingEntityForFiscal: jest.fn(async () => ({ id: 77 })),
+      getFiscalScope: fiscalScopeForAccounting.getFiscalScope,
+      findFiscalAccountingEntityId: fiscalScopeForAccounting.findFiscalAccountingEntityId,
+    } as any,
     {} as any,
     {} as any,
     { assertAreaActive: jest.fn(async () => undefined) } as any,
@@ -223,9 +248,22 @@ function serviceFixture(options: {
     new InvoiceCalculatorService(),
     { resolveExchangeRate: jest.fn(async () => ({ rate: new Prisma.Decimal(4200) })) } as any,
     {} as any,
+    profileAccountingValidator,
   );
 
-  return { service, prisma, tx, generator, eventEmitter, source, sequence, customer };
+  return {
+    service,
+    prisma,
+    tx,
+    generator,
+    eventEmitter,
+    source,
+    sequence,
+    customer,
+    profileAccountingValidator,
+    accountGate,
+    fiscalScopeForAccounting,
+  };
 }
 
 describe('InvoicingService.createInvoiceFromContract (integración con motor real)', () => {
@@ -300,6 +338,15 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
       where: { profile_id: 81, version: 4 },
       select: { version: true, config: true },
     });
+    expect(fixture.accountGate).toHaveBeenCalledWith(
+      fixture.source.economic.invoice_profile.config,
+      {
+        organization_id: 1,
+        store_id: 2,
+        operation_type: '09',
+        profile_id: 81,
+      },
+    );
     expect(fixture.prisma.products.findMany).not.toHaveBeenCalled();
     expect(fixture.prisma.product_variants.findMany).not.toHaveBeenCalled();
     expect(fixture.prisma.store_settings.findUnique).not.toHaveBeenCalled();
@@ -327,6 +374,42 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
     await expect(RequestContextService.runIsolated(CONTEXT, () =>
       fixture.service.createInvoiceFromContract(5),
     )).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
+    expect(fixture.generator.generateNextNumber).not.toHaveBeenCalled();
+  });
+
+  it('rechaza una cuenta congelada que no existe en el PUC actual antes de transacción/numeración', async () => {
+    const fixture = serviceFixture({ profileCostAccount: '999999' });
+    const error: any = await RequestContextService.runIsolated(CONTEXT, () =>
+      fixture.service.createInvoiceFromContract(5),
+    ).then(() => null, (caught) => caught);
+    expect(error.errorCode).toBe('INVOICING_PROFILE_010');
+    expect(error.getResponse().details).toMatchObject({
+        profile_id: 81,
+        operation_type: '09',
+        issues: [expect.objectContaining({
+          field: 'accounting.revenue_account_by_bucket.costo',
+          code: 'ACCOUNT_NOT_IN_CHART',
+        })],
+    });
+    expect(fixture.prisma.chart_of_accounts.findMany).toHaveBeenCalledWith({
+      where: {
+        organization_id: 1,
+        accounting_entity_id: 77,
+        code: { in: ['4140', '4145', '4150', '999999'] },
+      },
+      select: { code: true, accepts_entries: true },
+    });
+    expect(fixture.prisma.withoutScope).not.toHaveBeenCalled();
+    expect(fixture.generator.generateNextNumber).not.toHaveBeenCalled();
+  });
+
+  it('falla cerrado si el validador contable no está disponible en runtime', async () => {
+    const fixture = serviceFixture();
+    (fixture.service as any).profileAccountingValidator = undefined;
+    await expect(RequestContextService.runIsolated(CONTEXT, () =>
+      fixture.service.createInvoiceFromContract(5),
+    )).rejects.toMatchObject({ errorCode: 'SYS_INTERNAL_001' });
+    expect(fixture.prisma.withoutScope).not.toHaveBeenCalled();
     expect(fixture.generator.generateNextNumber).not.toHaveBeenCalled();
   });
 
