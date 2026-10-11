@@ -151,7 +151,7 @@ export class ReceivedDocumentMatchAllocationsService {
         };
       }
 
-      await assertReceivedDocumentNoteCoherentForEffects(tx as any, context, documentId);
+      await assertReceivedDocumentNoteCoherentForEffects(tx, context, documentId);
       this.assertDocumentAllowsMatching(document);
       this.assertVersion(document.version, validated.expected_version);
       this.assertSourceCapacity(sourceLine, validated.source_quantity, validated.allocated_net_amount);
@@ -323,6 +323,7 @@ export class ReceivedDocumentMatchAllocationsService {
         };
       }
 
+      await assertReceivedDocumentNoteCoherentForEffects(tx, context, documentId);
       this.assertDocumentAllowsMatching(document);
       this.assertVersion(document.version, input.expected_version);
       const now = new Date();

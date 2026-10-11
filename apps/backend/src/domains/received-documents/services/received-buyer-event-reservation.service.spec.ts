@@ -133,11 +133,15 @@ describe('ReceivedBuyerEventReservationService', () => {
     await expect(acknowledged.service.reserve(context, 42, { event_code: '032', idempotency_key: 'goods' })).resolves.toMatchObject({ duplicate: false, event_number: 'RD77' });
   });
 
-  it.each(['rejected', 'unknown', 'preparation_failed'])('does not trust a %s 030 as accepted predecessor evidence', async (status) => {
+  it.each([
+    ['rejected', UnprocessableEntityException],
+    ['unknown', ConflictException],
+    ['preparation_failed', UnprocessableEntityException],
+  ] as const)('does not trust a %s 030 as accepted predecessor evidence', async (status, errorType) => {
     const h = harness({ receipt: { id: 88 }, events: [{
       id: 69, event_code: '030', status, event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:ack', result: {},
     }] });
-    await expect(h.service.reserve(context, 42, { event_code: '032', idempotency_key: 'goods' })).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(h.service.reserve(context, 42, { event_code: '032', idempotency_key: 'goods' })).rejects.toBeInstanceOf(errorType);
     expect(h.tx.received_document_events.create).not.toHaveBeenCalled();
   });
 
