@@ -26,7 +26,10 @@ import { TaxesService } from '../taxes/taxes.service';
 import { ProfilesService } from '../invoicing/profiles/profiles.service';
 import { normalizeAndAssertProfileConfig } from '../invoicing/profiles/invoice-profile-config.validator';
 import { DIAN_INVOICE_OPERATION_TYPES } from '../invoicing/providers/dian-direct/constants/dian-document-types';
-import { resolveAiuComponentsBasis } from '../invoicing/profiles/invoice-profile-config.contract';
+import {
+  parsePercentScaled,
+  resolveAiuComponentsBasis,
+} from '../invoicing/profiles/invoice-profile-config.contract';
 import {
   buildAiuNote,
   DIAN_AIU_NOTE_MAX_LENGTH,
@@ -397,7 +400,7 @@ export class QuotationsService {
     quotation_id?: number;
     invoice_profile_id?: number;
     contract_object?: string;
-    due_date?: string;
+    due_date?: string | null;
     aiu_value?: number;
     items?: CreateQuotationDto['items'];
   }) {
@@ -729,7 +732,7 @@ export class QuotationsService {
           profile_id: quotation.profile_id ?? undefined,
           contract_object:
             dto.contract_object ?? existingSnapshot?.contract_object,
-          due_date: dto.due_date ?? existingSnapshot?.due_date,
+          due_date: dto.due_date,
           // A stored snapshot's `aiu_value` is a calculated output for
           // contract-basis profiles. The resolver only reuses it as an input
           // when the frozen profile explicitly uses an AIU-based component
@@ -1196,9 +1199,9 @@ export class QuotationsService {
     const pureAiuNoSumada =
       aiuConfig?.accounting_model === 'no_sumada' &&
       Object.values(aiuConfig.components ?? {}).reduce(
-        (sum, value) => sum + Number(value || 0),
+        (sum, value) => sum + (parsePercentScaled(value) ?? 0),
         0,
-      ) === 100 &&
+      ) === 10_000 &&
       costLines.every(
         (line) => Number(line.unit_price) === 0 && Number(line.discount_amount ?? 0) === 0,
       );
@@ -1213,7 +1216,10 @@ export class QuotationsService {
       quotation_profile: quotationProfile,
       contract_object:
         input.contract_object ?? input.existing_snapshot?.contract_object,
-      due_date: input.due_date ?? input.existing_snapshot?.due_date,
+      due_date:
+        input.due_date === undefined
+          ? input.existing_snapshot?.due_date
+          : input.due_date,
       aiu_value,
       cost_lines: costLines,
     });

@@ -38,11 +38,11 @@ export class PreviewContractQuotationDto {
   aiu_value?: number;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'due_date debe tener formato YYYY-MM-DD.',
   })
-  due_date?: string;
+  due_date?: string | null;
 
   @IsOptional()
   @IsArray()

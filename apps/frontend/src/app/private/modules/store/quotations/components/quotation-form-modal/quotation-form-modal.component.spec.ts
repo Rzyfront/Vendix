@@ -144,6 +144,22 @@ describe('QuotationFormModalComponent', () => {
     fixture.destroy();
   });
 
+  it('requires an explicit AIU value when no_sumada components total 100% with decimal shares', () => {
+    const fixture = createComponent('contract');
+    const component = fixture.componentInstance;
+    component.liveInvoiceProfile.set({
+      current_config: {
+        aiu: {
+          components_basis: 'contract',
+          accounting_model: 'no_sumada',
+          components: { administracion: '18.10', imprevistos: '46.20', utilidad: '35.70' },
+        },
+      },
+    });
+    expect(component.aiuInputRequired()).toBeTrue();
+    fixture.destroy();
+  });
+
   it('blocks a contract save while its server preview is pending, then preserves an explicit zero AIU', () => {
     jasmine.clock().install();
     const fixture = createComponent('contract');
@@ -234,6 +250,29 @@ describe('QuotationFormModalComponent', () => {
     for (const key of ['items', 'invoice_profile_id', 'contract_object', 'aiu_value', 'due_date']) {
       expect(Object.prototype.hasOwnProperty.call(emitted[0], key)).withContext(key).toBeFalse();
     }
+    fixture.destroy();
+  });
+
+  it('sends explicit null when an existing contract due date is cleared', () => {
+    const frozen = {
+      schema_version: 1, frozen_at: '2026-10-01T00:00:00Z',
+      invoice_profile: { profile_id: 8, version: 3, name: 'AIU', config: { aiu: { components_basis: 'contract' } } },
+      contract_object: 'Obra', due_date: '2027-10-10', aiu_value: '25.00', direct_cost: '100.00', contract_value: '125.00',
+      invoice_lines: [], calculation: { totals: {} },
+    };
+    const fixture = createComponent('contract', {
+      id: 11, destination: 'contract', invoice_profile_id: 8, contract_economic_snapshot: frozen,
+      customer_id: 42, customer: { id: 42, first_name: 'Ada', last_name: 'Lovelace' },
+      quotation_items: [{ product_name: 'Costo', quantity: 1, unit_price: 100, discount_amount: 0, total_price: 100 }],
+    });
+    const component = fixture.componentInstance;
+    const emitted: any[] = [];
+    component.save.subscribe((dto) => emitted.push(dto));
+    component.form.get('due_date')?.setValue('');
+    component.contractPreview.set(frozen as any);
+    component.previewPending.set(false);
+    component.onSave();
+    expect(emitted[0].due_date).toBeNull();
     fixture.destroy();
   });
 

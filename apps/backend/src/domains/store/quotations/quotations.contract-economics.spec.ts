@@ -5,6 +5,7 @@ import {
   InvoiceProfileConfig,
 } from '../invoicing/profiles/invoice-profile-config.contract';
 import { QuotationsService } from './quotations.service';
+import { buildQuotationContractEconomicSnapshot } from './quotation-contract-economics';
 
 function config(): InvoiceProfileConfig {
   const config = buildDefaultAiuProfileConfig('Servicio de construcción');
@@ -179,6 +180,43 @@ describe('QuotationsService contract economics', () => {
     expect(preview).toMatchObject({ direct_cost: '0.00', contract_value: '100.00', aiu_value: '100.00' });
   });
 
+  it('reuses the frozen AIU input for a fractional 100% no_sumada profile with zero costs', async () => {
+    const test = buildService();
+    const fractionalConfig = config();
+    fractionalConfig.aiu!.accounting_model = 'no_sumada';
+    fractionalConfig.aiu!.components = {
+      administracion: '18.10',
+      imprevistos: '46.20',
+      utilidad: '35.70',
+    };
+    const frozen = buildQuotationContractEconomicSnapshot({
+      frozen_at: '2026-10-01T00:00:00.000Z',
+      invoice_profile: { profile_id: 8, version: 3, name: 'AIU cien por ciento', config: fractionalConfig },
+      quotation_profile: null,
+      contract_object: 'Objeto del contrato acordado.',
+      aiu_value: '100.00',
+      cost_lines: [{ description: 'AIU acordado', quantity: 1, unit_price: 0 }],
+    });
+    test.prisma.quotations.findFirst.mockResolvedValue({
+      id: 12,
+      destination: 'contract',
+      status: 'draft',
+      store_id: 2,
+      customer_id: 55,
+      updated_at: new Date('2026-10-01T00:00:00.000Z'),
+      profile_id: null,
+      contract_economic_snapshot: frozen,
+      quotation_items: [{ product_name: 'AIU acordado', quantity: 1, unit_price: 0, discount_amount: 0, total_price: 0 }],
+    });
+
+    const preview = await RequestContextService.run(context, () =>
+      test.service.previewContractEconomics({ quotation_id: 12 }),
+    );
+
+    expect(preview.aiu_value).toBe('100.00');
+    expect(preview.contract_value).toBe('100.00');
+  });
+
   it('does not refresh the frozen profile on a notes-only edit after the live profile changes', async () => {
     const test = buildService();
     const frozen = {
@@ -250,6 +288,47 @@ describe('QuotationsService contract economics', () => {
     expect(test.tx.quotations.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.not.objectContaining({ contract_economic_snapshot: expect.anything() }) }),
     );
+  });
+
+  it('clears an agreed due date on preview and draft update, and blocks credit send until one is set again', async () => {
+    const test = buildService();
+    const creditConfig = config();
+    creditConfig.dian.payment_method_code = '2';
+    const frozen = buildQuotationContractEconomicSnapshot({
+      frozen_at: '2026-10-01T00:00:00.000Z',
+      invoice_profile: { profile_id: 8, version: 3, name: 'Crédito AIU', config: creditConfig },
+      quotation_profile: null,
+      contract_object: 'Servicio de construcción con objeto acordado.',
+      due_date: '2027-10-10',
+      cost_lines: [{ description: 'Materiales', quantity: 2, unit_price: 100, discount_amount: 0 }],
+    });
+    const quotation: any = {
+      id: 12,
+      destination: 'contract',
+      status: 'draft',
+      store_id: 2,
+      customer_id: 55,
+      updated_at: new Date('2026-10-01T00:00:00.000Z'),
+      profile_id: null,
+      contract_economic_snapshot: frozen,
+      quotation_items: [{ product_name: 'Materiales', quantity: 2, unit_price: 100, discount_amount: 0, total_price: 200 }],
+    };
+    test.prisma.quotations.findFirst.mockResolvedValue(quotation);
+
+    const preview = await RequestContextService.run(context, () =>
+      test.service.previewContractEconomics({ quotation_id: 12, due_date: null }),
+    );
+    expect(preview.due_date).toBeNull();
+
+    await RequestContextService.run(context, () =>
+      test.service.update(12, { due_date: null } as any),
+    );
+    const updateData = test.tx.quotations.update.mock.calls[0][0].data;
+    expect(updateData.contract_economic_snapshot.due_date).toBeNull();
+
+    quotation.contract_economic_snapshot = updateData.contract_economic_snapshot;
+    await expect(RequestContextService.run(context, () => test.service.send(12)))
+      .rejects.toThrow(/fecha de vencimiento acordada/);
   });
 
   it('recalculates changed cost lines with the frozen contract-basis profile without treating AIU output as input', async () => {

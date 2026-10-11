@@ -119,11 +119,11 @@ export class CreateQuotationDto {
 
   /** Fecha de vencimiento acordada para el contrato AIU, no una preferencia de tienda. */
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'due_date debe tener formato YYYY-MM-DD.',
   })
-  due_date?: string;
+  due_date?: string | null;
 
   /**
    * F-003 (FB-05) — Perfil opcional. Sin el campo, `forbidNonWhitelisted`

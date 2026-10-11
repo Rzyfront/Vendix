@@ -15,7 +15,7 @@ export interface ContractQuotationEconomicsPreviewRequest {
   quotation_id?: number;
   invoice_profile_id?: number;
   contract_object?: string;
-  due_date?: string;
+  due_date?: string | null;
   aiu_value?: number;
   items: ContractQuotationCostLine[];
 }

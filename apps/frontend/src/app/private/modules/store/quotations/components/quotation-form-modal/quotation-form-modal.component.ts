@@ -30,6 +30,7 @@ import { PriceResolverService } from '../../../../../../shared/services/pricing'
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { parsePercentScaled } from '../../../../../../core/utils/invoice-profile-config.contract';
 import {
   estimateNetBase,
   parseTaxRateFraction,
@@ -648,8 +649,11 @@ export class QuotationFormModalComponent implements OnInit {
   });
   readonly aiuInputRequired = computed(() => {
     const aiu = this.selectedInvoiceProfileConfig()?.aiu;
-    const total = (Object.values(aiu?.components ?? {}) as Array<string | number | null>).reduce<number>((sum, value) => sum + Number(value || 0), 0);
-    return aiu?.components_basis === 'aiu' || (aiu?.accounting_model === 'no_sumada' && total === 100);
+    const totalScaled = (Object.values(aiu?.components ?? {}) as unknown[]).reduce<number>(
+      (sum, value) => sum + (parsePercentScaled(value) ?? 0),
+      0,
+    );
+    return aiu?.components_basis === 'aiu' || (aiu?.accounting_model === 'no_sumada' && totalScaled === 10_000);
   });
   readonly creditDueDateRequired = computed(() => this.selectedInvoiceProfileConfig()?.dian?.payment_method_code === '2');
   private profileRequestId = 0;
@@ -976,7 +980,7 @@ export class QuotationFormModalComponent implements OnInit {
       ...(this.quotation()?.id ? { quotation_id: this.quotation()!.id } : {}),
       ...(!unchangedFrozen && this.invoiceProfileId() != null ? { invoice_profile_id: this.invoiceProfileId()! } : {}),
       contract_object: raw.contract_object,
-      due_date: raw.due_date || undefined,
+      due_date: raw.due_date || (this.quotation()?.destination === 'contract' ? null : undefined),
       ...(this.aiuInputRequired() ? { aiu_value: Number(raw.aiu_value) } : {}),
       items: raw.items.map((item: any) => ({
         product_id: item.product_id || undefined,
@@ -1321,7 +1325,7 @@ export class QuotationFormModalComponent implements OnInit {
         ...(this.invoiceProfileId() != null && (!this.quotation() || this.invoiceProfileExplicitlyChanged())
           ? { invoice_profile_id: this.invoiceProfileId()! } : {}),
         contract_object: rawValue.contract_object || '',
-        due_date: rawValue.due_date || undefined,
+        due_date: rawValue.due_date || (this.quotation()?.destination === 'contract' ? null : undefined),
         ...(this.aiuInputRequired() ? { aiu_value: Number(rawValue.aiu_value) } : {}),
       } : {}),
       ...((!isContract || economicChanged || !this.quotation()) ? { items: formValue.items.map((item: any) => isContract ? ({

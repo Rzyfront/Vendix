@@ -150,7 +150,7 @@ export interface CreateQuotationDto {
   invoice_profile_id?: number;
   contract_object?: string;
   aiu_value?: number;
-  due_date?: string;
+  due_date?: string | null;
   channel?: string;
   valid_until?: string;
   notes?: string;
