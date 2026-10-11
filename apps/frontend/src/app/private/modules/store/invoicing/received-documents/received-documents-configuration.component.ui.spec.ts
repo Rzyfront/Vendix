@@ -5,6 +5,7 @@ const component = readFileSync(join(__dirname, 'received-documents-configuration
 const wizard = readFileSync(join(__dirname, 'received-documents-configuration-wizard.component.ts'), 'utf8');
 const activation = readFileSync(join(__dirname, 'received-buyer-event-activation.component.ts'), 'utf8');
 const activationTemplate = readFileSync(join(__dirname, 'received-buyer-event-activation.component.html'), 'utf8');
+const dianWizard = readFileSync(join(__dirname, '../components/dian-config/dian-config-wizard.component.ts'), 'utf8');
 
 describe('received documents configuration UI source guards (static, not E2E)', () => {
   it('preserves the organization configuration surface for its existing consumer', () => {
@@ -39,7 +40,7 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).toContain('(clicked)="loadReadiness()">Reintentar');
     expect(wizard).toContain('Primero activa la configuración DIAN y la facturación electrónica de tu tienda');
     expect(wizard).toContain('routerLink="/admin/invoicing/dian-config" (click)="close()"');
-    expect(wizard).toContain('min-h-11 items-center justify-center rounded-lg px-3 font-medium underline focus:outline-none focus:ring-2');
+    expect(wizard).toContain('min-h-11 items-center justify-center rounded-lg px-3 font-medium underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]');
     expect(wizard).toContain("axis.environment === 'production'");
     expect(wizard).toContain("axis.enablement_status === 'enabled'");
     expect(wizard).toContain('config?.id === axis.config_id');
@@ -50,7 +51,37 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).toContain('if (this.busy() || !this.receptionActive()) return;');
     expect(wizard).toContain('this.step.set(0);');
     const activationGate = wizard.match(/readonly receptionActive = computed\(\(\) => \{([\s\S]*?)\n  \}\);/)?.[1] ?? '';
-    expect(activationGate).not.toContain('readiness');
+    expect(activationGate).toContain('this.isOpen()');
+    expect(activationGate).toContain('this.scopeEligible()');
+    expect(activationGate).toContain('this.canRead()');
+    expect(activationGate).toContain('!this.readinessLoading()');
+    expect(activationGate).toContain('!this.readinessError()');
+    expect(activationGate).not.toContain('axis.readiness?.ready');
+  });
+
+  it('fails closed on malformed fiscal readiness/configuration payloads', () => {
+    expect(wizard).toContain('private readFiscalReadiness(response: unknown)');
+    expect(wizard).toContain('if (!this.isRecord(payload) || !Array.isArray(payload[\'axes\'])) return null;');
+    expect(wizard).toContain('DIAN_CONFIGURATION_TYPES.some((allowedType) => allowedType === type)');
+    expect(wizard).toContain('configId === null || (typeof configId === \'number\' && Number.isFinite(configId))');
+    expect(wizard).toContain('private readDianConfig(response: unknown)');
+    expect(wizard).toContain('typeof config[\'id\'] === \'number\'');
+    expect(wizard).toContain('typeof config[\'software_id\'] === \'string\'');
+    expect(wizard).toContain('validEnvironments.includes(config[\'environment\'] as string)');
+    expect(wizard).toContain('validStatuses.includes(config[\'enablement_status\'] as DianConfig[\'enablement_status\'])');
+    expect(wizard).toContain('private unwrapData(response: unknown): unknown');
+    expect(wizard).toContain("Object.prototype.hasOwnProperty.call(response, 'data')");
+    expect(wizard).toContain('this.failReadiness(\'La respuesta del estado fiscal no tiene un formato válido. Reintenta la consulta.\')');
+    expect(wizard).toContain('this.failReadiness(\'La respuesta de la configuración DIAN guardada no es válida. Reintenta la consulta.\')');
+    expect(wizard).not.toContain('?.data ?? response');
+  });
+
+  it('keeps secondary-surface status badges legible with primary foregrounds', () => {
+    expect(activationTemplate).toContain('bg-surface-secondary px-2.5 py-1 text-xs font-medium text-text-primary">{{ stateLabel() }}');
+    expect(activationTemplate).toContain('bg-surface-secondary px-2 py-1 text-xs font-semibold text-text-primary">No solicitado');
+    expect(dianWizard).toContain('bg-[var(--color-surface-secondary)] text-text-primary">');
+    expect(dianWizard).toContain("not_started: 'bg-[var(--color-surface-secondary)] text-text-primary'");
+    expect(dianWizard).toContain("return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-primary'");
   });
 
   it('removes embedded DIAN editing and only blocks modal closure for buyer-event submission', () => {
@@ -96,6 +127,10 @@ describe('received documents configuration UI source guards (static, not E2E)', 
 
   it('keeps buyer-event review inline without a nested modal and preserves permission/CAS/pagination contracts', () => {
     expect(wizard).toContain('[embedded]="true"');
+    expect(activationTemplate).toContain("[id]=\"'buyer-event-config'\"");
+    expect(activationTemplate).toContain("[id]=\"'buyer-event-evidence'\"");
+    expect(activationTemplate).not.toContain('id="buyer-event-config"');
+    expect(activationTemplate).not.toContain('id="buyer-event-evidence"');
     expect(activation).toContain('readonly embedded = input(false)');
     expect(activation).toContain('expected_version: this.status()!.version');
     expect(activation).toContain('readonly filters = signal({ page: 1, limit: 25 })');
