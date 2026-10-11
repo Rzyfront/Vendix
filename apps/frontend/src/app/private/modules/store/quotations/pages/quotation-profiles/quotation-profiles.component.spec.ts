@@ -66,13 +66,23 @@ describe('QuotationProfilesComponent', () => {
 
   it('uses server pagination and resets the page when searching', async () => {
     await setup();
+    service.getProfiles.and.returnValue(of({ data: [profile], total: 51, page: 3, limit: 20 }));
     fixture.componentInstance.changePage(3);
     expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 3, limit: 20 }));
-    fixture.componentInstance.page.set(3);
+    expect(fixture.componentInstance.filters()).toEqual({ page: 3, limit: 20 });
+    expect(fixture.componentInstance.page()).toBe(3);
+    expect(fixture.componentInstance.limit()).toBe(20);
+    expect(fixture.componentInstance.total()).toBe(51);
+    expect(fixture.componentInstance.totalPages()).toBe(3);
+    service.getProfiles.and.returnValue(of({ data: [profile], total: 51, page: 1, limit: 20 }));
+    fixture.componentInstance.filters.update((filters) => ({ ...filters, page: 3 }));
     fixture.componentInstance.onSearch('obra 51');
     await new Promise((resolve) => setTimeout(resolve, 275));
     await fixture.whenStable();
     expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 1, search: 'obra 51' }));
+    expect(fixture.componentInstance.filters()).toEqual({ page: 1, limit: 20 });
+    expect(fixture.componentInstance.page()).toBe(1);
+    expect(fixture.componentInstance.limit()).toBe(20);
     expect(fixture.nativeElement.querySelector('app-pagination')).toBeTruthy();
   });
 
@@ -111,6 +121,8 @@ describe('QuotationProfilesComponent', () => {
     expect(component.state()).toBe('');
     expect(component.filterValues()).toEqual({ state: null });
     expect(component.page()).toBe(1);
+    expect(component.filters()).toEqual({ page: 1, limit: 20 });
+    expect(component.limit()).toBe(20);
     expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 1, search: undefined, state: undefined }));
   });
 
@@ -121,7 +133,7 @@ describe('QuotationProfilesComponent', () => {
       of({ data: [], total: 40, page: 3, limit: 20 }),
       of({ data: [secondPageRow], total: 40, page: 2, limit: 20 }),
     );
-    fixture.componentInstance.page.set(3);
+    fixture.componentInstance.filters.update((filters) => ({ ...filters, page: 3 }));
     fixture.componentInstance.load();
     fixture.detectChanges();
 
@@ -236,11 +248,17 @@ describe('QuotationProfilesComponent', () => {
 
   it('loads version history and supports a later server page', async () => {
     await setup();
-    service.getVersions.and.returnValue(of({ data: [], total: 41, page: 1, limit: 20 }));
+    service.getVersions.and.returnValues(
+      of({ data: [], total: 41, page: 1, limit: 20 }),
+      of({ data: [], total: 41, page: 2, limit: 20 }),
+    );
     fixture.componentInstance.toggleVersions(profile);
     expect(service.getVersions).toHaveBeenCalledWith(8, 1, 20);
     fixture.componentInstance.loadVersions(8, 2);
     expect(service.getVersions).toHaveBeenCalledWith(8, 2, 20);
+    expect(fixture.componentInstance.versionsFilters()).toEqual({ page: 2, limit: 20 });
+    expect(fixture.componentInstance.versionsPage()).toBe(2);
+    expect(fixture.componentInstance.versionsLimit()).toBe(20);
     expect(fixture.componentInstance.versionsTotalPages()).toBe(3);
   });
 

@@ -32,7 +32,7 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
   standalone: true,
   imports: [FormsModule, ReactiveFormsModule, DatePipe, JsonPipe, AlertBannerComponent, ButtonComponent, CardComponent, EmptyStateComponent, InputComponent, InputsearchComponent, ModalComponent, OptionsDropdownComponent, PaginationComponent, ResponsiveDataViewComponent, StatsComponent, QuotationProfileFormModalComponent],
   template: `
-    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_.inputsearch-wrapper]:!min-h-11">
+    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_select]:!min-h-11 [&_.inputsearch-wrapper]:!min-h-11">
       @if (canRead()) {
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           <app-stats title="Perfiles" [value]="total()" [loading]="isLoading()" smallText="Total de perfiles" iconName="file-text" iconBgColor="bg-blue-100" iconColor="text-blue-600" />
@@ -128,8 +128,9 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
   readonly state = signal('');
   readonly filterValues = signal<FilterValues>({ state: null });
   readonly filterConfigs: FilterConfig[] = [{ key: 'state', label: 'Estado', type: 'select', placeholder: 'Todos', options: [{ label: 'Todos', value: '' }, { label: 'Activos', value: 'active' }, { label: 'Inactivos', value: 'inactive' }] }];
-  readonly page = signal(1);
-  readonly limit = signal(20);
+  readonly filters = signal({ page: 1, limit: 20 });
+  readonly page = computed(() => this.filters().page);
+  readonly limit = computed(() => this.filters().limit);
   readonly total = signal(0);
   readonly totalPages = computed(() => Math.ceil(this.total() / this.limit()) || 1);
   readonly pageStats = computed(() => ({
@@ -143,9 +144,10 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
   readonly versions = signal<QuotationProfileVersion[]>([]);
   readonly versionsLoading = signal(false);
   readonly versionsError = signal('');
-  readonly versionsPage = signal(1);
+  readonly versionsFilters = signal({ page: 1, limit: 20 });
+  readonly versionsPage = computed(() => this.versionsFilters().page);
   readonly versionsTotal = signal(0);
-  readonly versionsLimit = signal(20);
+  readonly versionsLimit = computed(() => this.versionsFilters().limit);
   readonly versionsTotalPages = computed(() => Math.ceil(this.versionsTotal() / this.versionsLimit()) || 1);
   readonly pendingIds = signal<ReadonlySet<number>>(new Set());
   readonly cloneOpen = signal(false);
@@ -233,14 +235,14 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
   onSearch(value: string): void {
     this.search.set(value);
     if (this.searchTimer) clearTimeout(this.searchTimer);
-    this.searchTimer = setTimeout(() => { this.page.set(1); this.load(); }, 250);
+    this.searchTimer = setTimeout(() => { this.filters.update((filters) => ({ ...filters, page: 1 })); this.load(); }, 250);
   }
 
   setState(value: string): void {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.state.set(value);
     this.filterValues.set({ state: value || null });
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.load();
   }
   onFilterChange(values: FilterValues): void {
@@ -248,7 +250,7 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
     const state = typeof values['state'] === 'string' ? values['state'] : '';
     this.filterValues.set({ state: state || null });
     this.state.set(state);
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.load();
   }
   clearFilters(): void {
@@ -256,7 +258,7 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.state.set('');
     this.filterValues.set({ state: null });
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.load();
   }
   onActionClick(action: string): void {
@@ -268,7 +270,7 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
     this.selectedVersion.set(version);
     this.versionConfigOpen.set(true);
   }
-  changePage(page: number): void { this.page.set(page); this.load(); }
+  changePage(page: number): void { this.filters.update((filters) => ({ ...filters, page })); this.load(); }
 
   load(): void {
     if (!this.canRead()) return;
@@ -283,13 +285,13 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
           if (sequence !== this.loadSequence) return;
           const lastPage = result.total > 0 ? Math.ceil(result.total / this.limit()) : 1;
           if (requestedPage > lastPage) {
-            this.page.set(lastPage);
+            this.filters.update((filters) => ({ ...filters, page: lastPage }));
             this.load();
             return;
           }
           this.profiles.set(result.data);
           this.total.set(result.total);
-          this.page.set(result.total > 0 ? result.page : 1);
+          this.filters.update((filters) => ({ ...filters, page: result.total > 0 ? result.page : 1 }));
         },
         error: (error) => { if (sequence === this.loadSequence) this.errorMessage.set(extractApiErrorMessage(error)); },
       });
@@ -370,7 +372,7 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
     this.versionsLoading.set(true);
     this.versionsError.set('');
     this.versions.set([]);
-    this.versionsPage.set(page);
+    this.versionsFilters.update((filters) => ({ ...filters, page }));
     this.profilesService.getVersions(id, page, this.versionsLimit()).pipe(
       finalize(() => {
         if (sequence === this.versionsSequence && this.expandedId() === id) this.versionsLoading.set(false);
@@ -381,7 +383,7 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
         if (sequence !== this.versionsSequence || this.expandedId() !== id || this.versionsPage() !== page) return;
         this.versions.set(result.data);
         this.versionsTotal.set(result.total);
-        this.versionsPage.set(result.page);
+        this.versionsFilters.update((filters) => ({ ...filters, page: result.page }));
       },
       error: (error) => {
         if (sequence === this.versionsSequence && this.expandedId() === id && this.versionsPage() === page) this.versionsError.set(extractApiErrorMessage(error));
@@ -389,7 +391,7 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
     });
   }
 
-  onSaved(): void { this.toast.success('Perfil guardado.'); this.page.set(1); this.load(); }
+  onSaved(): void { this.toast.success('Perfil guardado.'); this.filters.update((filters) => ({ ...filters, page: 1 })); this.load(); }
 
   private runProfileMutation(id: number, request: Observable<unknown>, successMessage: string): void {
     if (this.isPending(id)) return;
