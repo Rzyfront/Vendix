@@ -17,6 +17,11 @@ describe('TooltipComponent accessible identity and styling source guards', () =>
     expect(source).toMatch(/if \(event\.key !== 'Escape' \|\| !this\.isVisible\(\)\) return;\s*event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
   });
 
+  it('resets Escape dismissal only when an explicit external visible input becomes false', () => {
+    expect(source).toContain('if (this.visible() === false) this.escapeDismissed.set(false);');
+    expect(source).not.toContain('if (this.visible() === undefined) this.escapeDismissed.set(false);');
+  });
+
   it('guards SSR viewport access and respects reduced motion with tokenized shadow colors', () => {
     expect(source).toContain("if (typeof window === 'undefined') return;");
     expect(source).toContain('@media (prefers-reduced-motion: reduce)');

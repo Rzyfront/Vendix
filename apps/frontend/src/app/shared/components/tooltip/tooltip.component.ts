@@ -440,6 +440,10 @@ export class TooltipComponent implements AfterViewInit {
   private readonly visualViewportChange = () => this.onViewportChange();
 
   constructor() {
+    effect(() => {
+      if (this.visible() === false) this.escapeDismissed.set(false);
+    });
+
     this.destroyRef.onDestroy(() => {
       this.removeDescribedBy();
       if (this.showTimeout) {
