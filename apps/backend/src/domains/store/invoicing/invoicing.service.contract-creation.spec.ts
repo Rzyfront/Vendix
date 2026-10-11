@@ -390,7 +390,7 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
     expect(fixture.generator.generateNextNumber).toHaveBeenCalledTimes(1);
   });
 
-  it('acepta vencimiento de hoy en la zona tienda después de las 19:00 UTC y conserva issue_date real', async () => {
+  it('acepta vencimiento de hoy en Bogotá después de las 19:00 locales y conserva issue_date real', async () => {
     const fixture = serviceFixture({ profileDueDate: '2026-10-10' });
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-10-11T04:00:00.000Z'));
