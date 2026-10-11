@@ -79,22 +79,30 @@ export class ReceivedBuyerEventDispatchService {
   ): Promise<void> {
     const storeId = payload.selection.store_id;
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // All mutations of a received document use document → event lock order.
+      // Locking both rows in one joined query leaves acquisition order to the
+      // PostgreSQL plan and can deadlock against reservation/matching paths.
+      const documentLocks = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+        SELECT "id" FROM "received_documents"
+        WHERE "id" = ${payload.source.document_id}
+          AND "organization_id" = ${ctx.organization_id}
+          AND "accounting_entity_id" = ${ctx.accounting_entity_id}
+          AND "version" = ${payload.source.document_version}
+          AND "document_key" = ${payload.source.referenced_cufe}
+          ${storeId == null ? Prisma.empty : Prisma.sql`AND "store_id" = ${storeId}`}
+        FOR UPDATE
+      `);
+      if (documentLocks.length !== 1) throw new Error('Source document changed or is outside the fiscal scope.');
       const locks = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
         SELECT e."id"
         FROM "received_document_events" e
-        JOIN "received_documents" d ON d."id" = e."document_id"
         WHERE e."id" = ${eventId}
           AND e."event_type" = 'BUYER_DIAN_EVENT'
           AND e."status" = 'preparing'
           AND e."event_code" = ${prepared.event_code}
           AND e."event_number" = ${prepared.event_number}
-          AND d."id" = ${payload.source.document_id}
-          AND d."organization_id" = ${ctx.organization_id}
-          AND d."accounting_entity_id" = ${ctx.accounting_entity_id}
-          AND d."version" = ${payload.source.document_version}
-          AND d."document_key" = ${payload.source.referenced_cufe}
-          ${storeId == null ? Prisma.empty : Prisma.sql`AND d."store_id" = ${storeId}`}
-        FOR UPDATE OF e, d
+          AND "document_id" = ${payload.source.document_id}
+        FOR UPDATE
       `);
       if (locks.length !== 1) throw new Error('Reserved event or source document changed.');
       const activationLocks = await tx.$queryRaw<Array<{ version: number; dian_configuration_id: number; software_id_snapshot: string | null; certificate_fingerprint_snapshot: string | null }>>(Prisma.sql`
