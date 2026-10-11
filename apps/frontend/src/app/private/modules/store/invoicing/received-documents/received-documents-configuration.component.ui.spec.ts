@@ -140,7 +140,7 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(activation).toContain('this.api.getOptions(this.scope(), this.apiStoreId(), page, limit)');
     expect(activation).toContain('Number.isInteger(responseLimit) && responseLimit > 0');
     expect(activation).toContain('pageCount(): number { return this.totalPages(); }');
-    expect(activation.match(/this.filters.update\(\(current\) => \(\{ \.\.\.current, page: 1 \}\)\);/g)).toHaveLength(2);
+    expect((activation.match(/this.filters.update\(\(current\) => \(\{ \.\.\.current, page: 1 \}\)\);/g))?.length).toBe(2);
     const statusMessage = activation.match(/statusMessage\(\): string \{([\s\S]*?)\n  \}\n  blockers\(/)?.[1] ?? '';
     expect(statusMessage).toContain("if (this.loading()) return 'Consultando habilitación…';");
     expect(statusMessage.indexOf('if (this.loading())')).toBeLessThan(statusMessage.indexOf('if (!this.status())'));
@@ -166,7 +166,7 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(activationTemplate).toContain('selectedConfigurationWarning()');
     expect(activationTemplate).toContain('bg-warning-light p-3 text-sm text-text-primary" role="note"');
     const alertTags = [...activationTemplate.matchAll(/<div\b(?=[^>]*\brole="alert")[^>]*>/g)].map(([tag]) => tag);
-    expect(alertTags).toHaveLength(3);
+    expect((alertTags)?.length).toBe(3);
     for (const tag of alertTags) {
       expect(tag).toContain('text-text-primary');
       expect(tag).not.toMatch(/\btext-error\b/);
@@ -188,7 +188,7 @@ describe('received documents configuration UI source guards (static, not E2E)', 
       const buttonTags = source.match(/<app-button\b/g) ?? [];
       const sizedButtonTags = source.match(/<app-button\b[^>]*\bcustomClasses="[^"]*\bmin-h-11\b[^"]*"/g) ?? [];
       expect(buttonTags.length).toBeGreaterThan(0);
-      expect(sizedButtonTags).toHaveLength(buttonTags.length);
+      expect((sizedButtonTags)?.length).toBe(buttonTags.length);
     }
   });
 });

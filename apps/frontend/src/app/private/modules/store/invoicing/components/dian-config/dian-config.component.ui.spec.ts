@@ -35,7 +35,7 @@ describe('DIAN configuration reception entry UI source guards', () => {
     expect(component).toContain('slot="footer"');
     expect(component).toContain('[disabled]="!canCloseWizard()"');
     expect(component).toContain('if (!this.canCloseWizard()) return;');
-    expect(component.match(/\[loading\]="loading\(\)"/g)).toHaveLength(4);
+    expect((component.match(/\[loading\]="loading\(\)"/g))?.length).toBe(4);
   });
 
   it('does not render failed readiness as zero stats and uses readable error copy', () => {

@@ -8,8 +8,8 @@ const source = readFileSync(
 
 describe('DIAN wizard contextual help source guards', () => {
   it('provides one informational panel for every wizard step', () => {
-    expect(source.match(/class="step-help-panel/g)).toHaveLength(5);
-    expect(source.match(/aria-label="Ayuda del paso de /g)).toHaveLength(5);
+    expect((source.match(/class="step-help-panel/g))?.length).toBe(5);
+    expect((source.match(/aria-label="Ayuda del paso de /g))?.length).toBe(5);
     expect(source).toMatch(/no representa por sí solo una aprobación de la DIAN/i);
     expect(source).toContain('no sustituye el estado oficial de la DIAN');
   });
@@ -67,7 +67,7 @@ describe('DIAN wizard contextual help source guards', () => {
     const responsiveFooters = source.match(
       /<div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">/g,
     );
-    expect(responsiveFooters).toHaveLength(2);
+    expect((responsiveFooters)?.length).toBe(2);
 
     const credentialsFooter = source.slice(
       source.indexOf('<!-- ═══ Step 1: Credentials'),
@@ -167,7 +167,7 @@ describe('DIAN wizard contextual help source guards', () => {
   });
 
   it('uses 16px shared form controls and a compact stepper when the axis is locked', () => {
-    expect(source.match(/<app-(?:input|selector) size="lg"/g)).toHaveLength(10);
+    expect((source.match(/<app-(?:input|selector) size="lg"/g))?.length).toBe(10);
     expect(source).toContain('[size]="configurationTypeLocked() ? \'sm\' : \'md\'"');
   });
 });

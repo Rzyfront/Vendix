@@ -58,7 +58,7 @@ describe('assertNoteOriginalHasNoAcceptedRadianEvent', () => {
   });
 
   it('blocks legacy accepted events whose store attribution is null after validating the original store', async () => {
-    const h = client({ event: { id: 51, event_code: '033', status: 'accepted', organization_id: 2, store_id: null, invoice_id: 10 } });
+    const h = client({ event: { id: 51, event_code: '033', status: 'accepted', organization_id: 2, store_id: null as unknown as undefined, invoice_id: 10 } });
     await expect(assertNoteOriginalHasNoAcceptedRadianEvent(h.prisma, scope))
       .rejects.toMatchObject({ errorCode: 'INVOICING_STATUS_002' });
     expect(h.db.invoices.findFirst).toHaveBeenCalledWith(expect.objectContaining({

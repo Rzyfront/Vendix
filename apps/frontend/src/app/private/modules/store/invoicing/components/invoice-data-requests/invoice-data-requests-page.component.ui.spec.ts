@@ -49,7 +49,7 @@ describe('invoice data requests UI source contract', () => {
   });
 
   it('renders four non-interactive stats cards with theme tokens', () => {
-    expect((source.match(/<app-stats\b/g) ?? [])).toHaveLength(4);
+    expect(((source.match(/<app-stats\b/g) ?? []))?.length).toBe(4);
     expect(source).not.toContain('[clickable]="true"');
     expect(source).not.toContain('role="button"');
     expect(source).toContain('iconBgColor="bg-primary/10"');
@@ -82,7 +82,7 @@ describe('invoice data requests UI source contract', () => {
     expect(source).toContain('readonly summaryError = signal(false)');
     expect(source).toContain('this.summaryError.set(false)');
     expect(source).toContain('this.summaryError.set(true)');
-    expect(source.match(/\[value\]="summaryError\(\) \? '—' : summary\(\)\./g)).toHaveLength(4);
+    expect((source.match(/\[value\]="summaryError\(\) \? '—' : summary\(\)\./g))?.length).toBe(4);
     expect(source).toContain('role="status"');
     expect(source).toContain('Actualizar en el menú de opciones para reintentar');
   });

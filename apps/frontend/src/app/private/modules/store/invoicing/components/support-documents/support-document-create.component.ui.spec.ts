@@ -27,7 +27,7 @@ describe('support document create modal UI source guards (static, not E2E)', () 
     const appButtons = component.match(/<app-button\b/g) ?? [];
     const sizedAppButtons = component.match(/<app-button\b[^>]*\bcustomClasses="[^"]*\bmin-h-11\b[^"]*"/g) ?? [];
     expect(appButtons.length).toBeGreaterThan(0);
-    expect(sizedAppButtons).toHaveLength(appButtons.length);
+    expect((sizedAppButtons)?.length).toBe(appButtons.length);
     expect(component).toContain('min-h-11 min-w-11 shrink-0 items-center justify-center');
     expect(component).toContain('focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]');
     expect(component).toContain('<div class="flex items-start gap-2">');
@@ -48,7 +48,7 @@ describe('support document create modal UI source guards (static, not E2E)', () 
   });
 
   it('uses one responsive footer slot and readable alert text', () => {
-    expect(component.match(/slot="footer"/g) ?? []).toHaveLength(1);
+    expect((component.match(/slot="footer"/g) ?? [])?.length).toBe(1);
     expect(component).toContain('flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end');
     expect(component).toContain('role="alert"');
     expect(component).toContain('text-text-primary bg-error-light border border-error/30');

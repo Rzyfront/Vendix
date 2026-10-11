@@ -198,8 +198,8 @@ export function buildContractAiuDraft(
       taxes: (line.taxes ?? []).map((tax) => ({
         tax_name: tax.tax_name,
         tax_rate: finiteNumber(tax.tax_rate, `tarifa línea ${index + 1}`, contract_id),
-        tax_type: tax.tax_type,
-        is_inclusive: tax.is_inclusive,
+        tax_type: tax.tax_type ?? undefined,
+        is_inclusive: tax.is_inclusive ?? undefined,
       })),
     };
   });

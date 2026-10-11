@@ -1375,7 +1375,9 @@ export class QuotationsService {
         'Una o más referencias de producto no existen en esta tienda.',
       );
     }
-    const variantById = new Map(variants.map((variant) => [variant.id, variant]));
+    const variantById = new Map(
+      (variants as Array<{ id: number; product_id: number }>).map((variant) => [variant.id, variant]),
+    );
     for (const item of items) {
       if (item.product_variant_id == null) continue;
       const variant = variantById.get(item.product_variant_id);
