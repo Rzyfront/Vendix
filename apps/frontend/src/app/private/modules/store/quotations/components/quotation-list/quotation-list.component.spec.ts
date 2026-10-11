@@ -144,6 +144,10 @@ describe('QuotationListComponent — destination actions', () => {
     fixture.detectChanges();
 
     const component = fixture.componentInstance;
+    const toolbar = fixture.nativeElement.querySelector('div.flex.flex-wrap.items-center.gap-2') as HTMLDivElement;
+    const searchControl = fixture.nativeElement.querySelector('app-inputsearch') as HTMLElement;
+    expect(toolbar).toBeTruthy();
+    expect(searchControl.classList.contains('min-w-0')).toBeTrue();
     const details: Quotation[] = [];
     const accept = jasmine.createSpy('accept');
     const convert = jasmine.createSpy('convert');

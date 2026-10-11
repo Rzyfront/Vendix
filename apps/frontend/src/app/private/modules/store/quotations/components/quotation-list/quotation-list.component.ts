@@ -53,9 +53,9 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
             Cotizaciones ({{ paginationData().total }})
           </h2>
 
-          <div class="flex items-center gap-2 w-full md:w-auto">
+          <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
             <app-inputsearch
-              class="flex-1 md:w-64 shadow-[var(--shadow-sm)] md:shadow-none rounded-[10px]"
+              class="min-w-0 flex-1 md:w-64 shadow-[var(--shadow-sm)] md:shadow-none rounded-[10px]"
               size="sm"
               placeholder="Buscar cotización..."
               ariaLabel="Buscar cotizaciones"
