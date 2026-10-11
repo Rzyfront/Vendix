@@ -43,6 +43,7 @@ import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
 import {
   SelectorComponent,
   SelectorOption,
@@ -250,6 +251,7 @@ interface PersistedTestResult {
     ButtonComponent,
     InputComponent,
     IconComponent,
+    TooltipComponent,
     SelectorComponent,
     StepsLineComponent,
     DianTechnicalResponseComponent,
@@ -260,14 +262,23 @@ interface PersistedTestResult {
       <app-steps-line
         [steps]="stepsConfig"
         [currentStep]="activeStep()"
-        [clickable]="true"
-        size="md"
+        [clickable]="!configurationTypeLocked()"
+        [size]="configurationTypeLocked() ? 'sm' : 'md'"
         (stepClicked)="activeStep.set($event)"
       ></app-steps-line>
 
       <!-- ═══ Step 1: Credentials ═══ -->
       @if (activeStep() === 0) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-secondary">Completa los datos registrados en la DIAN para esta habilitación. El nombre es interno; el NIT y las credenciales deben coincidir con los datos del portal.</p>
+            <app-tooltip content="Ten a mano el RUT y los datos del software registrados en la DIAN antes de guardar." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda del paso de credenciales">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="key" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Credenciales DIAN</h2>
@@ -284,7 +295,16 @@ interface PersistedTestResult {
               documento soporte, el documento equivalente POS y la nomina
               electronica solo se podian activar por curl.
             -->
-            @if (isEditingConfig()) {
+            @if (configurationTypeLocked()) {
+              <div class="rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 flex items-center gap-2">
+                <span class="text-sm font-medium text-text-primary">Facturación electrónica de esta empresa</span>
+                <app-tooltip content="Este asistente se abrió para configurar la facturación electrónica de esta empresa." position="top">
+                  <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda sobre el tipo de configuración">
+                    <app-icon name="info" [size]="16"></app-icon>
+                  </button>
+                </app-tooltip>
+              </div>
+            } @else if (isEditingConfig()) {
               <div
                 class="rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 flex items-start gap-2"
               >
@@ -301,11 +321,12 @@ interface PersistedTestResult {
                 </div>
               </div>
             } @else {
-              <app-selector
+              <app-selector size="lg"
                 label="Que vas a habilitar"
                 formControlName="configuration_type"
                 [options]="configurationTypeOptions()"
                 placeholder="Elige la habilitacion DIAN"
+                tooltipText="Cada tipo de documento tiene una habilitación independiente ante la DIAN."
               ></app-selector>
               <p class="text-[11px] text-text-secondary -mt-2">
                 {{ configurationTypeHint() }}
@@ -313,33 +334,37 @@ interface PersistedTestResult {
             }
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <app-input
+              <app-input size="lg"
                 label="Nombre de la configuracion"
                 formControlName="name"
                 [control]="nameControl"
                 placeholder="Ej: Empresa SAS, Persona Natural"
                 [required]="true"
+                tooltipText="Nombre interno para reconocer esta configuración en Vendix."
               ></app-input>
-              <app-selector
+              <app-selector size="lg"
                 label="Tipo de documento"
                 formControlName="nit_type"
                 [options]="nitTypeOptions"
                 placeholder="Seleccione tipo"
+                tooltipText="Selecciona el tipo de documento que aparece en el RUT o documento fiscal."
               ></app-selector>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <app-input
+              <app-input size="lg"
                 label="NIT / Documento"
                 formControlName="nit"
                 [control]="nitControl"
                 placeholder="Ej: 900123456"
                 [required]="true"
+                tooltipText="Escribe el NIT o documento sin el dígito de verificación."
               ></app-input>
-              <app-input
+              <app-input size="lg"
                 label="Digito de Verificacion (DV)"
                 formControlName="nit_dv"
                 [control]="nitDvControl"
                 placeholder="Ej: 7"
+                tooltipText="Dígito de verificación asociado al NIT; se valida junto con el número."
               ></app-input>
             </div>
             <!--
@@ -357,26 +382,29 @@ interface PersistedTestResult {
             ) {
               <p class="text-xs text-error font-medium">{{ nitDvMessage }}</p>
             }
-            <app-input
+            <app-input size="lg"
               label="Software ID"
               formControlName="software_id"
               [control]="softwareIdControl"
               placeholder="ID del software registrado en la DIAN"
               [required]="true"
+              tooltipText="Identificador del software que registraste en el portal de la DIAN."
             ></app-input>
-            <app-input
+            <app-input size="lg"
               label="PIN del Software"
               type="password"
               formControlName="software_pin"
               [control]="softwarePinControl"
               [placeholder]="selectedConfig() ? 'PIN guardado — escribe uno nuevo solo si deseas cambiarlo' : 'PIN secreto del software'"
               [required]="!selectedConfig()"
+              tooltipText="PIN técnico asociado al Software ID. Se mantiene oculto y no se muestra en pantalla."
             ></app-input>
-            <app-input
+            <app-input size="lg"
               label="Test Set ID"
               formControlName="test_set_id"
               [control]="testSetIdControl"
               placeholder="ID del set de pruebas (opcional)"
+              tooltipText="Código del set de pruebas asignado por la DIAN para esta habilitación."
             ></app-input>
           </form>
           <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
@@ -408,6 +436,15 @@ interface PersistedTestResult {
       <!-- ═══ Step 2: Certificate ═══ -->
       @if (activeStep() === 1) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-secondary">Usa el certificado digital vigente de la empresa. Selecciona el archivo .p12 y escribe su contraseña para cargarlo.</p>
+            <app-tooltip content="El certificado y su contraseña se usan para firmar los documentos electrónicos." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda del paso de certificado">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="upload" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Certificado Digital</h2>
@@ -445,9 +482,18 @@ interface PersistedTestResult {
                 </div>
               }
               <div class="space-y-3">
-                <label class="block text-sm font-medium text-text-primary">Archivo del certificado (.p12)</label>
-                <div
-                  class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors"
+                <div class="flex items-center gap-2">
+                  <label for="dian-certificate-file" class="block text-sm font-medium text-text-primary">Archivo del certificado (.p12)</label>
+                  <app-tooltip content="Selecciona el archivo .p12 o .pfx vigente que DIAN usará para firmar documentos." position="top">
+                    <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda sobre el archivo del certificado">
+                      <app-icon name="info" [size]="16"></app-icon>
+                    </button>
+                  </app-tooltip>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Seleccionar archivo del certificado"
+                  class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
                   (click)="fileInput.click()"
                   (dragover)="onDragOver($event)"
                   (drop)="onDrop($event)"
@@ -459,9 +505,10 @@ interface PersistedTestResult {
                   @if (!selectedFile()) {
                     <p class="text-xs text-text-secondary mt-1">Solo archivos .p12</p>
                   }
-                </div>
+                </button>
                 <input
                   #fileInput
+                  id="dian-certificate-file"
                   type="file"
                   accept=".p12,.pfx"
                   (change)="onFileSelected($event)"
@@ -469,7 +516,7 @@ interface PersistedTestResult {
                 />
               </div>
               <form [formGroup]="certificateForm" class="space-y-4">
-                <app-input
+                <app-input size="lg"
                   label="Contrasena del certificado"
                   type="password"
                   formControlName="certificate_password"
@@ -477,6 +524,7 @@ interface PersistedTestResult {
                   placeholder="Contrasena del archivo .p12"
                   [required]="!!selectedFile()"
                   [helperText]="selectedFile() ? 'Necesaria para abrir el archivo que acabas de seleccionar.' : 'Solo se pide cuando subes un archivo nuevo.'"
+                  tooltipText="La contraseña permite abrir el certificado seleccionado. No se muestra en pantalla."
                 ></app-input>
               </form>
               <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
@@ -511,13 +559,27 @@ interface PersistedTestResult {
       <!-- ═══ Step 3: Environment ═══ -->
       @if (activeStep() === 2) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-secondary">El ambiente de pruebas sirve para completar la habilitación. Producción se habilita según el estado que informa la DIAN y los requisitos existentes.</p>
+            <app-tooltip content="Revisa el ambiente antes de continuar: pruebas y producción tienen efectos distintos." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda del paso de ambiente">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="globe" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Ambiente</h2>
           </div>
-          <p class="text-sm text-text-secondary mb-4">
-            Seleccione el ambiente de facturacion electronica.
-          </p>
+          <div class="flex items-center gap-2 text-sm text-text-secondary mb-4">
+            <span>Seleccione el ambiente de facturacion electronica.</span>
+            <app-tooltip content="Pruebas se usa durante la habilitación; producción envía documentos reales a la DIAN." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda sobre el ambiente DIAN">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           @if (!selectedConfig()) {
             <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
               <div class="flex items-center gap-2">
@@ -530,8 +592,10 @@ interface PersistedTestResult {
             <div class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <button
+                  type="button"
                   (click)="setEnvironment('test')"
-                  class="p-4 rounded-lg border-2 text-left transition-all"
+                  [attr.aria-pressed]="selectedEnvironment() === 'test'"
+                  class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
                   [ngClass]="{
                     'border-primary bg-[var(--color-primary-light)]': selectedEnvironment() === 'test',
                     'border-border hover:border-primary': selectedEnvironment() !== 'test'
@@ -555,9 +619,11 @@ interface PersistedTestResult {
                   </p>
                 </button>
                 <button
+                  type="button"
                   (click)="setEnvironment('production')"
                   [disabled]="!testSetPassed()"
-                  class="p-4 rounded-lg border-2 text-left transition-all"
+                  [attr.aria-pressed]="selectedEnvironment() === 'production'"
+                  class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
                   [ngClass]="{
                     'border-primary bg-[var(--color-primary-light)]': selectedEnvironment() === 'production',
                     'border-border hover:border-primary': selectedEnvironment() !== 'production' && testSetPassed(),
@@ -756,6 +822,15 @@ interface PersistedTestResult {
       <!-- ═══ Step 4: Test Connection ═══ -->
       @if (activeStep() === 3) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-secondary">La prueba de conexión verifica comunicación. El set de pruebas se envía a la DIAN y su estado puede tardar en actualizarse.</p>
+            <app-tooltip content="La resolución seleccionada determina la numeración que se usa en el set de pruebas." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda del paso de pruebas">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="zap" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Probar Conexion</h2>
@@ -774,19 +849,14 @@ interface PersistedTestResult {
           @if (selectedConfig()) {
             <div class="space-y-4">
               <div class="space-y-3 mb-4">
-                <label class="text-sm font-medium text-text-primary">Resolucion para el set de pruebas</label>
-                <select
-                  class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-[var(--color-surface)] focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                <app-selector size="lg"
+                  label="Resolucion para el set de pruebas"
+                  [options]="resolutionOptions()"
                   [ngModel]="selectedResolutionId()"
                   (ngModelChange)="selectedResolutionId.set($event)"
-                >
-                  <option [ngValue]="null" disabled>Seleccione una resolucion</option>
-                  @for (res of resolutions(); track res.id) {
-                    <option [ngValue]="res.id">
-                      {{ res.prefix }} — Resolucion {{ res.resolution_number }} ({{ res.range_from }} - {{ res.range_to }})
-                    </option>
-                  }
-                </select>
+                  placeholder="Seleccione una resolucion"
+                  tooltipText="Elige la resolución de habilitación asociada al set que vas a enviar."
+                ></app-selector>
               </div>
               <div class="flex flex-wrap items-center gap-3">
                 <app-button
@@ -1199,6 +1269,15 @@ interface PersistedTestResult {
       <!-- ═══ Step 5: Audit Logs ═══ -->
       @if (activeStep() === 4) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-secondary">Consulta aquí las operaciones registradas para esta configuración. Este historial informa actividad; no representa por sí solo una aprobación de la DIAN.</p>
+            <app-tooltip content="El historial resume eventos registrados por el sistema y no sustituye el estado oficial de la DIAN." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-secondary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" aria-label="Ayuda del paso de historial">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="file-text" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Registro de Operaciones</h2>
@@ -1322,6 +1401,8 @@ export class DianConfigWizardComponent {
    * asistente desde la tarjeta de un eje concreto.
    */
   readonly configurationType = input<DianConfigurationType | null>(null);
+  /** Reception reuses the tenant's invoicing setup, never another document axis. */
+  readonly configurationTypeLocked = input(false);
 
   /**
    * Ejes que YA tienen configuración. Se ofrecen deshabilitados en vez de
@@ -1354,6 +1435,12 @@ export class DianConfigWizardComponent {
   readonly runningTestSet = signal(false);
   readonly testResult = signal<DianTestResult | null>(null);
   readonly resolutions = signal<InvoiceResolution[]>([]);
+  readonly resolutionOptions = computed<SelectorOption[]>(() =>
+    this.resolutions().map((resolution) => ({
+      value: resolution.id,
+      label: `${resolution.prefix} — Resolucion ${resolution.resolution_number} (${resolution.range_from} - ${resolution.range_to})`,
+    })),
+  );
   readonly selectedResolutionId = signal<number | null>(null);
   readonly testSetResult = signal<DianTestResult | null>(null);
   /**
