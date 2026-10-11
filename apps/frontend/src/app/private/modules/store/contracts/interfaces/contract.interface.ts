@@ -1,3 +1,5 @@
+import type { ContractSnapshot } from './contract-snapshot.interface';
+
 /**
  * C.2 (FB-07, ERR-06): ficha de contrato de obra y sus estados.
  *
@@ -40,7 +42,6 @@ export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
 export function isValidContractTransition(from: ContractStatus, to: ContractStatus): boolean {
   return CONTRACT_TRANSITIONS[from]?.includes(to) ?? false;
 }
-
 /**
  * D.2 (FB-08/FB-09): el boton "Generar factura AIU" solo existe en contrato
  * vigente sin factura ligada. Cualquier otro estado muestra enlace o texto
@@ -65,6 +66,25 @@ export interface ContractInvoiceRef {
   invoice_number?: string;
   status?: string;
   total?: number;
+  total_amount?: number | null;
+  dian_status?: string | null;
+}
+
+export interface ContractLineView {
+  product_name: string;
+  quantity: number | null;
+  unit_price: number | null;
+  discount_amount: number | null;
+  tax_rate: number | null;
+  tax_amount_item: number | null;
+  total_price: number | null;
+  notes: string | null;
+}
+
+export interface ContractProfileView {
+  profile_id: number | null;
+  version: number | null;
+  config: Record<string, unknown> | null;
 }
 
 export interface Contract {
@@ -83,8 +103,16 @@ export interface Contract {
   tax_amount?: number | null;
   grand_total?: number | null;
   notes?: string | null;
-  created_at: string;
-  updated_at: string;
+  discount_amount?: number | null;
+  terms_and_conditions?: string | null;
+  valid_until?: string | null;
+  snapshot?: ContractSnapshot | null;
+  items?: ContractLineView[];
+  profile_id?: number | null;
+  profile_version?: number | null;
+  profile?: ContractProfileView | null;
+  created_at: string | null;
+  updated_at: string | null;
   /** Trazabilidad al documento origen (cotizacion aceptada-contrato). */
   quotation?: ContractQuotationRef | null;
   /** Trazabilidad a la factura AIU (la crea D.1/D.2 desde el vigente). */
