@@ -16,13 +16,13 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
   standalone: true,
   imports: [ReactiveFormsModule, ModalComponent, ButtonComponent, InputComponent, TextareaComponent],
   template: `
-    <app-modal [(isOpen)]="isOpen" [title]="profile() ? 'Editar perfil de cotización' : 'Nuevo perfil de cotización'" subtitle="Configuración comercial de cotizaciones; no determina el régimen fiscal." size="lg" [dialog]="true" [closeOnEscape]="!isSaving()" [showCloseButton]="!isSaving()">
+    <app-modal [(isOpen)]="isOpen" [title]="profile() ? 'Editar perfil de cotización' : 'Nuevo perfil de cotización'" subtitle="Configuración comercial de cotizaciones; no determina el régimen fiscal." size="lg" customClasses="[&_button]:min-h-11 [&_button]:min-w-11" [dialog]="true" [canClose]="canClose" [closeOnEscape]="!isSaving()" [showCloseButton]="!isSaving()">
       <form [formGroup]="form" (ngSubmit)="save()" class="space-y-4">
         <section class="rounded-lg border border-[var(--color-border)] p-4 space-y-3">
           <h3 class="font-semibold">Datos generales</h3>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <app-input label="Nombre *" formControlName="name" [maxlength]="150" placeholder="Ej. Obra residencial" [error]="nameError()"></app-input>
-            <app-input label="Vigencia (días)" type="number" formControlName="validity_days" [min]="0" [step]="1" helperText="Déjalo vacío si no aplica." [error]="fieldError('validity_days')"></app-input>
+            <app-input label="Nombre *" formControlName="name" [maxlength]="150" placeholder="Ej. Obra residencial" customClasses="!min-h-11 !text-base" [error]="nameError()"></app-input>
+            <app-input label="Vigencia (días)" type="number" formControlName="validity_days" [min]="0" [step]="1" helperText="Déjalo vacío si no aplica." customClasses="!min-h-11 !text-base" [error]="fieldError('validity_days')"></app-input>
           </div>
         </section>
         <section class="rounded-lg border border-[var(--color-border)] p-4 space-y-3">
@@ -31,21 +31,21 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
             <p class="mt-1 text-sm text-[var(--color-text-secondary)]">Opcionales. Son parámetros del perfil, no un cálculo ni una clasificación tributaria.</p>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <app-input label="Administración (%)" type="number" formControlName="admin_percent" [min]="0" [max]="100" [step]="0.01" [error]="fieldError('admin_percent')"></app-input>
-            <app-input label="Imprevistos (%)" type="number" formControlName="contingency_percent" [min]="0" [max]="100" [step]="0.01" [error]="fieldError('contingency_percent')"></app-input>
-            <app-input label="Utilidad (%)" type="number" formControlName="profit_percent" [min]="0" [max]="100" [step]="0.01" [error]="fieldError('profit_percent')"></app-input>
+            <app-input label="Administración (%)" type="number" formControlName="admin_percent" [min]="0" [max]="100" [step]="0.01" customClasses="!min-h-11 !text-base" [error]="fieldError('admin_percent')"></app-input>
+            <app-input label="Imprevistos (%)" type="number" formControlName="contingency_percent" [min]="0" [max]="100" [step]="0.01" customClasses="!min-h-11 !text-base" [error]="fieldError('contingency_percent')"></app-input>
+            <app-input label="Utilidad (%)" type="number" formControlName="profit_percent" [min]="0" [max]="100" [step]="0.01" customClasses="!min-h-11 !text-base" [error]="fieldError('profit_percent')"></app-input>
           </div>
         </section>
         <section class="rounded-lg border border-[var(--color-border)] p-4 space-y-3">
           <h3 class="font-semibold">Condiciones y notas</h3>
-          <app-textarea label="Condiciones de pago" formControlName="payment_terms" [rows]="3" [maxlength]="500" placeholder="Opcional"></app-textarea>
-          <app-textarea label="Notas" formControlName="notes" [rows]="3" [maxlength]="2000" placeholder="Opcional"></app-textarea>
+          <app-textarea label="Condiciones de pago" formControlName="payment_terms" [control]="form.controls.payment_terms" [rows]="3" [maxlength]="500" customClass="!text-base" [error]="fieldError('payment_terms')" placeholder="Opcional"></app-textarea>
+          <app-textarea label="Notas" formControlName="notes" [control]="form.controls.notes" [rows]="3" [maxlength]="2000" customClass="!text-base" [error]="fieldError('notes')" placeholder="Opcional"></app-textarea>
         </section>
         @if (errorMessage()) { <p class="text-sm text-[var(--color-error)]" role="alert">{{ errorMessage() }}</p> }
       </form>
       <div slot="footer" class="flex justify-end gap-3">
-        <app-button variant="outline" type="button" [disabled]="isSaving()" (clicked)="close()">Cancelar</app-button>
-        <app-button variant="primary" type="button" [loading]="isSaving()" [disabled]="formStatus() !== 'VALID' || isSaving()" (clicked)="save()">Guardar</app-button>
+        <app-button variant="outline" customClasses="min-h-11" type="button" [disabled]="isSaving()" (clicked)="close()">Cancelar</app-button>
+        <app-button variant="primary" customClasses="min-h-11" type="button" [loading]="isSaving()" [disabled]="formStatus() !== 'VALID' || isSaving()" (clicked)="save()">Guardar</app-button>
       </div>
     </app-modal>
   `,
@@ -60,6 +60,7 @@ export class QuotationProfileFormModalComponent {
   readonly profile = signal<QuotationProfile | null>(null);
   readonly saved = output<void>();
   readonly isSaving = signal(false);
+  readonly canClose = (): boolean => !this.isSaving();
   readonly errorMessage = signal('');
   readonly form = this.fb.group({
     name: this.fb.nonNullable.control('', [Validators.required, Validators.maxLength(150)]),
@@ -71,6 +72,7 @@ export class QuotationProfileFormModalComponent {
     notes: this.fb.control<string | null>('', [Validators.maxLength(2000)]),
   });
   readonly formStatus = toSignal(this.form.statusChanges.pipe(startWith(this.form.status)), { initialValue: this.form.status });
+  readonly formEvents = toSignal(this.form.events, { initialValue: null });
 
   open(profile: QuotationProfile | null = null): void {
     this.errorMessage.set('');
@@ -93,6 +95,7 @@ export class QuotationProfileFormModalComponent {
   }
 
   nameError(): string {
+    this.formEvents();
     const control = this.form.controls.name;
     if (!control.touched && !control.dirty) return '';
     if (control.hasError('required')) return 'El nombre es obligatorio.';
@@ -100,9 +103,11 @@ export class QuotationProfileFormModalComponent {
     return '';
   }
 
-  fieldError(key: 'admin_percent' | 'contingency_percent' | 'profit_percent' | 'validity_days'): string {
+  fieldError(key: 'admin_percent' | 'contingency_percent' | 'profit_percent' | 'validity_days' | 'payment_terms' | 'notes'): string {
+    this.formEvents();
     const control = this.form.controls[key];
     if (!control.touched && !control.dirty) return '';
+    if (control.hasError('maxlength')) return key === 'payment_terms' ? 'Máximo 500 caracteres.' : key === 'notes' ? 'Máximo 2000 caracteres.' : '';
     if (control.hasError('min') || control.hasError('max')) return key === 'validity_days' ? 'Debe ser un entero mayor o igual a 0.' : 'Usa un valor entre 0 y 100.';
     if (control.hasError('pattern')) return key === 'validity_days' ? 'Debe ser un entero mayor o igual a 0.' : 'Introduce un número finito entre 0 y 100.';
     return '';

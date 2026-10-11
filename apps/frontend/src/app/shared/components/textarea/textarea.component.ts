@@ -62,6 +62,8 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
             [rows]="rows()"
             [class]="textareaClasses"
             [style]="customStyle()"
+            [attr.aria-invalid]="!!getValidationError()"
+            [attr.aria-describedby]="getValidationError() ? errorId : null"
             (input)="onInput($event)"
             (blur)="onBlur()"
             (focus)="onFocus()"
@@ -80,6 +82,8 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
         <!-- Error message -->
         @if (getValidationError()) {
           <p
+            [id]="errorId"
+            role="alert"
             class="mt-2 text-sm text-[var(--color-destructive)]"
             >
             {{ getValidationError() }}
@@ -139,6 +143,10 @@ export class TextareaComponent implements ControlValueAccessor {
 
   readonly value = signal('');
   textareaId = `textarea-${Math.random().toString(36).substr(2, 9)}`;
+
+  get errorId(): string {
+    return `${this.textareaId}-error`;
+  }
 
   // ControlValueAccessor implementation
   private onChange = (value: string) => { };
@@ -206,7 +214,7 @@ export class TextareaComponent implements ControlValueAccessor {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
-        'bg-[rgba(239,68,68,0.05)]',
+        'bg-[rgba(var(--color-error-rgb),0.05)]',
       ];
     } else {
       stateClasses = [
@@ -228,7 +236,7 @@ export class TextareaComponent implements ControlValueAccessor {
         'bg-[var(--color-background)]',   // Subtle background like onboarding
         'focus:bg-[var(--color-surface)]', // Change to surface on focus
         isInvalid
-          ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
+          ? 'focus:shadow-[0_0_0_2px_rgba(var(--color-error-rgb),0.3)]'
           : 'focus:shadow-[0_0_0_2px_var(--color-ring)]',
       ];
     } else {

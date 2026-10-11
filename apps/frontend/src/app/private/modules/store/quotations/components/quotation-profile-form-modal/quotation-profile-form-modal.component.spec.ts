@@ -67,6 +67,44 @@ describe('QuotationProfileFormModalComponent', () => {
     expect(footer?.textContent).not.toContain('Crear perfil');
   });
 
+  it('exposes dialog semantics and visible maxlength errors for the typed text controls', async () => {
+    const component = fixture.componentInstance;
+    component.open();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const dialog = root.querySelector('[role="dialog"]');
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');
+    expect(dialog?.getAttribute('class')).toContain('[&_button]:min-h-11');
+    expect(dialog?.getAttribute('class')).toContain('[&_button]:min-w-11');
+    const titleId = dialog?.getAttribute('aria-labelledby');
+    expect(titleId).toBeTruthy();
+    expect(root.querySelector(`[id="${titleId}"]`)).toBeTruthy();
+    expect(dialog?.contains(document.activeElement)).toBeTrue();
+
+    component.form.controls.name.markAsTouched();
+    await fixture.whenStable();
+    expect(dialog?.textContent).toContain('El nombre es obligatorio.');
+    component.form.controls.name.setValue('x'.repeat(151));
+    await fixture.whenStable();
+    expect(dialog?.textContent).toContain('Máximo 150 caracteres.');
+
+    component.form.controls.payment_terms.setValue('x'.repeat(501));
+    component.form.controls.payment_terms.markAsTouched();
+    component.form.controls.notes.setValue('x'.repeat(2001));
+    component.form.controls.notes.markAsTouched();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Máximo 500 caracteres.');
+    expect(root.textContent).toContain('Máximo 2000 caracteres.');
+    for (const textarea of Array.from(root.querySelectorAll('textarea'))) {
+      const errorId = textarea.getAttribute('aria-describedby');
+      expect(errorId).toBeTruthy();
+      expect(root.querySelector(`[id="${errorId}"]`)?.getAttribute('role')).toBe('alert');
+    }
+  });
+
   it('rejects out-of-range percentages and fractional validity days', () => {
     const component = fixture.componentInstance;
     component.open();
@@ -106,30 +144,54 @@ describe('QuotationProfileFormModalComponent', () => {
     expect('is_default' in body).toBeFalse();
   });
 
-  it('blocks duplicate submission and close while busy, then permits retry after an error', () => {
+  it('blocks duplicate submission and close while busy, then permits retry after an error', async () => {
     const component = fixture.componentInstance;
     component.open();
     component.form.controls.name.setValue('Perfil temporal');
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('[role="dialog"]')).toBeTruthy();
     const request = new Subject<QuotationProfile>();
     service.create.and.returnValue(request as Observable<QuotationProfile>);
     component.save();
     component.save();
+    await fixture.whenStable();
     expect(service.create).toHaveBeenCalledTimes(1);
     expect(component.isSaving()).toBeTrue();
+    const busyDialog = fixture.nativeElement.querySelector('[role="dialog"]') as HTMLElement;
+    expect(busyDialog).toBeTruthy();
+    expect(busyDialog.querySelector('[aria-label="Cerrar modal"]')).toBeNull();
+    expect(Array.from(busyDialog.querySelectorAll('button')).find((button) => button.textContent?.includes('Cancelar'))?.hasAttribute('disabled')).toBeTrue();
     component.close();
     expect(component.isOpen()).toBeTrue();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await fixture.whenStable();
+    expect(component.isOpen()).toBeTrue();
+    expect(service.create).toHaveBeenCalledTimes(1);
     request.next(profile);
     request.complete();
+    await fixture.whenStable();
     expect(component.isSaving()).toBeFalse();
     expect(component.isOpen()).toBeFalse();
 
     component.open();
     component.form.controls.name.setValue('Perfil reintentado');
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('[role="dialog"]')).toBeTruthy();
     service.create.and.returnValues(throwError(() => new Error('fallo de red')), of(profile));
     component.save();
+    await fixture.whenStable();
     expect(component.errorMessage()).toContain('fallo de red');
     expect(component.isOpen()).toBeTrue();
+    expect(fixture.nativeElement.querySelector('[role="dialog"]')).toBeTruthy();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await fixture.whenStable();
+    expect(component.isOpen()).toBeFalse();
+    component.open();
+    await fixture.whenStable();
+    expect(component.form.controls.name.value).toBe('');
+    component.form.controls.name.setValue('Perfil reintentado');
     component.save();
+    await fixture.whenStable();
     expect(service.create).toHaveBeenCalledTimes(3);
     expect(component.isOpen()).toBeFalse();
   });
