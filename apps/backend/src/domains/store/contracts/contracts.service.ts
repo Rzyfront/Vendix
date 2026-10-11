@@ -416,7 +416,7 @@ export class ContractsService {
               discount_amount: currentQuotation.discount_amount,
               tax_amount: currentQuotation.tax_amount,
               grand_total: currentQuotation.grand_total,
-              snapshot,
+              snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
               profile_id: (currentQuotation as any).profile_id ?? null,
               profile_version: profile
                 ? (profile as any).current_version ?? null
