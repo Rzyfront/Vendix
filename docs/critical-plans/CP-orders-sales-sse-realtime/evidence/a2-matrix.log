@@ -1,12 +1,11 @@
-32:import { PermissionsGuard } from '../../auth/guards/permissions.guard';
-33:import { Permissions } from '../../auth/decorators/permissions.decorator';
-51:// NotificationsSseService (Map<store_id, Subject>). OrderSseService empuja
-58:@UseGuards(PermissionsGuard)
-69:    // Carril B - B3: NotificationsSseService es el hub por store_id del que
-80:  @Permissions('store:orders:read')
-98:  @Permissions('store:orders:create')
-120:  @Permissions('store:orders:read')
-138:  @Permissions('store:orders:read')
-204:  @Permissions('store:orders:return_orders:read')
-210:  @Permissions('store:orders:purchase_orders:read')
-255:  @Permissions('store:orders:read')
+Matriz de auth y tenant — 2026-10-05, backend local saludable.
+
+| Request | Resultado | Observación |
+|---|---:|---|
+| POST /auth/login, owner seed + organization_slug=tech-solutions | 200 | JWT no se guardó ni imprimió |
+| GET /store/orders?page=1&limit=1, bearer owner | 200 | tenant seleccionado por login |
+| GET /store/orders/stream?token=<JWT> | 200 | conexión SSE abierta; curl cerró a los 2 s |
+| GET /store/orders/stream?token=invalid-token | 401 | token inválido rechazado |
+| GET /store/orders/stream sin token | 401 | token ausente rechazado |
+
+La ruta tiene `@Permissions('store:orders:read')` y deriva `store_id` del JWT/RequestContextService. La base de datos y el subject no se mutaron. No se probó un token autenticado sin permiso ni un ID de orden ajeno; Playwright/cliente físico no está disponible en esta sesión.

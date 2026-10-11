@@ -110,3 +110,44 @@ describe('describeApiFailure — copy curado de notas crédito/débito', () => {
     expect(failure.message).toBe('No se encontro la factura.');
   });
 });
+
+describe('describeApiFailure — bloqueo de notas por aceptación RADIAN', () => {
+  const message = 'No puedes crear ni emitir una nota crédito o débito: la factura tiene aceptación expresa o tácita registrada en RADIAN. Revisa sus eventos legales.';
+
+  for (const event_code of ['033', '034']) {
+    it(`INVOICING_STATUS_002 con evento ${event_code} muestra el motivo RADIAN curado, nunca el mensaje del backend`, () => {
+      const failure = describeApiFailure({
+        error: {
+          error_code: 'INVOICING_STATUS_002',
+          message: 'BACKEND DETAIL MUST NOT BE SHOWN',
+          details: { event_code },
+        },
+      });
+
+      expect(failure.errorCode).toBe('INVOICING_STATUS_002');
+      expect(failure.message).toBe(message);
+      expect(failure.message).not.toContain('BACKEND DETAIL');
+    });
+  }
+
+  it('preserva el copy genérico de otros eventos y no aplica a otros códigos', () => {
+    const unrelatedEvent = describeApiFailure({
+      error: {
+        error_code: 'INVOICING_STATUS_002',
+        message: 'No puedes modificar la factura en su estado actual.',
+        details: { event_code: '030' },
+      },
+    });
+    const unrelatedCode = describeApiFailure({
+      error: {
+        error_code: 'INVOICING_STATUS_001',
+        message: 'Invalid invoice state transition',
+        details: { event_code: '033' },
+      },
+    });
+
+    expect(unrelatedEvent.message).toBe('No puedes modificar la factura en su estado actual.');
+    expect(unrelatedCode.errorCode).toBe('INVOICING_STATUS_001');
+    expect(unrelatedCode.message).not.toBe(message);
+  });
+});

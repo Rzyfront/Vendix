@@ -109,3 +109,22 @@ interface PaymentSubmit {
 
 `vendix-payment-processors` · `vendix-zoneless-signals` · `vendix-frontend-modal`
 · `vendix-currency-formatting` · `vendix-angular-forms` · `vendix-frontend-icons`.
+
+## Tip policy (`tipPolicy`)
+
+`tipPolicy = input<TipPolicy | null>(null)` (`core/utils/tip-policy.util.ts`).
+`null` keeps the classic behavior (context `allowTip` decides). With a policy,
+tips are on only if `allowTip` (ceiling) is true, the mode is `contado` and the
+policy is active (`manualEnabled` and/or `suggested`).
+
+- `suggested`: renders the «Pago incluye propina» checkbox (unchecked by
+  default) with «Propina sugerida (10 %): $X». Checking it applies the suggested
+  type/value; with `manualEnabled` the amount stays editable in the manual card.
+  `PaymentSubmit.tipFromSuggested` is `true` when it travels unedited.
+- `manualEnabled` without `suggested`: the classic manual tip card.
+- The tip block lives in the header of the Método sub-step (stepped) / before the
+  methods block (flat), so the total is split across methods WITH the tip. In
+  multi-tender, a later tip change is applied as a delta to the last legs
+  (`syncLegsToTip`), keeping `remaining` at 0.
+- `PaymentSubmit.tip` is the resolved amount; `tipValue` is the raw value (the %
+  when `tipType='percentage'`).

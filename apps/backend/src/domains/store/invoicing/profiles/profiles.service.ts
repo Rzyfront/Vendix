@@ -967,7 +967,23 @@ export class ProfilesService {
     } catch (error) {
       if (this.isForeignKeyViolation(error)) {
         const now = await this.prisma.invoices.count({ where: { profile_id: id } });
-        throw this.deleteBlocked(id, now);
+        if (now > 0) throw this.deleteBlocked(id, now);
+
+        // Contract quotes pin a specific immutable invoice-profile version.
+        // Their JSON snapshot is not a substitute for this FK: the referenced
+        // version must remain addressable even if no invoice exists yet.
+        const quotation_count = await this.prisma.quotations.count({
+          where: { invoice_profile_id: id },
+        });
+        if (quotation_count > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.INVOICING_PROFILE_003,
+            quotation_count === 1
+              ? 'Este perfil se usó en 1 cotización de contrato y no puede eliminarse. Puedes desactivarlo.'
+              : `Este perfil se usó en ${quotation_count} cotizaciones de contrato y no puede eliminarse. Puedes desactivarlo.`,
+            { profile_id: id, quotation_count },
+          );
+        }
       }
       throw error;
     }

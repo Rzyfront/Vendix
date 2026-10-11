@@ -289,6 +289,55 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(h.storage.upload).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['cash', 'cash'],
+    ['credit', 'credit'],
+    ['unknown', 'unknown'],
+    ['omitted', 'unknown'],
+  ])('persists manual payment condition %s conservatively', async (input, expected) => {
+    const h = makeHarness();
+    const dto = input === 'omitted' ? manualDto() : manualDto({ payment_condition: input });
+    await h.service.createManual(context, dto);
+    const data = h.tx.received_documents.create.mock.calls[0][0].data;
+    expect(data.payment_condition).toBe(expected);
+    expect(data.validation_summary).toMatchObject({
+      structural: { status: 'needs_review' },
+      signature: { status: 'unsigned' },
+      dian: { status: 'not_checked' },
+    });
+  });
+
+  it('re-evaluates a reviewed historical summary only when its preserved evidence is complete', async () => {
+    const complete = makeHarness();
+    complete.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, source_channel: 'xml', fiscal_status: 'pending', posting_status: 'pending',
+      accepted_at: null, validation_status: 'needs_review',
+      validation_summary: {
+        errors: [], warnings: [{ code: 'SIGNATURE_NOT_VERIFIED', message: 'not checked' }],
+        has_signature: true, document_key_format_valid: true,
+      },
+      metadata: { source_format: 'ubl_xml' }, files: [],
+    });
+    await complete.service.updateReview(context, 50, { expected_version: 1 } as any);
+    const completeUpdate = complete.tx.received_documents.updateMany.mock.calls[0][0].data;
+    expect(completeUpdate.validation_status).toBe('valid');
+    expect(completeUpdate.signature_validation_status).toBe('not_verified');
+    expect(completeUpdate.validation_summary.structural.status).toBe('valid');
+    expect(completeUpdate.validation_summary.warnings[0].code).toBe('SIGNATURE_NOT_VERIFIED');
+
+    const incomplete = makeHarness();
+    incomplete.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, source_channel: 'xml', fiscal_status: 'pending', posting_status: 'pending',
+      accepted_at: null, validation_status: 'needs_review', validation_summary: { warnings: [] },
+      metadata: { source_format: 'ubl_xml' }, files: [],
+    });
+    await incomplete.service.updateReview(context, 50, { expected_version: 1 } as any);
+    const incompleteUpdate = incomplete.tx.received_documents.updateMany.mock.calls[0][0].data;
+    expect(incompleteUpdate.validation_status).toBe('needs_review');
+    expect(incompleteUpdate.validation_summary).toEqual({ warnings: [] });
+    expect(incompleteUpdate.structural_validation_status).toBeUndefined();
+  });
+
   it('revalidates edited manual facts against canonical NIT while preserving reviewed error details', async () => {
     const h = makeHarness();
     h.prisma.received_documents.findFirst.mockResolvedValueOnce({

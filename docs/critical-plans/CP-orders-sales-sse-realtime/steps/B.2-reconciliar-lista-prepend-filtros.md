@@ -27,5 +27,5 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-currency-formatting, h
   - [x] GET /:id hidrata y normaliza igual que loadOrders; prepend arriba con dedup
   - [x] Con filtros/pagina>1/sort no-default: toast info, sin insertar (canPrependLiveOrder)
   - [x] Toast success + flash seen via isNewOrder; rafaga >10/min colapsa en resumen
-  - [ ] GET 404 descarta sin mutar (ERR-03): codigo listo, E2E pendiente dev arriba
-- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-09-10 · codigo listo; falta E2E del item 4
+  - [ ] GET 404 descarta sin mutar (ERR-03): código revisado; E2E pendiente, Playwright no disponible en esta sesión
+- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-10-05 · código existente; E2E prepend/filtros/dedup y cross-store pendiente

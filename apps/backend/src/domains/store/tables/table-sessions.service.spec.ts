@@ -114,6 +114,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     const kitchenFireService = {
       cancelTicketInTx: jest.fn(),
       emitTicketCancelledEvent: jest.fn(),
+      emitTicketUpdatedEvent: jest.fn().mockResolvedValue(undefined),
     };
     const stockLevelManager = {
       getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
@@ -2632,7 +2633,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(row);
       const txMock = {
         order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        kitchen_ticket_items: {
+          findMany: jest.fn().mockResolvedValue([{ kitchen_ticket_id: 7 }]),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
       };
       (prismaMock.$transaction as jest.Mock).mockImplementation((cb: any) => cb(txMock));
 
@@ -2646,6 +2650,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         where: { order_item_id: 501, status: 'pending' },
         data: { notes: 'Sin cebolla, por favor' },
       });
+      // SSE post-commit al KDS para el ticket afectado.
+      expect(
+        (service as any).kitchenFireService.emitTicketUpdatedEvent,
+      ).toHaveBeenCalledWith(7);
     });
 
     it('updateItemNotes normaliza notas vacías a null', async () => {
@@ -2653,7 +2661,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(row);
       const txMock = {
         order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        kitchen_ticket_items: {
+          findMany: jest.fn().mockResolvedValue([{ kitchen_ticket_id: 7 }]),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
       };
       (prismaMock.$transaction as jest.Mock).mockImplementation((cb: any) => cb(txMock));
 

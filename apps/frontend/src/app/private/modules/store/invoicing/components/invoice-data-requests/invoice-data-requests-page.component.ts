@@ -6,17 +6,23 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
 
 import {
   CardComponent,
   IconComponent,
   InputsearchComponent,
+  OptionsDropdownComponent,
   PaginationComponent,
   ResponsiveDataViewComponent,
   StatsComponent,
   type ItemListCardConfig,
   type TableAction,
   type TableColumn,
+  type DropdownAction,
+  type FilterConfig,
+  type FilterValues,
 } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -84,19 +90,15 @@ const STATUS_LABELS: Record<InvoiceDataRequestStatus, string> = {
 };
 
 /**
- * Colores del badge de estado.
- *
- * Hex de 7 caracteres, no tokens ni utilidades de Tailwind: el `colorMap` de
- * `TableColumn.badgeConfig` los inyecta como color literal y una clase suelta
- * ahí no se resuelve. Es la misma tabla que usan los demás listados del panel.
+ * Colores de estado desde tokens del tema: `colorMap` acepta valores CSS.
  */
 const STATUS_COLORS: Record<InvoiceDataRequestStatus, string> = {
-  pending: '#6b7280',
-  submitted: '#d97706',
-  processing: '#2563eb',
-  completed: '#059669',
-  expired: '#9ca3af',
-  failed: '#dc2626',
+  pending: 'var(--color-text-secondary)',
+  submitted: 'var(--color-warning)',
+  processing: 'var(--color-primary)',
+  completed: 'var(--color-success)',
+  expired: 'var(--color-text-secondary)',
+  failed: 'var(--color-error)',
 };
 
 /** Estados que el comerciante puede elegir, en el orden en que le importan. */
@@ -131,15 +133,11 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
  * cliente que pidió su factura y cuya conversión reventó quedaba esperando en
  * silencio, sin que nadie en la tienda pudiera enterarse.
  *
- * ## Por qué las tarjetas son el filtro
+ * ## Resumen y filtros
  *
- * La pestaña se abre para atender DOS estados —`submitted` (esperando el
- * empujón) y `failed` (reventó)—; los otros cuatro son historia. Las tarjetas
- * dicen cuántas hay de cada uno y filtran al tocarlas, así que el trabajo del
- * día se ve y se acota sin abrir el selector. Su conteo NO sigue el filtro
- * activo (`summaryByStore` lo ignora a propósito): si lo siguiera, al entrar a
- * «Falló la conversión» las demás caerían a cero y dejarían de servir para
- * navegar.
+ * Las cuatro tarjetas son un resumen global, no controles interactivos. El
+ * filtro por estado vive en el dropdown de opciones y admite los seis estados.
+ * Su conteo NO sigue el filtro activo (`summaryByStore` lo ignora a propósito).
  *
  * ## Por qué la acción sólo aparece en `submitted`
  *
@@ -154,87 +152,63 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
   standalone: true,
   imports: [
     CardComponent,
+    FormsModule,
     IconComponent,
     InputsearchComponent,
+    OptionsDropdownComponent,
     PaginationComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
   ],
   template: `
     <div class="w-full">
-      <!--
-        Cuatro tarjetas, no seis: el bloque estándar es de cuatro columnas y los
-        dos estados de baja consulta (procesando y vencido) viven sólo en las
-        píldoras. Las cuatro elegidas son las accionables más el total.
-        NINGÚN acento grave dentro de este literal de plantilla: uno solo cierra
-        la cadena e invierte la paridad del archivo entero.
-      -->
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Solicitudes"
-          [value]="summary().total"
+          [value]="summaryError() ? '—' : summary().total"
           smallText="Facturas pedidas por clientes"
           iconName="file-text"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
           [loading]="summaryLoading()"
-          [clickable]="true"
-          role="button"
-          tabindex="0"
-          [attr.aria-pressed]="statusFilter() === ''"
-          (click)="filterByStatus('')"
-          (keydown.enter)="filterByStatus('')"
         />
         <app-stats
           title="Sin procesar"
-          [value]="summary().submitted"
-          smallText="Esperan el reintento manual"
+          [value]="summaryError() ? '—' : summary().submitted"
+          smallText="Datos recibidos, pendientes de procesar"
           iconName="clock"
-          iconBgColor="bg-amber-100"
-          iconColor="text-amber-600"
+          iconBgColor="bg-warning/10"
+          iconColor="text-warning"
           [loading]="summaryLoading()"
-          [clickable]="true"
-          role="button"
-          tabindex="0"
-          [attr.aria-pressed]="statusFilter() === 'submitted'"
-          (click)="filterByStatus('submitted')"
-          (keydown.enter)="filterByStatus('submitted')"
         />
         <app-stats
           title="Fallidas"
-          [value]="summary().failed"
-          smallText="La conversión automática reventó"
+          [value]="summaryError() ? '—' : summary().failed"
+          smallText="Requieren revisión de la conversión"
           iconName="alert-circle"
-          iconBgColor="bg-red-100"
-          iconColor="text-red-600"
+          iconBgColor="bg-error/10"
+          iconColor="text-error"
           [loading]="summaryLoading()"
-          [clickable]="true"
-          role="button"
-          tabindex="0"
-          [attr.aria-pressed]="statusFilter() === 'failed'"
-          (click)="filterByStatus('failed')"
-          (keydown.enter)="filterByStatus('failed')"
         />
         <app-stats
           title="Facturadas"
-          [value]="summary().completed"
+          [value]="summaryError() ? '—' : summary().completed"
           smallText="Nominativa ya emitida"
           iconName="check-circle"
-          iconBgColor="bg-emerald-100"
-          iconColor="text-emerald-600"
+          iconBgColor="bg-success/10"
+          iconColor="text-success"
           [loading]="summaryLoading()"
-          [clickable]="true"
-          role="button"
-          tabindex="0"
-          [attr.aria-pressed]="statusFilter() === 'completed'"
-          (click)="filterByStatus('completed')"
-          (keydown.enter)="filterByStatus('completed')"
         />
       </div>
+      @if (summaryError()) {
+        <p role="status" class="px-2 pb-2 text-sm text-text-primary">
+          No se pudo cargar el resumen. Selecciona Actualizar en el menú de opciones para reintentar.
+        </p>
+      }
 
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
@@ -243,70 +217,40 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
             class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4"
           >
             <h2
-              class="text-[13px] font-bold text-gray-600 tracking-wide
+              class="text-[13px] font-bold text-text-primary tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
-              Solicitudes de factura ({{ total() }})
+              Solicitudes de factura ({{ totalItems() }})
             </h2>
 
-            <div class="flex items-center gap-2 w-full md:w-auto">
+            <div class="flex flex-wrap items-center gap-2 w-full min-w-0 md:w-auto">
               <app-inputsearch
-                class="flex-1 md:w-72 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                class="min-w-0 flex-1 basis-40 md:w-72 shadow-none rounded-[10px]"
                 placeholder="Orden, nombre, documento o correo"
+                ariaLabel="Buscar solicitudes de factura"
+                [ngModel]="searchValue()"
+                (ngModelChange)="searchValue.set($event)"
                 (search)="onSearch($event)"
+                (clear)="onSearch('')"
               ></app-inputsearch>
-
-              <button
-                type="button"
-                class="shrink-0 h-10 w-10 flex items-center justify-center rounded-[10px]
-                       border border-border bg-[var(--color-surface)] text-text-secondary
-                       transition-colors hover:text-text-primary hover:border-primary/40
-                       disabled:opacity-50 disabled:cursor-not-allowed"
-                [disabled]="loading()"
-                aria-label="Actualizar solicitudes"
-                (click)="reload()"
-              >
-                <app-icon
-                  name="refresh-cw"
-                  [size]="16"
-                  [class]="loading() ? 'animate-spin' : ''"
-                ></app-icon>
-              </button>
+              <app-options-dropdown
+                class="shrink-0"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions"
+                [isLoading]="loading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
-          </div>
-
-          <!--
-            Píldoras de estado en vez de un desplegable: son seis valores fijos
-            y conocidos, y verlos todos a la vez con su conteo y el activo
-            resaltado ahorra el clic de abrir un selector para descubrir qué
-            hay. El filtro por tarjeta y el de píldora escriben la misma señal.
-          -->
-          <div class="flex flex-wrap gap-1.5 mt-2 md:mt-3">
-            <button
-              type="button"
-              class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors"
-              [class]="pillClass('')"
-              (click)="filterByStatus('')"
-            >
-              Todos
-            </button>
-            @for (status of statusOrder; track status) {
-              <button
-                type="button"
-                class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors"
-                [class]="pillClass(status)"
-                (click)="filterByStatus(status)"
-              >
-                {{ statusLabel(status) }}
-                <span class="opacity-60">· {{ summary()[status] }}</span>
-              </button>
-            }
           </div>
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4 space-y-3">
           @if (error(); as message) {
             <div
+              role="alert"
               class="flex items-start gap-2 p-3 rounded-lg border border-error/30 bg-error-light"
             >
               <app-icon
@@ -314,7 +258,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
                 [size]="16"
                 class="text-error shrink-0 mt-0.5"
               ></app-icon>
-              <p class="text-sm text-error">{{ message }}</p>
+              <p class="text-sm text-text-primary">{{ message }}</p>
             </div>
           }
 
@@ -327,17 +271,19 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
             emptyIcon="file-text"
             [emptyTitle]="emptyTitle()"
             [emptyDescription]="emptyDescription()"
-            [showEmptyClearFilters]="hasActiveFilters()"
-            [showEmptyRefresh]="!hasActiveFilters()"
+            [showEmptyClearFilters]="!error() && hasActiveFilters()"
+            [showEmptyRefresh]="!!error() || !hasActiveFilters()"
             (emptyClearFiltersClick)="clearFilters()"
             (emptyRefreshClick)="reload()"
+            rowLabelKey="order_id"
+            [sortable]="false"
           ></app-responsive-data-view>
 
           <app-pagination
-            [currentPage]="page()"
+            [currentPage]="filters().page"
             [totalPages]="totalPages()"
-            [total]="total()"
-            [limit]="limit()"
+            [total]="totalItems()"
+            [limit]="filters().limit"
             (pageChange)="onPageChange($event)"
           ></app-pagination>
         </div>
@@ -350,23 +296,46 @@ export class InvoiceDataRequestsPageComponent {
   private readonly toast = inject(ToastService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
+  private listSubscription?: Subscription;
+  private summarySubscription?: Subscription;
 
-  readonly statusOrder = STATUS_FILTER_ORDER;
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      placeholder: 'Todos los estados',
+      options: [
+        { label: 'Todos', value: '' },
+        ...STATUS_FILTER_ORDER.map((status) => ({
+          label: STATUS_LABELS[status],
+          value: status,
+        })),
+      ],
+    },
+  ];
+  readonly dropdownActions: DropdownAction[] = [
+    { label: 'Actualizar', icon: 'refresh-cw', action: 'reload' },
+  ];
 
   // ── Estado ─────────────────────────────────────────────
   readonly rows = signal<InvoiceDataRequestRow[]>([]);
   readonly loading = signal(false);
   readonly summaryLoading = signal(false);
+  readonly summaryError = signal(false);
   readonly error = signal<string | null>(null);
   readonly summary = signal<InvoiceDataRequestSummary>(EMPTY_SUMMARY);
 
   readonly statusFilter = signal<InvoiceDataRequestStatus | ''>('');
   readonly search = signal('');
-  readonly page = signal(1);
-  readonly limit = signal(10);
-  readonly total = signal(0);
+  readonly searchValue = signal('');
+  readonly filters = signal({ page: 1, limit: 10 });
+  readonly totalItems = signal(0);
+  readonly filterValues = computed<FilterValues>(() => ({
+    status: this.statusFilter() || null,
+  }));
   readonly totalPages = computed(() =>
-    Math.max(1, Math.ceil(this.total() / this.limit())),
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
   );
 
   readonly hasActiveFilters = computed(
@@ -374,9 +343,8 @@ export class InvoiceDataRequestsPageComponent {
   );
 
   /**
-   * Id en curso, NO un booleano: con un booleano compartido las acciones de
-   * todas las filas se apagan igual y el comerciante no sabe cuál solicitud
-   * está corriendo.
+   * Id en curso, NO un booleano: permite señalar la fila actualmente atendida
+   * y bloquear el resto para evitar POST simultáneos.
    */
   readonly processingId = signal<number | null>(null);
 
@@ -387,20 +355,26 @@ export class InvoiceDataRequestsPageComponent {
 
   // ── Carga ──────────────────────────────────────────────
   load(): void {
+    this.listSubscription?.unsubscribe();
     this.loading.set(true);
     this.error.set(null);
-    this.service
+    this.listSubscription = this.service
       .list({
         status: this.statusFilter(),
         search: this.search(),
-        page: this.page(),
-        limit: this.limit(),
+        page: this.filters().page,
+        limit: this.filters().limit,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.rows.set(response?.data ?? []);
-          this.total.set(response?.meta?.total ?? 0);
+          this.totalItems.set(response?.meta?.total ?? 0);
+          if (this.filters().page > this.totalPages()) {
+            this.filters.update((current) => ({ ...current, page: this.totalPages() }));
+            this.load();
+            return;
+          }
           this.loading.set(false);
         },
         error: (err: unknown) => {
@@ -411,22 +385,18 @@ export class InvoiceDataRequestsPageComponent {
             ),
           );
           this.rows.set([]);
-          this.total.set(0);
+          this.totalItems.set(0);
           this.loading.set(false);
         },
       });
   }
 
-  /**
-   * El resumen falla en SILENCIO a propósito.
-   *
-   * Son cuatro contadores decorativos sobre un listado que ya cargó: pintar un
-   * segundo banner de error por ellos taparía el del listado, que es el que
-   * importa. Quedan en cero, que es visiblemente distinto de un número.
-   */
+  /** Carga el resumen; un error se representa como no disponible, no como cero. */
   private loadSummary(): void {
+    this.summarySubscription?.unsubscribe();
     this.summaryLoading.set(true);
-    this.service
+    this.summaryError.set(false);
+    this.summarySubscription = this.service
       .summary(this.search())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -436,6 +406,7 @@ export class InvoiceDataRequestsPageComponent {
         },
         error: () => {
           this.summary.set(EMPTY_SUMMARY);
+          this.summaryError.set(true);
           this.summaryLoading.set(false);
         },
       });
@@ -448,13 +419,19 @@ export class InvoiceDataRequestsPageComponent {
   }
 
   // ── Filtros ────────────────────────────────────────────
-  filterByStatus(status: InvoiceDataRequestStatus | ''): void {
-    if (this.statusFilter() === status) {
-      return;
-    }
+  onFilterChange(values: FilterValues): void {
+    const selected = values['status'];
+    const status = !selected
+      ? ''
+      : STATUS_FILTER_ORDER.find((candidate) => candidate === selected) ?? '';
+    if (this.statusFilter() === status) return;
     this.statusFilter.set(status);
-    this.page.set(1);
+    this.filters.update((current) => ({ ...current, page: 1 }));
     this.load();
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'reload') this.reload();
   }
 
   /**
@@ -463,11 +440,12 @@ export class InvoiceDataRequestsPageComponent {
    * que la tabla.
    */
   onSearch(term: string): void {
+    if (term !== this.searchValue()) return;
     if (this.search() === term) {
       return;
     }
     this.search.set(term);
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.load();
     this.loadSummary();
   }
@@ -475,12 +453,14 @@ export class InvoiceDataRequestsPageComponent {
   clearFilters(): void {
     this.statusFilter.set('');
     this.search.set('');
-    this.page.set(1);
+    this.searchValue.set('');
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.reload();
   }
 
   onPageChange(page: number): void {
-    this.page.set(page);
+    if (!Number.isInteger(page) || page < 1 || page > this.totalPages()) return;
+    this.filters.update((filters) => ({ ...filters, page }));
     this.load();
   }
 
@@ -491,7 +471,7 @@ export class InvoiceDataRequestsPageComponent {
    * emitida» ahí sería afirmar un documento que este clic no creó.
    */
   process(row: InvoiceDataRequestRow): void {
-    if (this.processingId() !== null) {
+    if (row.status !== 'submitted' || this.processingId() !== null) {
       return;
     }
     this.processingId.set(row.id);
@@ -529,19 +509,15 @@ export class InvoiceDataRequestsPageComponent {
     return STATUS_LABELS[status] ?? status;
   }
 
-  pillClass(status: InvoiceDataRequestStatus | ''): string {
-    return this.statusFilter() === status
-      ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
-      : 'bg-[var(--color-surface)] text-text-secondary border-border hover:border-primary/40 hover:text-text-primary';
-  }
-
   emptyTitle(): string {
+    if (this.error()) return 'No se pudo cargar el listado';
     return this.hasActiveFilters()
       ? 'Ninguna solicitud coincide'
       : 'Todavía no hay solicitudes';
   }
 
   emptyDescription(): string {
+    if (this.error()) return 'Actualiza para reintentar. No se pudo comprobar si hay registros.';
     return this.hasActiveFilters()
       ? 'Prueba con otro estado o limpia la búsqueda.'
       : 'Cuando un cliente pida su factura a nombre propio después de una venta a consumidor final, la solicitud aparece acá.';
@@ -621,6 +597,8 @@ export class InvoiceDataRequestsPageComponent {
       priority: 0,
       badge: true,
       badgeConfig: { type: 'custom', colorMap: STATUS_COLORS },
+      transform: (value) =>
+        STATUS_LABELS[value as InvoiceDataRequestStatus] ?? String(value ?? '—'),
       badgeTransform: (value) =>
         STATUS_LABELS[value as InvoiceDataRequestStatus] ?? String(value ?? '—'),
     },
@@ -646,7 +624,7 @@ export class InvoiceDataRequestsPageComponent {
       STATUS_LABELS[value as InvoiceDataRequestStatus] ?? String(value ?? '—'),
     detailKeys: [
       {
-        key: 'submitted_at',
+        key: 'created_at',
         label: 'Solicitada',
         icon: 'calendar',
         transform: (_value, item) =>
@@ -688,14 +666,14 @@ export class InvoiceDataRequestsPageComponent {
    */
   readonly tableActions: TableAction[] = [
     {
-      label: 'Procesar ahora',
+      label: (item) =>
+        this.processingId() === item?.id ? 'Procesando…' : 'Procesar ahora',
       icon: 'play',
       variant: 'primary',
       tooltip:
         'Emite la factura a nombre del cliente con los datos que ya envió.',
       show: (item) => item?.status === 'submitted',
-      disabled: (item) =>
-        this.processingId() !== null && this.processingId() !== item?.id,
+      disabled: () => this.processingId() !== null,
       action: (item) => this.process(item),
     },
   ];

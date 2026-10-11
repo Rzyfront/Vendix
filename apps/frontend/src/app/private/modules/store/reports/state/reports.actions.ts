@@ -13,6 +13,9 @@ export const ReportsActions = createActionGroup({
     // Filters
     'Set Date Range': props<{ dateRange: DateRangeFilter }>(),
     'Set Fiscal Period': props<{ fiscalPeriodId: number | null }>(),
+    // Filtros de datos del reporte (orden, categoría...): viajan como query
+    // params extra en la recarga. `order` se traduce a sort_by/sort_direction.
+    'Set Data Filters': props<{ filters: Record<string, string | null> }>(),
 
     // Pagination
     'Set Page': props<{ page: number }>(),

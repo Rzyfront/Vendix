@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map, shareReplay } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
+import { catchError, map, shareReplay } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
@@ -196,6 +196,16 @@ export interface DeliveryOption {
   delivery_type: 'pickup' | 'home_delivery' | 'other';
 }
 
+/** Alcance de direcciones de la tienda (cobertura de municipio único). */
+export interface AddressScope {
+  single_municipality: {
+    country_code: string;
+    state_province: string;
+    city: string;
+  } | null;
+  postal_code_relevant: boolean;
+}
+
 export interface WompiWidgetConfig {
   public_key: string;
   currency: string;
@@ -275,6 +285,23 @@ export class CheckoutService {
       `${this.api_url}/delivery-options`,
       { headers: this.getHeaders() },
     );
+  }
+
+  /**
+   * Alcance de direcciones de entrega a domicilio: si la tienda envía a un
+   * único municipio, el checkout lo precarga y oculta los campos. Público.
+   * Cualquier error ⇒ `null` (el formulario queda como siempre).
+   */
+  getAddressScope(): Observable<AddressScope | null> {
+    return this.http
+      .get<{ success: boolean; data: AddressScope }>(
+        `${this.api_url}/address-scope`,
+        { headers: this.getHeaders() },
+      )
+      .pipe(
+        map((response) => (response?.success ? (response.data ?? null) : null)),
+        catchError(() => of(null)),
+      );
   }
 
   /**

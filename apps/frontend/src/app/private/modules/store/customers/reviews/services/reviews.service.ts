@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
-import { Review, ReviewStats, ReviewFilters } from '../models/review.model';
+import { Review, ReviewStats, ReviewFilters, OrderReviewFilters } from '../models/review.model';
 
 @Injectable({ providedIn: 'root' })
 export class AdminReviewsService {
@@ -19,6 +19,17 @@ export class AdminReviewsService {
     if (filters.sort_by) params = params.set('sort_by', filters.sort_by);
     if (filters.sort_order) params = params.set('sort_order', filters.sort_order);
     return this.http.get(this.apiUrl, { params });
+  }
+
+  getOrderReviews(query: OrderReviewFilters = {}): Observable<any> {
+    let params = new HttpParams();
+    if (query.page) params = params.set('page', query.page.toString());
+    if (query.limit) params = params.set('limit', query.limit.toString());
+    if (query.rating) params = params.set('rating', query.rating.toString());
+    if (query.quick_tag) params = params.set('quick_tag', query.quick_tag);
+    if (query.date_from) params = params.set('date_from', query.date_from);
+    if (query.date_to) params = params.set('date_to', query.date_to);
+    return this.http.get(`${this.apiUrl}/orders`, { params });
   }
 
   getStats(): Observable<any> {

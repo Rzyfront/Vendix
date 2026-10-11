@@ -104,6 +104,7 @@ export class AnalyticsShellComponent {
     '/admin/analytics/purchases/payable-aging': '/admin/reports/purchases/payable-aging',
     // Reviews
     '/admin/analytics/reviews/summary': '/admin/reports/reviews/reviews-summary',
+    '/admin/analytics/reviews/trend': '/admin/reports/reviews/reviews-trend',
     // Financial
     '/admin/analytics/financial/profit-loss': '/admin/reports/financial/profit-loss',
     '/admin/analytics/financial/tax-summary': '/admin/reports/financial/tax-summary',

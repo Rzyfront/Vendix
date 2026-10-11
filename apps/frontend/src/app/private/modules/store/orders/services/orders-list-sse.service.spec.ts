@@ -149,17 +149,72 @@ describe('OrdersListSseService — QUI-777', () => {
     expect(service.lastEvent()).toBeNull();
   });
 
-  it('onmessage con OTRO tipo (ticket.*) NO actualiza ningun signal', () => {
+  it('acepta ticket KDS solo con id numérico y emite hidratación separada', () => {
     service.connect();
     lastInstance.onopen?.();
     lastInstance.onmessage?.({
       data: JSON.stringify({
         id: 4,
-        type: 'ticket.fired',
-        created_at: '2026-09-03T10:00:00.000Z',
-        data: { order_id: 99, kind: 'ticket.fired' },
+        type: 'ticket.created',
+        ts: '2026-09-03T10:00:00.000Z',
+        ticket: { order_id: 99 },
       }),
     });
+    expect(service.hydrationEvents()).toEqual([{ id: 4, type: 'ticket.created', order_id: 99 }]);
+    expect(service.lastRelevantEvent()).toBeNull();
+    expect(service.lastCreatedEvent()).toBeNull();
+  });
+
+  it('acepta order.items.updated y descarta tickets desconocidos o con id inválido', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    const send = (payload: unknown) => lastInstance.onmessage?.({ data: JSON.stringify(payload) });
+    send({ id: 1, type: 'ticket.created', ticket: { order_id: '99' } });
+    expect(service.hydrationEvents()).toEqual([]);
+    send({ id: 2, type: 'ticket.foreign', ticket: { order_id: 99 } });
+    expect(service.hydrationEvents()).toEqual([]);
+    send({ id: 3, type: 'order.items.updated', data: { order_id: 101 } });
+    expect(service.hydrationEvents()).toEqual([{ id: 3, type: 'order.items.updated', order_id: 101 }]);
+    send({ id: 4, type: 'order.items.updated', data: { order_id: 0 } });
+    expect(service.hydrationEvents()).toEqual([{ id: 3, type: 'order.items.updated', order_id: 101 }]);
+  });
+
+  it('conserva eventos de órdenes distintas recibidos en ráfaga', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    lastInstance.onmessage?.({ data: JSON.stringify({ type: 'ticket.created', ticket: { order_id: 10 } }) });
+    lastInstance.onmessage?.({ data: JSON.stringify({ type: 'ticket.ready', ticket: { order_id: 11 } }) });
+    expect(service.hydrationEvents().map((event) => event.order_id)).toEqual([10, 11]);
+  });
+
+  it('emite una señal al recuperar la conexión después de una caída', () => {
+    jasmine.clock().install();
+    try {
+      service.connect();
+      lastInstance.onopen?.();
+      expect(service.recoveredConnection()).toBe(0);
+      lastInstance.onerror?.();
+      jasmine.clock().tick(1_000);
+      lastInstance.onopen?.();
+      expect(service.recoveredConnection()).toBe(1);
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  it('no reporta reconexión por un connect intencional después de disconnect', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    service.disconnect();
+    service.connect();
+    lastInstance.onopen?.();
+    expect(service.recoveredConnection()).toBe(0);
+  });
+
+  it('ignora otros tipos del subject compartido', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    lastInstance.onmessage?.({ data: JSON.stringify({ type: 'notification.new', data: { order_id: 99 } }) });
     expect(service.lastRelevantEvent()).toBeNull();
     expect(service.lastCreatedEvent()).toBeNull();
     expect(service.lastEvent()).toBeNull();

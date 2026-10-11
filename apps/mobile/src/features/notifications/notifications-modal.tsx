@@ -7,6 +7,7 @@ import {
   Modal,
   StyleSheet,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/shared/components/icon/icon';
@@ -84,23 +85,40 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchNotifications = useCallback(async () => {
+    const [notifs, count] = await Promise.all([
+      NotificationsService.getNotifications(1, 20),
+      NotificationsService.getUnreadCount(),
+    ]);
+    setNotifications(notifs.data || []);
+    setUnreadCount(count);
+  }, []);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [notifs, count] = await Promise.all([
-        NotificationsService.getNotifications(1, 20),
-        NotificationsService.getUnreadCount(),
-      ]);
-      setNotifications(notifs.data || []);
-      setUnreadCount(count);
+      await fetchNotifications();
     } catch {
       setNotifications([]);
       setUnreadCount(0);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fetchNotifications]);
+
+  const onRefresh = useCallback(async () => {
+    if (isLoading || refreshing) return;
+    setRefreshing(true);
+    try {
+      await fetchNotifications();
+    } catch {
+      // En pull-to-refresh se conserva la lista vieja si falla la red.
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchNotifications, isLoading, refreshing]);
 
   useEffect(() => {
     if (visible) {
@@ -162,43 +180,53 @@ export function NotificationsModal({ visible, onClose, onNavigate }: Notificatio
             )}
           </View>
 
-          {/* List */}
-          {isLoading ? (
-            <View style={styles.loading}>
-              <Spinner size="md" />
-            </View>
-          ) : notifications.length > 0 ? (
-            <FlatList
-              data={notifications}
-              keyExtractor={(item) => item.id.toString()}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={[styles.item, !item.is_read && styles.itemUnread]}
-                  onPress={() => handleNotificationPress(item)}
-                >
-                  <View style={[styles.itemIcon, { backgroundColor: getItemBgColor(item.type) }]}>
-                    <Icon name={getIconForType(item.type)} size={16} color={getItemIconColor(item.type)} />
-                  </View>
-                  <View style={styles.itemContent}>
-                    <Text style={styles.itemTitle} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.itemBody} numberOfLines={2}>
-                      {item.body}
-                    </Text>
-                    <Text style={styles.itemTime}>{formatTime(item.created_at)}</Text>
-                  </View>
-                  {!item.is_read && <View style={styles.unreadDot} />}
-                </Pressable>
-              )}
-              showsVerticalScrollIndicator={false}
-            />
-          ) : (
-            <View style={styles.empty}>
-              <Icon name="bell" size={32} color={colorScales.gray[300]} />
-              <Text style={styles.emptyText}>Sin notificaciones</Text>
-            </View>
-          )}
+          {/* La lista conserva el pull-to-refresh también vacía o tras error. */}
+          <FlatList
+            data={isLoading ? [] : notifications}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={styles.listContent}
+            alwaysBounceVertical
+            ListEmptyComponent={isLoading ? (
+              <View style={styles.loading}>
+                <Spinner size="md" />
+              </View>
+            ) : (
+              <View style={styles.empty}>
+                <Icon name="bell" size={32} color={colorScales.gray[300]} />
+                <Text style={styles.emptyText}>Sin notificaciones</Text>
+              </View>
+            )}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                enabled={!isLoading}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                style={[styles.item, !item.is_read && styles.itemUnread]}
+                onPress={() => handleNotificationPress(item)}
+              >
+                <View style={[styles.itemIcon, { backgroundColor: getItemBgColor(item.type) }]}>
+                  <Icon name={getIconForType(item.type)} size={16} color={getItemIconColor(item.type)} />
+                </View>
+                <View style={styles.itemContent}>
+                  <Text style={styles.itemTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.itemBody} numberOfLines={2}>
+                    {item.body}
+                  </Text>
+                  <Text style={styles.itemTime}>{formatTime(item.created_at)}</Text>
+                </View>
+                {!item.is_read && <View style={styles.unreadDot} />}
+              </Pressable>
+            )}
+            showsVerticalScrollIndicator={false}
+          />
         </View>
       </Pressable>
     </Modal>
@@ -280,6 +308,9 @@ const styles = StyleSheet.create({
   loading: {
     padding: spacing[8],
     alignItems: 'center',
+  },
+  listContent: {
+    flexGrow: 1,
   },
   item: {
     flexDirection: 'row',

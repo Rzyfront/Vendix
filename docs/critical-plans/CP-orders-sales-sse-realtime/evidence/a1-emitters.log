@@ -1,4 +1,15 @@
-apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:1629:    this.eventEmitter.emit('order.created', {
-apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:2382:    this.eventEmitter.emit('order.created', {
-apps/backend/src/domains/store/payments/payments.service.ts:1427:          this.eventEmitter.emit('order.created', {
-apps/backend/src/domains/store/orders/orders.service.ts:596:        this.eventEmitter.emit('order.created', {
+Auditoría de emisores — 2026-10-05 (solo lectura; no se crearon órdenes en DB)
+
+apps/backend/src/domains/store/orders/orders.service.ts:1031 — POS/manual, `store_id` de la orden y `order_id` persistido.
+apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:2369 — checkout ecommerce.
+apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:3244 — checkout WhatsApp.
+apps/backend/src/domains/store/payments/payments.service.ts:1991 — POS con pago.
+
+`OrdersService.onOrderCreated` en orders.service.ts:560-575 reenvía store_id, order_id, kind=`order.created` y metadatos acotados a `OrderSseService.pushOrderEvent`.
+`OrderSseService` publica a `NotificationsSseService` con el store_id como clave y descarta IDs falsy.
+
+Spec enfocado:
+`npm run test:path -- src/domains/store/orders/services/order-sse.service.spec.ts` — PASS, 2/2.
+
+Intento del spec amplio del listener:
+`npm run test:path -- src/domains/store/orders/orders.service.spec.ts` — bloqueado en compilación antes de ejecutar tests por TS2694 en `src/common/services/s3.service.ts:13` (`sharp` no exporta `default` en las dependencias locales). No es un fallo de aserción SSE.

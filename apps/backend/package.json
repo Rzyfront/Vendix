@@ -136,7 +136,6 @@
     "@types/sharp": "^0.31.1",
     "@types/supertest": "^6.0.2",
     "@types/web-push": "^3.6.4",
-    "@types/xlsx": "^0.0.35",
     "dotenv": "^16.4.7",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
@@ -165,6 +164,15 @@
     },
     "socket.io-adapter": {
       "ws": "^8.21.0"
+    },
+    "@nestjs/swagger": {
+      "js-yaml": "5.4.1"
+    },
+    "express": {
+      "proxy-addr": "2.0.8"
+    },
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "4.3.2"
     }
   },
   "jest": {

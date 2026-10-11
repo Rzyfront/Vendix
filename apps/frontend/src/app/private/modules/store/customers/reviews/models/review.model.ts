@@ -93,3 +93,42 @@ export interface ReviewFilters {
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
+
+// ── Experiencia de compra (reseña de la orden) ──────────────────────────────
+export type OrderReviewQuickTag = 'very_easy' | 'normal' | 'difficult';
+export type OrderReviewSource = 'order_confirmation' | 'order_detail';
+
+export interface OrderReview {
+  id: number;
+  order_id: number;
+  rating: number;
+  quick_tag: OrderReviewQuickTag | null;
+  comment: string | null;
+  source: OrderReviewSource;
+  created_at: string;
+}
+
+export interface AdminOrderReview extends OrderReview {
+  order_number: string;
+  customer_name: string | null;
+}
+
+export interface OrderReviewFilters {
+  page?: number;
+  limit?: number;
+  rating?: number;
+  quick_tag?: OrderReviewQuickTag;
+  date_from?: string;
+  date_to?: string;
+}
+
+export const ORDER_REVIEW_QUICK_TAG_LABELS: Record<OrderReviewQuickTag, string> = {
+  very_easy: '¡Fue súper fácil!',
+  normal: 'Todo bien, normal',
+  difficult: 'Fue difícil comprar',
+};
+
+export const ORDER_REVIEW_SOURCE_LABELS: Record<OrderReviewSource, string> = {
+  order_confirmation: 'Al confirmar el pedido',
+  order_detail: 'Desde el detalle del pedido',
+};

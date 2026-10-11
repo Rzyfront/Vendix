@@ -130,6 +130,8 @@ export class PopCartService {
   private authFacade = inject(AuthFacade);
   private _cartState = signal<PopCartState>(INITIAL_STATE);
   private _loading = signal<boolean>(false);
+  // QUI-891: tienda ya hidratada desde localStorage (ver initPersistence).
+  private lastHydratedStoreId: string | number | null = null;
   public cartState$ = toObservable(this._cartState);
   public loading$ = toObservable(this._loading);
 
@@ -139,10 +141,21 @@ export class PopCartService {
   }
 
   private initPersistence(): void {
-    // Hidratar cuando la tienda activa esté lista
+    // Hidratar cuando la tienda activa esté lista, UNA VEZ por tienda
+    // (QUI-891): el effect también se re-ejecuta cuando el carrito se
+    // vacía (p. ej. quitar la última línea) y sin esta guarda restaura
+    // el snapshot previo de localStorage — el guardado es debounced
+    // 250 ms, así que el snapshot viejo siempre gana la carrera y la
+    // línea "eliminada" resucita con sus totales.
     effect(() => {
       const store = this.authFacade.userStore();
-      if (store?.id && this._cartState().items.length === 0) {
+      const storeId = store?.id ?? null;
+      if (storeId && this.lastHydratedStoreId !== storeId) {
+        // Marcar ANTES de hidratar: el set() de abajo re-dispara el
+        // effect. También marcar si ya hay líneas: eliminarlas después
+        // no debe activar una primera hidratación tardía del snapshot.
+        this.lastHydratedStoreId = storeId;
+        if (this._cartState().items.length > 0) return;
         const saved = this.loadFromStorage();
         if (saved && saved.items && saved.items.length > 0) {
           this._cartState.set(saved);
@@ -168,16 +181,16 @@ export class PopCartService {
   }
 
   private saveToStorage(state: PopCartState): void {
-    if (typeof localStorage === 'undefined') return;
-    const key = this.getStorageKey();
-    if (!key) return;
-
-    if (!state.items || state.items.length === 0) {
-      localStorage.removeItem(key);
-      return;
-    }
-
     try {
+      if (typeof localStorage === 'undefined') return;
+      const key = this.getStorageKey();
+      if (!key) return;
+
+      if (!state.items || state.items.length === 0) {
+        localStorage.removeItem(key);
+        return;
+      }
+
       const payload = {
         state,
         savedAt: Date.now(),
@@ -185,16 +198,15 @@ export class PopCartService {
       };
       localStorage.setItem(key, JSON.stringify(payload));
     } catch {
-      // Ignorar fallos de cuota o deserialización
+      // Persistencia best-effort: acceso, cuota y borrado pueden fallar.
     }
   }
 
   private loadFromStorage(): PopCartState | null {
-    if (typeof localStorage === 'undefined') return null;
-    const key = this.getStorageKey();
-    if (!key) return null;
-
     try {
+      if (typeof localStorage === 'undefined') return null;
+      const key = this.getStorageKey();
+      if (!key) return null;
       const raw = localStorage.getItem(key);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
@@ -225,10 +237,14 @@ export class PopCartService {
   }
 
   public clearStorage(): void {
-    if (typeof localStorage === 'undefined') return;
-    const key = this.getStorageKey();
-    if (key) {
-      localStorage.removeItem(key);
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const key = this.getStorageKey();
+      if (key) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // El almacenamiento opcional nunca debe impedir vaciar el carrito.
     }
   }
 
@@ -1014,6 +1030,13 @@ export class PopCartService {
     const updatedItems = currentState.items.filter(
       (item) => item.id !== itemId,
     );
+
+    if (updatedItems.length === 0) {
+      // QUI-891: vaciar la última línea borra el snapshot sync (igual
+      // que clearCart) para que el effect de hidratación no restaure la
+      // línea desde el snapshot previo (el guardado debounced pierde).
+      this.clearStorage();
+    }
 
     return {
       ...currentState,

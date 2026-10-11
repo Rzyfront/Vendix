@@ -15,12 +15,14 @@
           <label class="field">Número de referencia<input formControlName="reference_number" autocomplete="off"></label>
           <label class="field">Fecha de emisión<input type="date" formControlName="issue_date"></label>
           <label class="field">Fecha de vencimiento<input type="date" formControlName="due_date"></label>
+          <label class="field">Condición de pago<select formControlName="payment_condition"><option value="unknown">No determinada</option><option value="cash">Contado</option><option value="credit">Crédito</option></select></label>
           <label class="field">Moneda (código ISO 4217)<input formControlName="currency" placeholder="Ej. COP; no se completa automáticamente"></label>
           <label class="field">NIT del proveedor<input formControlName="issuer_tax_id" autocomplete="off"></label>
           <label class="field">Nombre del proveedor<input formControlName="issuer_name" autocomplete="organization"></label>
           <label class="field">NIT del receptor<input formControlName="receiver_tax_id" autocomplete="off"></label>
           <label class="field">Nombre del receptor<input formControlName="receiver_name" autocomplete="organization"></label>
         </div>
+        <p class="text-xs text-text-secondary">No se deduce la condición de pago a partir de la fecha de vencimiento. Conserva “No determinada” si el documento no la indica claramente.</p>
       </section>
       <section class="space-y-3">
         <h3 class="font-semibold text-text-primary">Totales declarados por el proveedor</h3>

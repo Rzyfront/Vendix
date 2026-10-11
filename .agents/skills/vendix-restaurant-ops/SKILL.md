@@ -12,7 +12,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.3"
+  version: "1.4"
   scope: [root]
   auto_invoke:
     - "Validating tracked ingredients before fire/resend/production consumption"
@@ -367,6 +367,57 @@ delivered→info, cancelled→error. Non-fired items show no badge. The
 helper `kitchenStateFor(item)` prefers a non-terminal (in-flight) row
 over the most recent terminal row, so the badge tracks the active state
 even after re-fires.
+
+### KDS físico vs virtual (`restaurant.kitchen_mode`)
+
+`store_settings.settings.restaurant.kitchen_mode: 'virtual' | 'physical'`. One
+enum, so the two modes are mutually exclusive. Missing/null/garbage resolves to
+`'virtual'` via `normalizeKitchenMode` / `resolveKitchenMode`
+(`kitchen-fire/kitchen-mode.util.ts`) — the ONLY backend reader; never read the
+field ad hoc and never default to physical.
+
+Physical mode (small kitchens, paper comandas, no KDS screens):
+
+- Same tickets, same stations, same inventory/COGS at fire. Only a few things
+  change: tickets and items are born `in_preparation` (`fireOrderItemsInTx`,
+  `resendOrderItems`); delivery is allowed from any non-terminal kitchen state
+  (`canDeliverItem` via `kitchen_mode` on the snapshot, `deliverOrderItem` /
+  `syncKitchenOnOrderItemDelivered` skip `ready` like `fromDispatch`,
+  `markDelivered` accepts `pending`); and the storefront QR's effective
+  `auto_fire` is `false` (`getQrSettings`), because "the device that fires
+  prints" and a server-side fire has no device.
+- Finish gates (`hasPendingKitchenItems`, `kitchenHandoffBlocker`, auto-finish)
+  are NOT relaxed — the user satisfies them by marking dishes delivered.
+- Frontend: `KitchenTicketPrintService` (`restaurant-ops/kds/services/`) is the
+  single reader (`isPhysicalKitchen`). `printAfterFire(kitchen_ticket_ids)`
+  runs after every fire (POS, checkout shell, table page, order detail, resend
+  modal); it is a no-op in virtual, deduped 30 s, and honors the
+  `kitchen_ticket` print format's `is_active` / `auto_print`. `printTickets` is
+  the manual "Imprimir comanda". The order detail has "Entregar todo", which
+  delivers sequentially through `deliverOrderItem`. The "Comandas" sidebar item
+  (`restaurant_ops_kds`) is hidden by `MenuFilterService.hiddenBySettings`.
+- **Una sola estación y una sola hoja por ronda** (physical only):
+  1. Fire/resend (`apps/backend/src/domains/store/kitchen-fire/kitchen-fire.service.ts`)
+     send ALL items to the default KDS and ignore `products.kds_id` (kept, never
+     cleared) → one round yields ONE `kitchen_tickets` row.
+  2. Printed sheet (`apps/backend/src/domains/store/print-formats/providers/kitchen-ticket.provider.ts`):
+     given any ticket id of the order, returns ONE sheet with every
+     `kitchen_ticket_items` row of the order whose status is not delivered/cancelled.
+     Carries order #, comanda #, service (Domicilio / Mesa X / Para llevar), table,
+     customer, waiter; per item `packaging_label` (ENVÍO / PARA LLEVAR), exclusions
+     ("SIN x") and note; plus the order note. No `kds_name`. The composer
+     (`print-formats/services/print-layout-composer.service.ts`) enables these lines
+     only when `document.is_kitchen_ticket === true`; saved templates are not migrated.
+  3. Frontend `kitchen-ticket-print.service.ts` collapses the id list to one id, so
+     each event is one print.
+  4. Product form (`products/pages/product-create-page/`): the "Estación de
+     preparación" selector is hidden and the payload omits `kds_id` (preserves the
+     stored station).
+  5. **Duplicated rule:** packaging + service label logic lives in the frontend
+     (`kds-ticket-card.component.ts` `itemDeliveryBadge`) AND the backend provider.
+     Change one → change the other.
+- Printing uses `window.print()` (one dialog per comanda). For silent printing,
+  run Chrome with `--kiosk-printing` and the thermal printer as the default.
 
 ## Menu / Carta
 

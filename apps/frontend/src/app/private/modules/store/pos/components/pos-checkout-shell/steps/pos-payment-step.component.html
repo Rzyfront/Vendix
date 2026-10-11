@@ -20,7 +20,7 @@
       [customer]="collectorCustomer()"
       [requireCustomer]="!isAnonymous() && !isAlias()"
       [walletInfo]="collectorWalletInfo()"
-      [allowTip]="authFacade.isRestaurant()"
+      [tipPolicy]="tipPolicy()"
       [allowMultiTender]="true"
       [paymentResetKey]="paymentResetKey()"
       (submit)="onCollectorSubmit($event)"

@@ -58,6 +58,17 @@ export class CheckoutController {
   }
 
   /**
+   * Alcance geográfico de la entrega a domicilio (un solo municipio o no).
+   * Solo lectura, público (`@OptionalAuth()`); tenant por dominio.
+   */
+  @Get('address-scope')
+  @OptionalAuth()
+  async getAddressScope() {
+    const data = await this.checkout_service.getAddressScope();
+    return { success: true, data };
+  }
+
+  /**
    * Vista previa del descuento de un cupón (QUI-883). Solo lectura: corre la
    * misma validación que el confirm, con precios de servidor. Público con
    * `@OptionalAuth()` (invitados también ven su descuento); el tenant lo

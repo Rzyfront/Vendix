@@ -6,6 +6,11 @@ export type ReceivedDocumentType =
   | 'debit_note'
   | 'non_electronic';
 
+export type ReceivedDocumentPaymentCondition = 'cash' | 'credit' | 'unknown';
+export type StructuralValidationStatus = 'pending' | 'valid' | 'needs_review' | 'invalid';
+export type SignatureValidationStatus = 'unsigned' | 'not_verified';
+export type DianValidationStatus = 'not_checked';
+
 export interface ReceivedDocumentTax {
   tax_type: tax_type_enum | 'unclassified';
   scheme_code: string;
@@ -40,6 +45,28 @@ export interface ReceivedDocumentValidationIssue {
   message: string;
 }
 
+/** Independent evidence axes; none claims a cryptographic or DIAN verification. */
+export interface ReceivedDocumentValidationSummary {
+  structural: {
+    status: StructuralValidationStatus;
+    errors: ReceivedDocumentValidationIssue[];
+    warnings: ReceivedDocumentValidationIssue[];
+  };
+  signature: {
+    status: SignatureValidationStatus;
+    has_signature: boolean;
+  };
+  dian: {
+    status: DianValidationStatus;
+    application_response_unverified: boolean;
+  };
+  /** Compatibility shape retained for existing detail consumers and evidence snapshots. */
+  errors: ReceivedDocumentValidationIssue[];
+  warnings: ReceivedDocumentValidationIssue[];
+  has_signature: boolean;
+  document_key_format_valid: boolean;
+}
+
 export interface NormalizedReceivedDocument {
   document_type: ReceivedDocumentType;
   invoice_number: string;
@@ -50,6 +77,8 @@ export interface NormalizedReceivedDocument {
   document_key?: string;
   issue_date: string;
   due_date?: string;
+  /** Older non-XML producers may omit this; persistence must conservatively use unknown. */
+  payment_condition?: ReceivedDocumentPaymentCondition;
   currency: string;
   subtotal_amount: string;
   discount_amount: string;

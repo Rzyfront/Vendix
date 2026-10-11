@@ -1,3 +1,6 @@
+import { ErrorCodes } from '../errors/error-codes';
+import { VendixHttpException } from '../errors/vendix-http.exception';
+
 /**
  * Resolución de propina — implementación única para todos los caminos de cobro.
  *
@@ -63,6 +66,12 @@ export function resolveTip(
     value = amount;
   }
 
+  if (amount === 0 && type === 'fixed' && value != null && value > 0) {
+    // 'fixed' con sólo `tip_value`: el valor ES el monto.
+    amount = round(value);
+    value = amount;
+  }
+
   if (amount > 0 && type === 'percentage') {
     // El monto directo YA ganó sobre el porcentaje (la rama de arriba no
     // corrió porque `amount` no era 0). Si dejáramos `type='percentage'` con
@@ -95,4 +104,68 @@ export function resolveTip(
   // persistía antes de esta extracción, y limpiar metadatos huérfanos aquí
   // sería un cambio de comportamiento silencioso en un camino ya verificado.
   return { amount, type, value };
+}
+
+/** Estructura mínima de `settings.pos.tips` (sin depender de `domains/`). */
+export interface TipsSettingsLike {
+  enabled?: boolean | null;
+  suggested_enabled?: boolean | null;
+  suggested_type?: 'percentage' | 'fixed' | null;
+  suggested_value?: number | null;
+}
+
+export interface TipPolicy {
+  manualEnabled: boolean;
+  suggested: { type: 'percentage' | 'fixed'; value: number } | null;
+}
+
+/**
+ * Política de propina de la tienda. `enabled` sin valor se resuelve por
+ * industria (restaurante=true, resto=false); la sugerida requiere valor > 0.
+ */
+export function resolveTipPolicy(
+  tips: TipsSettingsLike | null | undefined,
+  isRestaurant: boolean,
+): TipPolicy {
+  const manualEnabled = tips?.enabled ?? isRestaurant;
+  const suggested =
+    tips?.suggested_enabled && Number(tips.suggested_value) > 0
+      ? {
+          type: tips.suggested_type ?? ('percentage' as const),
+          value: Number(tips.suggested_value),
+        }
+      : null;
+  return { manualEnabled, suggested };
+}
+
+export function isTipPolicyActive(policy: TipPolicy): boolean {
+  return policy.manualEnabled || policy.suggested != null;
+}
+
+/**
+ * Valida la propina entrante contra la política. Propina 0 siempre es válida.
+ * Sólo sugerida: el monto resuelto debe igualar al de la sugerida (al centavo).
+ */
+export function assertTipAllowed(
+  input: TipInput,
+  policy: TipPolicy,
+  grossProductsBase: number,
+  round: (value: number) => number,
+): void {
+  const resolved = resolveTip(input, grossProductsBase, round);
+  if (resolved.amount <= 0) return;
+
+  if (!isTipPolicyActive(policy)) {
+    throw new VendixHttpException(ErrorCodes.TIP_NOT_ENABLED_001);
+  }
+  if (policy.manualEnabled || !policy.suggested) return;
+
+  const expected = resolveTip(
+    { tip_type: policy.suggested.type, tip_value: policy.suggested.value },
+    grossProductsBase,
+    round,
+  ).amount;
+  if (Math.round(resolved.amount * 100) !== Math.round(expected * 100)) {
+    throw new VendixHttpException(ErrorCodes.TIP_NOT_SUGGESTED_001);
+  }
 }

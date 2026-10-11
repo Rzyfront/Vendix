@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ItemNotes } from '@common/decorators/item-notes.decorator';
 import {
   CheckoutShippingAddressDto,
   GuestCheckoutCustomerDto,
@@ -35,6 +36,13 @@ class WhatsappCartItemDto {
   @IsInt()
   @IsPositive()
   price_tier_id?: number;
+
+  @ApiPropertyOptional({
+    description: 'Nota libre del comprador para la linea (max 200).',
+    nullable: true,
+  })
+  @ItemNotes()
+  notes?: string | null;
 }
 
 export class WhatsappCheckoutDto {

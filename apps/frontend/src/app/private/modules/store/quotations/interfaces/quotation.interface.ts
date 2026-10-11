@@ -1,4 +1,6 @@
-export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted' | 'cancelled';
+import type { ContractQuotationEconomicSnapshot } from './quotation-contract-economics.interface';
+
+export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted' | 'contracted' | 'cancelled';
 
 /** B.2 (FB-01 parcial-destination): destino fijo al crear, jamas editable. Default `sale`. */
 export type QuotationDestination = 'sale' | 'contract' | 'other';
@@ -48,6 +50,9 @@ export interface Quotation {
   destination?: QuotationDestination;
   /** B.2: perfil con el que se precargo (nullable = cotizada desde cero). */
   profile_id?: number | null;
+  invoice_profile_id?: number | null;
+  invoice_profile_version?: number | null;
+  contract_economic_snapshot?: ContractQuotationEconomicSnapshot | null;
   channel: string;
   subtotal_amount: number;
   discount_amount: number;
@@ -63,6 +68,7 @@ export interface Quotation {
   rejected_at?: string;
   converted_at?: string;
   converted_order_id?: number;
+  contract?: { id: number; contract_number: string; status: string } | null;
   created_by_user_id?: number;
   created_at: string;
   updated_at: string;
@@ -141,6 +147,10 @@ export interface CreateQuotationDto {
   destination?: QuotationDestination;
   /** B.2 (FB-05): perfil opcional; omitido = cotizar desde cero. Id ajeno/inactivo da 400/403. */
   profile_id?: number;
+  invoice_profile_id?: number;
+  contract_object?: string;
+  aiu_value?: number;
+  due_date?: string | null;
   channel?: string;
   valid_until?: string;
   notes?: string;
@@ -148,3 +158,6 @@ export interface CreateQuotationDto {
   terms_and_conditions?: string;
   items: CreateQuotationItemDto[];
 }
+
+/** Modal payload permits a notes-only draft-contract patch without resending frozen economics. */
+export type QuotationFormSaveDto = CreateQuotationDto | Partial<CreateQuotationDto>;

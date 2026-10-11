@@ -13,6 +13,8 @@ import { ResponseService } from '@common/responses/response.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { order_state_enum } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import { Subject } from 'rxjs';
+import { RequestContextService } from '@common/context/request-context.service';
 
 describe('OrdersController', () => {
   let controller: OrdersController;
@@ -82,6 +84,8 @@ describe('OrdersController', () => {
     // Reset all mocks
     jest.clearAllMocks();
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   describe('findAll', () => {
     it('should return paginated orders successfully', async () => {
@@ -160,6 +164,39 @@ describe('OrdersController', () => {
       methods, 'Métodos de pago obtenidos exitosamente',
     );
     expect(Reflect.getMetadata('path', controller.listPaymentMethods)).toBe('payment-methods');
+  });
+
+  it('sanitizes KDS ticket payloads on the orders stream', () => {
+    const subject = new Subject<any>();
+    const getOrCreate = jest.fn().mockReturnValue(subject);
+    (controller as any).sseService = { getOrCreate };
+    const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      store_id: 7, is_super_admin: false, is_owner: false,
+    } as any);
+    const req = { on: jest.fn() } as any;
+    const events: any[] = [];
+    const subscription = controller.stream(req).subscribe((event) => {
+      events.push(JSON.parse(event.data as string));
+    });
+    subject.next({
+      type: 'ticket.created', ts: 1791280800000,
+      ticket: {
+        order_id: 42, notes: 'secret note', customer: { name: 'Secret' },
+        items: [{ product_name: 'Secret dish' }], private_field: 'secret',
+      },
+    });
+    subject.next({ type: 'ticket.created', ticket: { order_id: '42', notes: 'bad id' } });
+    subject.next({ type: 'ticket.unknown', ticket: { order_id: 43 } });
+    expect(events).toEqual([{
+      type: 'ticket.created',
+      ticket: { order_id: 42 },
+      ts: 1791280800000,
+    }]);
+    expect(JSON.stringify(events)).not.toContain('secret');
+    expect(getOrCreate).toHaveBeenCalledWith(7);
+    subscription.unsubscribe();
+    subject.complete();
+    contextSpy.mockRestore();
   });
 
   describe('create', () => {
@@ -408,6 +445,31 @@ describe('OrdersController', () => {
       await expect(controller.update(1, { state: order_state_enum.processing } as UpdateOrderDto))
         .rejects.toBe(error);
       expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
+
+    it('propaga errores inesperados al cancelar para que el filtro responda HTTP 500', async () => {
+      const error = new Error('unexpected cancellation failure');
+      mockOrdersService.update.mockRejectedValue(error);
+
+      await expect(
+        controller.update(1, { state: 'cancelled' } as UpdateOrderDto),
+      ).rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
+
+    it('mantiene el contrato anterior ante errores inesperados de otros PATCH', async () => {
+      const errorResponse = { success: false, statusCode: 400 };
+      mockOrdersService.update.mockRejectedValue(new Error('notes failure'));
+      mockResponseService.error.mockReturnValue(errorResponse);
+
+      await expect(
+        controller.update(1, { internal_notes: 'note' } as UpdateOrderDto),
+      ).resolves.toBe(errorResponse);
+      expect(mockResponseService.error).toHaveBeenCalledWith(
+        'notes failure',
+        'notes failure',
+        400,
+      );
     });
   });
 

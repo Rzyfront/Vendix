@@ -12,6 +12,10 @@ import {
   CreateQuotationDto,
   QuotationProfileCatalogEntry,
 } from '../interfaces/quotation.interface';
+import type {
+  ContractQuotationEconomicsPreviewRequest,
+  ContractQuotationEconomicSnapshot,
+} from '../interfaces/quotation-contract-economics.interface';
 
 let quotationStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
 
@@ -121,6 +125,19 @@ export class QuotationsService {
     );
   }
 
+  previewContractEconomics(
+    request: ContractQuotationEconomicsPreviewRequest,
+  ): Observable<ContractQuotationEconomicSnapshot> {
+    return this.http
+      .post<any>(`${this.apiUrl}/store/quotations/contract-preview`, request)
+      .pipe(
+        map((response) => response.data || response),
+        catchError((error) =>
+          throwError(() => new Error(this.extractErrorMessage(error))),
+        ),
+      );
+  }
+
   deleteQuotation(id: number): Observable<void> {
     const url = `${this.apiUrl}/store/quotations/${id}`;
     return this.http.delete<void>(url).pipe(
@@ -170,6 +187,9 @@ export class QuotationsService {
   }
 
   processCompleteQuotation(quotation: Quotation): Observable<Quotation> {
+    if (quotation.destination !== undefined && quotation.destination !== 'sale') {
+      return throwError(() => new Error('El procesamiento completo solo aplica a cotizaciones de venta.'));
+    }
     let flow$: Observable<Quotation> = of(quotation);
 
     if (quotation.status === 'draft') {

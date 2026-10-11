@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getQueryClient } from '@/core/api/query-client';
 import type { User, UserSettings, AppType } from '../auth/auth.types';
 import { useTenantStore } from './tenant.store';
 
@@ -102,6 +103,9 @@ export const useAuthStore = create<AuthState>()(
       setRefreshToken: (refreshToken) => set({ refreshToken }),
 
       logout: () => {
+        const queryClient = getQueryClient();
+        queryClient.removeQueries({ queryKey: ['orders'] });
+        queryClient.removeQueries({ queryKey: ['order-stats'] });
         useTenantStore.getState().clearTenant();
         set({
           user: null,

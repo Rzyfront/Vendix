@@ -24,6 +24,11 @@ import {
 import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
+import {
+  ScrollableTab,
+  ScrollableTabsComponent,
+} from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import { OrderReviewsListComponent } from './components/order-reviews-list/order-reviews-list.component';
 import { translateCustomerError } from '../utils/customer-error.translator';
 import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 
@@ -41,8 +46,23 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
     PaginationComponent,
     IconComponent,
     ModalComponent,
+    ScrollableTabsComponent,
+    OrderReviewsListComponent,
   ],
   template: `
+    <div class="px-2 pt-1 md:px-0 md:pb-2">
+      <app-scrollable-tabs
+        [tabs]="reviewTabs"
+        [activeTab]="activeTab()"
+        size="sm"
+        ariaLabel="Tipo de reseña"
+        (tabChange)="onTabChange($event)"
+      />
+    </div>
+
+    @if (activeTab() === 'experience') {
+      <app-order-reviews-list />
+    } @else {
     <!-- Stats: sticky on mobile, static on desktop -->
     @if (stats()) {
       <div
@@ -163,6 +183,7 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
         </div>
       }
     </app-card>
+    }
 
     <app-modal
       [(isOpen)]="detailOpen"
@@ -423,6 +444,17 @@ export class ReviewsComponent {
   private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+
+  // Tabs: "Productos" (vista original) y "Experiencia de compra".
+  readonly reviewTabs: ScrollableTab[] = [
+    { id: 'products', label: 'Productos', icon: 'package' },
+    { id: 'experience', label: 'Experiencia de compra', icon: 'star' },
+  ];
+  readonly activeTab = signal<'products' | 'experience'>('products');
+
+  onTabChange(id: string): void {
+    this.activeTab.set(id === 'experience' ? 'experience' : 'products');
+  }
 
   // State signals
   reviews = signal<Review[]>([]);

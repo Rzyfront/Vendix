@@ -7,9 +7,13 @@ import {
   Delete,
   Body,
   Param,
+  ParseIntPipe,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AccountService } from './account.service';
 import {
   UpdateProfileDto,
@@ -65,6 +69,45 @@ export class AccountController {
       parseInt(order_id, 10),
     );
     return { success: true, data };
+  }
+
+  /**
+   * Espejo de cuenta de `GET invoice-data/:token/.../receipt-url`: URL
+   * firmada TTL 5 min al comprobante. La autorización es el binding
+   * server-side customer→orden→pago (404 ciego si no hay vínculo).
+   */
+  @Get('payments/:paymentId/receipt-url')
+  async getPaymentReceiptUrl(
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+  ) {
+    const data =
+      await this.account_service.getPaymentReceiptUrl(paymentId);
+    return { success: true, data };
+  }
+
+  /**
+   * Subida tardía del comprobante desde el detalle logueado. Mismo
+   * contrato que el guest: `multipart/form-data` con `file`, 5 MB,
+   * MIME imagen/PDF, solo bank_transfer/voucher.
+   */
+  @Post('payments/:paymentId/receipt')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  async uploadPaymentReceipt(
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const data = await this.account_service.uploadPaymentReceipt(
+      paymentId,
+      file,
+    );
+    return {
+      success: true,
+      data,
+      message:
+        'Comprobante recibido. La tienda lo revisará para confirmar tu pago.',
+    };
   }
 
   @Get('addresses')

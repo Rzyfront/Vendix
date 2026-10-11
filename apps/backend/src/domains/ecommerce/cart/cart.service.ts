@@ -224,7 +224,18 @@ export class CartService {
     throw lastError;
   }
 
+  /**
+   * `[BOOKING:` es el marcador que el checkout lee en `order_items.notes` para
+   * reservas; una nota del comprador no puede imitarlo.
+   */
+  private assertValidItemNotes(notes: string | null | undefined): void {
+    if (typeof notes === 'string' && notes.includes('[BOOKING:')) {
+      throw new VendixHttpException(ErrorCodes.ECOM_CART_NOTES_001);
+    }
+  }
+
   async addItem(dto: AddToCartDto) {
+    this.assertValidItemNotes(dto.notes);
     await this.validateMaxQuantity(dto.quantity);
 
     // Verificar que el producto existe y está disponible
@@ -381,6 +392,7 @@ export class CartService {
           quantity: new_quantity,
           stock_units_consumed:
             packSize > 1 ? new_quantity * packSize : null,
+          notes: dto.notes ?? existing_item.notes ?? null,
         },
       });
     } else {
@@ -393,6 +405,7 @@ export class CartService {
           unit_price,
           applied_price_tier_id: appliedPriceTierId,
           stock_units_consumed: packSize > 1 ? dto.quantity * packSize : null,
+          notes: dto.notes ?? null,
         },
       });
     }
@@ -402,11 +415,20 @@ export class CartService {
   }
 
   async updateItem(item_id: number, dto: UpdateCartItemDto) {
-    if (dto.quantity === 0) {
+    const hasQuantity = dto.quantity !== undefined && dto.quantity !== null;
+    const hasNotes = dto.notes !== undefined;
+    if (!hasQuantity && !hasNotes) {
+      throw new VendixHttpException(ErrorCodes.ECOM_CART_005);
+    }
+    this.assertValidItemNotes(dto.notes);
+
+    if (hasQuantity && dto.quantity === 0) {
       return this.removeItem(item_id);
     }
 
-    await this.validateMaxQuantity(dto.quantity);
+    if (hasQuantity) {
+      await this.validateMaxQuantity(dto.quantity as number);
+    }
 
     const cart = await this.prisma.carts.findFirst({});
 
@@ -422,6 +444,16 @@ export class CartService {
     if (!item) {
       throw new NotFoundException('Cart item not found');
     }
+
+    // Solo nota: no se toca cantidad, stock ni subtotal.
+    if (!hasQuantity) {
+      await this.prisma.cart_items.update({
+        where: { id: item_id },
+        data: { notes: dto.notes ?? null },
+      });
+      return this.getCart();
+    }
+    const quantity = dto.quantity as number;
 
     // Misma conversión que en `addItem`: la cantidad del DTO cuenta PAQUETES y
     // el validador mide UNIDADES de stock.
@@ -441,18 +473,19 @@ export class CartService {
     await this.validateStock(
       item.product,
       item.product_variant,
-      dto.quantity * packSize,
+      quantity * packSize,
     );
 
     await this.prisma.cart_items.update({
       where: { id: item_id },
       data: {
-        quantity: dto.quantity,
+        quantity,
+        ...(hasNotes ? { notes: dto.notes ?? null } : {}),
         // Recalculado junto con la cantidad y nunca por separado: si se
         // actualizara solo `quantity`, la línea quedaría diciendo que 5 bultos
         // consumen las 100 unidades de los 2 anteriores, y el commit de stock
         // reservaría de menos sin que nada fallara.
-        stock_units_consumed: packSize > 1 ? dto.quantity * packSize : null,
+        stock_units_consumed: packSize > 1 ? quantity * packSize : null,
       },
     });
 
@@ -513,6 +546,7 @@ export class CartService {
           // sobrevivir al login; sin esto la sincronización la degradaría al
           // default en silencio y el cliente vería otro precio al entrar.
           price_tier_id: item.price_tier_id,
+          notes: item.notes,
         });
       } catch (error) {
         this.logger.warn(
@@ -704,6 +738,7 @@ export class CartService {
                 presentation_price: Number(item.unit_price),
               }
             : null,
+          notes: item.notes ?? null,
           unit_price: item.unit_price,
           total_price: Number(item.unit_price) * item.quantity,
           product: {

@@ -8,6 +8,7 @@ import {
   model,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -37,6 +38,7 @@ import {
 import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { Subscription } from 'rxjs';
 
 /**
  * Form de creación de un documento soporte o nota de ajuste (QUI-682).
@@ -69,6 +71,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       (cancel)="onClose()"
       title="Nuevo documento soporte"
       size="lg"
+      [dialog]="true"
+      [canClose]="canCloseModal"
     >
       <form
         [formGroup]="form"
@@ -77,22 +81,37 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       >
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <app-selector
+            size="lg"
             label="Tipo de documento"
             formControlName="invoice_type"
             [options]="typeOptions"
           ></app-selector>
 
           <app-selector
+            size="lg"
             label="Proveedor"
             formControlName="supplier_id"
             [options]="supplierOptions()"
             placeholder="Seleccione un proveedor"
             [required]="true"
+            [disabled]="suppliersLoading() || !!suppliersError() || submitting()"
           ></app-selector>
         </div>
 
+        @if (suppliersLoading()) {
+          <p class="text-sm text-text-primary" role="status">Consultando proveedores…</p>
+        } @else if (suppliersError(); as error) {
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary" role="alert">
+            <span>{{ error }}</span>
+            <app-button customClasses="min-h-11" variant="outline" size="sm" [disabled]="submitting()" (clicked)="retrySuppliers()">Reintentar</app-button>
+          </div>
+        } @else if (supplierOptions().length === 0) {
+          <p class="text-sm text-text-primary" role="note">No hay proveedores disponibles.</p>
+        }
+
         @if (form.controls['invoice_type'].value === 'support_adjustment_note') {
           <app-input
+            size="lg"
             label="ID del documento soporte original"
             type="number"
             formControlName="related_invoice_id"
@@ -105,6 +124,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <app-input
+            size="lg"
             label="Fecha de emisión"
             type="date"
             formControlName="issue_date"
@@ -112,6 +132,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             [required]="true"
           ></app-input>
           <app-input
+            size="lg"
             label="Fecha de pago"
             type="date"
             formControlName="due_date"
@@ -121,6 +142,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <app-input
+            size="lg"
             label="Retenciones aplicadas"
             [currency]="true"
             formControlName="withholding_amount"
@@ -134,9 +156,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           <div class="flex items-center justify-between">
             <h4 class="text-sm font-medium text-text-primary">Ítems</h4>
             <app-button
+              customClasses="min-h-11"
               variant="outline"
               size="sm"
               type="button"
+              [disabled]="submitting()"
               (clicked)="addItem()"
             >
               <app-icon slot="icon" name="plus" [size]="14"></app-icon>
@@ -146,33 +170,37 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
           <div formArrayName="items" class="space-y-3">
             @for (item of itemsArray.controls; track item; let i = $index) {
-              <div
-                [formGroupName]="i"
-                class="border border-border rounded-lg p-3 space-y-2 relative"
-              >
+              <div [formGroupName]="i" class="border border-border rounded-lg p-3 space-y-2">
                 <!-- A.6(a): único botón icon-only sin nombre accesible del módulo
                      (barrido mecánico de 204 usos de app-icon). Sin aria-label un
                      lector de pantalla anuncia «botón» para una acción que
                      destruye la fila entera capturada.
                      OJO: sin acentos graves acá — la plantilla ES un literal
                      delimitado por acentos graves y uno solo la cierra. -->
-                <button
-                  type="button"
-                  (click)="removeItem(i)"
-                  aria-label="Eliminar ítem"
-                  class="absolute top-2 right-2 text-text-secondary hover:text-error transition-colors"
-                >
-                  <app-icon name="x" [size]="16"></app-icon>
-                </button>
-                <app-input
-                  label="Descripción"
-                  formControlName="description"
-                  [control]="item.get('description')"
-                  placeholder="Descripción del ítem"
-                  [required]="true"
-                ></app-input>
+                <div class="flex items-start gap-2">
+                  <div class="min-w-0 flex-1">
+                    <app-input
+                      size="lg"
+                      label="Descripción"
+                      formControlName="description"
+                      [control]="item.get('description')"
+                      placeholder="Descripción del ítem"
+                      [required]="true"
+                    ></app-input>
+                  </div>
+                  <button
+                    type="button"
+                    (click)="removeItem(i)"
+                    [disabled]="submitting()"
+                    aria-label="Eliminar ítem"
+                    class="mt-1 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-text-primary transition-colors hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <app-icon name="x" [size]="16"></app-icon>
+                  </button>
+                </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                   <app-input
+                    size="lg"
                     label="Cantidad"
                     type="number"
                     formControlName="quantity"
@@ -181,6 +209,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                     min="1"
                   ></app-input>
                   <app-input
+                    size="lg"
                     label="Precio unitario"
                     [currency]="true"
                     formControlName="unit_price"
@@ -188,12 +217,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                     [required]="true"
                   ></app-input>
                   <app-input
+                    size="lg"
                     label="Descuento"
                     [currency]="true"
                     formControlName="discount_amount"
                     [control]="item.get('discount_amount')"
                   ></app-input>
                   <app-input
+                    size="lg"
                     label="IVA"
                     [currency]="true"
                     formControlName="tax_amount"
@@ -205,7 +236,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           </div>
 
           @if (itemsArray.length === 0) {
-            <div class="text-center py-4 text-text-secondary text-sm">
+            <div class="text-center py-4 text-text-primary text-sm">
               Agregue al menos un ítem
             </div>
           }
@@ -221,7 +252,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
         @if (submitError(); as errorMsg) {
           <div
-            class="text-sm text-error bg-error-light border border-error/30 rounded-lg p-3 flex items-start gap-2"
+            class="text-sm text-text-primary bg-error-light border border-error/30 rounded-lg p-3 flex items-start gap-2"
             role="alert"
           >
             <app-icon name="alert-circle" [size]="16"></app-icon>
@@ -231,13 +262,12 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       </form>
 
       <div slot="footer">
-        <div
-          class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border"
-        >
-          <app-button variant="outline" (clicked)="onClose()">
+        <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
+          <app-button customClasses="min-h-11 w-full sm:w-auto" variant="outline" [disabled]="submitting()" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
+            customClasses="min-h-11 w-full sm:w-auto"
             variant="primary"
             (clicked)="onSubmit()"
             [disabled]="form.invalid || submitting() || itemsArray.length === 0"
@@ -266,6 +296,9 @@ export class SupportDocumentCreateComponent {
 
   readonly submitting = signal(false);
   readonly submitError = signal<string | null>(null);
+  readonly suppliersLoading = signal(false);
+  readonly suppliersError = signal<string | null>(null);
+  readonly canCloseModal = (): boolean => !this.submitting();
 
   /**
    * Marca si el usuario tocó manualmente el `supplier_id`. El `effect()` de
@@ -276,6 +309,8 @@ export class SupportDocumentCreateComponent {
   private readonly supplierTouchedByUser = signal(false);
 
   readonly supplierOptions = signal<SelectorOption[]>([]);
+  private supplierRequest?: Subscription;
+  private supplierRequestGeneration = 0;
 
   readonly typeOptions: SelectorOption[] = [
     { value: 'support_document', label: 'Documento soporte' },
@@ -326,8 +361,6 @@ export class SupportDocumentCreateComponent {
         }
       });
 
-    this.loadSuppliers();
-
     // Si llega un initialSupplierId después de creado el form (input() tarda),
     // reflejarlo en el control. Sólo se aplica si el usuario no ha tocado
     // manualmente el proveedor — si no, pisaríamos su selección.
@@ -337,6 +370,22 @@ export class SupportDocumentCreateComponent {
         this.form.controls['supplier_id'].setValue(id);
       }
     });
+
+    let wasOpen = false;
+    effect(() => {
+      const open = this.isOpen();
+      if (open === wasOpen) return;
+      wasOpen = open;
+      untracked(() => {
+        if (open) {
+          this.reset();
+          this.loadSuppliers();
+        } else {
+          this.cancelSupplierLoad();
+          this.reset();
+        }
+      });
+    });
   }
 
   get itemsArray(): FormArray {
@@ -345,14 +394,20 @@ export class SupportDocumentCreateComponent {
 
   // ── Suppliers ────────────────────────────────────────────
   private loadSuppliers(): void {
+    this.cancelSupplierLoad();
+    const generation = ++this.supplierRequestGeneration;
+    this.suppliersLoading.set(true);
+    this.suppliersError.set(null);
+    this.supplierOptions.set([]);
     // Sin `state` filter: la UI padre restringe a activos, pero el form
     // admite cualquiera para no romper documentos viejos (mismo razonamiento
     // que `InvoicingService.loadSupportDocumentSupplier`).
-    this.suppliersService
+    this.supplierRequest = this.suppliersService
       .getSuppliers({ limit: 200 } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
+          if (generation !== this.supplierRequestGeneration || !this.isOpen()) return;
           const list = (response?.data ?? []) as Array<{
             id: number;
             name: string;
@@ -364,15 +419,34 @@ export class SupportDocumentCreateComponent {
               label: s.tax_id ? `${s.name} (${s.tax_id})` : s.name,
             })),
           );
+          this.suppliersLoading.set(false);
         },
-        error: () => {
+        error: (error: unknown) => {
+          if (generation !== this.supplierRequestGeneration || !this.isOpen()) return;
           this.supplierOptions.set([]);
+          this.suppliersLoading.set(false);
+          this.suppliersError.set(
+            describeApiFailure(error).message ?? 'No se pudieron consultar los proveedores.',
+          );
         },
       });
   }
 
+  retrySuppliers(): void {
+    if (this.submitting()) return;
+    this.loadSuppliers();
+  }
+
+  private cancelSupplierLoad(): void {
+    this.supplierRequestGeneration++;
+    this.supplierRequest?.unsubscribe();
+    this.supplierRequest = undefined;
+    this.suppliersLoading.set(false);
+  }
+
   // ── Items ────────────────────────────────────────────────
   addItem(): void {
+    if (this.submitting()) return;
     this.itemsArray.push(
       this.fb.group({
         description: ['', [Validators.required, Validators.minLength(2)]],
@@ -385,11 +459,13 @@ export class SupportDocumentCreateComponent {
   }
 
   removeItem(index: number): void {
+    if (this.submitting()) return;
     this.itemsArray.removeAt(index);
   }
 
   // ── Submit ──────────────────────────────────────────────
   onSubmit(): void {
+    if (this.submitting()) return;
     if (this.form.invalid || this.itemsArray.length === 0) {
       this.form.markAllAsTouched();
       return;
@@ -426,7 +502,6 @@ export class SupportDocumentCreateComponent {
           this.submitting.set(false);
           if (response?.success && response.data) {
             this.created.emit(response.data);
-            this.reset();
             this.onClose();
           } else {
             this.submitError.set(
@@ -465,9 +540,14 @@ export class SupportDocumentCreateComponent {
       notes: '',
     });
     this.itemsArray.clear();
+    this.submitError.set(null);
+    this.supplierTouchedByUser.set(false);
+    this.supplierOptions.set([]);
+    this.suppliersError.set(null);
   }
 
   onClose(): void {
+    if (this.submitting()) return;
     this.isOpen.set(false);
   }
 

@@ -84,6 +84,8 @@ export interface Invoice {
   notes?: string;
   order_id?: number;
   sales_order_id?: number;
+  /** Contract relation; linked draft economics are frozen and cannot be edited here. */
+  contract_id?: number | null;
   resolution_id?: number;
   created_at: string;
   updated_at: string;
@@ -663,6 +665,15 @@ export interface RegisterDianEventRequest {
 export interface InvoicePdfResult {
   key: string;
   url: string;
+}
+
+/** Respuesta de `POST /store/invoicing/:id/deliver` (reenvio por correo). */
+export interface InvoiceDeliverResult {
+  invoice_id: number;
+  invoice_number: string;
+  recipient: string;
+  zip_name?: string;
+  message_id?: string;
 }
 
 /**

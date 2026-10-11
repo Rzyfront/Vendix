@@ -17,11 +17,11 @@ import type { Invoice } from '../interfaces/invoice.interface';
  * modulo concentra las tres lecturas que la facturacion necesita hacer de ese
  * cuerpo, para que ningun effect ni componente vuelva a improvisarlas:
  *
- *  0. `describeKnownInvoicingFailure` — copy curado para los codigos que
- *     `ERROR_MESSAGES` no cubre y cuyo `message` de backend no es apto para
- *     mostrar tal cual (`INVOICING_CREDIT_NOTE_001`,
- *     `NOTE_TAX_TYPE_UNRESOLVABLE_001`). `describeApiFailure` lo consulta
- *     primero.
+ *  0. `describeKnownInvoicingFailure` — copy curado para errores cuyo
+ *     `message` de backend no es apto para mostrar tal cual
+ *     (`INVOICING_CREDIT_NOTE_001`, `NOTE_TAX_TYPE_UNRESOLVABLE_001` y el
+ *     bloqueo RADIAN específico de `INVOICING_STATUS_002`). `describeApiFailure`
+ *     lo consulta primero.
  *  1. `describeApiFailure`  — mensaje UX + codigo + details, en un objeto plano
  *     que puede viajar dentro de una accion NgRx.
  *  2. `readDianRejection`   — los motivos REALES del rechazo de la DIAN que
@@ -117,9 +117,10 @@ export function describeApiFailure(error: unknown): ApiFailure {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Copy curado para los dos codigos de notas credito/debito que el catalogo
- * general (`ERROR_MESSAGES`) no tiene mapeados y cuyo `message` de backend NO
- * es apto para mostrarle al operador tal cual:
+ * Copy curado para bloqueos de notas que no pueden mostrar el `message` de
+ * backend tal cual. Incluye los dos codigos de notas credito/debito que el
+ * catalogo general no tiene mapeados y solo el caso RADIAN 033/034 de
+ * `INVOICING_STATUS_002`:
  *
  *  - `INVOICING_CREDIT_NOTE_001` — `assertWithinCreditableBalance`
  *    (`credit-notes.service.ts`) arma un `message` en espanol que SI pasa la
@@ -135,6 +136,9 @@ export function describeApiFailure(error: unknown): ApiFailure {
  *    («Envia `tax_type`... o un `tax_rate_id`...»), no para quien opera la
  *    pantalla de notas. Se sustituye por una instruccion accionable desde la
  *    UI.
+ *  - `INVOICING_STATUS_002` — solo cuando `details.event_code` es `033` o
+ *    `034`, porque el copy general de estado oculta el bloqueo legal por
+ *    aceptación ya registrada. Otros estados o códigos conservan su fallback.
  *
  * Devuelve `null` para cualquier otro codigo, o cuando el propio codigo
  * curado no trae las cifras minimas para construir su mensaje: el llamador
@@ -145,6 +149,13 @@ function describeKnownInvoicingFailure(
   errorCode: string | null,
   details: unknown,
 ): string | null {
+  if (errorCode === 'INVOICING_STATUS_002') {
+    const eventCode = readString(asRecord(details)?.['event_code']);
+    if (eventCode === '033' || eventCode === '034') {
+      return 'No puedes crear ni emitir una nota crédito o débito: la factura tiene aceptación expresa o tácita registrada en RADIAN. Revisa sus eventos legales.';
+    }
+    return null;
+  }
   if (errorCode === 'INVOICING_CREDIT_NOTE_001') {
     return describeCreditNoteBalanceExceeded(details);
   }

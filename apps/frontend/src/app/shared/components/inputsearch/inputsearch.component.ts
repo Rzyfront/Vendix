@@ -55,7 +55,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
         <input
           [type]="type()"
           [placeholder]="placeholder()"
-          [attr.aria-label]="ariaLabel() || null"
+          [attr.aria-label]="ariaLabel() || placeholder() || 'Buscar'"
           [disabled]="isDisabled()"
           [readonly]="readonly()"
           [value]="value()"
@@ -73,6 +73,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
             type="button"
             class="inputsearch-clear"
             [class]="clearButtonClasses"
+            aria-label="Limpiar búsqueda"
             (click)="clearInput()"
             [disabled]="isDisabled()"
           >
@@ -113,7 +114,7 @@ export class InputsearchComponent
   readonly type = input<'text' | 'search' | 'email' | 'url'>('text');
   readonly placeholder = input('Buscar...');
   readonly disabled = input<boolean>(false);
-  private disabledState = false;
+  private disabledState = signal(false);
   readonly readonly = input(false);
   readonly required = input(false);
   readonly showClear = input(true);
@@ -217,11 +218,11 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabledState = isDisabled;
+    this.disabledState.set(isDisabled);
   }
 
   isDisabled(): boolean {
-    return this.disabled() || this.disabledState;
+    return this.disabled() || this.disabledState();
   }
 
   // Event handlers

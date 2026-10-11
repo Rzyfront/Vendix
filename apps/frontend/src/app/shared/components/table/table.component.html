@@ -228,24 +228,40 @@
                       <div class="table-actions">
                         @for (action of actions()!; track $index) {
                           @if (isActionVisible(action, item)) {
-                            <button [class]="getActionClasses(action, item)"
-                              [disabled]="isActionDisabled(action, item)" (click)="
-                                executeAction(action, item); $event.stopPropagation()
-                              " [attr.title]="getActionTooltip(action, item)"
-                              [attr.aria-label]="
-                                getActionAccessibleName(action, item)
-                              ">
-                              <!-- Icon if provided -->
-                              @if (getActionIcon(action, item)) {
-                                <app-icon [name]="getActionIcon(action, item)"
-                                  [size]="12"></app-icon>
-                              }
-
-                              <!-- Label (only show if no icon or on larger sizes) -->
-                              @if (!getActionIcon(action, item) || size() === 'lg') {
-                                <span>{{ getActionLabel(action, item) }}</span>
-                              }
-                            </button>
+                            @if (action.tooltipComponent) {
+                              <app-tooltip
+                                [content]="getActionTooltip(action, item)"
+                                [color]="getActionTooltipColor(action, item)"
+                                position="top"
+                                size="sm">
+                                <button [class]="getActionClasses(action, item)"
+                                  [disabled]="isActionDisabled(action, item)" (click)="
+                                    executeAction(action, item); $event.stopPropagation()
+                                  " [attr.aria-label]="
+                                    getActionAccessibleName(action, item)
+                                  ">
+                                  @if (getActionIcon(action, item)) {
+                                    <app-icon [name]="getActionIcon(action, item)" [size]="12"></app-icon>
+                                  }
+                                  @if (!getActionIcon(action, item) || size() === 'lg') {
+                                    <span>{{ getActionLabel(action, item) }}</span>
+                                  }
+                                </button>
+                              </app-tooltip>
+                            } @else {
+                              <button [class]="getActionClasses(action, item)"
+                                [disabled]="isActionDisabled(action, item)" (click)="
+                                  executeAction(action, item); $event.stopPropagation()
+                                " [attr.title]="getActionTooltip(action, item)"
+                                [attr.aria-label]="getActionAccessibleName(action, item)">
+                                @if (getActionIcon(action, item)) {
+                                  <app-icon [name]="getActionIcon(action, item)" [size]="12"></app-icon>
+                                }
+                                @if (!getActionIcon(action, item) || size() === 'lg') {
+                                  <span>{{ getActionLabel(action, item) }}</span>
+                                }
+                              </button>
+                            }
                           }
                         }
                       </div>

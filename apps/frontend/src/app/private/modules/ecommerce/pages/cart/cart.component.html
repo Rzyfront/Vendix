@@ -41,13 +41,16 @@
              en el carrito invitado `id` vale `product_id`, así que dos
              presentaciones del mismo producto colisionaban (NG0955) y el
              spinner de "actualizando" se pintaba en la fila equivocada. -->
-        @for (item of cart.items; track lineKey(item)) {
-          <app-cart-item-card
-            [item]="item"
-            [updating]="updating_line_key() === lineKey(item)"
+        @for (line of lines(); track line.key) {
+          <app-order-line-item
+            [item]="line.view"
+            mode="editable"
+            [noteEditable]="true"
+            [updating]="updating_line_key() === line.key"
             [maxQuantity]="maxQuantityPerItem()"
-            (quantityChange)="updateQuantity(item, $event)"
-            (remove)="removeItem(item)"
+            (quantityChange)="updateQuantity(line.item, $event)"
+            (remove)="removeItem(line.item)"
+            (noteChange)="updateNote(line.item, $event)"
           />
         }
       </div>

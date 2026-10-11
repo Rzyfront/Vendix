@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ReceivedDocumentParserService } from './received-document-parser.service';
+import { operationalValidationStatus, summarizeReceivedDocumentValidation } from './received-document-validation';
 
 const CAC = 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2';
 const CBC = 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2';
@@ -50,6 +51,40 @@ describe('ReceivedDocumentParserService', () => {
     expect(result.receiver_name).toBe('Comprador Dos');
     expect(result.validation.document_key_format_valid).toBe(true);
     expect(result.taxes[0].tax_type).toBe('iva');
+  });
+
+  it('treats a structurally valid signed XML as operationally valid without verifying the signature', () => {
+    const xml = invoiceXml().replace('</Invoice>',
+      '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"/></Invoice>');
+    const parsed = service.parse(xml);
+    const summary = summarizeReceivedDocumentValidation(parsed.validation);
+    expect(parsed.validation.errors).toEqual([]);
+    expect(parsed.validation.warnings.map((warning) => warning.code)).toContain('SIGNATURE_NOT_VERIFIED');
+    expect(summary.signature.status).toBe('not_verified');
+    expect(summary.dian.status).toBe('not_checked');
+    expect(operationalValidationStatus(summary)).toBe('valid');
+  });
+
+  it('extracts payment condition only from unambiguous PaymentMeans ID or explicit PaymentTerms', () => {
+    const withPayment = (body: string) => invoiceXml().replace('</Invoice>', `${body}</Invoice>`);
+    expect(service.parse(withPayment('<cac:PaymentMeans><cbc:ID>1</cbc:ID><cbc:PaymentMeansCode>10</cbc:PaymentMeansCode></cac:PaymentMeans>')).payment_condition).toBe('cash');
+    expect(service.parse(withPayment('<cac:PaymentMeans><cbc:ID>2</cbc:ID></cac:PaymentMeans>')).payment_condition).toBe('credit');
+    expect(service.parse(invoiceXml()).payment_condition).toBe('unknown');
+    expect(service.parse(withPayment('<cac:PaymentMeans><cbc:PaymentMeansCode>10</cbc:PaymentMeansCode></cac:PaymentMeans>')).payment_condition).toBe('unknown');
+    expect(service.parse(withPayment('<cac:PaymentTerms><cbc:Note>Condición de pago: Pago a crédito</cbc:Note></cac:PaymentTerms>')).payment_condition).toBe('credit');
+    expect(service.parse(withPayment('<cac:PaymentTerms><cbc:Note>Pago de contado</cbc:Note></cac:PaymentTerms>')).payment_condition).toBe('cash');
+    expect(service.parse(withPayment('<cac:PaymentTerms><cbc:Note>Pago de contado a 30 días</cbc:Note></cac:PaymentTerms>')).payment_condition).toBe('unknown');
+    expect(service.parse(withPayment('<cac:PaymentTerms><cbc:Note>Transferencia con descuento pronto pago 5 días</cbc:Note></cac:PaymentTerms>')).payment_condition).toBe('unknown');
+    expect(service.parse(withPayment('<cac:PaymentMeans><cbc:ID>1</cbc:ID></cac:PaymentMeans><cac:PaymentTerms><cbc:Note>Descuento pronto pago 5 días</cbc:Note></cac:PaymentTerms>')).payment_condition).toBe('cash');
+    expect(service.parse(withPayment('<cac:PaymentTerms><cbc:PaymentMeansID>cash</cbc:PaymentMeansID></cac:PaymentTerms>')).payment_condition).toBe('cash');
+    expect(service.parse(withPayment('<cac:PaymentTerms><cbc:PaymentMeansID>pago a crédito</cbc:PaymentMeansID></cac:PaymentTerms>')).payment_condition).toBe('credit');
+    expect(service.parse(withPayment('<cac:PaymentMeans><cbc:ID>1</cbc:ID></cac:PaymentMeans><cac:PaymentTerms><cbc:Note>Crédito</cbc:Note></cac:PaymentTerms>')).payment_condition).toBe('unknown');
+    const conflict = service.parse(withPayment('<cac:PaymentTerms><cbc:Note>Contado</cbc:Note><cbc:Note>Crédito</cbc:Note></cac:PaymentTerms>'));
+    expect(conflict.payment_condition).toBe('unknown');
+    expect(conflict.validation.warnings.map((warning) => warning.code)).toContain('PAYMENT_CONDITION_AMBIGUOUS');
+    const dueDateOnly = service.parse(invoiceXml());
+    expect(dueDateOnly.due_date).toBe('2026-10-30');
+    expect(dueDateOnly.payment_condition).toBe('unknown');
   });
 
   it('extracts UBL from AttachedDocument CDATA and does not trust an embedded ApplicationResponse', () => {

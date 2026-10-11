@@ -13,6 +13,7 @@ import {
 import { ReviewsService } from './reviews.service';
 import {
   ReviewQueryDto,
+  OrderReviewsQueryDto,
   CreateReviewResponseDto,
   UpdateReviewResponseDto,
 } from './dto';
@@ -65,6 +66,19 @@ export class ReviewsController {
         error.status || 400,
       );
     }
+  }
+
+  @Get('orders')
+  @Permissions('store:reviews:read')
+  async findAllOrderReviews(@Query() query: OrderReviewsQueryDto) {
+    const result = await this.reviewsService.findAllOrderReviews(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Reseñas de experiencia obtenidas exitosamente',
+    );
   }
 
   @Get(':id')

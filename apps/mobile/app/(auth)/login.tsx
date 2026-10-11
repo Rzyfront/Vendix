@@ -7,6 +7,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  ScrollView,
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { getItem, setItem, deleteItem } from '@/core/storage/secure-storage';
@@ -21,7 +22,8 @@ const CREDENTIALS_KEY = 'saved_credentials';
 
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background },
-  inner: { flex: 1, justifyContent: 'center' as const, paddingHorizontal: 32 },
+  scrollContent: { flexGrow: 1, justifyContent: 'center' as const, paddingHorizontal: 32 },
+  inner: { flex: 1, justifyContent: 'center' as const },
   logoContainer: { alignItems: 'center' as const, marginBottom: 32 },
   brandText: { fontSize: 20, fontWeight: '600' as const, color: colors.text.primary },
   titleContainer: { alignItems: 'center' as const, marginBottom: 24 },
@@ -131,6 +133,11 @@ export default function LoginScreen() {
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
       <View style={styles.inner}>
         {/* Logo */}
         <View style={styles.logoContainer}>
@@ -259,6 +266,7 @@ export default function LoginScreen() {
           </Link>
         </View>
       </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }

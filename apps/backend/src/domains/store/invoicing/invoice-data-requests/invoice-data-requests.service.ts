@@ -275,6 +275,8 @@ export class InvoiceDataRequestsService {
                 variant_sku: true,
                 variant_attributes: true,
                 variant_image_url: true,
+                // Nota que el propio comprador escribio para la linea.
+                notes: true,
                 quantity: true,
                 unit_price: true,
                 total_price: true,
@@ -422,6 +424,7 @@ export class InvoiceDataRequestsService {
         product_name: item.product_name,
         variant_sku: item.variant_sku,
         variant_attributes: item.variant_attributes,
+        notes: item.notes ?? null,
         quantity: item.quantity,
         unit_price: item.unit_price,
         total_price: item.total_price,

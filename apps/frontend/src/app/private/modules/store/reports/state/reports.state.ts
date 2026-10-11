@@ -7,6 +7,9 @@ export interface ReportsState {
   selectedReportId: string | null;
   dateRange: DateRangeFilter;
   fiscalPeriodId: number | null;
+  dataFilters: Record<string, string | null>;
+  /** Filtros recordados por reporte: sobrevivir a recreaciones/navegación. */
+  dataFiltersByReport: Record<string, Record<string, string | null>>;
   reportData: any[] | null;
   reportMeta: Record<string, any> | null;
   isSummary: boolean;
@@ -36,6 +39,8 @@ export const initialReportsState: ReportsState = {
   selectedReportId: null,
   dateRange: getDefaultDateRange(),
   fiscalPeriodId: null,
+  dataFilters: {},
+  dataFiltersByReport: {},
   reportData: null,
   reportMeta: null,
   isSummary: false,

@@ -89,6 +89,8 @@
     size="md"
     context="table"
     [amount]="total()"
+    [tipPolicy]="tipPolicy()"
+    [tipBase]="tipBase()"
     [allowMultiTender]="true"
     [isProcessing]="isProcessing()"
     (openChange)="onIsOpenChange($event)"

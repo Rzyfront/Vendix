@@ -6,6 +6,7 @@ import { IconComponent } from '../icon/icon.component';
 import { CurrencyPipe } from '../../pipes/currency';
 import type { PaymentMethod } from '../../models/payment-method.model';
 import { PaymentCollectorComponent } from './payment-collector.component';
+import type { TipPolicy } from '../../../core/utils/tip-policy.util';
 import type {
   ManualPaymentMethod,
   PaymentContext,
@@ -57,6 +58,8 @@ import type {
         [allowCash]="allowCash()"
         [allowReference]="allowReference()"
         [allowTip]="allowTip()"
+        [tipPolicy]="tipPolicy()"
+        [tipBase]="tipBase()"
         [allowCredit]="allowCredit()"
         [allowWompi]="allowWompi()"
         [allowWallet]="allowWallet()"
@@ -137,6 +140,8 @@ export class PaymentModalComponent {
   readonly allowCash = input<boolean | undefined>(undefined);
   readonly allowReference = input<boolean | undefined>(undefined);
   readonly allowTip = input<boolean | undefined>(undefined);
+  readonly tipPolicy = input<TipPolicy | null>(null);
+  readonly tipBase = input<number | null>(null);
   readonly allowCredit = input<boolean | undefined>(undefined);
   readonly allowWompi = input<boolean | undefined>(undefined);
   readonly allowWallet = input<boolean | undefined>(undefined);

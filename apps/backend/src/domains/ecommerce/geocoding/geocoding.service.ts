@@ -375,7 +375,10 @@ export class GeocodingService {
     // OSM way pair ~15km from the real corner and was cached as
     // 'interpolated' with false confidence) — a v4-cached false-confident
     // corner must not shadow the now-gated, honest result for its 7-day TTL.
-    return `geocode:fwd:v5:${parts.join('|')}`;
+    // v6: bumped from v5 when named OSM places (POIs: shop/amenity/building...)
+    // started classifying as 'exact' instead of 'area' — a v5-cached 'area'
+    // for a POI must not shadow the now-located result for its 7-day TTL.
+    return `geocode:fwd:v6:${parts.join('|')}`;
   }
 
   // ------------------------------------------------------------- Cascade
@@ -510,6 +513,32 @@ export class GeocodingService {
   }
 
   // ------------------------------------------------------- Municipality bbox
+
+  /**
+   * Center of the municipality bounding box. VISUAL FRAMING ONLY — never a
+   * delivery location. Never throws: any failure resolves to `null`.
+   */
+  async municipalityCenter(
+    city: string,
+    state?: string | null,
+  ): Promise<{ lat: number; lng: number } | null> {
+    try {
+      const cleanCity = (city ?? '').trim();
+      if (cleanCity.length < 2) return null;
+      const bbox = await this.resolveMunicipalityBbox(
+        cleanCity,
+        state?.trim() || null,
+        new RequestBudget(1),
+      );
+      if (!bbox) return null;
+      return {
+        lat: (bbox.south + bbox.north) / 2,
+        lng: (bbox.west + bbox.east) / 2,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   private async resolveMunicipalityBbox(
     city: string,

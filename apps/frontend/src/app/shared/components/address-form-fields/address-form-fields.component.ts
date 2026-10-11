@@ -1,9 +1,12 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
   ElementRef,
+  Injector,
   ViewEncapsulation,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -42,6 +45,13 @@ import {
 
 /** País cuyo catálogo Divipola gobierna este formulario. */
 const COLOMBIA_COUNTRY_CODE = 'CO';
+
+/** Single covered municipality that pre-fills and hides the geography fields. */
+export interface LockedLocation {
+  country_code: string;
+  state_province: string;
+  city: string;
+}
 
 /** Lat/lng pair — mirrors AddressMapPickerComponent.LatLng (not exported there). */
 export interface LatLng {
@@ -130,6 +140,7 @@ const UNLOCATED_ADDRESS_WARNING =
     InputComponent,
     IconComponent,
     SelectorComponent,
+    NgTemplateOutlet,
   ],
   templateUrl: './address-form-fields.component.html',
   styleUrls: ['./address-form-fields.component.scss'],
@@ -141,16 +152,14 @@ export class AddressFormFieldsComponent {
   readonly initialAddress = input<AddressPayload | null>(null);
   /** POS opt-in: keep optional address fields behind a secondary action. */
   readonly compact = input<boolean>(false);
-  /** null follows prefilled data; once toggled, the cashier owns visibility. */
-  readonly advancedOverride = signal<boolean | null>(null);
-  readonly showAdvanced = computed<boolean>(() =>
-    !this.compact() || (this.advancedOverride() ?? (
-      !!this.initialAddress()?.address_line2 ||
-      !!this.initialAddress()?.postal_code ||
-      (this.initialAddress()?.country_code != null &&
-        this.initialAddress()?.country_code !== COLOMBIA_COUNTRY_CODE)
-    )),
-  );
+  /** Compact hides line2 / country / optional postal; non-compact shows everything. */
+  readonly showAdvanced = computed<boolean>(() => !this.compact());
+  /**
+   * Compact only: the map section stays out of the DOM until a forward-geocode
+   * resolves (it then renders AT THE END of the form, so it never shifts the
+   * field being typed).
+   */
+  readonly compactMapRevealed = signal(false);
   /** Optional map center coordinate (e.g. existing lat/lng or GPS fix). */
   readonly center = input<LatLng | null>(null);
   /**
@@ -199,6 +208,16 @@ export class AddressFormFieldsComponent {
    * coordinates and never derives/replaces the DANE department or city.
    */
   readonly allowGeolocation = input<boolean>(true);
+  /**
+   * Fixed-location mode: when the store ships to ONE municipality, country,
+   * department, city and municipality_code are pre-filled and their selectors
+   * are replaced by a chip. Only takes effect once the municipality resolves
+   * against the DANE catalog ({@link lockResolved}); otherwise nothing hides.
+   * Default null → historical behavior.
+   */
+  readonly lockedLocation = input<LockedLocation | null>(null);
+  /** When false AND the location is locked, the postal code field is hidden. */
+  readonly showPostalCode = input<boolean>(true);
 
   /** Emits the full form value on every change. */
   readonly addressChange = output<AddressPayload>();
@@ -222,6 +241,35 @@ export class AddressFormFieldsComponent {
    * resolves to a real point (the `??` favors it).
    */
   readonly mapCenterHint = signal<LatLng | null>(null);
+  /** True once `lockedLocation` resolved to a DANE municipality. */
+  readonly lockResolved = signal(false);
+  readonly isLocked = computed<boolean>(
+    () => !!this.lockedLocation() && this.lockResolved(),
+  );
+  /** Chip text for the locked municipality (display only). */
+  readonly lockedLabel = computed<string>(() => {
+    const loc = this.lockedLocation();
+    if (!loc) return '';
+    const country = loc.country_code?.toUpperCase() === COLOMBIA_COUNTRY_CODE
+      ? 'Colombia'
+      : loc.country_code;
+    return `${loc.city}, ${loc.state_province} · ${country}`;
+  });
+  /**
+   * Centroid of the locked municipality. VISUAL framing only: it feeds the
+   * map's `focusArea` and is NEVER written to `coordsSignal`, the lat/lng
+   * controls or `mapCenterHint`, so it cannot count as `has_location` nor
+   * reach a shipping quote.
+   */
+  readonly municipalityFocus = signal<LatLng | null>(null);
+  /** Map framing: the geocoder's area hint wins over the municipality centroid. */
+  readonly focusArea = computed<LatLng | null>(
+    () => this.mapCenterHint() ?? this.municipalityFocus(),
+  );
+  /** Resolved DANE municipality of the lock, re-applied after a hydration. */
+  private lockedMunicipality: DianMunicipalityOption | null = null;
+  private lockLookupGeneration = 0;
+  private municipalityFocusKey: string | null = null;
   /**
    * True for a couple seconds right after a forward-geocode failure force-opens
    * the map, so the operator's eye lands on it (see {@link focusMapForWarning}).
@@ -303,6 +351,7 @@ export class AddressFormFieldsComponent {
   private readonly geocoding = inject(GeocodingService);
   private readonly municipalities = inject(DianMunicipalityLookupService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
   /** Host element — used to tell "the operator is still typing in THIS
    *  form" apart from focus elsewhere on the page (see
    *  {@link isTextEntryInsideHost}, rule 3 of the auto-scroll gate). */
@@ -339,6 +388,16 @@ export class AddressFormFieldsComponent {
   readonly departmentCatalogError = signal<string | null>(null);
   readonly municipalityCatalogError = signal<string | null>(null);
   readonly legacyAddressHint = signal<string | null>(null);
+  /** Phone that arrived prefilled (hydration) and is valid; null otherwise. */
+  private readonly prefilledPhone = signal<string | null>(null);
+  /** True once the user chose "Editar" on the phone chip (reset on hydration). */
+  readonly phoneEditing = signal(false);
+  /** Presentation only: the form value and its validators are untouched. */
+  readonly phoneChipValue = computed<string | null>(() =>
+    this.phoneEditing() ? null : this.prefilledPhone(),
+  );
+  /** Raw `city` of the hydrated address (hydration blanks the form's city). */
+  private hydratedCity = '';
   readonly departmentOptions = computed<SelectorOption[]>(() =>
     this.departments().map((item) => ({ value: item.code, label: item.name })),
   );
@@ -417,6 +476,21 @@ export class AddressFormFieldsComponent {
       const addr = this.initialAddress();
       if (!addr) return;
       untracked(() => this.hydrateAddress(addr));
+    });
+
+    // Fixed-location mode: resolve the locked municipality against the DANE
+    // catalog and pre-fill geography. Runs after the initialAddress effect
+    // (declaration order); hydrateAddress also re-applies it, so the lock wins.
+    effect(() => {
+      const loc = this.lockedLocation();
+      untracked(() => this.applyLockedLocation(loc));
+    });
+
+    // One forward-geocode per locked municipality, purely to frame the map.
+    effect(() => {
+      const locked = this.isLocked();
+      const loc = this.lockedLocation();
+      untracked(() => this.frameLockedMunicipality(locked ? loc : null));
     });
 
     // `coordsSignal` (map center) is now written directly, as a signal, at
@@ -522,6 +596,19 @@ export class AddressFormFieldsComponent {
   /** Toggles the collapsible map section. */
   toggleMap(): void {
     this.showMap.set(!this.showMap());
+  }
+
+  editPhone(): void {
+    this.phoneEditing.set(true);
+    afterNextRender(
+      () => {
+        const input = (this.hostRef.nativeElement as HTMLElement).querySelector<HTMLInputElement>(
+          'input[type="tel"]',
+        );
+        input?.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   onDepartmentChange(value: string | number | null): void {
@@ -648,6 +735,10 @@ export class AddressFormFieldsComponent {
     const state = address.state_province?.trim() ?? '';
     const hint = city || state ? `Antes: ${[city, state].filter(Boolean).join(', ')}` : null;
     const hasValidCoords = this.hasValidCoords(address.latitude, address.longitude);
+    this.hydratedCity = city;
+    const phone = address.phone_number?.trim() ?? '';
+    this.prefilledPhone.set(phone && /^[\d+#*\s()-]*$/.test(phone) ? phone : null);
+    this.phoneEditing.set(false);
 
     this.selectedDepartmentCode.set(null);
     this.selectedMunicipalityCode.set(null);
@@ -680,7 +771,18 @@ export class AddressFormFieldsComponent {
       ? { lat: address.latitude!, lng: address.longitude! }
       : null);
     this.mapCenterHint.set(null);
+    // New address: reveal/open the map only when it already carries a point.
+    if (this.compact()) {
+      this.compactMapRevealed.set(hasValidCoords);
+      this.showMap.set(hasValidCoords);
+    }
     this.form.updateValueAndValidity({ emitEvent: true });
+
+    // Fixed-location mode wins over whatever geography the address carried.
+    if (this.lockedMunicipality && this.lockedLocation()) {
+      this.applyLockedMunicipality();
+      return;
+    }
 
     const lookup$ = address.municipality_code?.trim()
       ? this.municipalities.resolveByCode(address.municipality_code)
@@ -711,6 +813,98 @@ export class AddressFormFieldsComponent {
         },
         error: () => {
           if (generation === this.hydrationGeneration) this.legacyAddressHint.set(hint);
+        },
+      });
+  }
+
+  private applyLockedLocation(loc: LockedLocation | null): void {
+    const generation = ++this.lockLookupGeneration;
+    if (!loc) {
+      const wasLocked = this.lockedMunicipality != null;
+      this.lockedMunicipality = null;
+      this.lockResolved.set(false);
+      // Selectors reappear: they need their municipality list back.
+      const dep = this.selectedDepartmentCode();
+      if (wasLocked && dep) this.loadMunicipalities(dep);
+      return;
+    }
+    this.municipalities
+      .resolveByName(loc.city.trim(), loc.state_province.trim())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (municipality) => {
+          if (generation !== this.lockLookupGeneration) return;
+          if (!municipality || !/^\d{2}$/.test(municipality.department_code)) {
+            this.lockedMunicipality = null;
+            this.lockResolved.set(false);
+            return;
+          }
+          this.lockedMunicipality = municipality;
+          this.applyLockedMunicipality();
+          this.lockResolved.set(true);
+        },
+        error: () => {
+          if (generation !== this.lockLookupGeneration) return;
+          this.lockedMunicipality = null;
+          this.lockResolved.set(false);
+        },
+      });
+  }
+
+  /** Patches the locked geography (same value format as hydrateAddress). */
+  private applyLockedMunicipality(): void {
+    const municipality = this.lockedMunicipality;
+    const loc = this.lockedLocation();
+    if (!municipality || !loc) return;
+    // Cancels any pending hydration lookup that could overwrite the lock.
+    this.hydrationGeneration++;
+    const previousCode = this.form.get('municipality_code')?.value as string | null;
+    const currentCity = (
+      ((this.form.get('city')?.value as string | null) ?? '').trim() || this.hydratedCity
+    );
+    const foreignCity = !previousCode && !!currentCity &&
+      this.normalizeName(currentCity) !== this.normalizeName(municipality.name);
+    if ((previousCode && previousCode !== municipality.code) || foreignCity) {
+      // Coordinates of another municipality (by code, or legacy city name) must not survive the lock.
+      this.invalidateGeographyAndLocation();
+    }
+    this.hydratedCity = '';
+    this.selectedDepartmentCode.set(municipality.department_code);
+    this.selectedMunicipalityCode.set(municipality.code);
+    this.legacyAddressHint.set(null);
+    this.form.patchValue({
+      country_code: loc.country_code?.toUpperCase() || COLOMBIA_COUNTRY_CODE,
+      city: municipality.name,
+      state_province: municipality.department_name,
+      municipality_code: municipality.code,
+    }, { emitEvent: false });
+    this.form.updateValueAndValidity({ emitEvent: true });
+  }
+
+  private normalizeName(value: string): string {
+    return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  private frameLockedMunicipality(loc: LockedLocation | null): void {
+    if (!loc) {
+      this.municipalityFocusKey = null;
+      this.municipalityFocus.set(null);
+      return;
+    }
+    const key = `${loc.city}|${loc.state_province}`;
+    if (this.municipalityFocusKey === key) return;
+    this.municipalityFocusKey = key;
+    this.municipalityFocus.set(null);
+    this.geocoding
+      .municipalityCenter(loc.city, loc.state_province)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (this.municipalityFocusKey !== key) return;
+          this.municipalityFocus.set(res);
+        },
+        error: () => {
+          if (this.municipalityFocusKey === key) this.municipalityFocus.set(null);
         },
       });
   }
@@ -871,6 +1065,12 @@ export class AddressFormFieldsComponent {
           this.precision.set(res.precision ?? null);
           this.geocodeLabel.set(res.label ?? null);
           this.emitAddressChange();
+          // Located (any precision): show the pin. In compact the map section
+          // sits at the END of the form, so revealing it shifts nothing.
+          if (this.compact()) {
+            this.compactMapRevealed.set(true);
+            this.showMap.set(true);
+          }
           // Low-precision hit: open the map — even in compact mode — so the
           // operator can confirm or drag the pin. Non-blocking: nothing here
           // gates `validChange`/submit.
@@ -988,7 +1188,7 @@ export class AddressFormFieldsComponent {
       this.pendingAddressWarning = false;
     }
     this.showMap.set(true);
-    this.advancedOverride.set(true);
+    this.compactMapRevealed.set(true);
     this.mapHighlight.set(true);
     setTimeout(() => this.mapHighlight.set(false), 2000);
     this.scrollMapIntoView();

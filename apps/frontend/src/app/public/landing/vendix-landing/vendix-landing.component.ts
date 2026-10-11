@@ -6,12 +6,14 @@ import {
   computed,
   DestroyRef,
   PLATFORM_ID,
+  effect,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterModule } from '@angular/router';
-import { CommonModule, DecimalPipe } from '@angular/common';
+import { CommonModule, DecimalPipe, DOCUMENT } from '@angular/common';
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser';
 import { isPlatformBrowser } from '@angular/common';
+import { buildVendixStructuredData } from './vendix-landing-structured-data';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { ModalComponent } from '../../../shared/components/modal/modal.component';
 import type { IconName } from '../../../shared/components/icon/icons.registry';
@@ -28,6 +30,7 @@ import {
 import { VexiToolTraceComponent } from '../../../shared/components/vexi-dock/vexi-tool-trace.component';
 import type { ToolStep } from '../../../core/store/vexi/vexi.actions';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../environments/environment';
 import {
   PublicPlansService,
   PublicPlan,
@@ -250,6 +253,15 @@ const DEMO_ORIGINS = [
   'https://fonts.gstatic.com',
 ];
 
+const COMMERCIAL_CAMPAIGN_PARAMS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'gclid',
+];
+
 @Component({
   selector: 'app-vendix-landing',
   standalone: true,
@@ -270,6 +282,7 @@ export class VendixLandingComponent implements OnInit {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly document = inject(DOCUMENT);
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private publicPlansService = inject(PublicPlansService);
@@ -607,6 +620,29 @@ export class VendixLandingComponent implements OnInit {
     return prices.length > 0 ? Math.min(...prices) : MIN_MONTHLY_PRICE_COP;
   });
 
+  /**
+   * JSON-LD de Vendix: solo en navegador (index.html/prerender sirven también a
+   * los storefronts de los tenants). Upsert de un único <script id>.
+   */
+  private readonly structuredDataEffect = effect(() => {
+    if (!this.isBrowser) return;
+    const prices = this.sellablePlans()
+      .filter((p) => p.billing_cycle === 'monthly')
+      .map((p) => Number(p.base_price))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const min = prices.length > 0 ? Math.min(...prices) : null;
+    const json = JSON.stringify(buildVendixStructuredData(min));
+
+    let script = this.document.getElementById('vendix-jsonld');
+    if (!script) {
+      script = this.document.createElement('script');
+      script.setAttribute('type', 'application/ld+json');
+      script.id = 'vendix-jsonld';
+      this.document.head.appendChild(script);
+    }
+    script.textContent = json;
+  });
+
   // Dynamic Available Cycles computed strictly from loaded API plans
   readonly availableCycles = computed(() => {
     const p = this.sellablePlans();
@@ -745,6 +781,7 @@ export class VendixLandingComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.initializeCommercialAnalytics();
     // Tenant config listener
     this.tenantConfig.set({
       branding: {
@@ -768,6 +805,74 @@ export class VendixLandingComponent implements OnInit {
     this.destroyRef.onDestroy(() => this.stopSectorRotation());
     this.destroyRef.onDestroy(() => this.teardownHeroWindow());
     this.destroyRef.onDestroy(() => this.clearVexiTimer());
+    if (this.isBrowser) {
+      this.destroyRef.onDestroy(() =>
+        this.document.getElementById('vendix-jsonld')?.remove(),
+      );
+    }
+  }
+
+  private initializeCommercialAnalytics(): void {
+    const measurementId = environment.commercialAnalyticsId;
+    if (!this.isBrowser || !measurementId) return;
+    if (
+      !['vendix.online', 'www.vendix.online'].includes(window.location.hostname) ||
+      window.location.pathname !== '/'
+    ) return;
+
+    // Analytics must never become a dependency of the landing or app startup.
+    try {
+      const disableKey = `ga-disable-${measurementId}`;
+      const analyticsWindow = window as unknown as Window &
+        Record<string, unknown> & {
+          dataLayer?: unknown[];
+          gtag?: (...args: unknown[]) => void;
+        };
+      analyticsWindow[disableKey] = false;
+      this.destroyRef.onDestroy(() => {
+        analyticsWindow[disableKey] = true;
+      });
+      analyticsWindow.dataLayer ??= [];
+      analyticsWindow.gtag ??= function () {
+        analyticsWindow.dataLayer!.push(arguments);
+      };
+
+      if (!document.getElementById('vendix-commercial-analytics')) {
+        analyticsWindow.gtag('js', new Date());
+        const script = document.createElement('script');
+        script.id = 'vendix-commercial-analytics';
+        script.async = true;
+        script.src = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
+        document.head.appendChild(script);
+      }
+
+      // Keep only campaign parameters so GA4 can attribute the visit; any other
+      // query param is dropped to avoid leaking tokens or personal data.
+      const params = new URLSearchParams(window.location.search);
+      const campaignQuery = COMMERCIAL_CAMPAIGN_PARAMS.filter((key) =>
+        params.has(key),
+      )
+        .map((key) => `${key}=${encodeURIComponent(params.get(key)!)}`)
+        .join('&');
+      const pageLocation =
+        window.location.origin + '/' + (campaignQuery ? `?${campaignQuery}` : '');
+
+      analyticsWindow.gtag('config', measurementId, {
+        send_page_view: false,
+        page_location: pageLocation,
+        page_referrer: document.referrer.split(/[?#]/)[0],
+        cookie_domain: window.location.hostname,
+        allow_google_signals: false,
+        allow_ad_personalization_signals: false,
+      });
+      analyticsWindow.gtag('event', 'page_view', {
+        send_to: measurementId,
+        page_location: pageLocation,
+        page_title: 'Vendix — Web comercial',
+      });
+    } catch {
+      // A blocked tag must not prevent rendering, pricing or navigation.
+    }
   }
 
   fetchPublicPlans(): void {
@@ -1375,4 +1480,3 @@ export class VendixLandingComponent implements OnInit {
     this.demoPlaying.set(false);
   }
 }
-

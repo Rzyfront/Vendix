@@ -19,6 +19,7 @@ Vista de lista estilo card para dispositivos moviles. Es el equivalente mobile d
 | `emptyMessage` | `string`             | `'No hay datos disponibles'` | Mensaje de estado vacio       |
 | `emptyIcon`    | `string`             | `inbox`                      | Icono del estado vacio        |
 | `size`         | `ItemListSize`       | `md`                         | Tamanio: `sm`, `md`, `lg`     |
+| `directActionsCount` | `number`         | `2`                          | Cantidad de acciones directas por tarjeta antes del menú de desbordamiento |
 | `rowLabelKey`  | `string \| null`     | `null`                       | Clave que nombra la tarjeta en el `aria-label` de los botones de accion (a11y) |
 
 ## Outputs

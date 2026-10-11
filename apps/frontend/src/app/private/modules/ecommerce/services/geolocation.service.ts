@@ -122,17 +122,24 @@ export class GeolocationService {
    * accuracy. Auto-focus must feel immediate, so we: (a) allow a recent cached
    * fix (`maximumAge`) so the first reading is near-instant, (b) resolve as soon
    * as a reading is "good enough" (`targetAccuracyM`, lenient by default), and
-   * (c) cap the whole thing at a short `maxWaitMs`. `watchPosition` still lets a
-   * GPS device improve on the first coarse fix within that short window, but we
-   * never make the customer wait long — the draggable marker corrects any
-   * residual offset (a WiFi-only device is biased no matter how long we wait).
-   * Rejects only if no fix arrives at all.
+   * (c) cap the REFINEMENT window at a short `maxWaitMs`. That window starts
+   * when the FIRST fix arrives, NOT at invocation: the time the customer spends
+   * on the browser's permission prompt must not count against it. Until a first
+   * fix arrives, `watchPosition`'s own `timeout` (`firstFixTimeoutMs`, which per
+   * the browser spec only counts after permission is granted) decides the
+   * error. `watchPosition` still lets a GPS device improve on the first coarse
+   * fix within the short window; the draggable marker corrects any residual
+   * offset (a WiFi-only device is biased no matter how long we wait).
+   * Rejects only if no fix arrives at all (`timeout` / `permission_denied` /
+   * `position_unavailable`).
    */
   getPrecisePosition(opts?: {
     maxWaitMs?: number;
     targetAccuracyM?: number;
+    firstFixTimeoutMs?: number;
   }): Promise<GeoCoords> {
     const maxWaitMs = opts?.maxWaitMs ?? 2500;
+    const firstFixTimeoutMs = opts?.firstFixTimeoutMs ?? 15000;
     const targetAccuracyM = opts?.targetAccuracyM ?? 50;
 
     return new Promise<GeoCoords>((resolve, reject) => {
@@ -161,7 +168,7 @@ export class GeolocationService {
       let best: GeolocationPosition | null = null;
       let settled = false;
       let watchId = -1;
-      let timer: ReturnType<typeof setTimeout>;
+      let timer: ReturnType<typeof setTimeout> | undefined;
 
       const finish = () => {
         if (settled) return;
@@ -186,26 +193,40 @@ export class GeolocationService {
 
       watchId = navigator.geolocation.watchPosition(
         (position) => {
+          const isFirstFix = !best;
           if (!best || position.coords.accuracy < best.coords.accuracy) {
             best = position;
+          }
+          // Refinement window starts at the first fix (not at invocation).
+          if (isFirstFix && !settled) {
+            timer = setTimeout(finish, maxWaitMs);
           }
           // Precise enough → stop early; no need to keep the GPS on.
           if (best.coords.accuracy <= targetAccuracyM) finish();
         },
         (error) => {
           // Only fail if we never got any fix; otherwise resolve with the best.
-          if (!best) {
+          if (!best && !settled) {
             settled = true;
             clearTimeout(timer);
+            if (watchId !== -1) {
+              try {
+                navigator.geolocation.clearWatch(watchId);
+              } catch {
+                /* noop */
+              }
+            }
             reject(this.mapError(error));
           }
         },
         // maximumAge: reuse a fix up to 30s old so the FIRST reading is near
         // instant instead of forcing a fresh (slow) GPS lock.
-        { enableHighAccuracy: true, maximumAge: 30000, timeout: maxWaitMs },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 30000,
+          timeout: firstFixTimeoutMs,
+        },
       );
-
-      timer = setTimeout(finish, maxWaitMs);
     });
   }
 

@@ -6,6 +6,24 @@ import { IDocumentDataProvider } from '../interfaces/document-data-provider.inte
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { resolveKitchenMode } from '../../kitchen-fire/kitchen-mode.util';
+
+/** Estados de ítem que ya no van en la hoja de comanda. */
+const DEAD_ITEM_STATES = ['delivered', 'cancelled'] as const;
+
+const ITEM_INCLUDE = {
+  product: { select: { id: true, name: true, sku: true } },
+  // Marca por plato "para llevar" (misma fuente que la tarjeta virtual).
+  order_item: { select: { is_takeaway: true } },
+  // Exclusiones por línea → el cocinero las ve impresas.
+  exclusions: {
+    include: {
+      // sin relación inversa tipada en el include del producto
+      // para evitar arrastrar el producto entero de la exclusión.
+      component_product: { select: { id: true, name: true } },
+    },
+  },
+} as const;
 
 @Injectable()
 export class KitchenTicketDataProvider implements IDocumentDataProvider {
@@ -42,24 +60,19 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       where: { id, store_id: storeId },
       include: {
         kds: { select: { id: true, name: true, code: true } },
+        table: { select: { id: true, name: true, zone: true } },
         items: {
           orderBy: { id: 'asc' },
-          include: {
-            product: { select: { id: true, name: true, sku: true } },
-            // Exclusiones por línea → el cocinero las ve impresas.
-            exclusions: {
-              include: {
-                // sin relación inversa tipada en el include del producto
-                // para evitar arrastrar el producto entero de la exclusión.
-                component_product: { select: { id: true, name: true } },
-              },
-            },
-          },
+          include: ITEM_INCLUDE,
         },
         order: {
           select: {
             id: true,
             order_number: true,
+            notes: true,
+            delivery_type: true,
+            customer_alias: true,
+            users: { select: { first_name: true, last_name: true } },
           },
         },
       },
@@ -99,7 +112,9 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
         })
       : undefined;
     const opener = session?.opener;
-    const table = session?.table;
+    // Misma regla que la tarjeta virtual: nombre desde `kitchen_tickets.table`,
+    // con fallback a la mesa de la última sesión.
+    const table = (ticket as any).table || session?.table;
     // ADR-04: el mesero de la mesa es quien abrió su sesión, no la asignación
     // estática de table_waiters (que puede cambiar después del servicio).
     const waiterName = opener
@@ -108,6 +123,56 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
     const tableName = table?.name
       ? `Mesa ${table.name}`
       : '';
+
+    const order: any = ticket.order;
+    const deliveryType: string | undefined = order?.delivery_type;
+    const hasTable = ticket.table_id != null || !!table;
+    // `isTableTicket` de la tarjeta virtual.
+    const isTableTicket = hasTable || deliveryType === 'dine_in';
+
+    const customerName =
+      (order?.customer_alias || '').trim() ||
+      `${(order?.users?.first_name || '').trim()} ${(order?.users?.last_name || '').trim()}`.trim();
+
+    let serviceTypeLabel = '';
+    if (deliveryType === 'home_delivery') serviceTypeLabel = 'Domicilio';
+    else if (tableName) serviceTypeLabel = tableName;
+    else if (
+      !hasTable &&
+      (deliveryType === 'pickup' || deliveryType === 'direct_delivery')
+    ) {
+      serviceTypeLabel = 'Para llevar';
+    } else if (isTableTicket) serviceTypeLabel = 'Mesa';
+
+    // `itemDeliveryBadge` de la tarjeta virtual.
+    const packagingLabel = (it: any): string => {
+      if (deliveryType === 'home_delivery') return 'ENVÍO';
+      const takeaway = it.order_item?.is_takeaway === true;
+      if (isTableTicket) return takeaway ? 'PARA LLEVAR' : '';
+      return deliveryType === 'direct_delivery' || takeaway
+        ? 'PARA LLEVAR'
+        : '';
+    };
+
+    // Modo físico: UNA hoja por orden con todos los ítems vivos de todos los
+    // tickets de la orden. Virtual: solo los del ticket pedido.
+    const kitchenMode = await resolveKitchenMode(this.prisma, storeId);
+    const isPhysical = kitchenMode === 'physical';
+    let sheetItems: any[] = ticket.items || [];
+    if (isPhysical && order?.id) {
+      const siblings: any[] = await this.prisma.kitchen_tickets.findMany({
+        where: { order_id: order.id, store_id: storeId },
+        orderBy: [{ fired_at: 'asc' }, { id: 'asc' }],
+        include: {
+          items: {
+            where: { status: { notIn: [...DEAD_ITEM_STATES] } },
+            orderBy: { id: 'asc' },
+            include: ITEM_INCLUDE,
+          },
+        },
+      });
+      sheetItems = siblings.flatMap((t) => t.items || []);
+    }
 
     return {
       store: { name: '', tax_id: '' },
@@ -132,7 +197,12 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
         state_label: ticket.status,
         table_number: tableName,
         waiter_name: waiterName,
-        notes: undefined,
+        notes: order?.notes?.trim() || undefined,
+        is_kitchen_ticket: true,
+        order_number: order?.order_number ? String(order.order_number) : '',
+        daily_number: ticket.daily_number || 0,
+        customer_name: customerName,
+        service_type_label: serviceTypeLabel,
       },
       // C.2 (ADR-12, G-12) — irrelevante en la práctica: `unit_price` es
       // siempre 0 en este formato (comanda de cocina, sin dinero).
@@ -141,10 +211,11 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       // `store` real, ver `store: { name: '', tax_id: '' }` arriba).
       money_basis: 'taxable_base',
       prints_vat_breakdown: false,
-      items: (ticket.items || []).map((it: any, idx: number) => {
-        const exclusionNames: string[] = (it.exclusions || []).map((e: any) =>
-          e.component_product?.name || '',
-        ).filter(Boolean);
+      items: sheetItems.map((it: any, idx: number) => {
+        const exclusionNames: string[] = (it.exclusions || [])
+          .map((e: any) => e.component_product?.name || '')
+          .filter(Boolean)
+          .map((n: string) => `SIN ${n}`);
         return {
           index: idx + 1,
           product_name: it.product?.name || '',
@@ -159,6 +230,7 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
           total_price: 0,
           notes: it.notes || undefined,
           modifiers: exclusionNames.length > 0 ? exclusionNames : undefined,
+          packaging_label: packagingLabel(it) || undefined,
         };
       }),
       taxes: [],
@@ -175,8 +247,13 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
         grand_total_formatted: '$0',
       },
       custom_variables: {
-        kds_name: ticket.kds?.name || '',
-        kds_station_type: ticket.kds?.code || '',
+        // En físico la hoja mezcla estaciones: no se declara una sola.
+        ...(isPhysical
+          ? {}
+          : {
+              kds_name: ticket.kds?.name || '',
+              kds_station_type: ticket.kds?.code || '',
+            }),
         daily_number: ticket.daily_number || 0,
         business_date: ticket.business_date
           ? new Date(ticket.business_date).toISOString()

@@ -42,6 +42,7 @@ import {
  * nuevo), así que compartir esta referencia es seguro.
  */
 const EMPTY_MULTI_VALUES: string[] = [];
+let optionsDropdownInstanceCounter = 0;
 
 @Component({
   selector: 'app-options-dropdown',
@@ -57,6 +58,8 @@ const EMPTY_MULTI_VALUES: string[] = [];
   styleUrls: ['./options-dropdown.component.scss'],
 })
 export class OptionsDropdownComponent {
+  private readonly filterIdPrefix = `options-filter-${++optionsDropdownInstanceCounter}`;
+
   /** Configuration for each filter in the dropdown */
   readonly filters = input<FilterConfig[]>([]);
 
@@ -110,6 +113,10 @@ export class OptionsDropdownComponent {
   readonly isActionsOpen = signal(false);
   readonly isFiltersOpen = signal(false);
   readonly activeFiltersCount = signal(0);
+
+  filterControlId(key: string): string {
+    return `${this.filterIdPrefix}-${key}`;
+  }
 
   /** Position for mobile dropdown */
   readonly dropdownTop = signal<number | null>(null);

@@ -40,11 +40,18 @@ import { ReceivedBuyerEventCommandComponent } from './received-buyer-event-comma
               <div><dt class="text-xs text-text-secondary">Tipo</dt><dd class="font-medium">{{ label(doc.document_type) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Fecha de emisión</dt><dd class="font-medium">{{ dateOnly(doc.issue_date) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Vencimiento</dt><dd class="font-medium">{{ dateOnly(doc.due_date) }}</dd></div>
+              <div><dt class="text-xs text-text-secondary">Condición de pago</dt><dd class="font-medium">{{ paymentConditionLabel(doc.payment_condition) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Identificador fiscal</dt><dd class="break-all font-mono text-sm">{{ doc.document_key || 'No informado' }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Subtotal del encabezado</dt><dd class="font-medium">{{ money(doc.subtotal_amount, doc.currency) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Impuestos del encabezado</dt><dd class="font-medium">{{ money(doc.tax_amount, doc.currency) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Total del encabezado</dt><dd class="font-semibold">{{ money(doc.total_amount, doc.currency) }}</dd></div>
             </dl>
+            @if (doc.confirmed_goods_at || doc.accepted_at) {
+              <dl class="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-3 sm:grid-cols-2">
+                @if (doc.confirmed_goods_at) { <div><dt class="text-xs text-text-secondary">Recibo de bienes/servicios (032)</dt><dd class="font-medium">{{ dateTime(doc.confirmed_goods_at) }}</dd></div> }
+                @if (doc.accepted_at) { <div><dt class="text-xs text-text-secondary">Aceptación legal registrada</dt><dd class="font-medium">{{ dateTime(doc.accepted_at) }}</dd></div> }
+              </dl>
+            }
             @if (!doc.currency || !validCurrency(doc.currency)) { <p class="mt-3 text-sm text-warning" role="note">La moneda no está identificada correctamente; los importes se muestran sin conversión.</p> }
           </section>
         </app-card>
@@ -77,6 +84,12 @@ import { ReceivedBuyerEventCommandComponent } from './received-buyer-event-comma
         <app-card [responsive]="true">
           <section aria-labelledby="validation-title">
             <h2 id="validation-title" class="mb-3 text-lg font-semibold">Validación y revisión</h2>
+            <dl class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div class="rounded-lg border border-border p-3"><dt class="text-xs text-text-secondary">Estructura</dt><dd class="mt-1 font-medium">{{ structuralStatusLabel(doc) }}</dd></div>
+              <div class="rounded-lg border border-border p-3"><dt class="text-xs text-text-secondary">Firma</dt><dd class="mt-1 font-medium">{{ signatureStatusLabel(doc) }}</dd></div>
+              <div class="rounded-lg border border-border p-3"><dt class="text-xs text-text-secondary">Verificación DIAN</dt><dd class="mt-1 font-medium">{{ dianStatusLabel(doc) }}</dd></div>
+            </dl>
+            <p class="mb-3 text-xs text-text-secondary">La firma criptográfica no se autentica y la DIAN no se consulta desde esta revisión. La validación estructural no acredita autenticidad ni aceptación.</p>
             @if (doc.validation_summary?.errors?.length) { <div class="mb-3 rounded-lg border border-error/30 bg-error-light p-3" role="alert"><h3 class="font-medium text-error">Inconsistencias</h3><ul class="list-inside list-disc text-sm text-error">@for (issue of doc.validation_summary?.errors ?? []; track $index) { <li>{{ issue.message }}</li> }</ul></div> }
             @if (doc.validation_summary?.warnings?.length) { <div class="rounded-lg border border-warning/30 bg-warning-light p-3" role="note"><h3 class="font-medium">Advertencias</h3><ul class="list-inside list-disc text-sm">@for (issue of doc.validation_summary?.warnings ?? []; track $index) { <li>{{ issue.message }}</li> }</ul></div> }
             @if (!doc.validation_summary?.errors?.length && !doc.validation_summary?.warnings?.length) { <p class="text-sm text-text-secondary">Sin observaciones de validación registradas.</p> }
@@ -104,7 +117,7 @@ import { ReceivedBuyerEventCommandComponent } from './received-buyer-event-comma
             <h2 id="timeline-title" class="mb-3 text-lg font-semibold">Actividad y procedencia</h2>
             <p class="mb-3 text-sm text-text-secondary">Origen: {{ label(doc.source_channel) }} · Registrado: {{ dateTime(doc.created_at) }} · Versión {{ doc.version }}</p>
             @if (!doc.events?.length) { <p class="text-sm text-text-secondary">Sin eventos adicionales.</p> }
-            <ol class="space-y-2">@for (event of doc.events ?? []; track event.id) { <li class="border-l-2 border-border pl-3"><p class="font-medium">{{ label(event.event_type) }} · {{ label(event.status) }}</p>@if (event.event_type === 'BUYER_DIAN_EVENT') { <p class="break-all text-xs text-text-secondary">Código {{ event.event_code || '—' }} · Número {{ event.event_number || '—' }} · CUDE {{ event.cude || '—' }}</p> }<time class="text-xs text-text-secondary">{{ dateTime(event.confirmed_at || event.event_date || event.created_at) }}</time></li> }</ol>
+            <ol class="space-y-2">@for (event of doc.events ?? []; track event.id) { <li class="border-l-2 border-border pl-3"><p class="font-medium">{{ label(event.event_type) }} · {{ label(event.status) }}</p>@if (event.event_type === 'BUYER_DIAN_EVENT') { <p class="break-all text-xs text-text-secondary">Código {{ event.event_code || '—' }} · Número {{ event.event_number || '—' }} · CUDE {{ event.cude || '—' }}</p> }@if (event.event_type === 'BUYER_DIAN_EVENT' && event.event_code === '034' && event.status === 'accepted') { <p class="text-xs text-text-secondary" role="note">Consulta 034 aceptada y registrada; esta evidencia solo se consulta y no se ofrece para emisión desde esta pantalla.</p> }<time class="text-xs text-text-secondary">{{ dateTime(event.confirmed_at || event.event_date || event.created_at) }}</time></li> }</ol>
             <details class="mt-4"><summary class="cursor-pointer text-sm font-medium">Ver metadatos de procedencia</summary><pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-3 text-xs">{{ provenance(doc) }}</pre></details>
           </section>
         </app-card>
@@ -214,6 +227,22 @@ export class ReceivedDocumentDetailComponent {
   }
   validCurrency(currency: string | null | undefined): boolean { return !!currency && /^[A-Z]{3}$/.test(currency.toUpperCase()); }
   label(value: unknown): string { return String(value ?? 'pendiente').replaceAll('_', ' '); }
+  paymentConditionLabel(value: unknown): string {
+    return value === 'cash' ? 'Contado' : value === 'credit' ? 'Crédito' : 'No determinada';
+  }
+  structuralStatusLabel(doc: ReceivedDocument): string {
+    const value = doc.structural_validation_status ?? doc.validation_summary?.structural?.status ?? 'pending';
+    return ({ pending: 'Pendiente de evaluar', valid: 'Estructura válida', needs_review: 'Requiere revisión', invalid: 'Estructura inválida' } as Record<string, string>)[value] ?? 'Pendiente de evaluar';
+  }
+  signatureStatusLabel(doc: ReceivedDocument): string {
+    const summary = doc.validation_summary?.signature;
+    const value = doc.signature_validation_status ?? summary?.status ?? (typeof summary?.has_signature === 'boolean' ? summary.has_signature ? 'not_verified' : 'unsigned' : 'not_verified');
+    return value === 'unsigned' ? 'No se detectó firma' : 'Firma no verificada';
+  }
+  dianStatusLabel(doc: ReceivedDocument): string {
+    const value = doc.dian_validation_status ?? doc.validation_summary?.dian?.status ?? 'not_checked';
+    return value === 'not_checked' ? 'No consultada' : 'Estado DIAN no reconocido';
+  }
   dateTime(value: string): string {
     return formatStoreDateTime(value, this.storeSettings.timezone(), { dateStyle: 'medium', timeStyle: 'short' });
   }

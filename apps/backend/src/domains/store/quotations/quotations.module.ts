@@ -7,6 +7,7 @@ import { OrdersModule } from '../orders/orders.module';
 import { EmailModule } from '../../../email/email.module';
 import { QuotationProfilesModule } from '../backend-quotations-profiles/quotation-profiles.module';
 import { TaxesModule } from '../taxes/taxes.module';
+import { ProfilesModule } from '../invoicing/profiles/profiles.module';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createQuotationTools } from '../../../ai-engine/tools/domains/quotations.tools';
 
@@ -18,6 +19,7 @@ import { createQuotationTools } from '../../../ai-engine/tools/domains/quotation
     EmailModule,
     QuotationProfilesModule,
     TaxesModule,
+    ProfilesModule,
   ],
   controllers: [QuotationsController],
   providers: [QuotationsService],

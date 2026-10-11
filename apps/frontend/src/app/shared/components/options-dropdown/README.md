@@ -38,6 +38,20 @@ actions: DropdownAction[] = [
 <app-options-dropdown [filters]="filters" [actions]="actions" [filterValues]="filterValues" triggerLabel="Filtros" triggerIcon="sliders-horizontal" [debounceMs]="350" [isLoading]="false" (filterChange)="onFilterChange($event)" (actionClick)="onAction($event)" (clearAllFilters)="onClearAll()"> </app-options-dropdown>
 ```
 
+## Filtros prearmados
+
+`order-filter.preset.ts` — orden alfabético reutilizable para cualquier vista
+que use este componente:
+
+```typescript
+import { buildAlphabeticalOrderFilter } from '@shared/components/options-dropdown';
+
+filters: FilterConfig[] = [buildAlphabeticalOrderFilter('order')];
+```
+
+Emite `'asc' | 'desc' | null` en la key indicada (`A → Z` / `Z → A`). El padre
+decide qué ordenar con ese valor.
+
 ## Inputs
 
 | Input        | Tipo             | Default              | Descripcion                           |

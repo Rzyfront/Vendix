@@ -20,6 +20,7 @@ import {
   DianDocumentEvent,
   InvoicePdfResult,
   InvoicePdfUrl,
+  InvoiceDeliverResult,
   PosUvtThreshold,
   RegisterDianEventRequest,
   RelatedNote,
@@ -188,6 +189,21 @@ export class InvoicingService {
   }
 
   // ── Documento electrónico: PDF y eventos RADIAN ───────────
+
+  /**
+   * Reenvia por correo el paquete de la factura (`POST :id/deliver`).
+   * El backend responde 422 `INVOICING_DELIVERY_001` si el correo es invalido
+   * y `INVOICING_DELIVERY_002` si la factura sigue en borrador.
+   */
+  deliverInvoice(
+    id: number,
+    email: string,
+  ): Observable<ApiResponse<InvoiceDeliverResult>> {
+    return this.http.post<ApiResponse<InvoiceDeliverResult>>(
+      this.getApiUrl(`${id}/deliver`),
+      { email },
+    );
+  }
 
   /**
    * URL FIRMADA del PDF de la factura (`GET :id/pdf`, verificado en

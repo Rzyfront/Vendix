@@ -38,7 +38,7 @@ describe('InvoiceFlowService · compuertas de emisión AIU', () => {
   const IVA = { tax_type: 'IVA', percent: '19.00', amount: '28500.00' };
 
   describe('coherencia entre lo que la línea declara y lo que lleva dentro', () => {
-    function check(lines: any[], regime = 'et_462_1', source = 'snapshot') {
+    function check(lines: any[], regime = 'et_462_1', source: 'snapshot' = 'snapshot') {
       return () =>
         (service() as any).assertAiuLineTaxCoherence(
           { id: 77, invoice_number: 'QA-77' },
@@ -186,24 +186,6 @@ describe('InvoiceFlowService · compuertas de emisión AIU', () => {
       ).not.toThrow();
     });
 
-    it('el mensaje distingue si el régimen salió de la factura o del ajuste de la tienda', () => {
-      // Sin esa distinción el operador no sabe si corregir la factura o la
-      // configuración, y las dos acciones producen documentos distintos.
-      expect(
-        check(
-          [
-            {
-              description: 'Administración',
-              omit_tax_total: true,
-              taxes: [IVA],
-              tax_amount: '28500.00',
-            },
-          ],
-          'decreto_1372_1992',
-          'settings',
-        ),
-      ).toThrow(/del ajuste de la tienda por procedencia «settings»/);
-    });
   });
 
   describe('piso legal del artículo 462-1 re-verificado contra el documento que se firma', () => {
@@ -334,103 +316,105 @@ describe('InvoiceFlowService · compuertas de emisión AIU', () => {
     });
   });
 
-  /**
-   * De dónde sale el PORCENTAJE del piso, que es distinto de si el piso aplica.
-   *
-   * Las facturas 158 y 159 del entorno dev son la razón de este bloque: se
-   * crearon con `aiu_regime = 'et_462_1'` y `aiu_minimum_percent` en NULL,
-   * porque nacieron antes de que la columna se poblara bien. Si el NULL se
-   * leyera como «sin piso», esas facturas emitirían SIN la comprobación que el
-   * motor sí les aplicó al calcularlas — y el error sería invisible: un
-   * documento que sale, que la DIAN acepta, y que declara menos IVA del debido.
-   *
-   * La ambigüedad del NULL se resuelve con la misma regla que usa el
-   * calculador: bajo `et_462_1` el piso está ACTIVO salvo que alguien declare
-   * `enforce_minimum_base: false` de forma explícita.
-   */
-  describe('procedencia del porcentaje del piso', () => {
+  describe('emisión basada únicamente en el snapshot fiscal AIU', () => {
     const OBJETO =
       'Construcción de la sede administrativa norte, etapa de acabados';
 
-    async function resolve(
-      invoice: Record<string, unknown>,
-      settings: Record<string, unknown> = {},
-    ) {
+    function serviceWithSettingsSpy() {
       const svc = service();
-      svc.loadAiuSettings = jest.fn().mockResolvedValue(settings);
+      svc.prisma.store_settings = { findFirst: jest.fn() };
+      return svc;
+    }
+
+    async function resolve(invoice: Record<string, unknown>) {
+      const svc = serviceWithSettingsSpy();
       const context = await svc.resolveAiuEmissionContext({
         id: 1,
-        store_id: 3,
         operation_type: '09',
         aiu_contract_object: OBJETO,
         ...invoice,
       });
+      expect(svc.prisma.store_settings.findFirst).not.toHaveBeenCalled();
       return context?.minimum_percent === null
         ? null
         : context?.minimum_percent?.toFixed(2);
     }
 
-    it('el snapshot del documento gana sobre el ajuste vivo', async () => {
+    it('usa el porcentaje AIU congelado en la factura', async () => {
       await expect(
-        resolve(
-          { aiu_regime: 'et_462_1', aiu_minimum_percent: new Prisma.Decimal(10) },
-          { regime: 'et_462_1', minimum_base_percent: 15 },
-        ),
-      ).resolves.toBe('10.00');
+        resolve({
+          aiu_regime: 'et_462_1',
+          aiu_minimum_percent: new Prisma.Decimal(12),
+        }),
+      ).resolves.toBe('12.00');
     });
 
-    it('apagar el piso DESPUÉS no lo desactiva en una factura que ya lo congeló', async () => {
-      // El snapshot se consulta ANTES de la bandera a propósito. La factura
-      // registró que el piso estaba activo y con qué porcentaje; que la tienda
-      // lo apague después no puede cambiar retroactivamente la base gravable de
-      // un documento cuyos importes ya se calcularon con él.
+    it('respeta el NULL de mínimo cuando la matriz congelada dice que estaba desactivado', async () => {
       await expect(
-        resolve(
-          { aiu_regime: 'et_462_1', aiu_minimum_percent: new Prisma.Decimal(10) },
-          { regime: 'et_462_1', enforce_minimum_base: false },
-        ),
-      ).resolves.toBe('10.00');
-    });
-
-    it('sin snapshot toma el porcentaje del ajuste de la tienda', async () => {
-      await expect(
-        resolve(
-          { aiu_regime: 'et_462_1', aiu_minimum_percent: null },
-          { regime: 'et_462_1', minimum_base_percent: 15 },
-        ),
-      ).resolves.toBe('15.00');
-    });
-
-    it('sin snapshot y sin ajuste el piso está ACTIVO al 10% (las facturas 158 y 159)', async () => {
-      // El caso que hace que el NULL no sea ambiguo. Leerlo como «sin piso»
-      // dejaría emitir sin comprobar exactamente a las facturas cuyos importes
-      // el motor SÍ calculó con el piso puesto.
-      await expect(
-        resolve({ aiu_regime: 'et_462_1', aiu_minimum_percent: null }, {}),
-      ).resolves.toBe('10.00');
-    });
-
-    it('sólo un `enforce_minimum_base: false` explícito apaga el piso', async () => {
-      await expect(
-        resolve(
-          { aiu_regime: 'et_462_1', aiu_minimum_percent: null },
-          { regime: 'et_462_1', enforce_minimum_base: false },
-        ),
+        resolve({
+          aiu_regime: 'et_462_1',
+          aiu_minimum_percent: null,
+          aiu_taxable_matrix: { minimum: { enforced: false, percent: null } },
+        }),
       ).resolves.toBeNull();
     });
 
-    it('bajo `decreto_1372_1992` no hay piso, ni siquiera con snapshot', async () => {
-      // El Decreto 1372/1992 no fija ningún mínimo sobre la utilidad del
-      // constructor: el régimen se evalúa PRIMERO, antes de mirar el snapshot.
+    it('bajo Decreto 1372 no aplica piso aunque exista un snapshot porcentual', async () => {
       await expect(
-        resolve(
-          {
-            aiu_regime: 'decreto_1372_1992',
-            aiu_minimum_percent: new Prisma.Decimal(10),
-          },
-          { regime: 'et_462_1' },
-        ),
+        resolve({
+          aiu_regime: 'decreto_1372_1992',
+          aiu_minimum_percent: new Prisma.Decimal(10),
+        }),
       ).resolves.toBeNull();
+    });
+
+    it('bloquea la factura histórica AIU si no trae objeto contractual congelado', async () => {
+      const svc = serviceWithSettingsSpy();
+      await expect(
+        svc.resolveAiuEmissionContext({
+          id: 2,
+          operation_type: '09',
+          aiu_regime: 'et_462_1',
+          aiu_contract_object: null,
+        }),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_AIU_002.code });
+      expect(svc.prisma.store_settings.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('bloquea la factura histórica AIU si no trae base gravable congelada', async () => {
+      const svc = serviceWithSettingsSpy();
+      await expect(
+        svc.resolveAiuEmissionContext({
+          id: 3,
+          operation_type: '09',
+          aiu_regime: null,
+          aiu_contract_object: OBJETO,
+        }),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_AIU_006.code });
+      expect(svc.prisma.store_settings.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('bloquea mínimo NULL histórico sin evidencia de si fue desactivado', async () => {
+      const svc = serviceWithSettingsSpy();
+      await expect(
+        svc.resolveAiuEmissionContext({
+          id: 5,
+          operation_type: '09',
+          aiu_regime: 'et_462_1',
+          aiu_contract_object: OBJETO,
+          aiu_minimum_percent: null,
+        }),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_AIU_006.code });
+      expect(svc.prisma.store_settings.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('noAIU no lee settings ni exige campos del snapshot AIU', async () => {
+      const svc = serviceWithSettingsSpy();
+      await expect(
+        svc.resolveAiuEmissionContext({ id: 4, operation_type: '10' }),
+      ).resolves.toBeNull();
+      expect(svc.prisma.store_settings.findFirst).not.toHaveBeenCalled();
     });
   });
+
 });

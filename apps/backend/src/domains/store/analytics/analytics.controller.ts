@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { SalesAnalyticsService } from './services/sales-analytics.service';
-import { InventoryAnalyticsService } from './services/inventory-analytics.service';
+import { InventoryAnalyticsService, calculateLowStockTotals } from './services/inventory-analytics.service';
 import { ProductsAnalyticsService } from './services/products-analytics.service';
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
@@ -701,7 +701,40 @@ export class AnalyticsController {
       result.meta.pagination.total,
       result.meta.pagination.page,
       result.meta.pagination.limit,
+      undefined,
+      undefined,
+      { totals: result.meta.totals },
     );
+  }
+
+  @Get('inventory/low-stock/export')
+  @Permissions('store:analytics:read')
+  async exportLowStockAlerts(
+    @Query() query: InventoryAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const rows = await this.inventory_analytics_service.getLowStockForExport(query);
+    const tz = await this.resolveReportTz();
+    const columns: ReportColumn[] = [
+      { key: 'product_name', header: 'Producto', type: 'text', width: 36 },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'stock_quantity', header: 'Stock Actual', type: 'number' },
+      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
+      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency' },
+    ];
+    const displayRows = rows.map((row) => ({
+      ...row,
+      status: row.status === 'out_of_stock' ? 'Agotado' : 'Stock bajo',
+    }));
+    await this.emitReport(res, 'stock_bajo', tz, [
+      this.toSheet('Stock Bajo', columns, displayRows, tz, {
+        product_name: 'TOTAL',
+        ...calculateLowStockTotals(rows),
+      }),
+    ]);
   }
 
   @Get('inventory/movements')
@@ -1497,6 +1530,63 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('reviews/rating-trend')
+  @Permissions('store:analytics:read')
+  async getReviewsRatingTrend(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getRatingTrend(query);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Paso 8: tendencia conjunta reseñas de producto + experiencia de compra.
+   * Rutas literales (sin :param) declaradas antes de cualquier ruta dinámica.
+   */
+  @Get('reviews/trend')
+  @Permissions('store:analytics:read')
+  async getReviewsTrend(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getReviewsTrend(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('reviews/trend/export')
+  @Permissions('store:analytics:read')
+  async exportReviewsTrend(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { trendRows, experienceRows, tagRows } =
+      await this.reviews_analytics_service.getReviewsTrendForExport(query);
+
+    const trendColumns: ReportColumn[] = [
+      { key: 'period', header: 'Periodo', type: 'text' },
+      { key: 'product_count', header: 'Reseñas productos', type: 'number' },
+      { key: 'product_avg', header: 'Promedio productos', type: 'number' },
+      { key: 'experience_count', header: 'Reseñas experiencia', type: 'number' },
+      { key: 'experience_avg', header: 'Promedio experiencia', type: 'number' },
+    ];
+    const experienceColumns: ReportColumn[] = [
+      { key: 'created_at', header: 'Fecha', type: 'date', tz },
+      { key: 'order_number', header: 'Orden #', type: 'text' },
+      { key: 'customer', header: 'Cliente', type: 'text' },
+      { key: 'rating', header: 'Estrellas', type: 'number' },
+      { key: 'quick_tag', header: 'Etiqueta', type: 'text' },
+      { key: 'comment', header: 'Comentario', type: 'text' },
+      { key: 'source', header: 'Origen', type: 'text' },
+    ];
+    const tagColumns: ReportColumn[] = [
+      { key: 'tag', header: 'Etiqueta', type: 'text' },
+      { key: 'count', header: 'Cantidad', type: 'number' },
+      { key: 'percent', header: '%', type: 'percent' },
+    ];
+
+    await this.emitReport(res, 'resenas-tendencia', tz, [
+      this.toSheet('Tendencia', trendColumns, trendRows, tz),
+      this.toSheet('Experiencias', experienceColumns, experienceRows, tz),
+      this.toSheet('Etiquetas', tagColumns, tagRows, tz),
+    ]);
+  }
+
   /**
    * QUI-548: reseñas agregadas por producto con promedio, distribución
    * de estrellas, conteo de verificadas/pendientes y fecha de la última.
@@ -1551,7 +1641,7 @@ export class AnalyticsController {
     @Res() res: Response,
   ): Promise<void> {
     const tz = await this.resolveReportTz();
-    const rows =
+    const { rows } =
       await this.reviews_analytics_service.getReviewsForExport(query);
 
     // The service returns rows keyed by their Spanish header labels; 'Fecha'

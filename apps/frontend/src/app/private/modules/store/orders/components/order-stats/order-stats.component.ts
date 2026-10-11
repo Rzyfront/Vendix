@@ -20,6 +20,8 @@ export class OrderStatsComponent {
     total_revenue: 0,
     pending_orders: 0,
     completed_orders: 0,
+    cancelled_orders: 0,
+    refunded_orders: 0,
     average_order_value: 0,
     ordersGrowthRate: 0,
     pendingGrowthRate: 0,

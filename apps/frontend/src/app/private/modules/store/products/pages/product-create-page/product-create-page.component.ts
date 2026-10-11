@@ -11,6 +11,7 @@ import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { KdsStationsService } from '../../../restaurant-ops/kds/services';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import type { KdsStation } from '../../../restaurant-ops/kds/interfaces';
 import { map, startWith, switchMap } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
@@ -551,6 +552,9 @@ export class ProductCreatePageComponent {
   private destroyRef = inject(DestroyRef);
   /** QUI-651 — estaciones de KDS para el selector del plato preparado. */
   private readonly kdsStationsService = inject(KdsStationsService);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
+  /** Cocina fisica: la estacion KDS se oculta en el form (el dato se conserva). */
+  readonly isPhysicalKitchen = this.kitchenTicketPrint.isPhysicalKitchen;
   private barcodeService = inject(PosBarcodeService);
   private readonly authFacade = inject(AuthFacade);
   private readonly fiscalGate = inject(FiscalGateService);
@@ -1774,6 +1778,7 @@ export class ProductCreatePageComponent {
     // El effect resuelve la condición de carrera donde storeSettings$ o loginIndustries$
     // emiten tras la construcción inicial del componente (especialmente en tablets/móvil/recarga).
     effect(() => {
+      if (this.isPhysicalKitchen()) return;
       if (this.isRestaurant() || this.isPreparedProduct()) {
         this.loadKdsStations();
       }
@@ -4352,7 +4357,11 @@ export class ProductCreatePageComponent {
       // QUI-651 — se envia explicitamente null cuando no hay estacion elegida, no
       // se omite: omitirlo en una edicion dejaria la estacion anterior pegada al
       // plato aunque el operador la haya limpiado.
-      kds_id: formValue.kds_id ? Number(formValue.kds_id) : null,
+      // En cocina fisica el selector esta oculto: se omite la clave para que el
+      // backend (PATCH, undefined = no tocar) conserve la estacion guardada.
+      ...(this.isPhysicalKitchen()
+        ? {}
+        : { kds_id: formValue.kds_id ? Number(formValue.kds_id) : null }),
       preparation_time_minutes: formValue.preparation_time_minutes
         ? Number(formValue.preparation_time_minutes)
         : undefined,

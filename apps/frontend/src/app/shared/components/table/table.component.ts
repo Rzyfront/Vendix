@@ -12,6 +12,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 import { DropdownComponent } from '../dropdown/dropdown.component';
+import { TooltipComponent, type TooltipColor } from '../tooltip/tooltip.component';
 
 export interface TableColumn {
   key: string;
@@ -47,11 +48,15 @@ export interface TableAction {
   label: string | ((item: any) => string);
   icon?: string | ((item: any) => string);
   action: (item: any) => void;
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'success' | 'warning' | 'info' | 'gaming' | 'royal' | 'muted' | ((item: any) => string);
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'success' | 'warning' | 'info' | 'gaming' | 'royal' | 'muted' | 'order-pending' | 'order-processing' | 'order-ready' | 'order-delivered' | 'order-cancelled' | ((item: any) => string);
   disabled?: (item: any) => boolean;
   show?: (item: any) => boolean;
   /** Optional tooltip text shown on hover. Falls back to label if not provided. */
   tooltip?: string | ((item: any) => string);
+  /** Render the shared app-tooltip around the action button. */
+  tooltipComponent?: boolean;
+  /** Force the shared tooltip open after an action click; undefined keeps hover behavior. */
+  tooltipColor?: TooltipColor | ((item: any) => TooltipColor);
 }
 
 export type TableSize = 'sm' | 'md' | 'lg';
@@ -70,7 +75,7 @@ export type RowSelectionState = 'none' | 'some' | 'all';
   selector: 'app-table',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, IconComponent, DropdownComponent],
+  imports: [CommonModule, IconComponent, DropdownComponent, TooltipComponent],
   templateUrl: './table.component.html',
   styleUrl: './table.component.scss',
 })
@@ -344,6 +349,12 @@ export class TableComponent {
     return this.getActionLabel(action, item);
   }
 
+  getActionTooltipColor(action: TableAction, item: any): TooltipColor {
+    return typeof action.tooltipColor === 'function'
+      ? action.tooltipColor(item)
+      : action.tooltipColor ?? 'ai';
+  }
+
   getActionIcon(action: TableAction, item: any): string {
     const icon =
       typeof action.icon === 'function' ? action.icon(item) : action.icon;
@@ -576,7 +587,11 @@ export class TableComponent {
       column.badgeConfig?.type === 'custom' &&
       (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
     ) {
-      return this.getBadgeColorFromMap(column, value);
+      const color = this.getBadgeColorFromMap(column, value);
+      if (!color) return null;
+      return color.startsWith('#') || color.startsWith('rgb')
+        ? color
+        : 'var(--color-text-primary)';
     }
     return null;
   }
@@ -699,7 +714,7 @@ export class TableComponent {
     } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
       return color.replace(/[\d.]+\)$/, '0.15)');
     }
-    return color;
+    return `color-mix(in srgb, ${color} 15%, transparent)`;
   }
 
   /**
@@ -711,7 +726,7 @@ export class TableComponent {
     } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
       return color.replace(/[\d.]+\)$/, '0.3)');
     }
-    return color;
+    return `color-mix(in srgb, ${color} 30%, transparent)`;
   }
 
   /**

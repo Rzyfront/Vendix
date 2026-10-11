@@ -17,9 +17,19 @@ const prepared = {
 
 function setup() {
   const tx = {
-    $queryRaw: jest.fn().mockResolvedValue([{ id: 41, status: 'preparing' }]).mockResolvedValueOnce([{ id: 41 }]).mockResolvedValueOnce([{ version: 2, dian_configuration_id: 18, software_id_snapshot: prepared.software_id, certificate_fingerprint_snapshot: prepared.certificate_fingerprint }]),
+    $queryRaw: jest.fn((query: any) => Promise.resolve(
+      query.sql?.includes('received_buyer_event_enablements')
+        ? [{ version: 2, dian_configuration_id: 18, software_id_snapshot: prepared.software_id, certificate_fingerprint_snapshot: prepared.certificate_fingerprint }]
+        : query.sql?.includes('e."status"') ? [{ id: 41, status: 'preparing' }]
+          : query.sql?.includes('FROM "received_documents"') && !query.sql?.includes('JOIN') ? [{ id: 30 }]
+            : [{ id: 41 }],
+    )),
     received_document_events: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), findFirst: jest.fn().mockResolvedValue({ result: reservedResult }) },
     received_document_event_attempts: { create: jest.fn().mockResolvedValue({}), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    received_documents: {
+      findFirst: jest.fn().mockResolvedValue({ confirmed_goods_at: null, accepted_at: null }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
   };
   const prisma = {
     $transaction: jest.fn((callback: (arg: typeof tx) => unknown) => callback(tx)),
@@ -62,12 +72,84 @@ describe('ReceivedBuyerEventDispatchService', () => {
     expect(h.dian.sendPreparedDocumentEvent).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['032', 'confirmed_goods_at'],
+    ['033', 'accepted_at'],
+  ] as const)('preserves the first accepted %s timestamp observation', async (eventCode, timestampField) => {
+    const h = setup();
+    const firstObserved = new Date('2026-10-10T10:00:00.000Z');
+    h.payloads.build.mockResolvedValue({ request: { event_code: eventCode, event_number: 'RD41', referenced_document_key: source.referenced_cufe }, selection: { configuration_id: 18, accounting_entity_id: 7, store_id: 11 }, source });
+    h.dian.prepareDocumentEvent.mockResolvedValue({ ...prepared, event_code: eventCode });
+    h.dian.sendPreparedDocumentEvent.mockResolvedValue({ ...prepared, event_code: eventCode, success: true, delivery_status: 'accepted', request_xml: prepared.signed_xml, response_xml: '<Response/>', errors: [] });
+    h.tx.received_documents.findFirst.mockResolvedValue({ confirmed_goods_at: timestampField === 'confirmed_goods_at' ? firstObserved : null, accepted_at: timestampField === 'accepted_at' ? firstObserved : null });
+
+    await expect(h.service.execute(context, 30, { event_code: eventCode as any, idempotency_key: `event-${eventCode}` })).resolves.toMatchObject({ status: 'accepted' });
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.tx.received_document_events.updateMany.mock.calls.at(-1)?.[0].data.status).toBe('accepted');
+    expect(h.tx.received_document_event_attempts.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'accepted' }) }));
+    expect(h.prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['032', 'confirmed_goods_at'],
+    ['033', 'accepted_at'],
+  ] as const)('projects accepted %s and increments the document version exactly once in the outcome transaction', async (eventCode, timestampField) => {
+    const h = setup();
+    h.payloads.build.mockResolvedValue({ request: { event_code: eventCode, event_number: 'RD41', referenced_document_key: source.referenced_cufe }, selection: { configuration_id: 18, accounting_entity_id: 7, store_id: 11 }, source });
+    h.dian.prepareDocumentEvent.mockResolvedValue({ ...prepared, event_code: eventCode });
+    h.dian.sendPreparedDocumentEvent.mockResolvedValue({ ...prepared, event_code: eventCode, success: true, delivery_status: 'accepted', request_xml: prepared.signed_xml, response_xml: '<Response/>', errors: [] });
+
+    await expect(h.service.execute(context, 30, { event_code: eventCode as any, idempotency_key: `project-${eventCode}` })).resolves.toMatchObject({ status: 'accepted' });
+    expect(h.tx.received_documents.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 30, organization_id: 5, accounting_entity_id: 7, store_id: 11, [timestampField]: null }),
+      data: expect.objectContaining({ [timestampField]: expect.any(Date), version: { increment: 1 } }),
+    }));
+    expect(h.tx.received_document_events.updateMany.mock.calls.at(-1)?.[0].data.status).toBe('accepted');
+    expect(h.tx.received_document_event_attempts.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'accepted' }) }));
+  });
+
+  it.each(['rejected', 'unknown'] as const)('does not project legal timestamps for a %s delivery result', async (status) => {
+    const h = setup();
+    h.payloads.build.mockResolvedValue({ request: { event_code: '033', event_number: 'RD41', referenced_document_key: source.referenced_cufe }, selection: { configuration_id: 18, accounting_entity_id: 7, store_id: 11 }, source });
+    h.dian.prepareDocumentEvent.mockResolvedValue({ ...prepared, event_code: '033' });
+    h.dian.sendPreparedDocumentEvent.mockResolvedValue({ ...prepared, event_code: '033', success: status === 'rejected', delivery_status: status, request_xml: prepared.signed_xml, response_xml: '<Response/>', errors: [] });
+
+    await expect(h.service.execute(context, 30, { event_code: '033', idempotency_key: `event-${status}` })).resolves.toMatchObject({ status });
+    expect(h.tx.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns unknown and rolls back outcome and attempt when the accepted projection cannot persist', async () => {
+    const h = setup();
+    h.payloads.build.mockResolvedValue({ request: { event_code: '032', event_number: 'RD41', referenced_document_key: source.referenced_cufe }, selection: { configuration_id: 18, accounting_entity_id: 7, store_id: 11 }, source });
+    h.dian.prepareDocumentEvent.mockResolvedValue({ ...prepared, event_code: '032' });
+    h.dian.sendPreparedDocumentEvent.mockResolvedValue({ ...prepared, event_code: '032', success: true, delivery_status: 'accepted', request_xml: prepared.signed_xml, response_xml: '<Response/>', errors: [] });
+    h.tx.received_documents.findFirst.mockResolvedValue({ confirmed_goods_at: null, accepted_at: null });
+    h.tx.received_documents.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(h.service.execute(context, 30, { event_code: '032', idempotency_key: 'projection-conflict' })).resolves.toMatchObject({ status: 'unknown' });
+    expect(h.tx.received_document_events.updateMany).toHaveBeenCalledTimes(1); // only freeze; accepted result was rolled back
+    expect(h.tx.received_document_event_attempts.updateMany).not.toHaveBeenCalled();
+    expect(h.dian.sendPreparedDocumentEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('locks the source document before its event when freezing for transmission', async () => {
+    const h = setup();
+    await h.service.execute(context, 30, { event_code: '030', idempotency_key: 'lock-order' });
+    const lockQueries = h.tx.$queryRaw.mock.calls.slice(0, 3).map(([query]) => query.sql);
+    expect(lockQueries[0]).toContain('FROM "received_documents"');
+    expect(lockQueries[1]).toContain('FROM "received_document_events"');
+    expect(lockQueries[2]).toContain('received_buyer_event_enablements');
+  });
+
   it('marks failures before SOAP as preparation_failed and never sends', async () => {
     const h = setup(); h.payloads.build.mockRejectedValue(new Error('sensitive internals'));
     h.tx.$queryRaw.mockReset().mockResolvedValueOnce([{ id: 41, status: 'preparing' }]);
     await expect(h.service.execute(context, 30, { event_code: '030', idempotency_key: 'once' })).resolves.toMatchObject({ status: 'preparation_failed' });
     const prepFailureResult = h.tx.received_document_events.updateMany.mock.calls[0][0].data.result;
     expect(prepFailureResult).toMatchObject({ description: 'original explanation', claim_concept_code: '02', dian_configuration_id: 18, activation_version: 2, failure_stage: 'preparation' });
+    expect(h.tx.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
     expect(h.dian.sendPreparedDocumentEvent).not.toHaveBeenCalled();
   });
 

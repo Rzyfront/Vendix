@@ -26,6 +26,8 @@ export interface ItemListDetailField {
   label: string;
   /** Optional transform function to format the value */
   transform?: (value: any, item?: any) => string;
+  /** Optional display value for null/undefined (and empty strings); omitted preserves legacy fallbacks. */
+  defaultValue?: string;
   /** Optional icon name to show next to the label */
   icon?: string;
   /** Optional informative icon to display next to the value (like an alert or info circle) */
@@ -52,6 +54,8 @@ export interface ItemListCardConfig {
   subtitleKey?: string;
   /** Optional transform function to compute the subtitle from the full item */
   subtitleTransform?: (item: any) => string;
+  /** Optional secondary note line (italic, small) rendered under the subtitle. Empty = hidden. */
+  noteTransform?: (item: any) => string | null | undefined;
   /** Key path for avatar/image URL */
   avatarKey?: string;
   /** Optional click handler for avatar/image interactions */
@@ -72,6 +76,8 @@ export interface ItemListCardConfig {
   footerLabel?: string;
   /** Transform function for the footer value */
   footerTransform?: (value: any, item?: any) => string;
+  /** Optional display value for null/undefined (and empty strings); omitted preserves legacy fallbacks. */
+  footerDefaultValue?: string;
   /**
    * Avatar shape: 'circle' (default, for users/profiles) or 'square' (for products with images)
    * Only applies when avatarKey or avatarFallbackIcon is defined

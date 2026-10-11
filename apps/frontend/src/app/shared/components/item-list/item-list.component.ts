@@ -9,6 +9,8 @@ import {
 } from '@angular/core';
 import { NgClass, NgStyle } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
+import type { TooltipColor } from '../tooltip/tooltip.component';
 import {
   ItemListCardConfig,
   ItemListSize,
@@ -22,7 +24,7 @@ export type ItemListActionsDisplay = 'buttons' | 'dropdown';
   selector: 'app-item-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, NgStyle, IconComponent],
+  imports: [NgClass, NgStyle, IconComponent, TooltipComponent],
   templateUrl: './item-list.component.html',
   styleUrl: './item-list.component.scss',
 })
@@ -37,6 +39,8 @@ export class ItemListComponent {
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');
   readonly actionsDisplay = input<ItemListActionsDisplay>('buttons');
+  /** Number of visible actions rendered directly before mobile overflow. */
+  readonly directActionsCount = input(2);
   readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
     () => undefined
   );
@@ -111,6 +115,11 @@ export class ItemListComponent {
       return this.getNestedValue(item, key) || '';
     }
     return '';
+  }
+
+  getNote(item: any): string {
+    const transform = this.cardConfig().noteTransform;
+    return transform ? (transform(item) ?? '').trim() : '';
   }
 
   showAvatar(): boolean {
@@ -209,13 +218,19 @@ export class ItemListComponent {
     }
     if (color) {
       let bg = color;
+      let textColor = color;
+      let borderColor = `1px solid ${color}40`;
       if (color.startsWith('#') && color.length === 7) {
         bg = `${color}26`;
+      } else {
+        bg = `color-mix(in srgb, ${color} 15%, transparent)`;
+        textColor = 'var(--color-text-primary)';
+        borderColor = `1px solid color-mix(in srgb, ${color} 25%, transparent)`;
       }
       return {
         'background-color': bg,
-        color: color,
-        border: `1px solid ${color}40`,
+        color: textColor,
+        border: borderColor,
       };
     }
     return {};
@@ -240,7 +255,8 @@ export class ItemListComponent {
 
   getDetailValue(item: any, field: any): string {
     const value = this.getNestedValue(item, field.key);
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return field.defaultValue ?? '-';
+    if (value === '' && field.defaultValue !== undefined) return field.defaultValue;
     if (field.transform) {
       return field.transform(value, item);
     }
@@ -268,7 +284,8 @@ export class ItemListComponent {
     const footerKey = config.footerKey;
     if (!footerKey) return '';
     const value = this.getNestedValue(item, footerKey);
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return config.footerDefaultValue ?? '-';
+    if (value === '' && config.footerDefaultValue !== undefined) return config.footerDefaultValue;
     const transform = config.footerTransform;
     if (transform) {
       return transform(value, item);
@@ -288,6 +305,17 @@ export class ItemListComponent {
       return null;
     }
     return id as string | number;
+  }
+
+  /**
+   * Stable DOM identity for a card. Rows without an id use their position as a
+   * fallback, which is intended only for frozen child rows that have no ID.
+   * The explicit namespaces keep ids (including numeric/string lookalikes)
+   * distinct from positional keys.
+   */
+  getRowTrackKey(item: any, index: number): string {
+    const id = this.getRowId(item);
+    return id === null ? `index:${index}` : `id:${typeof id}:${id}`;
   }
 
   isRowSelected(item: any): boolean {
@@ -433,6 +461,12 @@ export class ItemListComponent {
     return this.getActionLabel(action, item);
   }
 
+  getActionTooltipColor(action: TableAction, item: any): TooltipColor {
+    return typeof action.tooltipColor === 'function'
+      ? action.tooltipColor(item)
+      : action.tooltipColor ?? 'ai';
+  }
+
   getActionIcon(action: TableAction, item: any): string {
     const icon =
       typeof action.icon === 'function' ? action.icon(item) : action.icon;
@@ -461,11 +495,17 @@ export class ItemListComponent {
     return acts.filter((action) => this.isActionVisible(action, item));
   }
 
+  getDirectActions(item: any): TableAction[] {
+    return this.actionsDisplay() === 'dropdown'
+      ? []
+      : this.getVisibleActions(item).slice(0, this.directActionsCount());
+  }
+
   getMenuActions(item: any): TableAction[] {
     const visibleActions = this.getVisibleActions(item);
     return this.actionsDisplay() === 'dropdown'
       ? visibleActions
-      : visibleActions.slice(2);
+      : visibleActions.slice(this.directActionsCount());
   }
 
   getSizeClasses(): string {

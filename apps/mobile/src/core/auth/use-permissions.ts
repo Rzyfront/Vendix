@@ -17,6 +17,7 @@ export type Permission =
   | 'store:promotions:cancel'
   | 'store:promotions:delete'
   | 'store:orders:create'
+  | 'store:orders:read'
   | 'store:orders:update'
   | 'store:orders:delete';
 

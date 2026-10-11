@@ -45,6 +45,7 @@ export class ConsoleProvider implements EmailProvider {
     html: string,
     attachments: EmailAttachment[],
     text?: string,
+    _from?: { name: string; email: string },
   ): Promise<EmailResult> {
     const attachmentNames = attachments.map((a) => a.filename).join(', ');
     this.logger.log(

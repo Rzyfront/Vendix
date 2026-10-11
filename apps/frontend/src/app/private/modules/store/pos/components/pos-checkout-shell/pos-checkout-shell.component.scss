@@ -545,12 +545,90 @@
    Stitch paso 5: el mixin solo garantiza 44px en móvil; en desktop se refuerza
    aquí (target + foco 3px del lenguaje fijado en pasos 2–4). */
 .cliente-collapsed {
-  min-height: 44px;
   @include subwizard.subwizard-collapsed-row;
+  min-height: 32px;
+  padding: 4px 8px;
+  gap: 6px;
+  font-size: 12px;
+  cursor: default;
 
-  &:focus-visible {
-    outline: 3px solid var(--color-primary);
-    outline-offset: 2px;
+  @media (max-width: 767px) {
+    min-height: 36px;
+  }
+
+  .cliente-collapsed__main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+    border-radius: 6px;
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+  }
+
+  .sw-label {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .cliente-collapsed__name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .cliente-collapsed__doc {
+    flex-shrink: 0;
+    max-width: 50%;
+    font-weight: 400;
+    color: var(--color-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cliente-collapsed__icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+
+    &:hover {
+      color: var(--color-text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 1px;
+    }
   }
 }
 

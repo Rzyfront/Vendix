@@ -3,6 +3,8 @@ export const environment = {
   // apiUrl points to local backend for development
   apiUrl: 'https://api.vendix.com/api',
   vendixDomain: 'vendix.com',
+  // Vacío: la portada comercial no mide en desarrollo
+  commercialAnalyticsId: '',
 
   // Configuración para desarrollo
   debugDomainDetection: true,

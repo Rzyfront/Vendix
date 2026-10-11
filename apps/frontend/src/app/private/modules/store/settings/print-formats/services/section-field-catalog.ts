@@ -78,6 +78,8 @@ const TOTALS: CatalogField[] = [
   { id: 'f_tax', key: 'totals.tax_total', label: 'Impuestos', format: 'currency', position: 'right' },
   { id: 'f_reten', key: 'totals.withholding_total', label: 'Retención', format: 'currency', position: 'right' },
   { id: 'f_tip', key: 'totals.tip_amount', label: 'Propina', format: 'currency', position: 'right' },
+  { id: 'f_tip_suggested', key: 'totals.suggested_tip_amount', label: 'Propina sugerida', format: 'currency', position: 'right' },
+  { id: 'f_total_with_tip', key: 'totals.total_with_suggested_tip', label: 'Total con propina', format: 'currency', position: 'right' },
   { id: 'f_tot', key: 'totals.grand_total', label: 'TOTAL A PAGAR', format: 'currency', position: 'right' },
   { id: 'f_words', key: 'totals.grand_total_in_words', label: 'Valor en Letras', format: 'text', position: 'right' },
   { id: 'f_paym', key: 'document.payment_method', label: 'Método de Pago', format: 'text', position: 'right' },

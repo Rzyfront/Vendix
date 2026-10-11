@@ -276,7 +276,7 @@ describe('InvoiceDeliveryService', () => {
 
     const result = await service.deliver(12, { email: 'cliente@test.com' } as any);
 
-    expect(result.zip_name).toBe('Factura-FE100.zip');
+    expect(result.zip_name).toBe('z09001234560002600000064.zip');
     expect(emailService.sendEmailWithAttachments).toHaveBeenCalledTimes(1);
 
     const [, , , attachments] = (emailService.sendEmailWithAttachments as jest.Mock).mock
@@ -291,7 +291,7 @@ describe('InvoiceDeliveryService', () => {
     expect(entry_names).toEqual(['Factura-FE100.xml']);
 
     expect(deliveryEventsCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ status: 'sent', zip_name: 'Factura-FE100.zip' }),
+      data: expect.objectContaining({ status: 'sent', zip_name: 'z09001234560002600000064.zip' }),
     });
   });
 
@@ -330,7 +330,7 @@ describe('InvoiceDeliveryService', () => {
       email: 'cliente@test.com',
     } as any);
 
-    expect(result.zip_name).toBe('Factura-FE100.zip');
+    expect(result.zip_name).toBe('z09001234560002600000064.zip');
     expect(emailService.sendEmailWithAttachments).toHaveBeenCalledTimes(1);
 
     // Casilla 4: el PDF salió del motor `renderBuffer`, no de S3.
@@ -425,7 +425,7 @@ describe('InvoiceDeliveryService', () => {
     });
 
     const result = await service.deliver(10, { email: 'cliente@test.com' } as any);
-    expect(result.zip_name).toBe('Factura-FE100.zip');
+    expect(result.zip_name).toBe('z09001234560002600000064.zip');
 
     const [, , , attachments] = (emailService.sendEmailWithAttachments as jest.Mock)
       .mock.calls[0];
@@ -605,5 +605,168 @@ describe('InvoiceDeliveryService', () => {
       .getData()
       .toString('utf-8');
     expect(ax).toContain('<cbc:ProfileExecutionID>2</cbc:ProfileExecutionID>');
+  });
+
+  describe('formato DIAN del correo (2026-10-08)', () => {
+    const withXml = { ...acceptedInvoice, xml_document: '<Invoice/>' };
+
+    it('asunto DIAN §9.1 (NIT;razón social;número;código;nombre comercial)', async () => {
+      const { service, emailService } = createService({
+        prisma: {
+          invoices: { findFirst: jest.fn().mockResolvedValue(withXml) },
+        },
+      });
+
+      await service.deliver(12, { email: 'cliente@test.com' } as any);
+
+      const [, subject] = (emailService.sendEmailWithAttachments as jest.Mock)
+        .mock.calls[0];
+      expect(subject).toBe(
+        '900123456;Vendix Demo SAS;FE100;01;Vendix Demo',
+      );
+    });
+
+    it('remitente = razón social del emisor y Reply-To = su correo', async () => {
+      const { service, emailService } = createService({
+        prisma: {
+          invoices: { findFirst: jest.fn().mockResolvedValue(withXml) },
+        },
+      });
+
+      await service.deliver(12, { email: 'cliente@test.com' } as any);
+
+      const call = (emailService.sendEmailWithAttachments as jest.Mock).mock
+        .calls[0];
+      expect(call[5]).toEqual({
+        name: 'Vendix Demo SAS',
+        email: 'facturas@demo.test',
+      });
+    });
+
+    it('sin adjunto también viaja el remitente y el asunto DIAN', async () => {
+      const { service, emailService } = createService({
+        fiscalPdfRender: {
+          renderBuffer: jest.fn().mockRejectedValue(new Error('sin render')),
+        },
+      });
+
+      await service.deliver(12, { email: 'cliente@test.com' } as any);
+
+      expect(emailService.sendEmail).toHaveBeenCalledWith(
+        'cliente@test.com',
+        '900123456;Vendix Demo SAS;FE100;01;Vendix Demo',
+        expect.any(String),
+        expect.any(String),
+        { name: 'Vendix Demo SAS', email: 'facturas@demo.test' },
+      );
+    });
+
+    it('el zip usa la convención DIAN: z + NIT 10 + ppp + aa + consecutivo hex', async () => {
+      const { service } = createService({
+        prisma: {
+          invoices: { findFirst: jest.fn().mockResolvedValue(withXml) },
+        },
+      });
+
+      const result = await service.deliver(12, {
+        email: 'cliente@test.com',
+      } as any);
+
+      expect(result.zip_name).toMatch(/^z\d{10}\d{3}\d{2}[0-9a-f]{8}\.zip$/);
+      expect(result.zip_name).toBe('z09001234560002600000064.zip');
+    });
+
+    it('el correo HTML nombra al emisor y lleva marca Vendix', async () => {
+      const { service, emailService } = createService();
+
+      await service.deliver(12, { email: 'cliente@test.com' } as any);
+
+      const html = (emailService.sendEmailWithAttachments as jest.Mock).mock
+        .calls[0][2];
+      expect(html).toContain('te informa que se generó el siguiente comprobante');
+      expect(html).toContain('https://vendix.online/assets/images/mail/vendix_imagotipo_email.jpg');
+    });
+
+    it('recibo interno (dian_status not_applicable): asunto y zip legibles, remitente = emisor', async () => {
+      const { service, emailService } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest
+              .fn()
+              .mockResolvedValue({ ...withXml, dian_status: 'not_applicable' }),
+          },
+        },
+      });
+
+      const result = await service.deliver(12, {
+        email: 'cliente@test.com',
+      } as any);
+
+      const call = (emailService.sendEmailWithAttachments as jest.Mock).mock
+        .calls[0];
+      expect(call[1]).toMatch(/^Reenvío de factura FE100/);
+      expect(call[5]).toEqual({
+        name: 'Vendix Demo SAS',
+        email: 'facturas@demo.test',
+      });
+      expect(result.zip_name).toBe('Factura-FE100.zip');
+    });
+
+    it('el pie del correo usa el NIT de la identidad fiscal, no organizations.tax_id', async () => {
+      const { service, emailService } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue({
+              ...withXml,
+              organization: {
+                ...withXml.organization,
+                tax_id: '902056589',
+                fiscal_scope: 'ORGANIZATION',
+                organization_settings: {
+                  settings: { fiscal_data: { nit: '900123456' } },
+                },
+              },
+            }),
+          },
+        },
+      });
+
+      await service.deliver(12, { email: 'cliente@test.com' } as any);
+
+      const [, subject, html] = (
+        emailService.sendEmailWithAttachments as jest.Mock
+      ).mock.calls[0];
+      expect(subject.split(';')[0]).toBe('900123456');
+      expect(html).toContain('900123456');
+      expect(html).not.toContain('902056589');
+    });
+
+    it('identidad del emisor irresoluble: cae al asunto, remitente y zip anteriores', async () => {
+      const { service, emailService } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue({
+              ...withXml,
+              organization: {
+                ...withXml.organization,
+                tax_id: '',
+                legal_name: '',
+                name: '',
+              },
+            }),
+          },
+        },
+      });
+
+      const result = await service.deliver(12, {
+        email: 'cliente@test.com',
+      } as any);
+
+      const call = (emailService.sendEmailWithAttachments as jest.Mock).mock
+        .calls[0];
+      expect(call[1]).toMatch(/^Reenvío de factura FE100/);
+      expect(call[5]).toBeUndefined();
+      expect(result.zip_name).toBe('Factura-FE100.zip');
+    });
   });
 });

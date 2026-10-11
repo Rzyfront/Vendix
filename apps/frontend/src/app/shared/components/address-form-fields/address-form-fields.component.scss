@@ -191,3 +191,19 @@
   font-weight: 400;
   color: var(--color-text-muted, #6b7280);
 }
+/* Chip de ubicación fija (tienda con un solo municipio de cobertura). */
+.locked-location-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-surface-alt, var(--color-surface));
+  color: var(--color-text-primary, #111827);
+  font-size: 0.8125rem;
+}
+
+.locked-location-chip app-icon {
+  color: var(--color-primary, #16a34a);
+}

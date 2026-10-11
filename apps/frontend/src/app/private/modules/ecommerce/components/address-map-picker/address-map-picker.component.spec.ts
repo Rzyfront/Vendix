@@ -81,4 +81,106 @@ describe('AddressMapPickerComponent', () => {
       fixture.destroy();
     }
   });
+  describe('handleMapLoaded', () => {
+    function setup() {
+      TestBed.configureTestingModule({ imports: [AddressMapPickerComponent] });
+      const fixture = TestBed.createComponent(AddressMapPickerComponent);
+      const component = fixture.componentInstance;
+      spyOn(component, 'ngAfterViewInit').and.stub();
+      fixture.detectChanges();
+      const map = {
+        resize: jasmine.createSpy('resize'),
+        jumpTo: jasmine.createSpy('jumpTo'),
+        flyTo: jasmine.createSpy('flyTo'),
+      };
+      const internals = component as unknown as {
+        map: typeof map | null;
+        mapLoaded: boolean;
+        tileLoaded: boolean;
+        handleMapLoaded: () => void;
+      };
+      internals.map = map;
+      return { fixture, component, internals, map };
+    }
+
+    it('does not mark the map loaded when no real tile arrived', () => {
+      const { fixture, internals, map } = setup();
+      internals.tileLoaded = false;
+      internals.handleMapLoaded();
+      expect(internals.mapLoaded).toBeFalse();
+      expect(map.resize).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
+    it('marks the map loaded once a real tile arrived', () => {
+      const { fixture, internals } = setup();
+      internals.tileLoaded = true;
+      internals.handleMapLoaded();
+      expect(internals.mapLoaded).toBeTrue();
+      fixture.destroy();
+    });
+  });
+
+  describe('map failure placeholder', () => {
+    function setup() {
+      TestBed.configureTestingModule({ imports: [AddressMapPickerComponent] });
+      const fixture = TestBed.createComponent(AddressMapPickerComponent);
+      const component = fixture.componentInstance;
+      spyOn(component, 'ngAfterViewInit').and.stub();
+      const fail = () =>
+        (component as unknown as { failMap: () => void }).failMap();
+      return { fixture, component, fail };
+    }
+
+    it('shows the actionable text and the locate button', () => {
+      const { fixture, fail } = setup();
+      fixture.detectChanges();
+      fail();
+      fixture.detectChanges();
+
+      const el = fixture.nativeElement as HTMLElement;
+      const text = el.querySelector('.amp-error')?.textContent ?? '';
+      expect(text).toContain(
+        'No pudimos mostrar el mapa. Usa tu ubicación para ubicar la entrega.',
+      );
+      expect(text).not.toContain('manualmente');
+      expect(el.querySelector('.amp-error-btn')?.textContent).toContain(
+        'Usar mi ubicación',
+      );
+      fixture.destroy();
+    });
+
+    it('emits locateRequested when the button is clicked with delegateLocate', () => {
+      const { fixture, component, fail } = setup();
+      fixture.componentRef.setInput('delegateLocate', true);
+      fixture.detectChanges();
+      fail();
+      fixture.detectChanges();
+      const locateRequested = jasmine.createSpy('locateRequested');
+      component.locateRequested.subscribe(locateRequested);
+
+      (
+        fixture.nativeElement.querySelector('.amp-error-btn') as HTMLButtonElement
+      ).click();
+
+      expect(locateRequested).toHaveBeenCalledTimes(1);
+      fixture.destroy();
+    });
+
+    it('emits mapFailed (and mapReady) only once on the error path', () => {
+      const { fixture, component, fail } = setup();
+      const mapFailed = jasmine.createSpy('mapFailed');
+      const mapReady = jasmine.createSpy('mapReady');
+      component.mapFailed.subscribe(mapFailed);
+      component.mapReady.subscribe(mapReady);
+
+      fail();
+      fail();
+
+      expect(component.error()).toBeTrue();
+      expect(mapFailed).toHaveBeenCalledTimes(1);
+      expect(mapReady).toHaveBeenCalledTimes(1);
+      fixture.destroy();
+    });
+  });
 });

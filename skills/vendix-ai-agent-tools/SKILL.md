@@ -9,7 +9,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.1"
+  version: "3.2"
   scope: [root]
   auto_invoke:
     - "Creating new AI tools"
@@ -71,6 +71,11 @@ goes through the confirmation circuit instead.
 
 - Tools are stored by unique `name`.
 - Permission filtering uses `requiredPermissions.every(...)`.
+- Every subsequent narrowing (agent row, subscription plan, caller `tools`) uses
+  `matchesScope`: canonical names/aliases or domains. Normalize scope entries with
+  `canonicalName` first. A domain like `orders` must not be re-filtered as an exact
+  function name. Permissions filter first, `denied_tools` subtracts last; the
+  offered-catalog guard also checks calls at execution, before UI dispatch.
 - `executeTool()` reads `RequestContextService.getContext()`.
 - Runtime permissions come from `requestContext.permissions || context.roles || []`.
 - `executeTool()` **rejects** `clientSide` tools with `AI_AGENT_004`. This is
@@ -140,18 +145,21 @@ the domain module.
 Keeping one implementation is what stops the streaming and non-streaming paths from
 drifting in tool handling.
 
-Guardrails: `max_iterations = 10`, `timeout_ms = 60000`. Emits
-`ai.agent.iteration`, `ai.agent.tool_executed`, `ai.agent.completed`.
+Default Vexi budgets are 10 iterations / 60 s (25 / 180 s with a plan);
+Vex and explicit agent rows have their own budgets. See `ai-agent.service.ts`, not
+a copied hardcoded table. Emits `ai.agent.iteration`, `ai.agent.tool_executed`,
+`ai.agent.completed`. Iterations are not provider-call counts: empty-completion
+retries and the iteration-exhaustion closing inference add calls. A clock-expired
+turn does **not** start that closing inference; this is not in-flight cancellation.
 
 Per-tool frames: `tool_call` before execution, `tool_result` after (success,
-"Esperando confirmación del usuario.", or failure). Tool results are truncated to
-`TOOL_RESULT_SUMMARY_CHARS` in the stream and `PERSISTED_TOOL_RESULT_CHARS` in
-`ai_messages.tool_calls`.
+"Esperando confirmación del usuario.", or failure). Trace and persisted result
+limits are not a model context budget.
 
-**ClientSide short-circuit.** Inside the loop, a `clientSide` tool is never passed to
-`executeTool()`. The loop records it as `dispatched_to_client` and feeds the model a
-tool message saying the command went to the browser. Without this the model would
-apologize for failing to do something the user is watching happen on screen.
+**ClientSide short-circuit.** Never pass UI tools to `executeTool()`. In chat, the
+loop awaits the browser's real result on `(stream_id, tool_call_id)`; missing or
+late results mean `result_unknown: true`, not success. Browser wait is deducted
+from the agent clock budget. See `vendix-vexi-agent` for this closed-loop contract.
 
 Tool errors are returned to the model as tool results so it can recover.
 
@@ -192,6 +200,21 @@ Rules for the pattern:
   inheriting silence.
 - Scope the spec to the factories its step owns; other domains belong to
   their owners' specs.
+
+## Improvement Gates
+
+- `readOnly` is NOT `parallelSafe`: block tools mutate scratch state and reads can
+  depend on IDs from another call. Parallel execution needs explicit independence.
+- Registry schema validation is partial (`type/enum/required/properties/items`),
+  not full JSON Schema. It coerces numeric strings and ignores unknown keywords,
+  including `minimum/maximum`; enforce bounds in the handler/service as well.
+- A resolved Promise containing `{error}` is not proof of success. Do not change
+  quota or completion semantics without a discriminated result contract and tests.
+- Prefer scoped discovery + existing domain seams over hundreds of handwritten
+  wrappers. Persist resolved IDs and verify postconditions; do not infer a full
+  dataset from a truncated string or incomplete page.
+- Follow `docs/vex-agent-improvement-process.md` for Happy/Sad/Brute coverage and
+  benchmark gates. Synthetic contract tests are not live model or UI E2E.
 
 ## Anti-Patterns
 

@@ -39,7 +39,7 @@
   <!-- Card List -->
   @if (!loading() && data().length > 0) {
     <div class="item-list-cards">
-      @for (item of data(); track item; let i = $index) {
+      @for (item of data(); track getRowTrackKey(item, $index); let i = $index) {
         <div class="item-card" (click)="onItemClick(item)"
           [ngClass]="rowClass() ? rowClass()!(item, i) : ''">
           <!-- Combined Header & Details Wrap -->
@@ -108,6 +108,12 @@
                   @if (getSubtitle(item)) {
                     <p class="card-subtitle">
                       {{ getSubtitle(item) }}
+                    </p>
+                  }
+                  @if (getNote(item)) {
+                    <p class="card-note">
+                      <app-icon name="file-text" [size]="12" />
+                      <span>{{ getNote(item) }}</span>
                     </p>
                   }
                 </div>
@@ -237,27 +243,51 @@
               <div class="footer-actions-wrap relative">
                 <div class="footer-actions flex gap-2">
                   @if (actionsDisplay() === 'buttons') {
-                    <!-- First two visible actions -->
+                    <!-- First configured visible actions -->
                     @for (
-                      action of getVisibleActions(item).slice(0, 2);
+                      action of getDirectActions(item);
                       track action
                     ) {
-                      <button
-                        class="footer-action-btn"
-                        [ngClass]="[
-                          getActionVariant(action, item),
-                          isActionDisabled(action, item) ? 'action-disabled' : '',
-                        ]"
-                        [disabled]="isActionDisabled(action, item)"
-                        [title]="getActionTooltip(action, item)"
-                        [attr.aria-label]="getActionAccessibleName(action, item)"
-                        (click)="executeAction(action, item, $event)"
-                      >
-                        <app-icon
-                          [name]="getActionIcon(action, item) || 'circle'"
-                          [size]="18"
-                        ></app-icon>
-                      </button>
+                      @if (action.tooltipComponent) {
+                        <app-tooltip
+                          [content]="getActionTooltip(action, item)"
+                          [color]="getActionTooltipColor(action, item)"
+                          position="top"
+                          size="sm">
+                          <button
+                            class="footer-action-btn"
+                            [ngClass]="[
+                              getActionVariant(action, item),
+                              isActionDisabled(action, item) ? 'action-disabled' : '',
+                            ]"
+                            [disabled]="isActionDisabled(action, item)"
+                            [attr.aria-label]="getActionAccessibleName(action, item)"
+                            (click)="executeAction(action, item, $event)"
+                          >
+                            <app-icon
+                              [name]="getActionIcon(action, item) || 'circle'"
+                              [size]="18"
+                            ></app-icon>
+                          </button>
+                        </app-tooltip>
+                      } @else {
+                        <button
+                          class="footer-action-btn"
+                          [ngClass]="[
+                            getActionVariant(action, item),
+                            isActionDisabled(action, item) ? 'action-disabled' : '',
+                          ]"
+                          [disabled]="isActionDisabled(action, item)"
+                          [title]="getActionTooltip(action, item)"
+                          [attr.aria-label]="getActionAccessibleName(action, item)"
+                          (click)="executeAction(action, item, $event)"
+                        >
+                          <app-icon
+                            [name]="getActionIcon(action, item) || 'circle'"
+                            [size]="18"
+                          ></app-icon>
+                        </button>
+                      }
                     }
                   }
                   <!-- More (Vertical) Menu Trigger Button -->

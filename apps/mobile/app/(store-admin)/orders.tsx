@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { AppState, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OrderService } from '@/features/store/services/order.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import {
@@ -17,8 +17,10 @@ import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
-import { Icon } from '@/shared/components/icon/icon';
 import { useCan } from '@/core/auth/use-permissions';
+import { useAuthStore } from '@/core/store/auth.store';
+import { useTenantStore } from '@/core/store/tenant.store';
+import { subscribeToOrderEvents } from '@/features/store/services/order-sse.service';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatRelative } from '@/shared/utils/date';
 import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
@@ -116,9 +118,55 @@ const OrderCard = ({ order, onPress }: { order: Order; onPress: () => void }) =>
 
 export default function Orders() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const canCreate = useCan('store:orders:create');
+  const canReadOrders = useCan('store:orders:read');
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const storeId = useTenantStore((state) => state.storeId);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<OrderState | 'all'>('all');
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!canReadOrders || !isAuthenticated || !storeId) return undefined;
+
+      let stopStream: (() => void) | null = null;
+      let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+      let currentAppState = AppState.currentState;
+
+      const refreshQueries = () => {
+        if (refreshTimer) return;
+        refreshTimer = setTimeout(() => {
+          refreshTimer = null;
+          void queryClient.invalidateQueries({ queryKey: ['orders'] });
+          void queryClient.invalidateQueries({ queryKey: ['order-stats'] });
+        }, 250);
+      };
+
+      const connect = () => {
+        if (stopStream || currentAppState !== 'active') return;
+        stopStream = subscribeToOrderEvents(refreshQueries, refreshQueries);
+      };
+
+      connect();
+      const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+        currentAppState = nextState;
+        if (nextState === 'active') {
+          refreshQueries();
+          connect();
+        } else {
+          stopStream?.();
+          stopStream = null;
+        }
+      });
+
+      return () => {
+        appStateSubscription.remove();
+        stopStream?.();
+        if (refreshTimer) clearTimeout(refreshTimer);
+      };
+    }, [canReadOrders, isAuthenticated, queryClient, storeId]),
+  );
 
   const { data: stats } = useQuery({
     queryKey: ['order-stats'],

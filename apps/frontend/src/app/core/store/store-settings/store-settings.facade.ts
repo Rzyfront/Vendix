@@ -2,6 +2,8 @@ import { Injectable, computed, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 
+import { AuthFacade } from '../auth/auth.facade';
+import { TipPolicy, resolveTipPolicy } from '../../utils/tip-policy.util';
 import { selectStoreSettings } from '../auth/auth.selectors';
 import {
   StoreSettings,
@@ -43,6 +45,7 @@ type ExtendedStoreSettings = StoreSettings & {
 @Injectable({ providedIn: 'root' })
 export class StoreSettingsFacade {
   private store = inject(Store);
+  private authFacade = inject(AuthFacade);
 
   readonly settings = toSignal<ExtendedStoreSettings | null>(
     this.store.select(selectStoreSettings) as any,
@@ -51,6 +54,11 @@ export class StoreSettingsFacade {
 
   readonly pos = computed<PosSettings | null>(
     () => this.settings()?.pos ?? null,
+  );
+
+  /** Política de propinas efectiva (`pos.tips` + default por industria). */
+  readonly tipPolicy = computed<TipPolicy>(() =>
+    resolveTipPolicy(this.pos()?.tips, this.authFacade.isRestaurant()),
   );
 
   /**

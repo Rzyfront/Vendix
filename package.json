@@ -79,6 +79,24 @@
     "deepmerge-ts": "^8.0.2",
     "xcode": {
       "uuid": "^11.1.1"
+    },
+    "@nestjs/swagger": {
+      "js-yaml": "5.4.1"
+    },
+    "express": {
+      "proxy-addr": "2.0.8"
+    },
+    "@angular/cli": {
+      "@modelcontextprotocol/sdk": "1.31.0"
+    },
+    "tailwindcss": {
+      "postcss-selector-parser": "7.1.6"
+    },
+    "postcss-nested": {
+      "postcss-selector-parser": "7.1.6"
+    },
+    "@tailwindcss/typography": {
+      "postcss-selector-parser": "7.1.6"
     }
   }
 }

@@ -83,6 +83,7 @@ export class StorePrismaService extends BasePrismaService {
     'booking_reschedule_requests',
     'service_providers',
     'reviews',
+    'order_reviews',
     'ai_conversations',
     'ai_embeddings',
     // Ambas tienen `store_id` propio. Sin registro, el getter devolvería un
@@ -1516,6 +1517,9 @@ export class StorePrismaService extends BasePrismaService {
   // Reviews models
   get reviews() {
     return this.scoped_client.reviews;
+  }
+  get order_reviews() {
+    return this.scoped_client.order_reviews;
   }
 
   get review_responses() {

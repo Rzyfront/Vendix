@@ -106,6 +106,12 @@
       </div>
     </div>
   }
+  @if (uvtInvoiceNotice()) {
+    <app-alert-banner variant="info" icon="file-text" class="block mb-6">
+      Esta orden necesita factura electrónica porque supera el umbral de 5 UVT
+      ({{ uvtThreshold()?.limit_cop | currency }}).
+    </app-alert-banner>
+  }
   <!-- Bug 7 — banner para órdenes en estado `pending_delivery`. Informa al
        operador que la orden requiere despacho manual + entrega + finalizado
        (el estado ya no se auto-finaliza al cobrar). Los 2 botones wirean a
@@ -785,6 +791,36 @@
                       <p class="text-[10px] font-mono text-gray-400 truncate">
                         SKU: {{ item.variant_sku || "N/A" }}@if (parseVariantAttributes(item.variant_attributes); as attrs) {@if (attrs.length) {@for (attr of attrs; track attr.name + attr.value) {<span class="variant-mini-badge">@if (attr.name) {<span>{{ attr.name }}: </span>}{{ attr.value }}</span>}}}
                       </p>
+                      <!-- Nota del ítem: ver + editar -->
+                      @if (item.notes || canEditItemNotes(item)) {
+                        <div class="flex items-start gap-1 mt-0.5 text-[11px] text-gray-500 min-w-0">
+                          @if (item.notes) {
+                            <app-icon name="sticky-note" [size]="12" class="mt-0.5 shrink-0" />
+                            <span class="break-words min-w-0">{{ item.notes }}</span>
+                          }
+                          @if (canEditItemNotes(item)) {
+                            @if (item.notes) {
+                              <button
+                                type="button"
+                                class="shrink-0 p-0.5 text-gray-400 hover:text-primary"
+                                title="Editar nota"
+                                aria-label="Editar nota"
+                                (click)="openItemNoteEditor(item)"
+                              >
+                                <app-icon name="pencil" [size]="12" />
+                              </button>
+                            } @else {
+                              <button
+                                type="button"
+                                class="text-gray-400 hover:text-primary underline-offset-2 hover:underline"
+                                (click)="openItemNoteEditor(item)"
+                              >
+                                + Nota
+                              </button>
+                            }
+                          }
+                        </div>
+                      }
                       <!-- CP-REFUND-FLOW-REDESIGN paso 8 — badge Reembolsado
                            por línea (total o parcial con cantidades) desde la
                            cobertura refund↔NC; la línea facturada no se toca. -->
@@ -1792,6 +1828,48 @@
             />
           </app-card>
 
+          <!-- EXPERIENCIA DE COMPRA (solo lectura; solo si el cliente ya calificó) -->
+          @if (orderReview(); as review) {
+          <app-card shadow="sm" [responsivePadding]="true">
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-2 sm:mb-3"
+            >
+              Experiencia de compra
+            </h2>
+              <div class="flex flex-col gap-2">
+                <div
+                  class="flex items-center gap-0.5"
+                  role="img"
+                  [attr.aria-label]="review.rating + ' de 5 estrellas'"
+                >
+                  @for (n of reviewStars; track n) {
+                    <app-icon
+                      name="star"
+                      [size]="16"
+                      [class]="n <= review.rating ? 'text-warning fill-warning' : 'text-gray-300'"
+                    />
+                  }
+                </div>
+                @if (reviewQuickTagLabel()) {
+                  <p class="text-sm font-medium text-gray-900">
+                    {{ reviewQuickTagLabel() }}
+                  </p>
+                }
+                @if (review.comment) {
+                  <p class="text-sm text-gray-700 whitespace-pre-line">
+                    {{ review.comment }}
+                  </p>
+                }
+                <p class="text-xs text-gray-500">
+                  {{ reviewDateLabel() }}
+                  @if (reviewSourceLabel()) {
+                    · {{ reviewSourceLabel() }}
+                  }
+                </p>
+              </div>
+          </app-card>
+          }
+
           <!-- 5. FACTURA ELECTRÓNICA -->
           <!-- Acceso rápido a la factura de esta orden con la misma capacidad
                que el módulo de Facturación: los chips de abajo salen de
@@ -2744,6 +2822,37 @@
       [preview]="cancellationPreview()"
       (confirmed)="submitItemCancellation($event)"
     />
+
+    <app-modal
+      [isOpen]="noteEditorOpen()"
+      (isOpenChange)="noteEditorOpen.set($event)"
+      (cancel)="closeItemNoteEditor()"
+      title="Nota del ítem"
+      [subtitle]="noteEditorItem()?.product_name ?? ''"
+      size="sm"
+    >
+      <div class="space-y-1">
+        <textarea
+          rows="4"
+          [attr.maxlength]="itemNotesMaxLength"
+          [value]="noteEditorText()"
+          (input)="onNoteEditorInput($event)"
+          placeholder="Ej. sin cebolla, bien cocido..."
+          class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+        ></textarea>
+        <p class="text-[11px] text-gray-500 text-right">
+          {{ noteEditorText().length }}/{{ itemNotesMaxLength }}
+        </p>
+      </div>
+      <div slot="footer" class="flex items-center justify-end gap-2">
+        <app-button variant="outline" [disabled]="noteSaving()" (clicked)="closeItemNoteEditor()">
+          Cancelar
+        </app-button>
+        <app-button variant="primary" [loading]="noteSaving()" [disabled]="noteSaving()" (clicked)="saveItemNote()">
+          Guardar
+        </app-button>
+      </div>
+    </app-modal>
 
     <app-modal
       [isOpen]="showPaymentReceiptModal()"

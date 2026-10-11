@@ -18,6 +18,10 @@ import {
   ValidateIf,
   Equals,
   ArrayMinSize,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+  ValidationArguments,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -389,6 +393,56 @@ export class CashRegisterSettingsDto {
   track_non_cash_payments?: boolean;
 }
 
+/**
+ * Regla cruzada de propina sugerida: si el tipo es 'percentage' el valor no
+ * puede pasar de 100. Constraint propio porque un `@ValidateIf` en la misma
+ * propiedad saltaría TODOS sus demás validadores.
+ */
+@ValidatorConstraint({ name: 'tipSuggestedValueWithinType', async: false })
+export class TipSuggestedValueWithinTypeConstraint
+  implements ValidatorConstraintInterface
+{
+  validate(value: unknown, args: ValidationArguments): boolean {
+    const dto = args.object as { suggested_type?: string };
+    if (dto.suggested_type !== 'percentage') return true;
+    if (typeof value !== 'number') return true;
+    return value <= 100;
+  }
+
+  defaultMessage(): string {
+    return 'suggested_value no puede ser mayor a 100 cuando suggested_type es percentage';
+  }
+}
+
+export class TipsSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean({ message: 'enabled debe ser verdadero o falso' })
+  enabled?: boolean;
+
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean({ message: 'suggested_enabled debe ser verdadero o falso' })
+  suggested_enabled?: boolean;
+
+  @ApiProperty({ enum: ['percentage', 'fixed'], example: 'percentage', required: false })
+  @IsOptional()
+  @IsIn(['percentage', 'fixed'], {
+    message: 'suggested_type debe ser percentage o fixed',
+  })
+  suggested_type?: 'percentage' | 'fixed';
+
+  @ApiProperty({ example: 10, required: false })
+  @IsOptional()
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'suggested_value debe ser un número con máximo 2 decimales' },
+  )
+  @Min(0, { message: 'suggested_value no puede ser negativo' })
+  @Validate(TipSuggestedValueWithinTypeConstraint)
+  suggested_value?: number;
+}
+
 export class BarcodeScannerSettingsDto {
   @ApiProperty({ example: false, required: false })
   @IsOptional()
@@ -523,6 +577,12 @@ export class PosSettingsDto {
   @ValidateNested()
   @Type(() => CashRegisterSettingsDto)
   cash_register?: CashRegisterSettingsDto;
+
+  @ApiProperty({ type: () => TipsSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TipsSettingsDto)
+  tips?: TipsSettingsDto;
 
   @ApiProperty({ type: () => BarcodeScannerSettingsDto, required: false })
   @IsOptional()

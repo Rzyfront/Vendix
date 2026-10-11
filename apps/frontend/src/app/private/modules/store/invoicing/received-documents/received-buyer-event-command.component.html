@@ -2,11 +2,12 @@
   <section class="rounded-xl border border-border bg-surface p-4" aria-labelledby="buyer-events-title">
     <h2 id="buyer-events-title" class="text-lg font-semibold">Eventos del adquirente</h2>
     <p class="mt-1 text-sm text-text-secondary">Acciones legales de recepción, reclamo o aceptación. Cada envío requiere confirmación; la aceptación no se presume.</p>
-    <a class="mt-1 inline-block text-sm text-primary underline" routerLink="/admin/invoicing/received-documents" [queryParams]="listQueryParams()">Consultar habilitación en Documentos recibidos</a>
+    <a class="mt-1 inline-block text-sm text-primary underline" routerLink="/admin/invoicing/dian-config" [queryParams]="listQueryParams()">Ver configuración de facturación electrónica</a>
+    @if (hasPriorAcceptance()) { <p class="mt-2 rounded-lg border border-warning/40 bg-warning-light p-3 text-sm" role="status">El documento registra una aceptación legal previa. No se ofrece presentar un reclamo incompatible.</p> }
     @if (globallyLocked()) { <p class="mt-3 rounded-lg border border-warning/40 bg-warning-light p-3 text-sm" role="status">Hay un evento en preparación, envío o con resultado incierto. No se permiten nuevas acciones hasta consultar su estado.</p> }
     <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
       @for (code of codes; track code) {
-        <button type="button" class="min-h-11 rounded-lg border border-border px-3 py-2 text-left text-sm font-medium hover:bg-background disabled:cursor-not-allowed disabled:opacity-50" [disabled]="codeDisabled(code) || isAccepted(code)" (click)="openFor(code)">{{ isAccepted(code) ? 'Ya aceptado · ' : uncertainCode() === code ? 'Consultar / reintentar ' : '' }}{{ labels[code] }}</button>
+        <button type="button" class="min-h-11 rounded-lg border border-border px-3 py-2 text-left text-sm font-medium hover:bg-background disabled:cursor-not-allowed disabled:opacity-50" [disabled]="codeDisabled(code) || isAccepted(code)" (click)="openFor(code)">@if (code === '033' && hasPriorAcceptance()) { Aceptación legal previa registrada } @else { {{ isAccepted(code) ? 'Ya aceptado · ' : uncertainCode() === code ? 'Consultar / reintentar ' : '' }}{{ labels[code] }} }</button>
       }
     </div>
   </section>

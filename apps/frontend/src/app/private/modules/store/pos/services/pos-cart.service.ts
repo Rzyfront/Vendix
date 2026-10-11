@@ -50,8 +50,6 @@ import { resolveLineUnits } from '../utils/line-units.util';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
-import { InvoicingService } from '../../invoicing/services/invoicing.service';
-import { PosUvtThreshold } from '../../invoicing/interfaces/invoice.interface';
 import {
   catalogInclusiveDefault,
   estimateNetBase,
@@ -92,7 +90,6 @@ export class PosCartService {
   private destroyRef = inject(DestroyRef);
   private withholdingService = inject(WithholdingTaxService);
   private currencyFormat = inject(CurrencyFormatService);
-  private invoicingService = inject(InvoicingService);
   private saleUnitService = inject(PosSaleUnitService);
   private priceTierCache = inject(PriceTierCacheService);
   private authFacade = inject(AuthFacade);
@@ -103,38 +100,12 @@ export class PosCartService {
     () => this.storeSettingsFacade.settings()?.inventory?.allow_negative_stock === true,
   );
 
-  /**
-   * Techo de 5 UVT para el documento equivalente POS (Art. 616-1 ET / Res.
-   * 000165 de 2023). `null` mientras no se resuelve o cuando no aplica.
-   *
-   * Se carga UNA vez: el valor solo cambia cuando la DIAN publica una UVT nueva
-   * (anual) o cuando el comercio activa facturación electrónica.
-   */
-  readonly uvtThreshold = signal<PosUvtThreshold | null>(null);
-
-  /**
-   * `true` cuando la venta actual, tal como está, ya no cabe en un tiquete POS:
-   * supera el tope y no hay comprador identificado.
-   *
-   * Es SOLO un aviso de UI. El bloqueo real vive en la transacción de venta del
-   * backend, contra el total que el servidor recalcula — este cálculo usa el
-   * total del carrito, que aún puede cambiar con promociones resueltas server-side.
-   */
-  readonly invoiceRequiredByUvt = computed(() => {
-    const threshold = this.uvtThreshold();
-    if (!threshold?.enforced || threshold.limit_cop === null) return false;
-    const state = this.cartState();
-    if (state.customer?.id) return false;
-    return Number(state.summary.total ?? 0) > threshold.limit_cop;
-  });
-
   constructor(
     private productService: PosProductService,
     private priceResolver: PriceResolverService,
     private posApi: PosApiService,
   ) {
     this.initWithholdingPreview();
-    this.loadUvtThreshold();
     this.initPersistence();
   }
 
@@ -263,22 +234,6 @@ export class PosCartService {
     if (key) {
       localStorage.removeItem(key);
     }
-  }
-
-  /**
-   * Carga el techo de 5 UVT. Degrada a "sin tope" ante cualquier fallo: el aviso
-   * es una ayuda, y una llamada caída no debe teñir el carrito de una advertencia
-   * que no se puede sustentar (ni ocultar el error real de la venta, que llega
-   * tipado desde el backend).
-   */
-  private loadUvtThreshold(): void {
-    this.invoicingService
-      .getPosUvtThreshold()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => this.uvtThreshold.set(response?.data ?? null),
-        error: () => this.uvtThreshold.set(null),
-      });
   }
 
   /**

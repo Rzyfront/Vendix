@@ -826,6 +826,8 @@ export class PrintLayoutComposerService {
     const showNotes = section.show_notes !== false;
     const showItemDiscounts = section.show_item_discounts !== false;
     const showItemTaxes = section.show_item_taxes !== false;
+    // Solo la comanda de cocina pinta empaque y exclusiones por plato.
+    const isKitchen = data.document?.is_kitchen_ticket === true;
 
     let tbodyRows = '';
     if (mode === 'tokenized') {
@@ -878,6 +880,14 @@ export class PrintLayoutComposerService {
                     }
                     if (showVariantAttr && item.variant_attributes) {
                       sublines += `<br><small class="item-sub item-variants">${this.compiler.escapeHtml(item.variant_attributes)}</small>`;
+                    }
+                    if (isKitchen && item.packaging_label) {
+                      sublines += `<br><strong class="item-packaging">${this.compiler.escapeHtml(String(item.packaging_label).toUpperCase())}</strong>`;
+                    }
+                    if (isKitchen) {
+                      for (const mod of item.modifiers || []) {
+                        sublines += `<br><small class="item-sub item-modifier">${this.compiler.escapeHtml(mod)}</small>`;
+                      }
                     }
                     if (showNotes && item.notes) {
                       sublines += `<br><small class="item-note">Nota: ${this.compiler.escapeHtml(item.notes)}</small>`;
@@ -951,6 +961,8 @@ export class PrintLayoutComposerService {
     const showReten = this.isFieldActive(section, 'f_reten');
     const showTip = this.isFieldActive(section, 'f_tip');
     const showTot = this.isFieldActive(section, 'f_tot');
+    const showTipSuggested = this.isFieldActive(section, 'f_tip_suggested');
+    const showTotalWithTip = this.isFieldActive(section, 'f_total_with_tip');
     const showWords = this.isFieldActive(section, 'f_words');
     const showPaym = this.isFieldActive(section, 'f_paym');
     const showRecv = this.isFieldActive(section, 'f_recv');
@@ -1023,6 +1035,29 @@ export class PrintLayoutComposerService {
       ? '<span class="vendix-token-pill" data-token="order.tip_amount">&#123;&#123; money order.tip_amount &#125;&#125;</span>'
       : this.compiler.escapeHtml(totals.tip_amount_formatted || `$${Number(totals.tip_amount || 0).toLocaleString('es-CO')}`);
 
+    // Propina SUGERIDA (informativa): sólo sin propina real cobrada. El TOTAL
+    // pasa a "Total sin propina" salvo etiqueta personalizada del usuario.
+    const hasSuggestedTip =
+      mode !== 'tokenized' &&
+      Number(totals.suggested_tip_amount) > 0 &&
+      !(Number(totals.tip_amount) > 0);
+    const totField = Array.isArray(section?.fields)
+      ? section.fields.find((f: any) => f.id === 'f_tot' || f.key === 'f_tot')
+      : null;
+    const customTotLabel = totField?.custom_label && String(totField.custom_label).trim();
+    const totLabel =
+      hasSuggestedTip && !customTotLabel
+        ? 'Total sin propina'
+        : this.getFieldCustomLabel(section, 'f_tot', 'TOTAL');
+    const suggestedVal = this.compiler.escapeHtml(
+      totals.suggested_tip_amount_formatted ||
+        `$${Number(totals.suggested_tip_amount || 0).toLocaleString('es-CO')}`,
+    );
+    const totalWithTipVal = this.compiler.escapeHtml(
+      totals.total_with_suggested_tip_formatted ||
+        `$${Number(totals.total_with_suggested_tip || 0).toLocaleString('es-CO')}`,
+    );
+
     return `
       <div class="print-section section-totals" data-section-id="sec_totals">
         <div class="totals-table-wrapper">
@@ -1057,8 +1092,18 @@ export class PrintLayoutComposerService {
               <td class="total-val">${tipVal}</td>
             </tr>` : ''}
             ${showTot ? `<tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
-              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tot', 'TOTAL'))}:</td>
+              <td class="total-label">${this.compiler.escapeHtml(totLabel)}:</td>
               <td class="total-val grand-total">${grandVal}</td>
+            </tr>` : ''}
+            ${hasSuggestedTip && showTipSuggested ? `
+            <tr data-element-id="f_tip_suggested" data-section-id="sec_totals" data-token="order.suggested_tip_amount">
+              <td class="total-label">${this.compiler.escapeHtml((Array.isArray(section?.fields) ? String(section.fields.find((f: any) => f.id === 'f_tip_suggested')?.custom_label || '').trim() : '') || totals.suggested_tip_label || 'Propina sugerida')}:</td>
+              <td class="total-val">${suggestedVal}</td>
+            </tr>` : ''}
+            ${hasSuggestedTip && showTotalWithTip ? `
+            <tr data-element-id="f_total_with_tip" data-section-id="sec_totals" data-token="order.total_with_suggested_tip">
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_total_with_tip', 'Total con propina'))}:</td>
+              <td class="total-val">${totalWithTipVal}</td>
             </tr>` : ''}
             ${tipOutside && showTip && Number(totals.tip_amount) > 0 ? `
             <tr data-element-id="f_tip" data-section-id="sec_totals" data-token="order.tip_amount">
@@ -1523,6 +1568,10 @@ export class PrintLayoutComposerService {
     const tableNumber = doc.table_number;
     const waiterName = doc.waiter_name;
 
+    if (mode !== 'tokenized' && doc.is_kitchen_ticket === true) {
+      return this.renderKitchenTableInfo(section, doc);
+    }
+
     if (mode !== 'tokenized' && !tableNumber && !waiterName) return '';
 
     const tableVal = mode === 'tokenized'
@@ -1545,6 +1594,32 @@ export class PrintLayoutComposerService {
 
     if (rows.length === 0) return '';
     return `<div class="print-section section-table-info" data-section-id="${section.id || section.type}">${rows}</div>`;
+  }
+
+  /**
+   * `table_info` de la comanda de cocina: Orden #, Comanda #, servicio, mesa,
+   * cliente y mesero. Solo pinta las líneas con valor.
+   */
+  private renderKitchenTableInfo(section: any, doc: any): string {
+    const sid = section.id || section.type;
+    const line = (id: string, label: string, val: unknown): string => {
+      const text = val === undefined || val === null ? '' : String(val).trim();
+      if (!text || text === '0') return '';
+      return `<div class="field-row" data-element-id="${id}" data-section-id="${sid}"><span class="field-label">${label}:</span> <span class="field-val">${this.compiler.escapeHtml(text)}</span></div>`;
+    };
+    const rows = [
+      line('f_order_number', 'Orden #', doc.order_number),
+      line('f_daily_number', 'Comanda #', doc.daily_number),
+      line('f_service', 'Servicio', doc.service_type_label),
+      // Si el servicio ya es "Mesa X" la mesa no se repite.
+      doc.service_type_label === doc.table_number
+        ? ''
+        : line('f_table', 'Mesa', doc.table_number),
+      line('f_customer', 'Cliente', doc.customer_name),
+      line('f_waiter', 'Mesero', doc.waiter_name),
+    ].join('');
+    if (!rows) return '';
+    return `<div class="print-section section-table-info" data-section-id="${sid}">${rows}</div>`;
   }
 
   /**
@@ -1577,13 +1652,17 @@ export class PrintLayoutComposerService {
     if (mode !== 'tokenized' && !notes && !terms) return '';
 
     const blocks: string[] = [];
+    const notesLabel =
+      mode !== 'tokenized' && doc.is_kitchen_ticket === true
+        ? 'Nota de la orden'
+        : 'Notas';
 
     if (notes || mode === 'tokenized') {
       const val = mode === 'tokenized'
         ? '<span class="vendix-token-pill" data-token="document.notes">&#123;&#123; document.notes &#125;&#125;</span>'
         : this.compiler.escapeHtml(notes);
       blocks.push(
-        `<div class="notes-block" data-element-id="f_notes" data-token="document.notes"><div class="notes-label">Notas</div><div class="notes-body">${val}</div></div>`,
+        `<div class="notes-block" data-element-id="f_notes" data-token="document.notes"><div class="notes-label">${notesLabel}</div><div class="notes-body">${val}</div></div>`,
       );
     }
 

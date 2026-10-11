@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { DocumentPrintService } from '../../../../shared/services/print';
+import { parseVariantAttributes } from '../../../../shared/utils/variant-attributes.util';
 
 // ============================================================================
 // VOUCHER CONTRACT — structural subset of GuestOrderSummary (guest-order-summary
@@ -12,6 +13,7 @@ interface VoucherItem {
   product_name: string;
   variant_sku?: string | null;
   variant_attributes?: string | null;
+  notes?: string | null;
   quantity: number;
   unit_price: number;
   total_price: number;
@@ -278,10 +280,21 @@ export class GuestOrderPrintService {
               const variantParts: string[] = [];
               if (item.variant_sku)
                 variantParts.push(`SKU: ${this.esc(item.variant_sku)}`);
-              if (item.variant_attributes)
-                variantParts.push(this.esc(item.variant_attributes));
+              const variantText = parseVariantAttributes(item.variant_attributes)
+                .map((a) => {
+                  const name = a.name
+                    ? a.name.charAt(0).toUpperCase() + a.name.slice(1)
+                    : '';
+                  return name ? `${name}: ${a.value}` : a.value;
+                })
+                .join(' · ');
+              if (variantText) variantParts.push(this.esc(variantText));
               const variantLine = variantParts.length
                 ? `<br><span style="font-size: 11px; color: #9ca3af;">${variantParts.join(' · ')}</span>`
+                : '';
+              const note = item.notes?.trim();
+              const noteLine = note
+                ? `<br><span style="font-size: 11px; color: #6b7280; font-style: italic;">Nota: ${this.esc(note)}</span>`
                 : '';
               // Paso 8: badge "Preparación: <estado>" en paridad con la
               // vista. Release-853 regresión (paso 3): `in_preparation` ya
@@ -299,7 +312,7 @@ export class GuestOrderPrintService {
                 : '';
               return `
       <tr>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">${this.esc(item.product_name)}${variantLine}${kitchenLine}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">${this.esc(item.product_name)}${variantLine}${noteLine}${kitchenLine}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${this.esc(item.quantity)}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace;">${fmt(Number(item.unit_price))}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace; font-weight: 600;">${fmt(Number(item.total_price))}</td>

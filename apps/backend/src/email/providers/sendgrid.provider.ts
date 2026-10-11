@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { sanitizeReplyTo, sanitizeSenderName } from '../utils/sender.util';
 import {
   EmailProvider,
   EmailResult,
@@ -40,14 +41,19 @@ export class SendGridProvider implements EmailProvider {
     subject: string,
     html: string,
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult> {
     try {
+      const reply_to = from ? sanitizeReplyTo(from.email) : undefined;
       const msg = {
         to,
         from: {
           email: this.config.fromEmail,
-          name: this.config.fromName,
+          name: from
+            ? sanitizeSenderName(from.name, this.config.fromName)
+            : this.config.fromName,
         },
+        ...(reply_to && { replyTo: { email: reply_to } }),
         subject,
         html,
         text: text || '', // SendGrid requiere texto
@@ -75,14 +81,19 @@ export class SendGridProvider implements EmailProvider {
     html: string,
     attachments: EmailAttachment[],
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult> {
     try {
+      const reply_to = from ? sanitizeReplyTo(from.email) : undefined;
       const msg = {
         to,
         from: {
           email: this.config.fromEmail,
-          name: this.config.fromName,
+          name: from
+            ? sanitizeSenderName(from.name, this.config.fromName)
+            : this.config.fromName,
         },
+        ...(reply_to && { replyTo: { email: reply_to } }),
         subject,
         html,
         text: text || '',

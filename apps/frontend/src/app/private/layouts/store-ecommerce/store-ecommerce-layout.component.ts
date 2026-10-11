@@ -21,6 +21,11 @@ import {
   CartService,
 } from '../../modules/ecommerce/services/cart.service';
 import { cartLineKey } from '../../modules/ecommerce/utils/cart-line-key.util';
+import {
+  OrderLineItemComponent,
+  cartItemToLineView,
+} from '../../modules/ecommerce/components/order-line-item/order-line-item.component';
+import { CartMiniBarComponent } from '../../modules/ecommerce/components/cart-mini-bar/cart-mini-bar.component';
 import { CartPromotionsComponent } from '../../modules/ecommerce/components/cart-promotions/cart-promotions.component';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
@@ -104,6 +109,8 @@ interface FooterSettings {
     ModalComponent,
     CurrencyPipe,
     CartPromotionsComponent,
+    CartMiniBarComponent,
+    OrderLineItemComponent,
     // Appointment redesign phase 2 — in-app notifications bell for the
     // customer (reagenda aprobada/rechazada, etc.). Auth-gated in template.
     NotificationsDropdownComponent,
@@ -113,6 +120,14 @@ interface FooterSettings {
 })
 export class StoreEcommerceLayoutComponent {
   readonly store_name = signal('Tienda');
+  readonly store_display_name = computed(() =>
+    this.capitalizeFirst(this.store_name()),
+  );
+  readonly vendix_whatsapp_url =
+    'https://wa.me/573234668500?text=' +
+    encodeURIComponent(
+      'Hola equipo Vendix, vi una tienda en línea hecha con Vendix y quiero más información.',
+    );
   readonly store_logo = signal<string | null>(null);
   readonly show_user_menu = signal(false);
   readonly show_mobile_menu = signal(false);
@@ -178,6 +193,40 @@ export class StoreEcommerceLayoutComponent {
   cart$ = this.cart_service.cart$;
   readonly cart = toSignal(this.cart$, { initialValue: null as any });
   readonly show_cart_dropdown = signal(false);
+  /** Líneas del dropdown con su vista neutra (recalculada al cambiar el carrito). */
+  readonly cart_lines = computed(() =>
+    ((this.cart()?.items ?? []) as CartItem[]).map((item) => ({
+      item,
+      key: this.cartLineKeyOf(item),
+      view: cartItemToLineView(item),
+    })),
+  );
+  max_quantity_per_item(): number | null {
+    return this.cart_service.getMaxQuantityPerItem() ?? null;
+  }
+
+  // Barra mini de carrito (móvil): URL actual alimentada por NavigationEnd.
+  readonly current_url = signal(this.router.url);
+  private static readonly MINI_BAR_EXCLUDED_PATHS = [
+    '/cart',
+    '/checkout',
+    '/book',
+    '/pedido',
+    '/order',
+    '/factura',
+    '/fila',
+    '/preconsulta',
+  ];
+  readonly show_cart_mini_bar = computed<boolean>(() => {
+    if ((this.cart()?.item_count ?? 0) < 2) return false;
+    if (this.table_context.isActive()) return false;
+    const path = this.current_url().split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+    // El detalle de producto ya trae su propia barra sticky de compra.
+    if (path.startsWith('/products/')) return false;
+    return !StoreEcommerceLayoutComponent.MINI_BAR_EXCLUDED_PATHS.some(
+      (excluded) => path === excluded || path.startsWith(excluded + '/'),
+    );
+  });
 
   // Wishlist badge observable
   wishlist_badge$ = this.wishlist_service.wishlist$.pipe(
@@ -356,6 +405,7 @@ export class StoreEcommerceLayoutComponent {
         takeUntilDestroyed(this.destroy_ref),
       )
       .subscribe((event) => {
+        this.current_url.set(event.urlAfterRedirects);
         if (this.shouldScrollToTopOnNavigation(event.urlAfterRedirects)) {
           this.scrollToTop();
         }
@@ -540,12 +590,28 @@ export class StoreEcommerceLayoutComponent {
     this.show_user_menu.update((v) => !v);
   }
 
+  /**
+   * En táctil el tap dispara un `mouseenter` emulado ANTES del `click`:
+   * el hover abría el dropdown y el click lo cerraba al instante. El hover
+   * sólo aplica a dispositivos que realmente lo soportan; en táctil manda
+   * únicamente el click (`toggleCart`).
+   */
+  private canHover(): boolean {
+    return (
+      this.is_browser &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches
+    );
+  }
+
   onCartEnter(): void {
+    if (!this.canHover()) return;
     clearTimeout(this.close_timer);
     this.show_cart_dropdown.set(true);
   }
 
   onCartLeave(): void {
+    if (!this.canHover()) return;
     // Zoneless: setTimeout valido para debounce real (300ms evita parpadeo del dropdown).
     // La mutacion del signal show_cart_dropdown dispara CD automaticamente.
     this.close_timer = setTimeout(() => {
@@ -568,6 +634,18 @@ export class StoreEcommerceLayoutComponent {
     // La navegación al carrito ahora vive en el header y footer del dropdown.
     this.show_cart_dropdown.set(false);
     this.router.navigate(['/cart']);
+  }
+
+  /** Replica `proceedToCheckout` del carrito: login si hace falta, si no checkout. */
+  onMiniBarCheckout(): void {
+    const requires_registration =
+      !!this.domain_service.getCurrentDomainConfig()?.customConfig?.ecommerce
+        ?.checkout?.require_registration;
+    if (!this.is_authenticated() && requires_registration) {
+      this.store_ui_service.openLoginModal();
+    } else {
+      this.router.navigate(['/checkout']);
+    }
   }
 
   private previous_path: string | null = null;
@@ -635,6 +713,16 @@ export class StoreEcommerceLayoutComponent {
     ) {
       this.show_user_menu.set(false);
     }
+
+    // Dropdown del carrito: cierra al tocar fuera. Se usa composedPath()
+    // porque al eliminar una línea su nodo ya salió del DOM cuando este
+    // handler corre y `contains()` daría falso.
+    if (this.show_cart_dropdown()) {
+      const cartContainer = document.querySelector('.cart-container');
+      if (cartContainer && !event.composedPath().includes(cartContainer)) {
+        this.show_cart_dropdown.set(false);
+      }
+    }
   }
 
   // Close user menu on Escape key
@@ -642,6 +730,9 @@ export class StoreEcommerceLayoutComponent {
   onEscapeKey(): void {
     if (this.show_user_menu()) {
       this.show_user_menu.set(false);
+    }
+    if (this.show_cart_dropdown()) {
+      this.show_cart_dropdown.set(false);
     }
   }
 
@@ -1145,5 +1236,13 @@ export class StoreEcommerceLayoutComponent {
 
   getTagline(): string {
     return this.footer_settings()?.store_info?.tagline || 'Tu tienda de confianza';
+  }
+
+  private capitalizeFirst(value: string): string {
+    const name = (value ?? '').trim();
+    if (!name) return name;
+    const second = name.charAt(1);
+    if (second && second !== second.toLowerCase()) return name;
+    return name.charAt(0).toUpperCase() + name.slice(1);
   }
 }

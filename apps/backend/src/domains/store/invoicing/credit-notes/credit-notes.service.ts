@@ -20,6 +20,7 @@ import {
 import { CreateInvoiceItemDto } from '../dto/create-invoice.dto';
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
+import { assertNoteOriginalHasNoAcceptedRadianEvent } from '../utils/invoice-radian-note-coherence';
 import { absorbInclusiveLine } from '../utils/dian-money.util';
 import { normalizeInvoiceTaxRate } from '../utils/invoice-tax-rate.util';
 import {
@@ -192,7 +193,10 @@ export class CreditNotesService {
   async issueNote(id: number) {
     const note = await this.prisma.invoices.findFirst({
       where: { id },
-      select: { id: true, invoice_type: true, status: true },
+      select: {
+        id: true, invoice_type: true, status: true, related_invoice_id: true,
+        organization_id: true, store_id: true, accounting_entity_id: true,
+      },
     });
 
     if (!note) {
@@ -206,6 +210,14 @@ export class CreditNotesService {
         { invoice_id: id, invoice_type: note.invoice_type },
       );
     }
+
+    await assertNoteOriginalHasNoAcceptedRadianEvent(this.prisma, {
+      note_type: note.invoice_type,
+      related_invoice_id: note.related_invoice_id,
+      organization_id: note.organization_id,
+      store_id: note.store_id,
+      accounting_entity_id: note.accounting_entity_id,
+    });
 
     await this.invoice_flow.validate(id);
     const sent = await this.invoice_flow.send(id);
@@ -338,6 +350,14 @@ export class CreditNotesService {
         },
       );
     }
+
+    await assertNoteOriginalHasNoAcceptedRadianEvent(this.prisma, {
+      note_type: type,
+      related_invoice_id: related_invoice.id,
+      organization_id: related_invoice.organization_id,
+      store_id: related_invoice.store_id,
+      accounting_entity_id: note_accounting_entity_id,
+    });
 
     // CP-REFUND-FLOW-REDESIGN paso 7 — NC guiada por reembolso. Se resuelve
     // ANTES de numerar, como todas las guardas: un refund inexistente, de

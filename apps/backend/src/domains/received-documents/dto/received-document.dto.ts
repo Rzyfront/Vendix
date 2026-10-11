@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { tax_type_enum } from '@prisma/client';
 import { ReceivedDocumentType } from '../interfaces/received-document.interface';
+import { ReceivedDocumentPaymentCondition } from '../interfaces/received-document.interface';
 
 const DOCUMENT_TYPES: ReceivedDocumentType[] = [
   'invoice',
@@ -209,6 +210,10 @@ export class ManualReceivedDocumentDto {
   @IsOptional()
   @IsDateString({ strict: true })
   due_date?: string;
+
+  @IsOptional()
+  @IsIn(['cash', 'credit', 'unknown'])
+  payment_condition?: ReceivedDocumentPaymentCondition;
 
   @IsString()
   @Matches(/^[A-Z]{3}$/)

@@ -76,4 +76,52 @@ describe('tip-print — propina en la tirilla POS', () => {
     const html = render(data);
     expect(html).not.toContain('f_tip');
   });
+
+  describe('propina sugerida', () => {
+    const withSuggested = (tips: any, over: any = {}) =>
+      makeProvider(
+        null,
+        {
+          ...orderRow,
+          stores: {
+            ...orderRow.stores,
+            store_settings: { settings: { pos: { tips } } },
+          },
+          ...over,
+        },
+      );
+    const tips10 = { suggested_enabled: true, suggested_type: 'percentage', suggested_value: 10 };
+
+    it('sugerida 10% y sin propina real: filas sugerida y total con propina, TOTAL rotulado', async () => {
+      const data = await withSuggested(tips10, { tip_amount: 0 }).fetchDocumentData(10, 7);
+      // base = 4629.62 + 370.38 = 5000 -> 500
+      expect(data.totals.suggested_tip_amount).toBe(500);
+      expect(data.totals.total_with_suggested_tip).toBe(10500);
+      const html = render(data);
+      expect(html).toContain('Propina sugerida (10%):');
+      expect(html).toContain('Total con propina:');
+      expect(html).toContain('Total sin propina:');
+      expect(html).toContain('$500');
+      expect(html).toContain('$10.500');
+    });
+
+    it('con propina real: no pinta las sugeridas', async () => {
+      const data = await withSuggested(tips10, { tip_amount: 5000 }).fetchDocumentData(10, 7);
+      expect(data.totals.suggested_tip_amount).toBeUndefined();
+      const html = render(data);
+      expect(html).toContain('f_tip"');
+      expect(html).not.toContain('f_tip_suggested');
+      expect(html).not.toContain('f_total_with_tip');
+      expect(html).not.toContain('Total sin propina');
+    });
+
+    it('sin política sugerida: sin filas nuevas', async () => {
+      const data = await withSuggested({ suggested_enabled: false }, { tip_amount: 0 }).fetchDocumentData(10, 7);
+      expect(data.totals.suggested_tip_amount).toBeUndefined();
+      const html = render(data);
+      expect(html).not.toContain('f_tip_suggested');
+      expect(html).not.toContain('f_total_with_tip');
+      expect(html).not.toContain('Total sin propina');
+    });
+  });
 });

@@ -7,6 +7,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ItemNotes } from '@common/decorators/item-notes.decorator';
 
 /**
  * Documentación compartida del `price_tier_id` público (QUI-648, fase 3).
@@ -43,10 +44,17 @@ export class AddToCartDto {
   @IsInt()
   @Min(1)
   price_tier_id?: number;
+
+  @ApiPropertyOptional({
+    description: 'Nota libre del comprador para la linea (max 200).',
+    nullable: true,
+  })
+  @ItemNotes()
+  notes?: string | null;
 }
 
 /**
- * Actualiza SOLO la cantidad.
+ * Actualiza la cantidad y/o la nota de la linea.
  *
  * NO lleva `price_tier_id` a propósito: cambiar de presentación es *quitar y
  * agregar*, no un update. Si este DTO pudiera mover la tarifa, el servicio
@@ -56,9 +64,18 @@ export class AddToCartDto {
  * prohibir, y el fallo saldría como un P2002 crudo en la cara del comprador.
  */
 export class UpdateCartItemDto {
+  /** Opcional: se puede actualizar solo `notes`. El service exige al menos uno. */
+  @IsOptional()
   @IsInt()
   @Min(0)
-  quantity: number;
+  quantity?: number;
+
+  @ApiPropertyOptional({
+    description: 'Nota libre del comprador para la linea (max 200).',
+    nullable: true,
+  })
+  @ItemNotes()
+  notes?: string | null;
 }
 
 export class SyncCartItemDto {
@@ -79,6 +96,13 @@ export class SyncCartItemDto {
   @IsInt()
   @Min(1)
   price_tier_id?: number;
+
+  @ApiPropertyOptional({
+    description: 'Nota libre del comprador para la linea (max 200).',
+    nullable: true,
+  })
+  @ItemNotes()
+  notes?: string | null;
 }
 
 export class SyncCartDto {

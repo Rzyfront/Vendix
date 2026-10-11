@@ -112,7 +112,16 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
         }
         // La propina no entra en `invoices.total_amount`: va debajo del TOTAL
         // fiscal, con el total pagado. No se toca grand_total ni en letras.
-        const tip = Number((order as any).tip_amount || 0);
+        // Factura de cuenta dividida: la propina es la de ESA cuenta financiera.
+        let tip = Number((order as any).tip_amount || 0);
+        const financialAccountId = (invoice as any).financial_account_id;
+        if (financialAccountId) {
+          const account = await this.prisma.order_financial_accounts.findFirst({
+            where: { id: financialAccountId, store_id: storeId },
+            select: { tip_amount: true },
+          });
+          tip = Number(account?.tip_amount || 0);
+        }
         if (tip > 0) {
           const fiscalTotal = Number(printData.totals.grand_total || 0);
           const totalPaid = (Math.round(fiscalTotal * 100) + Math.round(tip * 100)) / 100;

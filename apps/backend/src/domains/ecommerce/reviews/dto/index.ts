@@ -94,3 +94,5 @@ export class ReportReviewDto {
   @MaxLength(500)
   reason: string;
 }
+
+export * from './order-review.dto';

@@ -25,7 +25,7 @@ skills: [how-to-test, vendix-error-handling, vendix-permissions, buildcheck-dev]
   - .agents/skills/how-to-critical-plan/assets/cp-lint.sh docs/critical-plans/CP-orders-sales-sse-realtime
 - **Acceptance checklist:**
   - [x] Unit frontend 13/13 SUCCESS (SSE created+status) → evidence/c1-karma-sse.log
-  - [ ] E2E dos sesiones + cross-tienda + kill/reconnect: dev apagado, pendiente
+  - [ ] E2E dos sesiones + cross-tienda + kill/reconnect: stream auth probado por curl; falta UI E2E, Playwright no disponible
   - [x] cp-lint exit 0 + review PR #780 scope SSE 95/100 APPROVE (fiscal: del sibling)
   - [ ] Dos rondas de convergencia limpias con entry points variados
-- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-09-10 · review OK; falta E2E con dev arriba
+- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-10-05 · curl local completado; falta E2E UI y convergencia de 13 perspectivas

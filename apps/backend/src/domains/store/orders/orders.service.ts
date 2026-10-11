@@ -1231,11 +1231,21 @@ export class OrdersService {
           order_items: {
             select: {
               id: true,
+              product_id: true,
               product_name: true,
               quantity: true,
+              skip_kds: true,
+              cancelled_at: true,
               inventory_committed: true,
               inventory_consumed_at_fire: true,
               delivered_at: true,
+              products: { select: { product_type: true } },
+              // Keep all real KDS attempts for this order line. Consumers
+              // prefer an in-flight attempt over an older terminal attempt.
+              kitchen_ticket_items: {
+                orderBy: { id: 'desc' },
+                select: { id: true, status: true, kitchen_ticket_id: true },
+              },
             },
           },
           // One relation projection for the whole page, never a query per row.
@@ -1468,6 +1478,18 @@ export class OrdersService {
         // snapshot (`toSettlementSnapshot` in `order-action-policy.util.ts`).
         refunds: {
           select: { state: true, amount: true },
+        },
+        // Reseña de experiencia de compra (null si no existe).
+        order_review: {
+          select: {
+            id: true,
+            order_id: true,
+            rating: true,
+            quick_tag: true,
+            comment: true,
+            source: true,
+            created_at: true,
+          },
         },
         shipping_method: {
           select: {
@@ -5393,7 +5415,14 @@ export class OrdersService {
     // Auto-scoped
     const where: Prisma.ordersWhereInput = {};
 
-    const [totalOrders, totalRevenue, pendingOrders, completedOrders] =
+    const [
+      totalOrders,
+      totalRevenue,
+      pendingOrders,
+      completedOrders,
+      cancelledOrders,
+      refundedOrders,
+    ] =
       await Promise.all([
         this.prisma.orders.count({ where }),
         this.prisma.orders.aggregate({
@@ -5425,6 +5454,18 @@ export class OrdersService {
             },
           },
         }),
+        this.prisma.orders.count({
+          where: {
+            ...where,
+            state: 'cancelled' as order_state_enum,
+          },
+        }),
+        this.prisma.orders.count({
+          where: {
+            ...where,
+            state: 'refunded' as order_state_enum,
+          },
+        }),
       ]);
 
     const averageOrderValue =
@@ -5435,6 +5476,8 @@ export class OrdersService {
       total_revenue: totalRevenue._sum.grand_total || 0,
       pending_orders: pendingOrders,
       completed_orders: completedOrders,
+      cancelled_orders: cancelledOrders,
+      refunded_orders: refundedOrders,
       average_order_value: averageOrderValue,
     };
   }

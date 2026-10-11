@@ -1,3 +1,4 @@
+import { AIToolRegistry } from './tools/ai-tool-registry';
 import { AIAgentService } from './ai-agent.service';
 import { RequestContextService } from '../common/context/request-context.service';
 import { AgentPlan, AgentPlanHook } from './interfaces/agent-plan.interface';
@@ -102,6 +103,8 @@ describe('AIAgentService.runAgentStream', () => {
         }),
       ),
       canonicalName: (n: string) => n,
+      matchesScope: (n: string, scopes: Set<string>) =>
+        !!domains[n] && (scopes.has(n) || scopes.has(domains[n])),
       get: (n: string) =>
         domains[n] ? { name: n, domain: domains[n] } : undefined,
       getDeprecation: () => undefined,
@@ -181,7 +184,9 @@ describe('AIAgentService.runAgentStream', () => {
 
   it('cuts a degenerate completion: error frame, no text, flagged result', async () => {
     configureStorePlan(['*']);
-    chat.mockResolvedValue(ok({ content: 'ells'.repeat(1000), model: 'free-x' }));
+    chat.mockResolvedValue(
+      ok({ content: 'ells'.repeat(1000), model: 'free-x' }),
+    );
     const errorLog = jest
       .spyOn((service as any).logger, 'error')
       .mockImplementation(() => undefined);
@@ -204,7 +209,10 @@ describe('AIAgentService.runAgentStream', () => {
   });
 
   it('offers only tools in the allowed domain', async () => {
-    configureStorePlan(['orders'], ['store:orders:read', 'store:customers:read']);
+    configureStorePlan(
+      ['orders'],
+      ['store:orders:read', 'store:customers:read'],
+    );
 
     await drain({});
 
@@ -440,7 +448,7 @@ describe('AIAgentService.runAgentStream', () => {
     });
   });
 
-  it('(v-b) timeout without a plan closes kindly, no exception', async () => {
+  it('(v-b) timeout without a plan closes without a post-deadline provider call', async () => {
     let now = 1_000_000;
     jest.spyOn(Date, 'now').mockImplementation(() => {
       now += 100_000;
@@ -451,9 +459,109 @@ describe('AIAgentService.runAgentStream', () => {
     const { chunks, result } = await drain({});
 
     expect(chunks.map((c) => c.type)).toEqual(['text']);
-    expect(result).toMatchObject({ success: true, content: 'Esto encontré' });
-    expect(chat).toHaveBeenCalledTimes(1);
-    expect(chat.mock.calls[0][1]).toEqual({});
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('No alcancé a completar');
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it.each(['vexi', 'vex'])(
+    'does not infer a closing response after %s uses its last clock budget',
+    async (agentKey) => {
+      let now = 0;
+      jest.spyOn(Date, 'now').mockImplementation(() => now);
+      executeTool.mockImplementation(async () => {
+        now = 1000;
+        return '{"verified":true}';
+      });
+      chat.mockResolvedValue(ok({ tool_calls: [call('r1', 'list_things')] }));
+      const { result } = await drain({
+        agent_key: agentKey,
+        max_iterations: 1,
+        timeout_ms: 1000,
+      });
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(executeTool).toHaveBeenCalledTimes(1);
+      expect(result.content).toContain('No alcancé a completar');
+      expect(result.total_tokens).toBe(10);
+    },
+  );
+
+  it.each([['orders'], ['fetch_orders'], ['list_orders']])(
+    'real registry keeps requested scope %s through agent and caller filters',
+    async (requested) => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        permissions: ['store:orders:read'],
+        roles: [],
+      } as any);
+      const real = new AIToolRegistry({} as any);
+      const readOrders = jest.fn().mockResolvedValue('{"orders":[42]}');
+      real.register({
+        name: 'list_orders',
+        domain: 'orders',
+        readOnly: true,
+        requiredPermissions: ['store:orders:read'],
+        description: 'Órdenes',
+        parameters: { type: 'object' },
+        handler: readOrders,
+      });
+      real.register({
+        name: 'list_private',
+        domain: 'orders',
+        readOnly: true,
+        requiredPermissions: ['private:read'],
+        description: 'Privado',
+        parameters: { type: 'object' },
+        handler: jest.fn(),
+      });
+      real.registerAlias('fetch_orders', 'list_orders');
+      (service as any).toolRegistry = real;
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('r1', 'list_orders')] }))
+        .mockResolvedValueOnce(ok({ content: 'Orden 42' }));
+      const { result } = await drain({
+        agent_allowed_tools: ['orders'],
+        tools: [requested],
+      });
+      expect(
+        chat.mock.calls[0][1].tools.map((t: any) => t.function.name),
+      ).toEqual(['list_orders']);
+      expect(readOrders).toHaveBeenCalledTimes(1);
+      expect(result.content).toBe('Orden 42');
+    },
+  );
+
+  it('domain narrowing cannot resurrect a denied tool or dispatch a hallucinated call', async () => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      permissions: ['store:orders:read'],
+      roles: [],
+    } as any);
+    const real = new AIToolRegistry({} as any);
+    const handler = jest.fn();
+    real.register({
+      name: 'list_orders',
+      domain: 'orders',
+      readOnly: true,
+      requiredPermissions: ['store:orders:read'],
+      description: 'Órdenes',
+      parameters: { type: 'object' },
+      handler,
+    });
+    real.registerAlias('fetch_orders', 'list_orders');
+    (service as any).toolRegistry = real;
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('r1', 'fetch_orders')] }))
+      .mockResolvedValueOnce(ok({ content: 'No autorizado' }));
+    const { chunks } = await drain({
+      tools: ['orders'],
+      agent_allowed_tools: ['orders'],
+      agent_denied_tools: ['fetch_orders'],
+    });
+    expect(chat.mock.calls[0][1].tools).toBeUndefined();
+    expect(handler).not.toHaveBeenCalled();
+    expect(
+      chunks.find((c) => c.type === 'tool_result')?.tool?.summary,
+    ).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    expect(consumeAIQuota).not.toHaveBeenCalled();
   });
 
   it('time waiting on the browser does not consume the turn budget', async () => {
@@ -525,7 +633,9 @@ describe('AIAgentService.runAgentStream', () => {
     chat.mockImplementation((_msgs: any, opts: any) =>
       opts && Object.keys(opts).length === 0
         ? ok({ content: 'cierre' })
-        : ok({ tool_calls: [call(`c${chat.mock.calls.length}`, 'list_things')] }),
+        : ok({
+            tool_calls: [call(`c${chat.mock.calls.length}`, 'list_things')],
+          }),
     );
 
     await drain({ agent_key: 'vex' });
@@ -604,12 +714,16 @@ describe('AIAgentService.runAgentStream', () => {
 
   it('(vex-vi) a write proposal emits plan_approval and ends the turn', async () => {
     executeTool.mockRejectedValueOnce(
-      new VendixHttpException(ErrorCodes.AI_AGENT_005, 'requiere confirmación', {
-        tool: 'create_expense',
-        arguments: { total: 5 },
-        preview: { target: 'gasto' },
-        confirmation_token: 'tok-1',
-      } as any),
+      new VendixHttpException(
+        ErrorCodes.AI_AGENT_005,
+        'requiere confirmación',
+        {
+          tool: 'create_expense',
+          arguments: { total: 5 },
+          preview: { target: 'gasto' },
+          confirmation_token: 'tok-1',
+        } as any,
+      ),
     );
     chat.mockResolvedValueOnce(
       ok({ tool_calls: [call('c1', 'create_expense', { total: 5 })] }),
@@ -661,14 +775,24 @@ describe('AIAgentService.runAgentStream', () => {
     const issueSingleUse = jest.fn().mockResolvedValue('su-1');
 
     const { chunks, result } = await drain({
-      plan_approval: { token: 'plan-tok', plan_id: 'plan-1', redeem, issueSingleUse },
+      plan_approval: {
+        token: 'plan-tok',
+        plan_id: 'plan-1',
+        redeem,
+        issueSingleUse,
+      },
     });
 
     expect(redeem).toHaveBeenCalledWith('create_expense', { total: 5 });
     expect(issueSingleUse).toHaveBeenCalledWith('create_expense', { total: 5 });
-    expect(executeTool).toHaveBeenNthCalledWith(2, 'create_expense', { total: 5 }, {
-      confirmationToken: 'su-1',
-    });
+    expect(executeTool).toHaveBeenNthCalledWith(
+      2,
+      'create_expense',
+      { total: 5 },
+      {
+        confirmationToken: 'su-1',
+      },
+    );
     expect(result.pending_confirmation).toBeUndefined();
     expect(result.content).toBe('aplicado');
     expect(chunks.map((c) => c.type)).toEqual([
@@ -681,12 +805,16 @@ describe('AIAgentService.runAgentStream', () => {
 
   it('(vex-viii) an irreversible plan step falls back to its own card', async () => {
     executeTool.mockRejectedValue(
-      new VendixHttpException(ErrorCodes.AI_AGENT_005, 'requiere confirmación', {
-        tool: 'send_invoice_dian',
-        arguments: { id: 1 },
-        preview: { target: 'factura' },
-        confirmation_token: 'tok-9',
-      } as any),
+      new VendixHttpException(
+        ErrorCodes.AI_AGENT_005,
+        'requiere confirmación',
+        {
+          tool: 'send_invoice_dian',
+          arguments: { id: 1 },
+          preview: { target: 'factura' },
+          confirmation_token: 'tok-9',
+        } as any,
+      ),
     );
     chat.mockResolvedValueOnce(
       ok({ tool_calls: [call('c1', 'send_invoice_dian', { id: 1 })] }),
@@ -823,7 +951,9 @@ describe('AIAgentService.runAgentStream', () => {
     chat.mockImplementation((_msgs: any, opts: any) =>
       opts && Object.keys(opts).length === 0
         ? ok({ content: 'cierre' })
-        : ok({ tool_calls: [call(`c${chat.mock.calls.length}`, 'list_things')] }),
+        : ok({
+            tool_calls: [call(`c${chat.mock.calls.length}`, 'list_things')],
+          }),
     );
 
     await drain({ agent_key: 'vex', max_iterations: 40 });
@@ -890,10 +1020,11 @@ describe('AIAgentService.runAgentStream', () => {
 
   it('(rx2-e) vex daily_messages cap exhausted with degradation block stops the turn before the provider', async () => {
     configureStorePlan(['*']);
-    checkExtraQuota.mockImplementation(async (_s: number, _f: string, c: string) =>
-      c === 'daily_messages'
-        ? { exceeded: true, cap: 5, used: 5, degradation: 'block' }
-        : { exceeded: false, cap: null, used: 0, degradation: 'block' },
+    checkExtraQuota.mockImplementation(
+      async (_s: number, _f: string, c: string) =>
+        c === 'daily_messages'
+          ? { exceeded: true, cap: 5, used: 5, degradation: 'block' }
+          : { exceeded: false, cap: null, used: 0, degradation: 'block' },
     );
 
     await expect(drain({ agent_key: 'vex' })).rejects.toMatchObject({
@@ -995,9 +1126,9 @@ describe('AIAgentService.runAgentStream', () => {
     const frame = approvals[0].plan_approval!;
     expect(frame.plan_id).toBe('plan-9');
     expect(frame.steps).toHaveLength(1);
-    expect(frame.steps!.map((s) => [s.step_id, s.tool, s.irreversible])).toEqual(
-      [['s1', 'create_expense', false]],
-    );
+    expect(
+      frame.steps!.map((s) => [s.step_id, s.tool, s.irreversible]),
+    ).toEqual([['s1', 'create_expense', false]]);
     expect(frame.steps![0].arguments).toEqual({ total: 5 });
     expect(frame.covered_steps).toEqual([1]);
     expect(frame.reconfirm_steps).toEqual([]);
@@ -1010,7 +1141,8 @@ describe('AIAgentService.runAgentStream', () => {
     expect(result.pending_confirmation).toBeUndefined();
     // The deferred writes answer neutrally and never become steps.
     const deferred = chunks.filter(
-      (c) => c.type === 'tool_result' && c.tool?.summary?.startsWith('Pendiente'),
+      (c) =>
+        c.type === 'tool_result' && c.tool?.summary?.startsWith('Pendiente'),
     );
     expect(deferred).toHaveLength(2);
     // The turn pauses on the approval: no second provider call.

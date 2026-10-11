@@ -34,6 +34,7 @@ import { SubscriptionBannerComponent } from '../../../shared/components/subscrip
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { VexiDockComponent } from '../../../shared/components/vexi-dock/vexi-dock.component';
+import { PullToRefreshDirective } from '../../../shared/directives/pull-to-refresh.directive';
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/components/weekly-report-banner/weekly-report-banner.component';
 import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
@@ -64,6 +65,7 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
     WeeklyReportStoriesComponent,
     ArrivalBannerComponent,
     VexiDockComponent,
+    PullToRefreshDirective,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -209,7 +211,10 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
 
         <!-- Page Content -->
         <main
-          class="flex-1 flex flex-col transition-all duration-300 ease-in-out"
+          appPullToRefresh
+          [ptrDisabled]="isPosRoute()"
+          (pullRefresh)="reloadPage()"
+          class="flex-1 flex flex-col min-h-0 transition-all duration-300 ease-in-out"
           [class.overflow-y-auto]="!isPosRoute()"
           [class.overflow-x-hidden]="!isPosRoute()"
           [class.px-1]="!isPosRoute()"
@@ -1314,5 +1319,9 @@ export class StoreAdminLayoutComponent {
     } else {
       this.sidebarCollapsed.update((v) => !v);
     }
+  }
+
+  reloadPage(): void {
+    window.location.reload();
   }
 }

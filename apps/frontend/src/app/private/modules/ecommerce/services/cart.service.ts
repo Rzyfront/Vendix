@@ -39,6 +39,8 @@ export interface CartItem {
    * fuera del servicio; `CartService` SIEMPRE lo rellena vía `normalizeCart`.
    */
   line_key?: string;
+  /** Nota del cliente para esta línea (máx. 200). NO forma parte de `line_key`. */
+  notes?: string | null;
   // Bug 8: presentación comercial (Caja 12und, Bulto 50kg). Presente
   // cuando el producto tiene has_multiple_price_tiers y el cliente eligió
   // una tier de tipo 'sale_unit'. El render del cart muestra label +
@@ -233,6 +235,8 @@ interface LocalCartItem {
   product_id: number;
   product_variant_id?: number;
   quantity: number;
+  /** Nota del cliente para la línea (máx. 200). No entra en `cartLineKey`. */
+  notes?: string | null;
   // Cached variant info for display
   variant_name?: string;
   variant_sku?: string;
@@ -436,6 +440,7 @@ export class CartService {
                     product_id: product.id,
                     product_variant_id: localItem.product_variant_id || null,
                     quantity: localItem.quantity,
+                    notes: localItem.notes ?? null,
                     unit_price: price,
                     total_price: price * localItem.quantity,
                     price_tier: localItem.price_tier_id
@@ -878,6 +883,28 @@ export class CartService {
       );
   }
 
+  /** PUT con la nota; reenvía la cantidad actual porque el endpoint la exige. */
+  private updateItemNotesApi(
+    item_id: number,
+    quantity: number,
+    notes: string | null,
+  ): Observable<any> {
+    return this.http
+      .put(
+        `${this.api_url}/items/${item_id}`,
+        { quantity, notes },
+        { headers: this.getHeaders() },
+      )
+      .pipe(
+        tap((response: any) => {
+          if (response.success) {
+            this.cart.set(this.normalizeCart(response.data));
+            this.enrichCartWithSummary();
+          }
+        }),
+      );
+  }
+
   removeItem(item_id: number): Observable<any> {
     return this.http
       .delete(`${this.api_url}/items/${item_id}`, {
@@ -913,6 +940,7 @@ export class CartService {
       product_id: i.product_id,
       product_variant_id: i.product_variant_id,
       quantity: i.quantity,
+      ...(i.notes ? { notes: i.notes } : {}),
       variant_name: i.variant_name,
       variant_sku: i.variant_sku,
       variant_price: i.variant_price,
@@ -1259,6 +1287,38 @@ export class CartService {
         identifier.product_variant_id,
         identifier.price_tier_id,
       );
+    }
+  }
+
+  /**
+   * Actualiza la nota de una línea (máx. 200, trim, vacío => null).
+   * Invitado: localStorage (la línea se identifica por producto+variante+
+   * tarifa, porque su `id` es `product_id`). Autenticado: PUT con la
+   * cantidad actual. Recibe la línea completa, no sólo el id, para no
+   * editar la presentación equivocada de un mismo producto.
+   */
+  updateItemNotes(
+    item: CartItem,
+    notes: string | null,
+  ): Observable<any> | void {
+    const clean = (notes ?? '').trim().slice(0, 200) || null;
+    if (this.is_authenticated) {
+      return this.updateItemNotesApi(item.id, item.quantity, clean);
+    }
+    const items = this.getLocalCart();
+    const target = cartLineKey(
+      item.product_id,
+      item.product_variant_id ?? undefined,
+      item.price_tier?.id,
+    );
+    const local = items.find(
+      (i) =>
+        cartLineKey(i.product_id, i.product_variant_id, i.price_tier_id) ===
+        target,
+    );
+    if (local) {
+      local.notes = clean;
+      this.saveLocalCart(items);
     }
   }
 

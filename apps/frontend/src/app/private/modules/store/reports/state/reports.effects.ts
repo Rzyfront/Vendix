@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import { of, EMPTY } from 'rxjs';
-import { map, mergeMap, catchError, tap, withLatestFrom } from 'rxjs/operators';
+import { map, mergeMap, switchMap, catchError, tap, withLatestFrom } from 'rxjs/operators';
 import { ReportsActions } from './reports.actions';
 import {
   selectSelectedReport,
@@ -13,10 +13,27 @@ import {
   selectReportMeta,
   selectReportData,
   selectTotalItems,
+  selectDataFilters,
 } from './reports.selectors';
 import { ReportsDataService } from '../services/reports-data.service';
 import { ReportExportService } from '../services/report-export.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+
+/** Translate UI data filters once for both screen requests and complete exports. */
+function reportExtraParams(dataFilters: Record<string, string | null>): Record<string, string> {
+  const { order, ...rest } = dataFilters ?? {};
+  const extraParams: Record<string, string> = {};
+  for (const [key, value] of Object.entries(rest)) {
+    if (value != null && value !== '' && !['page', 'limit', 'date_from', 'date_to'].includes(key)) {
+      extraParams[key] = value;
+    }
+  }
+  if (order === 'asc' || order === 'desc') {
+    extraParams['sort_by'] = 'name';
+    extraParams['sort_direction'] = order;
+  }
+  return extraParams;
+}
 
 @Injectable()
 export class ReportsEffects {
@@ -80,13 +97,16 @@ export class ReportsEffects {
         this.store.select(selectFiscalPeriodId),
         this.store.select(selectCurrentPage),
         this.store.select(selectItemsPerPage),
+        this.store.select(selectDataFilters),
       ),
-      mergeMap(([, report, dateRange, fiscalPeriodId, currentPage, itemsPerPage]) => {
+      switchMap(([, report, dateRange, fiscalPeriodId, currentPage, itemsPerPage, dataFilters]) => {
         if (!report) {
           // No report selected yet — shell may have set date range before child
           // dispatched selectReport. Silently skip, selectReportAndLoad$ will retry.
           return EMPTY;
         }
+
+        const extraParams = reportExtraParams(dataFilters);
 
         return this.reportsDataService
           .fetchReportData(report.dataEndpoint, report, {
@@ -94,6 +114,7 @@ export class ReportsEffects {
             fiscalPeriodId: report.requiresFiscalPeriod ? fiscalPeriodId : undefined,
             page: currentPage,
             limit: itemsPerPage,
+            extraParams,
           })
           .pipe(
             map((adapted) => ReportsActions.loadReportDataSuccess({
@@ -124,8 +145,9 @@ export class ReportsEffects {
       withLatestFrom(
         this.store.select(selectSelectedReport),
         this.store.select(selectDateRange),
+        this.store.select(selectDataFilters),
       ),
-      mergeMap(([, report, dateRange]) => {
+      switchMap(([, report, dateRange, dataFilters]) => {
         // Export is a single, authoritative flow: the backend generates the XLSX
         // (full dataset, store-TZ dates, correct aggregation). The UI only offers
         // the button when the report declares an `exportEndpoint`, so a missing
@@ -134,7 +156,11 @@ export class ReportsEffects {
           return of(ReportsActions.exportReportFailure({ error: 'Este reporte no admite exportación' }));
         }
 
-        return this.reportsDataService.exportFromBackend(report.exportEndpoint, dateRange).pipe(
+        return this.reportsDataService.exportFromBackend(
+          report.exportEndpoint,
+          report.requiresDateRange ? dateRange : undefined,
+          reportExtraParams(dataFilters),
+        ).pipe(
           tap((blob) => {
             this.reportExportService.downloadBlob(blob, report.exportFilename);
             this.toastService.success('Reporte exportado correctamente');

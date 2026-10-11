@@ -21,6 +21,11 @@ import {
 
 /** Descargo no fiscal del tiquete POS: texto único real + muestra (ADR-2). */
 const NON_FISCAL_DISCLAIMER = 'Este documento no es factura electrónica de venta.';
+import {
+  resolveTip,
+  resolveTipPolicy,
+} from '../../../../common/utils/tip.util';
+import { storeIsRestaurant } from '../../../../common/helpers/industry-capabilities.helper';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
 import { ORDER_PAYMENT_MEANS_INCLUDE } from '../../payments/order-payment-means.contract';
@@ -246,6 +251,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       if (Number.isFinite(total)) {
         model.totals.grand_total = total;
         model.totals.grand_total_formatted = formatFiscalMoney(total);
+
+        // Orden facturada: la factura electrónica no imprime la propina
+        // sugerida y su TOTAL ya no es el de la orden; se retira para no
+        // mezclar cifras de dos documentos.
+        delete model.totals.suggested_tip_amount;
+        delete model.totals.suggested_tip_amount_formatted;
+        delete model.totals.suggested_tip_label;
+        delete model.totals.total_with_suggested_tip;
+        delete model.totals.total_with_suggested_tip_formatted;
 
         // El total de la factura NO incluye la propina (no es ingreso ni base
         // gravable): pasa debajo del TOTAL fiscal, con el total pagado.
@@ -946,6 +960,39 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     // del TOTAL. `overrideWithInvoiceSnapshot` la mueve debajo si hay factura.
     const tip = Number((order as any).tip_amount || 0);
 
+    // Propina SUGERIDA (informativa): sólo sin propina real y con política
+    // `pos.tips.suggested_*`. Base = productos brutos (subtotal + IVA), igual
+    // que order-flow; no entra en `grand_total`.
+    let suggestedTip: {
+      amount: number;
+      label: string;
+    } | null = null;
+    if (!(tip > 0)) {
+      const policy = resolveTipPolicy(
+        (store.store_settings?.settings as any)?.pos?.tips,
+        storeIsRestaurant((store as any).industries),
+      );
+      if (policy.suggested) {
+        const amount = resolveTip(
+          {
+            tip_type: policy.suggested.type,
+            tip_value: policy.suggested.value,
+          },
+          subtotal + tax,
+          (v) => Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100,
+        ).amount;
+        if (amount > 0) {
+          suggestedTip = {
+            amount,
+            label:
+              policy.suggested.type === 'percentage'
+                ? `Propina sugerida (${policy.suggested.value}%)`
+                : 'Propina sugerida',
+          };
+        }
+      }
+    }
+
     return {
       store: {
         name: store.name || 'Vendix',
@@ -1037,6 +1084,20 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           ? {
               tip_amount: tip,
               tip_amount_formatted: this.formatOrderMoney(tip),
+            }
+          : {}),
+        ...(suggestedTip
+          ? {
+              suggested_tip_amount: suggestedTip.amount,
+              suggested_tip_amount_formatted: this.formatOrderMoney(
+                suggestedTip.amount,
+              ),
+              suggested_tip_label: suggestedTip.label,
+              total_with_suggested_tip:
+                Math.round((grandTotal + suggestedTip.amount) * 100) / 100,
+              total_with_suggested_tip_formatted: this.formatOrderMoney(
+                Math.round((grandTotal + suggestedTip.amount) * 100) / 100,
+              ),
             }
           : {}),
       },

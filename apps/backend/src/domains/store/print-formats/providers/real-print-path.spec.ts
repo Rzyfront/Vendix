@@ -224,6 +224,8 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     const prisma = {
       kitchen_tickets: { findFirst: findFirstTicket },
       table_sessions: { findFirst: findFirstSession },
+      // `resolveKitchenMode` lee store_settings; sin fila → 'virtual' (ticket por estación).
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new KitchenTicketDataProvider(prisma);
 
@@ -288,6 +290,8 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     const prisma = {
       kitchen_tickets: { findFirst: findFirstTicket },
       table_sessions: { findFirst: findFirstSession },
+      // `resolveKitchenMode` lee store_settings; sin fila → 'virtual' (ticket por estación).
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new KitchenTicketDataProvider(prisma);
 
@@ -309,6 +313,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
         id: 45, status: 'ready', items: [], order: { id: 103 },
       }) },
       table_sessions: { findFirst: findFirstSession },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
     const data = await p.fetchDocumentData(10, 45);
@@ -327,6 +332,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
         table: { name: '10', table_waiters: [{ user: { first_name: 'Lucía' } }] },
         opener: null,
       }) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
     const data = await p.fetchDocumentData(10, 46);
@@ -359,6 +365,8 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     const prisma = {
       kitchen_tickets: { findFirst: findFirstTicket },
       table_sessions: { findFirst: findFirstSession },
+      // `resolveKitchenMode` lee store_settings; sin fila → 'virtual' (ticket por estación).
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new KitchenTicketDataProvider(prisma);
 

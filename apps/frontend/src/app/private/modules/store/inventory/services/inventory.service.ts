@@ -1,9 +1,10 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   InventoryLocation,
   CreateLocationDto,
@@ -33,12 +34,18 @@ interface CacheEntry<T> {
 
 let inventoryStatsCache: CacheEntry<Observable<ApiResponse<InventoryStats>>> | null = null;
 
+// Scope de tienda del caché: el backend resuelve el tenant por sesión, así que
+// la URL no identifica de quién son los números. Sin este scope, un admin
+// multi-tienda que cambia de tienda dentro del TTL ve las cifras anteriores.
+let inventoryStatsScope: number | null | undefined;
+
 @Injectable({
   providedIn: 'root',
 })
 export class InventoryService {
   private readonly base_url = `${environment.apiUrl}/store/inventory`;
   private readonly CACHE_TTL = 30000; // 30 segundos
+  private readonly authFacade = inject(AuthFacade);
 
   constructor(private http: HttpClient) {}
 
@@ -326,6 +333,12 @@ export class InventoryService {
 
   getInventoryStats(): Observable<ApiResponse<InventoryStats>> {
     const now = Date.now();
+
+    const scope = (this.authFacade.userStore() as { id?: number } | null)?.id ?? null;
+    if (scope !== inventoryStatsScope) {
+      inventoryStatsCache = null;
+      inventoryStatsScope = scope;
+    }
 
     if (inventoryStatsCache && (now - inventoryStatsCache.lastFetch) < this.CACHE_TTL) {
       return inventoryStatsCache.observable;

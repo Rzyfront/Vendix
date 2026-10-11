@@ -27,9 +27,8 @@ const ORDER_STATES: ReadonlySet<string> = new Set<string>([
  * tienda para refrescar la lista de Órdenes de Venta sin F5. Mismo shape
  * que consume `OrderDetailSseService` (envuelto por `OrderSseService.pushOrderEvent`).
  *
- * Nos importan `order.status_changed` (refresca la fila) y `order.created`
- * (inserta la fila nueva). El subject compartido emite muchos otros tipos
- * (`ticket.*`, notificaciones, etc.) — esta vista los ignora.
+ * Esta vista consume cambios de estado/creación y emite señales de hidratación
+ * para tickets KDS y cambios de ítems. Otros tipos del subject se ignoran.
  */
 export interface OrderListStateChangedEvent {
   /** ID incremental monotónico del backend (vía `OrderSseService.seq`). */
@@ -67,6 +66,21 @@ export interface OrderListCreatedEvent {
   };
 }
 
+export interface OrderListHydrationEvent {
+  id: number;
+  type: string;
+  order_id: number;
+}
+
+const KITCHEN_TICKET_EVENTS: ReadonlySet<string> = new Set([
+  'ticket.created', 'ticket.started', 'ticket.ready', 'ticket.updated',
+  'ticket.delivered', 'ticket.cancelled', 'ticket.reverted',
+]);
+
+function isOrderId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
 export type OrdersListConnectionState =
   | 'idle'
   | 'connecting'
@@ -94,13 +108,13 @@ const BACKOFF_MAX_MS = 30_000;
  *
  * Replica el patrón de `OrderDetailSseService` (EventSource manual con
  * backoff, no auto-reconnect del browser) pero:
- *  - NO filtra por un orderId específico: la lista ve TODOS los
- *    `order.status_changed` y `order.created` de la tienda.
+ *  - NO filtra por un orderId específico: la lista recibe los eventos de la
+ *    tienda y el componente limita la hidratación a filas visibles.
  *  - El componente consumidor reconcilia con un signal upsert:
  *    `orders.update(prev => prev.map(o => o.id === evt.data.order_id
  *      ? { ...o, state: evt.data.new_state } : o))`.
- *  - El servicio expone `lastRelevantEvent` (status) y `lastCreatedEvent`
- *    (creadas); el componente decide si la fila está en su página actual
+ *  - El servicio expone `lastRelevantEvent` (status), `lastCreatedEvent`
+ *    (creadas) y una cola de eventos de hidratación; el componente decide si la fila está en su página actual
  *    antes de aplicar el upsert (si la orden no está en `orders()`, el
  *    evento de estado se ignora silencioso).
  *  - Idempotencia: el upsert siempre overwrite. Si llega el mismo evento
@@ -118,6 +132,8 @@ export class OrdersListSseService {
   private eventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private hasOpened = false;
+  private recoveryPending = false;
   private destroyed = false;
 
   readonly connectionState = signal<OrdersListConnectionState>('idle');
@@ -132,9 +148,11 @@ export class OrdersListSseService {
    * hidrata por REST y lo limpia a `null` igual que `lastRelevantEvent`.
    */
   readonly lastCreatedEvent = signal<OrderListCreatedEvent | null>(null);
+  readonly hydrationEvents = signal<readonly OrderListHydrationEvent[]>([]);
+  readonly recoveredConnection = signal(0);
   /** Último evento que vio el stream, sea relevante o no (debug/UI). */
   readonly lastEvent = signal<
-    OrderListStateChangedEvent | OrderListCreatedEvent | null
+    OrderListStateChangedEvent | OrderListCreatedEvent | OrderListHydrationEvent | null
   >(null);
 
   /**
@@ -156,6 +174,7 @@ export class OrdersListSseService {
 
   disconnect(): void {
     this.clearReconnectTimer();
+    this.recoveryPending = false;
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
@@ -193,6 +212,9 @@ export class OrdersListSseService {
     es.onopen = () => {
       this.reconnectAttempt = 0;
       this.connectionState.set('open');
+      if (this.recoveryPending) this.recoveredConnection.update((n) => n + 1);
+      this.recoveryPending = false;
+      this.hasOpened = true;
     };
 
     es.onmessage = (ev) => {
@@ -208,6 +230,7 @@ export class OrdersListSseService {
         // ignore
       }
       this.eventSource = null;
+      this.recoveryPending = this.hasOpened;
       this.scheduleReconnect();
     };
   }
@@ -220,6 +243,7 @@ export class OrdersListSseService {
       id?: number;
       type?: string;
       data?: Record<string, unknown>;
+      ticket?: { order_id?: unknown };
       created_at?: string;
     } | null = null;
     try {
@@ -227,13 +251,38 @@ export class OrdersListSseService {
     } catch {
       return; // payload binario o mal formado — ignoramos
     }
-    if (!payload || !payload.data || typeof payload.data !== 'object') return;
-    if (typeof payload.data['order_id'] !== 'number') return;
+    if (!payload) return;
 
-    // CP-orders-sales-sse-realtime: la lista consume `order.status_changed`
-    // y `order.created`. Otros eventos del subject compartido
-    // (notificaciones, ticket.*, order.items.updated, etc.) se descartan
-    // sin procesarlos.
+    if (typeof payload.type === 'string' && KITCHEN_TICKET_EVENTS.has(payload.type)) {
+      const ticket = (payload as any).ticket;
+      if (!ticket || !isOrderId(ticket.order_id)) return;
+      const evt: OrderListHydrationEvent = {
+        id: isOrderId(payload.id) ? payload.id : 0,
+        type: payload.type,
+        order_id: ticket.order_id,
+      };
+      this.lastEvent.set(evt);
+      this.hydrationEvents.update((events) => [...events, evt]);
+      return;
+    }
+
+    if (!payload.data || typeof payload.data !== 'object') return;
+    const orderId = payload.data['order_id'];
+    if (!isOrderId(orderId)) return;
+
+    if (payload.type === 'order.items.updated') {
+      const evt: OrderListHydrationEvent = {
+        id: isOrderId(payload.id) ? payload.id : 0,
+        type: payload.type,
+        order_id: orderId,
+      };
+      this.lastEvent.set(evt);
+      this.hydrationEvents.update((events) => [...events, evt]);
+      return;
+    }
+
+    // CP-orders-sales-sse-realtime: keep create/status handling independent;
+    // kitchen and item events are emitted through the hydration queue above.
     if (
       payload.type === 'order.created' &&
       payload.data['kind'] === 'order.created'

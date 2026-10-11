@@ -19,6 +19,8 @@
     [isProcessing]="isProcessing()"
     [allowAmountOverride]="isCreditOrder() || manualPaymentPending()"
     [allowTip]="!isCreditOrder()"
+    [tipPolicy]="tipPolicy()"
+    [tipBase]="tipBase()"
     [allowMultiTender]="!isCreditOrder()"
     [allowCredit]="false"
     [allowWompi]="false"

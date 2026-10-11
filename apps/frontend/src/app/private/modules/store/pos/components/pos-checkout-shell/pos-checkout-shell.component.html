@@ -217,22 +217,51 @@
                   </div>
                 </section>
               } @else {
-                <button
-                  type="button"
-                  class="cliente-collapsed"
-                  (click)="goToClienteSubStep(0)"
-                >
-                  <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
-                  <span class="sw-label">{{
-                    saleMode() === 'alias'
-                      ? 'Alias: ' + (customerAlias() || 'Ingresar alias')
-                      : isAnonymousSale()
-                        ? 'Consumidor Final'
-                        : 'Con Cliente: ' +
-                          (cartState()?.customer ? customerDisplayName : 'Seleccionar')
-                  }}</span>
-                  <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
-                </button>
+                <div class="cliente-collapsed" role="group" aria-label="Cliente de la venta">
+                  <button
+                    type="button"
+                    class="cliente-collapsed__main"
+                    (click)="goToClienteSubStep(0)"
+                  >
+                    <span class="sw-check"><app-icon name="check" [size]="14"></app-icon></span>
+                    @if (saleMode() === 'customer' && cartState()?.customer) {
+                      <span class="sw-label">
+                        <span class="cliente-collapsed__name">{{ customerDisplayName }}</span>
+                        @if (customerChipDetail(); as detail) {
+                          <span class="cliente-collapsed__doc">{{ detail }}</span>
+                        }
+                      </span>
+                    } @else {
+                      <span class="sw-label">{{
+                        saleMode() === 'alias'
+                          ? 'Alias: ' + (customerAlias() || 'Ingresar alias')
+                          : isAnonymousSale()
+                            ? 'Consumidor Final'
+                            : 'Con Cliente: Seleccionar'
+                      }}</span>
+                    }
+                  </button>
+                  @if (saleMode() === 'customer' && cartState()?.customer) {
+                    <button
+                      type="button"
+                      class="cliente-collapsed__icon-btn"
+                      aria-label="Cambiar cliente"
+                      (click)="onChangeCustomer($event)"
+                    >
+                      <app-icon name="pencil" [size]="14"></app-icon>
+                    </button>
+                    <button
+                      type="button"
+                      class="cliente-collapsed__icon-btn"
+                      aria-label="Quitar cliente"
+                      (click)="onRemoveCustomerFromChip($event)"
+                    >
+                      <app-icon name="x" [size]="14"></app-icon>
+                    </button>
+                  } @else {
+                    <span class="sw-edit"><app-icon name="pencil" [size]="14"></app-icon></span>
+                  }
+                </div>
               }
 
               <!-- SUB-STEP 1 · Cliente (selector inline) / Alias (input). -->
@@ -272,7 +301,7 @@
                     </section>
                   }
                 } @else {
-                  @if (clienteSubStep() === 1) {
+                  @if (clienteSubStep() === 1 && (!cartState()?.customer || customerPickerOpen())) {
                     <section
                       class="cliente-section cliente-section--no-scroll"
                       style="max-height: none; overflow: visible"

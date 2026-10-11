@@ -23,6 +23,11 @@ export type TooltipColor =
   | 'accent'
   | 'destructive'
   | 'warning'
+  | 'order-pending'
+  | 'order-processing'
+  | 'order-ready'
+  | 'order-delivered'
+  | 'order-cancelled'
   | 'ai';
 
 @Component({
@@ -33,6 +38,9 @@ export type TooltipColor =
     <ng-content></ng-content>
     <div
       #tooltipContainer
+      [id]="tooltipId"
+      role="tooltip"
+      [attr.aria-hidden]="isVisible() ? null : 'true'"
       class="tooltip-container"
       [attr.data-position]="resolvedPosition()"
       [attr.data-size]="size()"
@@ -66,14 +74,14 @@ export type TooltipColor =
         opacity: 0;
         visibility: hidden;
         width: max-content;
-        max-width: min(18rem, calc(100vw - 24px));
+        max-width: min(18rem, calc(100vw - 32px));
         transition:
           opacity 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
           transform 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
           visibility 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
         transform: translate3d(0, -2px, 0) scale(0.95);
         pointer-events: none;
-        filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+        filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 15%, transparent));
         box-sizing: border-box;
       }
 
@@ -92,8 +100,8 @@ export type TooltipColor =
         color: var(--tooltip-text);
         border: none;
         box-shadow:
-          0 4px 12px rgba(0, 0, 0, 0.15),
-          0 2px 4px rgba(0, 0, 0, 0.1);
+          0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 15%, transparent),
+          0 2px 4px color-mix(in srgb, var(--color-neutral-900, #111827) 10%, transparent);
         border-radius: 6px;
         padding: var(--tooltip-padding);
         font-size: var(--tooltip-font-size);
@@ -110,6 +118,19 @@ export type TooltipColor =
         box-sizing: border-box;
       }
 
+      @media (max-width: 480px) {
+        .tooltip-container {
+          max-width: calc(100vw - 32px);
+        }
+
+        .tooltip-content {
+          width: auto;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          white-space: normal;
+        }
+      }
+
       .tooltip-content::before {
         content: '';
         position: absolute;
@@ -119,9 +140,9 @@ export type TooltipColor =
         bottom: 0;
         background: linear-gradient(
           135deg,
-          rgba(255, 255, 255, 0.1) 0%,
-          rgba(255, 255, 255, 0.05) 50%,
-          rgba(255, 255, 255, 0) 100%
+          color-mix(in srgb, var(--color-surface, #fff) 10%, transparent) 0%,
+          color-mix(in srgb, var(--color-surface, #fff) 5%, transparent) 50%,
+          transparent 100%
         );
         pointer-events: none;
       }
@@ -216,6 +237,17 @@ export type TooltipColor =
         border-color: var(--color-warning-500);
       }
 
+      .tooltip-container[data-color='order-pending'] { --tooltip-arrow-color: #f3f4f6; }
+      .tooltip-container[data-color='order-processing'] { --tooltip-arrow-color: #fef3c7; }
+      .tooltip-container[data-color='order-ready'] { --tooltip-arrow-color: #d1fae5; }
+      .tooltip-container[data-color='order-delivered'] { --tooltip-arrow-color: #e0f2fe; }
+      .tooltip-container[data-color='order-cancelled'] { --tooltip-arrow-color: #fee2e2; }
+      .tooltip-container[data-color='order-pending'] .tooltip-content { background: #f3f4f6; color: #374151; }
+      .tooltip-container[data-color='order-processing'] .tooltip-content { background: #fef3c7; color: #92400e; }
+      .tooltip-container[data-color='order-ready'] .tooltip-content { background: #d1fae5; color: #065f46; }
+      .tooltip-container[data-color='order-delivered'] .tooltip-content { background: #e0f2fe; color: #075985; }
+      .tooltip-container[data-color='order-cancelled'] .tooltip-content { background: #fee2e2; color: #b91c1c; }
+
       @keyframes ai-tooltip-shimmer {
         0% {
           background-position: 0% 50%;
@@ -237,24 +269,32 @@ export type TooltipColor =
         white-space: normal;
         background: linear-gradient(
           135deg,
-          rgba(var(--color-primary-rgb), 0.85) 0%,
-          rgba(var(--color-primary-rgb), 0.95) 50%,
-          rgba(var(--color-primary-rgb), 0.85) 100%
+          color-mix(in srgb, var(--color-surface, #fff) 94%, var(--color-primary, #6d28d9)) 0%,
+          color-mix(in srgb, var(--color-surface, #fff) 90%, var(--color-primary, #6d28d9)) 50%,
+          color-mix(in srgb, var(--color-surface, #fff) 94%, var(--color-primary, #6d28d9)) 100%
         );
         background-size: 200% 200%;
         animation: ai-tooltip-shimmer 3s ease-in-out infinite;
-        color: white;
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--color-text-primary, #111827);
+        border: 1px solid color-mix(in srgb, var(--color-primary, #6d28d9) 24%, transparent);
         border-radius: 8px;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
         box-shadow:
-          0 4px 12px rgba(0, 0, 0, 0.25),
-          inset 0 1px 1px rgba(255, 255, 255, 0.15);
+          0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 25%, transparent),
+          inset 0 1px 1px color-mix(in srgb, var(--color-surface, #fff) 15%, transparent);
       }
 
       .tooltip-container[data-color='ai'] .tooltip-content::before {
         display: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .tooltip-container,
+        .tooltip-container[data-color='ai'] .tooltip-content {
+          animation: none;
+          transition: none;
+        }
       }
 
       /* Arrow */
@@ -263,7 +303,7 @@ export type TooltipColor =
         width: 0;
         height: 0;
         border: 6px solid transparent;
-        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+        filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--color-neutral-900, #111827) 10%, transparent));
       }
 
       .tooltip-container[data-position='top'] .tooltip-arrow {
@@ -362,6 +402,7 @@ export type TooltipColor =
   ],
 })
 export class TooltipComponent implements AfterViewInit {
+  readonly tooltipId = `tooltip-${Math.random().toString(36).slice(2, 11)}`;
   readonly content = input('');
   readonly size = input<TooltipSize>('md');
   readonly position = input<TooltipPosition>('top');
@@ -372,7 +413,7 @@ export class TooltipComponent implements AfterViewInit {
   private _visible = signal(false);
   readonly isVisible = computed(() => {
     const ext = this.visible();
-    return ext !== undefined ? ext : this._visible();
+    return (ext !== undefined ? ext : this._visible()) && !this.escapeDismissed();
   });
 
   readonly resolvedPosition = signal<TooltipPosition>('top');
@@ -391,25 +432,40 @@ export class TooltipComponent implements AfterViewInit {
 
   private showTimeout: ReturnType<typeof setTimeout> | undefined;
   private positionFrame: number | undefined;
+  private isHovered = false;
+  private hasFocus = false;
+  private escapeDismissed = signal(false);
+  private activeTrigger: HTMLElement | null = null;
+  private visualViewport: VisualViewport | null = null;
+  private readonly visualViewportChange = () => this.onViewportChange();
 
   constructor() {
+    effect(() => {
+      if (this.visible() === false) this.escapeDismissed.set(false);
+    });
+
     this.destroyRef.onDestroy(() => {
+      this.removeDescribedBy();
       if (this.showTimeout) {
         clearTimeout(this.showTimeout);
       }
       if (this.positionFrame !== undefined) {
         cancelAnimationFrame(this.positionFrame);
       }
+      this.visualViewport?.removeEventListener('resize', this.visualViewportChange);
+      this.visualViewport?.removeEventListener('scroll', this.visualViewportChange);
       this.tooltipContainer()?.nativeElement.remove();
     });
 
     effect(() => {
       if (this.isVisible()) {
+        this.applyDescribedBy();
         this.position();
         this.content();
         this.size();
         this.schedulePositionUpdate();
       } else {
+        this.removeDescribedBy();
         this.isPositioned.set(false);
       }
     });
@@ -421,6 +477,11 @@ export class TooltipComponent implements AfterViewInit {
   }
 
   ngAfterViewInit() {
+    if (typeof window === 'undefined') return;
+    this.visualViewport = window.visualViewport;
+    this.visualViewport?.addEventListener('resize', this.visualViewportChange);
+    this.visualViewport?.addEventListener('scroll', this.visualViewportChange);
+
     const tooltip = this.tooltipContainer()?.nativeElement;
     if (tooltip && tooltip.parentElement !== this.document.body) {
       this.document.body.appendChild(tooltip);
@@ -431,12 +492,16 @@ export class TooltipComponent implements AfterViewInit {
     }
   }
 
-  @HostListener('mouseenter')
-  onMouseEnter() {
+  @HostListener('mouseenter', ['$event'])
+  onMouseEnter(event: MouseEvent) {
+    this.isHovered = true;
+    this.escapeDismissed.set(false);
+    this.setActiveTrigger(event.target);
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
     }
     this.showTimeout = setTimeout(() => {
+      this.showTimeout = undefined;
       this._visible.set(true);
       this.schedulePositionUpdate();
     }, this.delay());
@@ -444,10 +509,77 @@ export class TooltipComponent implements AfterViewInit {
 
   @HostListener('mouseleave')
   onMouseLeave() {
+    this.isHovered = false;
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
+      this.showTimeout = undefined;
+    }
+    if (!this.hasFocus) {
+      this._visible.set(false);
+      this.removeDescribedBy();
+    }
+  }
+
+  @HostListener('focusin', ['$event'])
+  onFocusIn(event: FocusEvent) {
+    this.hasFocus = true;
+    this.escapeDismissed.set(false);
+    this.setActiveTrigger(event.target);
+    if (this.showTimeout) {
+      clearTimeout(this.showTimeout);
+      this.showTimeout = undefined;
+    }
+    this._visible.set(true);
+    this.schedulePositionUpdate();
+  }
+
+  @HostListener('focusout')
+  onFocusOut() {
+    this.hasFocus = false;
+    if (!this.isHovered) {
+      this._visible.set(false);
+      this.removeDescribedBy();
+    }
+  }
+
+  @HostListener('keydown', ['$event'])
+  onKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape' || !this.isVisible()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.showTimeout) {
+      clearTimeout(this.showTimeout);
+      this.showTimeout = undefined;
     }
     this._visible.set(false);
+    this.escapeDismissed.set(true);
+    this.removeDescribedBy();
+  }
+
+  private setActiveTrigger(target: EventTarget | null): void {
+    const element = target instanceof Element ? target : null;
+    const trigger = element?.closest<HTMLElement>('button, a, input, select, [tabindex]')
+      ?? this.hostRef.nativeElement;
+    if (this.activeTrigger !== trigger) this.removeDescribedBy();
+    this.activeTrigger = trigger;
+    if (this.isVisible()) this.applyDescribedBy();
+  }
+
+  private applyDescribedBy(): void {
+    if (!this.activeTrigger) return;
+    const ids = (this.activeTrigger.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/).filter(Boolean);
+    if (!ids.includes(this.tooltipId)) {
+      this.activeTrigger.setAttribute('aria-describedby', [...ids, this.tooltipId].join(' '));
+    }
+  }
+
+  private removeDescribedBy(): void {
+    if (!this.activeTrigger) return;
+    const ids = (this.activeTrigger.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/).filter((id) => id && id !== this.tooltipId);
+    if (ids.length) this.activeTrigger.setAttribute('aria-describedby', ids.join(' '));
+    else this.activeTrigger.removeAttribute('aria-describedby');
   }
 
   @HostListener('window:resize')
@@ -577,7 +709,7 @@ export class TooltipComponent implements AfterViewInit {
   ) {
     const gap = 8;
     const preferredMaxWidth = 288;
-    const minWidth = 64;
+    const minWidth = 0;
     let availableWidth = bounds.right - bounds.left;
 
     if (position === 'left') {
@@ -592,13 +724,18 @@ export class TooltipComponent implements AfterViewInit {
   }
 
   private getViewportBounds(): TooltipBounds {
-    const padding = 12;
+    const padding = 16;
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft ?? 0;
+    const top = viewport?.offsetTop ?? 0;
+    const width = viewport?.width ?? window.innerWidth;
+    const height = viewport?.height ?? window.innerHeight;
 
     return {
-      left: padding,
-      top: padding,
-      right: window.innerWidth - padding,
-      bottom: window.innerHeight - padding,
+      left: left + padding,
+      top: top + padding,
+      right: left + width - padding,
+      bottom: top + height - padding,
     };
   }
 

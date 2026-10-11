@@ -10,7 +10,6 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
 import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cache.service';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
-import { InvoicingService } from '../../invoicing/services/invoicing.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 
@@ -90,10 +89,6 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         // `PosCartService` inyecta `AuthFacade` (pos-cart.service.ts:89), que
         // a su vez inyecta el `Store` de NgRx. Sin este doble, el TestBed
         // instancia el facade real y muere con NG0201 antes de llegar a la
@@ -297,10 +292,6 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         // `PosCartService` inyecta `AuthFacade` (pos-cart.service.ts:89), que
         // a su vez inyecta el `Store` de NgRx. Sin este doble, el TestBed
         // instancia el facade real y muere con NG0201 antes de llegar a la
@@ -505,10 +496,6 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
@@ -561,10 +548,6 @@ describe('PosCartService — calculateSummary base neta (C.6)', () => {
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
@@ -743,10 +726,6 @@ describe('PosCartService — precio con impuesto incluido al repetir producto', 
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
@@ -897,10 +876,6 @@ describe('PosCartService — tarifa de cliente con impuesto incluido (C.8, terce
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
@@ -1080,10 +1055,6 @@ describe('PosCartService — precio de oferta a nivel producto (B5/B14)', () => 
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
@@ -1194,10 +1165,6 @@ describe('PosCartService — isPriceOverridden en centavos enteros (F-225)', () 
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
@@ -1298,10 +1265,6 @@ describe('PosCartService — updateCartItem preserva/borra notas por línea (pas
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
@@ -1413,10 +1376,6 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
           },
         },
         { provide: CurrencyFormatService, useValue: {} },
-        {
-          provide: InvoicingService,
-          useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],

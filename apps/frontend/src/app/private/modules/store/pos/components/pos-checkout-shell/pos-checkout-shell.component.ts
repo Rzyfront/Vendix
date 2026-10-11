@@ -609,6 +609,20 @@ export class PosCheckoutShellComponent {
     return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
   }
 
+  /** El cajero pidió cambiar el cliente: reabre el selector aunque ya haya uno. */
+  readonly customerPickerOpen = signal(false);
+
+  /** Detalle compacto del chip: documento (tipo + número) o, si no hay, teléfono. */
+  readonly customerChipDetail = computed<string>(() => {
+    const c = this.cartState()?.customer as
+      | { document_type?: string; document_number?: string; phone?: string }
+      | null
+      | undefined;
+    if (!c) return '';
+    if (c.document_number) return `${c.document_type || 'Doc'} ${c.document_number}`;
+    return c.phone || '';
+  });
+
   // ── Cliente sub-wizard (presentación; espeja Cobro/Envío) ────────────────
   /** Sub-paso activo del paso Cliente: 0=Tipo · 1=Cliente · 2=Dirección. */
   readonly clienteSubStep = signal<number>(0);
@@ -1919,6 +1933,7 @@ export class PosCheckoutShellComponent {
 
   /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza al siguiente paso. */
   onSelectCustomerAndAdvance(customer: PosCustomer): void {
+    this.customerPickerOpen.set(false);
     this.selectCustomer(customer);
     if (!this.requiresAddress()) this.nextStep();
   }
@@ -1941,8 +1956,22 @@ export class PosCheckoutShellComponent {
     this.customerSelected.emit(customer);
   }
 
+  /** Chip compacto: "Cambiar cliente" reabre el selector (con su lápiz de edición). */
+  onChangeCustomer(event: Event): void {
+    event.stopPropagation();
+    this.customerPickerOpen.set(true);
+    this.goToClienteSubStep(1);
+  }
+
+  /** Chip compacto: "Quitar cliente" reutiliza el flujo del selector. */
+  onRemoveCustomerFromChip(event: Event): void {
+    event.stopPropagation();
+    this.onCustomerCleared();
+  }
+
   /** "Quitar cliente / venta anónima" desde el selector inline. */
   onCustomerCleared(): void {
+    this.customerPickerOpen.set(false);
     this.toggleAnonymousSale(true);
     this.customerCleared.emit();
   }

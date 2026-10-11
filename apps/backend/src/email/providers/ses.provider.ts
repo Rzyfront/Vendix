@@ -14,6 +14,7 @@ import {
   PasswordResetEmailOptions,
 } from '../interfaces/branding.interface';
 import * as nodemailer from 'nodemailer';
+import { buildFromHeader, sanitizeReplyTo } from '../utils/sender.util';
 
 @Injectable()
 export class SesProvider implements EmailProvider {
@@ -69,11 +70,13 @@ export class SesProvider implements EmailProvider {
     //
     // Declared outside the `try` so the `catch` can name the sender in its
     // diagnostic — SES rejections are almost always sender-identity issues.
-    const fromAddress = from
-      ? `"${from.name}" <${this.config.fromEmail}>`
-      : `"${this.config.fromName}" <${this.config.fromEmail}>`;
+    const fromAddress = buildFromHeader(
+      from,
+      this.config.fromName,
+      this.config.fromEmail,
+    );
     const replyToAddress = from
-      ? { name: from.name, address: from.email }
+      ? { name: from.name, address: sanitizeReplyTo(from.email) }
       : undefined;
     try {
       const info = await this.transporter.sendMail({
@@ -82,7 +85,7 @@ export class SesProvider implements EmailProvider {
         subject,
         html,
         text,
-        ...(replyToAddress && { replyTo: replyToAddress.address }),
+        ...(replyToAddress?.address && { replyTo: replyToAddress.address }),
       });
 
       this.logger.log(
@@ -109,10 +112,20 @@ export class SesProvider implements EmailProvider {
     html: string,
     attachments: EmailAttachment[],
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult> {
+    // Misma semántica que `sendEmail`: From = nombre del emisor sobre la
+    // dirección verificada de la plataforma; Reply-To = correo del emisor.
+    const fromAddress = buildFromHeader(
+      from,
+      this.config.fromName,
+      this.config.fromEmail,
+    );
+    const replyTo = from ? sanitizeReplyTo(from.email) : undefined;
     try {
       const info = await this.transporter.sendMail({
-        from: `"${this.config.fromName}" <${this.config.fromEmail}>`,
+        from: fromAddress,
+        ...(replyTo && { replyTo }),
         to,
         subject,
         html,

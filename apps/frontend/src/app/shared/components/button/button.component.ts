@@ -28,6 +28,7 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
       [attr.form]="form()"
       [attr.aria-label]="ariaLabel() || null"
       [attr.title]="ariaLabel() || null"
+      [attr.aria-pressed]="ariaPressed() ?? null"
       [disabled]="disabled() || loading()"
       [class]="buttonClasses"
       (click)="handleClick($event)"
@@ -56,9 +57,9 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
           </svg>
         }
         <span class="btn-icon flex-shrink-0"><ng-content select="[slot=icon]"></ng-content></span>
-        @if (!loading() || showTextWhileLoading()) {
-          <span class="btn-text"><ng-content></ng-content></span>
-        }
+        <span class="btn-text" [class.sr-only]="loading() && !showTextWhileLoading()">
+          <ng-content></ng-content>
+        </span>
       </div>
     </button>
     `,
@@ -211,6 +212,8 @@ export class ButtonComponent {
    * BORRA el nombre accesible que el propio texto del botón ya daba.
    */
   readonly ariaLabel = input('');
+  /** Toggle state announced by assistive technology on the actual button. */
+  readonly ariaPressed = input<boolean | null>();
 
   readonly clicked = output<Event>();
 
@@ -223,6 +226,10 @@ export class ButtonComponent {
       'focus:outline-none',
       'focus:ring-2',
       'focus:ring-offset-2',
+      'focus-visible:outline',
+      'focus-visible:outline-2',
+      'focus-visible:outline-offset-2',
+      'focus-visible:outline-[var(--color-text-primary)]',
       'disabled:opacity-40',
       'disabled:cursor-not-allowed',
       'active:scale-[0.97]',
@@ -265,7 +272,7 @@ export class ButtonComponent {
       ],
       outline: [
         'btn-outline-border',
-        'text-[var(--color-primary)]',
+        'text-[var(--color-text-primary)]',
         'focus:ring-[var(--color-primary)]/50',
       ],
       'outline-secondary': [

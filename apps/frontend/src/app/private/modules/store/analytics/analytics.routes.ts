@@ -365,6 +365,13 @@ export const analyticsRoutes: Routes = [
                 (c) => c.ReviewByProductComponent,
               ),
           },
+          {
+            path: 'trend',
+            loadComponent: () =>
+              import('./pages/reviews/review-trend.component').then(
+                (c) => c.ReviewTrendComponent,
+              ),
+          },
         ],
       },
       // Financial Analytics (shell)

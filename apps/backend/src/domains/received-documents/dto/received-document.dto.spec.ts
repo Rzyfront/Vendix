@@ -36,6 +36,32 @@ function nestedTaxError(errors: ValidationError[], field: string): ValidationErr
 }
 
 describe('ReceivedDocumentTaxDto nominal IBUA shape', () => {
+  it.each(['cash', 'credit', 'unknown'] as const)(
+    'accepts explicit manual payment condition %s and keeps it optional for compatibility',
+    async (payment_condition) => {
+      const dto = plainToInstance(ManualReceivedDocumentDto, manualPayload({
+        tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', amount: '1.00',
+      }));
+      Object.assign(dto, { payment_condition });
+      const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+      expect(errors).toEqual([]);
+      expect(dto.payment_condition).toBe(payment_condition);
+    },
+  );
+
+  it('keeps the manual payment condition optional and rejects unsupported values', async () => {
+    const omitted = plainToInstance(ManualReceivedDocumentDto, manualPayload({
+      tax_type: 'iva', scheme_code: '01', tax_name: 'IVA', amount: '1.00',
+    }));
+    expect(await validate(omitted, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+    const invalid = plainToInstance(ManualReceivedDocumentDto, {
+      ...manualPayload({ tax_type: 'iva', scheme_code: '01', tax_name: 'IVA', amount: '1.00' }),
+      payment_condition: 'deferred',
+    });
+    const errors = await validate(invalid, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.find((error) => error.property === 'payment_condition')?.constraints).toHaveProperty('isIn');
+  });
+
   it('whitelists nested nominal facts and accepts omitted rate/base for unit basis', async () => {
     const dto = plainToInstance(ManualReceivedDocumentDto, manualPayload({
       tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', tax_basis_type: 'unit',
