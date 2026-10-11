@@ -30,6 +30,7 @@ import {
 import { DianConfigApiService } from '../../../../../shared/services/dian';
 import type { DianConfig } from '../interfaces/invoice.interface';
 import type { DianConfigurationType, FiscalReadinessAxis, FiscalReadinessResponse } from '../../../../../shared/components/dian';
+import { DIAN_ENABLEMENT_STATUS_LABELS } from '../../../../../shared/components/dian';
 import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 import { DianConfigWizardComponent } from '../components/dian-config/dian-config-wizard.component';
 import { ReceivedBuyerEventActivationComponent } from './received-buyer-event-activation.component';
@@ -103,7 +104,7 @@ const RECEPTION_STEPS: StepsLineItem[] = [
             } @else if (readinessError()) {
               <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">
                 <span>{{ readinessError() }}</span>
-                <app-button variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
+                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
               </div>
             } @else {
               @if (invoicingAxis(); as axis) {
@@ -119,7 +120,7 @@ const RECEPTION_STEPS: StepsLineItem[] = [
                   <app-card [responsive]="true" [responsivePadding]="true">
                     <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-secondary">Certificado</p><app-tooltip content="Solo se muestra si existe un certificado registrado y su fecha de vencimiento; nunca se revela la clave del archivo ni su huella."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre certificado DIAN"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
                     <p class="mt-1 text-sm text-text-primary">{{ hasCertificate() ? 'Registrado' : 'Pendiente' }}</p>
-                    @if (certificateExpiry()) { <p class="mt-1 text-xs text-text-secondary">Vence: {{ formatDate(certificateExpiry()!) }}</p> }
+                    @if (certificateExpiry(); as expiry) { <p class="mt-1 text-xs text-text-secondary">Vence: {{ formatDate(expiry) }}</p> }
                   </app-card>
                   <app-card [responsive]="true" [responsivePadding]="true">
                     <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-secondary">Habilitación DIAN</p><app-tooltip content="Este es el estado reportado por DIAN y el checklist de preparación del backend; guardar una configuración no cambia por sí solo la habilitación."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre estado de habilitación"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
@@ -138,7 +139,7 @@ const RECEPTION_STEPS: StepsLineItem[] = [
                 Guardar datos no significa que DIAN haya habilitado la recepción ni que Vendix descargue documentos desde DIAN. La importación disponible es manual desde la bandeja.
               </div>
               @if (canConfigureDian()) {
-                <app-button variant="primary" size="md" [disabled]="!canConfigureDian() || busy()" (clicked)="openDianWizard()">
+                <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="!canConfigureDian() || busy()" (clicked)="openDianWizard()">
                   <span slot="icon"><app-icon name="settings" [size]="16" /></span>
                   {{ invoicingAxis()?.config_id === null ? 'Configurar DIAN propia' : 'Revisar configuración DIAN' }}
                 </app-button>
@@ -184,14 +185,14 @@ const RECEPTION_STEPS: StepsLineItem[] = [
       }
 
       <div slot="footer" class="flex flex-col-reverse justify-between gap-2 sm:flex-row sm:items-center">
-        <app-button variant="outline" size="md" [disabled]="busy()" (clicked)="close()">Cerrar</app-button>
+        <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="busy()" (clicked)="close()">Cerrar</app-button>
         <div class="flex flex-col-reverse gap-2 sm:flex-row">
           @if (showDianWizard()) {
-            <app-button variant="outline" size="md" [disabled]="busy()" (clicked)="onDianWizardCancelled()">Volver al resumen DIAN</app-button>
+            <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="busy()" (clicked)="onDianWizardCancelled()">Volver al resumen DIAN</app-button>
           } @else {
-            <app-button variant="outline" size="md" [disabled]="!scopeEligible() || step() === 0 || busy()" (clicked)="previousStep()">Anterior</app-button>
+            <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="!scopeEligible() || step() === 0 || busy()" (clicked)="previousStep()">Anterior</app-button>
             @if (step() < steps.length - 1) {
-              <app-button variant="primary" size="md" [disabled]="!scopeEligible() || busy()" (clicked)="nextStep()">Continuar</app-button>
+              <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="!scopeEligible() || busy()" (clicked)="nextStep()">Continuar</app-button>
             }
           }
         </div>
@@ -376,7 +377,7 @@ export class ReceivedDocumentsConfigurationWizardComponent {
   }
 
   enablementLabel(axis: FiscalReadinessAxis): string {
-    return ({ not_started: 'Sin configurar', testing: 'En habilitación', test_set_passed: 'Set de pruebas aprobado', enabled: 'Habilitada por DIAN', suspended: 'Suspendida', expired: 'Vencida' } as Record<string, string>)[axis.enablement_status] ?? 'Estado no disponible';
+    return DIAN_ENABLEMENT_STATUS_LABELS[axis.enablement_status] ?? 'Estado no disponible';
   }
 
   environmentLabel(environment: string | null): string {
@@ -386,7 +387,9 @@ export class ReceivedDocumentsConfigurationWizardComponent {
   }
 
   formatDate(value: string): string {
-    return formatDateOnlyUTC(value);
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Fecha no disponible';
+    return formatDateOnlyUTC(date);
   }
 
   private permissionPrefix(): string {

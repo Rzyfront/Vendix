@@ -5,6 +5,7 @@ const component = readFileSync(join(__dirname, 'received-documents-configuration
 const wizard = readFileSync(join(__dirname, 'received-documents-configuration-wizard.component.ts'), 'utf8');
 const activation = readFileSync(join(__dirname, 'received-buyer-event-activation.component.ts'), 'utf8');
 const activationTemplate = readFileSync(join(__dirname, 'received-buyer-event-activation.component.html'), 'utf8');
+const dianWizard = readFileSync(join(__dirname, '../components/dian-config/dian-config-wizard.component.ts'), 'utf8');
 
 describe('received documents configuration UI source guards (static, not E2E)', () => {
   it('preserves the organization configuration surface for its existing consumer', () => {
@@ -42,11 +43,15 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).toContain('software_id');
     expect(wizard).toContain('tooltipText="Identificador informado por DIAN');
     expect(wizard).toContain('hasCertificate()');
+    expect(wizard).toContain('@if (certificateExpiry(); as expiry)');
+    expect(wizard).toContain('formatDate(expiry)');
     expect(wizard).toContain('environmentLabel(axis.environment)');
+    expect(wizard).toContain('DIAN_ENABLEMENT_STATUS_LABELS[axis.enablement_status]');
     expect(wizard).toContain('canConfigureDian()');
     expect(wizard).toContain('(clicked)="openDianWizard()"');
     expect(wizard).toContain('if (!this.canConfigureDian() || this.busy()) return;');
-    expect(wizard).toContain('formatDateOnlyUTC(value)');
+    expect(wizard).toContain('if (Number.isNaN(date.getTime())) return \'Fecha no disponible\';');
+    expect(wizard).toContain('formatDateOnlyUTC(date)');
     expect(wizard).toContain('Guardar datos no significa que DIAN haya habilitado');
     expect(wizard).toContain('La recepción automática desde DIAN no está implementada');
     expect(wizard).not.toContain('DocumentReceptionConnectionsComponent');
@@ -66,6 +71,13 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(activation).toContain('this.auth.hasPermission');
     expect(activation).toContain('this.statusCode(error) === 409');
     expect(activation).toContain('getReadiness(scope, code, storeId)');
+    expect(activation).toContain('DIAN_ENABLEMENT_STATUS_LABELS[config.enablement_status]');
+    expect(activation).toContain('this.form.controls.dian_configuration_id.valueChanges.pipe(startWith(this.form.controls.dian_configuration_id.value))');
+    expect(activation).toContain('{ initialValue: this.form.controls.dian_configuration_id.value }');
+    expect(activation).toContain('this.selectedEvidence.set(null);');
+    expect(activation).toContain('this.form.controls.evidence_id.setValue(null);');
+    expect(activation).toContain('if (Number.isNaN(date.getTime())) return \'Fecha no disponible\';');
+    expect(activation).toContain("hourCycle: 'h23'");
     expect(activationTemplate).toContain('@if (embedded() && inlineRequest())');
     expect(activationTemplate).toContain('<app-pagination');
     expect(activationTemplate).toContain('<app-selector');
@@ -75,7 +87,19 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(activationTemplate).toContain('evento 034 es solo de consulta');
     expect(activationTemplate).toContain('[disabled]="submitLoading()"');
     expect(activationTemplate).toContain('[content]="codeTooltip(code)"');
+    expect(activationTemplate).toContain('selectedConfigurationWarning()');
+    expect(activationTemplate).toContain('bg-warning-light p-3 text-sm text-text-primary" role="note"');
+    expect(activationTemplate).toContain('No se transmiten eventos a la DIAN desde esta pantalla.');
     expect(activation).toContain('Pagination exception: evidence is returned as a server-paginated page');
     expect(activationTemplate).not.toContain('event 034');
+  });
+
+  it('keeps buttons in the reception and reused DIAN wizards at accessible touch height', () => {
+    for (const source of [wizard, activationTemplate, dianWizard]) {
+      const buttonTags = source.match(/<app-button\b/g) ?? [];
+      const sizedButtonTags = source.match(/<app-button customClasses="min-h-11"/g) ?? [];
+      expect(buttonTags.length).toBeGreaterThan(0);
+      expect(sizedButtonTags).toHaveLength(buttonTags.length);
+    }
   });
 });

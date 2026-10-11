@@ -408,19 +408,19 @@ interface PersistedTestResult {
             ></app-input>
           </form>
           <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-            <app-button variant="outline" size="sm" (clicked)="cancelled.emit()">
+            <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="cancelled.emit()">
               Cancelar
             </app-button>
             <div class="flex items-center gap-2">
               <!-- Already-saved credentials must not force a pointless PATCH just
                    to move forward. -->
               @if (selectedConfig()) {
-                <app-button variant="outline" (clicked)="activeStep.set(1)">
+                <app-button customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(1)">
                   Continuar sin cambios
                   <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                 </app-button>
               }
-              <app-button
+              <app-button customClasses="min-h-11"
                 variant="primary"
                 (clicked)="saveCredentials()"
                 [disabled]="credentialsForm.invalid || savingCredentials()"
@@ -528,7 +528,7 @@ interface PersistedTestResult {
                 ></app-input>
               </form>
               <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-                <app-button variant="outline" size="sm" (clicked)="activeStep.set(0)">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(0)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
@@ -536,12 +536,12 @@ interface PersistedTestResult {
                   <!-- A stored certificate is enough to keep going: forcing a
                        re-upload turned this step into a dead end. -->
                   @if (hasCertificate() && !selectedFile()) {
-                    <app-button variant="outline" (clicked)="activeStep.set(2)">
+                    <app-button customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(2)">
                       Continuar
                       <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                     </app-button>
                   }
-                  <app-button
+                  <app-button customClasses="min-h-11"
                     variant="primary"
                     (clicked)="uploadCertificate()"
                     [disabled]="!selectedFile() || certificateForm.invalid || uploadingCertificate()"
@@ -678,7 +678,7 @@ interface PersistedTestResult {
                         Paso a producción
                       </span>
                     </div>
-                    <app-button
+                    <app-button customClasses="min-h-11"
                       variant="outline"
                       size="sm"
                       (clicked)="loadReadiness()"
@@ -785,7 +785,7 @@ interface PersistedTestResult {
 
                   @if (!alreadyInProduction()) {
                     <div class="flex justify-end pt-2">
-                      <app-button
+                      <app-button customClasses="min-h-11"
                         variant="primary"
                         size="sm"
                         (clicked)="promoteToProduction()"
@@ -801,11 +801,11 @@ interface PersistedTestResult {
               }
 
               <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-                <app-button variant="outline" size="sm" (clicked)="activeStep.set(1)">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(1)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
-                <app-button
+                <app-button customClasses="min-h-11"
                   variant="primary"
                   (clicked)="saveEnvironment()"
                   [disabled]="savingEnvironment()"
@@ -859,7 +859,7 @@ interface PersistedTestResult {
                 ></app-selector>
               </div>
               <div class="flex flex-wrap items-center gap-3">
-                <app-button
+                <app-button customClasses="min-h-11"
                   variant="outline"
                   (clicked)="testConnection()"
                   [disabled]="testingConnection()"
@@ -868,7 +868,7 @@ interface PersistedTestResult {
                   <app-icon slot="icon" name="wifi" [size]="14"></app-icon>
                   Probar Conexion
                 </app-button>
-                <app-button
+                <app-button customClasses="min-h-11"
                   variant="primary"
                   (clicked)="runTestSet()"
                   [disabled]="runningTestSet() || !selectedResolutionId() || testSetState() === 'pending' || testSetState() === 'passed'"
@@ -880,7 +880,7 @@ interface PersistedTestResult {
                 <!-- Re-poll: resolves the verdict of the batch already sent. It
                      never re-transmits, so it is always safe to press. -->
                 @if (testSetResult()?.zip_key || testSetState() === 'pending') {
-                  <app-button
+                  <app-button customClasses="min-h-11"
                     variant="outline"
                     (clicked)="checkTestSetStatus(false)"
                     [disabled]="checkingStatus()"
@@ -1060,7 +1060,7 @@ interface PersistedTestResult {
                         </span>
                       </div>
                       <div class="flex justify-end">
-                        <app-button
+                        <app-button customClasses="min-h-11"
                           variant="outline"
                           size="sm"
                           (clicked)="resumePolling()"
@@ -1089,7 +1089,7 @@ interface PersistedTestResult {
                     }
                     <div class="flex flex-wrap gap-2 justify-end">
                       @if (canDiagnoseDocuments()) {
-                        <app-button
+                        <app-button customClasses="min-h-11"
                           variant="outline"
                           size="sm"
                           (clicked)="diagnoseDocuments()"
@@ -1099,7 +1099,7 @@ interface PersistedTestResult {
                           Diagnosticar documentos
                         </app-button>
                       }
-                      <app-button
+                      <app-button customClasses="min-h-11"
                         [variant]="testSetStalled() ? 'primary' : 'outline'"
                         size="sm"
                         (clicked)="abandonBatch()"
@@ -1233,7 +1233,7 @@ interface PersistedTestResult {
                       Autorización de Numeración de Facturación en Muisca, regístrala
                       como resolución y luego activa producción en el paso de Ambiente.
                       <div class="mt-2">
-                        <app-button variant="outline" size="sm" (clicked)="goToProduction()">
+                        <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="goToProduction()">
                           <app-icon slot="icon" name="shield-check" [size]="14"></app-icon>
                           Ir al paso de producción
                         </app-button>
@@ -1252,11 +1252,11 @@ interface PersistedTestResult {
               }
 
               <div class="flex items-center justify-between pt-4 border-t border-border">
-                <app-button variant="outline" size="sm" (clicked)="activeStep.set(2)">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(2)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
-                <app-button variant="primary" size="sm" (clicked)="activeStep.set(4)">
+                <app-button customClasses="min-h-11" variant="primary" size="sm" (clicked)="activeStep.set(4)">
                   Registros
                   <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                 </app-button>
@@ -1286,7 +1286,7 @@ interface PersistedTestResult {
             Historial de operaciones realizadas con esta configuracion DIAN.
           </p>
           <div class="flex items-center justify-end mb-3">
-            <app-button
+            <app-button customClasses="min-h-11"
               variant="outline"
               size="sm"
               (clicked)="loadAuditLogs()"
@@ -1366,17 +1366,17 @@ interface PersistedTestResult {
             <div class="flex items-center justify-between pt-3 border-t border-border">
               <span class="text-xs text-text-secondary">Pagina {{ auditLogPage() }}</span>
               <div class="flex gap-2">
-                <app-button variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage() <= 1">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage() <= 1">
                   Anterior
                 </app-button>
-                <app-button variant="outline" size="sm" (clicked)="nextAuditPage()">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="nextAuditPage()">
                   Siguiente
                 </app-button>
               </div>
             </div>
           }
           <div class="flex items-center justify-end pt-4 border-t border-border">
-            <app-button variant="primary" size="sm" (clicked)="finish()">
+            <app-button customClasses="min-h-11" variant="primary" size="sm" (clicked)="finish()">
               <app-icon slot="icon" name="check" [size]="14"></app-icon>
               Finalizar
             </app-button>

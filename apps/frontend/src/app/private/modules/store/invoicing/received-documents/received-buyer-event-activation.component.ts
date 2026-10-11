@@ -7,6 +7,7 @@ import { forkJoin, startWith, Subscription, finalize } from 'rxjs';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { ButtonComponent, IconComponent, ModalComponent, PaginationComponent, SelectorComponent, ToggleComponent, TooltipComponent, ToastService, type SelectorOption } from '../../../../../shared/components/index';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
+import { DIAN_ENABLEMENT_STATUS_LABELS } from '../../../../../shared/components/dian';
 import type { ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedBuyerEventActivationService } from './received-buyer-event-activation.service';
 import type { BuyerEventActivationSnapshot, BuyerEventActivationStatusView, BuyerEventOptionsView, ReceivedBuyerEventCode } from './received-buyer-event-activation.interface';
@@ -55,8 +56,7 @@ export class ReceivedBuyerEventActivationComponent {
   // Pagination exception: evidence is returned as a server-paginated page. DIAN configurations are a bounded reference list capped at 100 by the backend; do not pretend that the cap is full pagination.
   readonly configurationOptions = computed<SelectorOption[]>(() => (this.options()?.dian_configurations ?? []).map((config) => ({
     value: config.id,
-    label: `${config.name} · ${config.environment === 'production' ? 'Producción' : 'Pruebas'} · ${config.enablement_status}`,
-    description: this.configWarning(config) ?? undefined,
+    label: `${config.name} · ${config.environment === 'production' ? 'Producción' : 'Pruebas'} · ${DIAN_ENABLEMENT_STATUS_LABELS[config.enablement_status] ?? 'Estado no disponible'}`,
   })));
   readonly evidenceOptions = computed<SelectorOption[]>(() => (this.options()?.evidence ?? []).filter((item) => item.has_artifact).map((item) => ({
     value: item.id,
@@ -72,6 +72,15 @@ export class ReceivedBuyerEventActivationComponent {
     event_codes: new FormControl<ReceivedBuyerEventCode[]>([], { nonNullable: true, validators: [Validators.required] }),
   });
   private readonly formStatus = toSignal(this.form.statusChanges.pipe(startWith(this.form.status)), { initialValue: this.form.status });
+  private readonly selectedConfigurationId = toSignal(
+    this.form.controls.dian_configuration_id.valueChanges.pipe(startWith(this.form.controls.dian_configuration_id.value)),
+    { initialValue: this.form.controls.dian_configuration_id.value },
+  );
+  readonly selectedConfigurationWarning = computed(() => {
+    const configId = this.selectedConfigurationId();
+    const config = this.options()?.dian_configurations.find((item) => item.id === configId);
+    return config ? this.configWarning(config) : null;
+  });
   readonly canSubmit = computed(() => this.canConfigure() && this.scopeReady() && this.formStatus() === 'VALID' && !this.submitLoading() && !this.conflict() && !this.optionsLoading() && this.hasSelectedValidOptions());
   private statusRequest?: Subscription;
   private optionsRequest?: Subscription;
@@ -128,7 +137,12 @@ export class ReceivedBuyerEventActivationComponent {
     if (this.submitLoading()) return;
     const evidenceId = value === null ? null : Number(value);
     const evidence = this.options()?.evidence.find((item) => item.id === evidenceId);
-    if (evidence) this.selectEvidence(evidence);
+    if (evidence) {
+      this.selectEvidence(evidence);
+      return;
+    }
+    this.selectedEvidence.set(null);
+    this.form.controls.evidence_id.setValue(null);
   }
   onCodeChange(code: ReceivedBuyerEventCode, event: Event): void { this.toggleCode(code, (event.target as HTMLInputElement).checked); }
   loadOptions(page: number): void {
@@ -188,7 +202,20 @@ export class ReceivedBuyerEventActivationComponent {
   hasUsableEvidence(options: BuyerEventOptionsView): boolean { return options.evidence.some((item) => item.has_artifact); }
   evidenceSelected(id: number): boolean { return this.form.controls.evidence_id.value === id; }
   isApproved(code: ReceivedBuyerEventCode): boolean { return this.approvedCodes().includes(code); }
-  formatDate(date: string | null): string { return date ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeZone: 'America/Bogota' }).format(new Date(date)) : 'Fecha no disponible'; }
+  /** created_at is an instant, so show both date and browser-local time; it is not a date-only field. */
+  formatDate(value: string | null): string {
+    if (!value) return 'Fecha no disponible';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Fecha no disponible';
+    return new Intl.DateTimeFormat('es-CO', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(date);
+  }
   codeTooltip(code: ReceivedBuyerEventCode): string { return `${code} · ${this.codeLabel(code)}. Se incluirá en la solicitud de revisión; esta configuración nunca transmite el evento.`; }
   private resetForContext(scope: ReceivedDocumentsScope | null, storeId: number | null): void {
     this.generation++; this.statusRequest?.unsubscribe(); this.optionsRequest?.unsubscribe(); this.submitRequest?.unsubscribe();

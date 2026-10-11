@@ -13,14 +13,14 @@
       <p class="mt-1 text-sm text-text-secondary">{{ statusMessage() }}</p>
     </div>
     @if (canConfigure() && !(embedded() && inlineRequest())) {
-      <app-button variant="primary" size="md" [disabled]="!scopeReady() || loading() || !status() || isBusy()" (clicked)="openRequest()">Solicitar revisión</app-button>
+      <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="!scopeReady() || loading() || !status() || isBusy()" (clicked)="openRequest()">Solicitar revisión</app-button>
     }
   </div>
 
   @if (loading()) { <p class="mt-3 text-sm text-text-secondary" role="status">Consultando habilitación…</p> }
   @if (loadError()) {
     <div class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">
-      <span>{{ loadError() }}</span><app-button variant="outline" size="sm" (clicked)="reloadStatus()">Recargar estado</app-button>
+      <span>{{ loadError() }}</span><app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="reloadStatus()">Recargar estado</app-button>
     </div>
   }
   @if (status() && !loading()) {
@@ -52,8 +52,8 @@
     <div class="mt-4 rounded-lg border border-border p-3">
       <ng-container [ngTemplateOutlet]="requestForm" />
       <div class="mt-4 flex flex-col-reverse justify-end gap-2 sm:flex-row">
-        <app-button variant="outline" size="md" [disabled]="submitLoading()" (clicked)="closeInlineRequest()">Cancelar</app-button>
-        <app-button variant="primary" size="md" [disabled]="!canSubmit()" [loading]="submitLoading()" (clicked)="submit()">Enviar solicitud</app-button>
+        <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="submitLoading()" (clicked)="closeInlineRequest()">Cancelar</app-button>
+        <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="!canSubmit()" [loading]="submitLoading()" (clicked)="submit()">Enviar solicitud</app-button>
       </div>
     </div>
   }
@@ -63,8 +63,8 @@
   <app-modal [(isOpen)]="open" title="Solicitar revisión de eventos" subtitle="Selecciona la configuración, evidencia y códigos para revisión." size="lg" [dialog]="true" [canClose]="canCloseModal" (cancel)="onModalChange(false)">
     <ng-container [ngTemplateOutlet]="requestForm" />
     <div slot="footer" class="flex flex-col-reverse justify-end gap-2 sm:flex-row">
-      <app-button variant="outline" size="md" [disabled]="submitLoading()" (clicked)="onModalChange(false)">Cancelar</app-button>
-      <app-button variant="primary" size="md" [disabled]="!canSubmit()" [loading]="submitLoading()" (clicked)="submit()">Enviar solicitud</app-button>
+      <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="submitLoading()" (clicked)="onModalChange(false)">Cancelar</app-button>
+      <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="!canSubmit()" [loading]="submitLoading()" (clicked)="submit()">Enviar solicitud</app-button>
     </div>
   </app-modal>
 }
@@ -74,7 +74,7 @@
     <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary">Enviar esta solicitud no significa aprobación de la DIAN ni transmite eventos legales.</p>
     @if (optionsError()) {
       <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
-        <span>{{ optionsError() }}</span><app-button variant="outline" size="sm" (clicked)="loadOptions(page())">Reintentar</app-button>
+        <span>{{ optionsError() }}</span><app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadOptions(page())">Reintentar</app-button>
       </div>
     }
     @if (optionsLoading()) { <p role="status" class="text-sm text-text-secondary">Cargando opciones…</p> }
@@ -99,6 +99,9 @@
             <button type="button" class="mt-6 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda para elegir configuración DIAN"><app-icon name="info" [size]="16" /></button>
           </app-tooltip>
         </div>
+        @if (selectedConfigurationWarning(); as warning) {
+          <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary" role="note">{{ warning }}</p>
+        }
         @if (data.configurations_truncated) { <p class="text-xs text-warning">La lista está limitada a las primeras 100 configuraciones (límite del backend).</p> }
       }
 
@@ -129,7 +132,7 @@
 
       <fieldset class="space-y-2">
         <legend class="flex items-center gap-2 text-sm font-semibold text-text-primary">Códigos para revisión <span aria-hidden="true">*</span>
-          <app-tooltip content="Los códigos marcados se incluyen en la solicitud de revisión. No se envían eventos al comprador desde esta pantalla.">
+          <app-tooltip content="Los códigos marcados se incluyen en la solicitud de revisión. No se transmiten eventos a la DIAN desde esta pantalla.">
             <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre códigos de evento"><app-icon name="info" [size]="16" /></button>
           </app-tooltip>
         </legend>
@@ -147,7 +150,7 @@
     @if (submitError()) {
       <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">
         <span>{{ submitError() }}</span>
-        @if (conflict()) { <app-button variant="outline" size="sm" (clicked)="reloadStatus()">Recargar estado</app-button> }
+        @if (conflict()) { <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="reloadStatus()">Recargar estado</app-button> }
       </div>
     }
   </div>
