@@ -63,13 +63,15 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
     CurrencyPipe,
   ],
   template: `
+    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_a]:min-h-11 [&_a]:inline-flex [&_a]:items-center [overflow-wrap:anywhere]">
     @if (loading()) {
-      <div class="flex items-center justify-center py-20">
+      <div class="flex items-center justify-center py-20" role="status" aria-live="polite">
         <app-spinner size="lg"></app-spinner>
+        <span class="sr-only">Cargando contrato</span>
       </div>
     } @else if (loadError()) {
       <div class="max-w-[1600px] mx-auto px-3 py-3 sm:px-4 sm:py-4">
-        <app-alert-banner variant="danger" heading="No se pudo cargar el contrato">
+        <app-alert-banner variant="danger" tone="token" heading="No se pudo cargar el contrato">
           {{ loadError() }}
           <div bannerActions class="mt-2 flex gap-2">
             <app-button variant="outline" size="sm" (clicked)="reload()">Reintentar</app-button>
@@ -92,7 +94,7 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
 
       <div class="max-w-[1600px] mx-auto px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5">
         @if (transitionError()) {
-          <app-alert-banner variant="danger" heading="No se pudo cambiar el estado">
+          <app-alert-banner variant="danger" tone="token" heading="No se pudo cambiar el estado">
             {{ transitionError() }}
             <div bannerActions class="mt-2">
               <app-button variant="outline" size="sm" (clicked)="clearTransitionError()">Entendido</app-button>
@@ -104,7 +106,7 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
           <div class="flex min-w-0 flex-col gap-3">
             <app-card title="Resumen y objeto del contrato" shadow="sm" [responsivePadding]="true">
               @if (contract()!.contract_object) {
-                <p class="text-sm whitespace-pre-wrap text-text-primary">{{ contract()!.contract_object }}</p>
+                <p class="text-sm whitespace-pre-wrap break-words text-text-primary">{{ contract()!.contract_object }}</p>
               } @else {
                 <p class="text-sm text-text-secondary">No configurado en los datos contractuales disponibles.</p>
               }
@@ -152,7 +154,7 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
                       }
                     </div>
                   } @else {
-                    <app-alert-banner variant="warning" heading="Perfil de facturación no configurado">
+                    <app-alert-banner variant="warning" tone="token" heading="Perfil de facturación no configurado">
                       El snapshot económico no conserva el perfil de facturación. Revisa o crea una cotización de contrato nueva con una configuración explícita; no se usa el perfil vigente ni se calculan valores por defecto.
                     </app-alert-banner>
                   }
@@ -213,22 +215,22 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
                   }
                 </div>
               } @else {
-                <app-alert-banner variant="warning" heading="Snapshot económico no disponible">
+                <app-alert-banner variant="warning" tone="token" heading="Snapshot económico no disponible">
                   Este contrato histórico no conserva perfil ni desglose económico congelado. No se puede generar una factura AIU desde configuración vigente o importes inferidos; crea una cotización de contrato nueva o revisada con su perfil de facturación.
                 </app-alert-banner>
               }
               <div class="mt-4 border-t border-border pt-4">
                 <h3 class="mb-2 text-sm font-semibold text-text-primary">Administración, Imprevistos y Utilidad (AIU)</h3>
               <dl class="space-y-2.5 text-sm">
-                <div class="flex justify-between items-center">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1">
                   <dt class="text-text-secondary">Administración (A)</dt>
                   <dd class="font-semibold text-text-primary">{{ formatPct(contract()!.administration_percentage) }}</dd>
                 </div>
-                <div class="flex justify-between items-center">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1">
                   <dt class="text-text-secondary">Imprevistos (I)</dt>
                   <dd class="font-semibold text-text-primary">{{ formatPct(contract()!.contingency_percentage) }}</dd>
                 </div>
-                <div class="flex justify-between items-center">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1">
                   <dt class="text-text-secondary">Utilidad (U)</dt>
                   <dd class="font-semibold text-text-primary">{{ formatPct(contract()!.profit_percentage) }}</dd>
                 </div>
@@ -254,11 +256,11 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
                 </div>
                 <div>
                   <dt class="text-text-secondary">Términos y condiciones</dt>
-                  <dd class="mt-1 whitespace-pre-wrap">{{ contract()!.terms_and_conditions || 'No configurado' }}</dd>
+                  <dd class="mt-1 whitespace-pre-wrap break-words">{{ contract()!.terms_and_conditions || 'No configurado' }}</dd>
                 </div>
                 <div>
                   <dt class="text-text-secondary">Notas de la cotización</dt>
-                  <dd class="mt-1 whitespace-pre-wrap">{{ contract()!.notes || 'No configurado' }}</dd>
+                  <dd class="mt-1 whitespace-pre-wrap break-words">{{ contract()!.notes || 'No configurado' }}</dd>
                 </div>
                 @if (contract()!.snapshot?.frozen_at) {
                   <div><dt class="text-text-secondary">Snapshot congelado</dt><dd>{{ contract()!.snapshot!.frozen_at | date:'dd/MM/yyyy HH:mm' }}</dd></div>
@@ -271,23 +273,23 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
             </app-card>
           </div>
 
-          <div class="flex flex-col gap-3 lg:pt-0 pt-1">
+          <div class="flex min-w-0 flex-col gap-3 lg:pt-0 pt-1">
             <app-card shadow="sm" [responsivePadding]="true">
               <h2 class="mb-3 text-sm font-bold text-text-primary">Resumen congelado</h2>
               <div class="space-y-2.5">
-                <div class="flex justify-between items-center text-sm">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1 text-sm">
                   <span class="text-text-secondary">Subtotal</span>
                   <span class="font-semibold text-text-primary">{{ contract()!.subtotal_amount !== null && contract()!.subtotal_amount !== undefined ? (contract()!.subtotal_amount | currency:2) : 'No configurado' }}</span>
                 </div>
-                <div class="flex justify-between items-center text-sm">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1 text-sm">
                   <span class="text-text-secondary">Descuentos</span>
                   <span class="font-semibold text-text-primary">{{ contract()!.discount_amount !== null && contract()!.discount_amount !== undefined ? (contract()!.discount_amount | currency:2) : 'No configurado' }}</span>
                 </div>
-                <div class="flex justify-between items-center text-sm">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1 text-sm">
                   <span class="text-text-secondary">Impuestos</span>
                   <span class="font-semibold text-text-primary">{{ contract()!.tax_amount !== null && contract()!.tax_amount !== undefined ? (contract()!.tax_amount | currency:2) : 'No configurado' }}</span>
                 </div>
-                <div class="pt-3 mt-1 border-t border-border flex justify-between items-center">
+                <div class="pt-3 mt-1 border-t border-border flex flex-col items-start gap-2 sm:flex-row sm:justify-between sm:items-center">
                   <span class="text-base font-bold text-text-primary">Total de cotización congelado</span>
                   <span class="text-xl sm:text-2xl font-bold text-primary font-mono">
                     {{ contract()!.grand_total !== null && contract()!.grand_total !== undefined ? (contract()!.grand_total | currency:2) : 'No configurado' }}
@@ -295,11 +297,11 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
                 </div>
               </div>
               <dl class="mt-4 pt-4 border-t border-border space-y-2.5 text-sm">
-                <div class="flex justify-between items-center">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1">
                   <dt class="text-text-secondary">Creado</dt>
                   <dd class="font-semibold text-text-primary">{{ contract()!.created_at ? (contract()!.created_at | date:'dd/MM/yyyy HH:mm') : 'No configurado' }}</dd>
                 </div>
-                <div class="flex justify-between items-center">
+                <div class="flex flex-wrap justify-between items-center gap-x-2 gap-y-1">
                   <dt class="text-text-secondary">Actualizado</dt>
                   <dd class="font-semibold text-text-primary">{{ contract()!.updated_at ? (contract()!.updated_at | date:'dd/MM/yyyy HH:mm') : 'No configurado' }}</dd>
                 </div>
@@ -308,7 +310,7 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
             <app-card shadow="sm" [responsivePadding]="true">
               <h2 class="mb-3 text-sm font-bold text-text-primary">Factura AIU</h2>
               @if (invoiceError()) {
-                <app-alert-banner variant="danger" heading="No se pudo generar la factura">
+                <app-alert-banner variant="danger" tone="token" heading="No se pudo generar la factura">
                   {{ invoiceError() }}
                   <div bannerActions class="mt-2 flex gap-2">
                     <app-button variant="outline" size="sm" (clicked)="goToInvoices()">Ver facturas</app-button>
@@ -376,6 +378,7 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
         </div>
       </div>
     }
+    </div>
   `,
   styles: [],
 })
@@ -411,16 +414,17 @@ export class ContractDetailComponent {
     titleKey: 'product_name',
     avatarFallbackIcon: 'package',
     avatarShape: 'square',
+    noteTransform: (item) => `Notas: ${item.notes || 'No configurado'}`,
     detailKeys: [
-      { key: 'quantity', label: 'Cantidad', transform: (value: number | null) => value == null ? 'No configurado' : String(value) },
-      { key: 'unit_price', label: 'Precio unitario', transform: (value: number | null) => this.formatFrozenMoney(value) },
-      { key: 'discount_amount', label: 'Descuento', transform: (value: number | null) => this.formatFrozenMoney(value) },
-      { key: 'tax_rate', label: 'Tarifa', transform: (value: number | null) => this.formatTaxRate(value) },
-      { key: 'tax_amount_item', label: 'Impuesto', transform: (value: number | null) => this.formatFrozenMoney(value) },
+      { key: 'quantity', label: 'Cantidad', defaultValue: 'No configurado', transform: (value: number | null) => value == null ? 'No configurado' : String(value) },
+      { key: 'unit_price', label: 'Precio unitario', defaultValue: 'No configurado', transform: (value: number | null) => this.formatFrozenMoney(value) },
+      { key: 'discount_amount', label: 'Descuento', defaultValue: 'No configurado', transform: (value: number | null) => this.formatFrozenMoney(value) },
+      { key: 'tax_rate', label: 'Tarifa', defaultValue: 'No configurado', transform: (value: number | null) => this.formatTaxRate(value) },
+      { key: 'tax_amount_item', label: 'Impuesto', defaultValue: 'No configurado', transform: (value: number | null) => this.formatFrozenMoney(value) },
     ],
-    noteTransform: (item) => item.notes || undefined,
     footerKey: 'total_price',
     footerLabel: 'Total congelado',
+    footerDefaultValue: 'No configurado',
     footerTransform: (value: number | null) => this.formatFrozenMoney(value),
   };
 

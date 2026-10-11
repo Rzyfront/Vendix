@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ContractDetailComponent } from './contract-detail.component';
@@ -133,6 +133,36 @@ describe('ContractDetailComponent — lectura del snapshot administrativo', () =
     expect(fixture.nativeElement.textContent).toContain('Obra');
     expect(fixture.nativeElement.textContent).toContain('Total congelado');
     expect(fixture.componentInstance.formatFrozenMoney(null)).toBe('No configurado');
+  });
+
+  it('renderiza los detalles móviles sin sustituir nulos del snapshot en el DTO y anuncia carga accesiblemente', () => {
+    const sourceItem = { product_name: 'Línea histórica', quantity: null, unit_price: null, discount_amount: null, tax_rate: null, tax_amount_item: null, total_price: null, notes: null };
+    service.getContractById.and.returnValue(of({
+      id: 14, store_id: 2, contract_number: 'CT-14', quotation_id: null, status: 'draft',
+      contract_object: null, created_at: null, updated_at: null, subtotal_amount: null, discount_amount: null, tax_amount: null, grand_total: null,
+      administration_percentage: 0, contingency_percentage: 0, profit_percentage: 0, notes: null, terms_and_conditions: null,
+      valid_until: null, items: [sourceItem], invoice: null,
+    } as any));
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.item-card') as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.textContent).toContain('No configurado');
+    expect(card.textContent).toContain('Notas: No configurado');
+    expect(sourceItem.quantity).toBeNull();
+    expect(sourceItem.total_price).toBeNull();
+    expect(sourceItem.notes).toBeNull();
+
+    const wrapper = fixture.nativeElement.querySelector('.w-full') as HTMLElement;
+    expect(wrapper.className).toContain('[overflow-wrap:anywhere]');
+    expect(wrapper.className).toContain('[&_a]:min-h-11');
+    const pending = new Subject<any>();
+    service.getContractById.and.returnValue(pending.asObservable());
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+    const status = fixture.nativeElement.querySelector('[role="status"][aria-live="polite"]');
+    expect(status?.textContent).toContain('Cargando contrato');
   });
 
   it('bloquea facturación de históricos sin snapshot económico explícito', () => {
