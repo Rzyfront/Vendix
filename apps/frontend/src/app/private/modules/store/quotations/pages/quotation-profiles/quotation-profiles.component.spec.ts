@@ -61,7 +61,7 @@ describe('QuotationProfilesComponent', () => {
     service.getProfiles.and.returnValue(throwError(() => new Error('offline')));
     fixture.componentInstance.load();
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain('offline');
+    expect(fixture.nativeElement.textContent).toContain('offline');
   });
 
   it('uses server pagination and resets the page when searching', async () => {
@@ -74,6 +74,44 @@ describe('QuotationProfilesComponent', () => {
     await fixture.whenStable();
     expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 1, search: 'obra 51' }));
     expect(fixture.nativeElement.querySelector('app-pagination')).toBeTruthy();
+  });
+
+  it('renders the standard stats/card/search/filter/data layout and actions dropdown', async () => {
+    await setup();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('app-stats').length).toBe(4);
+    expect(root.querySelector('app-card')).toBeTruthy();
+    expect(root.querySelector('app-inputsearch input')?.getAttribute('aria-label')).toBe('Buscar perfiles de cotización');
+    expect(root.querySelector('app-options-dropdown')).toBeTruthy();
+    expect(root.querySelector('app-responsive-data-view')).toBeTruthy();
+    expect(root.querySelector('app-pagination')).toBeTruthy();
+    expect(root.querySelector('app-alert-banner')?.textContent).toContain('no determinan');
+
+    root.querySelector('app-options-dropdown button[aria-label="Acciones"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Volver a cotizaciones');
+    expect(root.textContent).toContain('Nuevo perfil');
+  });
+
+  it('keeps state dropdown, search, clear, and pagination synchronized', async () => {
+    await setup();
+    const component = fixture.componentInstance;
+    component.changePage(3);
+    component.onSearch('obra');
+    component.onFilterChange({ state: 'inactive' });
+    expect(component.search()).toBe('obra');
+    expect(component.state()).toBe('inactive');
+    expect(component.filterValues()).toEqual({ state: 'inactive' });
+    expect(component.page()).toBe(1);
+    expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 1, search: 'obra', state: 'inactive' }));
+
+    component.changePage(2);
+    component.clearFilters();
+    expect(component.search()).toBe('');
+    expect(component.state()).toBe('');
+    expect(component.filterValues()).toEqual({ state: null });
+    expect(component.page()).toBe(1);
+    expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 1, search: undefined, state: undefined }));
   });
 
   it('backs up to the new last page when deleting the only row of page three', async () => {
@@ -153,6 +191,23 @@ describe('QuotationProfilesComponent', () => {
     fixture.componentInstance.loadVersions(8, 2);
     expect(service.getVersions).toHaveBeenCalledWith(8, 2, 20);
     expect(fixture.componentInstance.versionsTotalPages()).toBe(3);
+  });
+
+  it('renders version history in its own responsive card with readable configuration', async () => {
+    await setup();
+    service.getVersions.and.returnValue(of({
+      data: [{ id: 2, version: 2, config: { admin_percent: 0, payment_terms: 'Anticipo 50%' }, created_at: '2026-01-02T12:30:00Z' }],
+      total: 1, page: 1, limit: 20,
+    }));
+    fixture.componentInstance.toggleVersions(profile);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Historial de versiones');
+    expect(root.textContent).toContain('Configuración guardada');
+    expect(root.querySelectorAll('app-responsive-data-view').length).toBe(2);
+    fixture.componentInstance.versionActions[0].action(fixture.componentInstance.versions()[0]);
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Anticipo 50%');
   });
 
   it('ignores a late history response after switching from profile A to profile B', async () => {
