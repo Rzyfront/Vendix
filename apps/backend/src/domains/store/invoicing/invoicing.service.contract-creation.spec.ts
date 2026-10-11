@@ -19,6 +19,7 @@ function frozenContract(
   overrides: Record<string, unknown> = {},
   profileContractObject = 'Construcción de bodega industrial',
   profileCostAccount = '4135',
+  profileDueDate = '2099-12-31',
 ) {
   const config = buildDefaultAiuProfileConfig('Construcción de bodega industrial');
   config.aiu!.contract_object = profileContractObject;
@@ -53,7 +54,7 @@ function frozenContract(
     },
     quotation_profile: null,
     contract_object: 'Construcción de bodega industrial',
-    due_date: '2099-12-31',
+    due_date: profileDueDate,
     cost_lines: [
       {
         description: 'Costo directo de obra',
@@ -105,10 +106,16 @@ function serviceFixture(options: {
   profile?: any;
   profileContractObject?: string;
   profileCostAccount?: string;
+  profileDueDate?: string;
   chartAccounts?: Array<{ code: string; accepts_entries: boolean }>;
   failLineTaxPersist?: boolean;
 } = {}) {
-  const source = frozenContract({}, options.profileContractObject, options.profileCostAccount);
+  const source = frozenContract(
+    {},
+    options.profileContractObject,
+    options.profileCostAccount,
+    options.profileDueDate,
+  );
   const contract = options.contract ?? source.row;
   const freshContract = options.freshContract ?? contract;
   const sequence: string[] = [];
@@ -204,7 +211,18 @@ function serviceFixture(options: {
         { code: '4150', accepts_entries: true },
       ]),
     },
-    store_settings: { findUnique: jest.fn(async () => { throw new Error('live AIU settings read'); }) },
+    store_settings: {
+      findUnique: jest.fn(async () => { throw new Error('live AIU settings read'); }),
+      findFirst: jest.fn(async () => ({
+        settings: {
+          general: { timezone: 'America/Bogota' },
+          // Deliberately contradictory legacy AIU settings: only the frozen
+          // profile governs the calculation; this read is solely timezone.
+          invoicing: { aiu: { regime: 'decreto_1372_1992', minimum_base_percent: 0 } },
+        },
+        stores: { timezone: null },
+      })),
+    },
     withoutScope: jest.fn(() => ({
       $transaction: async (callback: (client: any) => Promise<any>) => {
         inTransaction = true;
@@ -292,6 +310,7 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
       payment_means_code: '10',
       due_date: new Date('2099-12-31T00:00:00.000Z'),
       aiu_contract_object: 'Construcción de bodega industrial',
+      aiu_taxable_matrix: expect.objectContaining({ taxable_basis: 'aiu' }),
       notes: 'Nota congelada del perfil',
     });
     expect(data.invoice_items.create).toHaveLength(4);
@@ -350,6 +369,10 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
     expect(fixture.prisma.products.findMany).not.toHaveBeenCalled();
     expect(fixture.prisma.product_variants.findMany).not.toHaveBeenCalled();
     expect(fixture.prisma.store_settings.findUnique).not.toHaveBeenCalled();
+    expect(fixture.prisma.store_settings.findFirst).toHaveBeenCalledWith({
+      where: { store_id: 2 },
+      select: { settings: true, stores: { select: { timezone: true } } },
+    });
     expect(result.contract_id).toBe(5);
     expect(result.status).toBe('draft');
   });
@@ -365,6 +388,40 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
     expect(data.aiu_contract_object).toBe('Construcción de bodega industrial');
     expect(result.contract_id).toBe(5);
     expect(fixture.generator.generateNextNumber).toHaveBeenCalledTimes(1);
+  });
+
+  it('acepta vencimiento de hoy en la zona tienda después de las 19:00 UTC y conserva issue_date real', async () => {
+    const fixture = serviceFixture({ profileDueDate: '2026-10-10' });
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-11T04:00:00.000Z'));
+    try {
+      await RequestContextService.runIsolated(CONTEXT, () =>
+        fixture.service.createInvoiceFromContract(5),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+    const data = fixture.tx.invoices.create.mock.calls[0][0].data;
+    expect(data.due_date).toEqual(new Date('2026-10-10T00:00:00.000Z'));
+    expect(data.issue_date).toEqual(new Date('2026-10-11T04:00:00.000Z'));
+    expect(fixture.generator.generateNextNumber).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza vencimiento del día anterior en la zona tienda antes de numerar', async () => {
+    const fixture = serviceFixture({ profileDueDate: '2026-10-09' });
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-11T04:00:00.000Z'));
+    let error: any;
+    try {
+      error = await RequestContextService.runIsolated(CONTEXT, () =>
+        fixture.service.createInvoiceFromContract(5),
+      ).then(() => null, (caught) => caught);
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(error.errorCode).toBe('SYS_VALIDATION_001');
+    expect(fixture.prisma.withoutScope).not.toHaveBeenCalled();
+    expect(fixture.generator.generateNextNumber).not.toHaveBeenCalled();
   });
 
   it('rechaza una versión histórica distinta sin leer el perfil vigente ni numerar', async () => {

@@ -4264,9 +4264,13 @@ export class InvoicingService {
             .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN)
         : null;
     const payment_form = config.dian.payment_method_code ?? undefined;
+    const issue_civil_day = fiscalIssueDate(
+      issue_date,
+      await resolveStoreTimezone(this.prisma, Number(context.store_id)),
+    );
     const due_date = this.resolveDueDate(
       { due_date: draft.due_date ?? undefined, payment_form },
-      issue_date,
+      new Date(`${issue_civil_day}T00:00:00.000Z`),
     );
 
     const split_line_taxes = this.needsPersistedLineTaxes(
