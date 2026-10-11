@@ -3,11 +3,7 @@ import { DOMParser } from '@xmldom/xmldom';
 
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 
-import {
-  DIAN_TAX_CODES,
-  DIAN_TAX_NAMES,
-  isDianTaxSchemeCode,
-} from '../providers/dian-direct/constants/dian-tax-codes';
+import { isDianTaxSchemeCode } from '../providers/dian-direct/constants/dian-tax-codes';
 import {
   DIAN_DOCUMENT_TYPES,
   DIAN_INVOICE_OPERATION_TYPES,
@@ -40,7 +36,6 @@ import {
 } from '../providers/dian-direct/xml/ubl-structure.validator';
 import { ProviderInvoiceTax } from '../providers/invoice-provider.interface';
 import {
-  AiuComponent,
   CalculatedAiu,
   CalculatedLine,
   InvoiceCalculatorLineInput,
@@ -51,14 +46,20 @@ import { dianAmount, toDecimal } from '../utils/dian-money.util';
 
 import {
   AiuBucket,
-  AiuComponentLiteral,
   AiuVatRegimeLiteral,
   InvoiceProfileConfig,
   ProfileTaxRule,
   regimeFromTaxableBasis,
-  resolveAiuComponentsBasis,
   resolveAiuTaxableBasis,
 } from './invoice-profile-config.contract';
+import {
+  AIU_EMISSION_ORDER,
+  profileBucketDefaultDescription,
+  profileLineToCalculatorLine,
+  profileModelDescription,
+  profileModelUnitCode,
+  splitAiuByComponents,
+} from './profile-contract-economics';
 import {
   PREVIEW_CUFE,
   PREVIEW_INVOICE_NUMBER,
@@ -189,75 +190,8 @@ const PREVIEW_CONTROL: DianInvoiceControl = {
   range_to: '0',
 };
 
-/** `tax_type` del calculador, por código de tributo de la tabla 13.2.2. */
-const TAX_TYPE_BY_DIAN_CODE: Readonly<Record<string, string>> = {
-  [DIAN_TAX_CODES.IVA]: 'iva',
-  [DIAN_TAX_CODES.INC]: 'inc',
-  [DIAN_TAX_CODES.ICA]: 'ica',
-};
-
 /** Unidad por omisión de una línea de muestra: servicio, no pieza. */
 const PREVIEW_DEFAULT_UNIT_CODE = DIAN_UNIT_CODES.EACH;
-
-/** Descripción por omisión, por bucket, cuando la muestra no trae una. */
-const BUCKET_DEFAULT_DESCRIPTION: Readonly<Record<AiuBucket, string>> = {
-  administracion: 'Administración',
-  imprevistos: 'Imprevistos',
-  utilidad: 'Utilidad',
-  costo: 'Costo reembolsable',
-};
-
-/**
- * Los tres componentes del AIU en el orden del **anexo**, que es el orden en el
- * que se emiten las líneas: Administración primero, porque es la que lleva la
- * nota CAV03 y la que el operador busca.
- *
- * Es una tupla literal y no `Object.keys(config.aiu.components)`: el orden de
- * iteración de un objeto viene del JSON persistido y dos snapshots con las
- * mismas cifras podrían recorrerse distinto. Ese orden decide a dónde cae el
- * céntimo residual (ver {@link AIU_RESIDUE_PRIORITY}), así que tomarlo del dato
- * haría que la misma entrada produjera dos muestras distintas.
- */
-const AIU_EMISSION_ORDER: readonly AiuComponentLiteral[] = [
-  'administracion',
-  'imprevistos',
-  'utilidad',
-];
-
-/**
- * Orden de desempate del céntimo residual del reparto AIU: **utilidad primero**.
- *
- * El reparto por resto mayor decide por sí solo en cuanto las partes
- * fraccionarias difieren; esta tupla sólo interviene cuando dos componentes
- * empatan al céntimo (33,33 / 33,33 / 33,34 empata Administración con
- * Imprevistos). Existe por dos razones:
- *
- * · **Determinismo.** Es un literal, no el orden de claves de un objeto: la
- *   misma entrada da siempre la misma muestra, y ningún reordenamiento del JSON
- *   persistido puede moverla.
- * · **Dirección fiscal segura.** La utilidad es la única porción gravable bajo
- *   las TRES bases (`'aiu'`, `'utilidad'` y `'subtotal'`). Bajo `'aiu'` y
- *   `'subtotal'` la base ya contiene el AIU completo, así que el destino del
- *   céntimo no mueve la base ni un peso; sólo importa bajo `'utilidad'`, y ahí
- *   sumarlo declara un céntimo MÁS —el lado recuperable con nota crédito—
- *   mientras dárselo a un componente no gravable declararía de menos, que ante
- *   la DIAN es sanción e intereses.
- *
- * NO es la misma regla que aplica la captura de la factura real
- * (`invoice-create-page.component.ts`, `aiuApplyPlan`): esa pantalla le da el
- * 100 % del residuo a Utilidad sin desempate por resto mayor, mientras que
- * aquí se reparte céntimo a céntimo por resto mayor y sólo el empate cae en
- * esta prioridad. El algoritmo de este archivo es el correcto — no cambiarlo
- * para "alinearlo" con `aiuApplyPlan`; si algo se alinea, es al revés.
- */
-const AIU_RESIDUE_PRIORITY: readonly AiuComponentLiteral[] = [
-  'utilidad',
-  'administracion',
-  'imprevistos',
-];
-
-/** Un céntimo, la unidad en la que se reparte el residuo del truncamiento. */
-const ONE_CENT = toDecimal('0.01');
 
 /** Severidad de una validación del informe. */
 export type PreviewValidationSeverity = 'blocker' | 'warning' | 'info';
@@ -901,7 +835,7 @@ export class ProfilePreviewService {
       index,
       bucket,
       description:
-        (line.description || '').trim() || BUCKET_DEFAULT_DESCRIPTION[bucket],
+        (line.description || '').trim() || profileBucketDefaultDescription(bucket),
       quantity: line.quantity ?? 1,
       unit_price: line.unit_price,
       discount_amount: line.discount_amount ?? 0,
@@ -998,7 +932,7 @@ export class ProfilePreviewService {
       );
     }
 
-    const portions = this.splitAiuByComponents(
+    const portions = splitAiuByComponents(
       aiu_value,
       contract_value,
       config,
@@ -1051,120 +985,18 @@ export class ProfilePreviewService {
     return lines;
   }
 
-  /**
-   * Reparte el AIU entre sus tres componentes **por el método del resto mayor**,
-   * de modo que la suma de las porciones sea EXACTAMENTE el total que el reparto
-   * representa, y no ese total menos los céntimos que se fugaron al truncar.
-   *
-   * ## El algoritmo, y por qué es estable
-   *
-   * 1. Porción exacta de cada componente, en `Decimal` y a precisión plena.
-   * 2. `objetivo` = la suma exacta, truncada a 2 decimales — lo que el reparto
-   *    vale como importe emitible.
-   * 3. Cada porción truncada a 2 decimales (truncar, nunca redondear: Anexo 1.9
-   *    §11.2), guardando su parte fraccionaria.
-   * 4. `residuo` = objetivo − Σ truncadas. Es ≥ 0 y menor que 3 céntimos, así
-   *    que se reparte de uno en uno entre las porciones de mayor parte
-   *    fraccionaria. Empate ⇒ {@link AIU_RESIDUE_PRIORITY}, que es un literal:
-   *    dos ejecuciones con la misma entrada dan el mismo resultado, y nada
-   *    depende del orden de iteración del JSON persistido.
-   *
-   * El residuo sólo puede ENTRAR al AIU, nunca salir, que es la dirección que
-   * protege el piso legal: la base sube como máximo dos céntimos respecto del
-   * truncado puro, y jamás baja.
-   *
-   * ## Sobre qué se reparte: `components_basis` decide la base, no un defecto
-   *
-   * `ProfileAiuConfig.components` mide sus tres porcentajes contra el AIU
-   * (`'aiu'`, deben sumar 100 — `AIU_PERCENT_SUM`) o contra el CONTRATO
-   * (`'contract'`, su suma ES el AIU: entre 0,01 % y 100 % —
-   * `AIU_PERCENT_SUM_OF_CONTRACT`, ambas en `invoice-profile-config.contract.ts`).
-   * Las dos unidades son legales y están validadas; `'contract'` no es un perfil
-   * mal configurado — de hecho es el que siembra `buildDefaultAiuProfileConfig`
-   * para todo perfil AIU nuevo (5/2/3, suma 10 = el piso legal). Una versión
-   * anterior de este método ignoraba `components_basis` y repartía siempre
-   * sobre `aiu_value`, así que bajo `'contract'` una suma de 10 se leía como
-   * "10 % de `aiu_value`" en vez de "10 % del contrato": el AIU emitido salía
-   * diez veces menor que el real, `checkAiuDivergences` lo comparaba contra el
-   * piso legal y CUALQUIER perfil recién creado, sin tocar un campo, se
-   * reportaba con `INVOICING_AIU_001` estando exactamente EN el piso. Por eso
-   * el reparto se hace sobre `contract_value` cuando `resolveAiuComponentsBasis`
-   * resuelve `'contract'`, y sobre `aiu_value` cuando resuelve `'aiu'` (su valor
-   * también para ausencia o dato corrupto — la unidad heredada, conservadora).
-   *
-   * ## Qué SÍ sigue sin hacer: no fuerza el total al AIU declarado
-   *
-   * El objetivo del paso 2 es la suma de las porciones sobre la base que le
-   * toca, no `aiu_value` a la fuerza. Bajo `'aiu'` con porcentajes que no sumen
-   * 100 —eso sí es un perfil mal configurado— la suma diverge de `aiu_value` y
-   * la diferencia se queda fuera a propósito: es el defecto que la
-   * previsualización existe para delatar (ver el docblock de
-   * {@link derivePreviewLines}). Forzarla a `aiu_value` lo taparía.
-   */
-  private splitAiuByComponents(
-    aiu_value: ReturnType<typeof toDecimal>,
-    contract_value: ReturnType<typeof toDecimal>,
-    config: InvoiceProfileConfig,
-  ): Map<AiuComponentLiteral, ReturnType<typeof toDecimal>> {
-    const basis = resolveAiuComponentsBasis(config.aiu);
-    const base = basis === 'contract' ? contract_value : aiu_value;
-    const parts = AIU_EMISSION_ORDER.map((component) => {
-      const share = toDecimal(config.aiu?.components?.[component]);
-      const exact = base.times(share).dividedBy(100);
-      const truncated = toDecimal(dianAmount(exact));
-      return {
-        component,
-        exact,
-        amount: truncated,
-        remainder: exact.minus(truncated),
-      };
-    });
-
-    const target = toDecimal(
-      dianAmount(
-        parts.reduce((acc, part) => acc.plus(part.exact), toDecimal(0)),
-      ),
-    );
-    let residue = parts.reduce(
-      (acc, part) => acc.minus(part.amount),
-      target,
-    );
-
-    // Resto mayor primero; a igualdad de resto, la prioridad fiscal. Las dos
-    // claves son totales sobre tres elementos, así que el orden es único y no
-    // se apoya en la estabilidad de `sort`.
-    const by_largest_remainder = [...parts].sort((a, b) => {
-      const by_remainder = b.remainder.comparedTo(a.remainder);
-      if (by_remainder !== 0) return by_remainder;
-      return (
-        AIU_RESIDUE_PRIORITY.indexOf(a.component) -
-        AIU_RESIDUE_PRIORITY.indexOf(b.component)
-      );
-    });
-
-    for (const part of by_largest_remainder) {
-      if (residue.lessThan(ONE_CENT)) break;
-      part.amount = part.amount.plus(ONE_CENT);
-      residue = residue.minus(ONE_CENT);
-    }
-
-    return new Map(parts.map((part) => [part.component, part.amount]));
-  }
-
   private modelDescription(
     config: InvoiceProfileConfig,
     bucket: AiuBucket,
   ): string {
-    const model = config.model_lines.find((line) => line.bucket === bucket);
-    return (model?.description || '').trim() || BUCKET_DEFAULT_DESCRIPTION[bucket];
+    return profileModelDescription(config, bucket);
   }
 
   private modelUnitCode(
     config: InvoiceProfileConfig,
     bucket: AiuBucket,
   ): string {
-    const model = config.model_lines.find((line) => line.bucket === bucket);
-    return (model?.unit_code || '').trim() || PREVIEW_DEFAULT_UNIT_CODE;
+    return profileModelUnitCode(config, bucket);
   }
 
   // ─── Puente hacia el calculador y hacia el constructor UBL ──────────────
@@ -1189,28 +1021,7 @@ export class ProfilePreviewService {
     line: SampleLine,
     config: InvoiceProfileConfig,
   ): InvoiceCalculatorLineInput {
-    const rule = this.ruleFor(config.taxes.rules, line.bucket);
-    const aiu_component: AiuComponent | null =
-      line.bucket === 'costo' ? null : line.bucket;
-
-    return {
-      description: line.description,
-      aiu_component,
-      quantity: line.quantity,
-      unit_price: line.unit_price,
-      discount_amount: line.discount_amount,
-      ...(rule && rule.taxable
-        ? {
-            taxes: [
-              {
-                tax_name: DIAN_TAX_NAMES[rule.tax_code] || rule.tax_code,
-                tax_rate: rule.rate,
-                tax_type: TAX_TYPE_BY_DIAN_CODE[rule.tax_code],
-              },
-            ],
-          }
-        : {}),
-    };
+    return profileLineToCalculatorLine(line, config);
   }
 
   private ruleFor(
