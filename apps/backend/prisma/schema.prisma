@@ -12007,6 +12007,12 @@ model order_financial_line_taxes {
 }
 
 // Persistent supplier documents are kept separate from invoices issued by Vendix.
+enum received_document_payment_condition_enum {
+  cash
+  credit
+  unknown
+}
+
 model received_documents {
   id                       Int       @id @default(autoincrement())
   organization_id          Int
@@ -12034,6 +12040,13 @@ model received_documents {
   total_amount             Decimal   @default(0) @db.Decimal(15, 2)
   processing_status        String    @default("ready") @db.VarChar(30)
   validation_status        String    @default("pending") @db.VarChar(30)
+  /// Structural UBL and arithmetic validation only; it does not assert signature authenticity or DIAN acceptance.
+  structural_validation_status String @default("pending") @db.VarChar(30)
+  /// `unsigned` means no XML signature node was present; `not_verified` means cryptographic verification was not performed.
+  signature_validation_status String  @default("not_verified") @db.VarChar(30)
+  /// Authoritative DIAN status is not checked by local XML parsing.
+  dian_validation_status   String    @default("not_checked") @db.VarChar(30)
+  payment_condition       received_document_payment_condition_enum @default(unknown)
   review_status            String    @default("pending") @db.VarChar(30)
   matching_status          String    @default("unlinked") @db.VarChar(30)
   fiscal_status            String    @default("pending") @db.VarChar(30)
