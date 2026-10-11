@@ -710,7 +710,7 @@ export class TableComponent {
     } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
       return color.replace(/[\d.]+\)$/, '0.15)');
     }
-    return color;
+    return `color-mix(in srgb, ${color} 15%, transparent)`;
   }
 
   /**
@@ -722,7 +722,7 @@ export class TableComponent {
     } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
       return color.replace(/[\d.]+\)$/, '0.3)');
     }
-    return color;
+    return `color-mix(in srgb, ${color} 30%, transparent)`;
   }
 
   /**
