@@ -44,4 +44,12 @@ describe('item-list action touch target source guards', () => {
     expect(styles).toContain('transition: none;');
     expect(styles).toContain('transform: none;');
   });
+
+  it('uses the primary theme foreground for card metadata and empty-state copy', () => {
+    for (const selector of ['.empty-message', '.card-note', '.card-subtitle', '.status-badge-default', '.detail-label', '.text-default', '.footer-label']) {
+      const block = styles.match(new RegExp(`${selector.replace('.', '\\.')}\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
+      expect(block).toContain('color: var(--color-text-primary);');
+    }
+    expect(styles).toContain('outline: 2px solid var(--color-text-primary);');
+  });
 });

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const source = readFileSync(join(__dirname, 'table.component.ts'), 'utf8');
+const styles = readFileSync(join(__dirname, 'table.component.scss'), 'utf8');
 
 describe('table custom badge color fallback source guards', () => {
   it('preserves existing hexadecimal and RGB soft-background conversions', () => {
@@ -28,5 +29,20 @@ describe('table custom badge color fallback source guards', () => {
   it('keeps configured hex/RGB text colors and uses a theme foreground for CSS tokens/names', () => {
     expect(source).toContain("return color.startsWith('#') || color.startsWith('rgb')");
     expect(source).toContain("? color\n        : 'var(--color-text-primary)';");
+  });
+});
+
+describe('table readable text and focus source guards', () => {
+  it('uses the primary theme foreground for empty metadata and readable table labels', () => {
+    for (const selector of ['.cell-content-empty', '.status-badge-default', '.table-action-empty', '.empty-message']) {
+      const escaped = selector.replace('.', '\\.');
+      const block = styles.match(new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
+      expect(block).toContain('color: var(--color-text-primary);');
+    }
+  });
+
+  it('provides solid primary focus indication for table action controls', () => {
+    expect(styles).toContain('outline: 2px solid var(--color-text-primary);');
+    expect(styles).toContain('&:focus-visible');
   });
 });

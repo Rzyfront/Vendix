@@ -202,7 +202,7 @@
         }
 
         .cell-content-empty {
-          color: var(--color-text-muted);
+          color: var(--color-text-primary);
           font-style: italic;
           white-space: nowrap; // Keep empty message on one line if possible, or allow wrap if needed
         }
@@ -268,7 +268,7 @@
   // Default badge style
   &.status-badge-default {
     background-color: rgba(148, 163, 184, 0.1);
-    color: var(--color-text-muted);
+    color: var(--color-text-primary);
     border-color: rgba(148, 163, 184, 0.3);
 
     &:hover {
@@ -583,6 +583,11 @@
     position: relative;
     overflow: hidden;
 
+    &:focus-visible {
+      outline: 2px solid var(--color-text-primary);
+      outline-offset: -2px;
+    }
+
     // Efecto ripple sutil
     &::before {
       content: "";
@@ -867,10 +872,15 @@
   align-items: center;
   justify-content: center;
   color: var(--color-text-secondary);
+
+  &:focus-visible {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: 2px;
+  }
 }
 
 .table-action-empty {
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
   font-size: var(--fs-sm);
 }
 
@@ -894,6 +904,11 @@
   position: static;
   text-align: left;
   transition: background-color var(--transition-fast) ease;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: -2px;
+  }
 
   &::before {
     display: none;
@@ -959,6 +974,10 @@
     gap: 12px;
     color: var(--color-text-secondary);
 
+    span {
+      color: var(--color-text-primary);
+    }
+
     .loading-spinner {
       width: 24px;
       height: 24px;
@@ -989,7 +1008,7 @@
   .empty-message {
     font-size: var(--fs-sm);
     margin: 0;
-    color: var(--color-text-muted);
+    color: var(--color-text-primary);
   }
 }
 

@@ -109,7 +109,7 @@
   }
 
   .empty-message {
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
     font-size: var(--fs-sm);
     margin: 0;
   }
@@ -259,14 +259,14 @@
   margin: 2px 0 0 0;
   font-size: var(--fs-xs);
   font-style: italic;
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
 .card-subtitle {
   font-size: var(--fs-sm);
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   margin: 2px 0 0 0;
   white-space: nowrap;
   overflow: hidden;
@@ -295,7 +295,7 @@
 
   &.status-badge-default {
     background-color: rgba(148, 163, 184, 0.1);
-    color: var(--color-text-muted);
+    color: var(--color-text-primary);
     border-color: rgba(148, 163, 184, 0.3);
   }
 
@@ -401,7 +401,7 @@
   gap: 4px;
   font-size: 10px;
   font-weight: var(--fw-bold);
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin: 0;
@@ -441,7 +441,7 @@
 }
 
 .text-default {
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
 }
 
 // Card Footer
@@ -464,7 +464,7 @@
 .footer-label {
   font-size: 10px;
   font-weight: var(--fw-medium);
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -502,7 +502,7 @@
     transform 0.15s ease;
 
   &:focus-visible {
-    outline: 2px solid var(--color-ring);
+    outline: 2px solid var(--color-text-primary);
     outline-offset: 2px;
   }
 
@@ -646,7 +646,7 @@
   text-align: left;
 
   &:focus-visible {
-    outline: 2px solid var(--color-ring);
+    outline: 2px solid var(--color-text-primary);
     outline-offset: -2px;
   }
 
