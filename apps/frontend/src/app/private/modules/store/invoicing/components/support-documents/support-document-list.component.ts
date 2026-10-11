@@ -177,6 +177,11 @@ export class SupportDocumentListComponent {
         next: (response) => {
           this.rows.set(response.data ?? []);
           this.totalItems.set(response.meta?.total ?? 0);
+          if (this.filters().page > this.totalPages()) {
+            this.filters.update((current) => ({ ...current, page: this.totalPages() }));
+            this.load();
+            return;
+          }
           this.loading.set(false);
           this.error.set(null);
         },
@@ -236,6 +241,7 @@ export class SupportDocumentListComponent {
   }
 
   onSearch(term: string): void {
+    if (term !== this.filters().search) return;
     this.filters.update((current) => ({ ...current, search: term, page: 1 }));
     this.load();
   }
@@ -447,12 +453,14 @@ export class SupportDocumentListComponent {
   }
 
   getEmptyStateTitle(): string {
+    if (this.error()) return 'No se pudo cargar el listado';
     return this.hasFilters
       ? 'Ningún documento soporte coincide con sus filtros'
       : 'Aún no hay documentos soporte';
   }
 
   getEmptyStateDescription(): string {
+    if (this.error()) return 'Actualiza para reintentar. No se pudo comprobar si hay registros.';
     return this.hasFilters
       ? 'Intente ajustar sus términos de búsqueda o filtros.'
       : 'Emita el primer documento soporte desde un proveedor.';

@@ -36,7 +36,7 @@ describe('invoice data requests UI source contract', () => {
     expect(source).toContain('(search)="onSearch($event)"');
     expect(source).toContain('(clear)="onSearch(\'\')"');
     expect(source).toContain('this.searchValue.set(\'\')');
-    expect(source).toContain('this.searchValue.set(term)');
+    expect(source).toContain('if (term !== this.searchValue()) return;');
     expect(source).toContain('<app-card [responsive]="true" [padding]="false" overflow="visible">');
     expect(source).toContain('sticky top-[99px]');
     expect(source).toContain('flex flex-wrap items-center gap-2 w-full min-w-0');
@@ -76,6 +76,26 @@ describe('invoice data requests UI source contract', () => {
     expect(source).toContain('if (response?.data)');
     expect(source).toContain('this.toast.warning(');
     expect(source).not.toMatch(/else\s*\{\s*this\.toast\.success/);
+  });
+
+  it('does not present failed summary requests as zero and offers refresh feedback', () => {
+    expect(source).toContain('readonly summaryError = signal(false)');
+    expect(source).toContain('this.summaryError.set(false)');
+    expect(source).toContain('this.summaryError.set(true)');
+    expect(source.match(/\[value\]="summaryError\(\) \? '—' : summary\(\)\./g)).toHaveLength(4);
+    expect(source).toContain('role="status"');
+    expect(source).toContain('Actualizar opciones para reintentar');
+  });
+
+  it('distinguishes load errors from empty results and handles stale searches/pages', () => {
+    expect(source).toContain("if (this.error()) return 'No se pudo cargar el listado'");
+    expect(source).toContain('No se pudo comprobar si hay registros.');
+    expect(source).toContain('[showEmptyClearFilters]="!error() && hasActiveFilters()"');
+    expect(source).toContain('[showEmptyRefresh]="!!error() || !hasActiveFilters()"');
+    expect(source).toContain('if (term !== this.searchValue()) return;');
+    expect(source).toContain("key: 'created_at'");
+    expect(source).toContain("label: 'Solicitada'");
+    expect(source).toContain('if (this.filters().page > this.totalPages())');
   });
 
   it('keeps accessible error feedback and race-safe list/summary requests', () => {

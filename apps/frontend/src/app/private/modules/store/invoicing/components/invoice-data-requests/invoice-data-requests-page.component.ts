@@ -167,7 +167,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
       >
         <app-stats
           title="Solicitudes"
-          [value]="summary().total"
+          [value]="summaryError() ? '—' : summary().total"
           smallText="Facturas pedidas por clientes"
           iconName="file-text"
           iconBgColor="bg-primary/10"
@@ -176,7 +176,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
         />
         <app-stats
           title="Sin procesar"
-          [value]="summary().submitted"
+          [value]="summaryError() ? '—' : summary().submitted"
           smallText="Datos recibidos, pendientes de procesar"
           iconName="clock"
           iconBgColor="bg-warning/10"
@@ -185,7 +185,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
         />
         <app-stats
           title="Fallidas"
-          [value]="summary().failed"
+          [value]="summaryError() ? '—' : summary().failed"
           smallText="Requieren revisión de la conversión"
           iconName="alert-circle"
           iconBgColor="bg-error/10"
@@ -194,7 +194,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
         />
         <app-stats
           title="Facturadas"
-          [value]="summary().completed"
+          [value]="summaryError() ? '—' : summary().completed"
           smallText="Nominativa ya emitida"
           iconName="check-circle"
           iconBgColor="bg-success/10"
@@ -202,6 +202,11 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
           [loading]="summaryLoading()"
         />
       </div>
+      @if (summaryError()) {
+        <p role="status" class="px-2 pb-2 text-sm text-text-secondary">
+          No se pudo cargar el resumen. Selecciona Actualizar en el menú de opciones para reintentar.
+        </p>
+      }
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
@@ -266,8 +271,8 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
             emptyIcon="file-text"
             [emptyTitle]="emptyTitle()"
             [emptyDescription]="emptyDescription()"
-            [showEmptyClearFilters]="hasActiveFilters()"
-            [showEmptyRefresh]="!hasActiveFilters()"
+            [showEmptyClearFilters]="!error() && hasActiveFilters()"
+            [showEmptyRefresh]="!!error() || !hasActiveFilters()"
             (emptyClearFiltersClick)="clearFilters()"
             (emptyRefreshClick)="reload()"
             rowLabelKey="order_id"
@@ -317,6 +322,7 @@ export class InvoiceDataRequestsPageComponent {
   readonly rows = signal<InvoiceDataRequestRow[]>([]);
   readonly loading = signal(false);
   readonly summaryLoading = signal(false);
+  readonly summaryError = signal(false);
   readonly error = signal<string | null>(null);
   readonly summary = signal<InvoiceDataRequestSummary>(EMPTY_SUMMARY);
 
@@ -364,6 +370,11 @@ export class InvoiceDataRequestsPageComponent {
         next: (response) => {
           this.rows.set(response?.data ?? []);
           this.totalItems.set(response?.meta?.total ?? 0);
+          if (this.filters().page > this.totalPages()) {
+            this.filters.update((current) => ({ ...current, page: this.totalPages() }));
+            this.load();
+            return;
+          }
           this.loading.set(false);
         },
         error: (err: unknown) => {
@@ -380,16 +391,11 @@ export class InvoiceDataRequestsPageComponent {
       });
   }
 
-  /**
-   * El resumen falla en SILENCIO a propósito.
-   *
-   * Son cuatro contadores decorativos sobre un listado que ya cargó: pintar un
-   * segundo banner de error por ellos taparía el del listado, que es el que
-   * importa. Quedan en cero, que es visiblemente distinto de un número.
-   */
+  /** Carga el resumen; un error se representa como no disponible, no como cero. */
   private loadSummary(): void {
     this.summarySubscription?.unsubscribe();
     this.summaryLoading.set(true);
+    this.summaryError.set(false);
     this.summarySubscription = this.service
       .summary(this.search())
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -400,6 +406,7 @@ export class InvoiceDataRequestsPageComponent {
         },
         error: () => {
           this.summary.set(EMPTY_SUMMARY);
+          this.summaryError.set(true);
           this.summaryLoading.set(false);
         },
       });
@@ -433,7 +440,7 @@ export class InvoiceDataRequestsPageComponent {
    * que la tabla.
    */
   onSearch(term: string): void {
-    this.searchValue.set(term);
+    if (term !== this.searchValue()) return;
     if (this.search() === term) {
       return;
     }
@@ -503,12 +510,14 @@ export class InvoiceDataRequestsPageComponent {
   }
 
   emptyTitle(): string {
+    if (this.error()) return 'No se pudo cargar el listado';
     return this.hasActiveFilters()
       ? 'Ninguna solicitud coincide'
       : 'Todavía no hay solicitudes';
   }
 
   emptyDescription(): string {
+    if (this.error()) return 'Actualiza para reintentar. No se pudo comprobar si hay registros.';
     return this.hasActiveFilters()
       ? 'Prueba con otro estado o limpia la búsqueda.'
       : 'Cuando un cliente pida su factura a nombre propio después de una venta a consumidor final, la solicitud aparece acá.';
@@ -615,7 +624,7 @@ export class InvoiceDataRequestsPageComponent {
       STATUS_LABELS[value as InvoiceDataRequestStatus] ?? String(value ?? '—'),
     detailKeys: [
       {
-        key: 'submitted_at',
+        key: 'created_at',
         label: 'Solicitada',
         icon: 'calendar',
         transform: (_value, item) =>

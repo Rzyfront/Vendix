@@ -77,6 +77,22 @@ describe('support document list UI source guards', () => {
     expect(source).toContain("'var(--color-error)'");
   });
 
+  it('distinguishes load errors from empty results and gates empty-state actions', () => {
+    expect(source).toContain("if (this.error()) return 'No se pudo cargar el listado'");
+    expect(source).toContain('No se pudo comprobar si hay registros.');
+    expect(template).toContain('[showEmptyAction]="!error() && !hasFilters"');
+    expect(template).toContain('[showEmptyRefresh]="true"');
+    expect(template).toContain('[showEmptyClearFilters]="!error() && hasFilters"');
+  });
+
+  it('ignores stale debounced searches and repairs pages beyond the returned result set', () => {
+    expect(source).toContain('if (term !== this.filters().search) return;');
+    expect(source).toContain('if (this.filters().page > this.totalPages())');
+    expect(source).toContain('this.filters.update((current) => ({ ...current, page: this.totalPages() }));');
+    expect(source).toContain('this.load();');
+    expect(source).toContain('return;');
+  });
+
   it('does not use unsafe casts, fake client sorting, or guessed local styling', () => {
     expect(source).not.toMatch(/\$any\s*\(/);
     expect(source).not.toMatch(/\bany\b/);
