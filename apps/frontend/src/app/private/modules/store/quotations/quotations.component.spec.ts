@@ -8,7 +8,7 @@ import { ContractsService } from '../contracts/services/contracts.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
-import { Quotation, CreateQuotationDto } from './interfaces/quotation.interface';
+import { Quotation, CreateQuotationDto, QuotationFormSaveDto } from './interfaces/quotation.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { QuotationListComponent } from './components/quotation-list/quotation-list.component';
 import { QuotationFormModalComponent } from './components/quotation-form-modal/quotation-form-modal.component';
@@ -36,7 +36,7 @@ class QuotationListStubComponent {
 @Component({ selector: 'app-quotation-form-modal', standalone: true, template: '' })
 class QuotationFormModalStubComponent {
   quotation = input<Quotation | null>(null); initialDestination = input<'sale' | 'contract' | 'other'>('sale');
-  saving = input(false); save = output<CreateQuotationDto>(); close = output<void>();
+  saving = input(false); save = output<QuotationFormSaveDto>(); close = output<void>();
 }
 
 describe('QuotationsComponent — contract quotation flow', () => {
@@ -133,6 +133,26 @@ describe('QuotationsComponent — contract quotation flow', () => {
     expect('destination' in updateBody).toBeFalse();
     expect('profile_id' in updateBody).toBeFalse();
     expect(quotations.updateQuotation).toHaveBeenCalledWith(21, updateBody);
+    fixture.destroy();
+  });
+
+  it('accepts a notes-only frozen-contract update without sending lines or fiscal inputs', () => {
+    const frozen = {
+      schema_version: 1 as const, frozen_at: '2026-10-01T00:00:00Z',
+      invoice_profile: { profile_id: 8, version: 3, name: 'AIU', config: {} as any },
+      contract_object: 'Obra', due_date: null, aiu_value: '0.00', direct_cost: '100.00', contract_value: '100.00',
+      invoice_lines: [], calculation: { totals: {} },
+    };
+    const existing = quotation({
+      id: 31, status: 'draft', customer_id: 42, invoice_profile_id: 8,
+      contract_economic_snapshot: frozen,
+    });
+    quotations.updateQuotation.and.returnValue(of(existing));
+    const fixture = create();
+    fixture.componentInstance.selectedQuotation.set(existing);
+    fixture.componentInstance.saveQuotation({ notes: 'Nota revisada' });
+    const updateBody = quotations.updateQuotation.calls.mostRecent().args[1];
+    expect(updateBody).toEqual({ notes: 'Nota revisada' });
     fixture.destroy();
   });
 

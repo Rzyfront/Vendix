@@ -1,6 +1,7 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
@@ -9,7 +10,7 @@ import { QuotationsService } from './services/quotations.service';
 import { QuotationListComponent } from './components/quotation-list/quotation-list.component';
 import { QuotationFormModalComponent } from './components/quotation-form-modal/quotation-form-modal.component';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
-import { CreateQuotationDto, QuotationDestination } from './interfaces/quotation.interface';
+import { CreateQuotationDto, QuotationDestination, QuotationFormSaveDto } from './interfaces/quotation.interface';
 import { ContractsService } from '../contracts/services/contracts.service';
 import {
   Quotation,
@@ -381,7 +382,7 @@ export class QuotationsComponent {
     this.selectedQuotation.set(null);
   }
 
-  saveQuotation(dto: CreateQuotationDto): void {
+  saveQuotation(dto: QuotationFormSaveDto): void {
     if (this.savingQuotation()) return;
     const editing = this.selectedQuotation();
     if (editing) {
@@ -407,9 +408,18 @@ export class QuotationsComponent {
     const updateDto = { ...dto };
     delete updateDto.destination;
     delete updateDto.profile_id;
-    const request$ = editing
-      ? this.quotationsService.updateQuotation(editing.id, updateDto)
-      : this.quotationsService.createQuotation(dto);
+    let request$: Observable<Quotation>;
+    if (editing) {
+      request$ = this.quotationsService.updateQuotation(editing.id, updateDto);
+    } else {
+      if (!dto.items) {
+        this.savingQuotation.set(false);
+        this.toastService.error('La cotización nueva necesita al menos una línea.');
+        return;
+      }
+      const createDto: CreateQuotationDto = { ...dto, items: dto.items };
+      request$ = this.quotationsService.createQuotation(createDto);
+    }
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (savedQuotation) => {
         this.toastService.success(editing ? 'Cotización actualizada' : 'Cotización creada');
