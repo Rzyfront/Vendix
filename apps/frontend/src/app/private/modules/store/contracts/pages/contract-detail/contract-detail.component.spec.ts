@@ -60,6 +60,9 @@ describe('ContractDetailComponent — lectura del snapshot administrativo', () =
     expect(text).toContain('pending');
     expect(text).toContain('No configurado');
     expect(text).toContain('19%');
+    expect(fixture.nativeElement.querySelector('app-responsive-data-view')).toBeTruthy();
+    expect(text).toContain('Precio unitario');
+    expect(text).not.toContain('Estado y transiciones');
     expect(fixture.componentInstance.formatTaxRate(0.19)).toBe('19%');
     expect(fixture.componentInstance.formatTaxRate(0.07)).toBe('7%');
     expect(fixture.componentInstance.formatTaxRate(0.18625)).toBe('18.625%');
@@ -74,7 +77,7 @@ describe('ContractDetailComponent — lectura del snapshot administrativo', () =
     fixture.componentInstance.reload();
     fixture.detectChanges();
     expect(service.getContractInvoice).not.toHaveBeenCalled();
-    expect(fixture.nativeElement.textContent).toContain('Pendiente: se genera desde el contrato vigente.');
+    expect(fixture.nativeElement.textContent).toContain('No se puede facturar: falta el perfil y el snapshot económico congelado.');
   });
 
   it('representa campos faltantes del snapshot como no configurados y no inventa objeto contractual', () => {
@@ -109,6 +112,27 @@ describe('ContractDetailComponent — lectura del snapshot administrativo', () =
     expect(component.canGenerateInvoice()).toBeFalse();
     expect(component.validTransitions()).not.toContain('cancelled');
     expect(component.validTransitions()).not.toContain('invoiced');
+    expect(fixture.nativeElement.textContent.match(/Factura activa: resuélvela antes de cancelar el contrato\./g)?.length).toBe(1);
+  });
+
+  it('conserva las acciones administrativas una sola vez en StickyHeader', () => {
+    service.getContractById.and.returnValue(of({
+      id: 12, store_id: 2, contract_number: 'CT-12', quotation_id: 8, status: 'draft',
+      created_at: null, updated_at: null, invoice: null,
+    } as any));
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-sticky-header')).toBeTruthy();
+    expect(fixture.nativeElement.textContent.match(/Activar contrato/g)?.length).toBe(1);
+    expect(fixture.nativeElement.textContent).not.toContain('Estado y transiciones');
+  });
+
+  it('mantiene las líneas congeladas legibles en el data view compartido y no pagina filas hijas', () => {
+    const lineView = fixture.nativeElement.querySelector('app-responsive-data-view');
+    expect(lineView).toBeTruthy();
+    expect(fixture.nativeElement.textContent).toContain('Obra');
+    expect(fixture.nativeElement.textContent).toContain('Total congelado');
+    expect(fixture.componentInstance.formatFrozenMoney(null)).toBe('No configurado');
   });
 
   it('bloquea facturación de históricos sin snapshot económico explícito', () => {
