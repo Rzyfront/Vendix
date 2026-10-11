@@ -55,7 +55,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
         <input
           [type]="type()"
           [placeholder]="placeholder()"
-          [attr.aria-label]="ariaLabel() || null"
+          [attr.aria-label]="ariaLabel() || placeholder() || 'Buscar'"
           [disabled]="isDisabled()"
           [readonly]="readonly()"
           [value]="value()"
