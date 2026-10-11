@@ -37,13 +37,17 @@ import { FormStyleVariant } from '../../types/form.types';
       [disabled]="isDisabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      [style.background-color]="isDisabled() ? 'var(--color-muted)' : isOn() ? 'var(--color-primary)' : 'rgba(var(--color-error-rgb), 0.25)'"
     >
       <span
-        class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out"
-        [class.translate-x-5]="isOn()"
-        [class.translate-x-0]="!isOn()"
-      ></span>
+        class="pointer-events-none inline-flex h-6 w-11 items-center rounded-full border-2 border-transparent"
+        [style.background-color]="isDisabled() ? 'var(--color-muted)' : isOn() ? 'var(--color-primary)' : 'rgba(var(--color-error-rgb), 0.25)'"
+      >
+        <span
+          class="inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out motion-reduce:transition-none"
+          [class.translate-x-5]="isOn()"
+          [class.translate-x-0]="!isOn()"
+        ></span>
+      </span>
     </button>
     @if (label()) {
       <span [class]="labelClasses">{{ label() }}</span>
@@ -114,8 +118,10 @@ export class ToggleComponent implements ControlValueAccessor {
     const baseClasses = [
       'relative',
       'inline-flex',
-      'h-6',
+      'h-11',
       'w-11',
+      'items-center',
+      'justify-center',
       'shrink-0',
       // CP-PURCHASE-TRANSPARENCY (T2/D.1) — un conmutador inactivo tiene que
       // PARECER inactivo. Antes salía con `cursor-pointer` y opacidad plena
@@ -127,9 +133,10 @@ export class ToggleComponent implements ControlValueAccessor {
       // intacto.
       this.isDisabled() ? 'cursor-not-allowed' : 'cursor-pointer',
       'rounded-full',
-      'border-2',
-      'border-transparent',
+      'border-0',
+      'bg-transparent',
       'transition-colors',
+      'motion-reduce:transition-none',
       'duration-75',
       'ease-out',
       'focus:outline-none',
@@ -148,16 +155,16 @@ export class ToggleComponent implements ControlValueAccessor {
       // Modern: shadow-based focus
       return [
         ...baseClasses,
-        'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+        'focus-visible:shadow-[0_0_0_3px_var(--color-ring)]',
       ].join(' ');
     }
 
     // Classic: ring with offset
     return [
       ...baseClasses,
-      'focus:ring-2',
-      'focus:ring-[var(--color-ring)]',
-      'focus:ring-offset-2',
+      'focus-visible:ring-2',
+      'focus-visible:ring-[var(--color-ring)]',
+      'focus-visible:ring-offset-2',
     ].join(' ');
   }
 
