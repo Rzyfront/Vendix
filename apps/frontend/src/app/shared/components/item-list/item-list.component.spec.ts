@@ -159,4 +159,76 @@ describe('ItemListComponent mobile action partition', () => {
     expect([...direct, ...menu]).toEqual(actions);
     expect(menu.some((action) => direct.includes(action))).toBeFalse();
   });
+
+  it('uses opt-in defaults for null, undefined, and empty values without changing legacy fallbacks', async () => {
+    fixture.componentRef.setInput('data', [{ id: 1, order_number: 'ORD-1', missing: undefined, nullable: null, empty: '', zero: 0, total: null }]);
+    fixture.componentRef.setInput('cardConfig', {
+      titleKey: 'order_number',
+      detailKeys: [
+        { key: 'missing', label: 'Missing', defaultValue: 'No configurado' },
+        { key: 'nullable', label: 'Nullable', defaultValue: 'No configurado' },
+        { key: 'empty', label: 'Empty', defaultValue: 'No configurado' },
+        { key: 'zero', label: 'Zero', defaultValue: 'No configurado', transform: (value: number) => `#${value}` },
+        { key: 'missing', label: 'Legacy missing' },
+        { key: 'empty', label: 'Legacy empty' },
+      ],
+      footerKey: 'total', footerDefaultValue: 'No configurado',
+    });
+    await render();
+    const item = component.data()[0];
+    const fields = component.cardConfig().detailKeys!;
+    expect(fields.slice(0, 3).map((field) => component.getDetailValue(item, field))).toEqual([
+      'No configurado', 'No configurado', 'No configurado',
+    ]);
+    expect(component.getDetailValue(item, fields[3])).toBe('#0');
+    expect(component.getDetailValue(item, fields[4])).toBe('-');
+    expect(component.getDetailValue(item, fields[5])).toBe('');
+    expect(component.getFooterValue(item)).toBe('No configurado');
+    expect(item).toEqual({ id: 1, order_number: 'ORD-1', missing: undefined, nullable: null, empty: '', zero: 0, total: null });
+  });
+
+  it('preserves legacy footer behavior and explicit zero through its transform', () => {
+    const item = { total: null, zero: 0, empty: '' };
+    fixture.componentRef.setInput('cardConfig', { titleKey: 'order_number', footerKey: 'total' });
+    expect(component.getFooterValue(item)).toBe('-');
+    fixture.componentRef.setInput('cardConfig', {
+      titleKey: 'order_number', footerKey: 'zero', footerTransform: (value: number) => `$${value}`,
+    });
+    expect(component.getFooterValue(item)).toBe('$0');
+    fixture.componentRef.setInput('cardConfig', { titleKey: 'order_number', footerKey: 'empty' });
+    expect(component.getFooterValue(item)).toBe('');
+  });
+
+  it('retains a card node across immutable row refreshes and uses the new row for rendering and callbacks', async () => {
+    const warn = spyOn(console, 'warn').and.callThrough();
+    const first = { id: 12, order_number: 'ORD-12', total: '$ 123.456' };
+    fixture.componentRef.setInput('data', [first]);
+    await render();
+    const card = fixture.debugElement.query(By.css('.item-card')).nativeElement;
+    const refreshed = { ...first, order_number: 'ORD-12 updated' };
+    fixture.componentRef.setInput('data', [refreshed]);
+    await render();
+
+    expect(fixture.debugElement.query(By.css('.item-card')).nativeElement).toBe(card);
+    expect(card.querySelector('.card-title').textContent.trim()).toBe('ORD-12 updated');
+    expect(warn.calls.allArgs().flat().join(' ')).not.toContain('NG0956');
+
+    const clicked = jasmine.createSpy('clicked');
+    component.itemClick.subscribe(clicked);
+    card.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(clicked).toHaveBeenCalledOnceWith(refreshed);
+  });
+
+  it('creates namespaced stable track keys for nested/custom, numeric/string, and missing ids', () => {
+    fixture.componentRef.setInput('rowIdKey', 'meta.record.id');
+    expect(component.getRowTrackKey({ meta: { record: { id: 0 } } }, 0)).toBe('id:number:0');
+    expect(component.getRowTrackKey({ meta: { record: { id: '0' } } }, 0)).toBe('id:string:0');
+    expect(component.getRowTrackKey({ meta: { record: { id: '' } } }, 0)).toBe('index:0');
+    expect(component.getRowTrackKey({ meta: { record: {} } }, 1)).toBe('index:1');
+    expect(new Set([
+      component.getRowTrackKey({ meta: { record: { id: 0 } } }, 0),
+      component.getRowTrackKey({ meta: { record: { id: '0' } } }, 0),
+      component.getRowTrackKey({ meta: { record: { id: '' } } }, 0),
+    ]).size).toBe(3);
+  });
 });

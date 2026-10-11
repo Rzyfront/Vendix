@@ -33,6 +33,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     const prisma = createPrismaMock({
       invoices: ['findFirst', 'findMany', 'create'],
       invoice_taxes: ['createMany'],
+      dian_document_events: ['findFirst'],
       products: ['findMany'],
       product_variants: ['findMany'],
       store_settings: ['findFirst'],
@@ -83,6 +84,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     prisma.invoices.findMany.mockResolvedValue([]);
     prisma.store_settings.findFirst.mockResolvedValue(null);
     prisma.tax_rates.findMany.mockResolvedValue([]);
+    prisma.dian_document_events.findFirst.mockResolvedValue(null);
     prisma.products.findMany.mockImplementation(async ({ where }: any) =>
       ((where?.id?.in ?? []) as number[]).map((id) => ({ id })),
     );
@@ -143,6 +145,28 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
       currency: 'COP',
       ...overrides,
     });
+
+  it.each(['033', '034'])('blocks NC creation before numbering when original has accepted RADIAN event %s', async (event_code) => {
+    const parent = baseParent({ id: 7100, total_amount: money(3900) });
+    const h = setup(parent);
+    h.prisma.dian_document_events.findFirst.mockResolvedValue({ id: 90, event_code });
+
+    await expect(h.service.createCreditNote({
+      related_invoice_id: 7100, reason: 'Anulación parcial',
+      items: [{ product_id: null, description: 'Almuerzo', quantity: 1, unit_price: 100, discount_amount: 0, tax_amount: 0 }],
+      taxes: [],
+    } as unknown as CreateCreditNoteDto)).rejects.toMatchObject({ errorCode: 'INVOICING_STATUS_002' });
+
+    expect(h.invoice_number_generator.generateNextNumber).not.toHaveBeenCalled();
+    expect(h.prisma.invoices.create).not.toHaveBeenCalled();
+    expect(h.prisma.dian_document_events.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        invoice_id: 7100, organization_id: parent.organization_id,
+        OR: [{ store_id: parent.store_id }, { store_id: null }],
+        event_code: { in: ['033', '034'] }, status: 'accepted',
+      }),
+    }));
+  });
 
   it('P0 — 3×1300 INC-inclusivo: la cabecera no acumula fuga de float (repro 3900.0000000000005)', async () => {
     // Antes del fix, sumar estos mismos 3 floats con `+=` da

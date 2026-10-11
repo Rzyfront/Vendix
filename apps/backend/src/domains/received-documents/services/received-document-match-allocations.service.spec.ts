@@ -36,6 +36,8 @@ function harness(options: Record<string, any> = {}) {
     expense: { id: 80, organization_id: 3, store_id: 21, currency: 'COP', state: 'approved', amount: dec('100.00'), ...options.expense },
     expenseItem: { id: 81, expense_id: 80, quantity: dec('10'), amount: dec('100.00'), ...options.expenseItem },
     documentTaxes: options.documentTaxes ?? [],
+    relatedDocuments: options.relatedDocuments ?? [],
+    acceptedBuyerEvent: options.acceptedBuyerEvent ?? null,
     allocations: [...(options.allocations ?? [])],
     taxAllocations: [...(options.taxAllocations ?? [])],
     events: [] as any[],
@@ -61,7 +63,18 @@ function harness(options: Record<string, any> = {}) {
     : rows.reduce((sum: Prisma.Decimal, row: any) => sum.plus(row[field] ?? 0), dec(0));
   const connection = {
     received_documents: {
-      findFirst: jest.fn(async ({ where }: any) => scopedDoc(where) ? { ...state.document, items: state.document.items } : null),
+      findFirst: jest.fn(async ({ where }: any) => {
+        if (scopedDoc(where)) return { ...state.document, items: state.document.items };
+        return state.relatedDocuments.find((candidate: any) => candidate.id === where.id &&
+          candidate.organization_id === where.organization_id && candidate.accounting_entity_id === where.accounting_entity_id &&
+          (where.store_id == null || candidate.store_id === where.store_id)) ?? null;
+      }),
+      findMany: jest.fn(async ({ where }: any) => state.relatedDocuments.filter((candidate: any) =>
+        candidate.organization_id === where.organization_id && candidate.accounting_entity_id === where.accounting_entity_id &&
+        (where.store_id == null || candidate.store_id === where.store_id) &&
+        (!where.document_key || candidate.document_key === where.document_key) &&
+        (!where.invoice_number || candidate.invoice_number === where.invoice_number) &&
+        (!where.document_type || candidate.document_type === where.document_type))),
       updateMany: jest.fn(async ({ where, data }: any) => {
         if (!scopedDoc(where) || where.version !== state.document.version) return { count: 0 };
         const nextVersion = data.version?.increment ? state.document.version + data.version.increment : state.document.version;
@@ -139,6 +152,7 @@ function harness(options: Record<string, any> = {}) {
     stores: { findFirst: jest.fn(async ({ where }: any) => where.id === 21 && where.organization_id === 3 ? { id: 21 } : null) },
     units_of_measure: { findUnique: jest.fn().mockResolvedValue({ code: 'EA', is_active: true }) },
     received_document_events: {
+      findFirst: jest.fn(async () => state.acceptedBuyerEvent),
       create: jest.fn(async ({ data }: any) => { state.events.push(data); return { id: state.events.length }; }),
     },
     $queryRaw: jest.fn().mockResolvedValue([{ id: 1 }]),
@@ -187,6 +201,45 @@ describe('ReceivedDocumentMatchAllocationsService', () => {
     }
     expect(h.state.document).not.toHaveProperty('quantity_received');
     expect(h.state.document).not.toHaveProperty('accounts_payable_id');
+    expect(h.prisma.received_documents.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['033', '034'])('blocks credit-note matching when the scoped original has trusted accepted buyer event %s', async (eventCode) => {
+    const h = harness({
+      document: { document_type: 'credit_note', original_reference_key: 'original-cufe' },
+      relatedDocuments: [{ id: 200, organization_id: 3, accounting_entity_id: 8, store_id: 21, document_type: 'invoice', document_key: 'original-cufe', invoice_number: 'SUP-200', issuer_tax_id: '900123456', accepted_at: null }],
+      acceptedBuyerEvent: { id: 300, event_code: eventCode },
+    });
+    await expect(h.service.confirm(ctx, 100, poInput() as any)).rejects.toBeInstanceOf(ConflictException);
+    expect(h.state.allocations).toHaveLength(0);
+    expect(h.prisma.received_document_events.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ document_id: 200, event_type: 'BUYER_DIAN_EVENT', event_code: { in: ['033', '034'] }, status: 'accepted' }),
+    }));
+  });
+
+  it('does not fall back from a wrong-supplier CUFE to an invoice number and preserves explicit tenant scope', async () => {
+    const h = harness({
+      document: { document_type: 'debit_note', original_reference_key: 'wrong-cufe', original_reference_number: 'SUP-200' },
+      relatedDocuments: [{ id: 200, organization_id: 3, accounting_entity_id: 8, store_id: 21, document_type: 'invoice', document_key: 'wrong-cufe', invoice_number: 'SUP-200', issuer_tax_id: '800123456', accepted_at: null }],
+    });
+    await expect(h.service.confirm(ctx, 100, poInput() as any)).rejects.toBeInstanceOf(ConflictException);
+    expect(h.prisma.received_documents.findMany).toHaveBeenCalledTimes(1);
+    expect(h.prisma.received_documents.findMany.mock.calls[0][0].where).toHaveProperty('document_key', 'wrong-cufe');
+    expect(h.prisma.received_documents.findMany.mock.calls[0][0].where).toMatchObject({ organization_id: 3, accounting_entity_id: 8, store_id: 21 });
+    expect(h.state.allocations).toHaveLength(0);
+  });
+
+  it('locks and re-reads a note original inside the matching transaction before creating an allocation', async () => {
+    const h = harness({
+      document: { document_type: 'credit_note', original_reference_key: null, original_reference_number: 'SUP-200' },
+      relatedDocuments: [{ id: 200, organization_id: 3, accounting_entity_id: 8, store_id: 21, document_type: 'invoice', document_key: 'original-cufe', invoice_number: 'SUP-200', issuer_tax_id: '900.123.456', accepted_at: null }],
+    });
+    await expect(h.service.confirm(ctx, 100, poInput() as any)).resolves.toMatchObject({ duplicate: false });
+    const originalLock = h.prisma.$queryRaw.mock.calls.find(([query]) => query.sql.includes('FOR UPDATE') && query.sql.includes('"accounting_entity_id"') && query.sql.includes('"organization_id"'));
+    expect(originalLock).toBeDefined();
+    expect(originalLock?.[0].sql).toContain('"store_id"');
+    expect(h.prisma.received_documents.findFirst.mock.calls.some(([args]) => args.where.id === 200)).toBe(true);
+    expect(h.state.allocations).toHaveLength(1);
   });
 
   it('supports N:M across two documents and one PO item without exceeding its active target quantity', async () => {
@@ -323,7 +376,8 @@ describe('ReceivedDocumentMatchAllocationsService', () => {
 
   it('writes signed prorated credit-note tax allocations and residual cents', async () => {
     const h = harness({
-      document: { document_type: 'credit_note' },
+      document: { document_type: 'credit_note', original_reference_key: 'original-credit' },
+      relatedDocuments: [{ id: 200, organization_id: 3, accounting_entity_id: 8, store_id: 21, document_type: 'invoice', document_key: 'original-credit', invoice_number: 'SUP-200', issuer_tax_id: '900123456', accepted_at: null }],
       documentTaxes: [{ id: 501, document_id: 100, item_id: 10, amount: dec('19.00'), eligible_amount: dec('0'), treatment: 'pending' }],
     });
     const first = await h.service.confirm(ctx, 100, poInput() as any);

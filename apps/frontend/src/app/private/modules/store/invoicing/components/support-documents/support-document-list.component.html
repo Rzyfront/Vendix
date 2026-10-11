@@ -1,88 +1,100 @@
-<div class="space-y-3">
-  <!-- Toolbar -->
-  <div class="flex flex-wrap items-center gap-3">
-    <app-inputsearch
-      class="flex-1 min-w-[200px]"
-      placeholder="Buscar por número, proveedor o NIT"
-      (search)="onSearch($event)"
-    ></app-inputsearch>
-
-    <app-options-dropdown
-      [filters]="filterConfigs"
-      (filterChange)="onFilterChange($event)"
-      (clearAllFilters)="onClearFilters()"
-    ></app-options-dropdown>
-
-    <button
-      type="button"
-      class="px-3 py-2 text-sm rounded-lg bg-primary text-[var(--color-text-on-primary)] hover:bg-primary-dark transition-colors flex items-center gap-2"
-      (click)="onCreate()"
-    >
-      <app-icon name="plus" [size]="14"></app-icon>
-      Nuevo documento soporte
-    </button>
-  </div>
-
-  <!-- Filtros rápidos: CUDS y rango de fechas (no encajan en el dropdown estándar) -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-    <div class="flex flex-col gap-1">
-      <label class="text-xs text-text-secondary">Buscar por CUDS</label>
-      <input
-        type="text"
-        class="px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface)] text-text-primary"
-        placeholder="CUDS completo (96 caracteres)"
-        [value]="filters.controls.cuds.value || ''"
-        (input)="filters.controls.cuds.setValue($any($event.target).value)"
-        maxlength="255"
-      />
-    </div>
-    <div class="flex flex-col gap-1">
-      <label class="text-xs text-text-secondary">Desde</label>
-      <input
-        type="date"
-        class="px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface)] text-text-primary"
-        [value]="filters.controls.date_from.value || ''"
-        (change)="filters.controls.date_from.setValue($any($event.target).value)"
-      />
-    </div>
-    <div class="flex flex-col gap-1">
-      <label class="text-xs text-text-secondary">Hasta</label>
-      <input
-        type="date"
-        class="px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface)] text-text-primary"
-        [value]="filters.controls.date_to.value || ''"
-        (change)="filters.controls.date_to.setValue($any($event.target).value)"
-      />
-    </div>
-  </div>
-
-  <!-- Tabla / cards -->
-  <app-responsive-data-view
-    [data]="rows()"
-    [columns]="columns"
-    [cardConfig]="cardConfig"
-    [actions]="tableActions"
-    [loading]="loading()"
-    [emptyTitle]="getEmptyStateTitle()"
-    [emptyDescription]="getEmptyStateDescription()"
-    (rowClick)="onView($event)"
-  ></app-responsive-data-view>
-
-  <!-- Paginación -->
-  <app-pagination
-    [currentPage]="page()"
-    [totalPages]="totalPages()"
-    [total]="total()"
-    [limit]="limit()"
-    (pageChange)="onPageChange($event)"
-  ></app-pagination>
-
-  @if (error()) {
+<div class="w-full">
+  <app-card [responsive]="true" [padding]="false" overflow="visible">
     <div
-      class="text-sm text-error bg-error-light border border-error/30 rounded-lg p-3 flex items-start gap-2"
+      class="sticky top-0 z-10 bg-background px-2 py-2 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
     >
-      <app-icon name="alert-circle" [size]="16"></app-icon>
-      <span>{{ error() }}</span>
+      <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
+        <h2 class="text-sm font-semibold text-text-primary md:text-lg md:text-text-primary">
+          Documentos soporte <span class="font-normal">({{ totalItems() }})</span>
+        </h2>
+
+        <div class="flex w-full flex-wrap items-center gap-2 md:w-auto md:flex-nowrap">
+          <app-inputsearch
+            class="min-w-0 flex-1 md:w-64"
+            placeholder="Buscar por número, proveedor o NIT"
+            ariaLabel="Buscar documentos soporte"
+            [(ngModel)]="searchTerm"
+            (searchChange)="onSearch($event)"
+          ></app-inputsearch>
+
+          <app-button
+            variant="outline"
+            size="md"
+            customClasses="min-h-11 min-w-11 shrink-0"
+            (clicked)="onCreate()"
+            ariaLabel="Nuevo documento soporte"
+          >
+            <app-icon slot="icon" name="plus" [size]="18"></app-icon>
+            <span class="hidden sm:inline">Nuevo</span>
+          </app-button>
+
+          <app-options-dropdown
+            [filters]="filterConfigs"
+            [filterValues]="filterValues()"
+            [actions]="dropdownActions"
+            [isLoading]="loading()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="clearFilters()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
+        </div>
+      </div>
     </div>
-  }
+
+    <div class="grid grid-cols-1 gap-2 px-2 pt-2 md:grid-cols-2 md:px-6">
+      <app-input
+        label="Buscar por CUDS"
+        size="lg"
+        type="text"
+        placeholder="CUDS completo"
+        [ngModel]="filters().cuds"
+        (ngModelChange)="onCudsChange($event)"
+        [maxlength]="255"
+        tooltipText="Filtra por el CUDS almacenado en el documento soporte."
+      ></app-input>
+    </div>
+
+    @if (error()) {
+      <div
+        class="mx-2 mt-3 rounded-lg border border-[var(--color-error)] bg-[var(--color-surface)] p-3 text-sm text-text-primary md:mx-6"
+        role="alert"
+      >
+        <div class="flex items-start gap-2">
+          <app-icon name="alert-circle" [size]="16"></app-icon>
+          <span>{{ error() }}</span>
+        </div>
+      </div>
+    }
+
+    <div class="px-2 pb-2 pt-3 md:p-4">
+      <app-responsive-data-view
+        [data]="rows()"
+        [columns]="columns"
+        [cardConfig]="cardConfig"
+        [actions]="tableActions"
+        [loading]="loading()"
+        [sortable]="false"
+        rowLabelKey="invoice_number"
+        [emptyTitle]="getEmptyStateTitle()"
+        [emptyDescription]="getEmptyStateDescription()"
+        [showEmptyAction]="!error() && !hasFilters"
+        emptyActionText="Crear documento soporte"
+        emptyActionIcon="plus"
+        [showEmptyRefresh]="true"
+        [showEmptyClearFilters]="!error() && hasFilters"
+        (rowClick)="onView($event)"
+        (emptyActionClick)="onCreate()"
+        (emptyRefreshClick)="load()"
+        (emptyClearFiltersClick)="clearFilters()"
+      ></app-responsive-data-view>
+
+      <app-pagination
+        [currentPage]="filters().page"
+        [totalPages]="totalPages()"
+        [total]="totalItems()"
+        [limit]="filters().limit"
+        (pageChange)="onPageChange($event)"
+      ></app-pagination>
+    </div>
+  </app-card>
 </div>

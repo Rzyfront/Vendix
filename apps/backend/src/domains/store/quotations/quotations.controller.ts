@@ -16,6 +16,7 @@ import {
   UpdateQuotationDto,
   QuotationQueryDto,
 } from './dto';
+import { PreviewContractQuotationDto } from './dto/preview-contract-quotation.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -45,6 +46,16 @@ export class QuotationsController {
     return this.responseService.created(
       result,
       'Cotización creada exitosamente',
+    );
+  }
+
+  @Post('contract-preview')
+  @Permissions('store:quotations:create')
+  async previewContract(@Body() dto: PreviewContractQuotationDto) {
+    const result = await this.quotationsService.previewContractEconomics(dto);
+    return this.responseService.success(
+      result,
+      'Economía del contrato calculada exitosamente',
     );
   }
 

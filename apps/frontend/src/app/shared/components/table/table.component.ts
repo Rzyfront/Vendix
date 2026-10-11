@@ -587,7 +587,11 @@ export class TableComponent {
       column.badgeConfig?.type === 'custom' &&
       (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
     ) {
-      return this.getBadgeColorFromMap(column, value);
+      const color = this.getBadgeColorFromMap(column, value);
+      if (!color) return null;
+      return color.startsWith('#') || color.startsWith('rgb')
+        ? color
+        : 'var(--color-text-primary)';
     }
     return null;
   }
@@ -710,7 +714,7 @@ export class TableComponent {
     } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
       return color.replace(/[\d.]+\)$/, '0.15)');
     }
-    return color;
+    return `color-mix(in srgb, ${color} 15%, transparent)`;
   }
 
   /**
@@ -722,7 +726,7 @@ export class TableComponent {
     } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
       return color.replace(/[\d.]+\)$/, '0.3)');
     }
-    return color;
+    return `color-mix(in srgb, ${color} 30%, transparent)`;
   }
 
   /**

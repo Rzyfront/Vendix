@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { normalizeNit } from '../../../common/utils/nit.util';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from '../received-documents.service';
+import { assertReceivedDocumentNoteCoherentForEffects } from './received-document-note-coherence';
 
 type Decimal = Prisma.Decimal;
 type MatchAllocation = Prisma.received_document_match_allocationsGetPayload<{}>;
@@ -150,6 +151,7 @@ export class ReceivedDocumentMatchAllocationsService {
         };
       }
 
+      await assertReceivedDocumentNoteCoherentForEffects(tx, context, documentId);
       this.assertDocumentAllowsMatching(document);
       this.assertVersion(document.version, validated.expected_version);
       this.assertSourceCapacity(sourceLine, validated.source_quantity, validated.allocated_net_amount);
@@ -321,6 +323,7 @@ export class ReceivedDocumentMatchAllocationsService {
         };
       }
 
+      await assertReceivedDocumentNoteCoherentForEffects(tx, context, documentId);
       this.assertDocumentAllowsMatching(document);
       this.assertVersion(document.version, input.expected_version);
       const now = new Date();

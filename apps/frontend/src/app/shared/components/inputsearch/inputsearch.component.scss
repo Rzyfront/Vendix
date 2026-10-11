@@ -10,7 +10,9 @@
 
 .inputsearch-wrapper-modern {
   // Mobile-first: md size as default for modern
-  height: constants.$height-md-mobile; // 40px mobile
+  height: constants.$height-md-mobile; // min-height below keeps the touch target >=44px
+  min-height: 44px;
+  box-sizing: border-box;
   border-radius: constants.$modern-border-radius;
   padding: 0 constants.$modern-padding-x;
   background-color: var(--color-background);
@@ -21,7 +23,7 @@
 
   &.inputsearch-wrapper-focused {
     background-color: var(--color-surface);
-    box-shadow: constants.$modern-focus-ring;
+    box-shadow: 0 0 0 2px var(--color-text-primary);
   }
 }
 
@@ -71,7 +73,7 @@
 
   &.inputsearch-focused {
     .inputsearch-wrapper {
-      box-shadow: 0 0 0 2px var(--color-ring);
+      box-shadow: 0 0 0 2px var(--color-text-primary);
     }
   }
 
@@ -95,10 +97,15 @@
   display: flex;
   align-items: center;
   width: 100%;
+  min-height: calc(44px + 2 * var(--border-width, 1px));
+  box-sizing: border-box;
   background-color: var(--color-surface);
   border: var(--border-width) solid var(--color-border);
   border-radius: constants.$modern-border-radius; // 0.75rem (12px) - same as modern
-  transition: all var(--transition-fast) ease;
+  transition:
+    background-color var(--transition-fast) ease,
+    border-color var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease;
 
   &:hover:not(.inputsearch-wrapper-disabled) {
     border-color: var(--color-text-secondary);
@@ -107,14 +114,14 @@
   // Estados
   &.inputsearch-wrapper-focused {
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px var(--color-ring);
+    box-shadow: 0 0 0 2px var(--color-text-primary);
   }
 
   &.inputsearch-wrapper-error {
     border-color: var(--color-destructive);
 
     &:focus {
-      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+      box-shadow: 0 0 0 2px var(--color-text-primary);
     }
   }
 
@@ -156,6 +163,9 @@
 .inputsearch-input {
   flex: 1;
   width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   outline: none;
@@ -164,7 +174,7 @@
   font-weight: var(--fw-regular);
 
   &::placeholder {
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
   }
 
   // Estados
@@ -195,7 +205,7 @@
 
   // Ajustar padding cuando hay iconos
   &:has(+ .inputsearch-clear) {
-    padding-right: 2rem;
+    padding-right: 3rem;
   }
 }
 
@@ -245,16 +255,30 @@
 // Botón de limpiar
 .inputsearch-clear {
   position: absolute;
-  right: 0.5rem;
+  right: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all var(--transition-fast) ease;
+  transition:
+    background-color var(--transition-fast) ease,
+    color var(--transition-fast) ease,
+    transform var(--transition-fast) ease;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: 2px;
+  }
 
   &:hover:not(:disabled) {
     background-color: var(--color-background);
@@ -277,8 +301,7 @@
 
   // Variaciones de tamaño
   &.inputsearch-clear-sm {
-    right: 0.375rem;
-    padding: 0.25rem;
+    right: 0;
 
     .clear-icon {
       width: 0.75rem;
@@ -287,8 +310,7 @@
   }
 
   &.inputsearch-clear-md {
-    right: 0.5rem;
-    padding: 0.375rem;
+    right: 0;
 
     .clear-icon {
       width: 0.875rem;
@@ -297,13 +319,24 @@
   }
 
   &.inputsearch-clear-lg {
-    right: 0.75rem;
-    padding: 0.5rem;
+    right: 0;
 
     .clear-icon {
       width: 1rem;
       height: 1rem;
     }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inputsearch-wrapper,
+  .inputsearch-icon,
+  .inputsearch-clear {
+    transition: none;
+  }
+
+  .inputsearch-clear:active:not(:disabled) {
+    transform: none;
   }
 }
 
@@ -313,7 +346,7 @@
   line-height: 1.4;
 
   .help-text {
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
   }
 
   .error-message {
@@ -331,12 +364,12 @@
 // Estados de foco para accesibilidad
 .inputsearch-wrapper:focus-within {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-ring);
+  box-shadow: 0 0 0 2px var(--color-text-primary);
 }
 
 .inputsearch-wrapper.inputsearch-wrapper-error:focus-within {
   border-color: var(--color-destructive);
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+  box-shadow: 0 0 0 2px var(--color-text-primary);
 }
 
 // Responsive design is now handled via mobile-first in size classes above
@@ -344,10 +377,10 @@
 // Animaciones suaves
 @keyframes inputsearch-focus-in {
   from {
-    box-shadow: 0 0 0 0 var(--color-ring);
+    box-shadow: 0 0 0 0 var(--color-text-primary);
   }
   to {
-    box-shadow: 0 0 0 2px var(--color-ring);
+    box-shadow: 0 0 0 2px var(--color-text-primary);
   }
 }
 
@@ -364,6 +397,12 @@
 
 .inputsearch-clear {
   animation: inputsearch-clear-appear 0.15s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inputsearch-clear {
+    animation: none;
+  }
 }
 
 // Tema oscuro: bloque eliminado. Re-seteaba --color-surface, --color-border,

@@ -218,13 +218,19 @@ export class ItemListComponent {
     }
     if (color) {
       let bg = color;
+      let textColor = color;
+      let borderColor = `1px solid ${color}40`;
       if (color.startsWith('#') && color.length === 7) {
         bg = `${color}26`;
+      } else {
+        bg = `color-mix(in srgb, ${color} 15%, transparent)`;
+        textColor = 'var(--color-text-primary)';
+        borderColor = `1px solid color-mix(in srgb, ${color} 25%, transparent)`;
       }
       return {
         'background-color': bg,
-        color: color,
-        border: `1px solid ${color}40`,
+        color: textColor,
+        border: borderColor,
       };
     }
     return {};
@@ -249,7 +255,8 @@ export class ItemListComponent {
 
   getDetailValue(item: any, field: any): string {
     const value = this.getNestedValue(item, field.key);
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return field.defaultValue ?? '-';
+    if (value === '' && field.defaultValue !== undefined) return field.defaultValue;
     if (field.transform) {
       return field.transform(value, item);
     }
@@ -277,7 +284,8 @@ export class ItemListComponent {
     const footerKey = config.footerKey;
     if (!footerKey) return '';
     const value = this.getNestedValue(item, footerKey);
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return config.footerDefaultValue ?? '-';
+    if (value === '' && config.footerDefaultValue !== undefined) return config.footerDefaultValue;
     const transform = config.footerTransform;
     if (transform) {
       return transform(value, item);
@@ -297,6 +305,17 @@ export class ItemListComponent {
       return null;
     }
     return id as string | number;
+  }
+
+  /**
+   * Stable DOM identity for a card. Rows without an id use their position as a
+   * fallback, which is intended only for frozen child rows that have no ID.
+   * The explicit namespaces keep ids (including numeric/string lookalikes)
+   * distinct from positional keys.
+   */
+  getRowTrackKey(item: any, index: number): string {
+    const id = this.getRowId(item);
+    return id === null ? `index:${index}` : `id:${typeof id}:${id}`;
   }
 
   isRowSelected(item: any): boolean {

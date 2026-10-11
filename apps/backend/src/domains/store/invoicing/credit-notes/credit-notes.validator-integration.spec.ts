@@ -48,6 +48,7 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
     const prisma = createPrismaMock({
       invoices: ['findFirst', 'findMany', 'create'],
       invoice_taxes: ['createMany'],
+      dian_document_events: ['findFirst'],
       products: ['findMany'],
       product_variants: ['findMany'],
       store_settings: ['findFirst'],
@@ -81,6 +82,7 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
       if (where?.id === NOTE_ID) return noteSnapshot();
       return null;
     });
+    prisma.dian_document_events.findFirst.mockResolvedValue(null);
     prisma.invoices.findMany.mockResolvedValue([]);
     prisma.store_settings.findFirst.mockResolvedValue(null);
     prisma.tax_rates.findMany.mockResolvedValue([]);

@@ -1,33 +1,36 @@
-import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError, map } from 'rxjs';
+import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError, map, merge, timer } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../../environments/environment';
 import {
   Quotation,
-  CreateQuotationDto,
   QuotationDestination,
   QuotationProfileCatalogEntry,
+  QuotationFormSaveDto,
 } from '../../interfaces/quotation.interface';
 import { QuotationsService } from '../../services/quotations.service';
+import { InvoiceProfileService } from '../../../invoicing/services/invoice-profile.service';
+import type { InvoiceProfileCatalogEntry } from '../../../invoicing/services/invoice-profile.service';
+import type { ContractQuotationEconomicSnapshot } from '../../interfaces/quotation-contract-economics.interface';
+import { QuotationProfilesService } from '../../services/quotation-profiles.service';
+import type { QuotationProfile, QuotationProfileConfig } from '../../interfaces/quotation-profile.interface';
 import { PosProductService, Product } from '../../../pos/services/pos-product.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import {
-  ModalComponent,
-  ButtonComponent,
-  InputComponent,
-  TextareaComponent,
-  IconComponent,
-} from '../../../../../../shared/components';
-import {
-  PriceTier,
-  ProductPriceTierOverride,
-  PriceTierCacheService,
-  PriceTierSelectorComponent,
-} from '../../../price-tiers';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import type { PriceTier, ProductPriceTierOverride } from '../../../price-tiers/interfaces/price-tier.interface';
+import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
+import { PriceTierSelectorComponent } from '../../../price-tiers/components/price-tier-selector/price-tier-selector.component';
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { parsePercentScaled } from '../../../../../../core/utils/invoice-profile-config.contract';
 import {
   estimateNetBase,
   parseTaxRateFraction,
@@ -129,6 +132,9 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                 (change)="onProfileSelect($event)"
               >
                 <option value="">Sin perfil — cotizar desde cero</option>
+                @if (savedProfileFallback(); as savedProfile) {
+                  <option [value]="savedProfile.id">{{ savedProfile.label }}</option>
+                }
                 @for (profile of quotationProfiles(); track profile.id) {
                   <option [value]="profile.id">
                     {{ profile.name }}{{ profile.is_default ? ' (predeterminado)' : '' }}
@@ -137,15 +143,73 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
               </select>
               @if (selectedProfile()) {
                 <p class="text-xs" style="color: var(--color-text-secondary);">
-                  Con este perfil la cotización nace precargada (objeto y condiciones del perfil).
+                  Configuración vigente del perfil como referencia; no modifica líneas ni total.
                 </p>
+                @if (selectedProfileDetail(); as profileDetail) {
+                  <div class="rounded-md border p-2 text-xs" style="border-color: var(--color-border); color: var(--color-text-secondary);">
+                    <p>Versión {{ profileDetail.current_version }} · Vigencia {{ profileDetail.current_config?.validity_days ?? 'No configurada' }} días</p>
+                    <p>Perfil de condiciones comerciales; no define la gravabilidad del contrato.</p>
+                  </div>
+                }
               }
             }
           </div>
 
+          @if (form.getRawValue().destination === 'contract') {
+            <section class="space-y-3 rounded-md border p-3" style="border-color: var(--color-border);">
+              <h3 class="font-semibold">Economía contractual · AIU</h3>
+              <label class="block text-sm font-medium" for="invoice-profile">Perfil de facturación AIU</label>
+              <select id="invoice-profile" [value]="invoiceProfileId() ?? ''" (change)="onInvoiceProfileSelect($event)"
+                class="w-full rounded-md border px-3 py-2 text-sm" style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;">
+                <option value="">Selecciona un perfil AIU</option>
+                @if (frozenInvoiceProfile(); as frozen) {
+                  @if (showFrozenProfileOption()) {
+                    <option [value]="frozen.profile_id">{{ frozen.name }} · versión congelada {{ frozen.version }}</option>
+                  }
+                }
+                @for (profile of invoiceProfiles(); track profile.id) {
+                  <option [value]="profile.id">{{ profile.name }} · v{{ profile.current_version }}{{ profile.is_default ? ' (predeterminado)' : '' }}</option>
+                }
+              </select>
+              @if (invoiceProfileLoading()) { <p class="text-xs">Cargando perfiles AIU…</p> }
+              @if (invoiceProfileError()) { <p role="alert" class="text-xs text-red-600">No se pudo cargar el catálogo AIU. <button type="button" class="underline" (click)="loadInvoiceProfileCatalog(true)">Reintentar</button></p> }
+              @if (frozenInvoiceProfile(); as frozen) {
+                <p class="text-xs">Configuración congelada: {{ frozen.name }} · versión {{ frozen.version }}. <button type="button" class="underline" (click)="useCurrentInvoiceProfile()">Usar versión vigente</button></p>
+              }
+              @if (selectedInvoiceProfileConfig(); as config) {
+                <p class="text-xs" style="color: var(--color-text-secondary);">Sólo referencia · A/I/U {{ config.aiu?.components?.administracion }}% / {{ config.aiu?.components?.imprevistos }}% / {{ config.aiu?.components?.utilidad }}%; base {{ config.aiu?.components_basis }}; gravabilidad {{ config.aiu?.regime }}. Edita esta configuración en Facturación → Perfiles.</p>
+              }
+              <app-textarea label="Objeto del contrato" formControlName="contract_object" [control]="form.get('contract_object')" [rows]="2" placeholder="Objeto acordado con el cliente..."></app-textarea>
+              <app-input label="Fecha de vencimiento acordada" type="date" formControlName="due_date" [control]="form.get('due_date')"></app-input>
+              @if (creditDueDateRequired() && !form.get('due_date')?.value) {
+                <p class="text-xs" style="color: var(--color-text-secondary);">Este perfil requiere acordar la fecha de vencimiento antes de enviar la cotización.</p>
+              }
+              @if (aiuInputRequired()) {
+                <app-input label="Valor AIU acordado" type="number" min="0" formControlName="aiu_value" [control]="form.get('aiu_value')"></app-input>
+              }
+              <p class="text-xs">Las líneas siguientes son costos directos netos. Impuestos y AIU los determina el servidor con el perfil elegido.</p>
+              @if (previewPending()) { <p role="status">Actualizando cálculo fiscal…</p> }
+              @if (previewError(); as message) { <div role="alert" class="text-sm text-red-600">{{ message }} <button type="button" class="underline" (click)="requestContractPreview()">Reintentar</button></div> }
+              @if (contractPreview(); as preview) {
+                <div class="space-y-1 rounded bg-background p-2 text-sm">
+                  <p>Perfil congelado {{ preview.invoice_profile.name }} · v{{ preview.invoice_profile.version }}</p>
+                  @for (line of preview.invoice_lines; track $index) {
+                  <p class="flex justify-between text-xs"><span>{{ line.description || line.bucket }} · {{ line.quantity }} × {{ money(line.unit_price) | currency:2 }}</span><span>{{ line.bucket }}</span></p>
+                  }
+                  <p class="flex justify-between"><span>Costo directo</span><strong>{{ money(preview.direct_cost) | currency:2 }}</strong></p>
+                  <p class="flex justify-between"><span>AIU</span><strong>{{ money(preview.aiu_value) | currency:2 }}</strong></p>
+                  <p class="flex justify-between"><span>Base gravable AIU</span><strong>{{ money(preview.calculation.aiu?.taxable_base) | currency:2 }}</strong></p>
+                  <p class="flex justify-between"><span>Base total</span><strong>{{ money(preview.calculation.totals.gross_subtotal) | currency:2 }}</strong></p>
+                  <p class="flex justify-between"><span>Impuestos</span><strong>{{ money(preview.calculation.totals.tax_amount) | currency:2 }}</strong></p>
+                  <p class="flex justify-between font-bold"><span>Total</span><strong>{{ money(preview.calculation.totals.total_amount) | currency:2 }}</strong></p>
+                </div>
+              }
+            </section>
+          }
+
           <!-- Customer Search -->
           <div class="space-y-1">
-            <label class="text-sm font-medium text-text-primary">Cliente (opcional)</label>
+            <label class="text-sm font-medium text-text-primary">Cliente @if (form.get('destination')?.value === 'contract') { (obligatorio) } @else { (opcional) }</label>
 
             @if (selectedCustomer()) {
               <div class="flex items-center justify-between rounded-md px-3 py-2 text-sm"
@@ -194,6 +258,9 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                   </div>
                 }
               </div>
+            }
+            @if (customerRequiredError()) {
+              <p class="text-xs text-red-600">Selecciona un cliente para cotizar un contrato.</p>
             }
           </div>
 
@@ -304,7 +371,7 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
           <!-- Items List -->
           @if (itemsArray.length > 0) {
             <div class="space-y-2">
-              <label class="text-sm font-medium text-text-primary">Productos ({{ itemsArray.length }})</label>
+              <label class="text-sm font-medium text-text-primary">{{ isContractMode() ? 'Costos directos' : 'Productos' }} ({{ itemsArray.length }})</label>
 
               <div formArrayName="items" class="space-y-1">
                 @for (itemGroup of itemsArray.controls; track $index; let i = $index) {
@@ -332,12 +399,12 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                           {{ itemGroup.get('variant_sku')?.value }}
                         </span>
                       }
-                      @if (!isCustomLine(itemGroup) && taxLabel(itemGroup)) {
+                      @if (!isContractMode() && !isCustomLine(itemGroup) && taxLabel(itemGroup)) {
                         <span class="text-xs" style="color: var(--color-text-secondary);">
                           {{ taxLabel(itemGroup) }}
                         </span>
                       }
-                      @if (canShowTierSelector(asFormGroup(itemGroup))) {
+                      @if (!isContractMode() && canShowTierSelector(asFormGroup(itemGroup))) {
                         <div class="mt-0.5">
                           <app-price-tier-selector
                             [tiers]="visibleTiersForItem(asFormGroup(itemGroup))"
@@ -346,7 +413,7 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                             (selectedTierIdChange)="onTierChange(i, $event)"
                           ></app-price-tier-selector>
                         </div>
-                      } @else if (itemGroup.get('applied_price_tier_name')?.value) {
+                      } @else if (!isContractMode() && itemGroup.get('applied_price_tier_name')?.value) {
                         <span
                           class="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 w-fit"
                         >
@@ -365,15 +432,24 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                         (change)="recalculateItem(i)"
                       />
 
-                      @if (isCustomLine(itemGroup)) {
+                      @if (isCustomLine(itemGroup) || isContractMode()) {
                         <input
                           type="number"
                           formControlName="unit_price"
                           min="0"
+                          [attr.aria-label]="isContractMode() ? 'Costo directo unitario' : 'Precio unitario'"
                           class="w-[100px] rounded border px-2 py-1 text-sm"
                           style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
                           (change)="recalculateItem(i)"
                         />
+                        @if (isContractMode()) {
+                          <input type="number" formControlName="discount_amount" min="0"
+                            aria-label="Descuento del costo directo"
+                            class="w-[90px] rounded border px-2 py-1 text-sm"
+                            style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                            (change)="recalculateItem(i)" />
+                        }
+                        @if (!isContractMode()) {
                         <span class="flex items-center gap-1 whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
                           <input
                             type="number"
@@ -385,15 +461,18 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                             (change)="onCustomTaxChange(i, $event)"
                           />% imp.
                         </span>
+                        }
                       } @else {
                         <span class="whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
                           {{ itemGroup.get('unit_price')?.value | currency }}
                         </span>
                       }
 
+                      @if (!isContractMode()) {
                       <span class="whitespace-nowrap font-mono text-sm font-semibold" style="color: var(--color-text-primary);">
                         {{ itemGroup.get('line_final_total')?.value | currency }}
                       </span>
+                      }
 
                       <button
                         type="button"
@@ -409,6 +488,7 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                 }
               </div>
 
+              @if (!isContractMode()) {
               <div class="mt-2 border-t-2 pt-3 space-y-1"
                    style="border-color: var(--color-border); color: var(--color-text-primary);">
                 <div class="flex justify-between text-sm">
@@ -432,6 +512,7 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                   <span class="font-mono">{{ grandTotal() | currency }}</span>
                 </div>
               </div>
+              }
             </div>
           }
 
@@ -466,13 +547,13 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
       <div slot="footer">
         <div class="flex items-center justify-end gap-3 rounded-b-xl border-t p-3"
              style="background: var(--color-background); border-color: var(--color-border);">
-          <app-button variant="outline" (clicked)="onClose()">
+          <app-button variant="outline" [disabled]="isSaving()" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSave()"
-            [disabled]="itemsArray.length === 0"
+            [disabled]="itemsArray.length === 0 || isSaving()"
             [loading]="isSaving()"
           >
             {{ quotation() ? 'Actualizar' : 'Crear' }} Cotización
@@ -482,23 +563,28 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
     </app-modal>
   `,
 })
-export class QuotationFormModalComponent {
+export class QuotationFormModalComponent implements OnInit {
   /** Input: existing quotation for edit mode, null for create mode */
   readonly quotation = input<Quotation | null>(null);
+  readonly initialDestination = input<QuotationDestination>('sale');
+  readonly saving = input(false);
 
   /** Output: emits the DTO when the user clicks save */
-  readonly save = output<CreateQuotationDto>();
+  readonly save = output<QuotationFormSaveDto>();
 
   /** Output: emits when the user wants to close the modal */
   readonly close = output<void>();
 
   private readonly fb = inject(FormBuilder);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly http = inject(HttpClient);
   private readonly posProductService = inject(PosProductService);
   private readonly priceTierCache = inject(PriceTierCacheService);
   private readonly priceResolver = inject(PriceResolverService);
   private readonly authFacade = inject(AuthFacade);
   private readonly quotationsService = inject(QuotationsService);
+  private readonly profilesService = inject(QuotationProfilesService);
+  private readonly invoiceProfileService = inject(InvoiceProfileService);
   private readonly apiUrl = environment.apiUrl;
 
   /** Active tiers loaded once when the modal opens (if user has permission). */
@@ -525,6 +611,9 @@ export class QuotationFormModalComponent {
     notes: [''],
     internal_notes: [''],
     terms_and_conditions: [''],
+    contract_object: ['', [Validators.maxLength(4900)]],
+    due_date: [''],
+    aiu_value: [null as number | null],
     items: this.fb.array([]),
   });
 
@@ -538,6 +627,43 @@ export class QuotationFormModalComponent {
   readonly profilesError = signal(false);
   /** Perfil elegido (para aviso de precarga); null = cotizar desde cero. */
   readonly selectedProfile = signal<QuotationProfileCatalogEntry | null>(null);
+  readonly selectedProfileDetail = signal<QuotationProfile | null>(null);
+  readonly invoiceProfiles = signal<InvoiceProfileCatalogEntry[]>([]);
+  readonly invoiceProfileLoading = signal(false);
+  readonly invoiceProfileError = signal(false);
+  readonly invoiceProfileId = signal<number | null>(null);
+  private readonly invoiceProfileExplicitlyChanged = signal(false);
+  readonly liveInvoiceProfile = signal<any>(null);
+  readonly contractPreview = signal<ContractQuotationEconomicSnapshot | null>(null);
+  readonly previewPending = signal(false);
+  readonly previewError = signal<string | null>(null);
+  readonly frozenInvoiceProfile = computed(() => this.quotation()?.contract_economic_snapshot?.invoice_profile ?? null);
+  readonly showFrozenProfileOption = computed(() => {
+    const frozen = this.frozenInvoiceProfile();
+    return !!frozen && !this.invoiceProfiles().some((profile) => profile.id === frozen.profile_id);
+  });
+  readonly selectedInvoiceProfileConfig = computed(() => {
+    const frozen = this.frozenInvoiceProfile();
+    if (frozen && frozen.profile_id === this.invoiceProfileId() && !this.invoiceProfileExplicitlyChanged()) return frozen.config;
+    return this.liveInvoiceProfile()?.current_config ?? null;
+  });
+  readonly aiuInputRequired = computed(() => {
+    const aiu = this.selectedInvoiceProfileConfig()?.aiu;
+    const totalScaled = (Object.values(aiu?.components ?? {}) as unknown[]).reduce<number>(
+      (sum, value) => sum + (parsePercentScaled(value) ?? 0),
+      0,
+    );
+    return aiu?.components_basis === 'aiu' || (aiu?.accounting_model === 'no_sumada' && totalScaled === 10_000);
+  });
+  readonly creditDueDateRequired = computed(() => this.selectedInvoiceProfileConfig()?.dian?.payment_method_code === '2');
+  private profileRequestId = 0;
+  readonly customerRequiredError = signal(false);
+  readonly savedProfileFallback = computed(() => {
+    const quotation = this.quotation();
+    const profileId = quotation?.profile_id;
+    if (profileId == null || this.quotationProfiles().some((profile) => profile.id === profileId)) return null;
+    return { id: profileId, label: `Perfil #${profileId} (guardado)` };
+  });
 
   /** Opciones de destino (valor fijo al crear, bloqueado al editar). */
   readonly destinationOptions: { value: QuotationDestination; label: string }[] = [
@@ -561,7 +687,8 @@ export class QuotationFormModalComponent {
   readonly pendingVariantProduct = signal<any>(null);
   readonly selectedVariantId = signal<number | null>(null);
 
-  readonly isSaving = signal(false);
+  readonly isSaving = computed(() => this.saving() || this.submitPending());
+  private readonly submitPending = signal(false);
 
   /** Summary signals — updated manually when items change */
   readonly subtotalAmount = signal(0);
@@ -576,6 +703,8 @@ export class QuotationFormModalComponent {
   /** RxJS subjects for debounced search */
   private readonly customerSearch$ = new Subject<string>(); // LEGÍTIMO — debounceTime+switchMap customer search
   private readonly productSearch$ = new Subject<string>(); // LEGÍTIMO — debounceTime+switchMap product search
+  private readonly contractPreview$ = new Subject<void>();
+  private invoiceProfileRequestId = 0;
 
   get itemsArray(): FormArray {
     return this.form.get('items') as FormArray;
@@ -587,7 +716,7 @@ export class QuotationFormModalComponent {
     if (this.canApplyPricingTier()) {
       this.priceTierCache
         .getActiveTiers()
-        .pipe(takeUntilDestroyed())
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (tiers) => this.availableTiers.set(tiers || []),
           error: () => this.availableTiers.set([]),
@@ -607,7 +736,7 @@ export class QuotationFormModalComponent {
               catchError(() => of({ data: [] })),
             );
         }),
-        takeUntilDestroyed(),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         const data = res?.data?.data || res?.data || res || [];
@@ -626,18 +755,37 @@ export class QuotationFormModalComponent {
             catchError(() => of([] as any[])),
           );
         }),
-        takeUntilDestroyed(),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((products) => {
         this.productResults.set(products);
       });
 
+    this.contractPreview$
+      .pipe(
+        switchMap(() => timer(250).pipe(
+          switchMap(() => {
+            if (!this.isContractMode() || !this.canPreviewContract()) return of({ invalid: true as const });
+            return this.quotationsService.previewContractEconomics(this.buildPreviewRequest()).pipe(
+              map((snapshot) => ({ snapshot } as const)),
+            catchError((error) => of({ error: extractApiErrorMessage(error) || 'No se pudo calcular la economía contractual. Revisa el perfil y los costos.' } as const)),
+            );
+          }),
+        )),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((result) => {
+        this.previewPending.set(false);
+        this.contractPreview.set('snapshot' in result ? result.snapshot : null);
+        this.previewError.set('error' in result ? result.error : null);
+      });
+
     // B.2 (FB-03): catalogo de perfiles activos. Un 404/500 (B.1 en curso) no
     // bloquea: el formulario cotiza desde cero igual que hoy.
     this.profilesLoading.set(true);
-    this.quotationsService
-      .getQuotationProfileCatalog()
-      .pipe(takeUntilDestroyed())
+    this.profilesService
+      .getCatalog()
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (profiles) => {
           const list = Array.isArray(profiles) ? profiles : [];
@@ -656,10 +804,19 @@ export class QuotationFormModalComponent {
         },
       });
 
-    // Populate form when editing an existing quotation
+  }
+
+  ngOnInit(): void {
+    if (!this.quotation()) {
+      this.form.patchValue({ destination: this.initialDestination() });
+    }
+    // Populate after Angular has bound the input; reading it in the constructor
+    // observes only the input's default and silently opens edit as create.
     const q = this.quotation();
     if (q) {
-      this.selectedCustomer.set(q.customer || null);
+      this.selectedCustomer.set(q.customer || (q.customer_id
+        ? { id: q.customer_id, first_name: 'Cliente asociado', last_name: '' }
+        : null));
       this.form.patchValue({
         destination: (q.destination as QuotationDestination | undefined) || 'sale',
         profile_id: q.profile_id != null ? String(q.profile_id) : '',
@@ -667,7 +824,12 @@ export class QuotationFormModalComponent {
         notes: q.notes || '',
         internal_notes: q.internal_notes || '',
         terms_and_conditions: q.terms_and_conditions || '',
+        contract_object: q.contract_economic_snapshot?.contract_object ?? '',
+        due_date: q.contract_economic_snapshot?.due_date ?? '',
+        aiu_value: q.contract_economic_snapshot?.aiu_value != null
+          ? Number(q.contract_economic_snapshot.aiu_value) : null,
       });
+      this.invoiceProfileId.set(q.invoice_profile_id ?? q.contract_economic_snapshot?.invoice_profile.profile_id ?? null);
       // B.2 (ADR-01): destino y perfil fijos al crear — bloqueados al editar.
       this.form.get('destination')?.disable();
       this.form.get('profile_id')?.disable();
@@ -711,6 +873,136 @@ export class QuotationFormModalComponent {
       for (let i = 0; i < this.itemsArray.length; i++) this.recalculateItem(i);
       this.recalculateGrandTotal();
     }
+    merge(
+      this.form.get('destination')!.valueChanges,
+      this.form.get('contract_object')!.valueChanges,
+      this.form.get('due_date')!.valueChanges,
+      this.form.get('aiu_value')!.valueChanges,
+      this.itemsArray.valueChanges,
+    ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      if (this.isContractMode()) this.requestContractPreview();
+      if (this.isContractMode()) this.loadInvoiceProfileCatalog();
+    });
+    if (this.isContractMode()) {
+      this.loadInvoiceProfileCatalog();
+      // Existing contracts display their frozen economics until the user edits an economic field.
+      if (q?.contract_economic_snapshot) this.contractPreview.set(q.contract_economic_snapshot);
+      if (!q?.contract_economic_snapshot) this.requestContractPreview();
+    }
+  }
+
+  isContractMode(): boolean { return this.form.getRawValue().destination === 'contract'; }
+
+  money(value: string | number | null | undefined): number { return Number(value ?? 0); }
+
+  loadInvoiceProfileCatalog(force = false): void {
+    if (force) { this.invoiceProfiles.set([]); this.invoiceProfileError.set(false); }
+    if (this.invoiceProfileLoading() || this.invoiceProfiles().length > 0) return;
+    this.invoiceProfileLoading.set(true);
+    this.invoiceProfileService.catalog().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
+        // The catalog endpoint contains active profiles only; narrow it to
+        // the AIU operation without inventing a `state` field it does not emit.
+        const list = (response.data ?? []).filter((p) => p.operation_type === '09');
+        this.invoiceProfiles.set(list);
+        this.invoiceProfileError.set(false);
+        this.invoiceProfileLoading.set(false);
+        if (!this.isEditMode() && this.invoiceProfileId() == null && list.length) {
+          const selectedDefault = list.find((p) => p.is_default === true);
+          if (selectedDefault) {
+            this.invoiceProfileId.set(selectedDefault.id);
+            this.invoiceProfileExplicitlyChanged.set(true);
+            this.loadInvoiceProfile(selectedDefault.id);
+          }
+        }
+      },
+      error: () => { this.invoiceProfileLoading.set(false); this.invoiceProfileError.set(true); },
+    });
+  }
+
+  onInvoiceProfileSelect(event: Event): void {
+    const id = Number((event.target as HTMLSelectElement).value) || null;
+    this.invoiceProfileId.set(id);
+    this.invoiceProfileExplicitlyChanged.set(true);
+    this.liveInvoiceProfile.set(null);
+    if (id != null) {
+      if (this.frozenInvoiceProfile()?.profile_id === id) {
+        this.invoiceProfileExplicitlyChanged.set(false);
+        this.requestContractPreview();
+        return;
+      }
+      this.loadInvoiceProfile(id);
+    }
+    this.requestContractPreview();
+  }
+
+  useCurrentInvoiceProfile(): void {
+    const id = this.invoiceProfileId();
+    if (id == null) return;
+    this.invoiceProfileExplicitlyChanged.set(true);
+    this.liveInvoiceProfile.set(null);
+    this.loadInvoiceProfile(id);
+  }
+
+  private loadInvoiceProfile(id: number): void {
+    const requestId = ++this.invoiceProfileRequestId;
+    this.invoiceProfileService.getById(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
+        if (requestId !== this.invoiceProfileRequestId || this.invoiceProfileId() !== id) return;
+        const profile = response.data;
+        if (profile.state !== 'active' || profile.operation_type !== '09') {
+          this.liveInvoiceProfile.set(null);
+          this.requestContractPreview();
+          return;
+        }
+        this.liveInvoiceProfile.set(profile);
+        this.requestContractPreview();
+      },
+      error: () => {
+        if (requestId !== this.invoiceProfileRequestId || this.invoiceProfileId() !== id) return;
+        this.liveInvoiceProfile.set(null);
+        this.requestContractPreview();
+      },
+    });
+  }
+
+  private canPreviewContract(): boolean {
+    return this.invoiceProfileId() != null && !!this.selectedInvoiceProfileConfig() &&
+      this.itemsArray.length > 0 && this.form.get('contract_object')!.valid &&
+      (!this.aiuInputRequired() || this.form.get('aiu_value')!.value !== null && this.form.get('aiu_value')!.value !== '');
+  }
+
+  private buildPreviewRequest() {
+    const snapshot = this.frozenInvoiceProfile();
+    const unchangedFrozen = !!snapshot && snapshot.profile_id === this.invoiceProfileId() && !this.invoiceProfileExplicitlyChanged();
+    const raw = this.form.getRawValue();
+    return {
+      ...(this.quotation()?.id ? { quotation_id: this.quotation()!.id } : {}),
+      ...(!unchangedFrozen && this.invoiceProfileId() != null ? { invoice_profile_id: this.invoiceProfileId()! } : {}),
+      contract_object: raw.contract_object,
+      due_date: raw.due_date || (this.quotation()?.destination === 'contract' ? null : undefined),
+      ...(this.aiuInputRequired() ? { aiu_value: Number(raw.aiu_value) } : {}),
+      items: raw.items.map((item: any) => ({
+        product_id: item.product_id || undefined,
+        product_variant_id: item.product_variant_id || undefined,
+        product_name: item.product_name,
+        variant_sku: item.variant_sku || undefined,
+        quantity: Number(item.quantity),
+        unit_price: Number(item.unit_price),
+        discount_amount: Number(item.discount_amount || 0),
+        total_price: Number(item.total_price || 0),
+      })),
+    };
+  }
+
+  requestContractPreview(): void {
+    if (!this.isContractMode()) return;
+    this.contractPreview.set(null);
+    this.previewError.set(null);
+    this.previewPending.set(this.canPreviewContract());
+    // Always emit: switchMap cancels an in-flight request even if the new form
+    // state is invalid, so a late old response can never re-enable save.
+    this.contractPreview$.next();
   }
 
   // ── Customer Search ──
@@ -723,6 +1015,7 @@ export class QuotationFormModalComponent {
 
   selectCustomer(customer: any): void {
     this.selectedCustomer.set(customer);
+    this.customerRequiredError.set(false);
     this.customerSearchTerm.set('');
     this.customerResults.set([]);
   }
@@ -740,25 +1033,39 @@ export class QuotationFormModalComponent {
    */
   onProfileSelect(event: Event): void {
     const raw = (event.target as HTMLSelectElement).value;
+    const requestId = ++this.profileRequestId;
     if (!raw) {
       this.selectedProfile.set(null);
+      this.selectedProfileDetail.set(null);
       return;
     }
     const profile = this.quotationProfiles().find((p) => String(p.id) === raw) || null;
     this.selectedProfile.set(profile);
+    this.selectedProfileDetail.set(null);
     if (!profile || profile.id == null) return;
-    this.quotationsService
-      .getQuotationProfileDetail(Number(profile.id))
-      .pipe(takeUntilDestroyed())
+    this.profilesService
+      .getProfile(Number(profile.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (detail) => {
-          const config = (detail as any)?.current_config ?? {};
+          if (requestId !== this.profileRequestId || this.selectedProfile()?.id !== profile.id) return;
+          this.selectedProfileDetail.set(detail);
+          if (this.isEditMode()) return;
+          const config: QuotationProfileConfig = detail.current_config ?? {};
           const patch: Record<string, string> = {};
-          if (config.notes && !this.form.get('notes')?.value) {
+          const notesControl = this.form.get('notes');
+          const termsControl = this.form.get('terms_and_conditions');
+          const validUntilControl = this.form.get('valid_until');
+          if (config.notes && notesControl?.pristine && !notesControl.value) {
             patch['notes'] = config.notes;
           }
-          if (config.payment_terms && !this.form.get('terms_and_conditions')?.value) {
+          if (config.payment_terms && termsControl?.pristine && !termsControl.value) {
             patch['terms_and_conditions'] = config.payment_terms;
+          }
+          if (config.validity_days !== undefined && validUntilControl?.pristine && !validUntilControl.value) {
+            const validUntil = new Date();
+            validUntil.setDate(validUntil.getDate() + config.validity_days);
+            patch['valid_until'] = toLocalDateString(validUntil);
           }
           if (Object.keys(patch).length > 0) {
             this.form.patchValue(patch);
@@ -788,7 +1095,7 @@ export class QuotationFormModalComponent {
   }
 
   addProductWithVariant(product: any, variant: any): void {
-    const basePrice = variant?.price_override ?? product.price;
+    const basePrice = this.isContractMode() ? 0 : (variant?.price_override ?? product.price);
     const taxEntries = taxEntriesFromAssignments(product.tax_assignments);
     const taxRate = taxEntries.reduce((sum, entry) => sum + entry.rate, 0);
 
@@ -890,6 +1197,7 @@ export class QuotationFormModalComponent {
   removeItem(index: number): void {
     this.itemsArray.removeAt(index);
     this.recalculateGrandTotal();
+    this.requestContractPreview();
   }
 
   /**
@@ -939,7 +1247,7 @@ export class QuotationFormModalComponent {
     const qty = Number(group.get('quantity')?.value || 0);
     const price = Number(group.get('unit_price')?.value || 0);
     const discount = Number(group.get('discount_amount')?.value || 0);
-    const entries = this.lineTaxEntries(group);
+    const entries = this.isContractMode() ? [] : this.lineTaxEntries(group);
     const inclusiveRate = entries
       .filter((entry) => entry.inclusive)
       .reduce((sum, entry) => sum + entry.rate, 0);
@@ -949,12 +1257,12 @@ export class QuotationFormModalComponent {
     // backend resta el descuento una sola vez en la cabecera
     // (`subtotal - descuentos + impuestos`).
     const lineUnits = qty / this.effectivePriceUnit(group);
-    const totalPrice = estimateNetBase(price, inclusiveRate) * lineUnits;
+    const totalPrice = this.isContractMode() ? Math.max(price * qty, 0) : estimateNetBase(price, inclusiveRate) * lineUnits;
     // La base gravable va después del descuento, no sobre el bruto.
     const taxAmountItem = Math.max(totalPrice - discount, 0) * totalRate;
 
     group.patchValue({
-      tax_rate: totalRate,
+      tax_rate: this.isContractMode() ? 0 : totalRate,
       total_price: totalPrice,
       tax_amount_item: taxAmountItem,
       line_final_total: Math.max(totalPrice - discount, 0) + taxAmountItem,
@@ -983,16 +1291,27 @@ export class QuotationFormModalComponent {
   // ── Save ──
 
   onSave(): void {
-    if (this.itemsArray.length === 0) return;
-
-    this.isSaving.set(true);
+    if (this.itemsArray.length === 0 || this.isSaving()) return;
+    if (this.itemsArray.invalid) {
+      this.itemsArray.markAllAsTouched();
+      return;
+    }
+    if (this.form.getRawValue().destination === 'contract' && !this.selectedCustomer()) {
+      this.customerRequiredError.set(true);
+      return;
+    }
+    this.customerRequiredError.set(false);
+    if (this.isContractMode() && (!this.contractPreview() || this.previewPending() || this.previewError() || !this.canPreviewContract())) return;
+    this.submitPending.set(true);
 
     const formValue = this.form.value;
     // B.2: el <select> nativo entrega string; '' = sin perfil (se omite, FB-05).
     // getRawValue() porque en edicion los controles van deshabilitados (ADR-01).
     const rawValue = this.form.getRawValue();
     const profileId = rawValue.profile_id ? Number(rawValue.profile_id) : undefined;
-    const dto: CreateQuotationDto = {
+    const isContract = rawValue.destination === 'contract';
+    const economicChanged = isContract && this.contractEconomicsChanged(rawValue);
+    const dto: QuotationFormSaveDto = {
       customer_id: this.selectedCustomer()?.id,
       // B.2: destino solo al crear; en edicion se omite (inmutable, ADR-01).
       // Sin valor explicito el backend aplica `sale` (A.1).
@@ -1002,7 +1321,23 @@ export class QuotationFormModalComponent {
       notes: formValue.notes || undefined,
       internal_notes: formValue.internal_notes || undefined,
       terms_and_conditions: formValue.terms_and_conditions || undefined,
-      items: formValue.items.map((item: any) => ({
+      ...(isContract && (economicChanged || !this.quotation()) ? {
+        ...(this.invoiceProfileId() != null && (!this.quotation() || this.invoiceProfileExplicitlyChanged())
+          ? { invoice_profile_id: this.invoiceProfileId()! } : {}),
+        contract_object: rawValue.contract_object || '',
+        due_date: rawValue.due_date || (this.quotation()?.destination === 'contract' ? null : undefined),
+        ...(this.aiuInputRequired() ? { aiu_value: Number(rawValue.aiu_value) } : {}),
+      } : {}),
+      ...((!isContract || economicChanged || !this.quotation()) ? { items: formValue.items.map((item: any) => isContract ? ({
+        product_id: item.product_id || undefined,
+        product_variant_id: item.product_variant_id || undefined,
+        product_name: item.product_name,
+        variant_sku: item.variant_sku || undefined,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount || 0,
+        total_price: item.total_price,
+      }) : ({
         product_id: item.product_id || undefined,
         product_variant_id: item.product_variant_id || undefined,
         product_name: item.product_name,
@@ -1018,16 +1353,40 @@ export class QuotationFormModalComponent {
           item.applied_price_tier_id != null
             ? Number(item.applied_price_tier_id)
             : undefined,
-      })),
+      })) } : {}),
     };
 
     this.save.emit(dto);
-    // Parent handles the API call; reset saving state after emit.
-    // If parent needs async feedback, it can control the modal visibility.
-    this.isSaving.set(false);
+    // Keep a same-tick latch for rapid duplicate clicks. The parent input is
+    // authoritative while the request is in flight; a microtask also releases
+    // this latch if the parent receives a synchronous error before input change
+    // detection has observed `saving=true`.
+    queueMicrotask(() => this.submitPending.set(false));
+  }
+
+  private contractEconomicsChanged(rawValue: any): boolean {
+    const quotation = this.quotation();
+    const snapshot = quotation?.contract_economic_snapshot;
+    if (!quotation || !snapshot || this.invoiceProfileExplicitlyChanged()) return true;
+    if ((rawValue.contract_object || '') !== snapshot.contract_object ||
+        (rawValue.due_date || null) !== (snapshot.due_date || null)) return true;
+    if (this.aiuInputRequired() && Number(rawValue.aiu_value) !== Number(snapshot.aiu_value)) return true;
+    const existing = quotation.quotation_items ?? [];
+    const current = rawValue.items ?? [];
+    if (existing.length !== current.length) return true;
+    return current.some((item: any, index: number) => {
+      const original = existing[index];
+      return !original || item.product_name !== original.product_name ||
+        Number(item.quantity) !== Number(original.quantity) ||
+        Number(item.unit_price) !== Number(original.unit_price) ||
+        Number(item.discount_amount || 0) !== Number(original.discount_amount || 0) ||
+        (item.product_id || null) !== (original.product_id || null) ||
+        (item.product_variant_id || null) !== (original.product_variant_id || null);
+    });
   }
 
   onClose(): void {
+    if (this.isSaving()) return;
     this.close.emit();
   }
 
@@ -1185,7 +1544,7 @@ export class QuotationFormModalComponent {
     if (this.productOverrides()[productId]) return;
     this.priceTierCache
       .getProductOverrides(productId)
-      .pipe(takeUntilDestroyed())
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (overrides) =>
           this.productOverrides.update((current) => ({

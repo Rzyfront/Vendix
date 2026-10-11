@@ -39,7 +39,7 @@
   <!-- Card List -->
   @if (!loading() && data().length > 0) {
     <div class="item-list-cards">
-      @for (item of data(); track item; let i = $index) {
+      @for (item of data(); track getRowTrackKey(item, $index); let i = $index) {
         <div class="item-card" (click)="onItemClick(item)"
           [ngClass]="rowClass() ? rowClass()!(item, i) : ''">
           <!-- Combined Header & Details Wrap -->

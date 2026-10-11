@@ -30,26 +30,26 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
       @if (label()) {
-        <label
-          [for]="textareaId"
-          [class]="labelClasses"
-          class="label-with-tooltip"
-          >
-          <span>{{ label() }}</span>
-          @if (tooltipText()) {
-            <app-tooltip [content]="tooltipText()" position="top">
-              <span class="help-icon">
-                <app-icon name="help-circle" [size]="14"></app-icon>
-              </span>
-            </app-tooltip>
-          }
-          @if (required()) {
-            <span class="text-[var(--color-destructive)] ml-1"
-              >*</span
-              >
+        <div class="label-with-tooltip">
+          <label [for]="textareaId" [class]="labelClasses">
+            <span>{{ label() }}</span>
+            @if (required()) {
+              <span class="text-[var(--color-text-primary)] ml-1" aria-hidden="true">*</span>
             }
           </label>
-        }
+          @if (tooltipText()) {
+            <app-tooltip [content]="tooltipText()" position="top">
+              <button
+                type="button"
+                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
+                [attr.aria-label]="'Ayuda para ' + label()"
+              >
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </button>
+            </app-tooltip>
+          }
+        </div>
+      }
     
         <!-- Textarea wrapper -->
         <div class="relative">
@@ -62,6 +62,9 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
             [rows]="rows()"
             [class]="textareaClasses"
             [style]="customStyle()"
+            [attr.aria-required]="required() ? 'true' : null"
+            [attr.aria-invalid]="!!getValidationError()"
+            [attr.aria-describedby]="getValidationError() ? errorId : null"
             (input)="onInput($event)"
             (blur)="onBlur()"
             (focus)="onFocus()"
@@ -71,7 +74,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
         <!-- Helper text -->
         @if (helperText() && !getValidationError()) {
           <p
-            class="mt-2 text-sm text-[var(--color-text-secondary)]"
+            class="mt-2 text-sm text-[var(--color-text-primary)]"
             >
             {{ helperText() }}
           </p>
@@ -80,7 +83,9 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
         <!-- Error message -->
         @if (getValidationError()) {
           <p
-            class="mt-2 text-sm text-[var(--color-destructive)]"
+            [id]="errorId"
+            role="alert"
+            class="mt-2 text-sm text-[var(--color-text-primary)]"
             >
             {{ getValidationError() }}
           </p>
@@ -103,8 +108,12 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
       gap: 0.25rem;
     }
 
+    .label-with-tooltip label {
+      margin-bottom: 0;
+    }
+
     .help-icon {
-      color: var(--color-text-muted);
+      color: var(--color-text-primary);
       cursor: help;
       position: relative;
       display: inline-flex;
@@ -112,7 +121,15 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     }
 
     .help-icon:hover {
-      color: var(--color-primary);
+      color: var(--color-text-primary);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .help-icon,
+      textarea {
+        animation: none;
+        transition: none;
+      }
     }
   `],
 })
@@ -139,6 +156,10 @@ export class TextareaComponent implements ControlValueAccessor {
 
   readonly value = signal('');
   textareaId = `textarea-${Math.random().toString(36).substr(2, 9)}`;
+
+  get errorId(): string {
+    return `${this.textareaId}-error`;
+  }
 
   // ControlValueAccessor implementation
   private onChange = (value: string) => { };
@@ -169,7 +190,7 @@ export class TextareaComponent implements ControlValueAccessor {
         'text-[11px]',
         'uppercase',
         'tracking-[0.05em]',
-        'text-[var(--color-text-muted)]',
+        'text-[var(--color-text-primary)]',
         this.customLabelClass(),
       ]
         .filter(Boolean)
@@ -194,7 +215,7 @@ export class TextareaComponent implements ControlValueAccessor {
       'transition-colors',
       'duration-200',
       'focus:outline-none',
-      'placeholder:text-text-muted',
+      'placeholder:text-[var(--color-text-primary)]',
     ];
 
     const control = this.control();
@@ -206,7 +227,7 @@ export class TextareaComponent implements ControlValueAccessor {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
-        'bg-[rgba(239,68,68,0.05)]',
+        'bg-[rgba(var(--color-error-rgb),0.05)]',
       ];
     } else {
       stateClasses = [
@@ -228,7 +249,7 @@ export class TextareaComponent implements ControlValueAccessor {
         'bg-[var(--color-background)]',   // Subtle background like onboarding
         'focus:bg-[var(--color-surface)]', // Change to surface on focus
         isInvalid
-          ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
+          ? 'focus:shadow-[0_0_0_2px_rgba(var(--color-error-rgb),0.3)]'
           : 'focus:shadow-[0_0_0_2px_var(--color-ring)]',
       ];
     } else {

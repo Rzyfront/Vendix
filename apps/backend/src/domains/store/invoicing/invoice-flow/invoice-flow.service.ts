@@ -46,10 +46,7 @@ import type {
 } from '../providers/dian-direct/xml/ubl-common.builder';
 import { DIAN_INVOICE_OPERATION_TYPES } from '../providers/dian-direct/constants/dian-document-types';
 import { DIAN_TAX_CODES } from '../providers/dian-direct/constants/dian-tax-codes';
-import type {
-  AiuSettings,
-  AiuVatRegime,
-} from '../../settings/interfaces/store-settings.interface';
+import type { AiuVatRegime } from '../../settings/interfaces/store-settings.interface';
 import {
   isAiuLineTaxable,
   taxableBasisFromRegime,
@@ -125,6 +122,8 @@ import {
   exceptionToFinding,
 } from '../utils/exception-to-finding.util';
 import { tryResolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
+import { assertNoteOriginalHasNoAcceptedRadianEvent } from '../utils/invoice-radian-note-coherence';
+import { markContractFiscalAcceptance } from '../../contracts/contract-invoice-lifecycle';
 
 /**
  * Re-export del hallazgo unificado. La definición vive en
@@ -400,7 +399,7 @@ interface AiuEmissionContext {
    * documento se emitió con su propio régimen o con el que la tienda tenía en
    * ese instante.
    */
-  regime_source: 'snapshot' | 'settings' | 'default';
+  regime_source: 'snapshot';
   /**
    * Piso legal que rige para ESTE documento, ya resuelto: el porcentaje si
    * aplica, `null` si no aplica ninguno. Viene del snapshot de la factura
@@ -1140,6 +1139,58 @@ export class InvoiceFlowService {
     }
 
     return invoice;
+  }
+
+  /**
+   * Persists fiscal acceptance and its contract projection atomically. This
+   * transaction uses the raw client, so both invoice writes/read explicitly
+   * carry id + store + organization to preserve tenant isolation.
+   */
+  private async persistAcceptedInvoiceAndContract(
+    invoice: any,
+    data: Prisma.invoicesUpdateManyMutationInput,
+  ) {
+    // Non-contract invoices retain the established scoped update path; only
+    // contract-backed acceptance needs the cross-row atomic transition.
+    if (invoice.contract_id == null) {
+      return this.prisma.invoices.update({
+        where: { id: invoice.id },
+        data,
+        include: INVOICE_INCLUDE,
+      });
+    }
+
+    return this.prisma.withoutScope().$transaction(async (tx: any) => {
+      const where = {
+        id: invoice.id,
+        store_id: invoice.store_id,
+        organization_id: invoice.organization_id,
+        status: invoice.status,
+      };
+      const result = await tx.invoices.updateMany({ where, data });
+      if (result.count !== 1) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_STATUS_001,
+          'La factura cambió durante la confirmación fiscal. Vuelve a consultar su estado antes de reintentar.',
+          { invoice_id: invoice.id, expected_status: invoice.status },
+        );
+      }
+
+      const updated = await tx.invoices.findFirst({
+        where: {
+          id: invoice.id,
+          store_id: invoice.store_id,
+          organization_id: invoice.organization_id,
+        },
+        include: INVOICE_INCLUDE,
+      });
+      if (!updated) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+      }
+
+      await markContractFiscalAcceptance(tx, updated);
+      return updated;
+    });
   }
 
   private validateTransition(
@@ -3084,29 +3135,6 @@ export class InvoiceFlowService {
   }
 
   /**
-   * `store_settings.settings.invoicing.aiu` — la MISMA lectura que hace
-   * `InvoicingService.loadAiuSettings`. Se duplica en vez de compartirse porque
-   * importar `InvoicingService` desde aquí cierra un ciclo de módulos
-   * (`InvoicingService` ya depende de este flujo).
-   */
-  private async loadAiuSettings(
-    store_id: number | bigint | null,
-  ): Promise<AiuSettings> {
-    if (store_id == null) return {};
-
-    // `findFirst`, no `findUnique`: la extensión de scoping mezcla el filtro de
-    // tenant y un WhereUnique no admite el `AND` resultante.
-    const row = await this.prisma.store_settings.findFirst({
-      where: { store_id: Number(store_id) },
-      select: { settings: true },
-    });
-
-    const settings = row?.settings as Record<string, any> | null;
-    const aiu = settings?.invoicing?.aiu;
-    return aiu && typeof aiu === 'object' ? (aiu as AiuSettings) : {};
-  }
-
-  /**
    * Contexto AIU del documento que se va a emitir, o `null` cuando no es un
    * contrato AIU — que es el 100 % del histórico y no cuesta ninguna lectura.
    *
@@ -3114,35 +3142,24 @@ export class InvoiceFlowService {
    * una omisión cosmética: la regla valida el `cbc:Note` de la línea de
    * Administración y un documento AIU sin esa nota se rechaza CON el consecutivo
    * ya gastado. `InvoicingService` valida lo mismo al crear; acá se vuelve a
-   * comprobar porque la configuración pudo cambiar entre la creación y el envío,
-   * y porque la nota no se persiste en ninguna columna del documento.
+   * comprobar porque una factura histórica puede no tener el snapshot completo;
+   * la nota se reconstruye exclusivamente desde el objeto congelado.
    */
   private async resolveAiuEmissionContext(invoice: {
     id: number;
-    store_id: number | bigint | null;
     operation_type?: string | null;
     aiu_contract_object?: string | null;
     aiu_regime?: string | null;
     aiu_minimum_percent?: Prisma.Decimal | null;
+    aiu_taxable_matrix?: any;
   }): Promise<AiuEmissionContext | null> {
     const operation_type = (invoice.operation_type || '').trim();
     if (operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) return null;
 
-    const settings = await this.loadAiuSettings(invoice.store_id);
-    // EL SNAPSHOT DEL DOCUMENTO MANDA.
-    //
-    // `invoices.aiu_contract_object` guarda el objeto con el que se validó la
-    // nota al capturar. Leer sólo la configuración de la tienda hacía que un
-    // cambio de configuración entre la captura y el envío emitiera un documento
-    // describiendo un contrato distinto del que se facturó — y con varios
-    // contratos AIU vivos, que es el caso normal de una empresa de servicios,
-    // TODOS salían con la misma descripción.
-    //
-    // La configuración sigue siendo el respaldo: cubre las facturas anteriores
-    // a la columna y a quien factura un único contrato.
-    const contract_object =
-      (invoice.aiu_contract_object || '').trim() ||
-      (settings.contract_object || '').trim();
+    // El snapshot de factura es la fuente fiscal para emisión. Nunca se
+    // reconstruye un documento AIU histórico a partir de configuración viva.
+
+    const contract_object = (invoice.aiu_contract_object || '').trim();
     // MISMA función que usó la creación: las dos cadenas no pueden divergir.
     const note = buildAiuNote(contract_object);
 
@@ -3155,8 +3172,8 @@ export class InvoiceFlowService {
         `No se puede emitir el contrato AIU: el objeto del contrato falta o no tiene la longitud que ` +
           `exige la DIAN. La nota de la línea de Administración debe medir entre ` +
           `${DIAN_AIU_NOTE_MIN_LENGTH} y ${DIAN_AIU_NOTE_MAX_LENGTH} caracteres contando el prefijo ` +
-          `obligatorio «${DIAN_AIU_NOTE_PREFIX}». Descríbelo en el campo «Objeto del contrato» de la ` +
-          `factura o, si es siempre el mismo, en la configuración de facturación de la tienda.`,
+          `obligatorio «${DIAN_AIU_NOTE_PREFIX}». Completa el objeto acordado en el snapshot ` +
+          `de la factura antes de volver a emitirla.`,
         {
           invoice_id: invoice.id,
           note_length: note.length,
@@ -3165,21 +3182,28 @@ export class InvoiceFlowService {
       );
     }
 
-    const regime = this.resolveAiuRegimeForEmission(invoice, settings);
+    const regime = this.resolveAiuRegimeForEmission(invoice);
 
-    // EL PISO SALE DEL SNAPSHOT, con la misma precedencia y por la misma razón
-    // que el régimen. Sólo rige bajo `et_462_1` —el Decreto 1372/1992 no fija
-    // ninguno sobre la utilidad del constructor— y el default es ACTIVO: en el
-    // ajuste de la tienda sólo se apaga declarando `false`, así que la ausencia
-    // no significa "sin piso".
-    const minimum_percent =
-      regime.regime !== 'et_462_1'
-        ? null
-        : invoice.aiu_minimum_percent != null
-          ? new Prisma.Decimal(invoice.aiu_minimum_percent)
-          : settings.enforce_minimum_base === false
-            ? null
-            : new Prisma.Decimal(settings.minimum_base_percent ?? 10);
+    // NULL is a valid frozen choice (minimum disabled), not a request to load a
+    // tenant default. The matrix records whether that NULL was intentional;
+    // old rows without this evidence fail closed rather than guessing.
+    let minimum_percent: Prisma.Decimal | null = null;
+    if (regime.regime === 'et_462_1') {
+      if (invoice.aiu_minimum_percent != null) {
+        minimum_percent = new Prisma.Decimal(invoice.aiu_minimum_percent);
+      } else if (invoice.aiu_taxable_matrix?.minimum?.enforced === false) {
+        minimum_percent = null;
+      } else {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_AIU_006,
+          `No se puede emitir la factura AIU ${invoice.id}: falta evidencia congelada sobre el piso mínimo. La matriz debe indicar si el piso estaba activo y su porcentaje; no se consultan valores actuales de la tienda.`,
+          {
+            invoice_id: invoice.id,
+            missing_snapshot_field: 'aiu_taxable_matrix.minimum',
+          },
+        );
+      }
+    }
 
     return { ...regime, minimum_percent, note };
   }
@@ -3202,14 +3226,9 @@ export class InvoiceFlowService {
    *
    *   1. `invoices.aiu_regime` — el régimen con el que se calcularon estos
    *      importes. Es el único dato que no puede contradecirlos.
-   *   2. `store_settings.invoicing.aiu.regime` — respaldo para las facturas
-   *      anteriores a la columna. Se avisa en el log, porque es precisamente la
-   *      lectura viva que el snapshot vino a reemplazar.
-   *   3. `'et_462_1'` — el MISMO default que usa la creación. Que las dos
-   *      puntas caigan al mismo valor es lo que hace consistente a la tienda
-   *      que nunca configuró AIU; cambiarlo por un rechazo acá rompería un
-   *      camino que hoy funciona y funciona bien, porque `et_462_1` declara MÁS
-   *      IVA: de más es recuperable, de menos es sanción.
+   * Sólo `invoices.aiu_regime` es una fuente permitida: contiene la base con la
+   * que se calcularon los importes. Si falta en históricos se bloquea para no
+   * inferir una base desde settings vivos ni inventar una fiscalidad.
    *
    * La columna se sigue llamando `aiu_regime` por compatibilidad, pero lo que
    * guarda es la BASE GRAVABLE declarada, y `'subtotal'` es un valor legal en
@@ -3229,7 +3248,6 @@ export class InvoiceFlowService {
    */
   private resolveAiuRegimeForEmission(
     invoice: { id: number; aiu_regime?: string | null },
-    settings: AiuSettings,
   ): Pick<AiuEmissionContext, 'regime' | 'regime_source'> {
     const KNOWN: readonly AiuRegimeSnapshot[] = [
       'et_462_1',
@@ -3246,31 +3264,19 @@ export class InvoiceFlowService {
             `(«${frozen}»). No se emite: las tres bases válidas gravan partes distintas del ` +
             `contrato —E.T. art. 462-1 grava Administración + Imprevistos + Utilidad, Decreto ` +
             `1372/1992 grava sólo la Utilidad, Subtotal declina el AIU y grava el contrato ` +
-            `completo— y elegir una por defecto cambiaría el IVA declarado. Corrige la base en ` +
-            `la configuración de facturación de la tienda y vuelve a guardar la factura.`,
+            `completo— y elegir una por defecto cambiaría el IVA declarado. Revisa y guarda el ` +
+            `snapshot contractual/fiscal de la factura antes de volver a emitir.`,
           { invoice_id: invoice.id, declared_regime: frozen, known: KNOWN },
         );
       }
       return { regime: frozen as AiuRegimeSnapshot, regime_source: 'snapshot' };
     }
 
-    if (settings.regime) {
-      this.logger.warn(
-        `Factura ${invoice.id}: contrato AIU sin régimen congelado. Se usa el ajuste VIVO de la ` +
-          `tienda («${settings.regime}») para decidir qué líneas emiten cac:TaxTotal. Es una ` +
-          `factura anterior a invoices.aiu_regime: si el ajuste cambió después de que se ` +
-          `calcularon sus importes, la gravabilidad del XML puede no corresponder a los tributos ` +
-          `persistidos.`,
-      );
-      return { regime: settings.regime, regime_source: 'settings' };
-    }
-
-    this.logger.warn(
-      `Factura ${invoice.id}: contrato AIU sin régimen congelado y sin configuración AIU en la ` +
-        `tienda. Se usa el default conservador «et_462_1», el mismo que aplicó la creación, que ` +
-        `grava el AIU completo y por tanto declara de más antes que de menos.`,
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_AIU_006,
+      `No se puede emitir la factura AIU ${invoice.id}: falta la base gravable congelada en el snapshot. No se reconstruye desde ajustes actuales porque podrían no corresponder a los importes guardados. Completa/revisa la factura contractual y vuelve a emitir.`,
+      { invoice_id: invoice.id, missing_snapshot_field: 'aiu_regime' },
     );
-    return { regime: 'et_462_1', regime_source: 'default' };
   }
 
   /**
@@ -4201,6 +4207,13 @@ export class InvoiceFlowService {
 
   async send(id: number) {
     const invoice = await this.getInvoice(id);
+    await assertNoteOriginalHasNoAcceptedRadianEvent(this.prisma, {
+      note_type: invoice.invoice_type,
+      related_invoice_id: invoice.related_invoice_id,
+      organization_id: invoice.organization_id,
+      store_id: invoice.store_id,
+      accounting_entity_id: invoice.accounting_entity_id,
+    });
     await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'sent');
     await this.assertOrderPaidForEmission(invoice);
@@ -4938,12 +4951,19 @@ export class InvoiceFlowService {
       provider_response.cuds ||
       provider_response.cune;
 
+    // A repeated fiscal confirmation repairs only the contract projection;
+    // it must not re-run accounting, withholding, or event side effects.
+    if (invoice.status === 'accepted') {
+      await markContractFiscalAcceptance(this.prisma, invoice);
+      return invoice;
+    }
+
     await this.fiscal_ledger.markAccepted(transmission_id, provider_response);
 
-    // Update invoice with provider response
-    const updated = await this.prisma.invoices.update({
-      where: { id },
-      data: {
+    const acceptance_at = new Date();
+
+    // Persist the accepted invoice and contract projection atomically.
+    const updated = await this.persistAcceptedInvoiceAndContract(invoice, {
         status: 'accepted',
         send_status: 'sent_ok',
         transmission_status: 'accepted',
@@ -4951,7 +4971,7 @@ export class InvoiceFlowService {
         accounting_status: 'provisional',
         fiscal_document_type: this.fiscalDocumentType(invoice.invoice_type),
         sent_at: new Date(),
-        accepted_at: new Date(),
+        accepted_at: acceptance_at,
         cufe: fiscal_key,
         qr_code: provider_response.qr_code,
         xml_document: provider_response.xml_document,
@@ -4972,8 +4992,6 @@ export class InvoiceFlowService {
         customer_fiscal_responsibilities:
           provider_data.customer_tax_responsibilities ?? undefined,
         customer_person_type: acquirer_identity.person_type ?? undefined,
-      },
-      include: INVOICE_INCLUDE,
     });
 
     if (is_support_document) {
@@ -5088,6 +5106,10 @@ export class InvoiceFlowService {
 
   async accept(id: number) {
     const invoice = await this.getInvoice(id);
+    if (invoice.status === 'accepted') {
+      await markContractFiscalAcceptance(this.prisma, invoice);
+      return invoice;
+    }
     await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'accepted');
     await this.assertFiscalPeriodOpen(
@@ -5119,18 +5141,16 @@ export class InvoiceFlowService {
       );
     }
 
-    const updated = await this.prisma.invoices.update({
-      where: { id },
-      data: {
+    const acceptance_at = new Date();
+
+    const updated = await this.persistAcceptedInvoiceAndContract(invoice, {
         status: 'accepted',
         send_status: 'sent_ok',
         transmission_status: 'accepted',
         dian_status: 'accepted',
         accounting_status: 'provisional',
-        accepted_at: new Date(),
+        accepted_at: acceptance_at,
         cufe: fiscal_key,
-      },
-      include: INVOICE_INCLUDE,
     });
 
     const is_support_document = this.isSupportDocumentType(

@@ -18,6 +18,7 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
         findFirst: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
       },
+      dian_document_events: { findFirst: jest.fn().mockResolvedValue(null) },
       ...overrides.prisma,
     };
 
@@ -50,7 +51,10 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
     expect(invoice_flow.send).not.toHaveBeenCalled();
     expect(prisma.invoices.findFirst).toHaveBeenCalledWith({
       where: { id: 999 },
-      select: { id: true, invoice_type: true, status: true },
+      select: {
+        id: true, invoice_type: true, status: true, related_invoice_id: true,
+        organization_id: true, store_id: true, accounting_entity_id: true,
+      },
     });
   });
 
@@ -70,10 +74,12 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
   });
 
   it('issue sobre NC en draft valida y envía en orden y retorna phases', async () => {
+    const note = { id: 5, invoice_type: 'credit_note', status: 'draft', related_invoice_id: 12, organization_id: 1, store_id: 2, accounting_entity_id: 3 };
+    const original = { id: 12, organization_id: 1, store_id: 2, accounting_entity_id: 3 };
     const { service, invoice_flow } = createService({
       prisma: {
         invoices: {
-          findFirst: jest.fn().mockResolvedValue({ id: 5, invoice_type: 'credit_note', status: 'draft' }),
+          findFirst: jest.fn(async ({ where }: { where: { id: number } }) => where.id === 5 ? note : original),
         },
       },
     });
@@ -97,14 +103,38 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
     expect((result as any).invoice).toMatchObject({ id: 5, status: 'sent' });
   });
 
+  it.each(['033', '034'])('issue bloquea antes de validar/enviar si original tiene RADIAN %s aceptado', async (event_code) => {
+    const note = {
+      id: 5, invoice_type: 'credit_note', status: 'draft', related_invoice_id: 12,
+      organization_id: 1, store_id: 2, accounting_entity_id: 3,
+    };
+    const original = { id: 12, organization_id: 1, store_id: 2, accounting_entity_id: 3 };
+    const findFirst = jest.fn(async ({ where }: { where: { id: number } }) => where.id === note.id ? note : original);
+    const { service, prisma, invoice_flow } = createService({
+      prisma: {
+        invoices: { findFirst },
+        dian_document_events: { findFirst: jest.fn().mockResolvedValue({ id: 90, event_code }) },
+      },
+    });
+
+    await expect(service.issueNote(5)).rejects.toMatchObject({ errorCode: 'INVOICING_STATUS_002' });
+    expect(invoice_flow.validate).not.toHaveBeenCalled();
+    expect(invoice_flow.send).not.toHaveBeenCalled();
+    expect(prisma.dian_document_events.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ invoice_id: 12, organization_id: 1, OR: [{ store_id: 2 }, { store_id: null }], status: 'accepted' }),
+    }));
+  });
+
   it('F-001: si validate rechaza (nota ya emitida), send jamás se llama', async () => {
     const statusError = Object.assign(new Error('ya emitida'), {
       errorCode: 'INVOICING_STATUS_001',
     });
+    const note = { id: 5, invoice_type: 'debit_note', status: 'sent', related_invoice_id: 12, organization_id: 1, store_id: 2, accounting_entity_id: 3 };
+    const original = { id: 12, organization_id: 1, store_id: 2, accounting_entity_id: 3 };
     const { service, invoice_flow } = createService({
       prisma: {
         invoices: {
-          findFirst: jest.fn().mockResolvedValue({ id: 5, invoice_type: 'debit_note', status: 'sent' }),
+          findFirst: jest.fn(async ({ where }: { where: { id: number } }) => where.id === 5 ? note : original),
         },
       },
       invoice_flow: { validate: jest.fn().mockRejectedValue(statusError) },

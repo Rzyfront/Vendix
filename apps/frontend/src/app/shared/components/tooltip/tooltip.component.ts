@@ -38,6 +38,9 @@ export type TooltipColor =
     <ng-content></ng-content>
     <div
       #tooltipContainer
+      [id]="tooltipId"
+      role="tooltip"
+      [attr.aria-hidden]="isVisible() ? null : 'true'"
       class="tooltip-container"
       [attr.data-position]="resolvedPosition()"
       [attr.data-size]="size()"
@@ -78,7 +81,7 @@ export type TooltipColor =
           visibility 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
         transform: translate3d(0, -2px, 0) scale(0.95);
         pointer-events: none;
-        filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+        filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 15%, transparent));
         box-sizing: border-box;
       }
 
@@ -97,8 +100,8 @@ export type TooltipColor =
         color: var(--tooltip-text);
         border: none;
         box-shadow:
-          0 4px 12px rgba(0, 0, 0, 0.15),
-          0 2px 4px rgba(0, 0, 0, 0.1);
+          0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 15%, transparent),
+          0 2px 4px color-mix(in srgb, var(--color-neutral-900, #111827) 10%, transparent);
         border-radius: 6px;
         padding: var(--tooltip-padding);
         font-size: var(--tooltip-font-size);
@@ -137,9 +140,9 @@ export type TooltipColor =
         bottom: 0;
         background: linear-gradient(
           135deg,
-          rgba(255, 255, 255, 0.1) 0%,
-          rgba(255, 255, 255, 0.05) 50%,
-          rgba(255, 255, 255, 0) 100%
+          color-mix(in srgb, var(--color-surface, #fff) 10%, transparent) 0%,
+          color-mix(in srgb, var(--color-surface, #fff) 5%, transparent) 50%,
+          transparent 100%
         );
         pointer-events: none;
       }
@@ -266,24 +269,32 @@ export type TooltipColor =
         white-space: normal;
         background: linear-gradient(
           135deg,
-          rgba(var(--color-primary-rgb), 0.85) 0%,
-          rgba(var(--color-primary-rgb), 0.95) 50%,
-          rgba(var(--color-primary-rgb), 0.85) 100%
+          color-mix(in srgb, var(--color-surface, #fff) 94%, var(--color-primary, #6d28d9)) 0%,
+          color-mix(in srgb, var(--color-surface, #fff) 90%, var(--color-primary, #6d28d9)) 50%,
+          color-mix(in srgb, var(--color-surface, #fff) 94%, var(--color-primary, #6d28d9)) 100%
         );
         background-size: 200% 200%;
         animation: ai-tooltip-shimmer 3s ease-in-out infinite;
-        color: white;
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--color-text-primary, #111827);
+        border: 1px solid color-mix(in srgb, var(--color-primary, #6d28d9) 24%, transparent);
         border-radius: 8px;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
         box-shadow:
-          0 4px 12px rgba(0, 0, 0, 0.25),
-          inset 0 1px 1px rgba(255, 255, 255, 0.15);
+          0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 25%, transparent),
+          inset 0 1px 1px color-mix(in srgb, var(--color-surface, #fff) 15%, transparent);
       }
 
       .tooltip-container[data-color='ai'] .tooltip-content::before {
         display: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .tooltip-container,
+        .tooltip-container[data-color='ai'] .tooltip-content {
+          animation: none;
+          transition: none;
+        }
       }
 
       /* Arrow */
@@ -292,7 +303,7 @@ export type TooltipColor =
         width: 0;
         height: 0;
         border: 6px solid transparent;
-        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+        filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--color-neutral-900, #111827) 10%, transparent));
       }
 
       .tooltip-container[data-position='top'] .tooltip-arrow {
@@ -391,6 +402,7 @@ export type TooltipColor =
   ],
 })
 export class TooltipComponent implements AfterViewInit {
+  readonly tooltipId = `tooltip-${Math.random().toString(36).slice(2, 11)}`;
   readonly content = input('');
   readonly size = input<TooltipSize>('md');
   readonly position = input<TooltipPosition>('top');
@@ -401,7 +413,7 @@ export class TooltipComponent implements AfterViewInit {
   private _visible = signal(false);
   readonly isVisible = computed(() => {
     const ext = this.visible();
-    return ext !== undefined ? ext : this._visible();
+    return (ext !== undefined ? ext : this._visible()) && !this.escapeDismissed();
   });
 
   readonly resolvedPosition = signal<TooltipPosition>('top');
@@ -422,11 +434,18 @@ export class TooltipComponent implements AfterViewInit {
   private positionFrame: number | undefined;
   private isHovered = false;
   private hasFocus = false;
+  private escapeDismissed = signal(false);
+  private activeTrigger: HTMLElement | null = null;
   private visualViewport: VisualViewport | null = null;
   private readonly visualViewportChange = () => this.onViewportChange();
 
   constructor() {
+    effect(() => {
+      if (this.visible() === false) this.escapeDismissed.set(false);
+    });
+
     this.destroyRef.onDestroy(() => {
+      this.removeDescribedBy();
       if (this.showTimeout) {
         clearTimeout(this.showTimeout);
       }
@@ -440,11 +459,13 @@ export class TooltipComponent implements AfterViewInit {
 
     effect(() => {
       if (this.isVisible()) {
+        this.applyDescribedBy();
         this.position();
         this.content();
         this.size();
         this.schedulePositionUpdate();
       } else {
+        this.removeDescribedBy();
         this.isPositioned.set(false);
       }
     });
@@ -456,6 +477,7 @@ export class TooltipComponent implements AfterViewInit {
   }
 
   ngAfterViewInit() {
+    if (typeof window === 'undefined') return;
     this.visualViewport = window.visualViewport;
     this.visualViewport?.addEventListener('resize', this.visualViewportChange);
     this.visualViewport?.addEventListener('scroll', this.visualViewportChange);
@@ -470,13 +492,16 @@ export class TooltipComponent implements AfterViewInit {
     }
   }
 
-  @HostListener('mouseenter')
-  onMouseEnter() {
+  @HostListener('mouseenter', ['$event'])
+  onMouseEnter(event: MouseEvent) {
     this.isHovered = true;
+    this.escapeDismissed.set(false);
+    this.setActiveTrigger(event.target);
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
     }
     this.showTimeout = setTimeout(() => {
+      this.showTimeout = undefined;
       this._visible.set(true);
       this.schedulePositionUpdate();
     }, this.delay());
@@ -487,13 +512,19 @@ export class TooltipComponent implements AfterViewInit {
     this.isHovered = false;
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
+      this.showTimeout = undefined;
     }
-    if (!this.hasFocus) this._visible.set(false);
+    if (!this.hasFocus) {
+      this._visible.set(false);
+      this.removeDescribedBy();
+    }
   }
 
-  @HostListener('focusin')
-  onFocusIn() {
+  @HostListener('focusin', ['$event'])
+  onFocusIn(event: FocusEvent) {
     this.hasFocus = true;
+    this.escapeDismissed.set(false);
+    this.setActiveTrigger(event.target);
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
       this.showTimeout = undefined;
@@ -505,7 +536,50 @@ export class TooltipComponent implements AfterViewInit {
   @HostListener('focusout')
   onFocusOut() {
     this.hasFocus = false;
-    if (!this.isHovered) this._visible.set(false);
+    if (!this.isHovered) {
+      this._visible.set(false);
+      this.removeDescribedBy();
+    }
+  }
+
+  @HostListener('keydown', ['$event'])
+  onKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape' || !this.isVisible()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.showTimeout) {
+      clearTimeout(this.showTimeout);
+      this.showTimeout = undefined;
+    }
+    this._visible.set(false);
+    this.escapeDismissed.set(true);
+    this.removeDescribedBy();
+  }
+
+  private setActiveTrigger(target: EventTarget | null): void {
+    const element = target instanceof Element ? target : null;
+    const trigger = element?.closest<HTMLElement>('button, a, input, select, [tabindex]')
+      ?? this.hostRef.nativeElement;
+    if (this.activeTrigger !== trigger) this.removeDescribedBy();
+    this.activeTrigger = trigger;
+    if (this.isVisible()) this.applyDescribedBy();
+  }
+
+  private applyDescribedBy(): void {
+    if (!this.activeTrigger) return;
+    const ids = (this.activeTrigger.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/).filter(Boolean);
+    if (!ids.includes(this.tooltipId)) {
+      this.activeTrigger.setAttribute('aria-describedby', [...ids, this.tooltipId].join(' '));
+    }
+  }
+
+  private removeDescribedBy(): void {
+    if (!this.activeTrigger) return;
+    const ids = (this.activeTrigger.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/).filter((id) => id && id !== this.tooltipId);
+    if (ids.length) this.activeTrigger.setAttribute('aria-describedby', ids.join(' '));
+    else this.activeTrigger.removeAttribute('aria-describedby');
   }
 
   @HostListener('window:resize')

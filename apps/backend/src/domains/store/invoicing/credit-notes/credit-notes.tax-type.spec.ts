@@ -61,6 +61,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
     const prisma = createPrismaMock({
       invoices: ['findFirst', 'findMany', 'create'],
       invoice_taxes: ['createMany'],
+      dian_document_events: ['findFirst'],
       products: ['findMany'],
       product_variants: ['findMany'],
       store_settings: ['findFirst'],
@@ -98,6 +99,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
       }
       return null;
     });
+    prisma.dian_document_events.findFirst.mockResolvedValue(null);
     prisma.invoices.findMany.mockResolvedValue([]);
     prisma.store_settings.findFirst.mockResolvedValue(null);
     prisma.tax_rates.findMany.mockResolvedValue([]);

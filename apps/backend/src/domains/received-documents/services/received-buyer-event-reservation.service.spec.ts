@@ -133,6 +133,51 @@ describe('ReceivedBuyerEventReservationService', () => {
     await expect(acknowledged.service.reserve(context, 42, { event_code: '032', idempotency_key: 'goods' })).resolves.toMatchObject({ duplicate: false, event_number: 'RD77' });
   });
 
+  it.each([
+    ['rejected', UnprocessableEntityException],
+    ['unknown', ConflictException],
+    ['preparation_failed', UnprocessableEntityException],
+  ] as const)('does not trust a %s 030 as accepted predecessor evidence', async (status, errorType) => {
+    const h = harness({ receipt: { id: 88 }, events: [{
+      id: 69, event_code: '030', status, event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:ack', result: {},
+    }] });
+    await expect(h.service.reserve(context, 42, { event_code: '032', idempotency_key: 'goods' })).rejects.toBeInstanceOf(errorType);
+    expect(h.tx.received_document_events.create).not.toHaveBeenCalled();
+  });
+
+  it('uses durable accepted timestamps and trusted accepted buyer events as prior legal state', async () => {
+    const durableGoods = harness({
+      document: { ...validDocument, confirmed_goods_at: new Date('2026-10-01T00:00:00Z') },
+      events: [{ id: 69, event_code: '030', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:ack', result: {} }],
+    });
+    await expect(durableGoods.service.reserve(context, 42, { event_code: '033', idempotency_key: 'accept' })).resolves.toMatchObject({ duplicate: false });
+
+    const acceptedDocumentBlocks031 = harness({
+      document: { ...validDocument, accepted_at: new Date('2026-10-01T00:00:00Z') },
+      events: [
+        { id: 69, event_code: '030', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:ack', result: {} },
+        { id: 70, event_code: '032', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:goods', result: {} },
+      ],
+    });
+    await expect(acceptedDocumentBlocks031.service.reserve(context, 42, { event_code: '031', idempotency_key: 'claim', description: 'Mismatch', claim_concept_code: '02' })).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('treats accepted 034 as trusted acceptance evidence but never permits reserving/emitting 034', async () => {
+    const eventsWith034 = [
+      { id: 69, event_code: '030', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:ack', result: {} },
+      { id: 70, event_code: '032', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:goods', result: {} },
+      { id: 71, event_code: '034', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:external-acceptance', result: {} },
+    ];
+    const with034 = harness({ events: eventsWith034 });
+    await expect(with034.service.reserve(context, 42, { event_code: '031', idempotency_key: 'claim', description: 'Mismatch', claim_concept_code: '02' })).rejects.toBeInstanceOf(UnprocessableEntityException);
+    const noFurtherAcceptance = harness({ events: eventsWith034 });
+    await expect(noFurtherAcceptance.service.reserve(context, 42, { event_code: '033', idempotency_key: 'accept' })).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    const noEmission = harness();
+    await expect(noEmission.service.reserve(context, 42, { event_code: '034' as any, idempotency_key: 'never' })).rejects.toThrow('Código de evento DIAN no soportado');
+    expect(noEmission.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('requires and persists the 031 claim concept code after accepted 030 and 032', async () => {
     const acceptedPredecessors = [
       { id: 69, event_code: '030', status: 'accepted', event_type: 'BUYER_DIAN_EVENT', idempotency_key: 'buyer:ack', result: {} },

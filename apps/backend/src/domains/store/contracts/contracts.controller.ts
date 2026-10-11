@@ -49,7 +49,11 @@ class ContractQueryDto {
   status?: ContractStatus;
 }
 
-/** C.2 (FB-07, ERR-06) — la transicion ilegal la rechaza el servicio (422). */
+/**
+ * `invoiced` permanece en el catálogo de filtros/lectura histórica, pero no es
+ * un estado asignable por PATCH: sólo la aceptación fiscal lo deriva.
+ * C.2 (FB-07, ERR-06) — la transición ilegal la rechaza el servicio (422).
+ */
 class UpdateContractStatusDto {
   @IsString()
   @IsIn([...CONTRACT_STATUSES])
@@ -121,8 +125,9 @@ export class ContractsController {
   /**
    * D.2 (FB-08, ERR-07) — `POST /store/contracts/:id/invoice` genera el
    * borrador de factura AIU precargada desde un contrato VIGENTE (`active`),
-   * delegando en `InvoicingService.createInvoiceFromContract` (D.1: atomico
-   * factura `draft` + contrato a `invoiced`, triple-capa de idempotencia).
+   * delegando en `InvoicingService.createInvoiceFromContract`. El contrato
+   * conserva `active` mientras la factura sea borrador; sólo su aceptación
+   * fiscal deriva el estado `invoiced` (P1.4).
    *
    * Permiso `invoicing:write` (facturar, seed existente — sin permiso nuevo):
    * paridad con `POST /store/invoicing/from-order/:orderId`, que tambien

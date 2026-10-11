@@ -316,6 +316,14 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'quotations/profiles',
+            canActivate: [panelUiGuard],
+            loadComponent: () =>
+              import('../../private/modules/store/quotations/pages/quotation-profiles/quotation-profiles.component').then(
+                (c) => c.QuotationProfilesComponent,
+              ),
+          },
+          {
             path: 'quotations/:id',
             loadComponent: () =>
               import('../../private/modules/store/quotations/pages/quotation-detail/quotation-detail.component').then(

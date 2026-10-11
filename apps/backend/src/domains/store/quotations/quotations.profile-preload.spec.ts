@@ -22,12 +22,15 @@ describe('QuotationsService precarga por perfil (F-003)', () => {
     ),
   };
   const profilesMock = { resolveForQuotation: jest.fn() };
+  const invoiceProfilesMock = { findOne: jest.fn() };
   const service = new QuotationsService(
     { quotations: quotationsMock } as any,
     {} as any,
     { emit: jest.fn() } as any,
     {} as any,
     profilesMock as any,
+    undefined,
+    invoiceProfilesMock as any,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -80,5 +83,7 @@ describe('QuotationsService precarga por perfil (F-003)', () => {
     expect(profilesMock.resolveForQuotation).not.toHaveBeenCalled();
     expect(result.profile_id).toBeNull();
     expect(result.valid_until).toBeNull();
+    expect(invoiceProfilesMock.findOne).not.toHaveBeenCalled();
+    expect(result.contract_economic_snapshot).toBeUndefined();
   });
 });

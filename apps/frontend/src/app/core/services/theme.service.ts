@@ -455,6 +455,15 @@ export class ThemeService {
       this.applyMonocromoScale();
     }
 
+    if (normalized !== 'monocromo') {
+      const finalPrimary =
+        this.asHex(getComputedStyle(root).getPropertyValue('--color-primary')) ||
+        basePrimary;
+      this.setCssVariables({
+        '--color-text-on-primary': ColorUtils.pickForeground(finalPrimary),
+      });
+    }
+
     root.setAttribute('data-theme-preset', normalized);
   }
 

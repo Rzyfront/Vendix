@@ -79,22 +79,30 @@ export class ReceivedBuyerEventDispatchService {
   ): Promise<void> {
     const storeId = payload.selection.store_id;
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // All mutations of a received document use document → event lock order.
+      // Locking both rows in one joined query leaves acquisition order to the
+      // PostgreSQL plan and can deadlock against reservation/matching paths.
+      const documentLocks = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+        SELECT "id" FROM "received_documents"
+        WHERE "id" = ${payload.source.document_id}
+          AND "organization_id" = ${ctx.organization_id}
+          AND "accounting_entity_id" = ${ctx.accounting_entity_id}
+          AND "version" = ${payload.source.document_version}
+          AND "document_key" = ${payload.source.referenced_cufe}
+          ${storeId == null ? Prisma.empty : Prisma.sql`AND "store_id" = ${storeId}`}
+        FOR UPDATE
+      `);
+      if (documentLocks.length !== 1) throw new Error('Source document changed or is outside the fiscal scope.');
       const locks = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
         SELECT e."id"
         FROM "received_document_events" e
-        JOIN "received_documents" d ON d."id" = e."document_id"
         WHERE e."id" = ${eventId}
           AND e."event_type" = 'BUYER_DIAN_EVENT'
           AND e."status" = 'preparing'
           AND e."event_code" = ${prepared.event_code}
           AND e."event_number" = ${prepared.event_number}
-          AND d."id" = ${payload.source.document_id}
-          AND d."organization_id" = ${ctx.organization_id}
-          AND d."accounting_entity_id" = ${ctx.accounting_entity_id}
-          AND d."version" = ${payload.source.document_version}
-          AND d."document_key" = ${payload.source.referenced_cufe}
-          ${storeId == null ? Prisma.empty : Prisma.sql`AND d."store_id" = ${storeId}`}
-        FOR UPDATE OF e, d
+          AND "document_id" = ${payload.source.document_id}
+        FOR UPDATE
       `);
       if (locks.length !== 1) throw new Error('Reserved event or source document changed.');
       const activationLocks = await tx.$queryRaw<Array<{ version: number; dian_configuration_id: number; software_id_snapshot: string | null; certificate_fingerprint_snapshot: string | null }>>(Prisma.sql`
@@ -145,6 +153,17 @@ export class ReceivedBuyerEventDispatchService {
     try {
       await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         const scope = { organization_id: ctx.organization_id, accounting_entity_id: ctx.accounting_entity_id, ...(prepared.store_id != null ? { store_id: prepared.store_id } : {}) };
+        // Reservation and allocation flows lock the source document first. Keep
+        // that order here so event outcomes cannot deadlock a concurrent match.
+        const documentLocks = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+          SELECT "id" FROM "received_documents"
+          WHERE "id" = (SELECT "document_id" FROM "received_document_events" WHERE "id" = ${eventId})
+            AND "organization_id" = ${ctx.organization_id}
+            AND "accounting_entity_id" = ${ctx.accounting_entity_id}
+            ${prepared.store_id == null ? Prisma.empty : Prisma.sql`AND "store_id" = ${prepared.store_id}`}
+          FOR UPDATE
+        `);
+        if (documentLocks.length !== 1) throw new Error('Source document is outside the fiscal scope.');
         const locked = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
           SELECT e."id" FROM "received_document_events" e
           JOIN "received_documents" d ON d."id" = e."document_id"
@@ -163,6 +182,26 @@ export class ReceivedBuyerEventDispatchService {
           ...(outcome.status_code ? { status_code: outcome.status_code } : {}),
           ...(status !== 'unknown' && outcome.message ? { message: outcome.message } : {}),
         };
+        if (status === 'accepted' && (prepared.event_code === '032' || prepared.event_code === '033')) {
+          const timestampField = prepared.event_code === '032' ? 'confirmed_goods_at' : 'accepted_at';
+          const alreadyProjected = await tx.received_documents.findFirst({
+            where: { id: documentLocks[0].id, ...scope },
+            select: { confirmed_goods_at: true, accepted_at: true },
+          });
+          if (!alreadyProjected) throw new Error('Source document is outside the fiscal scope.');
+          const projectedAt = timestampField === 'confirmed_goods_at'
+            ? alreadyProjected.confirmed_goods_at
+            : alreadyProjected.accepted_at;
+          // Preserve the first accepted observation and only advance the
+          // optimistic version when this event causes a real state transition.
+          if (projectedAt == null) {
+            const projection = await tx.received_documents.updateMany({
+              where: { id: documentLocks[0].id, ...scope, [timestampField]: null },
+              data: { [timestampField]: new Date(), version: { increment: 1 } },
+            });
+            if (projection.count !== 1) throw new Error('Source document projection changed concurrently.');
+          }
+        }
         const eventUpdate = await tx.received_document_events.updateMany({
           where: { id: eventId, event_type: 'BUYER_DIAN_EVENT', status: 'sending', document: { is: scope } },
           data: {

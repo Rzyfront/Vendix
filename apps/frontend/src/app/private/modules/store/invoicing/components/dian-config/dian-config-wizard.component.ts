@@ -7,6 +7,7 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NgClass, DatePipe } from '@angular/common';
@@ -29,6 +30,7 @@ import {
   nitFormatValidator,
 } from '../../../../../../shared/utils/dian-validators';
 import { nitDvValidator } from '../../../../../../shared/utils/nit.util';
+import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { pollAsyncJob } from '../../../../../../core/utils/async-job-poll.util';
 import {
@@ -41,8 +43,10 @@ import {
 } from '../../interfaces/invoice.interface';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
 import {
   SelectorComponent,
   SelectorOption,
@@ -52,6 +56,12 @@ import {
   StepsLineItem,
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import {
+  PaginationComponent,
+  ResponsiveDataViewComponent,
+  type ItemListCardConfig,
+  type TableColumn,
+} from '../../../../../../shared/components/index';
 import {
   DianTechnicalResponseComponent,
   DianTechnicalResponseData,
@@ -141,6 +151,12 @@ const DIAN_TIPS: ReadonlyArray<{ title: string; body: string }> = [
     body: 'La firma XAdES usa tu certificado digital. Si vence, la DIAN rechaza cada documento aunque el resto de la configuración esté perfecta.',
   },
 ];
+
+interface DianAuditLogPageResponse {
+  data?: DianAuditLog[] | null;
+  meta?: { total?: number | null } | null;
+}
+
 
 /** Visual state of the test-set panel. */
 type TestSetState = 'idle' | 'running' | 'pending' | 'passed' | 'rejected';
@@ -248,11 +264,15 @@ interface PersistedTestResult {
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
+    CardComponent,
     InputComponent,
     IconComponent,
+    TooltipComponent,
     SelectorComponent,
     StepsLineComponent,
     DianTechnicalResponseComponent,
+    ResponsiveDataViewComponent,
+    PaginationComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -260,19 +280,27 @@ interface PersistedTestResult {
       <app-steps-line
         [steps]="stepsConfig"
         [currentStep]="activeStep()"
-        [clickable]="true"
-        size="md"
-        (stepClicked)="activeStep.set($event)"
+        [clickable]="false"
+        [size]="configurationTypeLocked() ? 'sm' : 'md'"
       ></app-steps-line>
 
       <!-- ═══ Step 1: Credentials ═══ -->
       @if (activeStep() === 0) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-primary">Completa los datos registrados en la DIAN para esta habilitación. El nombre es interno; el NIT y las credenciales deben coincidir con los datos del portal.</p>
+            <app-tooltip content="Ten a mano el RUT y los datos del software registrados en la DIAN antes de guardar." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda del paso de credenciales">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="key" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Credenciales DIAN</h2>
           </div>
-          <p class="text-sm text-text-secondary mb-4">
+          <p class="text-sm text-text-primary mb-4">
             Ingrese los datos de su empresa y credenciales del software de facturacion electronica.
           </p>
           <form [formGroup]="credentialsForm" class="space-y-4">
@@ -284,7 +312,16 @@ interface PersistedTestResult {
               documento soporte, el documento equivalente POS y la nomina
               electronica solo se podian activar por curl.
             -->
-            @if (isEditingConfig()) {
+            @if (configurationTypeLocked()) {
+              <div class="rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 flex items-center gap-2">
+                <span class="text-sm font-medium text-text-primary">Facturación electrónica de esta empresa</span>
+                <app-tooltip content="Este asistente se abrió para configurar la facturación electrónica de esta empresa." position="top">
+                  <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda sobre el tipo de configuración">
+                    <app-icon name="info" [size]="16"></app-icon>
+                  </button>
+                </app-tooltip>
+              </div>
+            } @else if (isEditingConfig()) {
               <div
                 class="rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 flex items-start gap-2"
               >
@@ -293,7 +330,7 @@ interface PersistedTestResult {
                   <p class="text-xs font-medium text-text-primary">
                     {{ configurationTypeLabel() }}
                   </p>
-                  <p class="text-[11px] text-text-secondary">
+                  <p class="text-[11px] text-text-primary">
                     La habilitacion no se cambia: mover una configuracion de eje
                     la sacaria de la habilitacion que la DIAN aprobo, junto con
                     su set de pruebas y su numeracion.
@@ -301,45 +338,50 @@ interface PersistedTestResult {
                 </div>
               </div>
             } @else {
-              <app-selector
+              <app-selector size="lg"
                 label="Que vas a habilitar"
                 formControlName="configuration_type"
                 [options]="configurationTypeOptions()"
                 placeholder="Elige la habilitacion DIAN"
+                tooltipText="Cada tipo de documento tiene una habilitación independiente ante la DIAN."
               ></app-selector>
-              <p class="text-[11px] text-text-secondary -mt-2">
+              <p class="text-[11px] text-text-primary -mt-2">
                 {{ configurationTypeHint() }}
               </p>
             }
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <app-input
+              <app-input size="lg"
                 label="Nombre de la configuracion"
                 formControlName="name"
                 [control]="nameControl"
                 placeholder="Ej: Empresa SAS, Persona Natural"
                 [required]="true"
+                tooltipText="Nombre interno para reconocer esta configuración en Vendix."
               ></app-input>
-              <app-selector
+              <app-selector size="lg"
                 label="Tipo de documento"
                 formControlName="nit_type"
                 [options]="nitTypeOptions"
                 placeholder="Seleccione tipo"
+                tooltipText="Selecciona el tipo de documento que aparece en el RUT o documento fiscal."
               ></app-selector>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <app-input
+              <app-input size="lg"
                 label="NIT / Documento"
                 formControlName="nit"
                 [control]="nitControl"
                 placeholder="Ej: 900123456"
                 [required]="true"
+                tooltipText="Escribe el NIT o documento sin el dígito de verificación."
               ></app-input>
-              <app-input
+              <app-input size="lg"
                 label="Digito de Verificacion (DV)"
                 formControlName="nit_dv"
                 [control]="nitDvControl"
                 placeholder="Ej: 7"
+                tooltipText="Dígito de verificación asociado al NIT; se valida junto con el número."
               ></app-input>
             </div>
             <!--
@@ -355,44 +397,47 @@ interface PersistedTestResult {
               nitControl.touched &&
               nitDvControl.touched
             ) {
-              <p class="text-xs text-error font-medium">{{ nitDvMessage }}</p>
+              <p class="text-xs text-text-primary font-medium">{{ nitDvMessage }}</p>
             }
-            <app-input
+            <app-input size="lg"
               label="Software ID"
               formControlName="software_id"
               [control]="softwareIdControl"
               placeholder="ID del software registrado en la DIAN"
               [required]="true"
+              tooltipText="Identificador del software que registraste en el portal de la DIAN."
             ></app-input>
-            <app-input
+            <app-input size="lg"
               label="PIN del Software"
               type="password"
               formControlName="software_pin"
               [control]="softwarePinControl"
               [placeholder]="selectedConfig() ? 'PIN guardado — escribe uno nuevo solo si deseas cambiarlo' : 'PIN secreto del software'"
               [required]="!selectedConfig()"
+              tooltipText="PIN técnico asociado al Software ID. Se mantiene oculto y no se muestra en pantalla."
             ></app-input>
-            <app-input
+            <app-input size="lg"
               label="Test Set ID"
               formControlName="test_set_id"
               [control]="testSetIdControl"
               placeholder="ID del set de pruebas (opcional)"
+              tooltipText="Código del set de pruebas asignado por la DIAN para esta habilitación."
             ></app-input>
           </form>
-          <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-            <app-button variant="outline" size="sm" (clicked)="cancelled.emit()">
+          <div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">
+            <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="cancelled.emit()">
               Cancelar
             </app-button>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
               <!-- Already-saved credentials must not force a pointless PATCH just
                    to move forward. -->
               @if (selectedConfig()) {
-                <app-button variant="outline" (clicked)="activeStep.set(1)">
+                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" [disabled]="mutating()" (clicked)="activeStep.set(1)">
                   Continuar sin cambios
                   <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                 </app-button>
               }
-              <app-button
+              <app-button class="w-full sm:w-auto" customClasses="min-h-11"
                 variant="primary"
                 (clicked)="saveCredentials()"
                 [disabled]="credentialsForm.invalid || savingCredentials()"
@@ -408,15 +453,24 @@ interface PersistedTestResult {
       <!-- ═══ Step 2: Certificate ═══ -->
       @if (activeStep() === 1) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-primary">Usa el certificado digital vigente de la empresa. Selecciona el archivo .p12 y escribe su contraseña para cargarlo.</p>
+            <app-tooltip content="El certificado y su contraseña se usan para firmar los documentos electrónicos." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda del paso de certificado">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="upload" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Certificado Digital</h2>
           </div>
-          <p class="text-sm text-text-secondary mb-4">
+          <p class="text-sm text-text-primary mb-4">
             Suba su certificado digital (.p12) para firmar las facturas electronicas.
           </p>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-text-primary text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe guardar las credenciales en el Paso 1.
@@ -426,14 +480,14 @@ interface PersistedTestResult {
           @if (selectedConfig()) {
             <div class="space-y-4">
               @if (selectedConfig()!.certificate_s3_key) {
-                <div class="p-3 rounded-lg bg-success-light border border-success text-success text-sm">
+                <div class="p-3 rounded-lg bg-success-light border border-success text-text-primary text-sm">
                   <div class="flex items-center gap-2">
                     <app-icon name="check-circle" [size]="16"></app-icon>
                     <span>Certificado cargado</span>
                   </div>
                   @if (selectedConfig()!.certificate_expiry) {
                     @if (isCertExpired()) {
-                      <div class="mt-1 text-xs text-error font-medium">
+                      <div class="mt-1 text-xs text-text-primary font-medium">
                         Vencido el {{ selectedConfig()!.certificate_expiry | date:'dd/MM/yyyy':'UTC' }}
                       </div>
                     } @else {
@@ -445,23 +499,37 @@ interface PersistedTestResult {
                 </div>
               }
               <div class="space-y-3">
-                <label class="block text-sm font-medium text-text-primary">Archivo del certificado (.p12)</label>
-                <div
-                  class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors"
+                <div class="flex items-center gap-2">
+                  <label for="dian-certificate-file" class="block text-sm font-medium text-text-primary">Archivo del certificado (.p12)</label>
+                  <app-tooltip content="Selecciona el archivo .p12 o .pfx vigente que DIAN usará para firmar documentos." position="top">
+                    <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda sobre el archivo del certificado">
+                      <app-icon name="info" [size]="16"></app-icon>
+                    </button>
+                  </app-tooltip>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Seleccionar archivo del certificado"
+                  class="w-full border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
                   (click)="fileInput.click()"
                   (dragover)="onDragOver($event)"
                   (drop)="onDrop($event)"
                 >
-                  <app-icon name="upload-cloud" [size]="32" class="text-text-secondary mx-auto mb-2"></app-icon>
-                  <p class="text-sm text-text-secondary">
-                    {{ selectedFile() ? selectedFile()!.name : 'Haga clic o arrastre su archivo .p12 aqui' }}
+                  <app-icon name="upload-cloud" [size]="32" class="text-text-primary mx-auto mb-2"></app-icon>
+                  <p class="text-sm text-text-primary">
+                    @if (selectedFile()) {
+                      <span class="break-all">{{ selectedFile()!.name }}</span>
+                    } @else {
+                      Haga clic o arrastre su archivo .p12 aqui
+                    }
                   </p>
                   @if (!selectedFile()) {
-                    <p class="text-xs text-text-secondary mt-1">Solo archivos .p12</p>
+                    <p class="text-xs text-text-primary mt-1">Solo archivos .p12</p>
                   }
-                </div>
+                </button>
                 <input
                   #fileInput
+                  id="dian-certificate-file"
                   type="file"
                   accept=".p12,.pfx"
                   (change)="onFileSelected($event)"
@@ -469,7 +537,7 @@ interface PersistedTestResult {
                 />
               </div>
               <form [formGroup]="certificateForm" class="space-y-4">
-                <app-input
+                <app-input size="lg"
                   label="Contrasena del certificado"
                   type="password"
                   formControlName="certificate_password"
@@ -477,23 +545,24 @@ interface PersistedTestResult {
                   placeholder="Contrasena del archivo .p12"
                   [required]="!!selectedFile()"
                   [helperText]="selectedFile() ? 'Necesaria para abrir el archivo que acabas de seleccionar.' : 'Solo se pide cuando subes un archivo nuevo.'"
+                  tooltipText="La contraseña permite abrir el certificado seleccionado. No se muestra en pantalla."
                 ></app-input>
               </form>
-              <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-                <app-button variant="outline" size="sm" (clicked)="activeStep.set(0)">
+              <div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">
+                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(0)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
                   <!-- A stored certificate is enough to keep going: forcing a
                        re-upload turned this step into a dead end. -->
                   @if (hasCertificate() && !selectedFile()) {
-                    <app-button variant="outline" (clicked)="activeStep.set(2)">
+                    <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" [disabled]="mutating()" (clicked)="activeStep.set(2)">
                       Continuar
                       <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                     </app-button>
                   }
-                  <app-button
+                  <app-button class="w-full sm:w-auto" customClasses="min-h-11"
                     variant="primary"
                     (clicked)="uploadCertificate()"
                     [disabled]="!selectedFile() || certificateForm.invalid || uploadingCertificate()"
@@ -511,15 +580,29 @@ interface PersistedTestResult {
       <!-- ═══ Step 3: Environment ═══ -->
       @if (activeStep() === 2) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-primary">El ambiente de pruebas sirve para completar la habilitación. Producción se habilita según el estado que informa la DIAN y los requisitos existentes.</p>
+            <app-tooltip content="Revisa el ambiente antes de continuar: pruebas y producción tienen efectos distintos." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda del paso de ambiente">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="globe" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Ambiente</h2>
           </div>
-          <p class="text-sm text-text-secondary mb-4">
-            Seleccione el ambiente de facturacion electronica.
-          </p>
+          <div class="flex items-center gap-2 text-sm text-text-primary mb-4">
+            <span>Seleccione el ambiente de facturacion electronica.</span>
+            <app-tooltip content="Pruebas se usa durante la habilitación; producción envía documentos reales a la DIAN." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda sobre el ambiente DIAN">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-text-primary text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe guardar las credenciales en el Paso 1.
@@ -530,8 +613,11 @@ interface PersistedTestResult {
             <div class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <button
+                  type="button"
                   (click)="setEnvironment('test')"
-                  class="p-4 rounded-lg border-2 text-left transition-all"
+                  [disabled]="mutating()"
+                  [attr.aria-pressed]="selectedEnvironment() === 'test'"
+                  class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
                   [ngClass]="{
                     'border-primary bg-[var(--color-primary-light)]': selectedEnvironment() === 'test',
                     'border-border hover:border-primary': selectedEnvironment() !== 'test'
@@ -550,14 +636,16 @@ interface PersistedTestResult {
                     </div>
                     <span class="text-sm font-medium text-text-primary">Pruebas (Habilitacion)</span>
                   </div>
-                  <p class="text-xs text-text-secondary pl-6">
+                  <p class="text-xs text-text-primary pl-6">
                     Envia facturas al ambiente de pruebas de la DIAN. Use este modo durante la habilitacion.
                   </p>
                 </button>
                 <button
+                  type="button"
                   (click)="setEnvironment('production')"
-                  [disabled]="!testSetPassed()"
-                  class="p-4 rounded-lg border-2 text-left transition-all"
+                  [disabled]="!testSetPassed() || mutating()"
+                  [attr.aria-pressed]="selectedEnvironment() === 'production'"
+                  class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
                   [ngClass]="{
                     'border-primary bg-[var(--color-primary-light)]': selectedEnvironment() === 'production',
                     'border-border hover:border-primary': selectedEnvironment() !== 'production' && testSetPassed(),
@@ -577,11 +665,11 @@ interface PersistedTestResult {
                     </div>
                     <span class="text-sm font-medium text-text-primary">Producción</span>
                   </div>
-                  <p class="text-xs text-text-secondary pl-6">
+                  <p class="text-xs text-text-primary pl-6">
                     Envia facturas reales a la DIAN. Solo active despues de completar la habilitacion.
                   </p>
                   @if (!testSetPassed()) {
-                    <p class="text-xs text-warning pl-6 mt-2 flex items-start gap-1">
+                    <p class="text-xs text-text-primary pl-6 mt-2 flex items-start gap-1">
                       <app-icon name="lock" [size]="12" class="mt-0.5"></app-icon>
                       Disponible cuando la DIAN apruebe tu set de pruebas.
                     </p>
@@ -590,7 +678,7 @@ interface PersistedTestResult {
               </div>
               <div class="p-3 rounded-lg bg-[var(--color-surface-secondary)] border border-border text-sm">
                 <div class="flex items-center justify-between">
-                  <span class="text-text-secondary">Estado de habilitacion:</span>
+                  <span class="text-text-primary">Estado de habilitacion:</span>
                   <span class="px-2 py-0.5 rounded-full text-xs font-medium"
                     [ngClass]="getEnablementStatusClass(selectedConfig()!.enablement_status)"
                   >
@@ -598,7 +686,7 @@ interface PersistedTestResult {
                   </span>
                 </div>
                 <div class="flex items-center justify-between mt-2">
-                  <span class="text-text-secondary">Ambiente actual:</span>
+                  <span class="text-text-primary">Ambiente actual:</span>
                   <span class="text-text-primary font-medium">{{ selectedConfig()!.environment === 'test' ? 'Pruebas' : 'Producción' }}</span>
                 </div>
               </div>
@@ -612,7 +700,7 @@ interface PersistedTestResult {
                         Paso a producción
                       </span>
                     </div>
-                    <app-button
+                    <app-button customClasses="min-h-11"
                       variant="outline"
                       size="sm"
                       (clicked)="loadReadiness()"
@@ -624,7 +712,7 @@ interface PersistedTestResult {
                   </div>
 
                   @if (alreadyInProduction()) {
-                    <div class="p-3 rounded-lg bg-success-light border border-success text-success text-sm flex items-start gap-2">
+                    <div class="p-3 rounded-lg bg-success-light border border-success text-text-primary text-sm flex items-start gap-2">
                       <app-icon name="check-circle" [size]="16" class="mt-0.5"></app-icon>
                       <span>
                         Esta configuración ya está emitiendo facturas electrónicas
@@ -633,7 +721,14 @@ interface PersistedTestResult {
                     </div>
                   }
 
-                  @if (readiness()) {
+                  @if (readinessError()) {
+                    <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary">
+                      <span>{{ readinessError() }}</span>
+                      <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
+                    </div>
+                  } @else if (loadingReadiness()) {
+                    <p role="status" class="text-sm text-text-primary">Consultando los requisitos de producción…</p>
+                  } @else if (readiness()) {
                     <!--
                       Tres grupos, no una lista plana: lo que el comercio puede
                       hacer hoy, lo que solo la DIAN puede resolver, y las alertas
@@ -642,7 +737,7 @@ interface PersistedTestResult {
                     -->
                     @if (actionableBlockers().length) {
                       <div class="space-y-1.5">
-                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-primary">
                           Te falta hacer ({{ actionableBlockers().length }})
                         </p>
                         @for (check of actionableBlockers(); track check.key) {
@@ -650,10 +745,10 @@ interface PersistedTestResult {
                             <app-icon name="alert-circle" [size]="14" class="text-warning mt-0.5"></app-icon>
                             <div>
                               <span class="text-text-primary font-medium">{{ check.label }}</span>
-                              <div class="text-text-secondary mt-0.5">
+                              <div class="text-text-primary mt-0.5">
                                 {{ check.action }}
                                 @if (check.owner === 'platform') {
-                                  <span class="ml-1 px-1.5 py-0.5 rounded-full bg-[var(--color-surface-secondary)] text-text-secondary">
+                                  <span class="ml-1 px-1.5 py-0.5 rounded-full bg-[var(--color-surface-secondary)] text-text-primary">
                                     lo resuelve Vendix
                                   </span>
                                 }
@@ -666,7 +761,7 @@ interface PersistedTestResult {
 
                     @if (dianPendingChecks().length) {
                       <div class="space-y-1.5">
-                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-primary">
                           Esperando a la DIAN ({{ dianPendingChecks().length }})
                         </p>
                         @for (check of dianPendingChecks(); track check.key) {
@@ -674,7 +769,7 @@ interface PersistedTestResult {
                             <app-icon name="clock" [size]="14" class="text-info mt-0.5"></app-icon>
                             <div>
                               <span class="text-text-primary font-medium">{{ check.label }}</span>
-                              <div class="text-text-secondary mt-0.5">{{ check.action }}</div>
+                              <div class="text-text-primary mt-0.5">{{ check.action }}</div>
                             </div>
                           </div>
                         }
@@ -683,7 +778,7 @@ interface PersistedTestResult {
 
                     @if (readinessWarnings().length) {
                       <div class="space-y-1.5">
-                        <p class="text-[11px] font-semibold uppercase tracking-wide text-warning">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-primary">
                           Avisos ({{ readinessWarnings().length }})
                         </p>
                         @for (check of readinessWarnings(); track check.key) {
@@ -691,7 +786,7 @@ interface PersistedTestResult {
                             <app-icon name="alert-triangle" [size]="14" class="text-warning mt-0.5"></app-icon>
                             <div>
                               <span class="text-text-primary font-medium">{{ check.label }}</span>
-                              <div class="text-text-secondary mt-0.5">{{ check.action }}</div>
+                              <div class="text-text-primary mt-0.5">{{ check.action }}</div>
                             </div>
                           </div>
                         }
@@ -700,30 +795,31 @@ interface PersistedTestResult {
 
                     @if (satisfiedChecks().length) {
                       <div class="space-y-1.5">
-                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-primary">
                           Listo ({{ satisfiedChecks().length }})
                         </p>
                         @for (check of satisfiedChecks(); track check.key) {
                           <div class="flex items-start gap-2 text-xs">
                             <app-icon name="check-circle" [size]="14" class="text-success mt-0.5"></app-icon>
-                            <span class="text-text-secondary">{{ check.label }}</span>
+                            <span class="text-text-primary">{{ check.label }}</span>
                           </div>
                         }
                       </div>
                     }
-                  } @else if (!loadingReadiness()) {
-                    <p class="text-xs text-text-secondary">
-                      Verifica los requisitos para saber si ya puedes emitir facturas reales.
-                    </p>
+                  } @else {
+                    <div role="status" class="flex flex-wrap items-center justify-between gap-2 text-xs text-text-primary">
+                      <span>No hay un informe de preparación disponible.</span>
+                      <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Consultar requisitos</app-button>
+                    </div>
                   }
 
                   @if (!alreadyInProduction()) {
                     <div class="flex justify-end pt-2">
-                      <app-button
+                      <app-button customClasses="min-h-11"
                         variant="primary"
                         size="sm"
                         (clicked)="promoteToProduction()"
-                        [disabled]="promoting() || readiness()?.ready !== true"
+                        [disabled]="mutating() || readiness()?.ready !== true"
                         [loading]="promoting()"
                       >
                         <app-icon slot="icon" name="shield-check" [size]="14"></app-icon>
@@ -735,14 +831,14 @@ interface PersistedTestResult {
               }
 
               <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-                <app-button variant="outline" size="sm" (clicked)="activeStep.set(1)">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(1)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
-                <app-button
+                <app-button customClasses="min-h-11"
                   variant="primary"
                   (clicked)="saveEnvironment()"
-                  [disabled]="savingEnvironment()"
+                  [disabled]="mutating()"
                   [loading]="savingEnvironment()"
                 >
                   {{ selectedEnvironment() === selectedConfig()!.environment ? 'Continuar' : 'Guardar Ambiente' }}
@@ -756,15 +852,24 @@ interface PersistedTestResult {
       <!-- ═══ Step 4: Test Connection ═══ -->
       @if (activeStep() === 3) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-primary">La prueba de conexión verifica comunicación. El set de pruebas se envía a la DIAN y su estado puede tardar en actualizarse.</p>
+            <app-tooltip content="La resolución seleccionada determina la numeración que se usa en el set de pruebas." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda del paso de pruebas">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="zap" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Probar Conexion</h2>
           </div>
-          <p class="text-sm text-text-secondary mb-4">
+          <p class="text-sm text-text-primary mb-4">
             Verifique la conexion con la DIAN y ejecute el set de pruebas de habilitacion.
           </p>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-text-primary text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe completar los pasos anteriores.
@@ -774,34 +879,43 @@ interface PersistedTestResult {
           @if (selectedConfig()) {
             <div class="space-y-4">
               <div class="space-y-3 mb-4">
-                <label class="text-sm font-medium text-text-primary">Resolucion para el set de pruebas</label>
-                <select
-                  class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-[var(--color-surface)] focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                  [ngModel]="selectedResolutionId()"
-                  (ngModelChange)="selectedResolutionId.set($event)"
-                >
-                  <option [ngValue]="null" disabled>Seleccione una resolucion</option>
-                  @for (res of resolutions(); track res.id) {
-                    <option [ngValue]="res.id">
-                      {{ res.prefix }} — Resolucion {{ res.resolution_number }} ({{ res.range_from }} - {{ res.range_to }})
-                    </option>
-                  }
-                </select>
+                @if (resolutionsError()) {
+                  <div role="alert" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary">
+                    <span>{{ resolutionsError() }}</span>
+                    <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadResolutions()">Reintentar</app-button>
+                  </div>
+                } @else if (resolutionsLoading()) {
+                  <p role="status" class="text-sm text-text-primary">Consultando resoluciones de facturación…</p>
+                } @else if (!resolutions().length) {
+                  <div role="status" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 text-sm text-text-primary">
+                    <span>No hay resoluciones disponibles para ejecutar el set de pruebas.</span>
+                    <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadResolutions()">Consultar resoluciones</app-button>
+                  </div>
+                } @else {
+                  <app-selector size="lg"
+                    label="Resolucion para el set de pruebas"
+                    [options]="resolutionOptions()"
+                    [ngModel]="selectedResolutionId()"
+                    (ngModelChange)="selectedResolutionId.set($event)"
+                    placeholder="Seleccione una resolucion"
+                    tooltipText="Elige la resolución de habilitación asociada al set que vas a enviar."
+                  ></app-selector>
+                }
               </div>
               <div class="flex flex-wrap items-center gap-3">
-                <app-button
+                <app-button customClasses="min-h-11"
                   variant="outline"
                   (clicked)="testConnection()"
-                  [disabled]="testingConnection()"
+                  [disabled]="mutating()"
                   [loading]="testingConnection()"
                 >
                   <app-icon slot="icon" name="wifi" [size]="14"></app-icon>
                   Probar Conexion
                 </app-button>
-                <app-button
+                <app-button customClasses="min-h-11"
                   variant="primary"
                   (clicked)="runTestSet()"
-                  [disabled]="runningTestSet() || !selectedResolutionId() || testSetState() === 'pending' || testSetState() === 'passed'"
+                  [disabled]="mutating() || !selectedResolutionId() || resolutionsLoading() || !!resolutionsError() || !resolutions().length || testSetState() === 'pending' || testSetState() === 'passed'"
                   [loading]="runningTestSet()"
                 >
                   <app-icon slot="icon" name="play" [size]="14"></app-icon>
@@ -810,10 +924,10 @@ interface PersistedTestResult {
                 <!-- Re-poll: resolves the verdict of the batch already sent. It
                      never re-transmits, so it is always safe to press. -->
                 @if (testSetResult()?.zip_key || testSetState() === 'pending') {
-                  <app-button
+                  <app-button customClasses="min-h-11"
                     variant="outline"
                     (clicked)="checkTestSetStatus(false)"
-                    [disabled]="checkingStatus()"
+                    [disabled]="mutating()"
                     [loading]="checkingStatus()"
                   >
                     <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
@@ -834,11 +948,11 @@ interface PersistedTestResult {
                       [size]="18"
                       [class]="testResult()!.success ? 'text-success' : 'text-error'"
                     ></app-icon>
-                    <span class="text-sm font-medium" [class]="testResult()!.success ? 'text-success' : 'text-error'">
+                    <span class="text-sm font-medium" [class]="'text-text-primary'">
                       {{ testResult()!.success ? 'Conexion exitosa' : 'Error de conexion' }}
                     </span>
                   </div>
-                  <div class="text-xs space-y-1 pl-6" [class]="testResult()!.success ? 'text-success' : 'text-error'">
+                  <div class="text-xs space-y-1 pl-6" [class]="'text-text-primary'">
                     <div>{{ testResult()!.message }}</div>
                     <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Producción' }}</div>
                     <div>Tiempo de respuesta: {{ testResult()!.response_time_ms }}ms</div>
@@ -860,8 +974,8 @@ interface PersistedTestResult {
                    cierra el string y el resto se compila como código. -->
               @if (testSetWait()?.state === 'abandoned') {
                 <div class="p-3 rounded-lg border border-border bg-[var(--color-surface)] flex items-start gap-2">
-                  <app-icon name="trash-2" [size]="14" class="mt-0.5 shrink-0 text-text-secondary"></app-icon>
-                  <p class="text-xs text-text-secondary">
+                  <app-icon name="trash-2" [size]="14" class="mt-0.5 shrink-0 text-text-primary"></app-icon>
+                  <p class="text-xs text-text-primary">
                     {{ testSetWait()?.reason }}
                   </p>
                 </div>
@@ -891,7 +1005,7 @@ interface PersistedTestResult {
                     <div class="min-w-0">
                       <p
                         class="text-sm font-medium"
-                        [class]="testSetStalled() ? 'text-warning' : 'text-[var(--color-info)]'"
+                        [class]="'text-text-primary'"
                       >
                         {{ testSetState() === 'running'
                           ? 'Generando, firmando y enviando el set de habilitación…'
@@ -899,7 +1013,7 @@ interface PersistedTestResult {
                             ? 'La DIAN no está emitiendo veredicto para este lote'
                             : 'La DIAN está validando tu set de pruebas' }}
                       </p>
-                      <p class="text-xs text-text-secondary mt-1">
+                      <p class="text-xs text-text-primary mt-1">
                         {{ testSetState() === 'running'
                           ? 'No cierres esta ventana: el envío puede tardar hasta un minuto.'
                           : testSetStalled()
@@ -913,7 +1027,7 @@ interface PersistedTestResult {
                           state showed "consultando cada 15 segundos" long after the
                           automatic window had closed.
                         -->
-                        <p class="text-xs text-text-secondary mt-1">
+                        <p class="text-xs text-text-primary mt-1">
                           Enviado {{ waitingSinceLabel() }}@if (polling()) {, consultando cada 15 segundos}@else {. El sondeo automático está detenido}.
                         </p>
                       }
@@ -938,14 +1052,14 @@ interface PersistedTestResult {
                       <div class="flex items-start gap-2">
                         <app-icon name="clock" [size]="16" class="text-warning mt-0.5 shrink-0"></app-icon>
                         <div class="min-w-0 space-y-1">
-                          <p class="text-xs font-semibold text-warning">
+                          <p class="text-xs font-semibold text-text-primary">
                             {{ notePhase()!.deferred_count }} nota(s) quedaron sin transmitir
                           </p>
                           <!-- El texto viene del backend: es quien sabe cuantas
                                facturas registro la DIAN y en cuantas consultas. -->
-                          <p class="text-xs text-text-secondary">{{ notePhase()!.reason }}</p>
+                          <p class="text-xs text-text-primary">{{ notePhase()!.reason }}</p>
                           @if (deferredConsecutivesLabel()) {
-                            <p class="text-xs text-text-secondary">
+                            <p class="text-xs text-text-primary">
                               Numeracion reservada y sin usar: {{ deferredConsecutivesLabel() }}.
                               Se conservan firmadas, asi que reenviarlas no exige regenerarlas.
                             </p>
@@ -964,14 +1078,14 @@ interface PersistedTestResult {
                         <app-icon name="lightbulb" [size]="16" class="text-primary mt-0.5 shrink-0"></app-icon>
                         <div class="min-w-0">
                           <p class="text-xs font-semibold text-text-primary">{{ currentTip().title }}</p>
-                          <p class="text-xs text-text-secondary mt-0.5">{{ currentTip().body }}</p>
+                          <p class="text-xs text-text-primary mt-0.5">{{ currentTip().body }}</p>
                         </div>
                       </div>
                     </div>
                   }
 
                   @if (testSetResult()?.zip_key) {
-                    <div class="text-xs text-text-secondary">
+                    <div class="text-xs text-text-primary">
                       ZipKey: <span class="font-mono break-all">{{ testSetResult()!.zip_key }}</span>
                     </div>
                   }
@@ -980,7 +1094,7 @@ interface PersistedTestResult {
                        No aplica a un lote estancado: ahí "seguir consultando" es
                        precisamente lo que ya se demostró inútil. -->
                   @if (pollExhausted() && !testSetStalled()) {
-                    <div class="p-3 rounded-lg bg-warning-light border border-warning text-xs text-warning space-y-2">
+                    <div class="p-3 rounded-lg bg-warning-light border border-warning text-xs text-text-primary space-y-2">
                       <div class="flex items-start gap-2">
                         <app-icon name="clock" [size]="14" class="mt-0.5 shrink-0"></app-icon>
                         <span>
@@ -990,7 +1104,7 @@ interface PersistedTestResult {
                         </span>
                       </div>
                       <div class="flex justify-end">
-                        <app-button
+                        <app-button customClasses="min-h-11"
                           variant="outline"
                           size="sm"
                           (clicked)="resumePolling()"
@@ -1011,7 +1125,7 @@ interface PersistedTestResult {
                   -->
                   @if (testSetState() === 'pending' && testSetResult()?.zip_key) {
                     @if (!canDiagnoseDocuments()) {
-                      <p class="text-xs text-text-secondary">
+                      <p class="text-xs text-text-primary">
                         Este lote se envió antes de que se guardaran las claves de
                         documento, así que no se puede consultar por CUFE. La única
                         salida es descartarlo y reenviar el set.
@@ -1019,7 +1133,7 @@ interface PersistedTestResult {
                     }
                     <div class="flex flex-wrap gap-2 justify-end">
                       @if (canDiagnoseDocuments()) {
-                        <app-button
+                        <app-button customClasses="min-h-11"
                           variant="outline"
                           size="sm"
                           (clicked)="diagnoseDocuments()"
@@ -1029,7 +1143,7 @@ interface PersistedTestResult {
                           Diagnosticar documentos
                         </app-button>
                       }
-                      <app-button
+                      <app-button customClasses="min-h-11"
                         [variant]="testSetStalled() ? 'primary' : 'outline'"
                         size="sm"
                         (clicked)="abandonBatch()"
@@ -1098,31 +1212,31 @@ interface PersistedTestResult {
                       [size]="18"
                       [class]="testSetState() === 'passed' ? 'text-success' : 'text-error'"
                     ></app-icon>
-                    <span class="text-sm font-medium" [class]="testSetState() === 'passed' ? 'text-success' : 'text-error'">
+                    <span class="text-sm font-medium" [class]="'text-text-primary'">
                       {{ testSetResult()!.message }}
                     </span>
                   </div>
 
                   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                     <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
-                      <div class="text-text-secondary">Total</div>
+                      <div class="text-text-primary">Total</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.total_documents }}</div>
                     </div>
                     <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
-                      <div class="text-text-secondary">Facturas</div>
+                      <div class="text-text-primary">Facturas</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.invoices_count }}</div>
                     </div>
                     <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
-                      <div class="text-text-secondary">Notas Debito</div>
+                      <div class="text-text-primary">Notas Debito</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.debit_notes_count }}</div>
                     </div>
                     <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
-                      <div class="text-text-secondary">Notas Credito</div>
+                      <div class="text-text-primary">Notas Credito</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.credit_notes_count }}</div>
                     </div>
                   </div>
 
-                  <div class="mt-3 space-y-1 text-xs text-text-secondary">
+                  <div class="mt-3 space-y-1 text-xs text-text-primary">
                     @if (testSetResult()!.number_from && testSetResult()!.number_to) {
                       <div>
                         Numeración usada: {{ testSetResult()!.number_from }} — {{ testSetResult()!.number_to }}
@@ -1145,10 +1259,10 @@ interface PersistedTestResult {
                   <!-- Per-document DIAN errors: the only actionable output of a rejection. -->
                   @if (testSetResult()!.error_messages?.length) {
                     <div class="mt-3 p-3 rounded bg-[var(--color-surface)] border border-error/40 max-h-48 overflow-y-auto">
-                      <p class="text-xs font-semibold text-error mb-1">
+                      <p class="text-xs font-semibold text-text-primary mb-1">
                         Errores reportados por la DIAN
                       </p>
-                      <ul class="list-disc pl-4 space-y-0.5 text-xs text-text-secondary">
+                      <ul class="list-disc pl-4 space-y-0.5 text-xs text-text-primary">
                         @for (msg of testSetResult()!.error_messages; track msg) {
                           <li>{{ msg }}</li>
                         }
@@ -1157,13 +1271,13 @@ interface PersistedTestResult {
                   }
 
                   @if (testSetState() === 'passed') {
-                    <div class="mt-3 p-3 rounded bg-[var(--color-surface)] border border-success/40 text-xs text-text-secondary">
-                      <p class="font-semibold text-success mb-1">Siguiente paso</p>
+                    <div class="mt-3 p-3 rounded bg-[var(--color-surface)] border border-success/40 text-xs text-text-primary">
+                      <p class="font-semibold text-text-primary mb-1">Siguiente paso</p>
                       La DIAN habilitó tu NIT como facturador electrónico. Solicita la
                       Autorización de Numeración de Facturación en Muisca, regístrala
                       como resolución y luego activa producción en el paso de Ambiente.
                       <div class="mt-2">
-                        <app-button variant="outline" size="sm" (clicked)="goToProduction()">
+                        <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="goToProduction()">
                           <app-icon slot="icon" name="shield-check" [size]="14"></app-icon>
                           Ir al paso de producción
                         </app-button>
@@ -1182,11 +1296,11 @@ interface PersistedTestResult {
               }
 
               <div class="flex items-center justify-between pt-4 border-t border-border">
-                <app-button variant="outline" size="sm" (clicked)="activeStep.set(2)">
+                <app-button customClasses="min-h-11" variant="outline" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(2)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
-                <app-button variant="primary" size="sm" (clicked)="activeStep.set(4)">
+                <app-button customClasses="min-h-11" variant="primary" size="sm" [disabled]="mutating()" (clicked)="activeStep.set(4)">
                   Registros
                   <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                 </app-button>
@@ -1199,105 +1313,64 @@ interface PersistedTestResult {
       <!-- ═══ Step 5: Audit Logs ═══ -->
       @if (activeStep() === 4) {
         <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
+          <div class="step-help-panel rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3 flex items-start gap-2">
+            <app-icon name="info" [size]="16" class="text-[var(--color-info)] shrink-0 mt-0.5"></app-icon>
+            <p class="text-xs text-text-primary">Consulta aquí las operaciones registradas para esta configuración. Este historial informa actividad; no representa por sí solo una aprobación de la DIAN.</p>
+            <app-tooltip content="El historial resume eventos registrados por el sistema y no sustituye el estado oficial de la DIAN." position="top">
+              <button type="button" class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-text-primary hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]" aria-label="Ayuda del paso de historial">
+                <app-icon name="info" [size]="16"></app-icon>
+              </button>
+            </app-tooltip>
+          </div>
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="file-text" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Registro de Operaciones</h2>
           </div>
-          <p class="text-sm text-text-secondary mb-4">
+          <p class="text-sm text-text-primary mb-4">
             Historial de operaciones realizadas con esta configuracion DIAN.
           </p>
           <div class="flex items-center justify-end mb-3">
-            <app-button
+            <app-button customClasses="min-h-11"
               variant="outline"
               size="sm"
               (clicked)="loadAuditLogs()"
-              [loading]="loadingAuditLogs()"
+                  [loading]="loadingAuditLogs()"
             >
               <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
               Actualizar
             </app-button>
           </div>
-          @if (loadingAuditLogs()) {
-            <div class="py-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+          @if (auditLogsError()) {
+            <div role="alert" class="flex items-start gap-2 p-3 rounded-lg border border-error/30 bg-error-light">
+              <app-icon name="alert-circle" [size]="16" class="text-error shrink-0 mt-0.5"></app-icon>
+              <p class="text-sm text-text-primary">{{ auditLogsError() }}</p>
             </div>
           }
-          @if (!loadingAuditLogs()) {
-            <div class="overflow-x-auto">
-              @if (auditLogs().length > 0) {
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b border-border">
-                      <th class="text-left py-2 px-3 text-text-secondary font-medium">Accion</th>
-                      <th class="text-left py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Documento</th>
-                      <th class="text-center py-2 px-3 text-text-secondary font-medium">Estado</th>
-                      <th class="text-right py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Duracion</th>
-                      <th class="text-right py-2 px-3 text-text-secondary font-medium">Fecha</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (log of auditLogs(); track log.id) {
-                      <tr class="border-b border-border/50 hover:bg-[var(--color-surface-secondary)]">
-                        <td class="py-2 px-3">
-                          <div class="text-text-primary">{{ log.action }}</div>
-                          @if (log.error_message) {
-                            <div class="text-xs text-error mt-0.5 max-w-[200px] truncate">
-                              {{ log.error_message }}
-                            </div>
-                          }
-                        </td>
-                        <td class="py-2 px-3 hidden md:table-cell">
-                          @if (log.document_number) {
-                            <span class="text-text-primary">{{ log.document_type }} {{ log.document_number }}</span>
-                          } @else {
-                            <span class="text-text-secondary">-</span>
-                          }
-                        </td>
-                        <td class="py-2 px-3 text-center">
-                          <span class="px-1.5 py-0.5 text-xs rounded-full"
-                            [ngClass]="{
-                              'bg-success-light text-success': log.status === 'success',
-                              'bg-error-light text-error': log.status === 'error',
-                              'bg-warning-light text-warning': log.status === 'pending',
-                              'bg-[var(--color-surface-secondary)] text-text-secondary': log.status !== 'success' && log.status !== 'error' && log.status !== 'pending'
-                            }"
-                          >
-                            {{ log.status }}
-                          </span>
-                        </td>
-                        <td class="py-2 px-3 text-right hidden md:table-cell text-text-secondary">
-                          {{ log.duration_ms ? log.duration_ms + 'ms' : '-' }}
-                        </td>
-                        <td class="py-2 px-3 text-right text-text-secondary text-xs">
-                          {{ log.created_at | date:'dd/MM/yy HH:mm' }}
-                        </td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              } @else {
-                <div class="py-8 text-center">
-                  <app-icon name="file-text" [size]="32" class="text-text-secondary mx-auto mb-2"></app-icon>
-                  <p class="text-text-secondary text-sm">No hay registros de operaciones</p>
-                </div>
-              }
+          <app-card [responsive]="true" [padding]="false">
+            <div class="px-2 pb-2 pt-3 md:p-4">
+              <app-responsive-data-view
+                [data]="auditLogs()"
+                [columns]="auditLogColumns"
+                [cardConfig]="auditLogCardConfig"
+                [loading]="loadingAuditLogs()"
+                [sortable]="false"
+                emptyIcon="file-text"
+                [emptyTitle]="auditLogsError() ? 'No se pudo cargar el historial' : 'No hay registros de operaciones'"
+                [emptyDescription]="auditLogsError() ? 'Actualiza para reintentar.' : 'Las operaciones realizadas con esta configuración aparecerán aquí.'"
+                [showEmptyRefresh]="true"
+                (emptyRefreshClick)="loadAuditLogs()"
+              ></app-responsive-data-view>
+              <app-pagination
+                [currentPage]="auditLogPage()"
+                [totalPages]="auditLogTotalPages()"
+                [total]="auditLogTotalItems()"
+                [limit]="auditLogFilters().limit"
+                (pageChange)="onAuditPageChange($event)"
+              ></app-pagination>
             </div>
-          }
-          @if (auditLogs().length > 0) {
-            <div class="flex items-center justify-between pt-3 border-t border-border">
-              <span class="text-xs text-text-secondary">Pagina {{ auditLogPage() }}</span>
-              <div class="flex gap-2">
-                <app-button variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage() <= 1">
-                  Anterior
-                </app-button>
-                <app-button variant="outline" size="sm" (clicked)="nextAuditPage()">
-                  Siguiente
-                </app-button>
-              </div>
-            </div>
-          }
+          </app-card>
           <div class="flex items-center justify-end pt-4 border-t border-border">
-            <app-button variant="primary" size="sm" (clicked)="finish()">
+            <app-button customClasses="min-h-11" variant="primary" size="sm" [disabled]="mutating()" (clicked)="finish()">
               <app-icon slot="icon" name="check" [size]="14"></app-icon>
               Finalizar
             </app-button>
@@ -1322,6 +1395,8 @@ export class DianConfigWizardComponent {
    * asistente desde la tarjeta de un eje concreto.
    */
   readonly configurationType = input<DianConfigurationType | null>(null);
+  /** Reception reuses the tenant's invoicing setup, never another document axis. */
+  readonly configurationTypeLocked = input(false);
 
   /**
    * Ejes que YA tienen configuración. Se ofrecen deshabilitados en vez de
@@ -1354,6 +1429,14 @@ export class DianConfigWizardComponent {
   readonly runningTestSet = signal(false);
   readonly testResult = signal<DianTestResult | null>(null);
   readonly resolutions = signal<InvoiceResolution[]>([]);
+  readonly resolutionsLoading = signal(false);
+  readonly resolutionsError = signal<string | null>(null);
+  readonly resolutionOptions = computed<SelectorOption[]>(() =>
+    this.resolutions().map((resolution) => ({
+      value: resolution.id,
+      label: `${resolution.prefix} — Resolucion ${resolution.resolution_number} (${resolution.range_from} - ${resolution.range_to})`,
+    })),
+  );
   readonly selectedResolutionId = signal<number | null>(null);
   readonly testSetResult = signal<DianTestResult | null>(null);
   /**
@@ -1377,12 +1460,26 @@ export class DianConfigWizardComponent {
   // Step 3 (production transition)
   readonly readiness = signal<DianProductionReadiness | null>(null);
   readonly loadingReadiness = signal(false);
+  readonly readinessError = signal<string | null>(null);
   readonly promoting = signal(false);
+  readonly mutating = computed(() =>
+    this.savingCredentials() || this.uploadingCertificate() || this.savingEnvironment() ||
+    this.testingConnection() || this.runningTestSet() || this.checkingStatus() ||
+    this.diagnosing() || this.abandoning() || this.promoting(),
+  );
 
   // Step 5
   readonly auditLogs = signal<DianAuditLog[]>([]);
   readonly loadingAuditLogs = signal(false);
-  readonly auditLogPage = signal(1);
+  readonly auditLogsError = signal<string | null>(null);
+  readonly auditLogFilters = signal({ page: 1, limit: 20 });
+  readonly auditLogTotalItems = signal(0);
+  readonly auditLogTotalPages = computed(() =>
+    Math.max(1, Math.ceil(this.auditLogTotalItems() / this.auditLogFilters().limit)),
+  );
+  readonly auditLogPage = computed(() => this.auditLogFilters().page);
+  readonly auditLogTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  private auditLogsSubscription?: Subscription;
 
   // ── Typed Forms ───────────────────────────────────────────
   readonly credentialsForm: FormGroup<CredentialsForm> = this.fb.nonNullable.group({
@@ -1747,6 +1844,27 @@ export class DianConfigWizardComponent {
       }
     });
 
+    let previousAuditConfigId: number | null | undefined;
+    effect(() => {
+      const step = this.activeStep();
+      const configId = this.selectedConfig()?.id ?? null;
+      untracked(() => {
+        if (configId !== previousAuditConfigId) {
+          previousAuditConfigId = configId;
+          this.auditLogsSubscription?.unsubscribe();
+          this.auditLogs.set([]);
+          this.auditLogFilters.set({ page: 1, limit: 20 });
+          this.auditLogTotalItems.set(0);
+          this.auditLogsError.set(null);
+          this.loadingAuditLogs.set(false);
+        } else if (step !== 4) {
+          this.auditLogsSubscription?.unsubscribe();
+          this.loadingAuditLogs.set(false);
+        }
+        if (step === 4 && configId !== null) this.loadAuditLogs();
+      });
+    });
+
     effect(() => {
       const step = this.initialStep();
       if (typeof step === 'number') this.activeStep.set(step);
@@ -1803,14 +1921,14 @@ export class DianConfigWizardComponent {
 
   getEnablementStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      not_started: 'bg-[var(--color-surface-secondary)] text-text-secondary',
-      testing: 'bg-warning-light text-warning',
-      test_set_passed: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
-      enabled: 'bg-success-light text-success',
-      suspended: 'bg-error-light text-error',
-      expired: 'bg-error-light text-error',
+      not_started: 'bg-[var(--color-surface-secondary)] text-text-primary',
+      testing: 'bg-warning-light text-text-primary',
+      test_set_passed: 'bg-[var(--color-info-light)] text-text-primary',
+      enabled: 'bg-success-light text-text-primary',
+      suspended: 'bg-error-light text-text-primary',
+      expired: 'bg-error-light text-text-primary',
     };
-    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-primary';
   }
 
   private resetForms(): void {
@@ -1836,12 +1954,21 @@ export class DianConfigWizardComponent {
     this.testSetResult.set(null);
     this.persistedTestResult.set(null);
     this.selectedResolutionId.set(null);
+    this.auditLogsSubscription?.unsubscribe();
     this.auditLogs.set([]);
+    this.auditLogFilters.set({ page: 1, limit: 20 });
+    this.auditLogTotalItems.set(0);
+    this.auditLogsError.set(null);
+    this.loadingAuditLogs.set(false);
     // A fresh config has no batch in flight; drop any timer from the previous one.
     this.stopPolling();
     this.pollAttempts.set(0);
     this.pollExhausted.set(false);
     this.readiness.set(null);
+    this.readinessError.set(null);
+    this.loadingReadiness.set(false);
+    this.resolutionsError.set(null);
+    this.resolutionsLoading.set(false);
   }
 
   private patchCredentialsForm(cfg: DianConfig): void {
@@ -1974,6 +2101,7 @@ export class DianConfigWizardComponent {
 
   // ── Step 3: Environment + production transition ───────────
   setEnvironment(env: 'test' | 'production'): void {
+    if (this.mutating()) return;
     // Production is not a free choice: DIAN only authorizes real emission after
     // the test set passes. Selecting it earlier would produce a 412 on save, so
     // the option is refused up front with the reason.
@@ -1988,6 +2116,7 @@ export class DianConfigWizardComponent {
   }
 
   saveEnvironment(): void {
+    if (this.mutating()) return;
     const cfg = this.selectedConfig();
     if (!cfg) return;
 
@@ -2021,16 +2150,19 @@ export class DianConfigWizardComponent {
     const cfg = this.selectedConfig();
     if (!cfg) return;
     this.loadingReadiness.set(true);
+    this.readinessError.set(null);
     this.invoicingService
       .getDianProductionReadiness(cfg.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           this.readiness.set(response?.data ?? response ?? null);
+          this.readinessError.set(null);
           this.loadingReadiness.set(false);
         },
         error: () => {
           this.readiness.set(null);
+          this.readinessError.set('No se pudieron consultar los requisitos de producción.');
           this.loadingReadiness.set(false);
         },
       });
@@ -2072,16 +2204,24 @@ export class DianConfigWizardComponent {
   }
 
   // ── Step 4: Test connection ───────────────────────────────
-  private loadResolutions(): void {
+  loadResolutions(): void {
+    this.resolutionsLoading.set(true);
+    this.resolutionsError.set(null);
     this.invoicingService.getResolutions()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const list: InvoiceResolution[] = response?.data || [];
           this.resolutions.set(list);
+          this.resolutionsError.set(null);
+          this.resolutionsLoading.set(false);
           this.reconcileSelectedResolution();
         },
-        error: () => this.resolutions.set([]),
+        error: () => {
+          this.resolutions.set([]);
+          this.resolutionsError.set('No se pudieron consultar las resoluciones de facturación.');
+          this.resolutionsLoading.set(false);
+        },
       });
   }
 
@@ -2603,35 +2743,119 @@ export class DianConfigWizardComponent {
   }
 
   // ── Step 5: Audit logs ────────────────────────────────────
+  readonly auditLogColumns: TableColumn[] = [
+    { key: 'action', label: 'Acción', priority: 0, defaultValue: '—' },
+    {
+      key: 'id', label: 'Documento', priority: 1, defaultValue: '—',
+      transform: (_value, item) => item?.document_type && item?.document_number
+        ? `${item.document_type} ${item.document_number}` : '—',
+    },
+    {
+      key: 'error_message', label: 'Detalle del error', priority: 2, defaultValue: '—',
+    },
+    {
+      key: 'status', label: 'Estado', priority: 0, badge: true,
+      badgeConfig: { type: 'custom', colorMap: {
+        success: 'var(--color-success)', error: 'var(--color-error)', pending: 'var(--color-warning)',
+      } },
+      transform: (value) => this.auditStatusLabel(String(value ?? '')),
+      badgeTransform: (value) => this.auditStatusLabel(String(value ?? '')),
+    },
+    {
+      key: 'duration_ms', label: 'Duración', align: 'right', priority: 2, defaultValue: '—',
+      transform: (value) => value == null ? '—' : `${value} ms`,
+    },
+    {
+      key: 'created_at', label: 'Fecha y hora', align: 'right', priority: 1,
+      transform: (value) => value ? formatStoreDateTime(String(value), this.auditLogTimezone) || '—' : '—',
+    },
+  ];
+
+  readonly auditLogCardConfig: ItemListCardConfig = {
+    titleKey: 'action',
+    titleTransform: (item) => item?.action || '—',
+    badgeKey: 'status',
+    badgeConfig: { type: 'custom', colorMap: {
+      success: 'var(--color-success)', error: 'var(--color-error)', pending: 'var(--color-warning)',
+    } },
+    badgeTransform: (value) => this.auditStatusLabel(String(value ?? '')),
+    detailKeys: [
+      {
+        key: 'id', label: 'Documento', icon: 'file-text',
+        transform: (_value, item) => item?.document_type && item?.document_number
+          ? `${item.document_type} ${item.document_number}` : '—',
+      },
+      {
+        key: 'error_message', label: 'Detalle del error', icon: 'alert-circle', defaultValue: '—',
+        transform: (value) => value == null || value === '' ? '—' : String(value),
+      },
+      {
+        key: 'duration_ms', label: 'Duración', icon: 'clock',
+        transform: (value) => value == null ? '—' : `${value} ms`,
+      },
+      {
+        key: 'created_at', label: 'Fecha y hora', icon: 'calendar',
+        transform: (value) => value ? formatStoreDateTime(String(value), this.auditLogTimezone) || '—' : '—',
+      },
+    ],
+  };
+
+  auditStatusLabel(status: string): string {
+    const labels: Record<string, string> = { success: 'Éxito', error: 'Error', pending: 'Pendiente' };
+    return (labels[status] ?? status) || '—';
+  }
+
   loadAuditLogs(): void {
-    this.loadingAuditLogs.set(true);
     const configId = this.selectedConfig()?.id;
-    this.invoicingService.getDianAuditLogs(this.auditLogPage(), 20, configId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+    if (this.activeStep() !== 4 || configId == null) return;
+    this.auditLogsSubscription?.unsubscribe();
+    this.loadingAuditLogs.set(true);
+    this.auditLogsError.set(null);
+    this.auditLogsSubscription = this.invoicingService
+      .getDianAuditLogs(this.auditLogFilters().page, this.auditLogFilters().limit, configId)
+      .pipe(
+        map((response: unknown): DianAuditLogPageResponse => response as DianAuditLogPageResponse),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
-        next: (response: any) => {
-          this.auditLogs.set(response?.data || []);
+        next: (response: DianAuditLogPageResponse) => {
+          this.auditLogs.set(response?.data ?? []);
+          this.auditLogTotalItems.set(response?.meta?.total ?? 0);
+          if (this.auditLogFilters().page > this.auditLogTotalPages()) {
+            this.auditLogFilters.update((current) => ({
+              ...current,
+              page: this.auditLogTotalPages(),
+            }));
+            this.loadAuditLogs();
+            return;
+          }
           this.loadingAuditLogs.set(false);
         },
         error: () => {
+          this.auditLogsError.set('No se pudo cargar el historial de operaciones DIAN.');
+          this.auditLogs.set([]);
+          this.auditLogTotalItems.set(0);
           this.loadingAuditLogs.set(false);
         },
       });
   }
 
-  prevAuditPage(): void {
-    if (this.auditLogPage() > 1) {
-      this.auditLogPage.update((p) => p - 1);
-      this.loadAuditLogs();
-    }
-  }
-
-  nextAuditPage(): void {
-    this.auditLogPage.update((p) => p + 1);
+  onAuditPageChange(page: number): void {
+    if (!Number.isInteger(page) || page < 1 || page > this.auditLogTotalPages()) return;
+    this.auditLogFilters.update((current) => ({ ...current, page }));
     this.loadAuditLogs();
   }
 
+  prevAuditPage(): void {
+    this.onAuditPageChange(this.auditLogPage() - 1);
+  }
+
+  nextAuditPage(): void {
+    this.onAuditPageChange(this.auditLogPage() + 1);
+  }
+
   finish(): void {
+    if (this.mutating()) return;
     const cfg = this.selectedConfig();
     if (cfg) this.saved.emit(cfg);
     this.cancelled.emit();

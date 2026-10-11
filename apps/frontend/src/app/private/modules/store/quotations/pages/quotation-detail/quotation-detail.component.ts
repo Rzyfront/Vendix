@@ -6,23 +6,21 @@ import { finalize, Observable } from 'rxjs';
 import { QuotationsService } from '../../services/quotations.service';
 import { QuotationPrintService } from '../../services/quotation-print.service';
 import { Quotation, QuotationStatus } from '../../interfaces/quotation.interface';
-import {
-  StickyHeaderComponent,
-  IconComponent,
-  SpinnerComponent,
-  TimelineComponent,
-  DialogService,
-  ToastService,
-  CardComponent,
-  ButtonComponent,
-} from '../../../../../../shared/components';
-import type {
-  StickyHeaderActionButton,
-  StickyHeaderBadgeColor,
-  TimelineStep,
-} from '../../../../../../shared/components';
-import { CurrencyPipe } from '../../../../../../shared/pipes';
+import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import type { StickyHeaderActionButton, StickyHeaderBadgeColor } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+import { TimelineComponent } from '../../../../../../shared/components/timeline/timeline.component';
+import type { TimelineStep } from '../../../../../../shared/components/timeline/timeline.interfaces';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ContractsService } from '../../../contracts/services/contracts.service';
 
 const STATUS_LABELS: Record<QuotationStatus, string> = {
   draft: 'Borrador',
@@ -31,6 +29,7 @@ const STATUS_LABELS: Record<QuotationStatus, string> = {
   rejected: 'Rechazada',
   expired: 'Expirada',
   converted: 'Convertida',
+  contracted: 'Contratada',
   cancelled: 'Cancelada',
 };
 
@@ -41,8 +40,14 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
   rejected: 'red',
   expired: 'yellow',
   converted: 'green',
+  contracted: 'green',
   cancelled: 'gray',
 };
+
+interface ContractEconomicLineDisplay {
+  frozen: NonNullable<Quotation['contract_economic_snapshot']>['invoice_lines'][number];
+  calculation: Record<string, unknown> | null;
+}
 
 @Component({
   selector: 'app-quotation-detail',
@@ -113,14 +118,89 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
               }
             </app-card>
 
+            @if (quotation()!.destination === 'contract') {
+              @if (quotation()!.contract_economic_snapshot; as economic) {
+                <app-card title="Economía contractual congelada" shadow="sm" [responsivePadding]="true">
+                  <div class="space-y-3">
+                    <section class="rounded-lg border border-border p-3">
+                      <h3 class="text-sm font-semibold text-gray-900">Perfil AIU congelado</h3>
+                      <p class="text-sm text-text-secondary">
+                        {{ economic.invoice_profile.name || ('Perfil #' + economic.invoice_profile.profile_id) }} · versión {{ economic.invoice_profile.version }}
+                      </p>
+                      <dl class="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                        <div><dt class="text-text-secondary">Base gravable</dt><dd>{{ taxableBasisLabel(economic.invoice_profile.config.aiu?.taxable_basis ?? economic.invoice_profile.config.aiu?.regime) }}</dd></div>
+                        <div><dt class="text-text-secondary">Base de componentes</dt><dd>{{ componentsBasisLabel(economic.invoice_profile.config.aiu?.components_basis) }}</dd></div>
+                        <div><dt class="text-text-secondary">Modelo</dt><dd>{{ accountingModelLabel(economic.invoice_profile.config.aiu?.accounting_model) }}</dd></div>
+                      </dl>
+                      <dl class="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                        <div><dt class="text-text-secondary">Administración</dt><dd>{{ formatPercent(economic.invoice_profile.config.aiu?.components?.['administracion']) }}</dd></div>
+                        <div><dt class="text-text-secondary">Imprevistos</dt><dd>{{ formatPercent(economic.invoice_profile.config.aiu?.components?.['imprevistos']) }}</dd></div>
+                        <div><dt class="text-text-secondary">Utilidad</dt><dd>{{ formatPercent(economic.invoice_profile.config.aiu?.components?.['utilidad']) }}</dd></div>
+                      </dl>
+                    </section>
+
+                    <section>
+                      <h3 class="text-sm font-semibold text-gray-900">Objeto contractual</h3>
+                      <p class="mt-1 text-sm whitespace-pre-wrap text-gray-700">{{ economic.contract_object || 'No configurado en el snapshot económico.' }}</p>
+                    </section>
+
+                    <dl class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+                      <div><dt class="text-text-secondary">Costo directo</dt><dd class="font-semibold">{{ displayMoney(economic.direct_cost) !== null ? (displayMoney(economic.direct_cost)! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">AIU</dt><dd class="font-semibold">{{ displayMoney(economic.aiu_value) !== null ? (displayMoney(economic.aiu_value)! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Valor del contrato</dt><dd class="font-semibold">{{ displayMoney(economic.contract_value) !== null ? (displayMoney(economic.contract_value)! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                    </dl>
+
+                    @if (economic.due_date) {
+                      <p class="text-sm"><span class="text-text-secondary">Fecha de pago acordada:</span> {{ formatFrozenDate(economic.due_date) }}</p>
+                    }
+
+                    @if (economic.invoice_lines.length > 0) {
+                      <section class="space-y-2">
+                        <h3 class="text-sm font-semibold text-gray-900">Desglose económico fiscal congelado</h3>
+                        @for (entry of contractEconomicLines(); track $index) {
+                          <div class="rounded-lg border border-border p-3">
+                            <div class="flex flex-wrap justify-between gap-2">
+                              <div>
+                                <p class="font-semibold text-gray-900">{{ entry.frozen.description || economicBucketLabel(entry.frozen.bucket) }}</p>
+                                <p class="text-xs text-text-secondary">{{ economicBucketLabel(entry.frozen.bucket) }}</p>
+                              </div>
+                              <span class="font-semibold">{{ displayMoney(lineAmount(entry.calculation, 'total_amount')) !== null ? (displayMoney(lineAmount(entry.calculation, 'total_amount'))! | currency:2) : 'No configurado · revisar' }}</span>
+                            </div>
+                            <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-4">
+                              <div><dt>Cantidad</dt><dd>{{ entry.frozen.quantity }}</dd></div>
+                              <div><dt>Precio unitario</dt><dd>{{ displayMoney(entry.frozen.unit_price) !== null ? (displayMoney(entry.frozen.unit_price)! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                              <div><dt>Descuento</dt><dd>{{ displayMoney(entry.frozen.discount_amount) !== null ? (displayMoney(entry.frozen.discount_amount)! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                              <div><dt>Base calculada</dt><dd>{{ displayMoney(lineAmount(entry.calculation, 'line_extension_amount')) !== null ? (displayMoney(lineAmount(entry.calculation, 'line_extension_amount'))! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                            </dl>
+                            <p class="mt-1 text-xs text-text-secondary">Impuestos de línea: {{ displayMoney(lineAmount(entry.calculation, 'tax_amount')) !== null ? (displayMoney(lineAmount(entry.calculation, 'tax_amount'))! | currency:2) : 'No configurado · revisar' }}</p>
+                            @for (tax of lineTaxes(entry.calculation); track $index) {
+                              <p class="text-xs text-text-secondary">{{ taxName(tax) }}{{ displayTaxRate(tax) !== null ? ' ' + displayTaxRate(tax) : '' }}: {{ displayMoney(tax['tax_amount']) !== null ? (displayMoney(tax['tax_amount'])! | currency:2) : 'No configurado · revisar' }}</p>
+                            }
+                          </div>
+                        }
+                      </section>
+                    }
+
+                    <dl class="grid grid-cols-2 gap-2 border-t border-border pt-3 text-sm sm:grid-cols-4">
+                      <div><dt class="text-text-secondary">Subtotal bruto</dt><dd class="font-semibold">{{ snapshotTotal(economic, 'gross_subtotal') !== null ? (snapshotTotal(economic, 'gross_subtotal')! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Descuento</dt><dd class="font-semibold">{{ snapshotTotal(economic, 'discount_amount') !== null ? (snapshotTotal(economic, 'discount_amount')! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Impuestos</dt><dd class="font-semibold">{{ snapshotTotal(economic, 'tax_amount') !== null ? (snapshotTotal(economic, 'tax_amount')! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Total calculado</dt><dd class="font-bold">{{ snapshotTotal(economic, 'total_amount') !== null ? (snapshotTotal(economic, 'total_amount')! | currency:2) : 'No configurado · revisar' }}</dd></div>
+                    </dl>
+                  </div>
+                </app-card>
+              } @else {
+                <app-card title="Economía contractual" shadow="sm" [responsivePadding]="true">
+                  <p class="text-sm text-amber-800">Esta cotización histórica no conserva un snapshot económico ni perfil AIU congelado. No se puede reconstruir el objeto ni la economía desde notas o configuración vigente.</p>
+                </app-card>
+              }
+            }
+
             <!-- Items -->
-            <app-card shadow="sm" [responsivePadding]="true">
-              <div slot="header" class="flex items-center justify-between w-full">
-                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">Items</h3>
-                <span class="text-[11px] sm:text-xs font-medium text-gray-500 bg-[var(--color-background)] px-2.5 py-1 rounded-lg">
-                  {{ quotation()!.quotation_items.length }} productos
-                </span>
-              </div>
+            <app-card [title]="quotation()!.destination === 'contract' ? 'Costo directo cotizado' : 'Items'" shadow="sm" [responsivePadding]="true">
+              <p class="mb-2 text-right text-[11px] sm:text-xs font-medium text-gray-500">
+                {{ quotation()!.quotation_items.length }} productos
+              </p>
 
               <div class="space-y-2">
                 @for (item of quotation()!.quotation_items; track item.id) {
@@ -149,8 +229,8 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
 	                      </div>
                       <!-- Price -->
                       <div class="text-right flex-shrink-0">
-                        <p class="font-bold text-gray-900 text-sm sm:text-lg">{{ item.total_price || 0 | currency }}</p>
-                        <p class="text-xs text-gray-500">{{ item.quantity }} x {{ item.unit_price || 0 | currency }}</p>
+                        <p class="font-bold text-gray-900 text-sm sm:text-lg">{{ item.total_price || 0 | currency:(quotation()!.destination === 'contract' ? 2 : undefined) }}</p>
+                        <p class="text-xs text-gray-500">{{ item.quantity }} x {{ item.unit_price || 0 | currency:(quotation()!.destination === 'contract' ? 2 : undefined) }}</p>
                       </div>
                     </div>
                   </div>
@@ -215,6 +295,11 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
             <!-- Timeline / History -->
             <app-card title="Línea de Tiempo" shadow="sm" [responsivePadding]="true">
               <app-timeline class="block pt-1" [steps]="timelineSteps()" [collapsible]="true"></app-timeline>
+              @if (quotation()!.status === 'contracted' && quotation()!.contract) {
+                <a [routerLink]="['/admin/orders/contracts', quotation()!.contract!.id]" class="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline">
+                  Ver contrato {{ quotation()!.contract!.contract_number }}
+                </a>
+              }
             </app-card>
 
           </div>
@@ -323,28 +408,28 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
               <div class="space-y-2.5">
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Subtotal</span>
-                  <span class="font-semibold text-gray-900">{{ quotation()!.subtotal_amount || 0 | currency }}</span>
+                  <span class="font-semibold text-gray-900">{{ summaryAmount('gross_subtotal', quotation()!.subtotal_amount) !== null ? (summaryAmount('gross_subtotal', quotation()!.subtotal_amount)! | currency:(quotation()!.destination === 'contract' ? 2 : undefined)) : 'No configurado · revisar' }}</span>
                 </div>
-                @if (quotation()!.discount_amount > 0) {
+                @if (summaryAmount('discount_amount', quotation()!.discount_amount) !== null && summaryAmount('discount_amount', quotation()!.discount_amount)! > 0) {
                   <div class="flex justify-between items-center text-sm">
                     <span class="text-text-secondary">Descuento</span>
-                    <span class="font-semibold text-green-600">-{{ quotation()!.discount_amount || 0 | currency }}</span>
+                    <span class="font-semibold text-green-600">-{{ summaryAmount('discount_amount', quotation()!.discount_amount)! | currency:(quotation()!.destination === 'contract' ? 2 : undefined) }}</span>
                   </div>
                 }
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Impuestos</span>
-                  <span class="font-semibold text-gray-900">{{ quotation()!.tax_amount || 0 | currency }}</span>
+                  <span class="font-semibold text-gray-900">{{ summaryAmount('tax_amount', quotation()!.tax_amount) !== null ? (summaryAmount('tax_amount', quotation()!.tax_amount)! | currency:(quotation()!.destination === 'contract' ? 2 : undefined)) : 'No configurado · revisar' }}</span>
                 </div>
                 @if (quotation()!.shipping_cost > 0) {
                   <div class="flex justify-between items-center text-sm">
                     <span class="text-text-secondary">Envío</span>
-                    <span class="font-semibold text-gray-900">{{ quotation()!.shipping_cost || 0 | currency }}</span>
+                    <span class="font-semibold text-gray-900">{{ quotation()!.shipping_cost || 0 | currency:(quotation()!.destination === 'contract' ? 2 : undefined) }}</span>
                   </div>
                 }
                 <div class="pt-3 mt-1 border-t border-border flex justify-between items-center">
                   <span class="text-base font-bold text-gray-900">Total</span>
                   <span class="text-xl sm:text-2xl font-black text-primary-600 font-mono tracking-tighter">
-                    {{ quotation()!.grand_total || 0 | currency }}
+                    {{ summaryAmount('total_amount', quotation()!.grand_total) !== null ? (summaryAmount('total_amount', quotation()!.grand_total)! | currency:(quotation()!.destination === 'contract' ? 2 : undefined)) : 'No configurado · revisar' }}
                   </span>
                 </div>
               </div>
@@ -372,11 +457,119 @@ export class QuotationDetailComponent {
   private readonly dialogService = inject(DialogService);
   private readonly toastService = inject(ToastService);
   private readonly printService = inject(QuotationPrintService);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly contractsService = inject(ContractsService);
 
   readonly quotation = signal<Quotation | null>(null);
   readonly loading = signal(true);
   readonly actionLoading = signal<string | null>(null);
   readonly processAllEnabled = signal(false);
+  private readonly contractCreationInProgress = signal(false);
+  readonly canCreateContract = computed(() =>
+    this.authFacade.storeIndustries().includes('construction') &&
+    (this.authFacade.userPermissions().includes('store:contracts:create') ||
+      this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN')),
+  );
+  readonly canConvertToOrder = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:convert') ||
+      this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN'),
+  );
+  readonly canMutateQuotation = computed(() =>
+    this.authFacade.userPermissions().includes('store:quotations:update') ||
+      this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN'),
+  );
+
+  readonly contractEconomicLines = computed<ContractEconomicLineDisplay[]>(() => {
+    const snapshot = this.quotation()?.contract_economic_snapshot;
+    if (!snapshot) return [];
+    return snapshot.invoice_lines.map((frozen, index) => ({
+      frozen,
+      calculation: snapshot.calculation.lines?.[index] ?? null,
+    }));
+  });
+
+  /** Decimal parsing is for presentation only; all monetary values are frozen server outputs. */
+  displayMoney(value: unknown): number | null {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const amount = Number(value);
+      return Number.isFinite(amount) ? amount : null;
+    }
+    return null;
+  }
+
+  summaryAmount(key: 'gross_subtotal' | 'discount_amount' | 'tax_amount' | 'total_amount', saleValue: number): number | null {
+    const quotation = this.quotation();
+    if (quotation?.destination !== 'contract') return this.displayMoney(saleValue);
+    return this.displayMoney(quotation.contract_economic_snapshot?.calculation.totals[key]);
+  }
+
+  snapshotTotal(
+    snapshot: NonNullable<Quotation['contract_economic_snapshot']>,
+    key: 'gross_subtotal' | 'discount_amount' | 'tax_amount' | 'total_amount',
+  ): number | null {
+    return this.displayMoney(snapshot.calculation.totals[key]);
+  }
+
+  lineAmount(line: Record<string, unknown> | null, key: string): unknown {
+    return line?.[key];
+  }
+
+  lineTaxes(line: Record<string, unknown> | null): Record<string, unknown>[] {
+    const taxes = line?.['taxes'];
+    return Array.isArray(taxes)
+      ? taxes.filter((tax): tax is Record<string, unknown> => !!tax && typeof tax === 'object' && !Array.isArray(tax))
+      : [];
+  }
+
+  taxName(tax: Record<string, unknown>): string {
+    return typeof tax['tax_name'] === 'string' ? tax['tax_name'] : 'Impuesto';
+  }
+
+  displayTaxRate(tax: Record<string, unknown>): string | null {
+    const rate = this.displayMoney(tax['tax_rate']);
+    if (rate === null) return null;
+    const percent = tax['rate_basis'] === 'fraction' ? rate * 100 : rate;
+    return Number.isFinite(percent) ? `${percent}%` : null;
+  }
+
+  economicBucketLabel(bucket: string): string {
+    const labels: Record<string, string> = {
+      administracion: 'Administración',
+      imprevistos: 'Imprevistos',
+      utilidad: 'Utilidad',
+      costo: 'Costo directo',
+      contrato: 'Contrato',
+    };
+    return labels[bucket] ?? bucket;
+  }
+
+  formatPercent(value: string | number | null | undefined): string {
+    return value === null || value === undefined || value === '' ? 'No configurado · revisar' : `${value}%`;
+  }
+
+  taxableBasisLabel(value: string | null | undefined): string {
+    const labels: Record<string, string> = { aiu: 'AIU', utilidad: 'Utilidad', subtotal: 'Subtotal' };
+    if (value === 'et_462_1') return 'AIU';
+    if (value === 'decreto_1372_1992') return 'Utilidad';
+    return value ? labels[value] ?? value : 'No configurado · revisar';
+  }
+
+  componentsBasisLabel(value: string | null | undefined): string {
+    if (value === 'contract') return 'Porcentaje del contrato';
+    if (value === 'aiu') return 'Porcentaje del AIU';
+    return 'No configurado · revisar';
+  }
+
+  accountingModelLabel(value: string | null | undefined): string {
+    if (value === 'sumada') return 'Sumada';
+    if (value === 'no_sumada') return 'No sumada';
+    return 'No configurado · revisar';
+  }
+
+  formatFrozenDate(value: string): string {
+    return formatDateOnlyUTC(value);
+  }
 
   readonly statusLabel = computed(() => {
     const q = this.quotation();
@@ -398,7 +591,7 @@ export class QuotationDetailComponent {
         label: 'Enviar',
         variant: 'primary' as const,
         icon: 'send',
-        visible: q.status === 'draft',
+        visible: this.canMutateQuotation() && q.status === 'draft',
         loading: currentAction === 'send',
         disabled: currentAction !== null,
       },
@@ -407,7 +600,7 @@ export class QuotationDetailComponent {
         label: 'Aceptar',
         variant: 'primary' as const,
         icon: 'check-circle',
-        visible: q.status === 'sent',
+        visible: this.canMutateQuotation() && q.status === 'sent',
         loading: currentAction === 'accept',
         disabled: currentAction !== null,
       },
@@ -416,7 +609,7 @@ export class QuotationDetailComponent {
         label: 'Rechazar',
         variant: 'danger' as const,
         icon: 'x-circle',
-        visible: q.status === 'sent',
+        visible: this.canMutateQuotation() && q.status === 'sent',
         loading: currentAction === 'reject',
         disabled: currentAction !== null,
       },
@@ -425,8 +618,17 @@ export class QuotationDetailComponent {
         label: 'Convertir a Orden',
         variant: 'primary' as const,
         icon: 'shopping-cart',
-        visible: ['draft', 'sent', 'accepted'].includes(q.status),
+        visible: this.canConvertToOrder() && (q.destination === undefined || q.destination === 'sale') && q.status === 'accepted',
         loading: currentAction === 'convert',
+        disabled: currentAction !== null,
+      },
+      {
+        id: 'create-contract',
+        label: 'Crear contrato',
+        variant: 'primary' as const,
+        icon: 'file-text',
+        visible: this.canCreateContract() && q.destination === 'contract' && q.status === 'accepted',
+        loading: currentAction === 'create-contract',
         disabled: currentAction !== null,
       },
       {
@@ -434,7 +636,7 @@ export class QuotationDetailComponent {
         label: 'Duplicar',
         variant: 'outline' as const,
         icon: 'copy',
-        visible: true,
+        visible: this.authFacade.userPermissions().includes('store:quotations:create') || this.authFacade.userRoles().includes('super_admin') || this.authFacade.userRoles().includes('SUPER_ADMIN'),
         loading: currentAction === 'duplicate',
         disabled: currentAction !== null,
       },
@@ -443,7 +645,7 @@ export class QuotationDetailComponent {
         label: 'Cancelar',
         variant: 'outline-danger' as const,
         icon: 'x-circle',
-        visible: ['draft', 'sent', 'accepted'].includes(q.status),
+        visible: this.canMutateQuotation() && ['draft', 'sent', 'accepted'].includes(q.status),
         loading: currentAction === 'cancel',
         disabled: currentAction !== null,
       },
@@ -456,7 +658,7 @@ export class QuotationDetailComponent {
 
   readonly canProcessAll = computed(() => {
     const q = this.quotation();
-    return !!q && ['draft', 'sent', 'accepted'].includes(q.status);
+    return !!q && this.canMutateQuotation() && this.canConvertToOrder() && (q.destination === undefined || q.destination === 'sale') && ['draft', 'sent', 'accepted'].includes(q.status);
   });
 
   readonly timelineSteps = computed<TimelineStep[]>(() => {
@@ -528,11 +730,17 @@ export class QuotationDetailComponent {
         description: q.converted_order ? `Orden ${q.converted_order.order_number}` : undefined,
       });
     } else if (q.status === 'accepted') {
+      if (q.destination === 'contract') {
+        steps.push({ key: 'contract', label: 'Pendiente de contrato', status: 'upcoming', variant: 'default' });
+      } else if (q.destination !== 'other') {
+        steps.push({ key: 'convert', label: 'Pendiente de conversión', status: 'upcoming', variant: 'default' });
+      }
+    }
+
+    if (q.status === 'contracted') {
       steps.push({
-        key: 'convert',
-        label: 'Pendiente de conversión',
-        status: 'upcoming',
-        variant: 'default',
+        key: 'contracted', label: 'Contrato creado', status: 'completed', variant: 'success',
+        description: q.contract ? `Contrato ${q.contract.contract_number}` : undefined,
       });
     }
 
@@ -584,6 +792,9 @@ export class QuotationDetailComponent {
         break;
       case 'convert':
         this.onConvert();
+        break;
+      case 'create-contract':
+        this.onCreateContract();
         break;
       case 'cancel':
         this.onCancel();
@@ -652,6 +863,12 @@ export class QuotationDetailComponent {
   }
 
   private async onConvert(): Promise<void> {
+    if (!this.canConvertToOrder()) return;
+    const quotation = this.quotation();
+    if (!quotation || (quotation.destination !== undefined && quotation.destination !== 'sale')) {
+      this.toastService.error('Solo las cotizaciones de venta pueden convertirse en orden.');
+      return;
+    }
     const blockedMessage = this.getConvertBlockedMessage();
     if (blockedMessage) {
       this.toastService.error(blockedMessage);
@@ -669,6 +886,38 @@ export class QuotationDetailComponent {
     this.performAction('convert', () =>
       this.quotationsService.convertToOrder(this.quotation()!.id),
     );
+  }
+
+  private async onCreateContract(): Promise<void> {
+    const q = this.quotation();
+    if (!q || !this.canCreateContract() || q.destination !== 'contract' || q.status !== 'accepted' || this.contractCreationInProgress()) return;
+    this.contractCreationInProgress.set(true);
+    const confirmed = await this.dialogService.confirm({
+      title: 'Crear contrato',
+      message: `¿Crear un contrato desde la cotización ${q.quotation_number}?`,
+      confirmText: 'Crear contrato',
+      cancelText: 'Volver',
+    });
+    if (!confirmed) {
+      this.contractCreationInProgress.set(false);
+      return;
+    }
+    this.actionLoading.set('create-contract');
+    this.contractsService.createFromQuotation(q.id)
+      .pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.actionLoading.set(null)))
+      .subscribe({
+        next: (contract) => this.router.navigate(['/admin/orders/contracts', contract.id]),
+        error: (error) => {
+          this.contractCreationInProgress.set(false);
+          const contractId = Number(error?.details?.contract_id);
+          if (error?.code === 'QUOTE_CONTRACT_001' && Number.isInteger(contractId) && contractId > 0) {
+            this.quotationsService.invalidateCache();
+            this.router.navigate(['/admin/orders/contracts', contractId]);
+            return;
+          }
+          this.toastService.error(extractApiErrorMessage(error));
+        },
+      });
   }
 
   private onDuplicate(): void {
@@ -691,7 +940,7 @@ export class QuotationDetailComponent {
 
   async onProcessAll(): Promise<void> {
     const q = this.quotation();
-    if (!q) return;
+    if (!q || !this.canMutateQuotation() || !this.canConvertToOrder() || (q.destination !== undefined && q.destination !== 'sale')) return;
 
     const blockedMessage = this.getProcessAllBlockedMessage(q);
     if (blockedMessage) {
@@ -753,7 +1002,7 @@ export class QuotationDetailComponent {
 
   private getConvertBlockedMessage(): string | null {
     const q = this.quotation();
-    if (!q || q.status === 'accepted') {
+    if (!q || ((q.destination === undefined || q.destination === 'sale') && q.status === 'accepted')) {
       return null;
     }
 
@@ -769,6 +1018,7 @@ export class QuotationDetailComponent {
   }
 
   private getProcessAllBlockedMessage(q: Quotation): string | null {
+    if (q.destination !== undefined && q.destination !== 'sale') return 'El proceso completo solo aplica a cotizaciones de venta.';
     if (!['draft', 'sent', 'accepted'].includes(q.status)) {
       return 'Solo las cotizaciones en borrador, enviadas o aceptadas pueden procesarse en este flujo.';
     }

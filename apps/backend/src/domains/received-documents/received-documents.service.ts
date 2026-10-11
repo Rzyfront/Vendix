@@ -16,6 +16,11 @@ import {
   ReceivedDocumentTax,
 } from './interfaces/received-document.interface';
 import {
+  operationalValidationStatus,
+  receivedDocumentValidationSnapshot,
+  validationFromPreservedSummary,
+} from './services/received-document-validation';
+import {
   ManualReceivedDocumentDto,
   ReceivedDocumentItemDto,
   ReceivedDocumentQueryDto,
@@ -224,6 +229,14 @@ export class ReceivedDocumentsService {
         )
       : undefined;
     const validation = normalized?.validation;
+    const preservedValidation = validation
+      ? undefined
+      : validationFromPreservedSummary(existing.validation_summary);
+    const persistedValidation = validation
+      ? receivedDocumentValidationSnapshot(validation)
+      : preservedValidation
+        ? receivedDocumentValidationSnapshot(preservedValidation)
+        : undefined;
     const nextMetadata = {
       ...metadata,
       ...(dto.reviewer_note ? { reviewer_note: dto.reviewer_note } : {}),
@@ -292,11 +305,16 @@ export class ReceivedDocumentsService {
           reviewed_by: ctx.actor_id ?? null,
           reviewed_at: new Date(),
           validation_status: validation
-            ? this.validationStatus(validation)
-            : existing.validation_status,
-          validation_summary: validation
-            ? this.json(validation)
-            : existing.validation_summary,
+            ? this.validationStatus(normalized!)
+            : persistedValidation
+              ? operationalValidationStatus(persistedValidation)
+              : existing.validation_status,
+          ...(persistedValidation ? {
+            structural_validation_status: persistedValidation.structural.status,
+            signature_validation_status: persistedValidation.signature.status,
+            dian_validation_status: persistedValidation.dian.status,
+            validation_summary: this.json(persistedValidation),
+          } : { validation_summary: existing.validation_summary }),
           metadata: this.json(nextMetadata),
         },
       });
@@ -418,8 +436,12 @@ export class ReceivedDocumentsService {
       data: {
         ...this.documentColumns(extracted),
           processing_status: 'ready',
-          validation_status: this.validationStatus(validation),
-          validation_summary: this.json(validation),
+          validation_status: this.validationStatus(extracted),
+          structural_validation_status: this.validationSnapshot(extracted).structural.status,
+          signature_validation_status: this.validationSnapshot(extracted).signature.status,
+          dian_validation_status: this.validationSnapshot(extracted).dian.status,
+          payment_condition: extracted.payment_condition ?? 'unknown',
+          validation_summary: this.json(this.validationSnapshot(extracted)),
           version: { increment: 1 },
           metadata: this.json({
             ...this.asObject(existing.metadata),
@@ -448,7 +470,7 @@ export class ReceivedDocumentsService {
           idempotency_key: `extracted:${existing.version + 1}`,
           status: 'completed',
           actor_id: ctx.actor_id ?? null,
-          result: this.json({ validation_status: this.validationStatus(validation) }),
+          result: this.json({ validation_status: this.validationStatus(extracted) }),
         },
       });
     });
@@ -488,8 +510,12 @@ export class ReceivedDocumentsService {
               idempotency_key: canonicalKey,
               ...this.documentColumns(normalized),
               processing_status: 'ready',
-              validation_status: this.validationStatus(normalized.validation),
-              validation_summary: this.json(normalized.validation),
+              validation_status: this.validationStatus(normalized),
+              structural_validation_status: this.validationSnapshot(normalized).structural.status,
+              signature_validation_status: this.validationSnapshot(normalized).signature.status,
+              dian_validation_status: this.validationSnapshot(normalized).dian.status,
+              payment_condition: normalized.payment_condition ?? 'unknown',
+              validation_summary: this.json(this.validationSnapshot(normalized)),
               version: { increment: 1 },
               metadata: this.json({
                 ...this.asObject(pending.metadata),
@@ -518,7 +544,7 @@ export class ReceivedDocumentsService {
               idempotency_key: `extracted:${pending.version + 1}`,
               status: 'completed',
               actor_id: ctx.actor_id ?? null,
-              result: this.json({ validation_status: this.validationStatus(normalized.validation), canonicalized_key: true }),
+              result: this.json({ validation_status: this.validationStatus(normalized), canonicalized_key: true }),
             },
           });
           return pending.id;
@@ -586,8 +612,12 @@ export class ReceivedDocumentsService {
           data: {
             idempotency_key: `merged:${pending.id}`,
             processing_status: 'duplicate',
-            validation_status: this.validationStatus(normalized.validation),
-            validation_summary: this.json(normalized.validation),
+            validation_status: this.validationStatus(normalized),
+            structural_validation_status: this.validationSnapshot(normalized).structural.status,
+            signature_validation_status: this.validationSnapshot(normalized).signature.status,
+            dian_validation_status: this.validationSnapshot(normalized).dian.status,
+            payment_condition: normalized.payment_condition ?? 'unknown',
+            validation_summary: this.json(this.validationSnapshot(normalized)),
             version: { increment: 1 },
             metadata: this.json({
               ...this.asObject(pending.metadata),
@@ -731,13 +761,17 @@ export class ReceivedDocumentsService {
             idempotency_key: input.idempotencyKey,
             source_hash: input.sourceHash ?? null,
             processing_status: input.processingStatus,
-            validation_status: this.validationStatus(normalized.validation),
+            validation_status: this.validationStatus(normalized),
+            structural_validation_status: this.validationSnapshot(normalized).structural.status,
+            signature_validation_status: this.validationSnapshot(normalized).signature.status,
+            dian_validation_status: this.validationSnapshot(normalized).dian.status,
+            payment_condition: normalized.payment_condition ?? 'unknown',
             review_status: 'pending',
             matching_status: 'unlinked',
             fiscal_status: 'pending',
             posting_status: 'pending',
             raw_payload: this.json(input.rawPayload),
-            validation_summary: this.json(normalized.validation),
+            validation_summary: this.json(this.validationSnapshot(normalized)),
             metadata: this.json(input.metadata),
             version: 1,
             created_by: ctx.actor_id ?? null,
@@ -763,7 +797,7 @@ export class ReceivedDocumentsService {
             result: this.json({
               source_channel: input.source,
               source_hash: input.sourceHash ?? null,
-              validation_status: this.validationStatus(normalized.validation),
+              validation_status: this.validationStatus(normalized),
             }),
           },
         });
@@ -1100,6 +1134,7 @@ export class ReceivedDocumentsService {
       original_reference_number: this.columnString(normalized.reference_number, 100),
       issue_date: this.dateColumn(normalized.issue_date),
       due_date: this.dateColumn(normalized.due_date),
+      payment_condition: normalized.payment_condition ?? 'unknown',
       currency: normalized.currency && normalized.currency.length <= 10 ? normalized.currency : 'UNKNOWN',
       subtotal_amount: this.decimal(normalized.subtotal_amount),
       discount_amount: this.decimal(normalized.discount_amount),
@@ -1237,6 +1272,9 @@ export class ReceivedDocumentsService {
       document_key: documentKey,
       issue_date: this.isoDate(issueDateInput) ? issueDateInput : '',
       due_date: dueDateInput && this.isoDate(dueDateInput) ? dueDateInput : undefined,
+      payment_condition: ['cash', 'credit', 'unknown'].includes(input.payment_condition as string)
+        ? input.payment_condition as NormalizedReceivedDocument['payment_condition']
+        : 'unknown',
       currency,
       subtotal_amount: this.moneyString(subtotal),
       discount_amount: this.moneyString(discount),
@@ -1556,10 +1594,14 @@ export class ReceivedDocumentsService {
     };
   }
 
-  private validationStatus(validation: NormalizedReceivedDocument['validation']): string {
-    if (validation.errors.length > 0) return 'invalid';
-    if (validation.warnings.length > 0) return 'needs_review';
-    return 'valid';
+  private validationStatus(normalized: NormalizedReceivedDocument): string {
+    return operationalValidationStatus(
+      receivedDocumentValidationSnapshot(normalized.validation),
+    );
+  }
+
+  private validationSnapshot(normalized: NormalizedReceivedDocument) {
+    return receivedDocumentValidationSnapshot(normalized.validation);
   }
 
   private idempotencyKey(document: NormalizedReceivedDocument, fileSha256?: string): string {
@@ -1595,6 +1637,7 @@ export class ReceivedDocumentsService {
       document_key: document.document_key?.toLowerCase() ?? null,
       issue_date: document.issue_date,
       due_date: document.due_date ?? null,
+      payment_condition: document.payment_condition ?? 'unknown',
       currency: document.currency,
       subtotal_amount: document.subtotal_amount,
       discount_amount: document.discount_amount,

@@ -84,6 +84,8 @@ export interface Invoice {
   notes?: string;
   order_id?: number;
   sales_order_id?: number;
+  /** Contract relation; linked draft economics are frozen and cannot be edited here. */
+  contract_id?: number | null;
   resolution_id?: number;
   created_at: string;
   updated_at: string;
