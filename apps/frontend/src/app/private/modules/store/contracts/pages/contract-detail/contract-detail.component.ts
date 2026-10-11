@@ -13,22 +13,18 @@ import {
   CONTRACT_INVOICE_ERROR_CODE,
   canGenerateContractInvoice,
 } from '../../interfaces/contract.interface';
-import {
-  StickyHeaderComponent,
-  IconComponent,
-  SpinnerComponent,
-  TimelineComponent,
-  ToastService,
-  CardComponent,
-  ButtonComponent,
-  AlertBannerComponent,
-} from '../../../../../../shared/components';
-import type {
-  StickyHeaderActionButton,
-  StickyHeaderBadgeColor,
-  TimelineStep,
-} from '../../../../../../shared/components';
-import { CurrencyPipe } from '../../../../../../shared/pipes';
+import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+import { TimelineComponent } from '../../../../../../shared/components/timeline/timeline.component';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
+import type { StickyHeaderActionButton, StickyHeaderBadgeColor } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import type { TimelineStep } from '../../../../../../shared/components/timeline/timeline.interfaces';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 const STATUS_BADGE_COLORS: Record<ContractStatus, StickyHeaderBadgeColor> = {
   draft: 'gray',
@@ -40,8 +36,8 @@ const STATUS_BADGE_COLORS: Record<ContractStatus, StickyHeaderBadgeColor> = {
 /** Accionabilidad por transicion: que hace cada boton antes de pulsarlo. */
 const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hint: string }> = {
   draft: { label: 'Volver a borrador', icon: 'rotate-ccw', hint: '' },
-  active: { label: 'Activar contrato', icon: 'check-circle', hint: 'El contrato entra en vigencia y queda listo para facturar AIU.' },
-  invoiced: { label: 'Marcar facturado', icon: 'file-text', hint: 'Cierra el contrato como facturado.' },
+  active: { label: 'Activar contrato', icon: 'check-circle', hint: 'Cambia el estado administrativo del contrato.' },
+  invoiced: { label: 'Marcar facturado', icon: 'file-text', hint: 'Solo cambia el estado administrativo; no confirma emisión o aceptación fiscal.' },
   cancelled: { label: 'Cancelar contrato', icon: 'x-circle', hint: 'La cotización origen conserva su trazabilidad.' },
 };
 
@@ -78,7 +74,7 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
     } @else if (contract()) {
       <app-sticky-header
         [title]="contract()!.contract_number"
-        subtitle="Ficha de contrato de obra"
+        subtitle="Ficha administrativa de contrato"
         icon="file-text"
         [showBackButton]="true"
         backRoute="/admin/orders/contracts"
@@ -104,7 +100,35 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
               @if (contract()!.contract_object) {
                 <p class="text-sm whitespace-pre-wrap text-gray-700">{{ contract()!.contract_object }}</p>
               } @else {
-                <p class="text-sm text-text-secondary">Sin objeto registrado.</p>
+                <p class="text-sm text-text-secondary">No configurado en los datos contractuales disponibles.</p>
+              }
+            </app-card>
+
+            <app-card title="Ítems de la cotización congelada" shadow="sm" [responsivePadding]="true">
+              @if (contract()!.items?.length) {
+                <div class="space-y-3">
+                  @for (item of contract()!.items; track $index) {
+                    <div class="rounded-lg border border-border p-3">
+                      <div class="flex justify-between gap-3">
+                        <div class="min-w-0">
+                          <p class="font-semibold text-gray-900">{{ item.product_name }}</p>
+                          @if (item.notes) { <p class="mt-1 text-xs text-text-secondary">{{ item.notes }}</p> }
+                        </div>
+                        @if (item.total_price !== null) {
+                          <span class="shrink-0 font-semibold">{{ item.total_price | currency }}</span>
+                        }
+                      </div>
+                      <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-4">
+                        <div><dt>Cantidad</dt><dd>{{ item.quantity ?? 'No configurado' }}</dd></div>
+                        <div><dt>Precio unitario</dt><dd>{{ item.unit_price !== null ? (item.unit_price | currency) : 'No configurado' }}</dd></div>
+                        <div><dt>Descuento</dt><dd>{{ item.discount_amount !== null ? (item.discount_amount | currency) : 'No configurado' }}</dd></div>
+                        <div><dt>Impuesto</dt><dd>{{ item.tax_amount_item !== null ? (item.tax_amount_item | currency) : 'No configurado' }}@if (item.tax_rate !== null) { ({{ formatTaxRate(item.tax_rate) }}) }</dd></div>
+                      </dl>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <p class="text-sm text-text-secondary">No hay líneas congeladas disponibles para este contrato.</p>
               }
             </app-card>
 
@@ -123,9 +147,36 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                   <dd class="font-semibold text-gray-900">{{ formatPct(contract()!.profit_percentage) }}</dd>
                 </div>
               </dl>
-              <p class="mt-3 text-xs text-text-secondary">
-                Snapshot congelado al crear el contrato: la factura AIU precargada (D.1) reproduce estos valores.
+              @if (contract()!.profile) {
+                <p class="mt-3 text-xs text-text-secondary">
+                  Perfil congelado {{ contract()!.profile!.profile_id !== null ? ('#' + contract()!.profile!.profile_id) : 'ID no configurado' }} · versión {{ contract()!.profile!.version ?? 'No configurada' }}.
+                </p>
+              } @else {
+                <p class="mt-3 text-xs text-text-secondary">El snapshot no incluye un perfil de cotización.</p>
+              }
+              <p class="mt-2 text-xs text-text-secondary">
+                Los valores son informativos. Este flujo es administrativo; la economía contractual y la validación fiscal para facturar siguen pendientes de definición.
               </p>
+            </app-card>
+
+            <app-card title="Vigencia y condiciones" shadow="sm" [responsivePadding]="true">
+              <dl class="space-y-3 text-sm">
+                <div>
+                  <dt class="text-text-secondary">Válida hasta</dt>
+                  <dd class="font-medium">{{ formatValidityDate(contract()!.valid_until) }}</dd>
+                </div>
+                <div>
+                  <dt class="text-text-secondary">Términos y condiciones</dt>
+                  <dd class="mt-1 whitespace-pre-wrap">{{ contract()!.terms_and_conditions || 'No configurado' }}</dd>
+                </div>
+                <div>
+                  <dt class="text-text-secondary">Notas de la cotización</dt>
+                  <dd class="mt-1 whitespace-pre-wrap">{{ contract()!.notes || 'No configurado' }}</dd>
+                </div>
+                @if (contract()!.snapshot?.frozen_at) {
+                  <div><dt class="text-text-secondary">Snapshot congelado</dt><dd>{{ contract()!.snapshot!.frozen_at | date:'dd/MM/yyyy HH:mm' }}</dd></div>
+                }
+              </dl>
             </app-card>
 
             <app-card title="Documentos" shadow="sm" [responsivePadding]="true">
@@ -159,6 +210,7 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                         [attr.aria-label]="'Ver factura AIU del contrato ' + contract()!.contract_number"
                       >
                         {{ contract()!.invoice!.invoice_number || ('Factura #' + contract()!.invoice!.id) }}
+                        <span class="block text-xs text-text-secondary">Estado fiscal: {{ contract()!.invoice!.dian_status || 'No disponible' }}</span>
                         <app-icon name="arrow-right" [size]="14" class="inline-block ml-1"></app-icon>
                       </a>
                     } @else if (contract()!.status === 'active') {
@@ -195,7 +247,7 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                 </app-alert-banner>
               } @else if (contract()!.invoice) {
                 <p class="text-sm text-text-secondary">
-                  {{ contract()!.invoice!.invoice_number || ('Factura #' + contract()!.invoice!.id) }} ligada a este contrato.
+                  {{ contract()!.invoice!.invoice_number || ('Factura #' + contract()!.invoice!.id) }} · estado administrativo: {{ contract()!.invoice!.status || 'No disponible' }} · estado fiscal: {{ contract()!.invoice!.dian_status || 'No disponible' }}.
                 </p>
                 <div class="mt-3">
                   <app-button variant="outline" [fullWidth]="true" (clicked)="goToInvoices()">
@@ -217,7 +269,7 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                   </app-button>
                 </div>
                 <p class="mt-3 text-xs text-text-secondary">
-                  Crea el borrador precargado con el snapshot del contrato, listo para revisar y emitir.
+                  Crea un borrador administrativo. No confirma emisión ni aceptación fiscal, y los datos económicos/fiscales del contrato requieren validación antes de uso.
                 </p>
               } @else {
                 <p class="text-sm text-text-secondary">
@@ -258,27 +310,31 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
               <div class="space-y-2.5">
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Subtotal</span>
-                  <span class="font-semibold text-gray-900">{{ contract()!.subtotal_amount || 0 | currency }}</span>
+                  <span class="font-semibold text-gray-900">{{ contract()!.subtotal_amount !== null && contract()!.subtotal_amount !== undefined ? (contract()!.subtotal_amount | currency) : 'No configurado' }}</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Descuentos</span>
+                  <span class="font-semibold text-gray-900">{{ contract()!.discount_amount !== null && contract()!.discount_amount !== undefined ? (contract()!.discount_amount | currency) : 'No configurado' }}</span>
                 </div>
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Impuestos</span>
-                  <span class="font-semibold text-gray-900">{{ contract()!.tax_amount || 0 | currency }}</span>
+                  <span class="font-semibold text-gray-900">{{ contract()!.tax_amount !== null && contract()!.tax_amount !== undefined ? (contract()!.tax_amount | currency) : 'No configurado' }}</span>
                 </div>
                 <div class="pt-3 mt-1 border-t border-border flex justify-between items-center">
-                  <span class="text-base font-bold text-gray-900">Total</span>
+                  <span class="text-base font-bold text-gray-900">Total de cotización congelado</span>
                   <span class="text-xl sm:text-2xl font-black text-primary-600 font-mono tracking-tighter">
-                    {{ contract()!.grand_total || 0 | currency }}
+                    {{ contract()!.grand_total !== null && contract()!.grand_total !== undefined ? (contract()!.grand_total | currency) : 'No configurado' }}
                   </span>
                 </div>
               </div>
               <dl class="mt-4 pt-4 border-t border-border space-y-2.5 text-sm">
                 <div class="flex justify-between items-center">
                   <dt class="text-text-secondary">Creado</dt>
-                  <dd class="font-semibold text-gray-900">{{ contract()!.created_at | date:'dd/MM/yyyy HH:mm' }}</dd>
+                  <dd class="font-semibold text-gray-900">{{ contract()!.created_at ? (contract()!.created_at | date:'dd/MM/yyyy HH:mm') : 'No configurado' }}</dd>
                 </div>
                 <div class="flex justify-between items-center">
                   <dt class="text-text-secondary">Actualizado</dt>
-                  <dd class="font-semibold text-gray-900">{{ contract()!.updated_at | date:'dd/MM/yyyy HH:mm' }}</dd>
+                  <dd class="font-semibold text-gray-900">{{ contract()!.updated_at ? (contract()!.updated_at | date:'dd/MM/yyyy HH:mm') : 'No configurado' }}</dd>
                 </div>
               </dl>
             </app-card>
@@ -329,8 +385,8 @@ export class ContractDetailComponent {
   readonly transitionHint = computed(() => {
     const c = this.contract();
     if (!c || this.validTransitions().length === 0) return '';
-    if (c.status === 'draft') return 'Al activar, el contrato entra en vigencia y queda listo para facturar AIU.';
-    if (c.status === 'active') return 'Facturar cierra el contrato; cancelar lo anula conservando la trazabilidad.';
+    if (c.status === 'draft') return 'Al activar, el contrato pasa a estado administrativo vigente.';
+    if (c.status === 'active') return 'Marcar facturado solo actualiza el estado administrativo; cancelar lo anula conservando la trazabilidad.';
     return '';
   });
 
@@ -356,7 +412,7 @@ export class ContractDetailComponent {
         label: 'Creado',
         status: 'completed',
         variant: 'default',
-        date: c.created_at,
+        date: c.created_at ?? undefined,
         description: `Desde cotización #${c.quotation_id}`,
       },
     ];
@@ -375,7 +431,7 @@ export class ContractDetailComponent {
         label: reached ? labels[s] : `${labels[s]} pendiente`,
         status: reached ? 'completed' : 'upcoming',
         variant: 'default',
-        date: reached && s === c.status ? c.updated_at : undefined,
+        date: reached && s === c.status ? c.updated_at ?? undefined : undefined,
       });
     }
     if (c.status === 'cancelled') {
@@ -384,7 +440,7 @@ export class ContractDetailComponent {
         label: 'Cancelado',
         status: 'completed',
         variant: 'default',
-        date: c.updated_at,
+        date: c.updated_at ?? undefined,
       });
     }
     return steps;
@@ -400,6 +456,17 @@ export class ContractDetailComponent {
 
   formatPct(value: number | null | undefined): string {
     return value === null || value === undefined ? '—' : `${value}%`;
+  }
+
+  /** Quotation item tax_rate is canonicalized as a fraction (0.19 = 19%). */
+  formatTaxRate(value: number | null | undefined): string {
+    if (value === null || value === undefined) return 'No configurado';
+    if (!Number.isFinite(value) || value < 0 || value > 1) return 'Tarifa no normalizada';
+    return `${Number((value * 100).toFixed(5))}%`;
+  }
+
+  formatValidityDate(value: string | null | undefined): string {
+    return value ? formatDateOnlyUTC(value) : 'No configurado';
   }
 
   clearTransitionError(): void {
@@ -437,28 +504,8 @@ export class ContractDetailComponent {
       .subscribe({
         next: (c) => {
           this.contract.set(c);
-          this.resolveLinkedInvoice(c);
         },
         error: (err: ContractApiError | Error) => this.loadError.set(err?.message ?? 'Error al cargar el contrato'),
-      });
-  }
-
-  /**
-   * D.2 (FB-09): si el contrato esta vigente pero sin referencia de factura,
-   * se consulta la factura ligada para pintar enlace en vez de boton. El
-   * fallo se ignora en silencio: con D.1 pendiente el filtro aun no existe
-   * y la ficha conserva su estado consistente.
-   */
-  private resolveLinkedInvoice(c: Contract): void {
-    if (!canGenerateContractInvoice(c.status, c.invoice)) return;
-    this.contractsService
-      .getContractInvoice(c.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (invoice) => {
-          if (invoice) this.contract.set({ ...c, invoice });
-        },
-        error: () => undefined,
       });
   }
 
