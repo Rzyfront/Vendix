@@ -407,20 +407,20 @@ interface PersistedTestResult {
               tooltipText="Código del set de pruebas asignado por la DIAN para esta habilitación."
             ></app-input>
           </form>
-          <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-            <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="cancelled.emit()">
+          <div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">
+            <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" (clicked)="cancelled.emit()">
               Cancelar
             </app-button>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
               <!-- Already-saved credentials must not force a pointless PATCH just
                    to move forward. -->
               @if (selectedConfig()) {
-                <app-button customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(1)">
+                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(1)">
                   Continuar sin cambios
                   <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                 </app-button>
               }
-              <app-button customClasses="min-h-11"
+              <app-button class="w-full sm:w-auto" customClasses="min-h-11"
                 variant="primary"
                 (clicked)="saveCredentials()"
                 [disabled]="credentialsForm.invalid || savingCredentials()"
@@ -493,14 +493,18 @@ interface PersistedTestResult {
                 <button
                   type="button"
                   aria-label="Seleccionar archivo del certificado"
-                  class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
+                  class="w-full border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
                   (click)="fileInput.click()"
                   (dragover)="onDragOver($event)"
                   (drop)="onDrop($event)"
                 >
                   <app-icon name="upload-cloud" [size]="32" class="text-text-secondary mx-auto mb-2"></app-icon>
                   <p class="text-sm text-text-secondary">
-                    {{ selectedFile() ? selectedFile()!.name : 'Haga clic o arrastre su archivo .p12 aqui' }}
+                    @if (selectedFile()) {
+                      <span class="break-all">{{ selectedFile()!.name }}</span>
+                    } @else {
+                      Haga clic o arrastre su archivo .p12 aqui
+                    }
                   </p>
                   @if (!selectedFile()) {
                     <p class="text-xs text-text-secondary mt-1">Solo archivos .p12</p>
@@ -527,21 +531,21 @@ interface PersistedTestResult {
                   tooltipText="La contraseña permite abrir el certificado seleccionado. No se muestra en pantalla."
                 ></app-input>
               </form>
-              <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
-                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(0)">
+              <div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">
+                <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" size="sm" (clicked)="activeStep.set(0)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                   Anterior
                 </app-button>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
                   <!-- A stored certificate is enough to keep going: forcing a
                        re-upload turned this step into a dead end. -->
                   @if (hasCertificate() && !selectedFile()) {
-                    <app-button customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(2)">
+                    <app-button class="w-full sm:w-auto" customClasses="min-h-11" variant="outline" (clicked)="activeStep.set(2)">
                       Continuar
                       <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                     </app-button>
                   }
-                  <app-button customClasses="min-h-11"
+                  <app-button class="w-full sm:w-auto" customClasses="min-h-11"
                     variant="primary"
                     (clicked)="uploadCertificate()"
                     [disabled]="!selectedFile() || certificateForm.invalid || uploadingCertificate()"

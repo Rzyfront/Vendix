@@ -61,6 +61,29 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(source).toContain('class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline');
   });
 
+  it('keeps credential and certificate actions responsive on narrow wizard layouts', () => {
+    const responsiveFooters = source.match(
+      /<div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border">/g,
+    );
+    expect(responsiveFooters).toHaveLength(2);
+
+    const credentialsFooter = source.slice(
+      source.indexOf('<!-- ═══ Step 1: Credentials'),
+      source.indexOf('<!-- ═══ Step 2: Certificate'),
+    );
+    const certificateFooter = source.slice(
+      source.indexOf('<!-- ═══ Step 2: Certificate'),
+      source.indexOf('<!-- ═══ Step 3: Environment'),
+    );
+
+    for (const footer of [credentialsFooter, certificateFooter]) {
+      expect(footer).toContain('flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto');
+      expect(footer.match(/<app-button class="w-full sm:w-auto"/g)?.length).toBeGreaterThanOrEqual(2);
+    }
+    expect(certificateFooter).toContain('class="w-full border-2 border-dashed border-border');
+    expect(certificateFooter).toContain('<span class="break-all">{{ selectedFile()!.name }}</span>');
+  });
+
   it('uses 16px shared form controls and a compact stepper when the axis is locked', () => {
     expect(source.match(/<app-(?:input|selector) size="lg"/g)).toHaveLength(10);
     expect(source).toContain('[size]="configurationTypeLocked() ? \'sm\' : \'md\'"');
