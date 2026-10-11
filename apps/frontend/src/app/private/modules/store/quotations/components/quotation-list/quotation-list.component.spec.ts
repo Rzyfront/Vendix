@@ -47,4 +47,82 @@ describe('QuotationListComponent — destination actions', () => {
     expect(convertToOrder.show?.(row({ destination: undefined }))).toBeFalse();
     fixture.destroy();
   });
+
+  it('renders permission-filtered standard actions and emits the existing outputs from the real menu', () => {
+    const fixture = create();
+    fixture.componentRef.setInput('canCreateQuotation', true);
+    fixture.componentRef.setInput('showContractAction', true);
+    fixture.componentRef.setInput('canReadProfiles', true);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    const createSpy = jasmine.createSpy('create');
+    const contractSpy = jasmine.createSpy('createContract');
+    const profilesSpy = jasmine.createSpy('manageProfiles');
+    component.create.subscribe(createSpy);
+    component.createContract.subscribe(contractSpy);
+    component.manageProfiles.subscribe(profilesSpy);
+
+    expect(component.dropdownActions().map((action) => action.label)).toEqual([
+      'Crear cotización de venta', 'Cotizar contrato', 'Perfiles',
+    ]);
+    const openActions = () => {
+      fixture.nativeElement.querySelector('button[aria-label="Acciones"]').click();
+      fixture.detectChanges();
+    };
+    const clickAction = (label: string) => {
+      openActions();
+      const button = [...fixture.nativeElement.querySelectorAll('button.action-item')]
+        .find((element: any) => element.textContent.includes(label)) as HTMLButtonElement;
+      expect(button).toBeTruthy();
+      button.click();
+      fixture.detectChanges();
+    };
+    clickAction('Crear cotización de venta');
+    clickAction('Cotizar contrato');
+    clickAction('Perfiles');
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(contractSpy).toHaveBeenCalledTimes(1);
+    expect(profilesSpy).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('updates the real menu actions when permission inputs change', () => {
+    const fixture = create();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.dropdownActions()).toEqual([]);
+    fixture.componentRef.setInput('canCreateQuotation', true);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.dropdownActions().map((action) => action.action)).toEqual(['create']);
+    fixture.componentRef.setInput('canCreateQuotation', false);
+    fixture.componentRef.setInput('showContractAction', true);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.dropdownActions().map((action) => action.action)).toEqual(['createContract']);
+    fixture.destroy();
+  });
+
+  it('renders remote pagination below the responsive list and emits clear-filter from the dropdown', () => {
+    const fixture = TestBed.createComponent(QuotationListComponent);
+    fixture.componentRef.setInput('quotations', [row()]);
+    fixture.componentRef.setInput('paginationData', { page: 1, limit: 1, total: 2, totalPages: 2 });
+    fixture.componentRef.setInput('filterValues', { status: 'sent' });
+    fixture.detectChanges();
+    const pageChange = jasmine.createSpy('pageChange');
+    const clearAllFilters = jasmine.createSpy('clearAllFilters');
+    fixture.componentInstance.pageChange.subscribe(pageChange);
+    fixture.componentInstance.clearAllFilters.subscribe(clearAllFilters);
+    expect(fixture.nativeElement.querySelector('app-responsive-data-view')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('app-pagination')).toBeTruthy();
+    (fixture.nativeElement.querySelector('button.pagination-arrow[aria-label="Next page"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(pageChange).toHaveBeenCalledOnceWith(2);
+
+    fixture.nativeElement.querySelector('button[aria-label^="Filtros"]').click();
+    fixture.detectChanges();
+    const clearButton = fixture.nativeElement.querySelector('button.clear-all-btn') as HTMLButtonElement;
+    expect(clearButton).toBeTruthy();
+    clearButton.click();
+    fixture.detectChanges();
+    expect(clearAllFilters).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
 });

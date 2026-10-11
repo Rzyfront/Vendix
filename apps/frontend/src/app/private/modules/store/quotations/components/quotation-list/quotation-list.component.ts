@@ -1,4 +1,5 @@
-import { Component, input, output, signal, computed, inject } from '@angular/core';
+import { Component, input, output, computed, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
@@ -12,9 +13,10 @@ import { ItemListCardConfig } from '../../../../../../shared/components/item-lis
 import {
   FilterConfig,
   FilterValues,
+  DropdownAction,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { Quotation } from '../../interfaces/quotation.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
@@ -27,11 +29,12 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
-    IconComponent,
-    ButtonComponent
+    PaginationComponent,
+    EmptyStateComponent,
+    FormsModule,
 ],
   template: `
-    <app-card [responsive]="true" [padding]="false">
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
       <!-- Search Section (inside card) -->
       <div
         class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -41,62 +44,31 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
           class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
         >
           <h2
-            class="text-[13px] font-bold text-gray-600 tracking-wide
-                   md:text-lg md:font-semibold md:text-text-primary"
+            class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:text-text-primary"
           >
-            Cotizaciones ({{ quotations().length }})
+            Cotizaciones ({{ paginationData().total }})
           </h2>
 
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
               class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              size="sm"
               placeholder="Buscar cotización..."
+              ariaLabel="Buscar cotizaciones"
               [debounceTime]="300"
+              [ngModel]="searchTerm()"
               (searchChange)="search.emit($event)"
             />
 
-            @if (canCreateQuotation()) {
-            <app-button
-              variant="outline"
-              size="md"
-              customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-              (clicked)="create.emit()"
-              title="Nueva Cotización"
-            >
-              <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-            </app-button>
-            }
-            @if (showContractAction()) {
-              <app-button
-                variant="primary"
-                size="md"
-                customClasses="shrink-0"
-                (clicked)="createContract.emit()"
-                title="Cotizar contrato"
-                aria-label="Cotizar contrato"
-              >
-                <app-icon slot="icon" name="file-text" [size]="18"></app-icon>
-                <span class="hidden sm:inline">Cotizar contrato</span>
-              </app-button>
-            }
-            @if (canReadProfiles()) {
-              <app-button
-                variant="outline"
-                size="md"
-                customClasses="shrink-0"
-                (clicked)="manageProfiles.emit()"
-                title="Administrar perfiles de cotización"
-                aria-label="Administrar perfiles de cotización"
-              >
-                <app-icon slot="icon" name="settings" [size]="18"></app-icon>
-                <span class="hidden lg:inline">Perfiles</span>
-              </app-button>
-            }
-
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              [actions]="dropdownActions()"
               [filters]="filterOptions"
+              [filterValues]="filterValues()"
+              [isLoading]="loading()"
+              (actionClick)="onActionClick($event)"
               (filterChange)="filterChange.emit($event)"
+              (clearAllFilters)="clearAllFilters.emit()"
             />
           </div>
         </div>
@@ -113,7 +85,19 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
       }
 
       <!-- Data View -->
-      @if (!loading()) {
+      @if (!loading() && quotations().length === 0) {
+        <app-empty-state
+          icon="file-text"
+          title="No se encontraron cotizaciones"
+          description="Ajusta la búsqueda o los filtros para encontrar cotizaciones."
+          [showActionButton]="false"
+          [showRefreshButton]="false"
+          [showClearFilters]="hasFilters()"
+          (clearFiltersClick)="clearAllFilters.emit()"
+        />
+      }
+
+      @if (!loading() && quotations().length > 0) {
         <div class="px-2 pb-2 pt-3 md:p-4">
           <app-responsive-data-view
             [data]="quotations()"
@@ -121,10 +105,21 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
             [cardConfig]="cardConfig"
             [actions]="actions"
             [loading]="loading()"
+            rowLabelKey="quotation_number"
             emptyMessage="No se encontraron cotizaciones"
             emptyIcon="file-text"
             (rowClick)="viewDetail.emit($event)"
           ></app-responsive-data-view>
+          <div class="mt-4 flex justify-center">
+            <app-pagination
+              [currentPage]="paginationData().page"
+              [totalPages]="paginationData().totalPages"
+              [total]="paginationData().total"
+              [limit]="paginationData().limit"
+              infoStyle="none"
+              (pageChange)="pageChange.emit($event)"
+            />
+          </div>
         </div>
       }
     </app-card>
@@ -143,6 +138,9 @@ export class QuotationListComponent {
   canMutateQuotation = input(false);
   canUpdateContractQuotation = input(false);
   canDeleteQuotation = input(false);
+  paginationData = input({ page: 1, limit: 50, total: 0, totalPages: 0 });
+  searchTerm = input('');
+  filterValues = input<FilterValues>({});
 
   viewDetail = output<Quotation>();
   send = output<Quotation>();
@@ -159,6 +157,8 @@ export class QuotationListComponent {
   manageProfiles = output<void>();
   search = output<string>();
   filterChange = output<FilterValues>();
+  clearAllFilters = output<void>();
+  pageChange = output<number>();
 
   filterOptions: FilterConfig[] = [
     {
@@ -179,6 +179,30 @@ export class QuotationListComponent {
     },
   ];
 
+  readonly hasFilters = computed(() =>
+    Boolean(this.searchTerm().trim()) || Object.values(this.filterValues()).some(Boolean),
+  );
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => {
+    const actions: DropdownAction[] = [];
+    if (this.canCreateQuotation()) {
+      actions.push({ label: 'Crear cotización de venta', icon: 'plus', action: 'create' });
+    }
+    if (this.showContractAction()) {
+      actions.push({ label: 'Cotizar contrato', icon: 'file-text', action: 'createContract' });
+    }
+    if (this.canReadProfiles()) {
+      actions.push({ label: 'Perfiles', icon: 'settings', action: 'manageProfiles' });
+    }
+    return actions;
+  });
+
+  onActionClick(action: string): void {
+    if (action === 'create' && this.canCreateQuotation()) this.create.emit();
+    if (action === 'createContract' && this.showContractAction()) this.createContract.emit();
+    if (action === 'manageProfiles' && this.canReadProfiles()) this.manageProfiles.emit();
+  }
+
   columns: TableColumn[] = [
     { key: 'quotation_number', label: 'Número', sortable: true },
     {
@@ -193,19 +217,7 @@ export class QuotationListComponent {
       key: 'status',
       label: 'Estado',
       badge: true,
-      badgeConfig: {
-        type: 'custom',
-        colorMap: {
-          draft: '#94a3b8',
-          sent: '#3b82f6',
-          accepted: '#10b981',
-          rejected: '#ef4444',
-          expired: '#f59e0b',
-          converted: '#8b5cf6',
-          contracted: '#0f766e',
-          cancelled: '#6b7280',
-        },
-      },
+      badgeConfig: { type: 'status' },
       transform: (v: string) => this.getStatusLabel(v),
     },
     {
