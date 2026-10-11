@@ -1,7 +1,8 @@
 import { Component, input, output, signal, WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
-import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
+import { BehaviorSubject, NEVER, of, Subject, throwError } from 'rxjs';
 import { QuotationsComponent } from './quotations.component';
 import { QuotationsService } from './services/quotations.service';
 import { ContractsService } from '../contracts/services/contracts.service';
@@ -13,6 +14,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 import { QuotationListComponent } from './components/quotation-list/quotation-list.component';
 import { QuotationFormModalComponent } from './components/quotation-form-modal/quotation-form-modal.component';
 import { FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 @Component({ selector: 'app-stats', standalone: true, template: '' })
 class StatsStubComponent {
@@ -26,11 +28,14 @@ class QuotationListStubComponent {
   canCreateQuotation = input(false); canReadProfiles = input(false); canCreateFromQuotation = input(false);
   canConvertToOrder = input(false); canMutateQuotation = input(false); canUpdateContractQuotation = input(false);
   canDeleteQuotation = input(false);
+  paginationData = input({ page: 1, limit: 50, total: 0, totalPages: 0 });
+  searchTerm = input(''); filterValues = input<FilterValues>({});
   viewDetail = output<Quotation>(); send = output<Quotation>(); accept = output<Quotation>();
   reject = output<Quotation>(); cancel = output<Quotation>(); convert = output<Quotation>();
   duplicate = output<Quotation>(); deleteQuotation = output<Quotation>(); edit = output<Quotation>();
   create = output<void>(); createContract = output<void>(); createFromQuotation = output<Quotation>();
   manageProfiles = output<void>(); search = output<string>(); filterChange = output<FilterValues>();
+  clearAllFilters = output<void>(); pageChange = output<number>();
 }
 
 @Component({ selector: 'app-quotation-form-modal', standalone: true, template: '' })
@@ -48,6 +53,7 @@ describe('QuotationsComponent — contract quotation flow', () => {
   let industries: string[];
   let permissionState: WritableSignal<string[]>;
   let industryState: WritableSignal<string[]>;
+  let compactCurrency: jasmine.Spy;
   let routeParams: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
   const quotation = (overrides: Partial<Quotation> = {}): Quotation => ({
     id: 7, store_id: 1, quotation_number: 'COT-007', status: 'accepted', destination: 'contract',
@@ -76,6 +82,7 @@ describe('QuotationsComponent — contract quotation flow', () => {
     dialog = jasmine.createSpyObj<DialogService>('DialogService', ['confirm']);
     dialog.confirm.and.resolveTo(true);
     routeParams = new BehaviorSubject(convertToParamMap({}));
+    compactCurrency = jasmine.createSpy('formatCompact').and.returnValue('COP 1,2 M');
     TestBed.configureTestingModule({
       imports: [QuotationsComponent],
       providers: [
@@ -90,6 +97,7 @@ describe('QuotationsComponent — contract quotation flow', () => {
         } },
         { provide: DialogService, useValue: dialog },
         { provide: ToastService, useValue: jasmine.createSpyObj<ToastService>('ToastService', ['success', 'error', 'info', 'warning']) },
+        { provide: CurrencyFormatService, useValue: { formatCompact: compactCurrency } },
       ],
     });
     TestBed.overrideComponent(QuotationsComponent, {
@@ -210,6 +218,52 @@ describe('QuotationsComponent — contract quotation flow', () => {
     permissions = ['store:quotations:create', 'store:contracts:create'];
     permissionState.set(permissions);
     expect(fixture.componentInstance.canCreateContractQuotation()).toBeFalse();
+    fixture.destroy();
+  });
+
+  it('requests the selected server page and resets pagination when search or filters change', () => {
+    quotations.getQuotations.and.returnValue(of({ data: [], pagination: { total: 121, page: 1, limit: 50, totalPages: 3 } }));
+    const fixture = create();
+    const component = fixture.componentInstance;
+    component.onPageChange(3);
+    expect(quotations.getQuotations.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ page: 3, limit: 50 }));
+    expect(component.totalItems()).toBe(121);
+    expect(component.totalPages()).toBe(3);
+
+    component.onSearch('cliente');
+    expect(quotations.getQuotations.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ page: 1, search: 'cliente' }));
+    component.onPageChange(2);
+    component.onFilterChange({ status: 'sent' });
+    expect(quotations.getQuotations.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ page: 1, status: 'sent' }));
+    component.onPageChange(2);
+    component.clearFilters();
+    expect(quotations.getQuotations.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ page: 1 }));
+    expect(quotations.getQuotations.calls.mostRecent().args[0]?.search).toBeUndefined();
+    fixture.destroy();
+  });
+
+  it('formats the average-value statistic using the configured compact currency service', () => {
+    quotations.getQuotationStats.and.returnValue(of({ total: 0, pending: 0, conversion_rate: 0, average_value: 1234567, draft: 0, sent: 0, accepted: 0, converted: 0 }));
+    const fixture = create();
+    expect(compactCurrency).toHaveBeenCalledWith(1234567);
+    const averageStat = fixture.debugElement.queryAll(By.directive(StatsStubComponent))
+      .find((node) => node.componentInstance.title() === 'Valor Promedio');
+    expect(averageStat?.componentInstance.value()).toBe('COP 1,2 M');
+    fixture.destroy();
+  });
+
+  it('ignores a stale page response after a newer search response', () => {
+    const staleResponse = new Subject<any>();
+    const currentResponse = new Subject<any>();
+    quotations.getQuotations.and.returnValues(staleResponse.asObservable(), currentResponse.asObservable());
+    const fixture = create();
+    const component = fixture.componentInstance;
+    component.onSearch('nuevo');
+    currentResponse.next({ data: [quotation({ id: 22 })], pagination: { total: 1, page: 1, limit: 50, totalPages: 1 } });
+    staleResponse.next({ data: [quotation({ id: 11 })], pagination: { total: 100, page: 1, limit: 50, totalPages: 2 } });
+    expect(component.quotations().map((item) => item.id)).toEqual([22]);
+    expect(component.totalItems()).toBe(1);
+    expect(component.loading()).toBeFalse();
     fixture.destroy();
   });
 });

@@ -12,11 +12,14 @@ import { QuotationFormModalComponent } from './components/quotation-form-modal/q
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CreateQuotationDto, QuotationDestination, QuotationFormSaveDto } from './interfaces/quotation.interface';
 import { ContractsService } from '../contracts/services/contracts.service';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import {
   Quotation,
   QuotationStats,
   QuotationQuery,
+  QuotationStatus,
 } from './interfaces/quotation.interface';
+import { FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 @Component({
   selector: 'app-quotations',
@@ -61,7 +64,7 @@ import {
         ></app-stats>
         <app-stats
           title="Valor Promedio"
-          [value]="formatCurrency(stats().average_value)"
+          [value]="currencyService.formatCompact(stats().average_value)"
           smallText="Promedio por cotización"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -82,6 +85,9 @@ import {
         [canMutateQuotation]="canUpdateQuotation()"
         [canUpdateContractQuotation]="canUpdateContractQuotation()"
         [canDeleteQuotation]="canDeleteQuotation()"
+        [paginationData]="paginationData()"
+        [searchTerm]="searchTerm()"
+        [filterValues]="filterValues()"
         (viewDetail)="onViewDetail($event)"
         (send)="onSend($event)"
         (accept)="onAccept($event)"
@@ -97,6 +103,8 @@ import {
         (manageProfiles)="navigateToQuotationProfiles()"
         (search)="onSearch($event)"
         (filterChange)="onFilterChange($event)"
+        (clearAllFilters)="clearFilters()"
+        (pageChange)="onPageChange($event)"
       ></app-quotation-list>
 
       @if (quotationModalOpen()) {
@@ -122,6 +130,7 @@ export class QuotationsComponent {
   private route = inject(ActivatedRoute);
   private authFacade = inject(AuthFacade);
   private contractsService = inject(ContractsService);
+  readonly currencyService = inject(CurrencyFormatService);
 
   stats = signal<QuotationStats>({
     total: 0, pending: 0, conversion_rate: 0, average_value: 0,
@@ -135,6 +144,7 @@ export class QuotationsComponent {
   initialDestination = signal<QuotationDestination>('sale');
   savingQuotation = signal(false);
   private readonly contractCreationLocks = new Set<number>();
+  private quotationRequestId = 0;
   readonly canCreateContractQuotation = computed(() =>
     this.authFacade.storeIndustries().includes('construction') &&
     (this.isSuperAdmin() || (this.authFacade.userPermissions().includes('store:quotations:create') &&
@@ -170,8 +180,19 @@ export class QuotationsComponent {
     return roles.includes('super_admin') || roles.includes('SUPER_ADMIN');
   }
 
-  searchTerm = '';
-  statusFilter = '';
+  readonly searchTerm = signal('');
+  readonly filterValues = signal<FilterValues>({ status: '' });
+  readonly statusFilter = computed<QuotationStatus | undefined>(() => {
+    const status = this.filterValues()['status'];
+    return status ? status as QuotationStatus : undefined;
+  });
+  readonly page = signal(1);
+  readonly limit = signal(50);
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.limit()));
+  readonly paginationData = computed(() => ({
+    page: this.page(), limit: this.limit(), total: this.totalItems(), totalPages: this.totalPages(),
+  }));
 
   constructor() {
     this.loadStats();
@@ -188,12 +209,6 @@ export class QuotationsComponent {
     });
   }
 
-  formatCurrency(value: number): string {
-    if (value >= 1000000) return '$' + (value / 1000000).toFixed(1) + 'M';
-    if (value >= 1000) return '$' + (value / 1000).toFixed(1) + 'K';
-    return '$' + value.toFixed(0);
-  }
-
   loadStats(): void {
     this.statsLoading.set(true);
     this.quotationsService.getQuotationStats()
@@ -205,22 +220,28 @@ export class QuotationsComponent {
   }
 
   loadQuotations(): void {
+    const requestId = ++this.quotationRequestId;
     this.loading.set(true);
     const query: QuotationQuery = {
-      page: 1,
-      limit: 50,
-      ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.statusFilter && { status: this.statusFilter as any }),
+      page: this.page(),
+      limit: this.limit(),
+      ...(this.searchTerm() && { search: this.searchTerm() }),
+      ...(this.statusFilter() && { status: this.statusFilter() }),
     };
 
     this.quotationsService.getQuotations(query)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
+          if (requestId !== this.quotationRequestId) return;
           this.quotations.set(response.data);
+          this.page.set(response.pagination.page);
+          this.limit.set(response.pagination.limit);
+          this.totalItems.set(response.pagination.total);
           this.loading.set(false);
         },
         error: () => {
+          if (requestId !== this.quotationRequestId) return;
           this.toastService.error('Error al cargar cotizaciones');
           this.loading.set(false);
         },
@@ -228,12 +249,26 @@ export class QuotationsComponent {
   }
 
   onSearch(term: string): void {
-    this.searchTerm = term;
+    this.searchTerm.set(term);
+    this.page.set(1);
     this.loadQuotations();
   }
 
-  onFilterChange(values: Record<string, any>): void {
-    this.statusFilter = values['status'] || '';
+  onFilterChange(values: FilterValues): void {
+    this.filterValues.set({ ...values });
+    this.page.set(1);
+    this.loadQuotations();
+  }
+
+  clearFilters(): void {
+    this.filterValues.set({ status: '' });
+    this.searchTerm.set('');
+    this.page.set(1);
+    this.loadQuotations();
+  }
+
+  onPageChange(page: number): void {
+    this.page.set(page);
     this.loadQuotations();
   }
 
