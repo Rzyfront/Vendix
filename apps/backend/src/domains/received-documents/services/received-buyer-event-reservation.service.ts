@@ -84,14 +84,14 @@ export class ReceivedBuyerEventReservationService {
             id: true, document_type: true, document_key: true, invoice_number: true,
             issue_date: true, issuer_tax_id: true, issuer_name: true,
             receiver_tax_id: true, receiver_name: true, validation_status: true,
-            review_status: true, version: true,
+            review_status: true, version: true, accepted_at: true, confirmed_goods_at: true,
           },
         });
         if (!document) throw new ConflictException('Documento recibido no encontrado en el contexto fiscal actual.');
 
         const events = await tx.received_document_events.findMany({
           where: { document_id: documentId, event_type: 'BUYER_DIAN_EVENT' },
-          select: { id: true, event_code: true, idempotency_key: true, status: true, result: true, event_number: true },
+          select: { id: true, event_type: true, event_code: true, idempotency_key: true, status: true, result: true, event_number: true },
         });
         const existingKey = events.find((event) => event.idempotency_key === idempotencyKey);
         if (existingKey) {
@@ -177,8 +177,10 @@ export class ReceivedBuyerEventReservationService {
             },
             select: { id: true },
           });
-        const acceptedEvents = events.filter((event) => event.status === 'accepted');
+        const acceptedEvents = events.filter((event) => event.event_type === 'BUYER_DIAN_EVENT' && event.status === 'accepted');
         const acceptedCodes = new Set(acceptedEvents.map((event) => event.event_code));
+        const hasAcceptedGoods = document.confirmed_goods_at != null || acceptedCodes.has('032');
+        const hasAcceptedDocument = document.accepted_at != null || acceptedCodes.has('033') || acceptedCodes.has('034');
         const policy = evaluateBuyerEventReadiness({
           event_code: input.event_code,
           document_type: document.document_type,
@@ -190,10 +192,10 @@ export class ReceivedBuyerEventReservationService {
           review_status: document.review_status,
           actor_id: ctx.actor_id,
           has_prior_acknowledgement: acceptedCodes.has('030'),
-          has_prior_acceptance: acceptedCodes.has('033'),
+          has_prior_acceptance: hasAcceptedDocument,
           has_goods_receipt_evidence: Boolean(receiptEvidence),
           claim_reason: input.description,
-          has_prior_goods_receipt: acceptedCodes.has('032'),
+          has_prior_goods_receipt: hasAcceptedGoods,
           has_prior_claim: acceptedCodes.has('031'),
         });
         if (!policy.ready) {
