@@ -1,7 +1,7 @@
 import { Component, DestroyRef, inject, model, output, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { finalize } from 'rxjs';
+import { finalize, startWith } from 'rxjs';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -18,24 +18,34 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
   template: `
     <app-modal [(isOpen)]="isOpen" [title]="profile() ? 'Editar perfil de cotización' : 'Nuevo perfil de cotización'" subtitle="Configuración comercial de cotizaciones; no determina el régimen fiscal." size="lg" [dialog]="true" [closeOnEscape]="!isSaving()" [showCloseButton]="!isSaving()">
       <form [formGroup]="form" (ngSubmit)="save()" class="space-y-4">
-        <app-input label="Nombre *" formControlName="name" [maxlength]="150" placeholder="Ej. Obra residencial" [error]="nameError()"></app-input>
         <section class="rounded-lg border border-[var(--color-border)] p-4 space-y-3">
-          <h3 class="font-semibold">Porcentajes comerciales (opcionales)</h3>
-          <p class="text-sm text-[var(--color-text-secondary)]">Estos valores son parámetros del perfil, no un cálculo ni una clasificación tributaria.</p>
+          <h3 class="font-semibold">Datos generales</h3>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <app-input label="Nombre *" formControlName="name" [maxlength]="150" placeholder="Ej. Obra residencial" [error]="nameError()"></app-input>
+            <app-input label="Vigencia (días)" type="number" formControlName="validity_days" [min]="0" [step]="1" helperText="Déjalo vacío si no aplica." [error]="fieldError('validity_days')"></app-input>
+          </div>
+        </section>
+        <section class="rounded-lg border border-[var(--color-border)] p-4 space-y-3">
+          <div>
+            <h3 class="font-semibold">Porcentajes comerciales</h3>
+            <p class="mt-1 text-sm text-[var(--color-text-secondary)]">Opcionales. Son parámetros del perfil, no un cálculo ni una clasificación tributaria.</p>
+          </div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <app-input label="Administración (%)" type="number" formControlName="admin_percent" [min]="0" [max]="100" [step]="0.01" [error]="fieldError('admin_percent')"></app-input>
             <app-input label="Imprevistos (%)" type="number" formControlName="contingency_percent" [min]="0" [max]="100" [step]="0.01" [error]="fieldError('contingency_percent')"></app-input>
             <app-input label="Utilidad (%)" type="number" formControlName="profit_percent" [min]="0" [max]="100" [step]="0.01" [error]="fieldError('profit_percent')"></app-input>
           </div>
         </section>
-        <app-input label="Vigencia (días)" type="number" formControlName="validity_days" [min]="0" [step]="1" [error]="fieldError('validity_days')"></app-input>
-        <app-textarea label="Condiciones de pago" formControlName="payment_terms" [rows]="3" [maxlength]="500" placeholder="Opcional"></app-textarea>
-        <app-textarea label="Notas" formControlName="notes" [rows]="3" [maxlength]="2000" placeholder="Opcional"></app-textarea>
+        <section class="rounded-lg border border-[var(--color-border)] p-4 space-y-3">
+          <h3 class="font-semibold">Condiciones y notas</h3>
+          <app-textarea label="Condiciones de pago" formControlName="payment_terms" [rows]="3" [maxlength]="500" placeholder="Opcional"></app-textarea>
+          <app-textarea label="Notas" formControlName="notes" [rows]="3" [maxlength]="2000" placeholder="Opcional"></app-textarea>
+        </section>
         @if (errorMessage()) { <p class="text-sm text-[var(--color-error)]" role="alert">{{ errorMessage() }}</p> }
       </form>
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="outline" type="button" [disabled]="isSaving()" (clicked)="close()">Cancelar</app-button>
-        <app-button variant="primary" type="button" [loading]="isSaving()" [disabled]="form.invalid || isSaving()" (clicked)="save()">{{ profile() ? 'Guardar cambios' : 'Crear perfil' }}</app-button>
+        <app-button variant="primary" type="button" [loading]="isSaving()" [disabled]="formStatus() !== 'VALID' || isSaving()" (clicked)="save()">Guardar</app-button>
       </div>
     </app-modal>
   `,
@@ -60,6 +70,7 @@ export class QuotationProfileFormModalComponent {
     payment_terms: this.fb.control<string | null>('', [Validators.maxLength(500)]),
     notes: this.fb.control<string | null>('', [Validators.maxLength(2000)]),
   });
+  readonly formStatus = toSignal(this.form.statusChanges.pipe(startWith(this.form.status)), { initialValue: this.form.status });
 
   open(profile: QuotationProfile | null = null): void {
     this.errorMessage.set('');

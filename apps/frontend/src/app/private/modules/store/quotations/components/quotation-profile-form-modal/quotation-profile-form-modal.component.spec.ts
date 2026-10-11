@@ -46,6 +46,27 @@ describe('QuotationProfileFormModalComponent', () => {
     expect(component.isOpen()).toBeFalse();
   });
 
+  it('renders labeled form sections in the standard order with only cancel and save in the footer', () => {
+    const component = fixture.componentInstance;
+    component.open();
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const content = root.textContent ?? '';
+    expect(content.indexOf('Datos generales')).toBeLessThan(content.indexOf('Porcentajes comerciales'));
+    expect(content.indexOf('Porcentajes comerciales')).toBeLessThan(content.indexOf('Condiciones y notas'));
+    expect(content.indexOf('Condiciones y notas')).toBeLessThan(content.indexOf('Cancelar'));
+    expect(root.querySelectorAll('app-input').length).toBe(5);
+    expect(content).toContain('Nombre');
+    expect(content).toContain('Vigencia (días)');
+    expect(content).toContain('Condiciones de pago');
+    expect(content).toContain('Notas');
+    const footer = root.querySelector('[slot="footer"]');
+    expect(footer?.textContent).toContain('Cancelar');
+    expect(footer?.textContent).toContain('Guardar');
+    expect(footer?.textContent).not.toContain('Crear perfil');
+  });
+
   it('rejects out-of-range percentages and fractional validity days', () => {
     const component = fixture.componentInstance;
     component.open();
