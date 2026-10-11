@@ -141,7 +141,9 @@ describe('QuotationsComponent — contract quotation flow', () => {
       schema_version: 1 as const, frozen_at: '2026-10-01T00:00:00Z',
       invoice_profile: { profile_id: 8, version: 3, name: 'AIU', config: {} as any },
       contract_object: 'Obra', due_date: null, aiu_value: '0.00', direct_cost: '100.00', contract_value: '100.00',
-      invoice_lines: [], calculation: { totals: {} },
+      invoice_lines: [], calculation: { totals: {
+        gross_subtotal: '100.00', discount_amount: '0.00', tax_amount: '0.00', total_amount: '100.00',
+      } },
     };
     const existing = quotation({
       id: 31, status: 'draft', customer_id: 42, invoice_profile_id: 8,

@@ -83,4 +83,86 @@ describe('QuotationDetailComponent — destination gates and trace', () => {
     expect(component.canProcessAll()).toBeTrue();
     fixture.destroy();
   });
+
+  it('renders frozen AIU profile, formal object, agreed due date, economic lines and server totals', () => {
+    quotations.getQuotationById.and.returnValue(of(quote({
+      status: 'accepted',
+      subtotal_amount: 999,
+      discount_amount: 0,
+      tax_amount: 0,
+      grand_total: 999,
+      notes: 'Nota operativa; no es objeto contractual',
+      quotation_items: [{ id: 1, quotation_id: 12, product_name: 'Costo base', quantity: 1, unit_price: 100, discount_amount: 0, total_price: 100 }],
+      contract_economic_snapshot: {
+        schema_version: 1,
+        frozen_at: '2026-06-01T00:00:00.000Z',
+        invoice_profile: {
+          profile_id: 44,
+          version: 7,
+          name: 'Perfil AIU congelado',
+          config: { aiu: {
+            regime: 'et_462_1', taxable_basis: 'utilidad', contract_object: 'Objeto desde perfil NO mostrado',
+            components_basis: 'contract', accounting_model: 'sumada', components: { administracion: '10.00', imprevistos: '2.00', utilidad: '6.50' },
+            enforce_minimum_base: true, minimum_base_percent: '10.00',
+          } },
+        },
+        contract_object: 'Objeto contractual explícito congelado',
+        due_date: '2026-06-15',
+        aiu_value: '18.50', direct_cost: '100.00', contract_value: '118.50',
+        invoice_lines: [{ bucket: 'administracion', description: 'Administración', quantity: '1', unit_price: '10.00', discount_amount: '0.00' }],
+        calculation: {
+          lines: [{ line_extension_amount: '10.00', tax_amount: '1.90', total_amount: '11.90', taxes: [{ tax_name: 'IVA', tax_type: 'iva', tax_rate: '19', rate_basis: 'percent', tax_amount: '1.90' }] }],
+          totals: { gross_subtotal: '110.00', discount_amount: '10.00', tax_amount: '1.90', total_amount: '101.90' },
+          aiu: { contract_value: '118.50', aiu_value: '18.50', taxable_base: '6.50' },
+        },
+      } as any,
+    })));
+
+    const fixture = create();
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Perfil AIU congelado');
+    expect(text).toContain('versión 7');
+    expect(text).toContain('Objeto contractual explícito congelado');
+    expect(text).not.toContain('Objeto desde perfil NO mostrado');
+    expect(text).toContain('Notas');
+    expect(text).toContain('Nota operativa; no es objeto contractual');
+    expect(text).toContain('Fecha de pago acordada:');
+    expect(text).toContain('15/6/2026');
+    expect(text).toContain('Costo directo cotizado');
+    expect(text).toContain('Desglose económico fiscal congelado');
+    expect(text).toContain('Administración');
+    expect(text).toContain('101.9');
+    expect(fixture.componentInstance.summaryAmount('gross_subtotal', 999)).toBe(110);
+    expect(fixture.componentInstance.summaryAmount('total_amount', 999)).toBe(101.9);
+    fixture.destroy();
+  });
+
+  it('warns on legacy contract quote without economic snapshot and keeps sale details unchanged', () => {
+    quotations.getQuotationById.and.returnValue(of(quote({
+      destination: 'contract',
+      contract_economic_snapshot: null,
+      notes: 'Notas históricas, no objeto formal',
+    })));
+    const contractFixture = create();
+    expect(contractFixture.nativeElement.textContent).toContain('no conserva un snapshot económico');
+    expect(contractFixture.nativeElement.textContent).toContain('Notas');
+    expect(contractFixture.nativeElement.textContent).toContain('Notas históricas, no objeto formal');
+    expect(contractFixture.nativeElement.textContent).not.toContain('Objeto contractual');
+    expect(contractFixture.nativeElement.textContent).toContain('No configurado · revisar');
+    contractFixture.destroy();
+
+    quotations.getQuotationById.and.returnValue(of(quote({
+      destination: 'sale',
+      contract_economic_snapshot: null,
+      grand_total: 119,
+      quotation_items: [{ id: 2, quotation_id: 12, product_name: 'Producto venta', quantity: 1, unit_price: 100, discount_amount: 0, total_price: 119 }],
+    })));
+    const saleFixture = create();
+    expect(saleFixture.nativeElement.textContent).toContain('Items');
+    expect(saleFixture.nativeElement.textContent).toContain('Producto venta');
+    expect(saleFixture.nativeElement.textContent).not.toContain('Economía contractual congelada');
+    expect(saleFixture.nativeElement.textContent).not.toContain('Costo directo cotizado');
+    expect(saleFixture.componentInstance.summaryAmount('total_amount', 119)).toBe(119);
+    saleFixture.destroy();
+  });
 });

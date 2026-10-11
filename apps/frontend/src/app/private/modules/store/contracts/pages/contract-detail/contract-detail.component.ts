@@ -115,14 +115,14 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
                           @if (item.notes) { <p class="mt-1 text-xs text-text-secondary">{{ item.notes }}</p> }
                         </div>
                         @if (item.total_price !== null) {
-                          <span class="shrink-0 font-semibold">{{ item.total_price | currency }}</span>
+                          <span class="shrink-0 font-semibold">{{ item.total_price | currency:2 }}</span>
                         }
                       </div>
                       <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-4">
                         <div><dt>Cantidad</dt><dd>{{ item.quantity ?? 'No configurado' }}</dd></div>
-                        <div><dt>Precio unitario</dt><dd>{{ item.unit_price !== null ? (item.unit_price | currency) : 'No configurado' }}</dd></div>
-                        <div><dt>Descuento</dt><dd>{{ item.discount_amount !== null ? (item.discount_amount | currency) : 'No configurado' }}</dd></div>
-                        <div><dt>Impuesto</dt><dd>{{ item.tax_amount_item !== null ? (item.tax_amount_item | currency) : 'No configurado' }}@if (item.tax_rate !== null) { ({{ formatTaxRate(item.tax_rate) }}) }</dd></div>
+                        <div><dt>Precio unitario</dt><dd>{{ item.unit_price !== null ? (item.unit_price | currency:2) : 'No configurado' }}</dd></div>
+                        <div><dt>Descuento</dt><dd>{{ item.discount_amount !== null ? (item.discount_amount | currency:2) : 'No configurado' }}</dd></div>
+                        <div><dt>Impuesto</dt><dd>{{ item.tax_amount_item !== null ? (item.tax_amount_item | currency:2) : 'No configurado' }}@if (item.tax_rate !== null) { ({{ formatTaxRate(item.tax_rate) }}) }</dd></div>
                       </dl>
                     </div>
                   }
@@ -162,14 +162,14 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
                   }
 
                   <dl class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
-                    <div><dt class="text-text-secondary">Costo directo congelado</dt><dd class="font-semibold">{{ economic.direct_cost !== null ? (economic.direct_cost | currency) : 'No configurado · revisar' }}</dd></div>
-                    <div><dt class="text-text-secondary">AIU congelado</dt><dd class="font-semibold">{{ economic.aiu_value !== null ? (economic.aiu_value | currency) : 'No configurado · revisar' }}</dd></div>
-                    <div><dt class="text-text-secondary">Valor del contrato</dt><dd class="font-semibold">{{ economic.contract_value !== null ? (economic.contract_value | currency) : 'No configurado · revisar' }}</dd></div>
+                    <div><dt class="text-text-secondary">Costo directo congelado</dt><dd class="font-semibold">{{ economic.direct_cost !== null ? (economic.direct_cost | currency:2) : 'No configurado · revisar' }}</dd></div>
+                    <div><dt class="text-text-secondary">AIU congelado</dt><dd class="font-semibold">{{ economic.aiu_value !== null ? (economic.aiu_value | currency:2) : 'No configurado · revisar' }}</dd></div>
+                    <div><dt class="text-text-secondary">Valor del contrato</dt><dd class="font-semibold">{{ economic.contract_value !== null ? (economic.contract_value | currency:2) : 'No configurado · revisar' }}</dd></div>
                   </dl>
                   @if (economic.aiu?.components?.length) {
                     <dl class="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
                       @for (component of economic.aiu!.components; track component.component) {
-                        <div><dt class="text-text-secondary">{{ economicBucketLabel(component.component) }}</dt><dd class="font-semibold">{{ component.amount !== null ? (component.amount | currency) : 'No configurado · revisar' }}</dd></div>
+                        <div><dt class="text-text-secondary">{{ economicBucketLabel(component.component) }}</dt><dd class="font-semibold">{{ component.amount !== null ? (component.amount | currency:2) : 'No configurado · revisar' }}</dd></div>
                       }
                     </dl>
                   }
@@ -184,18 +184,18 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
                               <p class="font-semibold text-gray-900">{{ line.description }}</p>
                               <p class="text-xs text-text-secondary">{{ economicBucketLabel(line.bucket) }}</p>
                             </div>
-                            <span class="font-semibold">{{ line.total_amount !== null ? (line.total_amount | currency) : 'No configurado · revisar' }}</span>
+                            <span class="font-semibold">{{ line.total_amount !== null ? (line.total_amount | currency:2) : 'No configurado · revisar' }}</span>
                           </div>
                           <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-4">
                             <div><dt>Cantidad</dt><dd>{{ line.quantity ?? 'No configurado · revisar' }}</dd></div>
-                            <div><dt>Precio unitario</dt><dd>{{ line.unit_price !== null ? (line.unit_price | currency) : 'No configurado · revisar' }}</dd></div>
-                            <div><dt>Descuento</dt><dd>{{ line.discount_amount !== null ? (line.discount_amount | currency) : 'No configurado · revisar' }}</dd></div>
-                            <div><dt>Base de línea</dt><dd>{{ line.base_amount !== null ? (line.base_amount | currency) : 'No configurado · revisar' }}</dd></div>
+                            <div><dt>Precio unitario</dt><dd>{{ line.unit_price !== null ? (line.unit_price | currency:2) : 'No configurado · revisar' }}</dd></div>
+                            <div><dt>Descuento</dt><dd>{{ line.discount_amount !== null ? (line.discount_amount | currency:2) : 'No configurado · revisar' }}</dd></div>
+                            <div><dt>Base de línea</dt><dd>{{ line.base_amount !== null ? (line.base_amount | currency:2) : 'No configurado · revisar' }}</dd></div>
                           </dl>
                           <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
-                            <span>Impuestos de línea: {{ line.tax_amount !== null ? (line.tax_amount | currency) : 'No configurado · revisar' }}</span>
+                            <span>Impuestos de línea: {{ line.tax_amount !== null ? (line.tax_amount | currency:2) : 'No configurado · revisar' }}</span>
                             @for (tax of line.taxes; track $index) {
-                            <span>{{ tax.tax_name }}{{ economicTaxRate(tax.tax_rate, tax.rate_basis) !== null ? ' ' + economicTaxRate(tax.tax_rate, tax.rate_basis) : '' }}: {{ tax.tax_amount !== null ? (tax.tax_amount | currency) : 'No configurado · revisar' }}</span>
+                            <span>{{ tax.tax_name }}{{ economicTaxRate(tax.tax_rate, tax.rate_basis) !== null ? ' ' + economicTaxRate(tax.tax_rate, tax.rate_basis) : '' }}: {{ tax.tax_amount !== null ? (tax.tax_amount | currency:2) : 'No configurado · revisar' }}</span>
                             }
                           </div>
                         </div>
@@ -207,10 +207,10 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
 
                   @if (economic.totals) {
                     <dl class="grid grid-cols-2 gap-2 border-t border-border pt-3 text-sm sm:grid-cols-4">
-                      <div><dt class="text-text-secondary">Base total</dt><dd class="font-semibold">{{ economic.totals.total_before_tax !== null ? (economic.totals.total_before_tax | currency) : 'No configurado · revisar' }}</dd></div>
-                      <div><dt class="text-text-secondary">Impuestos totales</dt><dd class="font-semibold">{{ economic.totals.tax_amount !== null ? (economic.totals.tax_amount | currency) : 'No configurado · revisar' }}</dd></div>
-                      <div><dt class="text-text-secondary">Descuentos</dt><dd class="font-semibold">{{ economic.totals.discount_amount !== null ? (economic.totals.discount_amount | currency) : 'No configurado · revisar' }}</dd></div>
-                      <div><dt class="text-text-secondary">Total congelado</dt><dd class="font-bold">{{ economic.totals.total_amount !== null ? (economic.totals.total_amount | currency) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Base total</dt><dd class="font-semibold">{{ economic.totals.total_before_tax !== null ? (economic.totals.total_before_tax | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Impuestos totales</dt><dd class="font-semibold">{{ economic.totals.tax_amount !== null ? (economic.totals.tax_amount | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Descuentos</dt><dd class="font-semibold">{{ economic.totals.discount_amount !== null ? (economic.totals.discount_amount | currency:2) : 'No configurado · revisar' }}</dd></div>
+                      <div><dt class="text-text-secondary">Total congelado</dt><dd class="font-bold">{{ economic.totals.total_amount !== null ? (economic.totals.total_amount | currency:2) : 'No configurado · revisar' }}</dd></div>
                     </dl>
                   } @else {
                     <p class="text-sm text-text-secondary">Totales del cálculo: No configurado · revisar.</p>
@@ -408,20 +408,20 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
               <div class="space-y-2.5">
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Subtotal</span>
-                  <span class="font-semibold text-gray-900">{{ contract()!.subtotal_amount !== null && contract()!.subtotal_amount !== undefined ? (contract()!.subtotal_amount | currency) : 'No configurado' }}</span>
+                  <span class="font-semibold text-gray-900">{{ contract()!.subtotal_amount !== null && contract()!.subtotal_amount !== undefined ? (contract()!.subtotal_amount | currency:2) : 'No configurado' }}</span>
                 </div>
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Descuentos</span>
-                  <span class="font-semibold text-gray-900">{{ contract()!.discount_amount !== null && contract()!.discount_amount !== undefined ? (contract()!.discount_amount | currency) : 'No configurado' }}</span>
+                  <span class="font-semibold text-gray-900">{{ contract()!.discount_amount !== null && contract()!.discount_amount !== undefined ? (contract()!.discount_amount | currency:2) : 'No configurado' }}</span>
                 </div>
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Impuestos</span>
-                  <span class="font-semibold text-gray-900">{{ contract()!.tax_amount !== null && contract()!.tax_amount !== undefined ? (contract()!.tax_amount | currency) : 'No configurado' }}</span>
+                  <span class="font-semibold text-gray-900">{{ contract()!.tax_amount !== null && contract()!.tax_amount !== undefined ? (contract()!.tax_amount | currency:2) : 'No configurado' }}</span>
                 </div>
                 <div class="pt-3 mt-1 border-t border-border flex justify-between items-center">
                   <span class="text-base font-bold text-gray-900">Total de cotización congelado</span>
                   <span class="text-xl sm:text-2xl font-black text-primary-600 font-mono tracking-tighter">
-                    {{ contract()!.grand_total !== null && contract()!.grand_total !== undefined ? (contract()!.grand_total | currency) : 'No configurado' }}
+                    {{ contract()!.grand_total !== null && contract()!.grand_total !== undefined ? (contract()!.grand_total | currency:2) : 'No configurado' }}
                   </span>
                 </div>
               </div>
