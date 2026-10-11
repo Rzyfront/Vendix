@@ -97,7 +97,7 @@ describe('received documents configuration UI source guards (static, not E2E)', 
   it('keeps buttons in the reception and reused DIAN wizards at accessible touch height', () => {
     for (const source of [wizard, activationTemplate, dianWizard]) {
       const buttonTags = source.match(/<app-button\b/g) ?? [];
-      const sizedButtonTags = source.match(/<app-button customClasses="min-h-11"/g) ?? [];
+      const sizedButtonTags = source.match(/<app-button\b[^>]*\bcustomClasses="[^"]*\bmin-h-11\b[^"]*"/g) ?? [];
       expect(buttonTags.length).toBeGreaterThan(0);
       expect(sizedButtonTags).toHaveLength(buttonTags.length);
     }
