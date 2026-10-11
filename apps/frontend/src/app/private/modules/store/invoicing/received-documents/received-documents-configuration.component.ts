@@ -83,7 +83,7 @@ export class ReceivedDocumentsConfigurationComponent {
   readonly scopeReady = input(true);
   readonly readOnly = input(false);
   readonly connectionsOpen = signal(false);
-  private readonly isSuperAdmin = computed(() => {
+  readonly isSuperAdmin = computed(() => {
     const roles = this.auth.userRoles();
     return roles.includes('super_admin') || roles.includes('SUPER_ADMIN');
   });
