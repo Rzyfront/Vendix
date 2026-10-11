@@ -59,6 +59,8 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(source).toContain('[attr.aria-pressed]="selectedEnvironment() === \'test\'"');
     expect(source).toContain('[attr.aria-pressed]="selectedEnvironment() === \'production\'"');
     expect(source).toContain('class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline');
+    expect(source).toContain('focus-visible:outline-[var(--color-text-primary)]');
+    expect(source).not.toContain('focus-visible:outline-[var(--color-ring)]');
   });
 
   it('keeps credential and certificate actions responsive on narrow wizard layouts', () => {
