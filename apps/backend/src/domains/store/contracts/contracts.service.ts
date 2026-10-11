@@ -7,7 +7,6 @@ import {
   ErrorCodes,
   VendixHttpException,
 } from 'src/common/errors';
-import { QuotationProfilesService } from '../backend-quotations-profiles/quotation-profiles.service';
 import {
   buildContractSnapshot,
   contractNumberPrefix,
@@ -31,8 +30,9 @@ import {
  * C.2 — lectura y transiciones de la ficha (FB-07, ERR-06): `findAll`
  * devuelve el mismo envoltorio `{ data, pagination }` que el frontend
  * `PaginatedContractsResponse`; `updateStatus` solo admite
- * `draft -> active -> invoiced` y `draft|active -> cancelled` (terminales
- * `invoiced`/`cancelled` sin salida). La transicion invalida responde 422
+ * `draft -> active` y `draft|active -> cancelled`; `invoiced` deriva de la
+ * aceptación fiscal y no se establece con PATCH administrativo. La transición
+ * inválida responde 422
  * `CONTRACT_STATUS_001`.
  */
 
@@ -48,7 +48,7 @@ export const CONTRACT_STATUS_ENTRY: ErrorCodeEntry =
 /** Transiciones validas por estado (FB-07). */
 export const CONTRACT_TRANSITIONS: Record<ContractStatus, ContractStatus[]> = {
   draft: ['active', 'cancelled'],
-  active: ['invoiced', 'cancelled'],
+  active: ['cancelled'],
   invoiced: [],
   cancelled: [],
 };
@@ -62,10 +62,7 @@ export interface ContractQuery {
 
 @Injectable()
 export class ContractsService {
-  constructor(
-    private readonly prisma: StorePrismaService,
-    private readonly profilesService: QuotationProfilesService,
-  ) {}
+  constructor(private readonly prisma: StorePrismaService) {}
 
   private contractInclude() {
     const context = RequestContextService.getContext();
@@ -101,6 +98,8 @@ export class ContractsService {
           status: true,
           total_amount: true,
           dian_status: true,
+          accepted_at: true,
+          cufe: true,
         },
         take: 1,
         orderBy: [
@@ -114,16 +113,54 @@ export class ContractsService {
   /** Return a singular, minimal active invoice rather than Prisma's list. */
   private withInvoice<
     T extends {
+      status: string;
       invoices?: Array<
         Pick<
           invoices,
-          'id' | 'invoice_number' | 'status' | 'total_amount' | 'dian_status'
+          | 'id'
+          | 'invoice_number'
+          | 'status'
+          | 'total_amount'
+          | 'dian_status'
+          | 'accepted_at'
+          | 'cufe'
         >
       >;
     },
   >(row: T) {
     const { invoices, ...contract } = row;
-    return { ...contract, invoice: invoices?.[0] ?? null };
+    const sourceInvoice = invoices?.[0] ?? null;
+    const fiscallyAccepted = Boolean(
+      sourceInvoice?.status === 'accepted' &&
+        sourceInvoice.accepted_at &&
+        sourceInvoice.cufe?.trim(),
+    );
+    const effectiveStatus = fiscallyAccepted
+      ? 'invoiced'
+      : contract.status === 'invoiced'
+        ? 'active'
+        : contract.status;
+    const invoice = sourceInvoice
+      ? (({ accepted_at: _accepted_at, cufe: _cufe, ...publicInvoice }) =>
+          publicInvoice)(sourceInvoice)
+      : null;
+    return {
+      ...contract,
+      administrative_status: contract.status,
+      status: effectiveStatus,
+      invoice,
+    };
+  }
+
+  private acceptedFiscalInvoiceWhere(): Prisma.invoicesWhereInput {
+    const context = RequestContextService.getContext();
+    return {
+      store_id: context?.store_id ?? -1,
+      organization_id: context?.organization_id ?? -1,
+      status: 'accepted',
+      accepted_at: { not: null },
+      cufe: { not: '' },
+    };
   }
 
   /**
@@ -144,15 +181,29 @@ export class ContractsService {
     const skip = (page - 1) * limit;
     const search = query.search?.trim() || undefined;
 
-    const where: Prisma.contractsWhereInput = {
-      ...(search && {
+    const predicates: Prisma.contractsWhereInput[] = [];
+    if (search) {
+      predicates.push({
         OR: [
           { contract_number: { contains: search, mode: 'insensitive' } },
           { notes: { contains: search, mode: 'insensitive' } },
         ],
-      }),
-      ...(query.status && { status: query.status }),
-    };
+      });
+    }
+    if (query.status === 'invoiced') {
+      predicates.push({
+        invoices: { some: this.acceptedFiscalInvoiceWhere() },
+      });
+    } else if (query.status === 'active') {
+      predicates.push({
+        status: { in: ['active', 'invoiced'] },
+        NOT: { invoices: { some: this.acceptedFiscalInvoiceWhere() } },
+      });
+    } else if (query.status) {
+      predicates.push({ status: query.status });
+    }
+    const where: Prisma.contractsWhereInput =
+      predicates.length > 1 ? { AND: predicates } : predicates[0] ?? {};
 
     const [data, total] = await Promise.all([
       this.prisma.contracts.findMany({
@@ -191,35 +242,131 @@ export class ContractsService {
   }
 
   /**
-   * C.2 (FB-07, ERR-06) — transicion de estado: `draft -> active ->
-   * invoiced`, `draft|active -> cancelled`; `invoiced`/`cancelled` son
-   * terminales. Lo ilegal responde 422 `CONTRACT_STATUS_001` con el
-   * estado actual y las transiciones permitidas en `details`.
+   * C.2/P1.4 — `draft -> active` y `draft|active -> cancelled`. `invoiced`
+   * deriva de aceptación fiscal y no es editable con PATCH. La cancelación se
+   * serializa con la creación de facturas y se bloquea ante cualquier factura
+   * todavía activa.
    */
   async updateStatus(id: number, status: ContractStatus) {
-    const contract = await this.findOne(id);
-    const from = contract.status as ContractStatus;
-    const allowed = CONTRACT_TRANSITIONS[from] ?? [];
-    if (!allowed.includes(status)) {
-      throw new VendixHttpException(
-        CONTRACT_STATUS_ENTRY,
-        `No se puede cambiar el contrato de "${from}" a "${status}".`,
-        {
-          contract_id: id,
-          current_status: from,
-          attempted_status: status,
-          allowed_transitions: allowed,
-        },
-      );
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id || !context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    // Misma disciplina que `quotations.transition`: lectura scopeada
-    // primero (404 ajeno) y escritura sobre el id ya verificado.
-    const updated = await this.prisma.contracts.update({
-      where: { id },
-      data: { status, updated_at: new Date() },
-      include: this.contractInclude(),
+    const scope = {
+      store_id: context.store_id,
+      organization_id: context.organization_id,
+    };
+
+    await this.prisma.withoutScope().$transaction(async (tx: any) => {
+      // Invoice creation takes this same row lock before checking the contract,
+      // so cancellation cannot race past a concurrent draft creation.
+      await tx.$queryRaw`
+        SELECT id FROM contracts
+        WHERE id = ${id}
+          AND store_id = ${scope.store_id}
+          AND organization_id = ${scope.organization_id}
+        FOR UPDATE
+      `;
+
+      const current = await tx.contracts.findFirst({
+        where: { id, ...scope },
+        select: {
+          id: true,
+          status: true,
+          updated_at: true,
+          invoices: {
+            where: {
+              status: { notIn: ['cancelled', 'voided'] },
+              ...scope,
+            },
+            select: {
+              id: true,
+              invoice_number: true,
+              status: true,
+              total_amount: true,
+              dian_status: true,
+              accepted_at: true,
+              cufe: true,
+            },
+            take: 1,
+            orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+          },
+        },
+      });
+      if (!current) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_NOT_FOUND_001,
+          'Contrato no encontrado en esta tienda.',
+          { contract_id: id },
+        );
+      }
+
+      if (status === 'cancelled') {
+        const activeInvoice = await tx.invoices.findFirst({
+          where: {
+            contract_id: id,
+            ...scope,
+            status: { notIn: ['cancelled', 'voided'] },
+          },
+          select: { id: true, invoice_number: true, status: true },
+        });
+        if (activeInvoice) {
+          const accepted = activeInvoice.status === 'accepted';
+          throw new VendixHttpException(
+            ErrorCodes.CONTRACT_INVOICE_001,
+            accepted
+              ? 'No se puede cancelar este contrato porque su factura ya fue aceptada fiscalmente. La política de reversión mediante nota crédito debe definirse antes de habilitar esta acción.'
+              : 'No se puede cancelar este contrato mientras tenga una factura activa. Descarta el borrador o resuelve/anula primero el documento fiscal y vuelve a intentarlo.',
+            {
+              contract_id: id,
+              invoice_id: activeInvoice.id,
+              invoice_number: activeInvoice.invoice_number,
+              invoice_status: activeInvoice.status,
+              required_action: accepted
+                ? 'credit_note_policy_pending'
+                : 'resolve_invoice_first',
+            },
+          );
+        }
+      }
+
+      const projected = this.withInvoice(current);
+      const from = projected.status as ContractStatus;
+      const allowed = CONTRACT_TRANSITIONS[from] ?? [];
+      if (!allowed.includes(status)) {
+        throw new VendixHttpException(
+          CONTRACT_STATUS_ENTRY,
+          `No se puede cambiar el contrato de "${from}" a "${status}".`,
+          {
+            contract_id: id,
+            current_status: from,
+            administrative_status: current.status,
+            attempted_status: status,
+            allowed_transitions: allowed,
+          },
+        );
+      }
+
+      const result = await tx.contracts.updateMany({
+        where: {
+          id,
+          ...scope,
+          status: current.status,
+          updated_at: current.updated_at,
+        },
+        data: { status, updated_at: new Date() },
+      });
+      if (result.count !== 1) {
+        throw new VendixHttpException(
+          CONTRACT_STATUS_ENTRY,
+          'El contrato cambió durante la actualización. Vuelve a consultar y reintenta.',
+          { contract_id: id },
+        );
+      }
+
+      return true;
     });
-    return this.withInvoice(updated);
+    return this.findOne(id);
   }
 
   async createFromQuotation(quotation_id: number) {
@@ -290,9 +437,8 @@ export class ContractsService {
       );
     }
 
-    // ADR-03: el contrato congela la version VIGENTE del perfil. Sin perfil
-    // (cotizo desde cero) el snapshot guarda `profile: null` y los totales
-    // mandan. `resolveForQuotation` valida el tenant (ERR-04 si es ajeno).
+    // ADR-03: el contrato copia la versión de perfil y economía congelada al
+    // cotizar. El perfil actual jamás reescribe ni completa un snapshot histórico.
     try {
       // El cliente de `$transaction` es el BASE (sin extension de scoping):
       // todo `where` lleva `store_id` a mano y la creacion inyecta el tenant
@@ -378,17 +524,9 @@ export class ContractsService {
             );
           }
 
-          // Preserve current-profile snapshot behavior for this P0 change;
-          // freezing the quoted profile is explicitly a separate P1 item.
-          const profile = (currentQuotation as any).profile_id
-            ? await this.profilesService.resolveForQuotation(
-                (currentQuotation as any).profile_id,
-              )
-            : null;
-          const snapshot = buildContractSnapshot(
-            currentQuotation,
-            profile as any,
-          );
+          // The contract inherits the accepted quote's frozen economics and
+          // quotation terms. Never resolve a live profile during conversion.
+          const snapshot = buildContractSnapshot(currentQuotation);
 
           const last = await tx.contracts.findFirst({
             where: {
@@ -417,10 +555,8 @@ export class ContractsService {
               tax_amount: currentQuotation.tax_amount,
               grand_total: currentQuotation.grand_total,
               snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
-              profile_id: (currentQuotation as any).profile_id ?? null,
-              profile_version: profile
-                ? (profile as any).current_version ?? null
-                : null,
+              profile_id: snapshot.profile?.profile_id ?? null,
+              profile_version: snapshot.profile?.version ?? null,
               notes: currentQuotation.notes ?? null,
               created_by: scope.user_id ?? null,
               updated_at: new Date(),

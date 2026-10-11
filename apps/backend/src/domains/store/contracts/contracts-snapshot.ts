@@ -24,6 +24,7 @@ export interface ContractSnapshotItem {
 }
 
 export interface ContractSnapshot {
+  schema_version: 1;
   frozen_at: string;
   quotation: {
     id: number;
@@ -45,6 +46,8 @@ export interface ContractSnapshot {
     version: number;
     config: unknown;
   } | null;
+  /** Exact economic/configuration snapshot inherited from the accepted quote. */
+  economic: unknown | null;
 }
 
 /** Decimal de Prisma (o numero/string) a cadena exacta para el JSON. */
@@ -61,15 +64,20 @@ function str(value: unknown): string | null {
 }
 
 /**
- * Congela la cotizacion (con sus items y totales) y la version vigente del
- * perfil en el momento de crear el contrato. Referencia viva jamas: lo que
- * cambie despues en el perfil o la cotizacion no toca este JSON.
+ * Congela la cotizacion con sus totales y hereda sus snapshots de perfil y
+ * economía. No consulta perfiles vivos: históricos sin snapshot quedan null.
  */
-export function buildContractSnapshot(
-  quotation: any,
-  profile: { id: number; current_version: number; current_config: unknown } | null,
-): ContractSnapshot {
+export function buildContractSnapshot(quotation: any): ContractSnapshot {
+  const economic = quotation.contract_economic_snapshot ?? null;
+  const frozenQuotationProfile =
+    economic &&
+    typeof economic === 'object' &&
+    (economic as any).schema_version === 1
+      ? (economic as any).quotation_profile
+      : null;
+
   return {
+    schema_version: 1,
     frozen_at: new Date().toISOString(),
     quotation: {
       id: quotation.id,
@@ -106,13 +114,14 @@ export function buildContractSnapshot(
           item.applied_price_tier_name_snapshot ?? null,
       })),
     },
-    profile: profile
+    profile: frozenQuotationProfile
       ? {
-          profile_id: profile.id,
-          version: profile.current_version,
-          config: profile.current_config ?? null,
+          profile_id: frozenQuotationProfile.profile_id,
+          version: frozenQuotationProfile.version,
+          config: frozenQuotationProfile.config ?? null,
         }
       : null,
+    economic,
   };
 }
 

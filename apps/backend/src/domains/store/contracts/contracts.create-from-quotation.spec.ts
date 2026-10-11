@@ -20,6 +20,7 @@ describe('ContractsService.createFromQuotation (P0.3)', () => {
       discount_amount: '0',
       tax_amount: '0',
       grand_total: '100',
+      contract_economic_snapshot: null,
       quotation_items: [],
     };
     tx = {
@@ -30,7 +31,7 @@ describe('ContractsService.createFromQuotation (P0.3)', () => {
       },
       contracts: {
         findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 99, invoices: [] }),
+        create: jest.fn().mockResolvedValue({ id: 99, status: 'draft', invoices: [] }),
       },
     };
     const prisma: any = {
@@ -38,7 +39,7 @@ describe('ContractsService.createFromQuotation (P0.3)', () => {
       contracts: { findFirst: jest.fn().mockResolvedValue(null) },
       withoutScope: () => ({ $transaction: (callback: any) => callback(tx) }),
     };
-    service = new ContractsService(prisma, { resolveForQuotation: jest.fn() } as any);
+    service = new ContractsService(prisma);
   });
 
   it('serializa por tienda, relee y transicióna accepted dentro del tx con tenant explícito', async () => {
@@ -68,7 +69,12 @@ describe('ContractsService.createFromQuotation (P0.3)', () => {
       data: expect.objectContaining({ status: 'contracted' }),
     });
     expect(tx.contracts.create).toHaveBeenCalled();
-    expect(result).toEqual({ id: 99, invoice: null });
+    expect(result).toEqual({
+      id: 99,
+      status: 'draft',
+      administrative_status: 'draft',
+      invoice: null,
+    });
   });
 
   it('si una cancelación ganó la carrera, no actualiza ni crea contrato', async () => {
@@ -103,6 +109,53 @@ describe('ContractsService.createFromQuotation (P0.3)', () => {
         data: expect.objectContaining({ contract_number: `${prefix}0002` }),
       }),
     );
+  });
+
+  it('hereda la economía y perfil de términos congelados sin resolver perfiles vivos', async () => {
+    const economic = {
+      schema_version: 1,
+      frozen_at: '2026-10-10T10:00:00.000Z',
+      invoice_profile: {
+        profile_id: 80,
+        version: 5,
+        name: 'AIU aprobado',
+        config: { aiu: { regime: 'et_462_1' } },
+      },
+      quotation_profile: {
+        profile_id: 6,
+        version: 3,
+        config: { payment_terms: 'Anticipo 20%' },
+      },
+      contract_object: 'Reforma del segundo piso',
+      aiu_value: '15000.00',
+      direct_cost: '100000.00',
+      contract_value: '115000.00',
+      invoice_lines: [{ description: 'Costo directo', unit_price: '100000.00' }],
+      calculation: { total: '115000.00' },
+    };
+    quotation = { ...quotation, profile_id: 99, contract_economic_snapshot: economic };
+    tx.quotations.findFirst.mockResolvedValue(quotation);
+
+    await service.createFromQuotation(7);
+
+    expect(tx.contracts.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          profile_id: 6,
+          profile_version: 3,
+          snapshot: expect.objectContaining({
+            schema_version: 1,
+            profile: {
+              profile_id: 6,
+              version: 3,
+              config: { payment_terms: 'Anticipo 20%' },
+            },
+            economic,
+          }),
+        }),
+      }),
+    );
+    expect((service as any).profilesService).toBeUndefined();
   });
 
   it('serializa reintentos y devuelve 409 con el contrato ganador del tenant', async () => {

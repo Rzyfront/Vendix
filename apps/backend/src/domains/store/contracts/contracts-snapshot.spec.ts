@@ -22,6 +22,7 @@ describe('contracts-snapshot (C.1)', () => {
     notes: 'Obra gris',
     terms_and_conditions: 'Anticipo 30%',
     accepted_at: '2026-09-06T10:00:00.000Z',
+    contract_economic_snapshot: null,
     quotation_items: [
       {
         product_id: 11,
@@ -42,9 +43,11 @@ describe('contracts-snapshot (C.1)', () => {
   };
 
   it('congela items, totales y trazabilidad sin perfil', () => {
-    const snapshot = buildContractSnapshot(quotation, null);
+    const snapshot = buildContractSnapshot(quotation);
 
     expect(snapshot.profile).toBeNull();
+    expect(snapshot.economic).toBeNull();
+    expect(snapshot.schema_version).toBe(1);
     expect(snapshot.quotation.quotation_number).toBe('QT-20260906-0003');
     expect(snapshot.quotation.grand_total).toBe('114000.00');
     expect(snapshot.quotation.items).toHaveLength(1);
@@ -53,28 +56,50 @@ describe('contracts-snapshot (C.1)', () => {
     expect(typeof snapshot.frozen_at).toBe('string');
   });
 
-  it('congela la version vigente del perfil (A/I/U)', () => {
-    const profile = {
-      id: 3,
-      current_version: 2,
-      current_config: {
-        admin_percent: 10,
-        contingency_percent: 5,
-        profit_percent: 8,
+  it('hereda economía exacta y perfil de términos desde el snapshot de cotización', () => {
+    const economic = {
+      schema_version: 1,
+      frozen_at: '2026-09-06T09:00:00.000Z',
+      invoice_profile: {
+        profile_id: 81,
+        version: 4,
+        name: 'AIU cliente',
+        config: { aiu: { regime: 'et_462_1' } },
       },
+      quotation_profile: {
+        profile_id: 3,
+        version: 2,
+        config: { admin_percent: 10, payment_terms: 'Anticipo 30%' },
+      },
+      contract_object: 'Construcción y adecuación del local comercial',
+      aiu_value: '23000.00',
+      direct_cost: '100000.00',
+      contract_value: '123000.00',
+      invoice_lines: [{ description: 'Costo directo', unit_price: '100000.00' }],
+      calculation: { total: '123000.00' },
     };
+    const snapshot = buildContractSnapshot({
+      ...quotation,
+      contract_economic_snapshot: economic,
+    });
 
-    const snapshot = buildContractSnapshot(quotation, profile);
-
+    expect(snapshot.economic).toBe(economic);
     expect(snapshot.profile).toEqual({
       profile_id: 3,
       version: 2,
-      config: {
-        admin_percent: 10,
-        contingency_percent: 5,
-        profit_percent: 8,
-      },
+      config: { admin_percent: 10, payment_terms: 'Anticipo 30%' },
     });
+  });
+
+  it('no recompone snapshots históricos ausentes desde el profile_id vivo', () => {
+    const snapshot = buildContractSnapshot({
+      ...quotation,
+      profile_id: 3,
+      contract_economic_snapshot: null,
+    });
+
+    expect(snapshot.profile).toBeNull();
+    expect(snapshot.economic).toBeNull();
   });
 
   it('numera CT-YYYYMMDD-0001 sin anterior y secuencia despues', () => {
