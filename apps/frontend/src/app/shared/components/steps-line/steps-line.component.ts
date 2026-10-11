@@ -20,7 +20,7 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
           @for (step of steps(); track step.label; let i = $index) {
             @if (i > 0) {
               <div
-                class="flex-1 h-0.5 rounded-full transition-colors duration-300"
+                class="flex-1 h-0.5 rounded-full transition-colors duration-300 motion-reduce:transition-none"
                 [class.bg-primary]="i <= currentStep()"
                 [class.bg-border]="i > currentStep()"
                 [style.margin-top]="circleOffset"
@@ -31,15 +31,14 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
               [class.cursor-pointer]="clickable()"
               (click)="onStepClick(i)">
               <div
-                class="rounded-full flex items-center justify-center font-semibold transition-all duration-300 border-2 shrink-0"
+                class="rounded-full flex items-center justify-center font-semibold transition-[background-color,border-color,box-shadow,color] duration-300 motion-reduce:transition-none border-2 shrink-0"
                 [ngClass]="circleClasses"
                 [class.bg-primary]="isCompleted(i, step)"
                 [class.border-primary]="i <= currentStep()"
-                [class.text-white]="isCompleted(i, step)"
                 [class.border-border]="i > currentStep()"
                 [class.bg-surface]="i >= currentStep()"
                 [style.box-shadow]="i === currentStep() ? '0 0 0 3px ' + primaryColorAlpha : 'none'"
-                [style.color]="i === currentStep() ? primaryColor() : (isCompleted(i, step) ? 'white' : 'var(--color-text-secondary)')"
+                [style.color]="isCompleted(i, step) ? 'var(--color-text-on-primary)' : 'var(--color-text-primary)'"
                 [style.border-color]="(isCompleted(i, step) || i === currentStep()) ? primaryColor() : undefined"
                 [style.background-color]="isCompleted(i, step) ? primaryColor() : undefined"
               >
@@ -61,9 +60,9 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
                 }
               </div>
               <span
-                class="font-medium text-center whitespace-nowrap transition-colors duration-300 mt-1"
+                class="font-medium text-center whitespace-nowrap transition-colors duration-300 motion-reduce:transition-none mt-1"
                 [ngClass]="labelClasses"
-                [style.color]="i <= currentStep() ? primaryColor() : 'var(--color-text-secondary)'"
+                [style.color]="'var(--color-text-primary)'"
                 [class.!font-semibold]="i === currentStep()"
               >{{ step.label }}</span>
             </div>
@@ -81,7 +80,7 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
           @for (step of steps(); track step.label; let i = $index) {
             @if (i > 0) {
               <div
-                class="w-0.5 rounded-full transition-colors duration-300 ml-4 my-0.5"
+                class="w-0.5 rounded-full transition-colors duration-300 motion-reduce:transition-none ml-4 my-0.5"
                 [ngClass]="fillHeight() ? 'flex-1' : verticalLineClasses"
                 [class.bg-primary]="i <= currentStep()"
                 [class.bg-border]="i > currentStep()"
@@ -92,10 +91,10 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
               [class.cursor-pointer]="clickable()"
               (click)="onStepClick(i)">
               <div
-                class="rounded-full flex items-center justify-center font-semibold transition-all duration-300 border-2 shrink-0"
+                class="rounded-full flex items-center justify-center font-semibold transition-[background-color,border-color,box-shadow,color] duration-300 motion-reduce:transition-none border-2 shrink-0"
                 [ngClass]="circleClasses"
                 [style.box-shadow]="i === currentStep() ? '0 0 0 3px ' + primaryColorAlpha : 'none'"
-                [style.color]="i === currentStep() ? primaryColor() : (isCompleted(i, step) ? 'white' : 'var(--color-text-secondary)')"
+                [style.color]="isCompleted(i, step) ? 'var(--color-text-on-primary)' : 'var(--color-text-primary)'"
                 [style.border-color]="(isCompleted(i, step) || i === currentStep()) ? primaryColor() : undefined"
                 [style.background-color]="isCompleted(i, step) ? primaryColor() : undefined"
               >
@@ -117,9 +116,9 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
                 }
               </div>
               <span
-                class="font-medium whitespace-nowrap transition-colors duration-300"
+                class="font-medium whitespace-nowrap transition-colors duration-300 motion-reduce:transition-none"
                 [ngClass]="labelClasses"
-                [style.color]="i <= currentStep() ? primaryColor() : 'var(--color-text-secondary)'"
+                [style.color]="'var(--color-text-primary)'"
                 [class.!font-semibold]="i === currentStep()"
               >{{ step.label }}</span>
             </div>
