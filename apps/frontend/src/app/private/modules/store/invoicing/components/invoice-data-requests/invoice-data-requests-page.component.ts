@@ -258,7 +258,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
                 [size]="16"
                 class="text-error shrink-0 mt-0.5"
               ></app-icon>
-              <p class="text-sm text-error">{{ message }}</p>
+              <p class="text-sm text-text-primary">{{ message }}</p>
             </div>
           }
 

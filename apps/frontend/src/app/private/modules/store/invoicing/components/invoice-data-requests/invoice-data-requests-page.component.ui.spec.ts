@@ -100,6 +100,8 @@ describe('invoice data requests UI source contract', () => {
 
   it('keeps accessible error feedback and race-safe list/summary requests', () => {
     expect(source).toContain('role="alert"');
+    expect(source).toContain('<p class="text-sm text-text-primary">{{ message }}</p>');
+    expect(source).not.toContain('<p class="text-sm text-error">{{ message }}</p>');
     expect(source).toContain('[emptyTitle]="emptyTitle()"');
     expect(source).toContain('[emptyDescription]="emptyDescription()"');
     expect(source).toContain('this.listSubscription?.unsubscribe()');

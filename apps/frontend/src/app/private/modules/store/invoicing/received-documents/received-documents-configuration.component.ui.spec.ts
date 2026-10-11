@@ -89,6 +89,19 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(activationTemplate).toContain('[content]="codeTooltip(code)"');
     expect(activationTemplate).toContain('selectedConfigurationWarning()');
     expect(activationTemplate).toContain('bg-warning-light p-3 text-sm text-text-primary" role="note"');
+    const alertTags = [...activationTemplate.matchAll(/<div\b(?=[^>]*\brole="alert")[^>]*>/g)].map(([tag]) => tag);
+    expect(alertTags).toHaveLength(3);
+    for (const tag of alertTags) {
+      expect(tag).toContain('text-text-primary');
+      expect(tag).not.toMatch(/\btext-error\b/);
+    }
+    expect(activationTemplate).toContain('bg-success-light px-2 py-1 text-xs font-semibold text-text-primary">Listo');
+    expect(activationTemplate).toContain('bg-warning-light px-2 py-1 text-xs font-semibold text-text-primary">Bloqueado');
+    expect(activationTemplate).toContain('text-xs text-text-primary">Se muestran hasta 100 configuraciones.');
+    expect(activationTemplate).toContain('font-medium text-text-primary underline" routerLink="/admin/invoicing/dian-config"');
+    expect(activationTemplate).toContain('font-medium text-text-primary underline" routerLink="/admin/fiscal"');
+    expect(activationTemplate).not.toContain('text-sm text-error" role="alert"');
+    expect(activationTemplate).not.toContain('font-medium text-primary underline');
     expect(activationTemplate).toContain('No se transmiten eventos a la DIAN desde esta pantalla.');
     expect(activation).toContain('Pagination exception: evidence is returned as a server-paginated page');
     expect(activationTemplate).not.toContain('event 034');
