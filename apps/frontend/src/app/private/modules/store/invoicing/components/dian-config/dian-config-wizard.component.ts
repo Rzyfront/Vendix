@@ -7,6 +7,7 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NgClass, DatePipe } from '@angular/common';
@@ -53,6 +54,12 @@ import {
   StepsLineItem,
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import {
+  PaginationComponent,
+  ResponsiveDataViewComponent,
+  type ItemListCardConfig,
+  type TableColumn,
+} from '../../../../../../shared/components/index';
 import {
   DianTechnicalResponseComponent,
   DianTechnicalResponseData,
@@ -142,6 +149,21 @@ const DIAN_TIPS: ReadonlyArray<{ title: string; body: string }> = [
     body: 'La firma XAdES usa tu certificado digital. Si vence, la DIAN rechaza cada documento aunque el resto de la configuración esté perfecta.',
   },
 ];
+
+interface DianAuditLogPageResponse {
+  data?: DianAuditLog[] | null;
+  meta?: { total?: number | null } | null;
+}
+
+function formatAuditDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(date);
+}
 
 /** Visual state of the test-set panel. */
 type TestSetState = 'idle' | 'running' | 'pending' | 'passed' | 'rejected';
@@ -255,6 +277,8 @@ interface PersistedTestResult {
     SelectorComponent,
     StepsLineComponent,
     DianTechnicalResponseComponent,
+    ResponsiveDataViewComponent,
+    PaginationComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -1300,85 +1324,31 @@ interface PersistedTestResult {
               Actualizar
             </app-button>
           </div>
-          @if (loadingAuditLogs()) {
-            <div class="py-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+          @if (auditLogsError()) {
+            <div role="alert" class="flex items-start gap-2 p-3 rounded-lg border border-error/30 bg-error-light">
+              <app-icon name="alert-circle" [size]="16" class="text-error shrink-0 mt-0.5"></app-icon>
+              <p class="text-sm text-error">{{ auditLogsError() }}</p>
             </div>
           }
-          @if (!loadingAuditLogs()) {
-            <div class="overflow-x-auto">
-              @if (auditLogs().length > 0) {
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b border-border">
-                      <th class="text-left py-2 px-3 text-text-secondary font-medium">Accion</th>
-                      <th class="text-left py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Documento</th>
-                      <th class="text-center py-2 px-3 text-text-secondary font-medium">Estado</th>
-                      <th class="text-right py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Duracion</th>
-                      <th class="text-right py-2 px-3 text-text-secondary font-medium">Fecha</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (log of auditLogs(); track log.id) {
-                      <tr class="border-b border-border/50 hover:bg-[var(--color-surface-secondary)]">
-                        <td class="py-2 px-3">
-                          <div class="text-text-primary">{{ log.action }}</div>
-                          @if (log.error_message) {
-                            <div class="text-xs text-error mt-0.5 max-w-[200px] truncate">
-                              {{ log.error_message }}
-                            </div>
-                          }
-                        </td>
-                        <td class="py-2 px-3 hidden md:table-cell">
-                          @if (log.document_number) {
-                            <span class="text-text-primary">{{ log.document_type }} {{ log.document_number }}</span>
-                          } @else {
-                            <span class="text-text-secondary">-</span>
-                          }
-                        </td>
-                        <td class="py-2 px-3 text-center">
-                          <span class="px-1.5 py-0.5 text-xs rounded-full"
-                            [ngClass]="{
-                              'bg-success-light text-success': log.status === 'success',
-                              'bg-error-light text-error': log.status === 'error',
-                              'bg-warning-light text-warning': log.status === 'pending',
-                              'bg-[var(--color-surface-secondary)] text-text-secondary': log.status !== 'success' && log.status !== 'error' && log.status !== 'pending'
-                            }"
-                          >
-                            {{ log.status }}
-                          </span>
-                        </td>
-                        <td class="py-2 px-3 text-right hidden md:table-cell text-text-secondary">
-                          {{ log.duration_ms ? log.duration_ms + 'ms' : '-' }}
-                        </td>
-                        <td class="py-2 px-3 text-right text-text-secondary text-xs">
-                          {{ log.created_at | date:'dd/MM/yy HH:mm' }}
-                        </td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              } @else {
-                <div class="py-8 text-center">
-                  <app-icon name="file-text" [size]="32" class="text-text-secondary mx-auto mb-2"></app-icon>
-                  <p class="text-text-secondary text-sm">No hay registros de operaciones</p>
-                </div>
-              }
-            </div>
-          }
-          @if (auditLogs().length > 0) {
-            <div class="flex items-center justify-between pt-3 border-t border-border">
-              <span class="text-xs text-text-secondary">Pagina {{ auditLogPage() }}</span>
-              <div class="flex gap-2">
-                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage() <= 1">
-                  Anterior
-                </app-button>
-                <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="nextAuditPage()">
-                  Siguiente
-                </app-button>
-              </div>
-            </div>
-          }
+          <app-responsive-data-view
+            [data]="auditLogs()"
+            [columns]="auditLogColumns"
+            [cardConfig]="auditLogCardConfig"
+            [loading]="loadingAuditLogs()"
+            [sortable]="false"
+            emptyIcon="file-text"
+            [emptyTitle]="auditLogsError() ? 'No se pudo cargar el historial' : 'No hay registros de operaciones'"
+            [emptyDescription]="auditLogsError() ? 'Actualiza para reintentar.' : 'Las operaciones realizadas con esta configuración aparecerán aquí.'"
+            [showEmptyRefresh]="true"
+            (emptyRefreshClick)="loadAuditLogs()"
+          ></app-responsive-data-view>
+          <app-pagination
+            [currentPage]="auditLogPage()"
+            [totalPages]="auditLogTotalPages()"
+            [total]="auditLogTotalItems()"
+            [limit]="auditLogFilters().limit"
+            (pageChange)="onAuditPageChange($event)"
+          ></app-pagination>
           <div class="flex items-center justify-end pt-4 border-t border-border">
             <app-button customClasses="min-h-11" variant="primary" size="sm" (clicked)="finish()">
               <app-icon slot="icon" name="check" [size]="14"></app-icon>
@@ -1473,7 +1443,14 @@ export class DianConfigWizardComponent {
   // Step 5
   readonly auditLogs = signal<DianAuditLog[]>([]);
   readonly loadingAuditLogs = signal(false);
-  readonly auditLogPage = signal(1);
+  readonly auditLogsError = signal<string | null>(null);
+  readonly auditLogFilters = signal({ page: 1, limit: 20 });
+  readonly auditLogTotalItems = signal(0);
+  readonly auditLogTotalPages = computed(() =>
+    Math.max(1, Math.ceil(this.auditLogTotalItems() / this.auditLogFilters().limit)),
+  );
+  readonly auditLogPage = computed(() => this.auditLogFilters().page);
+  private auditLogsSubscription?: Subscription;
 
   // ── Typed Forms ───────────────────────────────────────────
   readonly credentialsForm: FormGroup<CredentialsForm> = this.fb.nonNullable.group({
@@ -1838,6 +1815,27 @@ export class DianConfigWizardComponent {
       }
     });
 
+    let previousAuditConfigId: number | null | undefined;
+    effect(() => {
+      const step = this.activeStep();
+      const configId = this.selectedConfig()?.id ?? null;
+      untracked(() => {
+        if (configId !== previousAuditConfigId) {
+          previousAuditConfigId = configId;
+          this.auditLogsSubscription?.unsubscribe();
+          this.auditLogs.set([]);
+          this.auditLogFilters.set({ page: 1, limit: 20 });
+          this.auditLogTotalItems.set(0);
+          this.auditLogsError.set(null);
+          this.loadingAuditLogs.set(false);
+        } else if (step !== 4) {
+          this.auditLogsSubscription?.unsubscribe();
+          this.loadingAuditLogs.set(false);
+        }
+        if (step === 4 && configId !== null) this.loadAuditLogs();
+      });
+    });
+
     effect(() => {
       const step = this.initialStep();
       if (typeof step === 'number') this.activeStep.set(step);
@@ -1927,7 +1925,12 @@ export class DianConfigWizardComponent {
     this.testSetResult.set(null);
     this.persistedTestResult.set(null);
     this.selectedResolutionId.set(null);
+    this.auditLogsSubscription?.unsubscribe();
     this.auditLogs.set([]);
+    this.auditLogFilters.set({ page: 1, limit: 20 });
+    this.auditLogTotalItems.set(0);
+    this.auditLogsError.set(null);
+    this.loadingAuditLogs.set(false);
     // A fresh config has no batch in flight; drop any timer from the previous one.
     this.stopPolling();
     this.pollAttempts.set(0);
@@ -2694,32 +2697,112 @@ export class DianConfigWizardComponent {
   }
 
   // ── Step 5: Audit logs ────────────────────────────────────
+  readonly auditLogColumns: TableColumn[] = [
+    { key: 'action', label: 'Acción', priority: 0, defaultValue: '—' },
+    {
+      key: 'id', label: 'Documento', priority: 1, defaultValue: '—',
+      transform: (_value, item) => item?.document_type && item?.document_number
+        ? `${item.document_type} ${item.document_number}` : '—',
+    },
+    {
+      key: 'error_message', label: 'Detalle del error', priority: 2, defaultValue: '—',
+    },
+    {
+      key: 'status', label: 'Estado', priority: 0, badge: true,
+      badgeConfig: { type: 'custom', colorMap: {
+        success: 'var(--color-success)', error: 'var(--color-error)', pending: 'var(--color-warning)',
+      } },
+      transform: (value) => this.auditStatusLabel(String(value ?? '')),
+      badgeTransform: (value) => this.auditStatusLabel(String(value ?? '')),
+    },
+    {
+      key: 'duration_ms', label: 'Duración', align: 'right', priority: 2, defaultValue: '—',
+      transform: (value) => value == null ? '—' : `${value} ms`,
+    },
+    {
+      key: 'created_at', label: 'Fecha y hora', align: 'right', priority: 1,
+      transform: (value) => formatAuditDateTime(value == null ? null : String(value)),
+    },
+  ];
+
+  readonly auditLogCardConfig: ItemListCardConfig = {
+    titleKey: 'action',
+    titleTransform: (item) => item?.action || '—',
+    badgeKey: 'status',
+    badgeConfig: { type: 'custom', colorMap: {
+      success: 'var(--color-success)', error: 'var(--color-error)', pending: 'var(--color-warning)',
+    } },
+    badgeTransform: (value) => this.auditStatusLabel(String(value ?? '')),
+    detailKeys: [
+      {
+        key: 'id', label: 'Documento', icon: 'file-text',
+        transform: (_value, item) => item?.document_type && item?.document_number
+          ? `${item.document_type} ${item.document_number}` : '—',
+      },
+      {
+        key: 'error_message', label: 'Detalle del error', icon: 'alert-circle', defaultValue: '—',
+        transform: (value) => value == null || value === '' ? '—' : String(value),
+      },
+      {
+        key: 'duration_ms', label: 'Duración', icon: 'clock',
+        transform: (value) => value == null ? '—' : `${value} ms`,
+      },
+      {
+        key: 'created_at', label: 'Fecha y hora', icon: 'calendar',
+        transform: (value) => formatAuditDateTime(value == null ? null : String(value)),
+      },
+    ],
+  };
+
+  auditStatusLabel(status: string): string {
+    const labels: Record<string, string> = { success: 'Éxito', error: 'Error', pending: 'Pendiente' };
+    return (labels[status] ?? status) || '—';
+  }
+
   loadAuditLogs(): void {
-    this.loadingAuditLogs.set(true);
     const configId = this.selectedConfig()?.id;
-    this.invoicingService.getDianAuditLogs(this.auditLogPage(), 20, configId)
+    if (this.activeStep() !== 4 || configId == null) return;
+    this.auditLogsSubscription?.unsubscribe();
+    this.loadingAuditLogs.set(true);
+    this.auditLogsError.set(null);
+    this.auditLogsSubscription = this.invoicingService
+      .getDianAuditLogs(this.auditLogFilters().page, this.auditLogFilters().limit, configId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response: any) => {
-          this.auditLogs.set(response?.data || []);
+        next: (response: DianAuditLogPageResponse) => {
+          this.auditLogs.set(response?.data ?? []);
+          this.auditLogTotalItems.set(response?.meta?.total ?? 0);
+          if (this.auditLogFilters().page > this.auditLogTotalPages()) {
+            this.auditLogFilters.update((current) => ({
+              ...current,
+              page: this.auditLogTotalPages(),
+            }));
+            this.loadAuditLogs();
+            return;
+          }
           this.loadingAuditLogs.set(false);
         },
         error: () => {
+          this.auditLogsError.set('No se pudo cargar el historial de operaciones DIAN.');
+          this.auditLogs.set([]);
+          this.auditLogTotalItems.set(0);
           this.loadingAuditLogs.set(false);
         },
       });
   }
 
+  onAuditPageChange(page: number): void {
+    if (!Number.isInteger(page) || page < 1 || page > this.auditLogTotalPages()) return;
+    this.auditLogFilters.update((current) => ({ ...current, page }));
+    this.loadAuditLogs();
+  }
+
   prevAuditPage(): void {
-    if (this.auditLogPage() > 1) {
-      this.auditLogPage.update((p) => p - 1);
-      this.loadAuditLogs();
-    }
+    this.onAuditPageChange(this.auditLogPage() - 1);
   }
 
   nextAuditPage(): void {
-    this.auditLogPage.update((p) => p + 1);
-    this.loadAuditLogs();
+    this.onAuditPageChange(this.auditLogPage() + 1);
   }
 
   finish(): void {

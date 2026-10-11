@@ -84,6 +84,39 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(certificateFooter).toContain('<span class="break-all">{{ selectedFile()!.name }}</span>');
   });
 
+  it('renders audit history with responsive cards and server pagination', () => {
+    expect(source).toContain('ResponsiveDataViewComponent');
+    expect(source).toContain('PaginationComponent');
+    expect(source).toContain('[data]="auditLogs()"');
+    expect(source).toContain('[columns]="auditLogColumns"');
+    expect(source).toContain('[cardConfig]="auditLogCardConfig"');
+    expect(source).toMatch(/<\/app-responsive-data-view>\s*<app-pagination/);
+    expect(source).toContain('readonly auditLogFilters = signal({ page: 1, limit: 20 })');
+    expect(source).toContain('readonly auditLogTotalItems = signal(0)');
+    expect(source).toContain('response?.meta?.total');
+    expect(source).toContain('if (this.auditLogFilters().page > this.auditLogTotalPages())');
+    expect(source).toContain('this.loadAuditLogs();');
+    expect(source).toContain("key: 'id', label: 'Documento'");
+    expect(source).toContain("key: 'error_message', label: 'Detalle del error', priority: 2, defaultValue: '—'");
+    expect(source).toContain("key: 'error_message'");
+    expect(source).toContain("key: 'duration_ms'");
+    expect(source).toContain("key: 'created_at'");
+    expect(source).toContain('formatAuditDateTime');
+  });
+
+  it('cancels stale audit requests, auto-loads only for a saved config on step five, and exposes retries', () => {
+    expect(source).toContain('private auditLogsSubscription?: Subscription');
+    expect(source).toContain('this.auditLogsSubscription?.unsubscribe()');
+    expect(source).toContain('takeUntilDestroyed(this.destroyRef)');
+    expect(source).toContain('const step = this.activeStep()');
+    expect(source).toContain('const configId = this.selectedConfig()?.id ?? null');
+    expect(source).toContain('if (step === 4 && configId !== null) this.loadAuditLogs()');
+    expect(source).toContain('role="alert"');
+    expect(source).toContain('(emptyRefreshClick)="loadAuditLogs()"');
+    expect(source).toContain('No se pudo cargar el historial de operaciones DIAN.');
+    expect(source).toContain('this.auditLogFilters.set({ page: 1, limit: 20 })');
+  });
+
   it('uses 16px shared form controls and a compact stepper when the axis is locked', () => {
     expect(source.match(/<app-(?:input|selector) size="lg"/g)).toHaveLength(10);
     expect(source).toContain('[size]="configurationTypeLocked() ? \'sm\' : \'md\'"');
