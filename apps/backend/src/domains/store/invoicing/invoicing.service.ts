@@ -4074,23 +4074,23 @@ export class InvoicingService {
 
   /**
    * D.1 (DB-05, FB-08, ERR-07; ADR-03) — borrador de factura AIU precargada
-   * desde un contrato VIGENTE (`active`), atomico con su paso a `invoiced`.
+   * desde un contrato VIGENTE (`active`), sin marcarlo como facturado.
    *
-   * Es la transicion `active->invoiced` de la ficha (C.2): solo un contrato
-   * `active` genera factura; cualquier otro estado responde 422
-   * `CONTRACT_STATUS_001` con el estado actual. La idempotencia es triple
-   * capa como en `ContractsService.createFromQuotation`: chequeo previo 409
-   * con la factura existente, re-chequeo dentro de la transaccion, y el
-   * UNIQUE parcial de `invoices.contract_id` como red (el choque `P2002` se
-   * traduce al mismo 409 con la factura ganadora).
+   * `invoiced` deriva sólo de aceptación fiscal verificable posterior.
+   * Un contrato `active` produce un BORRADOR, pero conserva su estado
+   * `active`: la aceptación fiscal es una transición posterior y
+   * separada. Cualquier otro estado responde 422 `CONTRACT_STATUS_001`.
+   * La idempotencia usa chequeo previo, re-chequeo transaccional bajo el mismo
+   * lock de fila que la cancelación y el UNIQUE parcial de
+   * `invoices.contract_id` como última defensa.
    *
-   * La precarga sale ENTERA del snapshot congelado (`contract-invoice.ts`):
-   * lineas A/I/U Modelo 2, objeto desde las notas, tarifa heredada de la
-   * cotizacion. El REGIMEN sale del ajuste de la tienda —igual que la
-   * captura manual sin perfil— y queda CONGELADO en las columnas `aiu_*` de
-   * la factura: la emision lee lo congelado, nunca lo vivo. Todo lo que
-   * puede fallar (snapshot sin A/I/U, sin tarifa, nota CAV03, piso 001,
-   * 004) falla ANTES de tomar el consecutivo.
+   * La precarga sale ENTERA del acuerdo económico congelado de la cotización:
+   * costos originales y A/I/U (incluida la línea única de `no_sumada`), la
+   * configuración y versión histórica del perfil, el objeto contractual
+   * explícito y el cálculo fiscal. No se reconstruye desde notas, precios de
+   * catálogo, ajustes AIU ni metadatos mutables del perfil actual. Todo lo que
+   * puede fallar —snapshot/version, recálculo, matriz tributaria, objeto,
+   * cliente y vencimiento— ocurre antes de consumir numeración.
    *
    * Decisiones de alcance: sin retencion propia del contrato (Non-Goals del
    * plan: la que corresponda la resuelve `InvoiceFlowService` al aceptar);
@@ -4461,23 +4461,13 @@ export class InvoicingService {
   ): Promise<void> {
     const profile = await this.prisma.invoice_profiles.findFirst({
       where: { id: frozen.profile_id },
-      select: { id: true, operation_type: true },
+      select: { id: true },
     });
     if (!profile) throw profileNotFound(frozen.profile_id);
-    if (profile.operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_PROFILE_008,
-        'El perfil congelado de la cotización ya no corresponde a una operación AIU (09). No se puede reinterpretar el acuerdo como otra operación.',
-        {
-          profile_id: frozen.profile_id,
-          profile_operation_type: profile.operation_type,
-          invoice_operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
-        },
-      );
-    }
 
-    // This is an immutable historical version lookup, intentionally not a
-    // read of current_version and not gated by the profile's current state.
+    // The mutable profile row proves only scoped ownership/existence. Its
+    // current operation type/state/version cannot reinterpret a quote already
+    // accepted against the immutable historical profile version below.
     const historical = await this.prisma.invoice_profile_versions.findFirst({
       where: { profile_id: frozen.profile_id, version: frozen.version },
       select: { version: true, config: true },

@@ -16,7 +16,7 @@ describe('facturación desde contrato · snapshot económico', () => {
     const service = Object.create(InvoicingService.prototype) as any;
     service.prisma = {
       invoice_profiles: {
-        findFirst: jest.fn().mockResolvedValue({ id: 4, operation_type: '09' }),
+        findFirst: jest.fn().mockResolvedValue({ id: 4, operation_type: '01', state: 'inactive' }),
       },
       invoice_profile_versions: {
         findFirst: jest.fn().mockResolvedValue({
@@ -33,7 +33,7 @@ describe('facturación desde contrato · snapshot económico', () => {
     await expect(service.assertFrozenContractInvoiceProfile(profile)).resolves.toBeUndefined();
     expect(service.prisma.invoice_profiles.findFirst).toHaveBeenCalledWith({
       where: { id: 4 },
-      select: { id: true, operation_type: true },
+      select: { id: true },
     });
     expect(service.prisma.invoice_profile_versions.findFirst).toHaveBeenCalledWith({
       where: { profile_id: 4, version: 2 },
@@ -41,12 +41,15 @@ describe('facturación desde contrato · snapshot económico', () => {
     });
   });
 
-  it('rechaza deriva de configuración sin consultar perfil activo', async () => {
+  it('rechaza deriva de versión histórica aunque el perfil actual se haya editado', async () => {
     const service = serviceWith({ aiu: { regime: 'decreto_1372_1992' } });
     await expect(service.assertFrozenContractInvoiceProfile(profile)).rejects.toMatchObject({
       errorCode: 'INVOICING_CALC_001',
     });
-    expect(service.prisma.invoice_profiles.findFirst.mock.calls[0][0].where).toEqual({ id: 4 });
+    expect(service.prisma.invoice_profiles.findFirst.mock.calls[0][0]).toEqual({
+      where: { id: 4 },
+      select: { id: true },
+    });
   });
 
   it('detecta cualquier diferencia al recalcular la factura congelada', () => {

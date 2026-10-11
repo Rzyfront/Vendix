@@ -171,8 +171,8 @@ function serviceFixture(options: {
     invoice_profiles: {
       findFirst: jest.fn(async () => options.profile ?? {
         id: 81,
-        operation_type: '09',
-        state: 'archived',
+        operation_type: '01',
+        state: 'inactive',
         current_version: 999,
       }),
     },
@@ -294,7 +294,7 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
     expect(fixture.tx.contracts.updateMany).not.toHaveBeenCalled();
     expect(fixture.prisma.invoice_profiles.findFirst).toHaveBeenCalledWith({
       where: { id: 81 },
-      select: { id: true, operation_type: true },
+      select: { id: true },
     });
     expect(fixture.prisma.invoice_profile_versions.findFirst).toHaveBeenCalledWith({
       where: { profile_id: 81, version: 4 },
