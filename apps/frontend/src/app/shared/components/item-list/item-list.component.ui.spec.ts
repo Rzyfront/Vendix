@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const source = readFileSync(join(__dirname, 'item-list.component.ts'), 'utf8');
+const styles = readFileSync(join(__dirname, 'item-list.component.scss'), 'utf8');
 
 describe('item-list custom badge style source guards', () => {
   it('preserves the existing six-digit hex background and border colors', () => {
@@ -23,5 +24,24 @@ describe('item-list custom badge style source guards', () => {
     expect(source).toContain('field.defaultValue ?? \'-\'');
     expect(source).toContain('getFooterValue(item: any): string');
     expect(source).toContain('config.footerDefaultValue ?? \'-\'');
+  });
+});
+
+describe('item-list action touch target source guards', () => {
+  it('keeps direct actions, overflow trigger, and overflow menu items touch-sized', () => {
+    const actionStyles = styles.match(/\.footer-action-btn\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const menuItemStyles = styles.match(/\.menu-item\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+    expect(actionStyles).toContain('width: 44px;');
+    expect(actionStyles).toContain('height: 44px;');
+    expect(actionStyles).toContain('min-width: 44px;');
+    expect(menuItemStyles).toContain('min-height: 44px;');
+    expect(styles).toContain(':focus-visible');
+  });
+
+  it('avoids animated transforms and transitions when reduced motion is preferred', () => {
+    expect(styles).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(styles).toContain('transition: none;');
+    expect(styles).toContain('transform: none;');
   });
 });

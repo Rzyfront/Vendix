@@ -128,7 +128,10 @@
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  transition: all var(--transition-fast) ease;
+  transition:
+    border-color var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease,
+    transform var(--transition-fast) ease;
   cursor: pointer;
 
   &:hover {
@@ -479,8 +482,11 @@
 }
 
 .footer-action-btn {
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -489,7 +495,16 @@
   border-radius: var(--radius-md, 8px);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
 
   &:hover:not(:disabled) {
     transform: translateY(-1px);
@@ -601,7 +616,7 @@
 // Dropdown Menu
 .card-menu-dropdown {
   position: absolute;
-  bottom: 40px;
+  bottom: 48px;
   right: 0;
   min-width: 140px;
   background-color: var(--color-surface);
@@ -617,14 +632,23 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
   padding: 10px 14px;
   background: transparent;
   border: none;
   font-size: var(--fs-sm);
   color: var(--color-text-primary);
   cursor: pointer;
-  transition: all var(--transition-fast) ease;
+  transition:
+    background-color var(--transition-fast) ease,
+    color var(--transition-fast) ease;
   text-align: left;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: -2px;
+  }
 
   &:hover:not(:disabled) {
     background-color: var(--color-muted);
@@ -681,6 +705,22 @@
   &.menu-item-disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item-card,
+  .card-avatar-wrapper .card-avatar,
+  .footer-action-btn,
+  .menu-item {
+    transition: none;
+  }
+
+  .item-card:hover,
+  .item-card:active,
+  .avatar-clickable:hover .card-avatar,
+  .footer-action-btn:hover:not(:disabled) {
+    transform: none;
   }
 }
 
@@ -797,8 +837,8 @@
 
   // Footer actions
   .footer-action-btn {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     background-color: var(--color-neutral-50); // Slate-50
     color: var(--color-neutral-600); // Slate-600
 
