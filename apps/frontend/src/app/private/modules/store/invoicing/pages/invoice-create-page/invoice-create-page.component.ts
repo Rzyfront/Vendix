@@ -20,7 +20,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Actions, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import {
@@ -84,6 +84,8 @@ import {
   Invoice,
   InvoiceResolution,
 } from '../../interfaces/invoice.interface';
+import { canEditContractInvoice } from '../../interfaces/invoice-contract-editability';
+import { InvoicingService } from '../../services/invoicing.service';
 import {
   EmitReadinessVerdict,
   InvoiceEmitReadiness,
@@ -1629,6 +1631,14 @@ export function mergeRequirementsByTarget(
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       />
+
+      @if (contractInvoiceEditRedirecting()) {
+        <div class="mx-auto max-w-3xl p-4" role="status" aria-live="polite">
+          <app-alert-banner variant="warning" heading="Factura contractual de solo lectura">
+            Se está abriendo la factura ligada al contrato. Su economía proviene del acuerdo congelado y no puede editarse ni volver a numerarse.
+          </app-alert-banner>
+        </div>
+      } @else {
 
       <!--
         SEPARACIÓN ENTRE SECCIONES. Estaban a «space-y-2» (0,5 rem) sobre
@@ -3241,6 +3251,7 @@ export function mergeRequirementsByTarget(
           />
         </aside>
       </div>
+      }
     </div>
 
     <app-customer-modal
@@ -3541,6 +3552,8 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly store = inject(Store);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  private readonly invoicingService = inject(InvoicingService);
   private readonly actions$ = inject(Actions);
   private readonly destroyRef = inject(DestroyRef);
   private readonly dialogService = inject(DialogService);
@@ -3601,6 +3614,8 @@ export class InvoiceCreatePageComponent implements OnInit {
   // ── Estado de UI ────────────────────────────────────────────
   readonly mode = signal<'manual' | 'from_order'>('manual');
   readonly submitting = signal(false);
+  /** Keeps every editor control unmounted while a requested invoice is checked. */
+  readonly contractInvoiceEditRedirecting = signal(false);
   readonly customerModalOpen = signal(false);
   readonly productPickerOpen = signal(false);
 
@@ -7089,6 +7104,7 @@ export class InvoiceCreatePageComponent implements OnInit {
         debounceTime(800),
         filter(
           () =>
+            !this.contractInvoiceEditRedirecting() &&
             !this.submitting() &&
             !this.checkingEmitReadiness() &&
             !this.validatingDraft() &&
@@ -7218,6 +7234,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     // E.1 — biblioteca de la organización y config activa de la tienda para
     // la sección Formato. Lecturas de otro dominio, pedidas una sola vez.
     this.loadPrintFormats();
+    this.redirectContractInvoiceEdit();
 
     // LAS RESOLUCIONES SE PIDEN AQUÍ. En el modal las traía el contenedor del
     // listado, que vive bajo el shell del módulo; esta vista cuelga FUERA de ese
@@ -7225,6 +7242,40 @@ export class InvoiceCreatePageComponent implements OnInit {
     // el efecto de que la factura se numeraría a ciegas.
     this.store.dispatch(loadResolutions());
     this.initializeCapture();
+  }
+
+  /** Contract drafts are opened in invoice detail; this capture page never edits them. */
+  private redirectContractInvoiceEdit(): void {
+    const rawId =
+      this.route.snapshot.queryParamMap.get('editInvoiceId') ??
+      this.route.snapshot.queryParamMap.get('invoiceId');
+    if (!rawId || !/^\d+$/.test(rawId)) return;
+    const invoiceId = Number(rawId);
+    if (!Number.isSafeInteger(invoiceId) || invoiceId <= 0) return;
+
+    this.contractInvoiceEditRedirecting.set(true);
+    this.invoicingService
+      .getInvoice(invoiceId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ data }) => {
+          if (!data || data.id !== invoiceId) {
+            this.toastService.error('No se pudo verificar la factura solicitada; la captura permanece bloqueada.');
+            return;
+          }
+          if (canEditContractInvoice(data)) {
+            // This page remains a create flow; preserve its normal behavior for
+            // non-contract invoices rather than applying contract restrictions.
+            this.contractInvoiceEditRedirecting.set(false);
+            return;
+          }
+          this.toastService.info('El borrador pertenece a un contrato y conserva un acuerdo económico congelado. Se abrirá su detalle de solo lectura.');
+          void this.router.navigate(['/admin/invoicing/invoices'], {
+            queryParams: { invoiceId },
+          });
+        },
+        error: () => this.toastService.error('No se pudo verificar la factura solicitada; la captura permanece bloqueada.'),
+      });
   }
 
   /**
@@ -8664,6 +8715,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   // ── Envío ───────────────────────────────────────────────────
 
   onSubmit(): void {
+    if (this.contractInvoiceEditRedirecting()) return;
     if (this.submitting()) return;
 
     // El borrador de esta sesión YA existe: el modal sigue abierto sólo porque
@@ -8752,6 +8804,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   private createInvoiceNow(payload: CreateInvoiceDto): void {
+    if (this.contractInvoiceEditRedirecting()) return;
     if (this.submitting()) return;
     this.submitting.set(true);
     this.store.dispatch(createInvoice({ invoice: payload }));
@@ -9648,6 +9701,7 @@ export class InvoiceCreatePageComponent implements OnInit {
    * la DIAN, aritmética recompuesta, resolución y clave técnica.
    */
   onValidateDraft(): void {
+    if (this.contractInvoiceEditRedirecting()) return;
     if (this.mode() !== 'manual') return;
     if (
       this.submitting() ||

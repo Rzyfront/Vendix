@@ -23,6 +23,7 @@ import {
   InvoiceTax,
   resolveInvoiceAiuTaxableBasis,
 } from '../../interfaces/invoice.interface';
+import { canEditContractInvoice } from '../../interfaces/invoice-contract-editability';
 import { InvoicingService } from '../../services/invoicing.service';
 import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
@@ -63,6 +64,7 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
@@ -85,6 +87,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     ReactiveFormsModule,
     ButtonComponent,
     IconComponent,
+    AlertBannerComponent,
     DianEventRegisterModalComponent,
     InvoiceNoteCreateComponent,
   ],
@@ -97,6 +100,11 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
       >
       @if (detail(); as inv) {
         <div class="p-4">
+          @if (!canEditContractInvoice(inv)) {
+            <app-alert-banner variant="warning" heading="Acuerdo económico congelado" class="mb-4 block">
+              Esta factura pertenece al contrato #{{ inv.contract_id }} y conserva el snapshot aceptado. No se puede editar el borrador ni volver a capturar sus importes; sí puedes validar, enviar a la DIAN o cancelar el borrador con las acciones disponibles.
+            </app-alert-banner>
+          }
           <!-- ── RECHAZO DE LA DIAN ────────────────────────────────────────
                Aqui, y no en un toast: dian_errors[] puede traer N reglas
                («FAB10a: Valor del CUFE no esta calculado correctamente»), y
@@ -1258,6 +1266,8 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     `
 })
 export class InvoiceDetailComponent {
+  readonly canEditContractInvoice = canEditContractInvoice;
+
   /**
    * `model()` publica su propio `isOpenChange`. El `output()` manual que habia
    * aqui era un segundo canal para el mismo estado: el padre se enteraba del
