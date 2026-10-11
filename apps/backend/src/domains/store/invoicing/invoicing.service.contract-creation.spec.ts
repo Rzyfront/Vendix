@@ -14,8 +14,12 @@ const CONTEXT = {
   is_owner: true,
 };
 
-function frozenContract(overrides: Record<string, unknown> = {}) {
+function frozenContract(
+  overrides: Record<string, unknown> = {},
+  profileContractObject = 'Construcción de bodega industrial',
+) {
   const config = buildDefaultAiuProfileConfig('Construcción de bodega industrial');
+  config.aiu!.contract_object = profileContractObject;
   config.aiu!.accounting_model = 'sumada';
   config.taxes.rules = [
     { bucket: 'administracion', taxable: true, tax_code: '01', rate: '19.00', taxable_basis: 'aiu' },
@@ -97,9 +101,10 @@ function serviceFixture(options: {
   customer?: any;
   historicalConfig?: any;
   profile?: any;
+  profileContractObject?: string;
   failLineTaxPersist?: boolean;
 } = {}) {
-  const source = frozenContract();
+  const source = frozenContract({}, options.profileContractObject);
   const contract = options.contract ?? source.row;
   const freshContract = options.freshContract ?? contract;
   const sequence: string[] = [];
@@ -300,6 +305,19 @@ describe('InvoicingService.createInvoiceFromContract (integración con motor rea
     expect(fixture.prisma.store_settings.findUnique).not.toHaveBeenCalled();
     expect(result.contract_id).toBe(5);
     expect(result.status).toBe('draft');
+  });
+
+  it('acepta objeto explícito de cotización aunque el default del perfil congelado esté vacío', async () => {
+    const fixture = serviceFixture({ profileContractObject: '' });
+    const result = await RequestContextService.runIsolated(CONTEXT, () =>
+      fixture.service.createInvoiceFromContract(5),
+    );
+    const data = fixture.tx.invoices.create.mock.calls[0][0].data;
+
+    expect(fixture.source.economic.invoice_profile.config.aiu?.contract_object).toBe('');
+    expect(data.aiu_contract_object).toBe('Construcción de bodega industrial');
+    expect(result.contract_id).toBe(5);
+    expect(fixture.generator.generateNextNumber).toHaveBeenCalledTimes(1);
   });
 
   it('rechaza una versión histórica distinta sin leer el perfil vigente ni numerar', async () => {

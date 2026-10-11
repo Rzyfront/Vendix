@@ -74,6 +74,7 @@ import {
   resolveOrderDianPaymentMeans,
 } from '../payments/order-payment-means.contract';
 import {
+  blockingIssues,
   regimeFromTaxableBasis,
   resolveAiuTaxableBasis,
   validateInvoiceProfileConfig,
@@ -4131,8 +4132,9 @@ export class InvoicingService {
     const profile_issues = validateInvoiceProfileConfig(config, {
       operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
     });
-    if (profile_issues.length > 0) {
-      throw buildProfileConfigException(profile_issues, {
+    const blocking_profile_issues = blockingIssues(profile_issues);
+    if (blocking_profile_issues.length > 0) {
+      throw buildProfileConfigException(blocking_profile_issues, {
         profile_id: draft.invoice_profile.profile_id,
         operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
       });
