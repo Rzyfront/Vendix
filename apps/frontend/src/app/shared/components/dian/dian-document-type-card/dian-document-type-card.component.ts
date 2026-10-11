@@ -112,7 +112,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
 
         <!-- Checklist resumido -->
         @if (summary().notEvaluated) {
-          <p class="text-xs text-[var(--color-text-secondary)]">
+          <p class="text-xs text-[var(--color-text-primary)]">
             Este eje todavía no tiene configuración DIAN. Mientras no la tenga no
             emite documentos electrónicos, y sus documentos se siguen entregando
             en el formato no electrónico de la tienda.
@@ -121,7 +121,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
           <div class="flex flex-col gap-2">
             <!-- Progreso -->
             <div
-              class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"
+              class="flex items-center gap-2 text-xs text-[var(--color-text-primary)]"
             >
               <app-icon
                 [name]="summary().ready ? 'check-circle' : 'list-checks'"
@@ -133,7 +133,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                 "
               ></app-icon>
               @if (summary().ready) {
-                <span class="text-[var(--color-success)] font-medium">
+                <span class="text-[var(--color-text-primary)] font-medium">
                   Listo para emitir en producción
                 </span>
               } @else {
@@ -148,7 +148,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             @if (summary().todo.length) {
               <div class="flex flex-col gap-1">
                 <p
-                  class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+                  class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-primary)]"
                 >
                   Lo que falta hacer
                 </p>
@@ -164,12 +164,12 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                         check.label
                       }}</span>
                       @if (check.action) {
-                        <span class="text-[var(--color-text-secondary)]">
+                        <span class="text-[var(--color-text-primary)]">
                           — {{ check.action }}</span
                         >
                       }
                       @if (check.owner === 'platform') {
-                        <span class="text-[var(--color-text-secondary)] italic">
+                        <span class="text-[var(--color-text-primary)] italic">
                           (lo resuelve Vendix)</span
                         >
                       }
@@ -177,7 +177,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                   </div>
                 }
                 @if (hiddenTodoCount(); as extra) {
-                  <p class="text-[11px] text-[var(--color-text-secondary)] pl-5">
+                  <p class="text-[11px] text-[var(--color-text-primary)] pl-5">
                     y {{ extra }} más
                   </p>
                 }
@@ -188,13 +188,13 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             @if (summary().waiting.length) {
               <div class="flex flex-col gap-1">
                 <p
-                  class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+                  class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-primary)]"
                 >
                   Esperando a la DIAN
                 </p>
                 @for (check of summary().waiting; track check.key) {
                   <div
-                    class="flex items-start gap-2 text-xs text-[var(--color-text-secondary)]"
+                    class="flex items-start gap-2 text-xs text-[var(--color-text-primary)]"
                   >
                     <app-icon
                       name="hourglass"
@@ -204,7 +204,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                     <span class="min-w-0">{{ check.label }}</span>
                   </div>
                 }
-                <p class="text-[11px] text-[var(--color-text-secondary)] pl-5">
+                <p class="text-[11px] text-[var(--color-text-primary)] pl-5">
                   Nuestra parte está hecha. No hay nada que reenviar: repetir el
                   envío consume un bloque nuevo de consecutivos autorizados que no
                   se recupera.
@@ -216,7 +216,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             @if (summary().warnings.length) {
               <div class="flex flex-col gap-1">
                 <p
-                  class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+                  class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-primary)]"
                 >
                   Avisos — no bloquean la emisión
                 </p>
@@ -227,7 +227,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
                       [size]="13"
                       class="text-[var(--color-warning)] shrink-0 mt-0.5"
                     ></app-icon>
-                    <span class="min-w-0 text-[var(--color-text-secondary)]">
+                    <span class="min-w-0 text-[var(--color-text-primary)]">
                       {{ check.label }}
                       @if (detailOf(check); as detail) {
                         <span class="font-medium">· {{ detail }}</span>
@@ -252,7 +252,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             <app-button
               size="sm"
               [variant]="summary().notEvaluated ? 'primary' : 'outline'"
-              customClasses="w-full sm:w-auto"
+              customClasses="min-h-11 w-full sm:w-auto"
               [disabled]="busy()"
               (clicked)="configure.emit(axis())"
             >
@@ -265,7 +265,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             </app-button>
           } @else if (writeBlockedReason(); as reason) {
             <p
-              class="text-[11px] text-[var(--color-text-secondary)] flex items-start gap-1.5"
+              class="text-[11px] text-[var(--color-text-primary)] flex items-start gap-1.5"
             >
               <app-icon name="lock" [size]="12" class="shrink-0 mt-0.5"></app-icon>
               <span>{{ reason }}</span>
@@ -276,7 +276,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             <app-button
               size="sm"
               variant="primary"
-              customClasses="w-full sm:w-auto"
+              customClasses="min-h-11 w-full sm:w-auto"
               [disabled]="busy()"
               (clicked)="viewDetail.emit(axis())"
             >
