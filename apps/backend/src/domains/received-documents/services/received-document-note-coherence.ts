@@ -101,7 +101,7 @@ export async function evaluateReceivedDocumentNoteCoherence(
   }
   if (!isNote(note)) return { allowed: true };
 
-  const originalKey = note.original_reference_key?.trim() ?? '';
+  const originalKey = note.original_reference_key?.trim().toLowerCase() ?? '';
   const originalNumber = note.original_reference_number?.trim() ?? '';
   const noteSupplierNit = normalizedNit(note.issuer_tax_id);
   if (!originalKey && (!originalNumber || !noteSupplierNit)) {
@@ -177,7 +177,7 @@ export async function evaluateReceivedDocumentNoteCoherence(
   if (
     !original || original.document_type.trim().toLowerCase() !== 'invoice' ||
     normalizedNit(original.issuer_tax_id) !== noteSupplierNit ||
-    (originalKey ? original.document_key !== originalKey : original.invoice_number !== originalNumber)
+    (originalKey ? original.document_key?.trim().toLowerCase() !== originalKey : original.invoice_number !== originalNumber)
   ) {
     return {
       allowed: false,

@@ -76,6 +76,16 @@ describe('evaluateReceivedDocumentNoteCoherence', () => {
     expect(db.db.$queryRaw).not.toHaveBeenCalled();
   });
 
+  it('normalizes a raw uppercase CUFE reference against its canonical lowercase original', async () => {
+    const canonicalCufe = 'a'.repeat(96);
+    const db = client({
+      document: { ...note, original_reference_key: canonicalCufe.toUpperCase() },
+      candidates: [{ ...invoice, document_key: canonicalCufe }],
+    });
+    await expect(evaluateReceivedDocumentNoteCoherence(db.transactionClient, context, note.id)).resolves.toEqual({ allowed: true });
+    expect(db.db.received_documents.findMany.mock.calls[0][0].where).toHaveProperty('document_key', canonicalCufe);
+  });
+
   it('fails closed for a missing or ambiguous original', async () => {
     await expect(evaluateReceivedDocumentNoteCoherence(client({ candidates: [] }).transactionClient, context, note.id))
       .resolves.toMatchObject({ allowed: false, reason: 'original_unknown' });
