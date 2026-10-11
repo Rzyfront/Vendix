@@ -272,7 +272,7 @@ export class ButtonComponent {
       ],
       outline: [
         'btn-outline-border',
-        'text-[var(--color-primary)]',
+        'text-[var(--color-text-primary)]',
         'focus:ring-[var(--color-primary)]/50',
       ],
       'outline-secondary': [

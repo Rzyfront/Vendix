@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const source = readFileSync(join(__dirname, 'button.component.ts'), 'utf8');
+const variants = source.match(/const variantClasses = \{([\s\S]*?)\n    \};/)?.[1] ?? '';
+const outlineVariant = variants.match(/\boutline:\s*\[([\s\S]*?)\],/)?.[1] ?? '';
 
 describe('ButtonComponent keyboard focus source guards', () => {
   it('provides every variant a solid high-contrast focus-visible outline', () => {
@@ -23,5 +25,16 @@ describe('ButtonComponent keyboard focus source guards', () => {
     expect(source).toContain('<ng-content></ng-content>');
     expect(source).not.toContain('@if (!loading() || showTextWhileLoading())');
     expect(source).not.toContain('[attr.aria-hidden]');
+  });
+
+  it('uses text-primary only for standard outline foreground and preserves its branded border and focus ring', () => {
+    expect(outlineVariant).toContain("'text-[var(--color-text-primary)]'");
+    expect(outlineVariant).toContain("'btn-outline-border'");
+    expect(outlineVariant).toContain("'focus:ring-[var(--color-primary)]/50'");
+    expect(outlineVariant).not.toContain("'text-[var(--color-primary)]'");
+
+    const secondaryOutline = variants.match(/'outline-secondary':\s*\[([\s\S]*?)\],/)?.[1] ?? '';
+    expect(secondaryOutline).toContain("'text-[var(--color-secondary)]'");
+    expect(secondaryOutline).toContain("'btn-outline-secondary-border'");
   });
 });
