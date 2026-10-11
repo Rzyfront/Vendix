@@ -299,6 +299,17 @@ export class ItemListComponent {
     return id as string | number;
   }
 
+  /**
+   * Stable DOM identity for a card. Rows without an id use their position as a
+   * fallback, which is intended only for frozen child rows that have no ID.
+   * The explicit namespaces keep ids (including numeric/string lookalikes)
+   * distinct from positional keys.
+   */
+  getRowTrackKey(item: any, index: number): string {
+    const id = this.getRowId(item);
+    return id === null ? `index:${index}` : `id:${typeof id}:${id}`;
+  }
+
   isRowSelected(item: any): boolean {
     const id = this.getRowId(item);
     return id === null ? false : this.selectedIds().has(id);

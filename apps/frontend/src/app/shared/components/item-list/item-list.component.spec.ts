@@ -159,4 +159,37 @@ describe('ItemListComponent mobile action partition', () => {
     expect([...direct, ...menu]).toEqual(actions);
     expect(menu.some((action) => direct.includes(action))).toBeFalse();
   });
+
+  it('retains a card node across immutable row refreshes and uses the new row for rendering and callbacks', async () => {
+    const warn = spyOn(console, 'warn').and.callThrough();
+    const first = { id: 12, order_number: 'ORD-12', total: '$ 123.456' };
+    fixture.componentRef.setInput('data', [first]);
+    await render();
+    const card = fixture.debugElement.query(By.css('.item-card')).nativeElement;
+    const refreshed = { ...first, order_number: 'ORD-12 updated' };
+    fixture.componentRef.setInput('data', [refreshed]);
+    await render();
+
+    expect(fixture.debugElement.query(By.css('.item-card')).nativeElement).toBe(card);
+    expect(card.querySelector('.card-title').textContent.trim()).toBe('ORD-12 updated');
+    expect(warn.calls.allArgs().flat().join(' ')).not.toContain('NG0956');
+
+    const clicked = jasmine.createSpy('clicked');
+    component.itemClick.subscribe(clicked);
+    card.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(clicked).toHaveBeenCalledOnceWith(refreshed);
+  });
+
+  it('creates namespaced stable track keys for nested/custom, numeric/string, and missing ids', () => {
+    fixture.componentRef.setInput('rowIdKey', 'meta.record.id');
+    expect(component.getRowTrackKey({ meta: { record: { id: 0 } } }, 0)).toBe('id:number:0');
+    expect(component.getRowTrackKey({ meta: { record: { id: '0' } } }, 0)).toBe('id:string:0');
+    expect(component.getRowTrackKey({ meta: { record: { id: '' } } }, 0)).toBe('index:0');
+    expect(component.getRowTrackKey({ meta: { record: {} } }, 1)).toBe('index:1');
+    expect(new Set([
+      component.getRowTrackKey({ meta: { record: { id: 0 } } }, 0),
+      component.getRowTrackKey({ meta: { record: { id: '0' } } }, 0),
+      component.getRowTrackKey({ meta: { record: { id: '' } } }, 0),
+    ]).size).toBe(3);
+  });
 });
