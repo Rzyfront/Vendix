@@ -134,14 +134,14 @@ interface AxisStats {
       <div class="mt-4 md:mt-6">
         @if (scopeBlockReason(); as reason) {
           <div
-            class="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-secondary)]"
+            class="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-primary)]"
           >
             {{ reason }}
           </div>
         }
 
         @if (loading()) {
-          <div class="py-10 text-center text-sm text-[var(--color-text-secondary)]">
+          <div class="py-10 text-center text-sm text-[var(--color-text-primary)]">
             Cargando habilitaciones…
           </div>
         } @else if (loadError(); as message) {
@@ -165,7 +165,7 @@ interface AxisStats {
                 <span class="rounded-lg bg-primary/10 p-2 text-primary" aria-hidden="true"><app-icon name="inbox" [size]="18" /></span>
                 <div>
                   <h2 class="text-base font-semibold text-text-primary">Recepción de documentos</h2>
-                  <p class="mt-1 text-sm text-text-secondary">La entidad fiscal es de la organización. La recepción de esta tienda se administra allí; este panel conserva el alcance fiscal actual y no cambia su configuración.</p>
+                  <p class="mt-1 text-sm text-text-primary">La entidad fiscal es de la organización. La recepción de esta tienda se administra allí; este panel conserva el alcance fiscal actual y no cambia su configuración.</p>
                 </div>
               </div>
               </app-card>
@@ -178,12 +178,12 @@ interface AxisStats {
                     <div class="flex flex-wrap items-center gap-2">
                       <h2 class="text-base font-semibold text-text-primary">Recepción de documentos</h2>
                       <app-tooltip content="La bandeja admite importación manual de XML. La conexión directa con DIAN no está implementada; la revisión y conciliación siguen siendo pasos operativos.">
-                        <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre recepción de documentos"><app-icon name="info" [size]="16" /></button>
+                        <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre recepción de documentos"><app-icon name="info" [size]="16" /></button>
                       </app-tooltip>
                     </div>
                   </div>
                 </div>
-                <p class="text-sm text-text-secondary">Importa XML manualmente, consulta el estado del comprador y revisa los documentos recibidos.</p>
+                <p class="text-sm text-text-primary">Importa XML manualmente, consulta el estado del comprador y revisa los documentos recibidos.</p>
                 <div class="mt-auto pt-2">
                 <app-button variant="primary" size="md" customClasses="h-11 min-h-11 w-full sm:w-auto" [disabled]="!canConfigureReception()" (clicked)="openReception()">
                     <span slot="icon"><app-icon name="settings" [size]="16" /></span>
@@ -192,11 +192,11 @@ interface AxisStats {
                 </div>
               </div>
               @if (readOnly()) {
-                <p class="mt-3 text-xs text-text-secondary" role="note">Modo consulta: la configuración no está disponible para escritura.</p>
+                <p class="mt-3 text-xs text-text-primary" role="note">Modo consulta: la configuración no está disponible para escritura.</p>
               } @else if (!receptionScopeReady()) {
-                <p class="mt-3 text-xs text-text-secondary" role="note">La configuración de recepción requiere una entidad fiscal de tienda.</p>
+                <p class="mt-3 text-xs text-text-primary" role="note">La configuración de recepción requiere una entidad fiscal de tienda.</p>
               } @else if (!canConfigureReception()) {
-                <p class="mt-3 text-xs text-text-secondary" role="note">Tu perfil no tiene permiso para configurar esta entidad fiscal.</p>
+                <p class="mt-3 text-xs text-text-primary" role="note">Tu perfil no tiene permiso para configurar esta entidad fiscal.</p>
               }
               </app-card>
             }

@@ -203,7 +203,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
         />
       </div>
       @if (summaryError()) {
-        <p role="status" class="px-2 pb-2 text-sm text-text-secondary">
+        <p role="status" class="px-2 pb-2 text-sm text-text-primary">
           No se pudo cargar el resumen. Selecciona Actualizar en el menú de opciones para reintentar.
         </p>
       }
@@ -217,7 +217,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
             class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4"
           >
             <h2
-              class="text-[13px] font-bold text-text-secondary tracking-wide
+              class="text-[13px] font-bold text-text-primary tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
               Solicitudes de factura ({{ totalItems() }})
