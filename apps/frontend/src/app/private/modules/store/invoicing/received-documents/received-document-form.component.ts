@@ -4,7 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription, finalize } from 'rxjs';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
-import type { ManualReceivedDocumentInput, ManualReceivedDocumentItemInput, ManualReceivedDocumentTaxInput, ReceivedDocument, ReceivedDocumentReviewInput, ReceivedDocumentsScope } from './received-documents.interface';
+import type { ManualReceivedDocumentInput, ManualReceivedDocumentItemInput, ManualReceivedDocumentTaxInput, ReceivedDocument, ReceivedDocumentPaymentCondition, ReceivedDocumentReviewInput, ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 
 type TaxForm = FormGroup<{
@@ -20,7 +20,7 @@ type ItemForm = FormGroup<{
 type DocumentForm = FormGroup<{
   document_type: FormControl<string>; invoice_number: FormControl<string>; document_key: FormControl<string>; reference_key: FormControl<string>; reference_number: FormControl<string>;
   issuer_tax_id: FormControl<string>; issuer_name: FormControl<string>; receiver_tax_id: FormControl<string>; receiver_name: FormControl<string>;
-  issue_date: FormControl<string>; due_date: FormControl<string>; currency: FormControl<string>;
+  issue_date: FormControl<string>; due_date: FormControl<string>; payment_condition: FormControl<ReceivedDocumentPaymentCondition>; currency: FormControl<string>;
   subtotal_amount: FormControl<string>; discount_amount: FormControl<string>; charge_amount: FormControl<string>; tax_exclusive_amount: FormControl<string>;
   tax_inclusive_amount: FormControl<string>; tax_amount: FormControl<string>; total_amount: FormControl<string>; prepaid_amount: FormControl<string>;
   payable_rounding_amount: FormControl<string>; withholding_amount: FormControl<string>; reviewer_note: FormControl<string>;
@@ -124,7 +124,7 @@ export class ReceivedDocumentFormComponent {
       document_key: this.str(facts['document_key'] ?? doc?.document_key), reference_key: this.str(facts['reference_key'] ?? facts['original_reference_key']),
       reference_number: this.str(facts['reference_number'] ?? facts['original_reference_number']), issuer_tax_id: this.str(facts['issuer_tax_id'] ?? doc?.issuer_tax_id),
       issuer_name: this.str(facts['issuer_name'] ?? doc?.issuer_name), receiver_tax_id: this.str(facts['receiver_tax_id'] ?? doc?.receiver_tax_id), receiver_name: this.str(facts['receiver_name'] ?? doc?.receiver_name),
-      issue_date: this.dateInput(facts['issue_date'] ?? doc?.issue_date), due_date: this.dateInput(facts['due_date'] ?? doc?.due_date), currency: this.str(facts['currency'] ?? doc?.currency),
+      issue_date: this.dateInput(facts['issue_date'] ?? doc?.issue_date), due_date: this.dateInput(facts['due_date'] ?? doc?.due_date), payment_condition: this.paymentCondition(facts['payment_condition'] ?? doc?.payment_condition), currency: this.str(facts['currency'] ?? doc?.currency),
       subtotal_amount: this.str(facts['subtotal_amount'] ?? doc?.subtotal_amount), discount_amount: this.str(facts['discount_amount'] ?? doc?.discount_amount),
       charge_amount: this.str(facts['charge_amount']), tax_exclusive_amount: this.str(facts['tax_exclusive_amount']), tax_inclusive_amount: this.str(facts['tax_inclusive_amount']),
       tax_amount: this.str(facts['tax_amount'] ?? doc?.tax_amount), total_amount: this.str(facts['total_amount'] ?? doc?.total_amount), prepaid_amount: this.str(facts['prepaid_amount']),
@@ -152,7 +152,7 @@ export class ReceivedDocumentFormComponent {
     const money = (required = false) => new FormControl('', { nonNullable: true, validators: [...(required ? [Validators.required] : []), Validators.pattern(MONEY)] });
     return this.fb.group({
       document_type: text(true), invoice_number: text(true), document_key: text(), reference_key: text(), reference_number: text(),
-      issuer_tax_id: text(true), issuer_name: text(true), receiver_tax_id: text(true), receiver_name: text(true), issue_date: text(true), due_date: text(), currency: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.pattern(/^[A-Z]{3}$/)] }),
+      issuer_tax_id: text(true), issuer_name: text(true), receiver_tax_id: text(true), receiver_name: text(true), issue_date: text(true), due_date: text(), payment_condition: new FormControl<ReceivedDocumentPaymentCondition>('unknown', { nonNullable: true }), currency: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.pattern(/^[A-Z]{3}$/)] }),
       subtotal_amount: money(true), discount_amount: money(true), charge_amount: money(), tax_exclusive_amount: money(), tax_inclusive_amount: money(), tax_amount: money(true), total_amount: money(true), prepaid_amount: money(), payable_rounding_amount: new FormControl('', { nonNullable: true, validators: [Validators.pattern(NEGATIVE_MONEY)] }), withholding_amount: money(), reviewer_note: text(),
       items: this.fb.array<ItemForm>([], { validators: [Validators.minLength(1)] }), taxes: this.fb.array<TaxForm>([]),
     }) as DocumentForm;
@@ -184,7 +184,7 @@ export class ReceivedDocumentFormComponent {
     const raw = this.form.getRawValue();
     const taxes = (rows: typeof raw.taxes): ManualReceivedDocumentTaxInput[] => rows.map((tax) => ({ tax_type: tax.tax_type, scheme_code: this.optional(tax.scheme_code), tax_basis_type: tax.tax_basis_type === 'unit' || tax.tax_basis_type === 'monetary' ? tax.tax_basis_type : undefined, base_quantity: this.optional(tax.base_quantity), base_unit_code: this.optional(tax.base_unit_code), per_unit_amount: this.optional(tax.per_unit_amount), tax_name: tax.tax_name, rate: this.optional(tax.rate), base_amount: this.optional(tax.base_amount), amount: tax.amount }));
     const items: ManualReceivedDocumentItemInput[] = raw.items.map((item) => ({ external_code: this.optional(item.external_code), description: item.description, quantity: item.quantity, unit_code: this.optional(item.unit_code), unit_price: item.unit_price, discount_amount: item.discount_amount, net_amount: item.net_amount, total_amount: item.total_amount, taxes: taxes(item.taxes) }));
-    return { document_type: raw.document_type as ManualReceivedDocumentInput['document_type'], invoice_number: raw.invoice_number, document_key: this.optional(raw.document_key), reference_key: this.optional(raw.reference_key), reference_number: this.optional(raw.reference_number), issuer_tax_id: raw.issuer_tax_id, issuer_name: raw.issuer_name, receiver_tax_id: raw.receiver_tax_id, receiver_name: raw.receiver_name, issue_date: raw.issue_date, due_date: this.optional(raw.due_date), currency: raw.currency, subtotal_amount: raw.subtotal_amount, discount_amount: raw.discount_amount, charge_amount: this.optional(raw.charge_amount), tax_exclusive_amount: this.optional(raw.tax_exclusive_amount), tax_inclusive_amount: this.optional(raw.tax_inclusive_amount), tax_amount: raw.tax_amount, total_amount: raw.total_amount, prepaid_amount: this.optional(raw.prepaid_amount), payable_rounding_amount: this.optional(raw.payable_rounding_amount), withholding_amount: this.optional(raw.withholding_amount), reviewer_note: this.optional(raw.reviewer_note), items, taxes: taxes(raw.taxes) };
+    return { document_type: raw.document_type as ManualReceivedDocumentInput['document_type'], invoice_number: raw.invoice_number, document_key: this.optional(raw.document_key), reference_key: this.optional(raw.reference_key), reference_number: this.optional(raw.reference_number), issuer_tax_id: raw.issuer_tax_id, issuer_name: raw.issuer_name, receiver_tax_id: raw.receiver_tax_id, receiver_name: raw.receiver_name, issue_date: raw.issue_date, due_date: this.optional(raw.due_date), payment_condition: raw.payment_condition, currency: raw.currency, subtotal_amount: raw.subtotal_amount, discount_amount: raw.discount_amount, charge_amount: this.optional(raw.charge_amount), tax_exclusive_amount: this.optional(raw.tax_exclusive_amount), tax_inclusive_amount: this.optional(raw.tax_inclusive_amount), tax_amount: raw.tax_amount, total_amount: raw.total_amount, prepaid_amount: this.optional(raw.prepaid_amount), payable_rounding_amount: this.optional(raw.payable_rounding_amount), withholding_amount: this.optional(raw.withholding_amount), reviewer_note: this.optional(raw.reviewer_note), items, taxes: taxes(raw.taxes) };
   }
   private reviewPayload(doc: ReceivedDocument, facts: ManualReceivedDocumentInput): ReceivedDocumentReviewInput {
     return { expected_version: doc.version, reviewer_note: facts.reviewer_note, ...(this.canEditFacts(doc) ? { facts } : {}) };
@@ -214,6 +214,7 @@ export class ReceivedDocumentFormComponent {
   }
   private str(v: unknown): string { return v === null || v === undefined ? '' : typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : ''; }
   private optional(v: string): string | undefined { return v.trim() === '' ? undefined : v; }
+  private paymentCondition(value: unknown): ReceivedDocumentPaymentCondition { return value === 'cash' || value === 'credit' ? value : 'unknown'; }
   private dateInput(v: unknown): string { const s = this.str(v); return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : ''; }
   private metadata(v: unknown): Record<string, unknown> { return v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}; }
 }

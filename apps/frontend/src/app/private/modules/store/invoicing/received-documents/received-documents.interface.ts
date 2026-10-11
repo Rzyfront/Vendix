@@ -1,5 +1,9 @@
 export type ReceivedDocumentsScope = 'store' | 'organization';
 export type ReceivedDocumentType = 'invoice' | 'credit_note' | 'debit_note' | 'non_electronic';
+export type ReceivedDocumentPaymentCondition = 'cash' | 'credit' | 'unknown';
+export type StructuralValidationStatus = 'pending' | 'valid' | 'needs_review' | 'invalid';
+export type SignatureValidationStatus = 'unsigned' | 'not_verified';
+export type DianValidationStatus = 'not_checked';
 
 export interface ReceivedDocumentQuery {
   page?: number;
@@ -83,6 +87,7 @@ export interface ReceivedDocument {
   document_key: string | null;
   issue_date: string | null;
   due_date: string | null;
+  payment_condition?: ReceivedDocumentPaymentCondition | null;
   currency: string | null;
   subtotal_amount: string;
   discount_amount: string;
@@ -90,11 +95,17 @@ export interface ReceivedDocument {
   total_amount: string;
   processing_status: string;
   validation_status: string;
+  structural_validation_status?: StructuralValidationStatus | null;
+  signature_validation_status?: SignatureValidationStatus | null;
+  dian_validation_status?: DianValidationStatus | null;
   review_status: string;
   matching_status: string;
   fiscal_status: string;
   posting_status: string;
   validation_summary?: {
+    structural?: { status?: StructuralValidationStatus; errors?: Array<{ code?: string; message: string }>; warnings?: Array<{ code?: string; message: string }> } | null;
+    signature?: { status?: SignatureValidationStatus; has_signature?: boolean } | null;
+    dian?: { status?: DianValidationStatus; application_response_unverified?: boolean } | null;
     errors?: Array<{ code?: string; message: string }>;
     warnings?: Array<{ code?: string; message: string }>;
   } | null;
@@ -104,6 +115,7 @@ export interface ReceivedDocument {
   created_at: string;
   updated_at: string;
   accepted_at?: string | null;
+  confirmed_goods_at?: string | null;
   files?: ReceivedDocumentFile[];
   items?: ReceivedDocumentItem[];
   taxes?: ReceivedDocumentTax[];
@@ -186,6 +198,7 @@ export interface ManualReceivedDocumentInput {
   receiver_name: string;
   issue_date: string;
   due_date?: string;
+  payment_condition?: ReceivedDocumentPaymentCondition;
   currency: string;
   subtotal_amount: string;
   discount_amount: string;
