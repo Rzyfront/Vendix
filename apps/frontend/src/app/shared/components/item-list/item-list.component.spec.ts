@@ -160,6 +160,45 @@ describe('ItemListComponent mobile action partition', () => {
     expect(menu.some((action) => direct.includes(action))).toBeFalse();
   });
 
+  it('uses opt-in defaults for null, undefined, and empty values without changing legacy fallbacks', async () => {
+    fixture.componentRef.setInput('data', [{ id: 1, order_number: 'ORD-1', missing: undefined, nullable: null, empty: '', zero: 0, total: null }]);
+    fixture.componentRef.setInput('cardConfig', {
+      titleKey: 'order_number',
+      detailKeys: [
+        { key: 'missing', label: 'Missing', defaultValue: 'No configurado' },
+        { key: 'nullable', label: 'Nullable', defaultValue: 'No configurado' },
+        { key: 'empty', label: 'Empty', defaultValue: 'No configurado' },
+        { key: 'zero', label: 'Zero', defaultValue: 'No configurado', transform: (value: number) => `#${value}` },
+        { key: 'missing', label: 'Legacy missing' },
+        { key: 'empty', label: 'Legacy empty' },
+      ],
+      footerKey: 'total', footerDefaultValue: 'No configurado',
+    });
+    await render();
+    const item = component.data()[0];
+    const fields = component.cardConfig().detailKeys!;
+    expect(fields.slice(0, 3).map((field) => component.getDetailValue(item, field))).toEqual([
+      'No configurado', 'No configurado', 'No configurado',
+    ]);
+    expect(component.getDetailValue(item, fields[3])).toBe('#0');
+    expect(component.getDetailValue(item, fields[4])).toBe('-');
+    expect(component.getDetailValue(item, fields[5])).toBe('');
+    expect(component.getFooterValue(item)).toBe('No configurado');
+    expect(item).toEqual({ id: 1, order_number: 'ORD-1', missing: undefined, nullable: null, empty: '', zero: 0, total: null });
+  });
+
+  it('preserves legacy footer behavior and explicit zero through its transform', () => {
+    const item = { total: null, zero: 0, empty: '' };
+    fixture.componentRef.setInput('cardConfig', { titleKey: 'order_number', footerKey: 'total' });
+    expect(component.getFooterValue(item)).toBe('-');
+    fixture.componentRef.setInput('cardConfig', {
+      titleKey: 'order_number', footerKey: 'zero', footerTransform: (value: number) => `$${value}`,
+    });
+    expect(component.getFooterValue(item)).toBe('$0');
+    fixture.componentRef.setInput('cardConfig', { titleKey: 'order_number', footerKey: 'empty' });
+    expect(component.getFooterValue(item)).toBe('');
+  });
+
   it('retains a card node across immutable row refreshes and uses the new row for rendering and callbacks', async () => {
     const warn = spyOn(console, 'warn').and.callThrough();
     const first = { id: 12, order_number: 'ORD-12', total: '$ 123.456' };

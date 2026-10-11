@@ -249,7 +249,8 @@ export class ItemListComponent {
 
   getDetailValue(item: any, field: any): string {
     const value = this.getNestedValue(item, field.key);
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return field.defaultValue ?? '-';
+    if (value === '' && field.defaultValue !== undefined) return field.defaultValue;
     if (field.transform) {
       return field.transform(value, item);
     }
@@ -277,7 +278,8 @@ export class ItemListComponent {
     const footerKey = config.footerKey;
     if (!footerKey) return '';
     const value = this.getNestedValue(item, footerKey);
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return config.footerDefaultValue ?? '-';
+    if (value === '' && config.footerDefaultValue !== undefined) return config.footerDefaultValue;
     const transform = config.footerTransform;
     if (transform) {
       return transform(value, item);
