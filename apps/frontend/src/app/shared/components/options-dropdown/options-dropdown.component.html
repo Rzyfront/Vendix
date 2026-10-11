@@ -52,7 +52,7 @@
         <h3 class="dropdown-title">Acciones</h3>
       </div>
       <div class="actions-list">
-        @for (action of actions(); track action) {
+        @for (action of actions(); track action.action) {
           <button
             class="action-item"
             [class.action-primary]="action.variant === 'primary'"
@@ -104,16 +104,17 @@
       </div>
       <!-- Filters Body -->
       <div class="filters-body">
-        @for (filter of filters(); track filter) {
+        @for (filter of filters(); track filter.key) {
           <div class="filter-section">
             <div class="filter-section-header">
-              <label class="filter-label">{{ filter.label }}</label>
+              <label class="filter-label" [attr.for]="filterControlId(filter.key)">{{ filter.label }}</label>
               @if (hasActiveFilter(filter.key)) {
                 <button
                   class="clear-filter-btn"
                   (click)="onClearFilter(filter.key)"
                   type="button"
                   [title]="'Limpiar ' + filter.label.toLowerCase()"
+                  [attr.aria-label]="'Limpiar ' + filter.label.toLowerCase()"
                   >
                   <app-icon name="x" [size]="12"></app-icon>
                 </button>
@@ -122,6 +123,7 @@
             <!-- Single Select Filter -->
             @if (filter.type === 'select') {
               <app-selector
+                [id]="filterControlId(filter.key)"
                 [options]="filter.options || []"
                 [ngModel]="getFilterValue(filter.key)"
                 (valueChange)="onFilterChange(filter.key, $event)"
@@ -145,6 +147,7 @@
             @if (filter.type === 'date') {
               <input
                 type="date"
+                [id]="filterControlId(filter.key)"
                 [ngModel]="getFilterValue(filter.key)"
                 (ngModelChange)="onFilterChange(filter.key, $event)"
                 class="date-filter-input"
