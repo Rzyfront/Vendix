@@ -62,6 +62,13 @@ describe('invoice data requests UI source contract', () => {
     expect(source).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
+  it('localizes desktop status cell text as well as status badges', () => {
+    expect(source).toMatch(
+      /key: 'status',[\s\S]*?transform: \(value\) =>\s*STATUS_LABELS\[value as InvoiceDataRequestStatus\]/,
+    );
+    expect(source).toContain('badgeTransform: (value) =>');
+  });
+
   it('preserves process-only-for-submitted and treats null as a warning', () => {
     expect(source).toContain("show: (item) => item?.status === 'submitted'");
     expect(source).toContain('disabled: () => this.processingId() !== null');

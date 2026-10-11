@@ -588,6 +588,8 @@ export class InvoiceDataRequestsPageComponent {
       priority: 0,
       badge: true,
       badgeConfig: { type: 'custom', colorMap: STATUS_COLORS },
+      transform: (value) =>
+        STATUS_LABELS[value as InvoiceDataRequestStatus] ?? String(value ?? '—'),
       badgeTransform: (value) =>
         STATUS_LABELS[value as InvoiceDataRequestStatus] ?? String(value ?? '—'),
     },
