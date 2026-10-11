@@ -30,7 +30,7 @@ import { FilterValues } from '../../../../shared/components/options-dropdown/opt
     QuotationFormModalComponent,
   ],
   template: `
-    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_.inputsearch-wrapper]:!min-h-11">
+    <div class="w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:!text-base [&_select]:!text-base [&_select]:!min-h-11 [&_.inputsearch-wrapper]:!min-h-11">
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
@@ -189,8 +189,9 @@ export class QuotationsComponent {
     const status = this.filterValues()['status'];
     return status ? status as QuotationStatus : undefined;
   });
-  readonly page = signal(1);
-  readonly limit = signal(50);
+  readonly filters = signal({ page: 1, limit: 50 });
+  readonly page = computed(() => this.filters().page);
+  readonly limit = computed(() => this.filters().limit);
   readonly totalItems = signal(0);
   readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.limit()));
   readonly paginationData = computed(() => ({
@@ -239,8 +240,7 @@ export class QuotationsComponent {
         next: (response) => {
           if (requestId !== this.quotationRequestId) return;
           this.quotations.set(response.data);
-          this.page.set(response.pagination.page);
-          this.limit.set(response.pagination.limit);
+          this.filters.set({ page: response.pagination.page, limit: response.pagination.limit });
           this.totalItems.set(response.pagination.total);
           this.loading.set(false);
         },
@@ -257,25 +257,25 @@ export class QuotationsComponent {
 
   onSearch(term: string): void {
     this.searchTerm.set(term);
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.loadQuotations();
   }
 
   onFilterChange(values: FilterValues): void {
     this.filterValues.set({ ...values });
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.loadQuotations();
   }
 
   clearFilters(): void {
     this.filterValues.set({ status: '' });
     this.searchTerm.set('');
-    this.page.set(1);
+    this.filters.update((filters) => ({ ...filters, page: 1 }));
     this.loadQuotations();
   }
 
   onPageChange(page: number): void {
-    this.page.set(page);
+    this.filters.update((filters) => ({ ...filters, page }));
     this.loadQuotations();
   }
 

@@ -225,13 +225,19 @@ describe('QuotationsComponent — contract quotation flow', () => {
     quotations.getQuotations.and.returnValue(of({ data: [], pagination: { total: 121, page: 1, limit: 50, totalPages: 3 } }));
     const fixture = create();
     const component = fixture.componentInstance;
+    quotations.getQuotations.and.returnValue(of({ data: [], pagination: { total: 121, page: 3, limit: 50, totalPages: 3 } }));
     component.onPageChange(3);
     expect(quotations.getQuotations.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ page: 3, limit: 50 }));
     expect(component.totalItems()).toBe(121);
     expect(component.totalPages()).toBe(3);
+    expect(component.filters()).toEqual({ page: 3, limit: 50 });
+    expect(component.page()).toBe(3);
+    expect(component.limit()).toBe(50);
 
+    quotations.getQuotations.and.returnValue(of({ data: [], pagination: { total: 121, page: 1, limit: 50, totalPages: 3 } }));
     component.onSearch('cliente');
     expect(quotations.getQuotations.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ page: 1, search: 'cliente' }));
+    expect(component.filters()).toEqual({ page: 1, limit: 50 });
     component.onPageChange(2);
     component.onFilterChange({ status: 'sent' });
     expect(quotations.getQuotations.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ page: 1, status: 'sent' }));
