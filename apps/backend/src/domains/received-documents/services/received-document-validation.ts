@@ -81,3 +81,10 @@ export function operationalValidationStatus(
 ): 'valid' | 'needs_review' | 'invalid' {
   return summary.structural.status === 'pending' ? 'needs_review' : summary.structural.status;
 }
+
+/** Project the canonical validation snapshot into the persisted independent axes. */
+export function receivedDocumentValidationSnapshot(
+  validation: NormalizedReceivedDocument['validation'] | undefined,
+): ReceivedDocumentValidationSummary {
+  return summarizeReceivedDocumentValidation(validation);
+}

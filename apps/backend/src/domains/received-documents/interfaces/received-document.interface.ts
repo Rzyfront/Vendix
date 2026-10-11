@@ -77,7 +77,8 @@ export interface NormalizedReceivedDocument {
   document_key?: string;
   issue_date: string;
   due_date?: string;
-  payment_condition: ReceivedDocumentPaymentCondition;
+  /** Older non-XML producers may omit this; persistence must conservatively use unknown. */
+  payment_condition?: ReceivedDocumentPaymentCondition;
   currency: string;
   subtotal_amount: string;
   discount_amount: string;
