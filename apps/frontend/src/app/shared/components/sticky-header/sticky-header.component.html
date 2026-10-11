@@ -97,13 +97,13 @@
           [queryParams]="backQueryParams()"
           size="xsm"
           ariaLabel="Volver"
-          customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-border"
+          customClasses="!p-0 !w-11 !h-11 md:!w-11 md:!h-11 flex-shrink-0 !rounded-lg border border-transparent hover:border-border"
         >
           <app-icon
             slot="icon"
             name="arrow-left"
             size="16"
-            class="md:!w-[18px] md:!h-[18px] text-text-secondary"
+            class="md:!w-[18px] md:!h-[18px] text-text-primary"
           ></app-icon>
         </app-button>
       }
@@ -151,7 +151,7 @@
           <!-- Subtitle - Hidden on very small screens, visible from sm -->
           @if (subtitle()) {
             <p
-              class="sticky-header-subtitle hidden sm:block text-xs text-text-secondary font-medium truncate"
+              class="sticky-header-subtitle hidden sm:block text-xs text-text-primary font-medium truncate"
             >
               {{ subtitle() }}
             </p>
@@ -164,7 +164,7 @@
     <div class="flex items-center gap-2 md:gap-4 flex-shrink-0">
       <!-- Metadata -->
       @if (metadataContent()) {
-        <div class="hidden md:block text-xs text-text-secondary italic">
+        <div class="hidden md:block text-xs text-text-primary italic">
           {{ metadataContent() }}
         </div>
       }
@@ -181,7 +181,7 @@
               (clicked)="onActionClick(action.id)"
               size="xsm"
               [iconOnlyMobile]="!!action.icon"
-              customClasses="!rounded-[10px] !h-9 !w-9 !px-0 font-bold shadow-sm shadow-[var(--shadow-sm)] active:scale-95 transition-all md:!rounded-lg md:!h-9 md:!px-3 md:!w-auto"
+              customClasses="!rounded-[10px] !h-11 !w-11 !px-0 font-bold shadow-sm shadow-[var(--shadow-sm)] active:scale-95 transition-all md:!rounded-lg md:!h-11 md:!px-3 md:!w-auto"
             >
               @if (action.icon) {
                 <app-icon
