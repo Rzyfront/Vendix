@@ -15,6 +15,8 @@ describe('toggle touch target source guards', () => {
 
   it('preserves visible keyboard focus and honors reduced motion on the track control', () => {
     expect(source).toContain('focus-visible:shadow-');
+    expect(source).toContain('var(--color-text-primary)');
+    expect(source).not.toContain('var(--color-ring)');
     expect(source).toContain("'motion-reduce:transition-none'");
     expect(source).toContain('motion-reduce:transition-none');
   });

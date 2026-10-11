@@ -155,7 +155,7 @@ export class ToggleComponent implements ControlValueAccessor {
       // Modern: shadow-based focus
       return [
         ...baseClasses,
-        'focus-visible:shadow-[0_0_0_3px_var(--color-ring)]',
+        'focus-visible:shadow-[0_0_0_3px_var(--color-text-primary)]',
       ].join(' ');
     }
 
@@ -163,7 +163,7 @@ export class ToggleComponent implements ControlValueAccessor {
     return [
       ...baseClasses,
       'focus-visible:ring-2',
-      'focus-visible:ring-[var(--color-ring)]',
+      'focus-visible:ring-[var(--color-text-primary)]',
       'focus-visible:ring-offset-2',
     ].join(' ');
   }

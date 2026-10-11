@@ -23,7 +23,7 @@
 
   &.inputsearch-wrapper-focused {
     background-color: var(--color-surface);
-    box-shadow: constants.$modern-focus-ring;
+    box-shadow: 0 0 0 2px var(--color-text-primary);
   }
 }
 
@@ -73,7 +73,7 @@
 
   &.inputsearch-focused {
     .inputsearch-wrapper {
-      box-shadow: 0 0 0 2px var(--color-ring);
+      box-shadow: 0 0 0 2px var(--color-text-primary);
     }
   }
 
@@ -114,14 +114,14 @@
   // Estados
   &.inputsearch-wrapper-focused {
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px var(--color-ring);
+    box-shadow: 0 0 0 2px var(--color-text-primary);
   }
 
   &.inputsearch-wrapper-error {
     border-color: var(--color-destructive);
 
     &:focus {
-      box-shadow: 0 0 0 2px rgba(var(--color-error-rgb), 0.2);
+      box-shadow: 0 0 0 2px var(--color-text-primary);
     }
   }
 
@@ -174,7 +174,7 @@
   font-weight: var(--fw-regular);
 
   &::placeholder {
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
   }
 
   // Estados
@@ -275,6 +275,11 @@
     color var(--transition-fast) ease,
     transform var(--transition-fast) ease;
 
+  &:focus-visible {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: 2px;
+  }
+
   &:hover:not(:disabled) {
     background-color: var(--color-background);
     color: var(--color-text-primary);
@@ -341,7 +346,7 @@
   line-height: 1.4;
 
   .help-text {
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
   }
 
   .error-message {
@@ -359,12 +364,12 @@
 // Estados de foco para accesibilidad
 .inputsearch-wrapper:focus-within {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-ring);
+  box-shadow: 0 0 0 2px var(--color-text-primary);
 }
 
 .inputsearch-wrapper.inputsearch-wrapper-error:focus-within {
   border-color: var(--color-destructive);
-  box-shadow: 0 0 0 2px rgba(var(--color-error-rgb), 0.2);
+  box-shadow: 0 0 0 2px var(--color-text-primary);
 }
 
 // Responsive design is now handled via mobile-first in size classes above
@@ -372,10 +377,10 @@
 // Animaciones suaves
 @keyframes inputsearch-focus-in {
   from {
-    box-shadow: 0 0 0 0 var(--color-ring);
+    box-shadow: 0 0 0 0 var(--color-text-primary);
   }
   to {
-    box-shadow: 0 0 0 2px var(--color-ring);
+    box-shadow: 0 0 0 2px var(--color-text-primary);
   }
 }
 
@@ -392,6 +397,12 @@
 
 .inputsearch-clear {
   animation: inputsearch-clear-appear 0.15s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inputsearch-clear {
+    animation: none;
+  }
 }
 
 // Tema oscuro: bloque eliminado. Re-seteaba --color-surface, --color-border,

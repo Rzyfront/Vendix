@@ -24,5 +24,13 @@ describe('inputsearch touch target source guards', () => {
     expect(styles).toContain('@media (prefers-reduced-motion: reduce)');
     expect(styles).toContain('transition: none;');
     expect(styles).toContain('transform: none;');
+    expect(styles).toContain('outline: 2px solid var(--color-text-primary);');
+    expect(styles).not.toContain('var(--color-ring)');
+  });
+
+  it('uses readable theme foregrounds for placeholder and help text', () => {
+    expect(styles).toContain('color: var(--color-text-primary);');
+    expect(styles).not.toContain('.help-text {\n    color: var(--color-text-secondary);');
+    expect(styles).not.toContain('color: var(--color-text-muted);');
   });
 });
