@@ -76,6 +76,26 @@ describe('QuotationProfilesComponent', () => {
     expect(fixture.nativeElement.querySelector('app-pagination')).toBeTruthy();
   });
 
+  it('backs up to the new last page when deleting the only row of page three', async () => {
+    await setup();
+    const secondPageRow = { ...profile, id: 40, name: 'Último perfil vigente' };
+    service.getProfiles.and.returnValues(
+      of({ data: [], total: 40, page: 3, limit: 20 }),
+      of({ data: [secondPageRow], total: 40, page: 2, limit: 20 }),
+    );
+    fixture.componentInstance.page.set(3);
+    fixture.componentInstance.load();
+    fixture.detectChanges();
+
+    expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 3, limit: 20 }));
+    expect(service.getProfiles).toHaveBeenCalledWith(jasmine.objectContaining({ page: 2, limit: 20 }));
+    expect(fixture.componentInstance.page()).toBe(2);
+    expect(fixture.componentInstance.profiles()).toEqual([secondPageRow]);
+    expect(fixture.nativeElement.textContent).toContain('Último perfil vigente');
+    expect(fixture.nativeElement.textContent).not.toContain('Aún no hay perfiles');
+    expect(fixture.nativeElement.querySelector('app-pagination')).toBeTruthy();
+  });
+
   it('ignores stale list responses and clears a pending search timer on destroy', async () => {
     await setup();
     const component = fixture.componentInstance;

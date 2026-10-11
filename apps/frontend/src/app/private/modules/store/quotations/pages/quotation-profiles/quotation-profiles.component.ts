@@ -61,9 +61,9 @@ import { QuotationProfilesService } from '../../services/quotation-profiles.serv
       } @else {
         <div class="px-2 pb-2 pt-3 md:p-4">
           <app-responsive-data-view [data]="profiles()" [columns]="tableColumns" [actions]="tableActions()" [cardConfig]="cardConfig" [loading]="isLoading()" />
-          <app-pagination [currentPage]="page()" [totalPages]="totalPages()" [total]="total()" [limit]="limit()" (pageChange)="changePage($event)" />
         </div>
       }
+      <app-pagination [currentPage]="page()" [totalPages]="totalPages()" [total]="total()" [limit]="limit()" (pageChange)="changePage($event)" />
       </app-card>
       @if (expandedId() !== null) {
         <section class="mt-4" aria-label="Historial de versiones">
@@ -183,12 +183,24 @@ export class QuotationProfilesComponent implements OnInit, OnDestroy {
   load(): void {
     if (!this.canRead()) return;
     const sequence = ++this.loadSequence;
+    const requestedPage = this.page();
     this.isLoading.set(true);
     this.errorMessage.set('');
     this.profilesService.getProfiles({ page: this.page(), limit: this.limit(), search: this.search().trim() || undefined, state: (this.state() || undefined) as 'active' | 'inactive' | undefined })
       .pipe(finalize(() => { if (sequence === this.loadSequence) this.isLoading.set(false); }), takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (result) => { if (sequence !== this.loadSequence) return; this.profiles.set(result.data); this.total.set(result.total); this.page.set(result.page); },
+        next: (result) => {
+          if (sequence !== this.loadSequence) return;
+          const lastPage = result.total > 0 ? Math.ceil(result.total / this.limit()) : 1;
+          if (requestedPage > lastPage) {
+            this.page.set(lastPage);
+            this.load();
+            return;
+          }
+          this.profiles.set(result.data);
+          this.total.set(result.total);
+          this.page.set(result.total > 0 ? result.page : 1);
+        },
         error: (error) => { if (sequence === this.loadSequence) this.errorMessage.set(extractApiErrorMessage(error)); },
       });
   }
