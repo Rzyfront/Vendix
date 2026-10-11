@@ -7893,6 +7893,10 @@ model quotations {
   /// C.1 congela la version vigente en el contrato (ADR-03); esta columna es
   /// solo el puntero vivo al perfil, nunca el snapshot.
   profile_id           Int?
+  /// Snapshot económico AIU del perfil de facturación al cotizar. Nullable
+  /// para preservar cotizaciones históricas sin reescritura; nunca es una
+  /// referencia viva al perfil.
+  contract_economic_snapshot Json?
   created_at           DateTime?             @default(now()) @db.Timestamp(6)
   updated_at           DateTime?             @default(now()) @db.Timestamp(6)
 
