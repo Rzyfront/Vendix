@@ -24,4 +24,9 @@ describe('table custom badge color fallback source guards', () => {
     expect(source).toContain('return `color-mix(in srgb, ${color} 30%, transparent)`;');
     expect(source).not.toMatch(/color-mix\([^\n]*(?:#[0-9a-f]{3,8}\b|rgba?\(\s*\d)/i);
   });
+
+  it('keeps configured hex/RGB text colors and uses a theme foreground for CSS tokens/names', () => {
+    expect(source).toContain("return color.startsWith('#') || color.startsWith('rgb')");
+    expect(source).toContain("? color\n        : 'var(--color-text-primary)';");
+  });
 });

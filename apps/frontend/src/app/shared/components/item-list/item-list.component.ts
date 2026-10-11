@@ -218,13 +218,19 @@ export class ItemListComponent {
     }
     if (color) {
       let bg = color;
+      let textColor = color;
+      let borderColor = `1px solid ${color}40`;
       if (color.startsWith('#') && color.length === 7) {
         bg = `${color}26`;
+      } else {
+        bg = `color-mix(in srgb, ${color} 15%, transparent)`;
+        textColor = 'var(--color-text-primary)';
+        borderColor = `1px solid color-mix(in srgb, ${color} 25%, transparent)`;
       }
       return {
         'background-color': bg,
-        color: color,
-        border: `1px solid ${color}40`,
+        color: textColor,
+        border: borderColor,
       };
     }
     return {};
