@@ -48,17 +48,17 @@ export class ReceivedBuyerEventCommandComponent {
   readonly uncertainCode = signal<BuyerCommandCode | null>(null);
   readonly permission = computed(() => this.auth.hasPermission(`${this.scope() === 'store' ? 'invoicing' : 'organization:invoicing'}:received:events:emit`));
   readonly listQueryParams = computed(() => this.scope() === 'organization' && this.storeId() ? { store_id: this.storeId() } : undefined);
+  readonly hasPriorAcceptance = computed(() => !!this.document().accepted_at || (this.document().events ?? []).some((event) => event.event_type === 'BUYER_DIAN_EVENT' && ['033', '034'].includes(event.event_code ?? '') && event.status === 'accepted'));
   readonly form = new FormGroup({ concept: new FormControl<BuyerClaimConcept | ''>('', Validators.required), reason: new FormControl('', [Validators.required, Validators.maxLength(500), (control) => typeof control.value === 'string' && control.value.trim().length > 0 ? null : { required: true }]) });
   readonly formStatus = toSignal(this.form.statusChanges.pipe(startWith(this.form.status)), { initialValue: this.form.status });
-  readonly canEmit = computed(() => this.permission() && !this.pending() && !this.checking() && !!this.readiness()?.ready && (!this.uncertain() || !!this.key()) && (this.selected() !== '031' || this.formStatus() === 'VALID'));
+  readonly canEmit = computed(() => this.permission() && !this.pending() && !this.checking() && !!this.readiness()?.ready && (!this.uncertain() || !!this.key()) && (this.selected() !== '031' || this.formStatus() === 'VALID') && !(['031', '033'].includes(this.selected() ?? '') && this.hasPriorAcceptance()));
   readonly globallyLocked = computed(() => !!this.uncertainCode() || (this.document().events ?? []).some((event) => event.event_type === 'BUYER_DIAN_EVENT' && ['preparing', 'prepared', 'sending', 'unknown'].includes(event.status)));
   readonly canClose = (): boolean => !this.pending();
   private request?: Subscription;
   private readinessRequest?: Subscription;
 
   openFor(code: BuyerCommandCode): void {
-    if (!this.permission() || (this.globallyLocked() && (this.uncertainCode() !== code || this.hasServerPendingEvent()))) return;
-    if (this.isAccepted(code)) return;
+    if (!this.permission() || this.codeDisabled(code) || this.isAccepted(code)) return;
     const retryingUncertain = this.uncertainCode() === code;
     this.selected.set(code); this.error.set(null); this.result.set(null); this.uncertain.set(retryingUncertain); if (!retryingUncertain) this.key.set(this.createKey());
     this.form.reset({ concept: '', reason: '' });
@@ -71,6 +71,10 @@ export class ReceivedBuyerEventCommandComponent {
   }
   emit(): void {
     const code = this.selected(); const idempotencyKey = this.key();
+    if ((code === '031' || code === '033') && this.hasPriorAcceptance()) {
+      this.error.set(code === '031' ? 'El documento ya registra una aceptación previa; no se puede presentar un reclamo incompatible.' : 'El documento ya registra una aceptación previa; no se puede emitir otra aceptación.');
+      return;
+    }
     if (!code || !idempotencyKey || !this.canEmit()) return;
     this.pending.set(true); this.error.set(null); this.uncertain.set(false);
     const input = { event_code: code, idempotency_key: idempotencyKey, ...(code === '031' ? { claim_concept_code: this.form.controls.concept.value as BuyerClaimConcept, description: (this.form.controls.reason.value ?? '').trim() } : {}) };
@@ -97,8 +101,16 @@ export class ReceivedBuyerEventCommandComponent {
     });
   }
   blockers(): string[] { return (this.readiness()?.blockers ?? []).map((b) => BLOCKERS[b] ?? 'Hay un requisito pendiente de validar.'); }
-  codeDisabled(code: BuyerCommandCode): boolean { return this.globallyLocked() && (this.uncertainCode() !== code || this.hasServerPendingEvent()); }
-  isAccepted(code: BuyerCommandCode): boolean { return (this.document().events ?? []).some((event) => event.event_type === 'BUYER_DIAN_EVENT' && event.event_code === code && event.status === 'accepted'); }
+  codeDisabled(code: BuyerCommandCode): boolean {
+    if (code === '031' && this.hasPriorAcceptance()) return true;
+    return this.globallyLocked() && (this.uncertainCode() !== code || this.hasServerPendingEvent());
+  }
+  isAccepted(code: BuyerCommandCode): boolean {
+    const doc = this.document();
+    if (code === '032' && doc.confirmed_goods_at) return true;
+    if (code === '033' && this.hasPriorAcceptance()) return true;
+    return (doc.events ?? []).some((event) => event.event_type === 'BUYER_DIAN_EVENT' && event.event_code === code && event.status === 'accepted');
+  }
   private hasServerPendingEvent(): boolean { return (this.document().events ?? []).some((event) => event.event_type === 'BUYER_DIAN_EVENT' && ['preparing', 'prepared', 'sending', 'unknown'].includes(event.status)); }
   onClose(value: boolean): void { if (!value && !this.pending()) { this.open.set(false); this.selected.set(null); if (!this.uncertainCode()) this.key.set(null); this.result.set(null); this.error.set(null); this.uncertain.set(!!this.uncertainCode()); } }
   private createKey(): string { return `buyer-event-${this.document().id}-${crypto.randomUUID()}`; }
