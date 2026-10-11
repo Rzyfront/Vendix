@@ -30,6 +30,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { DianConfigWizardComponent } from './dian-config-wizard.component';
+import { ReceivedDocumentsConfigurationComponent } from '../../received-documents/received-documents-configuration.component';
 
 interface AxisStats {
   total: number;
@@ -71,6 +72,7 @@ interface AxisStats {
     ModalComponent,
     DianDocumentTypeCardComponent,
     DianConfigWizardComponent,
+    ReceivedDocumentsConfigurationComponent,
   ],
   template: `
     <div class="w-full">
@@ -148,6 +150,20 @@ interface AxisStats {
             }
           </div>
         }
+
+        <div class="mt-4 md:mt-6">
+          @if (fiscalScope() === 'ORGANIZATION') {
+            <app-card [responsive]="true">
+              <p class="text-sm text-text-secondary">La recepción fiscal de esta tienda se administra desde la configuración de facturación de la organización.</p>
+            </app-card>
+          } @else {
+            <app-received-documents-configuration
+              scope="store"
+              [scopeReady]="receptionScopeReady()"
+              [readOnly]="readOnly()"
+            />
+          }
+        </div>
       </div>
 
       <!-- Wizard Modal.
@@ -201,6 +217,7 @@ export class DianConfigComponent {
   readonly loadError = signal<string | null>(null);
   readonly axes = signal<FiscalReadinessAxis[]>([]);
   readonly fiscalScope = signal<string | null>(null);
+  readonly receptionScopeReady = computed(() => this.fiscalScope() === 'STORE');
 
   // Wizard
   readonly isWizardOpen = signal(false);

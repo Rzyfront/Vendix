@@ -28,6 +28,7 @@ export class ReceivedBuyerEventActivationComponent {
   readonly scope = input.required<ReceivedDocumentsScope>();
   readonly selectedStoreId = input<number | null>(null);
   readonly scopeReady = input(true);
+  readonly readOnly = input(false);
   readonly eventCodes = CODES;
   private readonly api = inject(ReceivedBuyerEventActivationService);
   private readonly auth = inject(AuthFacade);
@@ -47,7 +48,7 @@ export class ReceivedBuyerEventActivationComponent {
   readonly submitError = signal<string | null>(null);
   readonly conflict = signal(false);
   readonly configurationsTruncated = computed(() => this.options()?.configurations_truncated ?? false);
-  readonly canConfigure = computed(() => this.auth.hasPermission(`${this.scope() === 'store' ? 'invoicing' : 'organization:invoicing'}:received:events:configure`));
+  readonly canConfigure = computed(() => !this.readOnly() && this.auth.hasPermission(`${this.scope() === 'store' ? 'invoicing' : 'organization:invoicing'}:received:events:configure`));
   readonly approvedCodes = computed(() => CODES.filter((code) => this.status()?.event_codes.includes(code) ?? false));
   readonly readyCodes = computed(() => this.approvedCodes().filter((code) => this.codeStates().some((item) => item.code === code && item.readiness.ready)).length);
   readonly stateLabel = computed(() => ({ not_started: 'Sin solicitud', testing: 'En revisión', verified: 'Verificada', suspended: 'Suspendida' }[this.status()?.status ?? 'not_started']));
@@ -57,7 +58,7 @@ export class ReceivedBuyerEventActivationComponent {
     event_codes: new FormControl<ReceivedBuyerEventCode[]>([], { nonNullable: true, validators: [Validators.required] }),
   });
   private readonly formStatus = toSignal(this.form.statusChanges.pipe(startWith(this.form.status)), { initialValue: this.form.status });
-  readonly canSubmit = computed(() => this.formStatus() === 'VALID' && !this.submitLoading() && !this.conflict() && !this.optionsLoading() && this.hasSelectedValidOptions());
+  readonly canSubmit = computed(() => this.canConfigure() && this.scopeReady() && this.formStatus() === 'VALID' && !this.submitLoading() && !this.conflict() && !this.optionsLoading() && this.hasSelectedValidOptions());
   private statusRequest?: Subscription;
   private optionsRequest?: Subscription;
   private submitRequest?: Subscription;
@@ -67,8 +68,8 @@ export class ReceivedBuyerEventActivationComponent {
 
   constructor() {
     effect(() => {
-      const scope = this.scope(); const storeId = this.selectedStoreId(); const ready = this.scopeReady();
-      const key = `${scope}:${storeId ?? ''}:${ready}`;
+      const scope = this.scope(); const storeId = this.selectedStoreId(); const ready = this.scopeReady(); const readOnly = this.readOnly();
+      const key = `${scope}:${storeId ?? ''}:${ready}:${readOnly}`;
       if (key === this.contextKey) return;
       this.contextKey = key;
       untracked(() => this.resetForContext(ready ? scope : null, storeId));
@@ -80,6 +81,7 @@ export class ReceivedBuyerEventActivationComponent {
     this.open.set(true); this.loadOptions(1);
   }
   onModalChange(isOpen: boolean): void {
+    if (isOpen && (!this.canConfigure() || !this.scopeReady())) return;
     if (!isOpen && this.submitLoading()) { this.open.set(true); return; }
     this.open.set(isOpen);
     if (!isOpen) this.resetModal();
@@ -97,7 +99,7 @@ export class ReceivedBuyerEventActivationComponent {
   }
   onCodeChange(code: ReceivedBuyerEventCode, event: Event): void { this.toggleCode(code, (event.target as HTMLInputElement).checked); }
   loadOptions(page: number): void {
-    if (!this.scopeReady()) return;
+    if (!this.canConfigure() || !this.scopeReady()) return;
     this.optionsRequest?.unsubscribe();
     const generation = this.generation;
     this.optionsLoading.set(true); this.optionsError.set(null); this.page.set(page);
@@ -107,7 +109,7 @@ export class ReceivedBuyerEventActivationComponent {
     });
   }
   submit(): void {
-    if (!this.canSubmit() || !this.status()) return;
+    if (!this.canConfigure() || !this.scopeReady() || !this.canSubmit() || !this.status()) return;
     const raw = this.form.getRawValue();
     if (raw.dian_configuration_id === null || raw.evidence_id === null) return;
     this.submitRequest?.unsubscribe();

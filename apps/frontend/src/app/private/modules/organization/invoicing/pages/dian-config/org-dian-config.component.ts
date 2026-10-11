@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -19,6 +19,7 @@ import { ApiErrorService } from '../../../../../../core/services/api-error.servi
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import { OrgFiscalScopeSelectorComponent } from '../../../shared/components/org-fiscal-scope-selector.component';
+import { ReceivedDocumentsConfigurationComponent } from '../../../../store/invoicing/received-documents/received-documents-configuration.component';
 import {
   OrgDianConfigRow,
   OrgInvoicingService,
@@ -35,6 +36,7 @@ import {
     ResponsiveDataViewComponent,
     StatsComponent,
     OrgFiscalScopeSelectorComponent,
+    ReceivedDocumentsConfigurationComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -141,6 +143,13 @@ import {
           />
         </div>
       </app-card>
+
+      <app-received-documents-configuration
+        scope="organization"
+        [selectedStoreId]="requiresStoreSelector() ? selectedStoreId() : null"
+        [scopeReady]="receptionScopeReady()"
+        [readOnly]="readOnly()"
+      />
     </div>
   `,
 })
@@ -153,6 +162,7 @@ export class OrgDianConfigComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly loading = signal(false);
+  readonly readOnly = input(false);
   readonly errorMessage = signal<string | null>(null);
   readonly selectedStoreId = signal<number | null>(null);
   readonly searchTerm = signal('');
@@ -160,6 +170,7 @@ export class OrgDianConfigComponent {
   readonly rows = signal<OrgDianConfigRow[]>([]);
 
   readonly requiresStoreSelector = computed(() => this.auth.fiscalScope() === 'STORE');
+  readonly receptionScopeReady = computed(() => !this.requiresStoreSelector() || this.selectedStoreId() !== null);
   readonly enabledCount = computed(() =>
     this.rows().filter((row) => ['enabled', 'accepted', 'production'].includes(String(row.enablement_status).toLowerCase())).length,
   );
@@ -303,7 +314,7 @@ export class OrgDianConfigComponent {
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
-        const storeId = params.get('store_id');
+        const storeId = this.requiresStoreSelector() ? params.get('store_id') : null;
         this.selectedStoreId.set(storeId ? Number(storeId) : null);
         this.loadData();
       });
