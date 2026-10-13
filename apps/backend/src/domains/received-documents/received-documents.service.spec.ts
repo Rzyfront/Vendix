@@ -1018,3 +1018,71 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(h.storage.upload).not.toHaveBeenCalled();
   });
 });
+
+describe('ReceivedDocumentsService inbox read wiring', () => {
+  const readContext = { ...context, fiscal_scope: 'ORGANIZATION' as const };
+  it('paginates server-side by arrival/id on request and strips compact events from rows', async () => {
+    const h = makeHarness();
+    const arrival = new Date('2026-10-13T10:00:00Z');
+    h.tx.received_documents.findMany = jest.fn().mockResolvedValue([{
+      id: 50, document_type: 'invoice', processing_status: 'ready', validation_status: 'valid',
+      structural_validation_status: 'valid', accepted_at: null, created_at: arrival,
+      events: [{ event_type: 'BUYER_DIAN_EVENT', event_code: '031', status: 'accepted' }],
+    }]);
+    h.tx.received_documents.count = jest.fn().mockResolvedValue(55);
+    const result = await h.service.listInbox(readContext, { page: 2, limit: 25, sort: 'inbox', inbox_state: 'reclaimed' });
+    expect(result).toMatchObject({ total: 55, page: 2, limit: 25 });
+    expect(result.data[0]).toMatchObject({ inbox_state: 'reclaimed', legal_status: 'reclaimed', arrived_at: arrival });
+    expect(result.data[0]).not.toHaveProperty('events');
+    expect(result.data[0]).not.toHaveProperty('raw_payload');
+    const args = h.tx.received_documents.findMany.mock.calls[0][0];
+    expect(args).toMatchObject({ take: 25, skip: 25, orderBy: [{ created_at: 'desc' }, { id: 'desc' }] });
+    expect(args.where.AND[0]).toMatchObject({ organization_id: 2, accounting_entity_id: 8, store_id: 3 });
+    expect(args.select.events.select).toEqual({ event_type: true, event_code: true, status: true, confirmed_at: true, event_date: true });
+    expect(args.select).not.toHaveProperty('raw_payload');
+    expect(h.tx.received_documents.count).toHaveBeenCalledWith({ where: args.where });
+    expect(h.tx.received_documents.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps issue-date ordering unless inbox ordering is explicitly selected', async () => {
+    const h = makeHarness();
+    h.tx.received_documents.findMany = jest.fn().mockResolvedValue([]);
+    h.tx.received_documents.count = jest.fn().mockResolvedValue(0);
+    await h.service.listInbox(readContext, { page: 1, limit: 25, legal_status: 'accepted' });
+    expect(h.tx.received_documents.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: [{ issue_date: 'desc' }, { created_at: 'desc' }] }));
+  });
+
+  it('revalidates entity/store ownership before invoking a health or summary reader', async () => {
+    const h = makeHarness();
+    const inboxStatus = { summary: jest.fn().mockResolvedValue({ total: 0 }), receptionStatus: jest.fn().mockResolvedValue({ configured: false }) };
+    Object.assign(h.service, { inboxStatus });
+    await h.service.inboxSummary(readContext, { page: 1, limit: 25 });
+    expect(inboxStatus.summary).toHaveBeenCalledWith({ organization_id: 2, accounting_entity_id: 8, store_id: 3 }, { page: 1, limit: 25 });
+    h.baseClient.accounting_entities.findFirst.mockResolvedValueOnce(null);
+    await expect(h.service.receptionStatus(readContext)).rejects.toThrow(ForbiddenException);
+    expect(inboxStatus.receptionStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns empty pages without entity creation and rejects forged null-entity store scope', async () => {
+    const h = makeHarness();
+    h.prisma.organizations = { findFirst: jest.fn().mockResolvedValue({ id: 2 }) };
+    h.prisma.stores = { findFirst: jest.fn().mockResolvedValue({ id: 3 }) };
+    expect(await h.service.listInbox({ ...readContext, accounting_entity_id: null }, { page: 3, limit: 100, sort: 'inbox' }))
+      .toEqual({ data: [], total: 0, page: 3, limit: 100 });
+    expect(h.prisma.$transaction).not.toHaveBeenCalled();
+    h.prisma.stores.findFirst.mockResolvedValueOnce(null);
+    await expect(h.service.listInbox({ ...readContext, accounting_entity_id: null, store_id: 999 }, { page: 1, limit: 25 })).rejects.toThrow(ForbiddenException);
+  });
+
+  it('adds inbox fields to detail without removing existing evidence relationships', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, document_type: 'invoice', processing_status: 'ready', validation_status: 'valid',
+      accepted_at: new Date('2026-10-13T10:00:00Z'), created_at: new Date('2026-10-13T09:00:00Z'),
+      files: [{ id: 1 }], items: [{ id: 2 }], taxes: [], links: [],
+      events: [{ id: 3, event_type: 'BUYER_DIAN_EVENT', event_code: '030', status: 'unknown' }],
+    });
+    const result = await h.service.findOneInbox(readContext, 50);
+    expect(result).toMatchObject({ inbox_state: 'requires_review', legal_status: 'accepted', legal_flags: { accepted: true, reclaimed: false }, files: [{ id: 1 }], items: [{ id: 2 }], events: [{ id: 3 }] });
+  });
+});
