@@ -94,7 +94,8 @@ describe('InvoiceNoteCreateComponent source-aware editing', () => {
     expect(component.lineControl(41, 'discount_amount').value).toBe(3.33);
     expect(component.selections()[0].discount_amount).toBeUndefined();
     component.setLineValue(sourceItem, 'quantity', '1');
-    expect(component.selections()[0].discount_amount).toBe(5);
+    expect(component.lineControl(41, 'discount_amount').value).toBe(5);
+    expect(component.selections()[0].discount_amount).toBeUndefined();
     component.setLineValue(sourceItem, 'unit_price', '1500');
     component.setLineValue(sourceItem, 'discount_amount', '3');
     component.setLineValue(sourceItem, 'quantity', '0.5');
