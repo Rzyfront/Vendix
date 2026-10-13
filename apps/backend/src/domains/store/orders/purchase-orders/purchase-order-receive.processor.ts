@@ -75,7 +75,7 @@ export class PurchaseOrderReceiveProcessor extends WorkerHost {
             );
             throw new UnrecoverableError(
               JSON.stringify({
-                message: error?.errorCode ?? error?.message ?? 'Error',
+                message: error?.message ?? error?.errorCode ?? 'Error',
                 batch_index: b,
                 failed_at_line: start,
               }),

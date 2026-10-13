@@ -78,11 +78,10 @@ describe('PurchaseOrderReceiveProcessor', () => {
 
   it('el lote 2 falla => failed con batch_index=1, failed_at_line=100 y el lote 1 no se revierte', async () => {
     const { processor, po } = build();
+    const failure = new VendixHttpException(ErrorCodes.AI_QUEUE_001);
     po.receive
       .mockResolvedValueOnce({ status: 'partial' })
-      .mockRejectedValueOnce(
-        new VendixHttpException(ErrorCodes.AI_QUEUE_001),
-      );
+      .mockRejectedValueOnce(failure);
     const j = job(250);
 
     const err: any = await processor.process(j).then(
@@ -92,7 +91,7 @@ describe('PurchaseOrderReceiveProcessor', () => {
 
     expect(err).toBeInstanceOf(UnrecoverableError);
     expect(JSON.parse(err.message)).toEqual({
-      message: 'AI_QUEUE_001',
+      message: failure.message,
       batch_index: 1,
       failed_at_line: 100,
     });
