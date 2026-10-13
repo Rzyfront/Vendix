@@ -55,6 +55,8 @@ export interface DocumentEmailPartResult {
   originals_checkpoint?: Array<{ sha256: string; stored: boolean }>;
   /** Only populated for a document readable in the same operational store. */
   document_id?: number;
+  /** Trusted transport checkpoint only; all HTTP projections must drop it. */
+  transport_facts?: DocumentEmailTransportFacts;
 }
 
 export interface DocumentEmailSnapshot {
@@ -102,4 +104,45 @@ export interface DocumentEmailConfiguration {
   version: number | null;
   enabled: boolean;
   policy_version: string;
+}
+
+/** Derived only from the authenticated SES notification, never MIME self-declared headers. */
+export interface DocumentEmailTransportFacts {
+  virus_status: 'PASS' | 'FAIL' | 'GRAY' | 'PROCESSING_FAILED' | 'UNKNOWN';
+  spam_status: 'PASS' | 'FAIL' | 'GRAY' | 'PROCESSING_FAILED' | 'UNKNOWN';
+  gmail_authenticated: boolean;
+  /** Durable internal retry epoch; claim/finalization versions may advance independently. */
+  retry_requested_version?: number;
+}
+
+export const DOCUMENT_EMAIL_PROCESSOR = Symbol('DOCUMENT_EMAIL_PROCESSOR');
+export interface DocumentEmailProcessorRequest {
+  raw: import('node:stream').Readable;
+  context: DocumentEmailProcessingContext;
+  message_id: number;
+  checkpoint_parts: DocumentEmailPartResult[];
+  transport_facts: DocumentEmailTransportFacts;
+  before_write: () => Promise<void>;
+  signal: AbortSignal;
+}
+export interface DocumentEmailProcessorResult {
+  status: DocumentEmailState;
+  reason_code: DocumentEmailReasonCode | null;
+  retryable: boolean;
+  parts: DocumentEmailPartResult[];
+  /** True only after complete required originals, including an eligible fiscal duplicate. */
+  valid_document: boolean;
+}
+export interface DocumentEmailProcessor {
+  processEmail(request: DocumentEmailProcessorRequest): Promise<DocumentEmailProcessorResult>;
+}
+
+/** Internal IO substitution for the local simulator/specs, never an HTTP payload. */
+export interface DocumentEmailTransport {
+  receipt_handle?: string;
+  readRaw(bucket: string, key: string, signal: AbortSignal): Promise<import('node:stream').Readable>;
+  delete(handle: string, signal: AbortSignal): Promise<void>;
+  renew(handle: string, signal: AbortSignal): Promise<void>;
+  sendRetry(payload: { type: 'internal_retry'; message_id: number; version: number }, signal: AbortSignal): Promise<void>;
+  tagRaw?(bucket: string, key: string, classification: 'invoice' | 'noinvoice', signal: AbortSignal): Promise<void>;
 }
