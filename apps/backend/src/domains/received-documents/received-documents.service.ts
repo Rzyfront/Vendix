@@ -13,9 +13,12 @@ import { tryResolveTenantFiscalIdentity } from '../../common/helpers/fiscal-iden
 import { normalizeNit } from '../../common/utils/nit.util';
 import {
   NormalizedReceivedDocument,
+  PreparedEmailDocument,
+  PreparedEmailEvidence,
   ReceivedDocumentItem,
   ReceivedDocumentTax,
 } from './interfaces/received-document.interface';
+import { DOCUMENT_EMAIL_WARNINGS } from './interfaces/document-email-reception.interface';
 import {
   operationalValidationStatus,
   receivedDocumentValidationSnapshot,
@@ -124,7 +127,7 @@ export class ReceivedDocumentsService {
       }),
       this.prisma.received_documents.count({ where }),
     ]);
-    return { data, total, page, limit };
+    return { data: data.map(({ metadata, ...row }) => ({ ...row, ...this.projectEmailReception(metadata) })), total, page, limit };
   }
 
   async listInbox(ctx: ReceivedDocumentsReadContext, query: ReceivedDocumentQueryDto) {
@@ -154,8 +157,8 @@ export class ReceivedDocumentsService {
       ]);
       return {
         data: rows.map((row) => {
-          const { events, ...safeRow } = row;
-          return { ...safeRow, ...projectReceivedDocumentInbox({ ...safeRow, events }) };
+          const { events, metadata, ...safeRow } = row;
+          return { ...safeRow, ...this.projectEmailReception(metadata), ...projectReceivedDocumentInbox({ ...safeRow, events }) };
         }),
         total, page, limit,
       };
@@ -229,7 +232,7 @@ export class ReceivedDocumentsService {
       },
     });
     if (!document) throw new NotFoundException('Documento recibido no encontrado.');
-    return { ...document, ...projectReceivedDocumentInbox(document) };
+    return { ...document, ...this.projectEmailReception(document.metadata), ...projectReceivedDocumentInbox(document) };
   }
 
   async importXml(
@@ -293,6 +296,55 @@ export class ReceivedDocumentsService {
     });
     if (result.outcome === 'duplicate_other_store') return result;
     return this.findOne(ctx, result.document.id);
+  }
+
+  /** Internal-only: consumes an already preflighted package, never client-normalized DTO facts. */
+  async ingestPreparedEmail(
+    ctx: ReceivedDocumentsContext,
+    prepared: PreparedEmailDocument,
+    beforeWrite?: () => Promise<void>,
+  ): Promise<NormalizedReceivedDocumentImportResult> {
+    const scope = await this.resolveScope(ctx);
+    this.assertPreparedEmailBounds(prepared);
+    const normalized = await this.validateReceiverIdentity(
+      prepared.parsed.normalized, await this.expectedReceiverTaxId(scope),
+    );
+    if (normalized.validation.errors.length > 0) {
+      throw new BadRequestException({ reason_code: 'INVALID_FISCAL_XML', message: 'El documento fiscal no supera la validación de ingreso.' });
+    }
+    const receipt = this.safeReceiptEvidence(prepared.receipt_evidence);
+    const warningMessages = {
+      DIAN_RECEIPT_MISSING: 'No incluye constancia de validación DIAN.',
+      DIAN_RECEIPT_REFERENCE_MISMATCH: 'La constancia incluida no corresponde al código único del documento.',
+      RECEIVER_DV_ATTACHED: 'El documento del adquirente incluía el dígito de verificación; se comparó su base validada.',
+      COMPLEMENT_ARCHIVE_NOT_EXPANDED: 'Archivo complementario guardado sin abrir.',
+    };
+    for (const code of prepared.warnings) {
+      if (!normalized.validation.warnings.some((warning) => warning.code === code)) {
+        normalized.validation.warnings.push({ code, message: warningMessages[code] });
+      }
+    }
+    if (receipt.included && !normalized.validation.warnings.some((warning) => warning.code === 'APPLICATION_RESPONSE_EVIDENCE_UNVERIFIED')) {
+      normalized.validation.warnings.push({ code: 'APPLICATION_RESPONSE_EVIDENCE_UNVERIFIED', message: 'La constancia incluida se conserva como evidencia no verificada.' });
+    }
+    const emailMetadata = {
+      message_id: prepared.email_message_id,
+      document_type_code: prepared.parsed.fiscal.document_type_code,
+      profile_execution_id: prepared.parsed.fiscal.profile_execution_id,
+      uuid_scheme_name: prepared.parsed.fiscal.uuid.scheme_name,
+      receipt_evidence: receipt,
+    };
+    const recorded = await this.recordNormalized({
+      scope, normalized, source: 'email', idempotencyKey: this.idempotencyKey(normalized),
+      rawPayload: { source_format: 'email', normalized },
+      metadata: { source_format: 'email', email_reception: emailMetadata, originals_checkpoint: [] },
+      processingStatus: 'processing',
+      validationSummary: this.json({ ...this.validationSnapshot(normalized), receipt_evidence: receipt }),
+      beforeWrite,
+    });
+    if (recorded.outcome === 'duplicate_other_store') return recorded;
+    await this.persistEmailEvidence(scope, recorded.document, prepared.evidence, emailMetadata, beforeWrite);
+    return { ...recorded, document: await this.findOne(ctx, recorded.document.id) };
   }
 
   async updateReview(
@@ -835,6 +887,8 @@ export class ReceivedDocumentsService {
     rawPayload: unknown;
     metadata: unknown;
     processingStatus: string;
+    validationSummary?: Prisma.InputJsonValue;
+    beforeWrite?: () => Promise<void>;
   }): Promise<NormalizedReceivedDocumentImportResult> {
     const normalized = this.withPendingWarnings(input.normalized);
     const ctx = input.scope.context;
@@ -849,9 +903,11 @@ export class ReceivedDocumentsService {
         const existing = await tx.received_documents.findFirst({ where: existingWhere });
         if (existing) {
           this.assertSameNormalizedFacts(existing, normalized);
+          if (input.source === 'email') this.assertSameEmailFiscalMetadata(existing.metadata, input.metadata);
           return this.normalizedDuplicateOutcome(input.scope, existing);
         }
 
+        if (input.beforeWrite) await input.beforeWrite();
         const document = await tx.received_documents.create({
           data: {
             organization_id: ctx.organization_id,
@@ -872,14 +928,15 @@ export class ReceivedDocumentsService {
             fiscal_status: 'pending',
             posting_status: 'pending',
             raw_payload: this.json(input.rawPayload),
-            validation_summary: this.json(this.validationSnapshot(normalized)),
+            validation_summary: input.validationSummary ?? this.json(this.validationSnapshot(normalized)),
             metadata: this.json(input.metadata),
             version: 1,
             created_by: ctx.actor_id ?? null,
           },
         });
-        const skippedLines = await this.createChildren(tx, document.id, normalized);
+        const skippedLines = await this.createChildren(tx, document.id, normalized, input.beforeWrite);
         if (skippedLines.length > 0) {
+          if (input.beforeWrite) await input.beforeWrite();
           await tx.received_documents.updateMany({
             where: this.documentWhere(input.scope, document.id),
             data: { metadata: this.json({
@@ -888,6 +945,7 @@ export class ReceivedDocumentsService {
             }) },
           });
         }
+        if (input.beforeWrite) await input.beforeWrite();
         await tx.received_document_events.create({
           data: {
             document_id: document.id,
@@ -909,6 +967,7 @@ export class ReceivedDocumentsService {
         const winner = await this.prisma.received_documents.findFirst({ where: this.fiscalIdempotencyWhere(input.scope, input.idempotencyKey) });
         if (winner) {
           this.assertSameNormalizedFacts(winner, normalized);
+          if (input.source === 'email') this.assertSameEmailFiscalMetadata(winner.metadata, input.metadata);
           return this.normalizedDuplicateOutcome(input.scope, winner);
         }
         throw new ConflictException('La clave de documento ya está registrada en esta entidad fiscal.');
@@ -983,6 +1042,103 @@ export class ReceivedDocumentsService {
         throw new ConflictException('El archivo ya está registrado en esta entidad fiscal.');
       }
       throw error;
+    }
+  }
+
+  private async persistEmailEvidence(
+    scope: Scope,
+    document: Prisma.received_documentsGetPayload<{}>,
+    evidence: PreparedEmailEvidence[],
+    emailMetadata: Record<string, unknown>,
+    beforeWrite?: () => Promise<void>,
+  ): Promise<void> {
+    const where = this.documentWhere(scope, document.id);
+    let guardFailed = false;
+    const guardWrite = async () => {
+      if (!beforeWrite) return;
+      try { await beforeWrite(); }
+      catch (error) { guardFailed = true; throw error; }
+    };
+    try {
+      for (const original of evidence) {
+        const sha256 = original.sha256.toLowerCase();
+        const prior = await this.prisma.received_document_files.findFirst({
+          where: { document_id: document.id, sha256 }, select: { id: true },
+        });
+        if (prior) continue;
+        await guardWrite();
+        const stored = await this.storage.uploadEvidence(this.storageContext(scope), document.id, original);
+        if (stored.sha256.toLowerCase() !== sha256) {
+          throw new ServiceUnavailableException('La evidencia almacenada no conserva la huella original.');
+        }
+        try {
+          await this.prisma.$transaction(async (tx) => {
+            const owned = await tx.received_documents.findFirst({ where, select: { id: true } });
+            if (!owned) throw new NotFoundException('Documento recibido no encontrado.');
+            const duplicate = await tx.received_document_files.findFirst({
+              where: { document_id: document.id, sha256 }, select: { id: true },
+            });
+            if (duplicate) return;
+            await guardWrite();
+            await tx.received_document_files.create({ data: {
+              document_id: document.id, file_key: stored.file_key, file_name: stored.file_name,
+              mime_type: stored.mime_type, file_size: stored.file_size, sha256, role: original.role,
+            } });
+            await guardWrite();
+            await tx.received_document_events.upsert({
+              where: { document_id_idempotency_key: { document_id: document.id, idempotency_key: `email-file:${sha256}` } },
+              create: {
+                document_id: document.id, event_type: 'ORIGINAL_FILE_ATTACHED', idempotency_key: `email-file:${sha256}`,
+                status: 'completed', actor_id: scope.context.actor_id ?? null,
+                result: this.json({ sha256, role: original.role, mime_type: stored.mime_type, file_size: stored.file_size }),
+              },
+              update: {},
+            });
+          });
+        } catch (error) {
+          if (!this.isFileUniqueError(error)) throw error;
+        }
+      }
+      await this.prisma.$transaction(async (tx) => {
+        const owned = await tx.received_documents.findFirst({ where });
+        if (!owned) throw new NotFoundException('Documento recibido no encontrado.');
+        const hashes = [...new Set(evidence.map((original) => original.sha256.toLowerCase()))];
+        const originals = await tx.received_document_files.findMany({
+          where: { document_id: document.id, sha256: { in: hashes } }, select: { sha256: true },
+        });
+        const storedHashes = new Set(originals.map((original) => original.sha256.toLowerCase()));
+        if (hashes.some((sha256) => !storedHashes.has(sha256))) {
+          throw new ServiceUnavailableException('La evidencia del documento aún no está completa.');
+        }
+        const metadata = this.asObject(owned.metadata);
+        this.assertSameEmailFiscalMetadata(metadata, { email_reception: emailMetadata });
+        const ready = ['ready', 'duplicate'].includes(owned.processing_status);
+        await guardWrite();
+        const updated = await tx.received_documents.updateMany({
+          where: { ...where, processing_status: owned.processing_status },
+          data: {
+            ...(!ready ? { processing_status: 'ready' } : {}),
+            metadata: this.json({
+              ...metadata,
+              email_reception: { ...emailMetadata, ...this.asObject(metadata.email_reception) },
+              originals_checkpoint: hashes.map((sha256) => ({ sha256, stored: true })),
+            }),
+          },
+        });
+        if (updated.count !== 1) throw new ConflictException('El documento cambió durante el ingreso de evidencia.');
+      });
+    } catch (error) {
+      // Lost context/lease must abort without further writes. A concurrent ready
+      // document is never demoted by a partial supplemental evidence failure.
+      if (guardFailed || error instanceof ConflictException || error instanceof ForbiddenException || error instanceof NotFoundException) throw error;
+      if (!['ready', 'duplicate'].includes(document.processing_status)) {
+        await guardWrite();
+        await this.prisma.received_documents.updateMany({
+          where: { ...where, processing_status: { in: ['processing', 'error'] } },
+          data: { processing_status: 'error' },
+        });
+      }
+      throw new ServiceUnavailableException('No se pudo completar la evidencia original; el documento quedó disponible para reintento.');
     }
   }
 
@@ -1145,10 +1301,11 @@ export class ReceivedDocumentsService {
     }
   }
 
-  private async createChildren(tx: any, documentId: number, normalized: NormalizedReceivedDocument): Promise<number[]> {
+  private async createChildren(tx: any, documentId: number, normalized: NormalizedReceivedDocument, beforeWrite?: () => Promise<void>): Promise<number[]> {
     const skippedLines: number[] = [];
     const headerTaxes = normalized.taxes.filter((tax) => tax.line_number == null && this.isPersistableTaxRow(tax));
     if (headerTaxes.length > 0) {
+      if (beforeWrite) await beforeWrite();
       await tx.received_document_taxes.createMany({
         data: headerTaxes.map((tax) => this.taxRow(documentId, null, tax)),
       });
@@ -1159,6 +1316,7 @@ export class ReceivedDocumentsService {
         skippedLines.push(item.line_number);
         continue;
       }
+      if (beforeWrite) await beforeWrite();
       const created = await tx.received_document_items.create({
         data: {
           document_id: documentId,
@@ -1178,6 +1336,7 @@ export class ReceivedDocumentsService {
       });
       const persistableItemTaxes = item.taxes.filter((tax) => this.isPersistableTaxRow(tax));
       if (persistableItemTaxes.length > 0) {
+        if (beforeWrite) await beforeWrite();
         await tx.received_document_taxes.createMany({
           data: persistableItemTaxes.map((tax) => this.taxRow(documentId, created.id, tax)),
         });
@@ -1564,6 +1723,7 @@ export class ReceivedDocumentsService {
       processing_status: true, validation_status: true, review_status: true,
       matching_status: true, fiscal_status: true, posting_status: true,
       version: true, created_at: true, updated_at: true,
+      metadata: true,
     } satisfies Prisma.received_documentsSelect;
   }
 
@@ -1613,6 +1773,65 @@ export class ReceivedDocumentsService {
       organization_id: scope.context.organization_id,
       store_id: scope.context.store_id ?? scope.entity_store_id,
       accounting_entity_id: scope.context.accounting_entity_id,
+    };
+  }
+
+  private assertPreparedEmailBounds(prepared: PreparedEmailDocument): void {
+    const invalid = () => new BadRequestException({ reason_code: 'INVALID_FISCAL_XML', message: 'El paquete fiscal preparado no es válido o excede sus límites.' });
+    const normalized = prepared?.parsed?.normalized;
+    if (!normalized || !Number.isSafeInteger(prepared.email_message_id) || prepared.email_message_id < 1 ||
+        !prepared.parsed.commercial_xml || !Array.isArray(normalized.items) || normalized.items.length < 1 || normalized.items.length > ITEM_MAX ||
+        !Array.isArray(normalized.taxes) || normalized.taxes.length > HEADER_TAX_MAX ||
+        normalized.items.some((item) => !Array.isArray(item.taxes) || item.taxes.length > ITEM_TAX_MAX) ||
+        !Array.isArray(prepared.evidence) || prepared.evidence.length < 1 || prepared.evidence.length > 40 ||
+        !prepared.evidence.some((original) => original.role === 'commercial') ||
+        (prepared.parsed.fiscal.container != null && !prepared.evidence.some((original) => original.role === 'container')) ||
+        !Array.isArray(prepared.warnings) || prepared.warnings.length > DOCUMENT_EMAIL_WARNINGS.length ||
+        prepared.warnings.some((warning) => !DOCUMENT_EMAIL_WARNINGS.includes(warning)) || !prepared.receipt_evidence) throw invalid();
+    let aggregateBytes = 0;
+    for (const original of prepared.evidence) {
+      if (!['container', 'commercial', 'dian_receipt', 'representation', 'zip'].includes(original.role) ||
+          !Buffer.isBuffer(original.bytes) || original.bytes.length < 1 || original.bytes.length > MAX_XML_BYTES ||
+          typeof original.filename !== 'string' || original.filename.length < 1 || original.filename.length > 120 ||
+          typeof original.mime_type !== 'string' || !/^[a-f\d]{64}$/i.test(original.sha256) ||
+          this.sha256(original.bytes) !== original.sha256.toLowerCase()) throw invalid();
+      aggregateBytes += original.bytes.length;
+    }
+    // Internal evidence may copy raw (20 MiB), ZIP inflation (30 MiB) and
+    // embedded XML/AR (up to 50 MiB); original adapter budgets remain unchanged.
+    if (aggregateBytes > 100 * 1024 * 1024) throw invalid();
+  }
+
+  private assertSameEmailFiscalMetadata(existing: unknown, incoming: unknown): void {
+    const known = this.asObject(this.asObject(existing).email_reception);
+    const next = this.asObject(this.asObject(incoming).email_reception);
+    for (const field of ['document_type_code', 'profile_execution_id', 'uuid_scheme_name']) {
+      if (typeof known[field] === 'string' && known[field] && known[field] !== next[field]) {
+        throw new ConflictException({ reason_code: 'DOCUMENT_KEY_CONFLICT', message: 'La clave del documento ya existe con una clasificación fiscal diferente.' });
+      }
+    }
+  }
+
+  private safeReceiptEvidence(receipt: { included?: unknown; reference_matches?: unknown; response_code?: unknown }) {
+    return {
+      included: receipt.included === true,
+      reference_matches: receipt.reference_matches === true,
+      response_code: typeof receipt.response_code === 'string' && /^[a-z\d._-]{1,30}$/i.test(receipt.response_code) ? receipt.response_code : null,
+    };
+  }
+
+  private projectEmailReception(value: unknown) {
+    const metadata = this.asObject(value);
+    const email = this.asObject(metadata.email_reception);
+    const received = Number.isSafeInteger(email.message_id) && email.message_id > 0;
+    return {
+      email_transport_received: received,
+      email_reception: received ? {
+        document_type_code: typeof email.document_type_code === 'string' && /^(?:01|02|03|04|20|91|92)$/.test(email.document_type_code) ? email.document_type_code : null,
+        profile_execution_id: typeof email.profile_execution_id === 'string' && /^[12]$/.test(email.profile_execution_id) ? email.profile_execution_id : null,
+        uuid_scheme_name: ['CUFE-SHA384', 'CUDE-SHA384'].includes(email.uuid_scheme_name) ? email.uuid_scheme_name : null,
+        receipt_evidence: this.safeReceiptEvidence(this.asObject(email.receipt_evidence)),
+      } : null,
     };
   }
 

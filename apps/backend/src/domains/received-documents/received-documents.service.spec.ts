@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { NormalizedReceivedDocument, ReceivedDocumentTax } from './interfaces/received-document.interface';
+import { NormalizedReceivedDocument, PreparedEmailDocument, PreparedEmailEvidence, ReceivedDocumentTax } from './interfaces/received-document.interface';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentStorageService } from './services/received-document-storage.service';
 import { ReceivedDocumentParserService } from './services/received-document-parser.service';
 import { DocumentReceptionIngestService } from './services/document-reception-ingest.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
+import type { S3Service } from '../../common/services/s3.service';
 
 const context: ReceivedDocumentsContext = {
   organization_id: 2,
@@ -145,6 +146,65 @@ function makeHarness() {
 const xmlFile = () => ({
   buffer: Buffer.from('<Invoice/>'), originalname: 'factura.xml', mimetype: 'application/xml', size: 10,
 }) as Express.Multer.File;
+
+function emailEvidence(bytes: Buffer, role: PreparedEmailEvidence['role'] = 'commercial', filename = 'invoice.xml', mime_type = 'application/xml'): PreparedEmailEvidence {
+  return { bytes, role, filename, mime_type, sha256: require('crypto').createHash('sha256').update(bytes).digest('hex') };
+}
+
+function preparedEmail(overrides: Partial<PreparedEmailDocument> = {}): PreparedEmailDocument {
+  const commercial = '<?xml version="1.0" encoding="UTF-8"?><Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"/>';
+  return {
+    parsed: {
+      normalized: normalized(), commercial_xml: commercial, application_responses: [],
+      fiscal: { root: 'Invoice', profile_execution_id: '1', document_type_code: '01',
+        uuid: { value: 'a'.repeat(96), scheme_id: '1', scheme_name: 'CUFE-SHA384' },
+        receiver_company_id: { value: '800123456', scheme_name: '31', scheme_id: null } },
+    },
+    evidence: [emailEvidence(Buffer.from(commercial))], email_message_id: 101,
+    warnings: ['DIAN_RECEIPT_MISSING'],
+    receipt_evidence: { included: false, reference_matches: false, response_code: null },
+    ...overrides,
+  };
+}
+
+function makeEmailHarness() {
+  const h = makeHarness();
+  const files = new Map<string, any>();
+  const findDocument = ({ where }: any) => [...h.createdDocs.values()].find((row) =>
+    (where.id == null || row.id === where.id) && row.organization_id === where.organization_id &&
+    row.accounting_entity_id === where.accounting_entity_id && (where.store_id == null || row.store_id === where.store_id) &&
+    (where.idempotency_key == null || row.idempotency_key === where.idempotency_key)) ?? null;
+  h.tx.received_documents.findFirst.mockImplementation(async (args: any) => findDocument(args));
+  h.prisma.received_documents.findFirst.mockImplementation(async (args: any) => {
+    const row = findDocument(args);
+    return row ? { ...row, files: [...files.values()], items: [], taxes: [], links: [], events: [] } : null;
+  });
+  const update = async ({ where, data }: any) => {
+    const row = findDocument({ where });
+    if (!row || (typeof where.processing_status === 'string' && row.processing_status !== where.processing_status) ||
+        (where.processing_status?.in && !where.processing_status.in.includes(row.processing_status))) return { count: 0 };
+    Object.assign(row, data);
+    return { count: 1 };
+  };
+  h.tx.received_documents.updateMany.mockImplementation(update);
+  h.prisma.received_documents.updateMany.mockImplementation(update);
+  const findFile = async ({ where }: any) => [...files.values()].find((file) => file.document_id === where.document_id && file.sha256 === where.sha256) ?? null;
+  h.prisma.received_document_files.findFirst.mockImplementation(findFile);
+  h.tx.received_document_files.findFirst.mockImplementation(findFile);
+  h.tx.received_document_files.create.mockImplementation(async ({ data }: any) => {
+    const file = { id: files.size + 1, ...data };
+    files.set(`${data.document_id}:${data.sha256}`, file);
+    return file;
+  });
+  h.tx.received_document_files.findMany.mockImplementation(async ({ where }: any) => [...files.values()].filter((file) =>
+    file.document_id === where.document_id && (!where.sha256?.in || where.sha256.in.includes(file.sha256))));
+  const uploadEvidence = jest.fn(async (_ctx: unknown, id: number, original: PreparedEmailEvidence) => ({
+    file_key: `organizations/2/fiscal-entities/8/received-documents/${id}/${original.sha256}-${original.filename}`,
+    file_name: original.filename, mime_type: original.mime_type, file_size: original.bytes.length, sha256: original.sha256,
+  }));
+  Object.assign(h.storage, { uploadEvidence });
+  return { ...h, files, uploadEvidence };
+}
 
 describe('ReceivedDocumentsService tenant-safe persistence', () => {
   it('exposes the existing active fiscal/store scope validation to adjacent configuration services', async () => {
@@ -1152,6 +1212,216 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     await expect(h.service.replaceFromExtraction(context, 50, normalized())).rejects.toBeInstanceOf(ConflictException);
     expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
     expect(h.storage.upload).not.toHaveBeenCalled();
+  });
+});
+
+describe('ReceivedDocumentsService prepared email evidence', () => {
+  it('creates processing and only finalizes ready after every exact evidence hash is durable', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    const pdf = emailEvidence(Buffer.from('%PDF-1.7\nrepresentation'), 'representation', 'invoice.pdf', 'application/pdf');
+    prepared.evidence.push(pdf);
+    const guard = jest.fn().mockResolvedValue(undefined);
+    const outcome = await h.service.ingestPreparedEmail(context, prepared, guard);
+    expect(outcome.outcome).toBe('created');
+    expect(h.tx.received_documents.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      source_channel: 'email', processing_status: 'processing', created_by: context.actor_id,
+      metadata: expect.objectContaining({ source_format: 'email', email_reception: expect.objectContaining({ message_id: 101, document_type_code: '01' }) }),
+    }) }));
+    const row = [...h.createdDocs.values()][0];
+    expect(row.processing_status).toBe('ready');
+    expect(row.metadata.originals_checkpoint).toEqual(prepared.evidence.map(({ sha256 }) => ({ sha256, stored: true })));
+    expect([...h.files.values()].map(({ sha256, role }) => ({ sha256, role }))).toEqual(prepared.evidence.map(({ sha256, role }) => ({ sha256, role })));
+    expect(h.parser.parse).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    const mutations = [h.tx.received_documents.create, h.tx.received_document_items.create,
+      h.tx.received_document_taxes.createMany, h.tx.received_document_events.create,
+      h.uploadEvidence, h.tx.received_document_files.create, h.tx.received_document_events.upsert,
+      h.tx.received_documents.updateMany].flatMap((mock) => mock.mock.invocationCallOrder).sort((a, b) => a - b);
+    expect(guard).toHaveBeenCalledTimes(mutations.length);
+    mutations.forEach((order, index) => {
+      expect(guard.mock.invocationCallOrder[index]).toBeLessThan(order);
+      if (index > 0) expect(guard.mock.invocationCallOrder[index]).toBeGreaterThan(mutations[index - 1]);
+    });
+  });
+
+  it('retries only missing evidence after a failure following the first upload, with no early ready', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    prepared.evidence.push(emailEvidence(Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2]), 'zip', 'invoice.zip', 'application/zip'));
+    const upload = h.uploadEvidence.getMockImplementation()!;
+    h.uploadEvidence.mockImplementationOnce(upload).mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(h.service.ingestPreparedEmail(context, prepared)).rejects.toBeInstanceOf(ServiceUnavailableException);
+    const row = [...h.createdDocs.values()][0];
+    expect(row.processing_status).toBe('error');
+    expect(h.files.size).toBe(1);
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ processing_status: 'ready' }) }));
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    const recovered = await h.service.ingestPreparedEmail(context, prepared);
+    expect(recovered.outcome).toBe('duplicate');
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(h.uploadEvidence).toHaveBeenCalledTimes(3);
+    expect(h.uploadEvidence).toHaveBeenNthCalledWith(3, expect.any(Object), row.id, prepared.evidence[1]);
+    expect(h.files.size).toBe(2);
+    expect(row.processing_status).toBe('ready');
+    expect(row.metadata.originals_checkpoint.every(({ stored }: any) => stored)).toBe(true);
+  });
+
+  it('does not declare ready merely because the upload returned when a manifest file row is not durable', async () => {
+    const h = makeEmailHarness();
+    h.tx.received_document_files.create.mockResolvedValueOnce({ id: 1 });
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect([...h.createdDocs.values()][0].processing_status).toBe('error');
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('returns a hidden cross-store duplicate before storage, document detail, guard mutation or IDs', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    await h.service.ingestPreparedEmail(context, prepared);
+    h.uploadEvidence.mockClear(); h.prisma.received_documents.findFirst.mockClear();
+    const guard = jest.fn();
+    const scanQueue = { enqueue: jest.fn() };
+    const ingest = new DocumentReceptionIngestService(h.service, scanQueue as unknown as ReceivedDocumentScanQueueService);
+    await expect(ingest.ingestPreparedEmail({ ...context, store_id: 4 }, prepared, guard)).resolves.toEqual({
+      received_count: 0, duplicate_count: 1, error_count: 0, document_ids: [], error_codes: [], next_cursor: null,
+    });
+    expect(guard).not.toHaveBeenCalled();
+    expect(scanQueue.enqueue).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects known POS20 versus FEV01 fiscal metadata before storage and without overwriting history', async () => {
+    const h = makeEmailHarness();
+    const pos = preparedEmail();
+    pos.parsed.fiscal.document_type_code = '20'; pos.parsed.fiscal.uuid.scheme_name = 'CUDE-SHA384';
+    await h.service.ingestPreparedEmail(context, pos);
+    const row = [...h.createdDocs.values()][0];
+    const preserved = JSON.stringify(row);
+    h.uploadEvidence.mockClear(); h.prisma.received_documents.findFirst.mockClear();
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ConflictException);
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(JSON.stringify(row)).toBe(preserved);
+  });
+
+  it('keeps a historically ready API document ready on supplemental failure and retains its source on success', async () => {
+    const h = makeEmailHarness();
+    await h.service.importXml(context, xmlFile(), 'api');
+    const row = [...h.createdDocs.values()][0];
+    const raw = JSON.stringify(row.raw_payload);
+    const summary = JSON.stringify(row.validation_summary);
+    h.uploadEvidence.mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(row.processing_status).toBe('ready');
+    expect(h.prisma.received_documents.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: { processing_status: 'error' } }));
+    const outcome = await h.service.ingestPreparedEmail(context, preparedEmail());
+    expect(outcome.outcome).toBe('duplicate');
+    expect(row.source_channel).toBe('api');
+    expect(row.metadata.source_format).toBe('ubl_xml');
+    expect(JSON.stringify(row.raw_payload)).toBe(raw);
+    expect(JSON.stringify(row.validation_summary)).toBe(summary);
+    if (outcome.outcome === 'duplicate_other_store') throw new Error('Expected a visible duplicate');
+    expect(outcome.document).toMatchObject({ email_transport_received: true });
+  });
+
+  it('keeps included receipts and signatures unverified and never promotes a legal acceptance', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail({ warnings: [], receipt_evidence: { included: true, reference_matches: true, response_code: '00' } });
+    prepared.parsed.normalized.validation.has_signature = true;
+    prepared.evidence.push(emailEvidence(Buffer.from('<ApplicationResponse xmlns="urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2"/>'), 'dian_receipt', 'response.xml'));
+    await h.service.ingestPreparedEmail(context, prepared);
+    const row = [...h.createdDocs.values()][0];
+    expect(row.dian_validation_status).toBe('not_checked');
+    expect(row.signature_validation_status).toBe('not_verified');
+    expect(row.validation_summary.dian.status).toBe('not_checked');
+    expect(row.validation_summary.receipt_evidence).toEqual(prepared.receipt_evidence);
+    expect(row.accepted_at).toBeUndefined();
+    expect(row.fiscal_status).toBe('pending');
+    expect(row.posting_status).toBe('pending');
+    expect(JSON.stringify(row.metadata)).not.toContain('ApplicationResponse');
+  });
+
+  it('projects only safe fiscal receipt fields in lists and preserves legacy detail metadata', async () => {
+    const h = makeEmailHarness();
+    await h.service.ingestPreparedEmail(context, preparedEmail());
+    const row = [...h.createdDocs.values()][0];
+    row.metadata.private_checkpoint = 'must not appear in list';
+    h.prisma.received_documents.findMany.mockResolvedValueOnce([row]);
+    const list = await h.service.list(context, { page: 1, limit: 25 });
+    expect(list.data[0]).toMatchObject({ email_transport_received: true, email_reception: {
+      document_type_code: '01', profile_execution_id: '1', uuid_scheme_name: 'CUFE-SHA384',
+      receipt_evidence: { included: false, reference_matches: false, response_code: null },
+    } });
+    expect(list.data[0]).not.toHaveProperty('metadata');
+    expect(JSON.stringify(list)).not.toContain('private_checkpoint');
+    expect(JSON.stringify(list)).not.toContain('originals_checkpoint');
+    const detail = await h.service.findOne(context, row.id);
+    expect(detail.metadata.private_checkpoint).toBe('must not appear in list');
+    expect(detail.email_transport_received).toBe(true);
+  });
+
+  it('aborts on a lost beforeWrite guard after upload without inserting files or issuing failure writes', async () => {
+    const h = makeEmailHarness();
+    const lost = new ConflictException('lease lost');
+    const guard = jest.fn(async () => { if (h.uploadEvidence.mock.calls.length > 0) throw lost; });
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail(), guard)).rejects.toBe(lost);
+    expect(h.tx.received_document_files.create).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('propagates incomplete storage through the internal ingest wrapper instead of producing an acknowledgement-shaped success', async () => {
+    const h = makeEmailHarness();
+    h.uploadEvidence.mockRejectedValueOnce(new Error('storage unavailable'));
+    const scanQueue = { enqueue: jest.fn() };
+    const ingest = new DocumentReceptionIngestService(h.service, scanQueue as unknown as ReceivedDocumentScanQueueService);
+    await expect(ingest.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(scanQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each(['overflow', 'issuer_length', 'hash_mismatch', 'receiver_mismatch', 'missing_container'] as const)('rejects prepared %s before any document write', async (kind) => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    if (kind === 'overflow') prepared.parsed.normalized.items = Array.from({ length: 501 }, () => prepared.parsed.normalized.items[0]);
+    if (kind === 'issuer_length') prepared.parsed.normalized.issuer_name = 'x'.repeat(256);
+    if (kind === 'hash_mismatch') prepared.evidence[0].sha256 = '0'.repeat(64);
+    if (kind === 'receiver_mismatch') prepared.parsed.normalized.receiver_tax_id = '900111222';
+    if (kind === 'missing_container') prepared.parsed.fiscal.container = { profile_execution_id: '1', uuid: prepared.parsed.fiscal.uuid };
+    await expect(h.service.ingestPreparedEmail(context, prepared)).rejects.toBeInstanceOf(BadRequestException);
+    expect(h.tx.received_documents.create).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+  });
+
+  it('stores exact Latin1, ZIP and unverified response bytes only through the internal evidence path', async () => {
+    const previous = process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER;
+    process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER = 's3';
+    try {
+      const s3 = { uploadFile: jest.fn().mockResolvedValue('ignored') };
+      const storage = new ReceivedDocumentStorageService(s3 as unknown as S3Service);
+      const latin = emailEvidence(Buffer.from('<?xml version="1.0" encoding="ISO-8859-1"?><Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"><Name>Café Bogotá</Name></Invoice>', 'latin1'));
+      latin.encoding = 'iso-8859-1';
+      const zip = emailEvidence(Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2]), 'zip', 'supplier.zip', 'application/zip');
+      const ar = emailEvidence(Buffer.from('<ApplicationResponse xmlns="urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2"/>'), 'dian_receipt', 'response.xml');
+      for (const original of [latin, zip, ar]) {
+        const before = Buffer.from(original.bytes);
+        const stored = await storage.uploadEvidence({ organization_id: 2, accounting_entity_id: 8, store_id: 3 }, 50, original);
+        expect(stored.sha256).toBe(original.sha256);
+        expect(stored.file_size).toBe(before.length);
+        expect(s3.uploadFile).toHaveBeenLastCalledWith(original.bytes, expect.any(String), original.mime_type);
+        expect(original.bytes.equals(before)).toBe(true);
+        await expect(storage.upload({ organization_id: 2, accounting_entity_id: 8, store_id: 3 }, 50, {
+          buffer: original.bytes, originalname: original.filename, mimetype: original.mime_type, size: original.bytes.length,
+        })).rejects.toThrow();
+      }
+      expect(s3.uploadFile).toHaveBeenCalledTimes(3);
+    } finally {
+      if (previous === undefined) delete process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER;
+      else process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER = previous;
+    }
   });
 });
 

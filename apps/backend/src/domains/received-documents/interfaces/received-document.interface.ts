@@ -1,4 +1,5 @@
 import type { tax_type_enum } from '@prisma/client';
+import type { DocumentEmailWarning } from './document-email-reception.interface';
 
 export type ReceivedDocumentType =
   | 'invoice'
@@ -41,6 +42,28 @@ export interface DetailedReceivedDocument {
   commercial_xml: string | null;
   /** Embedded source strings remain unverified evidence. */
   application_responses: string[];
+}
+
+/** Internal-only package produced after bounded attachment and fiscal preflight. */
+export interface PreparedEmailEvidence {
+  role: 'container' | 'commercial' | 'dian_receipt' | 'representation' | 'zip';
+  bytes: Buffer;
+  filename: string;
+  mime_type: string;
+  sha256: string;
+  encoding?: 'utf-8' | 'iso-8859-1';
+}
+
+export interface PreparedEmailDocument {
+  parsed: DetailedReceivedDocument;
+  evidence: PreparedEmailEvidence[];
+  email_message_id: number;
+  warnings: DocumentEmailWarning[];
+  receipt_evidence: {
+    included: boolean;
+    reference_matches: boolean;
+    response_code: string | null;
+  };
 }
 
 export interface ReceivedDocumentTax {
