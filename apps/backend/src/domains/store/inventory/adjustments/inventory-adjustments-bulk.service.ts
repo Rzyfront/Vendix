@@ -72,6 +72,13 @@ export class InventoryAdjustmentsBulkService {
         },
         include: {
           products: {
+            select: {
+              sku: true,
+              name: true,
+              _count: { select: { product_variants: true } },
+            },
+          },
+          product_variants: {
             select: { sku: true, name: true },
           },
         },
@@ -80,16 +87,30 @@ export class InventoryAdjustmentsBulkService {
         },
       });
 
+      // Fila de variante -> SKU/nombre de la VARIANTE (el upload resuelve por
+      // ese SKU). Fila base huérfana (product_variant_id null) de un producto
+      // que tiene variantes: se omite, el upload la rechazaría por ambigua.
       data = stock_levels
-        .filter((sl) => sl.products.sku)
-        .map((sl) => ({
-          SKU: sl.products.sku,
-          'Nombre Producto': sl.products.name,
-          'Cantidad Actual': sl.quantity_on_hand,
-          'Cantidad Nueva': '',
-          'Tipo Ajuste': '',
-          Descripción: '',
-        }));
+        .filter((sl) => {
+          if (sl.product_variant_id) return !!sl.product_variants?.sku;
+          if (sl.products._count?.product_variants > 0) return false;
+          return !!sl.products.sku;
+        })
+        .map((sl) => {
+          const variant = sl.product_variant_id ? sl.product_variants : null;
+          return {
+            SKU: variant ? variant.sku : sl.products.sku,
+            'Nombre Producto': variant
+              ? variant.name
+                ? `${sl.products.name} - ${variant.name}`
+                : sl.products.name
+              : sl.products.name,
+            'Cantidad Actual': sl.quantity_on_hand,
+            'Cantidad Nueva': '',
+            'Tipo Ajuste': '',
+            Descripción: '',
+          };
+        });
     }
 
     if (data.length === 0) {
@@ -202,7 +223,14 @@ export class InventoryAdjustmentsBulkService {
         continue;
       }
 
-      // Buscar producto por SKU en la tienda actual
+      // Resolver SKU -> producto simple, o -> variante de un producto de la
+      // tienda. Match EXACTO (igual que la búsqueda previa de producto: sin
+      // `mode: insensitive`), también para variantes, por coherencia.
+      let product_id: number;
+      let product_variant_id: number | null = null;
+      let product_name: string;
+      let track_inventory: boolean;
+
       const product = await this.prisma.products.findFirst({
         where: {
           store_id,
@@ -214,25 +242,67 @@ export class InventoryAdjustmentsBulkService {
           name: true,
           sku: true,
           track_inventory: true,
+          product_variants: { select: { sku: true }, take: 3 },
         },
       });
 
-      if (!product) {
-        results.push({
-          row_number,
-          sku,
-          status: 'error',
-          message: `Producto con SKU "${sku}" no encontrado`,
+      if (product) {
+        if (product.product_variants?.length > 0) {
+          const examples = product.product_variants
+            .map((v) => v.sku)
+            .join(', ');
+          results.push({
+            row_number,
+            sku,
+            product_name: product.name,
+            status: 'error',
+            message: `El producto ${product.name} maneja variantes: usa el SKU de la variante (p.ej. ${examples})`,
+          });
+          failed++;
+          continue;
+        }
+        product_id = product.id;
+        product_name = product.name;
+        track_inventory = product.track_inventory;
+      } else {
+        const variant = await this.prisma.product_variants.findFirst({
+          where: {
+            sku,
+            products: { store_id, state: { not: 'archived' } },
+          },
+          select: {
+            id: true,
+            product_id: true,
+            name: true,
+            track_inventory_override: true,
+            products: { select: { name: true, track_inventory: true } },
+          },
         });
-        failed++;
-        continue;
+
+        if (!variant) {
+          results.push({
+            row_number,
+            sku,
+            status: 'error',
+            message: `Producto con SKU "${sku}" no encontrado`,
+          });
+          failed++;
+          continue;
+        }
+        product_id = variant.product_id;
+        product_variant_id = variant.id;
+        product_name = variant.name
+          ? `${variant.products.name} - ${variant.name}`
+          : variant.products.name;
+        track_inventory =
+          variant.track_inventory_override ?? variant.products.track_inventory;
       }
 
-      if (!product.track_inventory) {
+      if (!track_inventory) {
         results.push({
           row_number,
           sku,
-          product_name: product.name,
+          product_name,
           status: 'error',
           message: 'El producto no tiene seguimiento de inventario habilitado',
         });
@@ -240,11 +310,11 @@ export class InventoryAdjustmentsBulkService {
         continue;
       }
 
-      // Obtener stock actual en la ubicación
+      // Obtener stock actual en la ubicación (de la variante si aplica)
       const current_stock = await this.prisma.stock_levels.findFirst({
         where: {
-          product_id: product.id,
-          product_variant_id: null,
+          product_id,
+          product_variant_id,
           location_id: upload_dto.location_id,
         },
       });
@@ -256,7 +326,7 @@ export class InventoryAdjustmentsBulkService {
         results.push({
           row_number,
           sku,
-          product_name: product.name,
+          product_name,
           status: 'success',
           message: 'Sin cambios - cantidad igual a la actual',
           quantity_before,
@@ -278,7 +348,8 @@ export class InventoryAdjustmentsBulkService {
         'Ajuste masivo de inventario';
 
       valid_items.push({
-        product_id: product.id,
+        product_id,
+        ...(product_variant_id ? { product_variant_id } : {}),
         type: adjustment_type,
         quantity_after: Math.floor(quantity_after),
         description,
@@ -287,7 +358,7 @@ export class InventoryAdjustmentsBulkService {
       results.push({
         row_number,
         sku,
-        product_name: product.name,
+        product_name,
         status: 'success',
         quantity_before,
         quantity_after: Math.floor(quantity_after),
