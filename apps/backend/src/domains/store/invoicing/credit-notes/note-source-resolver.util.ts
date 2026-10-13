@@ -10,6 +10,8 @@ import {
 } from '../services/invoice-calculator.service';
 import { toDecimal } from '../utils/dian-money.util';
 import { normalizeInvoiceTaxRate } from '../utils/invoice-tax-rate.util';
+import type { InvoiceCalculatorAiuInput } from '../services/invoice-calculator.service';
+import { resolveFrozenNoteAiuInput } from './note-source-aiu.util';
 
 export type NoteSourceNumeric = Prisma.Decimal | number | string;
 
@@ -105,6 +107,8 @@ export interface ResolvedNoteSourceLine {
 export interface ResolveNoteSourceOptions {
   /** The code actually emitted for legacy rows whose stored unit was absent. */
   emitted_unit_codes?: ReadonlyMap<number, string>;
+  /** Validated immutable AIU configuration for source snapshot reproduction. */
+  frozen_aiu?: InvoiceCalculatorAiuInput;
 }
 
 const VALID_TAX_TYPES = new Set([
@@ -173,7 +177,7 @@ function normalizeNamedTaxType(name: string): string | null {
   return null;
 }
 
-function resolvedTaxType(
+export function resolveNoteSourceTaxType(
   source: NoteSourceInvoiceSnapshot,
   tax: NoteSourceTaxSnapshot,
   source_item_id?: number,
@@ -191,7 +195,7 @@ function invoiceTaxForCalculator(
   tax: NoteSourceTaxSnapshot,
   source_item_id: number,
 ): NonNullable<InvoiceCalculatorLineInput['taxes']>[number] {
-  const tax_type = resolvedTaxType(source, tax, source_item_id);
+  const tax_type = resolveNoteSourceTaxType(source, tax, source_item_id);
   return {
     tax_rate_id: tax.tax_rate_id ?? null,
     tax_name: tax.tax_name,
@@ -255,7 +259,7 @@ function includedTaxRateFraction(
     // ambiguous and fails closed instead of guessing per tax.
     const tax_inclusive = all_flags_missing ? true : tax_inclusivity[index] === true;
     if (!tax_inclusive) continue;
-    const tax_type = resolvedTaxType(source, tax, item.id);
+    const tax_type = resolveNoteSourceTaxType(source, tax, item.id);
     const rate = normalizeInvoiceTaxRate(
       decimal(source, tax.tax_rate, 'tax_rate', item.id),
       tax_type,
@@ -337,7 +341,28 @@ function resolveInclusiveFlag(
   item: NoteSourceItemSnapshot,
   taxes: readonly NoteSourceTaxSnapshot[],
   preserve_total_snapshot = false,
+  frozen_aiu?: InvoiceCalculatorAiuInput,
 ): boolean | null {
+  if (source.operation_type === '09' && frozen_aiu) {
+    const quantity = decimal(source, item.quantity, 'line_quantity', item.id);
+    const price = decimal(source, item.unit_price, 'line_unit_price', item.id);
+    const discount = decimal(source, item.discount_amount, 'line_discount', item.id);
+    const captured = quantity
+      .times(price)
+      .dividedBy(divisorFor(source, item))
+      .minus(discount)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const base = sourceBase(source, item).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const total = decimal(source, item.total_amount, 'line_total', item.id)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    if (captured.equals(base)) {
+      // A legacy true flag is normalized when captured economics prove the
+      // stored unit price was already the net line-extension base.
+      return false;
+    }
+    if (captured.equals(total) && item.is_inclusive !== false) return true;
+    sourceError(source, 'aiu_inclusive_snapshot_unprovable', item.id);
+  }
   if (preserve_total_snapshot) {
     if (item.is_inclusive !== null) {
       if (
@@ -429,7 +454,7 @@ function capturedAllowanceForLine(
   const included_rate_fraction = taxes.reduce((sum, tax) => {
     const tax_inclusive = tax.is_inclusive ?? line_flag ?? is_inclusive;
     if (!tax_inclusive) return sum;
-    const tax_type = resolvedTaxType(source, tax, item.id);
+    const tax_type = resolveNoteSourceTaxType(source, tax, item.id);
     const rate = normalizeInvoiceTaxRate(
       decimal(source, tax.tax_rate, 'tax_rate', item.id),
       tax_type,
@@ -597,7 +622,7 @@ export function resolveNoteSourceLines(
         sourceError(source, 'tax_snapshot_missing', item.id);
       }
     }
-    for (const tax of source.invoice_taxes) resolvedTaxType(source, tax, tax.invoice_item_id ?? undefined);
+    for (const tax of source.invoice_taxes) resolveNoteSourceTaxType(source, tax, tax.invoice_item_id ?? undefined);
   } else {
     if (allowance.isNegative()) sourceError(source, 'document_base_exceeds_source_lines');
     allocated_allowance = allocateNoteDocumentAllowance(
@@ -625,7 +650,10 @@ export function resolveNoteSourceLines(
       ),
     );
   }
-  if (!exact_total_copy && header_rows.length === 1 && !linked_rows) {
+  const frozenAiu = !exact_total_copy && source.operation_type === '09'
+    ? options.frozen_aiu ?? resolveFrozenNoteAiuInput(source)
+    : undefined;
+  if (!exact_total_copy && header_rows.length === 1 && !linked_rows && !frozenAiu) {
     const header_row = header_rows[0];
     if (!header_row) sourceError(source, 'header_tax_missing');
     const header_tax_amount = decimal(source, header_row.tax_amount, 'header_tax_amount');
@@ -689,7 +717,7 @@ export function resolveNoteSourceLines(
         if (tax.invoice_item_id === line.id) {
           const persisted_tax_base = decimal(source, tax.taxable_amount, 'taxable_amount', line.id);
           const source_line_base = source_bases_after_allowance.get(line.id) ?? new Prisma.Decimal(0);
-          if (!persisted_tax_base.equals(source_line_base)) {
+          if (!persisted_tax_base.equals(source_line_base) && !frozenAiu) {
             // The frozen AIU regime/matrix is retained on `source`, but the
             // calculator input cannot carry that matrix or prove a per-line
             // ratio for contract-contained AIU. Do not treat metadata presence
@@ -711,7 +739,11 @@ export function resolveNoteSourceLines(
       line,
       inclusiveEvidenceRows,
       exact_total_copy,
+      frozenAiu,
     );
+    if (frozenAiu && is_inclusive === true && !allocated.isZero()) {
+      sourceError(source, 'aiu_inclusive_allowance_unprovable', line.id);
+    }
     const captured_allowance = capturedAllowanceForLine(
       source,
       line,
@@ -791,7 +823,7 @@ export function buildTrustedNoteSnapshot(
     if (tax.invoice_item_id != null && line_index === undefined) {
       sourceError(source, 'trusted_tax_line_missing', tax.invoice_item_id);
     }
-    const tax_type = resolvedTaxType(source, tax, tax.invoice_item_id ?? undefined);
+    const tax_type = resolveNoteSourceTaxType(source, tax, tax.invoice_item_id ?? undefined);
     return {
       tax_rate_id: tax.tax_rate_id ?? null,
       tax_name: tax.tax_name,
