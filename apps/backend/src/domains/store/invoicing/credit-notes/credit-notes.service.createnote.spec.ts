@@ -6,6 +6,7 @@ import {
   mockRequestContext,
 } from '../../../../testing/prisma-mock';
 import { buildInvoice } from '../../../../testing/money-fixtures';
+import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
 
 /**
  * F-INC6 — pruebas de extremo a extremo de `createNote` (nota crédito), no
@@ -27,11 +28,12 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
   const STORE_ID = 100;
   const NOTE_ID = 9001;
 
-  function setup(parent: Record<string, any>) {
+  function setup(parent: Record<string, any>, balanceOverrides: Record<string, any> = {}) {
     mockRequestContext({ store_id: STORE_ID });
 
     const prisma = createPrismaMock({
       invoices: ['findFirst', 'findMany', 'create'],
+      invoice_items: ['createMany', 'findMany'],
       invoice_taxes: ['createMany'],
       dian_document_events: ['findFirst'],
       products: ['findMany'],
@@ -48,7 +50,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     const created_taxes: Array<Record<string, any>> = [];
     let next_item_id = 1;
     let last_created_data: Record<string, any> | null = null;
-    let last_created_items: Array<Record<string, any>> = [];
+    const created_items: Array<Record<string, any>> = [];
 
     const noteSnapshot = () => ({
       id: NOTE_ID,
@@ -70,7 +72,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
       customer_tax_regime: last_created_data?.customer_tax_regime,
       customer_fiscal_responsibilities:
         last_created_data?.customer_fiscal_responsibilities,
-      invoice_items: last_created_items,
+      invoice_items: created_items,
       invoice_taxes: created_taxes,
     });
 
@@ -97,14 +99,19 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
       async ({ data }: { data: Record<string, any> }) => {
         created.push(data);
         last_created_data = data;
-        last_created_items = (data.invoice_items?.create ?? []).map(
-          (item: Record<string, unknown>) => ({
-            id: next_item_id++,
-            ...item,
-          }),
-        );
         return noteSnapshot();
       },
+    );
+    prisma.invoice_items.createMany.mockImplementation(
+      async ({ data }: { data: Array<Record<string, any>> }) => {
+        created_items.push(...data.map((item) => ({ id: next_item_id++, ...item })));
+        return { count: data.length };
+      },
+    );
+    prisma.invoice_items.findMany.mockImplementation(async ({ where }: any) =>
+      created_items
+        .filter((item) => item.invoice_id === where?.invoice_id)
+        .map(({ id, source_invoice_item_id }) => ({ id, source_invoice_item_id })),
     );
     prisma.invoice_taxes.createMany.mockImplementation(
       async ({ data }: { data: Array<Record<string, any>> }) => {
@@ -120,24 +127,29 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
       })),
     };
 
+    const credit_note_balance = {
+      assertCanCreate: jest.fn().mockResolvedValue(undefined),
+      remaining: jest.fn().mockResolvedValue(null),
+      ...balanceOverrides,
+    };
     const service = new CreditNotesService(
       prisma as never,
       invoice_number_generator as never,
       { emit: jest.fn() } as never,
       {
-        resolveAccountingEntityForFiscal: jest.fn(async () => ({
-          id: ENTITY_ID,
-        })),
+        findFiscalAccountingEntityId: jest.fn(async () => ENTITY_ID),
       } as never,
       { assertAreaActive: jest.fn(async () => undefined) } as never,
       {} as never,
+      new InvoiceCalculatorService(),
+      credit_note_balance as never,
     );
 
-    return { service, prisma, created, created_taxes, invoice_number_generator };
+    return { service, prisma, created, created_items, created_taxes, invoice_number_generator, credit_note_balance };
   }
 
-  const baseParent = (overrides: Record<string, any> = {}) =>
-    buildInvoice({
+  const baseParent = (overrides: Record<string, any> = {}) => {
+    const invoice = buildInvoice({
       invoice_type: 'sales_invoice',
       invoice_number: 'FV-1',
       status: 'accepted',
@@ -145,16 +157,37 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
       currency: 'COP',
       ...overrides,
     });
+    return {
+      ...invoice,
+      invoice_items: (invoice.invoice_items ?? []).map((item: Record<string, any>, index: number) => ({
+        ...item,
+        id: item.id ?? 900000 + index,
+        invoice_id: invoice.id,
+        unit_code: 'NIU',
+        price_unit_quantity: item.price_unit_quantity ?? 1,
+      })),
+    };
+  };
+  const noteLine = (
+    source_invoice_item_id: number,
+    quantity: number,
+    unit_price: number,
+    extra: Record<string, unknown> = {},
+  ) => ({ source_invoice_item_id, quantity, unit_price, ...extra });
 
   it.each(['033', '034'])('blocks NC creation before numbering when original has accepted RADIAN event %s', async (event_code) => {
-    const parent = baseParent({ id: 7100, total_amount: money(3900) });
+    const parent = baseParent({
+      id: 7100,
+      total_amount: money(3900),
+      invoice_items: [{ id: 900000, description: 'Almuerzo', quantity: money(1), unit_price: money(3900), discount_amount: money(0), tax_amount: money(0), total_amount: money(3900) }],
+      invoice_taxes: [],
+    });
     const h = setup(parent);
     h.prisma.dian_document_events.findFirst.mockResolvedValue({ id: 90, event_code });
 
     await expect(h.service.createCreditNote({
       related_invoice_id: 7100, reason: 'Anulación parcial',
-      items: [{ product_id: null, description: 'Almuerzo', quantity: 1, unit_price: 100, discount_amount: 0, tax_amount: 0 }],
-      taxes: [],
+      items: [{ source_invoice_item_id: 900000, quantity: 1, unit_price: 100, unit_code: 'NIU' }],
     } as unknown as CreateCreditNoteDto)).rejects.toMatchObject({ errorCode: 'INVOICING_STATUS_002' });
 
     expect(h.invoice_number_generator.generateNextNumber).not.toHaveBeenCalled();
@@ -168,35 +201,44 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     }));
   });
 
-  it('P0 — 3×1300 INC-inclusivo: la cabecera no acumula fuga de float (repro 3900.0000000000005)', async () => {
-    // Antes del fix, sumar estos mismos 3 floats con `+=` da
-    // 3900.0000000000005 (ver docblock de `createNote`): mayor que el saldo
-    // exacto de la factura y rechazado con `INVOICING_CREDIT_NOTE_001` pese a
-    // que la nota SÍ cabe. `Prisma.Decimal.reduce` no arrastra ese residuo.
+  it('P0 — 3×1300 INC: una selección por source id recalcula con Decimal sin fuga de float', async () => {
+    // La tarifa y las cuotas vienen de la factura padre; el payload sólo elige
+    // líneas y valores comerciales, nunca fija tax_amount/taxes.
     const parent = baseParent({
       id: 7100,
+      subtotal_amount: money(3611.1),
+      tax_amount: money(288.9),
       total_amount: money(3900),
+      invoice_items: [1, 2, 3].map((id) => ({
+        id,
+        product_id: null,
+        product_variant_id: null,
+        description: 'Almuerzo',
+        quantity: money(1),
+        unit_price: money(1203.7),
+        discount_amount: money(0),
+        tax_amount: money(96.3),
+        total_amount: money(1300),
+        is_inclusive: false,
+        unit_code: 'NIU',
+      })),
+      invoice_taxes: [1, 2, 3].map((id) => ({
+        invoice_item_id: id,
+        tax_rate_id: 68,
+        tax_name: 'INC 8%',
+        tax_rate: money(8),
+        taxable_amount: money(1203.7),
+        tax_amount: money(96.3),
+        tax_type: 'inc',
+        is_inclusive: false,
+      })),
     });
     const { service } = setup(parent);
 
     const note = await service.createCreditNote({
       related_invoice_id: 7100,
       reason: 'Anulación parcial',
-      items: [
-        { product_id: null, description: 'Almuerzo', quantity: 1, unit_price: 1203.7, discount_amount: 0, tax_amount: 96.3 },
-        { product_id: null, description: 'Almuerzo', quantity: 1, unit_price: 1203.7, discount_amount: 0, tax_amount: 96.3 },
-        { product_id: null, description: 'Almuerzo', quantity: 1, unit_price: 1203.7, discount_amount: 0, tax_amount: 96.3 },
-      ],
-      taxes: [
-        {
-          tax_rate_id: 68,
-          tax_name: 'INC 8%',
-          tax_rate: 8,
-          taxable_amount: 3611.1,
-          tax_amount: 288.9,
-          tax_type: 'inc',
-        },
-      ],
+      items: [1, 2, 3].map((id) => noteLine(id, 1, 1203.7, { unit_code: 'NIU' })),
     } as unknown as CreateCreditNoteDto);
 
     expect(note.subtotal_amount.toString()).toBe('3611.1');
@@ -204,26 +246,65 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     expect(note.total_amount.toString()).toBe('3900');
   });
 
-  it('P0 — el guard de saldo rechaza con INVOICING_CREDIT_NOTE_001 exacto cuando SÍ excede', async () => {
-    const parent = baseParent({ id: 7101, total_amount: money(100) });
+  it('rejects client-supplied fiscal taxes before numbering', async () => {
+    const parent = baseParent({
+      id: 7102,
+      total_amount: money(100),
+      invoice_items: [{
+        id: 71021, description: 'Línea', quantity: money(1), unit_price: money(100),
+        discount_amount: money(0), tax_amount: money(0), total_amount: money(100),
+      }],
+      invoice_taxes: [],
+    });
     const { service, prisma, invoice_number_generator } = setup(parent);
+
+    await expect(service.createCreditNote({
+      related_invoice_id: 7102,
+      reason: 'La tasa no puede venir del cliente',
+      items: [{
+        source_invoice_item_id: 71021,
+        quantity: 1,
+        unit_price: 100,
+        tax_amount: 0,
+      }],
+      taxes: [],
+    } as unknown as CreateCreditNoteDto)).rejects.toMatchObject({
+      errorCode: 'INVOICING_NOTE_SOURCE_001',
+    });
+    expect(invoice_number_generator.generateNextNumber).not.toHaveBeenCalled();
+    expect(prisma.invoices.create).not.toHaveBeenCalled();
+  });
+
+  it('P0 — el guard de saldo rechaza con INVOICING_CREDIT_NOTE_001 exacto cuando SÍ excede', async () => {
+    const parent = baseParent({
+      id: 7101,
+      total_amount: money(100),
+      invoice_items: [{
+        id: 71011, description: 'Línea', quantity: money(1), unit_price: money(100),
+        discount_amount: money(0), tax_amount: money(0), total_amount: money(100),
+      }],
+      invoice_taxes: [],
+    });
+    const { service, prisma, invoice_number_generator, credit_note_balance } = setup(parent, {
+      assertCanCreate: jest.fn().mockRejectedValue(
+        Object.assign(new Error('Credit note exceeds source balance'), {
+          errorCode: 'INVOICING_CREDIT_NOTE_001',
+        }),
+      ),
+    });
 
     await expect(
       service.createCreditNote({
         related_invoice_id: 7101,
         reason: 'Excede el saldo',
-        items: [
-          { product_id: null, description: 'Línea', quantity: 1, unit_price: 150, discount_amount: 0, tax_amount: 0 },
-        ],
-        taxes: [
-          { tax_rate_id: null, tax_name: 'IVA 0%', tax_rate: 0, taxable_amount: 150, tax_amount: 0, tax_type: 'iva' },
-        ],
+        items: [noteLine(71011, 1, 150, { unit_code: 'NIU' })],
       } as unknown as CreateCreditNoteDto),
     ).rejects.toMatchObject({ errorCode: 'INVOICING_CREDIT_NOTE_001' });
 
     // Falla ANTES de numerar: un consecutivo autorizado no se devuelve.
     expect(invoice_number_generator.generateNextNumber).not.toHaveBeenCalled();
     expect(prisma.invoices.create).not.toHaveBeenCalled();
+    expect(credit_note_balance.assertCanCreate).toHaveBeenCalledTimes(1);
   });
 
   it('P0/P2 — NC TOTAL con descuento a nivel de orden: copia la cabecera verbatim, no recompone Σ(líneas)', async () => {
@@ -375,9 +456,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     const note = await service.createCreditNote({
       related_invoice_id: 7301,
       reason: 'Devolución del menú',
-      items: [
-        { product_id: 9, description: 'Menú ejecutivo', quantity: 1, unit_price: 22685.19 },
-      ],
+      items: [noteLine(602, 1, 22685.19)],
     } as unknown as CreateCreditNoteDto);
 
     const item = note.invoice_items[0];
@@ -458,10 +537,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     const note = await service.createCreditNote({
       related_invoice_id: 7400,
       reason: 'Devolución parcial del plato + envío completo',
-      items: [
-        { product_id: 11, description: 'Plato', quantity: 1, unit_price: 25000 },
-        { product_id: null, description: 'Envío', quantity: 1, unit_price: 12605.04 },
-      ],
+      items: [noteLine(701, 1, 25000), noteLine(702, 1, 12605.04)],
     } as unknown as CreateCreditNoteDto);
 
     expect(created_taxes).toHaveLength(2);
@@ -534,9 +610,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     const note = await service.createCreditNote({
       related_invoice_id: 7500,
       reason: 'Devolución total del combo legado',
-      items: [
-        { product_id: 77, description: 'Combo legado (pre 8f8427f4b)', quantity: 1, unit_price: 3000 },
-      ],
+      items: [noteLine(801, 1, 3000)],
     } as unknown as CreateCreditNoteDto);
 
     const item = note.invoice_items[0];
