@@ -34,7 +34,10 @@ import {
   AdjustmentQueryDto,
 } from './interfaces/inventory-adjustment.interface';
 import { BatchCreateAdjustmentsDto } from './dto/batch-create-adjustments.dto';
-import { BulkAdjustmentUploadDto } from './dto/bulk-adjustment-upload.dto';
+import {
+  BulkAdjustmentUploadDto,
+  BulkAdjustmentUploadSessionDto,
+} from './dto/bulk-adjustment-upload.dto';
 import { ReleaseReservationsByProductDto } from './dto/release-reservations.dto';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RequirePermissions } from '../../../auth/decorators/permissions.decorator';
@@ -89,7 +92,7 @@ export class InventoryAdjustmentsController {
   async uploadBulkAdjustments(
     @UploadedFile(
       new ParseFilePipe({
-        validators: [new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 })],
+        validators: [new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 })],
       }),
     )
     file: any,
@@ -111,6 +114,66 @@ export class InventoryAdjustmentsController {
       result,
       'Ajuste masivo completado exitosamente',
     );
+  }
+
+  @Post('bulk/analyze')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Analyze a bulk adjustment file (dry-run) and open an S3 session',
+  })
+  @ApiResponse({ status: 200, description: 'Analysis completed' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  @UseInterceptors(FileInterceptor('file'))
+  async analyzeBulkAdjustments(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 })],
+      }),
+    )
+    file: any,
+    @Body() upload_dto: BulkAdjustmentUploadDto,
+  ) {
+    const result = await this.bulkService.analyzeFile(file.buffer, upload_dto);
+    return this.responseService.success(result, 'Analisis completado');
+  }
+
+  @Post('bulk/upload-session')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Commit a bulk adjustment session (optionally paginated)',
+  })
+  @ApiResponse({ status: 201, description: 'Bulk adjustment processed' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  async uploadBulkAdjustmentsFromSession(
+    @Body() body: BulkAdjustmentUploadSessionDto,
+  ) {
+    const { session_id, offset, limit, ...upload_dto } = body;
+    const result = await this.bulkService.uploadFromSession(
+      session_id,
+      upload_dto as BulkAdjustmentUploadDto,
+      { offset, limit },
+    );
+
+    if (result.failed > 0) {
+      return this.responseService.success(
+        result,
+        'Ajuste masivo completado con algunos errores',
+      );
+    }
+
+    return this.responseService.success(
+      result,
+      'Ajuste masivo completado exitosamente',
+    );
+  }
+
+  @Delete('bulk/session/:id')
+  @ApiOperation({ summary: 'Cancel a bulk adjustment session' })
+  @ApiResponse({ status: 200, description: 'Session cancelled' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  async cancelBulkAdjustmentSession(@Param('id') session_id: string) {
+    await this.bulkService.cancelSession(session_id);
+    return this.responseService.success(null, 'Sesion cancelada');
   }
 
   @Post()
@@ -226,7 +289,12 @@ export class InventoryAdjustmentsController {
     if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
     if (!location_id)
       throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    const allowed = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    ];
     if (!allowed.includes(file.mimetype))
       throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
     const result = await this.inventoryCountScanner.scanCount(
@@ -241,13 +309,15 @@ export class InventoryAdjustmentsController {
 
   @Post('scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Enqueue inventory count sheet AI scan (async job)' })
+  @ApiOperation({
+    summary: 'Enqueue inventory count sheet AI scan (async job)',
+  })
   @ApiResponse({ status: 202, description: 'Scan enqueued, returns job_id' })
   @RequirePermissions('store:inventory:adjustments:create')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits: { fileSize: 15 * 1024 * 1024 },
+      limits: { fileSize: 120 * 1024 * 1024 },
     }),
   )
   async scanCountAsync(

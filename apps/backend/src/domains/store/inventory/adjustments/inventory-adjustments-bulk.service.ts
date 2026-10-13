@@ -6,16 +6,24 @@ import {
   BulkAdjustmentUploadDto,
   BulkAdjustmentUploadResultDto,
   BulkAdjustmentItemResultDto,
+  BulkAdjustmentAnalysisResultDto,
+  BulkAdjustmentUploadSessionResultDto,
+  MAX_BULK_ADJUSTMENT_UPLOAD_PAGE,
 } from './dto/bulk-adjustment-upload.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import type { ReportColumn } from '@common/reports/report-column.types';
 import * as XLSX from 'xlsx';
+import { v4 as uuidv4 } from 'uuid';
+import { S3Service } from '@common/services/s3.service';
+
+/** Tamaño de grupo para los `findMany({ in })` de la validación. */
+const LOOKUP_CHUNK = 1000;
 
 @Injectable()
 export class InventoryAdjustmentsBulkService {
   private readonly logger = new Logger(InventoryAdjustmentsBulkService.name);
-  private readonly MAX_BATCH_SIZE = 1000;
+  private readonly MAX_BATCH_SIZE = 10000;
 
   private readonly HEADER_TRANSLATIONS: Record<string, string> = {
     sku: 'sku',
@@ -41,6 +49,7 @@ export class InventoryAdjustmentsBulkService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly adjustmentsService: InventoryAdjustmentsService,
+    private readonly s3Service: S3Service,
   ) {}
 
   /**
@@ -151,37 +160,233 @@ export class InventoryAdjustmentsBulkService {
     );
 
     return buildReportBuffer({
-      sheets: [
-        { name: 'Ajuste Masivo Inventario', columns, rows: data },
-      ],
+      sheets: [{ name: 'Ajuste Masivo Inventario', columns, rows: data }],
     });
   }
 
   /**
-   * Procesa archivo Excel/CSV para ajuste masivo de inventario
+   * Procesa archivo Excel/CSV para ajuste masivo de inventario (modo legacy:
+   * valida y aplica todo el archivo en un solo request).
    */
   async uploadFromFile(
     file_buffer: Buffer,
     upload_dto: BulkAdjustmentUploadDto,
   ): Promise<BulkAdjustmentUploadResultDto> {
-    const context = RequestContextService.getContext();
-    const store_id = context?.store_id;
+    const store_id = this.requireStoreId();
+    const rows = this.parseAndCheckLimits(file_buffer);
+    return this.processRows(rows, upload_dto, store_id, 0);
+  }
+
+  /**
+   * Analiza el archivo (dry-run, no escribe stock), lo guarda en S3 temporal y
+   * devuelve el resumen por fila para confirmar luego por paginas.
+   */
+  async analyzeFile(
+    file_buffer: Buffer,
+    upload_dto: BulkAdjustmentUploadDto,
+  ): Promise<BulkAdjustmentAnalysisResultDto> {
+    const store_id = this.requireStoreId();
+    const rows = this.parseAndCheckLimits(file_buffer);
+
+    const evaluation = await this.evaluateRows(rows, upload_dto, store_id, 0);
+
+    const session_id = uuidv4();
+    await this.s3Service.uploadFile(
+      file_buffer,
+      this.sessionKey(store_id, session_id),
+      'application/octet-stream',
+    );
+
+    const errors = evaluation.results
+      .filter((r) => r.status === 'error')
+      .map((r) => ({
+        row_number: r.row_number,
+        sku: r.sku,
+        message: r.message ?? '',
+      }));
+
+    return {
+      session_id,
+      total: rows.length,
+      valid: evaluation.successful,
+      failed: evaluation.failed,
+      errors,
+    };
+  }
+
+  /**
+   * Confirma una sesion de analisis. Con `offset`/`limit` procesa solo la
+   * pagina `[offset, offset + limit)`; sin ellos, el archivo completo (legacy).
+   * El S3 temporal se borra solo con `done=true` (o en el modo legacy); si la
+   * pagina lanza, se conserva para reintentar.
+   */
+  async uploadFromSession(
+    session_id: string,
+    upload_dto: BulkAdjustmentUploadDto,
+    page?: { offset?: number; limit?: number },
+  ): Promise<
+    BulkAdjustmentUploadResultDto | BulkAdjustmentUploadSessionResultDto
+  > {
+    const store_id = this.requireStoreId();
+    const s3_key = this.sessionKey(store_id, session_id);
+
+    let file_buffer: Buffer;
+    try {
+      file_buffer = await this.s3Service.downloadImage(s3_key);
+    } catch (error) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+    }
+
+    if (page && (page.offset !== undefined || page.limit !== undefined)) {
+      const offset = page.offset ?? 0;
+      const limit = Math.min(
+        page.limit ?? MAX_BULK_ADJUSTMENT_UPLOAD_PAGE,
+        MAX_BULK_ADJUSTMENT_UPLOAD_PAGE,
+      );
+
+      const all = this.parseAndCheckLimits(file_buffer);
+      const total = all.length;
+      if (offset >= total) {
+        throw new BadRequestException(
+          `El offset (${offset}) está fuera del archivo: contiene ${total} filas de datos`,
+        );
+      }
+
+      const result = await this.processRows(
+        all.slice(offset, offset + limit),
+        upload_dto,
+        store_id,
+        offset,
+      );
+      const done = offset + limit >= total;
+      if (done) {
+        await this.safeDelete(s3_key);
+      }
+      return { ...result, total, offset, limit, done };
+    }
+
+    try {
+      const rows = this.parseAndCheckLimits(file_buffer);
+      return await this.processRows(rows, upload_dto, store_id, 0);
+    } finally {
+      await this.safeDelete(s3_key);
+    }
+  }
+
+  /** Cancela una sesion de analisis y limpia el archivo temporal. */
+  async cancelSession(session_id: string): Promise<void> {
+    const store_id = this.requireStoreId();
+    await this.safeDelete(this.sessionKey(store_id, session_id));
+  }
+
+  private sessionKey(store_id: number, session_id: string): string {
+    return `tmp/bulk-adjustments/${store_id}/${session_id}.xlsx`;
+  }
+
+  private async safeDelete(key: string): Promise<void> {
+    try {
+      await this.s3Service.deleteFile(key);
+    } catch (e) {
+      // Silent cleanup failure
+    }
+  }
+
+  private requireStoreId(): number {
+    const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
     }
+    return store_id;
+  }
 
-    // 1. Parsear archivo
+  private parseAndCheckLimits(file_buffer: Buffer): Record<string, any>[] {
     const rows = this.parseFile(file_buffer);
-
     if (rows.length === 0) {
       throw new VendixHttpException(ErrorCodes.INV_BULK_001);
     }
-
     if (rows.length > this.MAX_BATCH_SIZE) {
       throw new VendixHttpException(ErrorCodes.INV_BULK_002);
     }
+    return rows;
+  }
 
-    // 2. Validar y resolver SKUs → product_ids
+  /** Valida las filas y aplica los ajustes validos. */
+  private async processRows(
+    rows: Record<string, any>[],
+    upload_dto: BulkAdjustmentUploadDto,
+    store_id: number,
+    row_offset: number,
+  ): Promise<BulkAdjustmentUploadResultDto> {
+    const evaluation = await this.evaluateRows(
+      rows,
+      upload_dto,
+      store_id,
+      row_offset,
+    );
+    const { results, valid_items } = evaluation;
+    let { successful, failed } = evaluation;
+
+    // Ejecutar ajustes batch usando el servicio existente
+    if (valid_items.length > 0) {
+      // Se pide el resultado POR ÍTEM. Antes se llamaba al lote que aborta en el
+      // primer fallo y el `catch` marcaba como error TODAS las filas válidas:
+      // el lote no es atómico, así que las anteriores ya estaban aplicadas y el
+      // reporte decía "0 exitosos, 1000 con errores" con el stock movido. El
+      // operador no tenía forma de saber qué quedó hecho.
+      const outcomes =
+        await this.adjustmentsService.batchCreateAndCompleteSettled(
+          upload_dto.location_id,
+          valid_items,
+        );
+
+      // `valid_items[i]` y la fila de `results` con ajuste pendiente van en el
+      // mismo orden, así que el índice del lote mapea a la fila del archivo.
+      const applied_rows = evaluation.applied_rows;
+
+      for (const outcome of outcomes) {
+        if (outcome.ok) continue;
+        const row = applied_rows[outcome.index];
+        if (!row) continue;
+        row.status = 'error';
+        row.message = `Error al aplicar ajuste: ${outcome.error?.message ?? 'desconocido'}`;
+        successful--;
+        failed++;
+      }
+    }
+
+    return {
+      success: failed === 0,
+      total_processed: rows.length,
+      successful,
+      failed,
+      results,
+    };
+  }
+
+  /**
+   * Validacion pura (sin escribir): resuelve SKU -> producto/variante y el
+   * stock actual con lookups agrupados (`findMany({ in })`) y arma los items
+   * a ajustar. `row_offset` desplaza el numero de fila (paginas del commit).
+   */
+  private async evaluateRows(
+    rows: Record<string, any>[],
+    upload_dto: BulkAdjustmentUploadDto,
+    store_id: number,
+    row_offset: number,
+  ): Promise<{
+    results: BulkAdjustmentItemResultDto[];
+    valid_items: {
+      product_id: number;
+      product_variant_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+    }[];
+    applied_rows: BulkAdjustmentItemResultDto[];
+    successful: number;
+    failed: number;
+  }> {
     const results: BulkAdjustmentItemResultDto[] = [];
     const valid_items: {
       product_id: number;
@@ -191,12 +396,101 @@ export class InventoryAdjustmentsBulkService {
       reason_code?: string;
       description?: string;
     }[] = [];
+    const applied_rows: BulkAdjustmentItemResultDto[] = [];
     let successful = 0;
     let failed = 0;
 
+    // Lookups agrupados. Match EXACTO por SKU (sin `mode: insensitive`).
+    const skus = Array.from(
+      new Set(
+        rows
+          .map((r) => r.sku?.toString().trim())
+          .filter((s): s is string => !!s),
+      ),
+    );
+
+    const products_by_sku = new Map<string, any>();
+    for (const chunk of this.chunk(skus, LOOKUP_CHUNK)) {
+      const found = await this.prisma.products.findMany({
+        where: {
+          store_id,
+          sku: { in: chunk },
+          state: { not: 'archived' },
+        },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          track_inventory: true,
+          product_variants: { select: { sku: true }, take: 3 },
+        },
+        orderBy: { id: 'asc' },
+      });
+      for (const p of found) {
+        if (p.sku && !products_by_sku.has(p.sku)) {
+          products_by_sku.set(p.sku, p);
+        }
+      }
+    }
+
+    const variants_by_sku = new Map<string, any>();
+    const missing_skus = skus.filter((s) => !products_by_sku.has(s));
+    for (const chunk of this.chunk(missing_skus, LOOKUP_CHUNK)) {
+      const found = await this.prisma.product_variants.findMany({
+        where: {
+          sku: { in: chunk },
+          products: { store_id, state: { not: 'archived' } },
+        },
+        select: {
+          id: true,
+          sku: true,
+          product_id: true,
+          name: true,
+          track_inventory_override: true,
+          products: { select: { name: true, track_inventory: true } },
+        },
+        orderBy: { id: 'asc' },
+      });
+      for (const v of found) {
+        if (v.sku && !variants_by_sku.has(v.sku)) {
+          variants_by_sku.set(v.sku, v);
+        }
+      }
+    }
+
+    // Stock actual en la ubicación, por (producto, variante).
+    const product_ids = Array.from(
+      new Set([
+        ...Array.from(products_by_sku.values()).map((p) => p.id as number),
+        ...Array.from(variants_by_sku.values()).map(
+          (v) => v.product_id as number,
+        ),
+      ]),
+    );
+    const stock_by_key = new Map<string, number>();
+    for (const chunk of this.chunk(product_ids, LOOKUP_CHUNK)) {
+      const levels = await this.prisma.stock_levels.findMany({
+        where: {
+          product_id: { in: chunk },
+          location_id: upload_dto.location_id,
+        },
+        select: {
+          product_id: true,
+          product_variant_id: true,
+          quantity_on_hand: true,
+        },
+      });
+      for (const l of levels) {
+        stock_by_key.set(
+          `${l.product_id}:${l.product_variant_id ?? 'null'}`,
+          l.quantity_on_hand ?? 0,
+        );
+      }
+    }
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const row_number = i + 2; // +2 porque la fila 1 es header y el índice empieza en 0
+      const row_number = row_offset + i + 2; // +2 porque la fila 1 es header y el índice empieza en 0
 
       const sku = row.sku?.toString().trim();
       if (!sku) {
@@ -223,28 +517,13 @@ export class InventoryAdjustmentsBulkService {
         continue;
       }
 
-      // Resolver SKU -> producto simple, o -> variante de un producto de la
-      // tienda. Match EXACTO (igual que la búsqueda previa de producto: sin
-      // `mode: insensitive`), también para variantes, por coherencia.
+      // Resolver SKU -> producto simple, o -> variante de un producto de la tienda.
       let product_id: number;
       let product_variant_id: number | null = null;
       let product_name: string;
       let track_inventory: boolean;
 
-      const product = await this.prisma.products.findFirst({
-        where: {
-          store_id,
-          sku,
-          state: { not: 'archived' },
-        },
-        select: {
-          id: true,
-          name: true,
-          sku: true,
-          track_inventory: true,
-          product_variants: { select: { sku: true }, take: 3 },
-        },
-      });
+      const product = products_by_sku.get(sku);
 
       if (product) {
         if (product.product_variants?.length > 0) {
@@ -265,19 +544,7 @@ export class InventoryAdjustmentsBulkService {
         product_name = product.name;
         track_inventory = product.track_inventory;
       } else {
-        const variant = await this.prisma.product_variants.findFirst({
-          where: {
-            sku,
-            products: { store_id, state: { not: 'archived' } },
-          },
-          select: {
-            id: true,
-            product_id: true,
-            name: true,
-            track_inventory_override: true,
-            products: { select: { name: true, track_inventory: true } },
-          },
-        });
+        const variant = variants_by_sku.get(sku);
 
         if (!variant) {
           results.push({
@@ -310,16 +577,8 @@ export class InventoryAdjustmentsBulkService {
         continue;
       }
 
-      // Obtener stock actual en la ubicación (de la variante si aplica)
-      const current_stock = await this.prisma.stock_levels.findFirst({
-        where: {
-          product_id,
-          product_variant_id,
-          location_id: upload_dto.location_id,
-        },
-      });
-
-      const quantity_before = current_stock?.quantity_on_hand ?? 0;
+      const quantity_before =
+        stock_by_key.get(`${product_id}:${product_variant_id ?? 'null'}`) ?? 0;
 
       // Si la cantidad no cambió, skip con éxito
       if (quantity_after === quantity_before) {
@@ -355,7 +614,7 @@ export class InventoryAdjustmentsBulkService {
         description,
       });
 
-      results.push({
+      const result_row: BulkAdjustmentItemResultDto = {
         row_number,
         sku,
         product_name,
@@ -363,45 +622,21 @@ export class InventoryAdjustmentsBulkService {
         quantity_before,
         quantity_after: Math.floor(quantity_after),
         quantity_change: Math.floor(quantity_after) - quantity_before,
-      });
+      };
+      results.push(result_row);
+      applied_rows.push(result_row);
       successful++;
     }
 
-    // 3. Ejecutar ajustes batch usando el servicio existente
-    if (valid_items.length > 0) {
-      // Se pide el resultado POR ÍTEM. Antes se llamaba al lote que aborta en el
-      // primer fallo y el `catch` marcaba como error TODAS las filas válidas:
-      // el lote no es atómico, así que las anteriores ya estaban aplicadas y el
-      // reporte decía "0 exitosos, 1000 con errores" con el stock movido. El
-      // operador no tenía forma de saber qué quedó hecho.
-      const outcomes =
-        await this.adjustmentsService.batchCreateAndCompleteSettled(
-          upload_dto.location_id,
-          valid_items,
-        );
+    return { results, valid_items, applied_rows, successful, failed };
+  }
 
-      // `valid_items[i]` y la fila de `results` con status success van en el
-      // mismo orden, así que el índice del lote mapea a la fila del archivo.
-      const successRows = results.filter((r) => r.status === 'success');
-
-      for (const outcome of outcomes) {
-        if (outcome.ok) continue;
-        const row = successRows[outcome.index];
-        if (!row) continue;
-        row.status = 'error';
-        row.message = `Error al aplicar ajuste: ${outcome.error?.message ?? 'desconocido'}`;
-        successful--;
-        failed++;
-      }
+  private chunk<T>(items: T[], size: number): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+      out.push(items.slice(i, i + size));
     }
-
-    return {
-      success: failed === 0,
-      total_processed: rows.length,
-      successful,
-      failed,
-      results,
-    };
+    return out;
   }
 
   /**
