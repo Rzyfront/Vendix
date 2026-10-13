@@ -134,6 +134,92 @@ const CUFE_SCHEME_ORDER: readonly string[] = [
   DIAN_TAX_CODES.ICA,
 ];
 
+/**
+ * Deterministically allocates a document allowance in cents by source-line
+ * base. Largest fractional remainders receive residual cents; ties break by
+ * ascending source line id. Invalid, negative, over-base, or duplicate inputs
+ * return null instead of silently changing historical amounts.
+ */
+export function allocateNoteDocumentAllowance(
+  allowance: DianNumericInput,
+  lines: readonly { id: number; base_amount: DianNumericInput }[],
+): Map<number, Prisma.Decimal> | null {
+  try {
+    if (allowance === null || allowance === undefined) return null;
+    const amount = toDecimal(allowance);
+    if (!amount.isFinite() || amount.isNegative() || amount.decimalPlaces() > 2) {
+      return null;
+    }
+
+    const seen = new Set<number>();
+    const entries = lines.map((line) => {
+      if (!Number.isInteger(line.id) || line.id < 1 || seen.has(line.id)) return null;
+      seen.add(line.id);
+      if (line.base_amount === null || line.base_amount === undefined) return null;
+      const base = toDecimal(line.base_amount);
+      if (!base.isFinite() || base.isNegative() || base.decimalPlaces() > 2) {
+        return null;
+      }
+      return { id: line.id, base, base_cents: base.times(100) };
+    });
+    if (entries.some((entry) => entry === null)) return null;
+    const valid_entries = entries as Array<{
+      id: number;
+      base: Prisma.Decimal;
+      base_cents: Prisma.Decimal;
+    }>;
+    const total_base = valid_entries.reduce(
+      (sum, entry) => sum.plus(entry.base),
+      new Prisma.Decimal(0),
+    );
+    if (amount.gt(total_base)) return null;
+
+    const total_base_cents = total_base.times(100);
+    const allowance_cents = amount.times(100);
+    const allocated_cents = new Map<number, Prisma.Decimal>();
+    if (total_base_cents.isZero()) {
+      if (!allowance_cents.isZero()) return null;
+      for (const entry of valid_entries) {
+        allocated_cents.set(entry.id, new Prisma.Decimal(0));
+      }
+    } else {
+      let assigned = new Prisma.Decimal(0);
+      const shares = valid_entries.map((entry) => {
+        const numerator = allowance_cents.times(entry.base_cents);
+        const floor = numerator.dividedToIntegerBy(total_base_cents);
+        const remainder = numerator.minus(floor.times(total_base_cents));
+        assigned = assigned.plus(floor);
+        return { id: entry.id, cents: floor, remainder };
+      });
+      let residual = allowance_cents.minus(assigned);
+      const residual_order = [...shares].sort((a, b) => {
+        const by_remainder = b.remainder.comparedTo(a.remainder);
+        return by_remainder || a.id - b.id;
+      });
+      let index = 0;
+      while (residual.greaterThan(0)) {
+        const share = residual_order[index];
+        if (!share) return null;
+        share.cents = share.cents.plus(1);
+        residual = residual.minus(1);
+        index += 1;
+      }
+      for (const share of shares) allocated_cents.set(share.id, share.cents);
+    }
+
+    const allocation = new Map<number, Prisma.Decimal>();
+    for (const entry of valid_entries) {
+      allocation.set(
+        entry.id,
+        (allocated_cents.get(entry.id) ?? new Prisma.Decimal(0)).dividedBy(100),
+      );
+    }
+    return allocation;
+  } catch {
+    return null;
+  }
+}
+
 // --- Contrato público: entradas ---
 
 /**
@@ -328,8 +414,46 @@ export interface InvoiceCalculatorWithholdingInput {
   amount?: DianNumericInput;
 }
 
+/**
+ * Server-owned, immutable fiscal values used to reverse an issued source
+ * document exactly. This contract must never be accepted from an HTTP DTO.
+ */
+export interface TrustedInvoiceReversalTax extends InvoiceCalculatorTaxInput {
+  taxable_amount: DianNumericInput;
+  tax_amount: DianNumericInput;
+  /** Index of the source line this tax belongs to; omitted means header tax. */
+  line_index?: number;
+}
+
+export interface TrustedInvoiceReversalLine {
+  description?: string;
+  quantity: DianNumericInput;
+  unit_price: DianNumericInput;
+  discount_amount: DianNumericInput;
+  tax_amount: DianNumericInput;
+  total_amount: DianNumericInput;
+  line_extension_amount?: DianNumericInput;
+  price_unit_quantity?: DianNumericInput;
+  is_inclusive?: boolean | null;
+  taxes?: TrustedInvoiceReversalTax[];
+}
+
+export interface TrustedInvoiceReversalSnapshot {
+  lines: TrustedInvoiceReversalLine[];
+  taxes: TrustedInvoiceReversalTax[];
+  subtotal_amount: DianNumericInput;
+  discount_amount: DianNumericInput;
+  tax_amount: DianNumericInput;
+  total_amount: DianNumericInput;
+  prepaid_amount?: DianNumericInput;
+}
+
 export interface InvoiceCalculatorInput {
   items: InvoiceCalculatorLineInput[];
+  /** Internal-only input mode. Default `computed` preserves all existing behavior. */
+  mode?: 'computed' | 'trusted_snapshot_reversal';
+  /** Trusted server snapshot required only for `trusted_snapshot_reversal`. */
+  trusted_snapshot?: TrustedInvoiceReversalSnapshot;
   /** Retenciones aplicables. NUNCA restan del total. Ver `withholdings`. */
   withholdings?: InvoiceCalculatorWithholdingInput[];
   /**
@@ -547,6 +671,8 @@ export type InvoiceCalculatorDivergenceScope =
    * que sólo se corrige con nota crédito.
    */
   | 'aiu_base_below_minimum'
+  /** A caller selected snapshot reversal without supplying trusted server data. */
+  | 'missing_trusted_snapshot'
   /**
    * A.2 (ADR-04) — el bruto inclusivo es INALCANZABLE: `f(base)` salta el
    * objetivo por escalón (multi-tasa, $17 @ 8 %, descuentos que dejan brutos
@@ -629,9 +755,13 @@ export interface InvoiceCalculatorTotals {
   gross_subtotal: string;
   /** Σ `discount_amount` tal como fue capturado. */
   discount_amount: string;
+  /** Snapshot-only difference between source line bases and document subtotal. */
+  document_allowance_amount?: string;
   /**
    * `ValFac` del CUFE y `cac:LegalMonetaryTotal/cbc:LineExtensionAmount`.
-   * Σ de `line_extension_amount`.
+   * Σ de `line_extension_amount` en modo calculado; el modo snapshot conserva
+   * el subtotal fiscal de cabecera y expone la diferencia en
+   * `document_allowance_amount`.
    */
   total_before_tax: string;
   /** Σ de todos los impuestos = `cac:TaxTotal/cbc:TaxAmount`. */
@@ -644,7 +774,7 @@ export interface InvoiceCalculatorTotals {
   tax_ica: string;
   /** Esquemas fuera de 01/03/04. Alimenta `ValOtroIm` del QR junto a INC e ICA. */
   tax_other: string;
-  /** `cbc:TaxInclusiveAmount` = `total_before_tax + tax_amount`. */
+  /** `cbc:TaxInclusiveAmount`; computed sum or exact trusted source snapshot. */
   tax_inclusive_amount: string;
   /**
    * `ValTot` del CUFE y `cbc:PayableAmount`.
@@ -742,6 +872,12 @@ export class InvoiceCalculatorService {
    * Anexo 1.8.
    */
   calculate(input: InvoiceCalculatorInput): InvoiceCalculatorResult {
+    if (input.mode === 'trusted_snapshot_reversal') {
+      return input.trusted_snapshot
+        ? this.calculateTrustedSnapshot(input.trusted_snapshot)
+        : this.missingTrustedSnapshotResult();
+    }
+
     const divergences: InvoiceCalculatorDivergence[] = [];
     const lines: CalculatedLine[] = [];
     /** Retenciones que llegaron infiltradas en `items[].taxes[]`. */
@@ -812,6 +948,169 @@ export class InvoiceCalculatorService {
         total_amount,
         withholding_amount: dianSum(withholdings.map((w) => w.amount)),
         prepaid_amount: dianAmount(input.prepaid_amount),
+      },
+    };
+  }
+
+  /**
+   * Exact reversal mode. It maps only frozen server snapshots into the common
+   * calculator result shape; it never recalculates a rate, redistributes a
+   * header discount, or consults live fiscal configuration.
+   */
+  private calculateTrustedSnapshot(
+    snapshot: TrustedInvoiceReversalSnapshot,
+  ): InvoiceCalculatorResult {
+    const line_tax_inputs = snapshot.lines.map((line, index) => {
+      const snapshot_rows = snapshot.taxes.filter(
+        (tax) => tax.line_index === index,
+      );
+      return snapshot_rows.length > 0 ? snapshot_rows : line.taxes ?? [];
+    });
+    const header_tax_inputs = snapshot.taxes.filter(
+      (tax) => tax.line_index === undefined,
+    );
+    const lines: CalculatedLine[] = snapshot.lines.map((line, index) => {
+      const source_taxes = line_tax_inputs[index] ?? [];
+      const is_inclusive =
+        line.is_inclusive ??
+        source_taxes.some((tax) => tax.is_inclusive === true);
+      const gross_amount = dianAmount(
+        toDecimal(line.quantity)
+          .times(toDecimal(line.unit_price))
+          .dividedBy(this.priceUnitDivisor(line.price_unit_quantity)),
+      );
+      const discount_amount = dianAmount(line.discount_amount);
+      const line_extension_amount =
+        line.line_extension_amount !== null &&
+        line.line_extension_amount !== undefined
+          ? dianAmount(line.line_extension_amount)
+          : dianAmount(
+              toDecimal(line.total_amount).minus(toDecimal(line.tax_amount)),
+            );
+      const taxes = source_taxes.map((tax) =>
+        this.mapTrustedSnapshotTax(tax, is_inclusive),
+      );
+
+      return {
+        index,
+        description: line.description,
+        gross_amount,
+        discount_amount,
+        net_entered_amount: dianAmount(
+          toDecimal(gross_amount).minus(toDecimal(discount_amount)),
+        ),
+        line_extension_amount,
+        taxes,
+        tax_amount: dianAmount(line.tax_amount),
+        total_amount: dianAmount(line.total_amount),
+        is_inclusive,
+        aiu_component: null,
+        omit_tax_total: false,
+        taxable_amount: line_extension_amount,
+      };
+    });
+    const all_tax_rows = [
+      ...header_tax_inputs.map((tax) => this.mapTrustedSnapshotTax(tax, false)),
+      ...line_tax_inputs.flatMap((taxes, index) => {
+        const line = snapshot.lines[index];
+        const line_inclusive =
+          line?.is_inclusive ?? taxes.some((tax) => tax.is_inclusive === true);
+        return taxes.map((tax) =>
+          this.mapTrustedSnapshotTax(tax, line_inclusive),
+        );
+      }),
+    ];
+    const header_taxes = this.aggregateTaxRows(all_tax_rows);
+    const tax_schemes = this.aggregateTaxSchemes(header_taxes);
+    const total_before_tax = dianAmount(snapshot.subtotal_amount);
+    const line_base_total = dianSum(
+      lines.map((line) => line.line_extension_amount),
+    );
+    const allowance_difference = toDecimal(line_base_total).minus(
+      toDecimal(total_before_tax),
+    );
+    const total_amount = dianAmount(snapshot.total_amount);
+    const tax_amount = dianAmount(snapshot.tax_amount);
+    const prepaid_amount = dianAmount(snapshot.prepaid_amount);
+
+    return {
+      lines,
+      header_taxes,
+      tax_schemes,
+      withholdings: [],
+      divergences: [],
+      totals: {
+        gross_subtotal: dianSum(lines.map((line) => line.gross_amount)),
+        discount_amount: dianAmount(snapshot.discount_amount),
+        ...(allowance_difference.gt(0)
+          ? { document_allowance_amount: dianAmount(allowance_difference) }
+          : {}),
+        total_before_tax,
+        tax_amount,
+        tax_iva: this.schemeTotal(tax_schemes, DIAN_TAX_CODES.IVA),
+        tax_inc: this.schemeTotal(tax_schemes, DIAN_TAX_CODES.INC),
+        tax_ica: this.schemeTotal(tax_schemes, DIAN_TAX_CODES.ICA),
+        tax_other: dianSum(
+          tax_schemes
+            .filter(
+              (scheme) => !CUFE_SCHEME_ORDER.includes(scheme.dian_tax_code),
+            )
+            .map((scheme) => scheme.tax_amount),
+        ),
+        tax_inclusive_amount: total_amount,
+        total_amount,
+        withholding_amount: dianAmount(0),
+        prepaid_amount,
+      },
+    };
+  }
+
+  private mapTrustedSnapshotTax(
+    tax: TrustedInvoiceReversalTax,
+    line_is_inclusive: boolean,
+  ): CalculatedTax {
+    return {
+      tax_rate_id: tax.tax_rate_id ?? null,
+      tax_name: tax.tax_name,
+      tax_type: this.normalizeTaxType(tax.tax_type),
+      dian_tax_code: this.resolveDianTaxCode(tax),
+      tax_rate: dianRate(tax.tax_rate),
+      rate_basis: this.resolveRateBasis(tax),
+      is_inclusive: tax.is_inclusive ?? line_is_inclusive,
+      taxable_amount: dianAmount(tax.taxable_amount),
+      tax_amount: dianAmount(tax.tax_amount),
+    };
+  }
+
+  private missingTrustedSnapshotResult(): InvoiceCalculatorResult {
+    return {
+      lines: [],
+      header_taxes: [],
+      tax_schemes: [],
+      withholdings: [],
+      divergences: [
+        {
+          scope: 'missing_trusted_snapshot',
+          line_index: -1,
+          detail: 'trusted_snapshot is required in trusted_snapshot_reversal mode',
+          expected: dianAmount(0),
+          received: dianAmount(0),
+          difference: dianAmount(0),
+        },
+      ],
+      totals: {
+        gross_subtotal: dianAmount(0),
+        discount_amount: dianAmount(0),
+        total_before_tax: dianAmount(0),
+        tax_amount: dianAmount(0),
+        tax_iva: dianAmount(0),
+        tax_inc: dianAmount(0),
+        tax_ica: dianAmount(0),
+        tax_other: dianAmount(0),
+        tax_inclusive_amount: dianAmount(0),
+        total_amount: dianAmount(0),
+        withholding_amount: dianAmount(0),
+        prepaid_amount: dianAmount(0),
       },
     };
   }
@@ -1781,29 +2080,31 @@ export class InvoiceCalculatorService {
    * de lo que sale en el XML de cada línea.
    */
   private aggregateHeaderTaxes(lines: CalculatedLine[]): CalculatedTax[] {
+    return this.aggregateTaxRows(lines.flatMap((line) => line.taxes));
+  }
+
+  private aggregateTaxRows(taxes: CalculatedTax[]): CalculatedTax[] {
     const buckets = new Map<string, CalculatedTax>();
 
-    for (const line of lines) {
-      for (const tax of line.taxes) {
-        const key = [
-          tax.tax_name,
-          tax.tax_rate,
-          tax.tax_type,
-          tax.is_inclusive ? '1' : '0',
-          tax.dian_tax_code,
-        ].join('|');
+    for (const tax of taxes) {
+      const key = [
+        tax.tax_name,
+        tax.tax_rate,
+        tax.tax_type,
+        tax.is_inclusive ? '1' : '0',
+        tax.dian_tax_code,
+      ].join('|');
 
-        const existing = buckets.get(key);
-        if (existing) {
-          existing.taxable_amount = dianSum([
-            existing.taxable_amount,
-            tax.taxable_amount,
-          ]);
-          existing.tax_amount = dianSum([existing.tax_amount, tax.tax_amount]);
-          continue;
-        }
-        buckets.set(key, { ...tax });
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.taxable_amount = dianSum([
+          existing.taxable_amount,
+          tax.taxable_amount,
+        ]);
+        existing.tax_amount = dianSum([existing.tax_amount, tax.tax_amount]);
+        continue;
       }
+      buckets.set(key, { ...tax });
     }
 
     return Array.from(buckets.values());
