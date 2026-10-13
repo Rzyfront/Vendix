@@ -524,9 +524,14 @@ describe('PurchaseOrdersService.receive()', () => {
         purchase_order_items: {
           findMany: jest.fn().mockResolvedValue([]),
           deleteMany: jest.fn(),
-          create: jest.fn(),
+          createManyAndReturn: jest
+            .fn()
+            .mockImplementation(({ data }: any) =>
+              Promise.resolve(data.map((_: any, i: number) => ({ id: i + 1 }))),
+            ),
         },
         purchase_order_item_taxes: {
+          createMany: jest.fn().mockResolvedValue({ count: 0 }),
           deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         product_variants: { findMany: jest.fn().mockResolvedValue([]) },
@@ -634,7 +639,7 @@ describe('PurchaseOrdersService.receive()', () => {
       expect(tx.purchase_order_items.deleteMany).toHaveBeenCalledWith({
         where: { purchase_order_id: PO_ID },
       });
-      expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
+      expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
       const dataArg = (tx.purchase_orders.update as jest.Mock).mock.calls[0][0]
         .data;
       expect(dataArg).not.toHaveProperty('items');
@@ -2261,7 +2266,7 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
    * métodos que `update()` toca son: `purchase_orders.findUnique`
    * (loadOrderOrFail), `product_variants.findMany`
    * (assertNoBaseLineOnVariantProduct), `purchase_order_items.deleteMany`,
-   * `purchase_order_items.create` y `purchase_orders.update`.
+   * `purchase_order_items.createManyAndReturn` y `purchase_orders.update`.
    */
   function mockDraftOrderTx() {
     const tx = {
@@ -2279,10 +2284,15 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       purchase_order_items: {
         findMany: jest.fn().mockResolvedValue([]),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        create: jest.fn().mockResolvedValue({}),
+        createManyAndReturn: jest
+          .fn()
+          .mockImplementation(({ data }: any) =>
+            Promise.resolve(data.map((_: any, i: number) => ({ id: i + 1 }))),
+          ),
       },
       purchase_order_item_taxes: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       product_variants: { findMany: jest.fn().mockResolvedValue([]) },
     };
@@ -2306,8 +2316,9 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       ],
     } as any);
 
-    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
-    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+    expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
+    const createData =
+      tx.purchase_order_items.createManyAndReturn.mock.calls[0][0].data[0];
 
     // ownDiscount = 1000 * 1 * (0.20 / 100) = 2
     // discount_total = 2 (discountPerUnit * quantity = 2 * 1)
@@ -2338,8 +2349,9 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       ],
     } as any);
 
-    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
-    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+    expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
+    const createData =
+      tx.purchase_order_items.createManyAndReturn.mock.calls[0][0].data[0];
 
     // El porcentaje solo produciría 2; el monto es 4 → discount_amount gana.
     expect(createData.discount_amount).toBe(4);
@@ -2376,8 +2388,9 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       ],
     } as any);
 
-    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
-    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+    expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
+    const createData =
+      tx.purchase_order_items.createManyAndReturn.mock.calls[0][0].data[0];
 
     // El porcentaje original se persiste como provenance; NO se re-deriva.
     expect(createData.discount_percentage).toBe(20);
@@ -2389,6 +2402,63 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
 
     const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
     expect(headerData.subtotal_amount).toBe(800);
+  });
+
+  it('escritura por lotes: 2.500 líneas = 3 createManyAndReturn y los impuestos cuelgan del id de su línea', async () => {
+    const tx = mockDraftOrderTx();
+    const items = Array.from({ length: 2500 }, () => ({
+      product_id: PRODUCT_ID_LOCAL,
+      quantity: 1,
+      unit_price: 100,
+      tax_rate: 19,
+    }));
+
+    await service.update(PO_ID_LOCAL, { items } as any);
+
+    const calls = tx.purchase_order_items.createManyAndReturn.mock.calls;
+    expect(calls.map((c: any) => c[0].data.length)).toEqual([1000, 1000, 500]);
+    // Una fila de impuesto por línea, con el id (1..n) de SU línea en el lote.
+    const taxCalls = tx.purchase_order_item_taxes.createMany.mock.calls;
+    expect(taxCalls).toHaveLength(3);
+    expect(taxCalls[0][0].data).toHaveLength(1000);
+    expect(taxCalls[0][0].data[0].purchase_order_item_id).toBe(1);
+    expect(taxCalls[0][0].data[999].purchase_order_item_id).toBe(1000);
+    expect(taxCalls[2][0].data[499].purchase_order_item_id).toBe(500);
+  });
+
+  it('solo cabecera: el reparto del flete va en sentencias agrupadas (1 por 1.000 líneas), no un update por línea', async () => {
+    const tx: any = mockDraftOrderTx();
+    tx.purchase_orders.findUnique.mockResolvedValue({
+      id: PO_ID_LOCAL,
+      status: 'draft',
+      order_number: 'PO-HDR',
+      shipping_cost: 0,
+      shipping_cost_allocation: null,
+      subtotal_amount: 0,
+      tax_amount: 0,
+    });
+    tx.purchase_order_items.findMany.mockResolvedValue(
+      Array.from({ length: 1500 }, (_, i) => ({
+        id: i + 1,
+        quantity_ordered: 1,
+        unit_price_net: 100,
+        unit_cost: 100,
+        tax_amount: 0,
+      })),
+    );
+    tx.purchase_order_items.update = jest.fn();
+    tx.$executeRaw = jest.fn().mockResolvedValue(1500);
+
+    await service.update(PO_ID_LOCAL, {
+      shipping_cost: 150,
+      shipping_cost_allocation: 'prorate',
+    } as any);
+
+    expect(tx.purchase_order_items.update).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+    const first = tx.$executeRaw.mock.calls[0][0];
+    expect(first.strings.join('?')).toContain('UPDATE purchase_order_items AS p');
+    expect(first.values).toHaveLength(2000);
   });
 });
 

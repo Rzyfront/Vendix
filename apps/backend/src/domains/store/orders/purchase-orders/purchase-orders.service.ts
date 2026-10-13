@@ -3316,15 +3316,26 @@ export class PurchaseOrdersService {
         await tx.purchase_order_items.deleteMany({
           where: { purchase_order_id: id },
         });
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          const derived = this.resolveLineTaxes(
-            item,
-            updatePurchaseOrderDto,
-            headerShares[i],
-          );
-          await tx.purchase_order_items.create({
-            data: {
+        // Escritura por lotes (antes: 1 INSERT por línea + 1 por impuesto).
+        // `createManyAndReturn` devuelve los ids; se ordenan ascendente para
+        // casarlos con el orden de inserción y colgar de ellos los impuestos.
+        const BATCH = 1000;
+        for (let start = 0; start < items.length; start += BATCH) {
+          const end = Math.min(start + BATCH, items.length);
+          const rows: Prisma.purchase_order_itemsCreateManyInput[] = [];
+          const taxRowsPerLine: Array<
+            NonNullable<
+              ReturnType<PurchaseOrdersService['buildItemTaxRows']>
+            >['create']
+          > = [];
+          for (let i = start; i < end; i++) {
+            const item = items[i];
+            const derived = this.resolveLineTaxes(
+              item,
+              updatePurchaseOrderDto,
+              headerShares[i],
+            );
+            rows.push({
               purchase_order_id: id,
               product_id: item.product_id,
               product_variant_id: item.product_variant_id ?? null,
@@ -3339,17 +3350,30 @@ export class PurchaseOrdersService {
               tax_type: derived.legacy_tax_type,
               prices_include_tax: item.prices_include_tax ?? null,
               tax_amount: derived.tax_amount,
-              // QUI-855 — filas por impuesto: las previas se borraron arriba,
-              // así que esto es un reemplazo limpio.
-              purchase_order_item_taxes: this.buildItemTaxRows(derived),
               notes: item.notes,
               batch_number: item.batch_number,
               manufacturing_date:
                 PurchaseOrdersService.toDateOrUndefined(item.manufacturing_date),
               expiration_date:
                 PurchaseOrdersService.toDateOrUndefined(item.expiration_date),
-            },
+            });
+            // QUI-855 — filas por impuesto: las previas se borraron arriba,
+            // así que esto es un reemplazo limpio.
+            taxRowsPerLine.push(this.buildItemTaxRows(derived)?.create ?? []);
+          }
+          const created = await tx.purchase_order_items.createManyAndReturn({
+            data: rows,
+            select: { id: true },
           });
+          const ids = (created as Array<{ id: number }>)
+            .map((r) => r.id)
+            .sort((x, y) => x - y);
+          const taxData = taxRowsPerLine.flatMap((taxes, offset) =>
+            taxes.map((t) => ({ ...t, purchase_order_item_id: ids[offset] })),
+          );
+          if (taxData.length > 0) {
+            await tx.purchase_order_item_taxes.createMany({ data: taxData });
+          }
         }
       } else if (
         updatePurchaseOrderDto.shipping_cost !== undefined ||
@@ -3405,11 +3429,17 @@ export class PurchaseOrdersService {
         });
         data.shipping_cost_allocation = freight.applied;
 
-        for (let i = 0; i < existingLines.length; i++) {
-          await tx.purchase_order_items.update({
-            where: { id: existingLines[i].id },
-            data: { allocated_shipping_amount: freight.shares[i] ?? 0 },
-          });
+        // Una sentencia por hasta 1000 líneas (antes: un UPDATE por línea).
+        // El único campo por línea es `allocated_shipping_amount`.
+        for (let start = 0; start < existingLines.length; start += 1000) {
+          const slice = existingLines.slice(start, start + 1000);
+          const values = slice.map(
+            (line, offset) =>
+              Prisma.sql`(${line.id}::int, ${freight.shares[start + offset] ?? 0}::numeric)`,
+          );
+          await tx.$executeRaw(
+            Prisma.sql`UPDATE purchase_order_items AS p SET allocated_shipping_amount = v.amount FROM (VALUES ${Prisma.join(values)}) AS v(id, amount) WHERE p.id = v.id`,
+          );
         }
 
         // El total se recompone desde lo persistido: el neto y el IVA de las
