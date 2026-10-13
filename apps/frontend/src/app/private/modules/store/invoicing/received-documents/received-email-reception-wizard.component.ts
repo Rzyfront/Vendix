@@ -23,7 +23,7 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
       [fullScreenOnMobile]="true" [closeOnBackdrop]="false" [canClose]="canCloseModal" (cancel)="close()">
       @if (scope() !== 'store') {
         <p class="text-sm text-text-secondary">La recepción se configura desde cada tienda. Cambia al entorno de una tienda autorizada para continuar.</p>
-        <app-button variant="outline" (clicked)="storeContextRequested.emit()">Cambiar a una tienda</app-button>
+        <app-button customClasses="min-h-11" variant="outline" (clicked)="storeContextRequested.emit()">Cambiar a una tienda</app-button>
       } @else if (!contextReady() || !tenantKey()) {
         <p role="status" class="text-sm text-text-secondary">Esperando el contexto de tu tienda…</p>
       } @else if (!canRead()) {
@@ -31,7 +31,7 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
       } @else {
         <div class="email-wizard">
           <app-steps-line [steps]="steps" [currentStep]="step()" [clickable]="false" size="sm" />
-          @if (mutationError() || error()) { <div role="alert" class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error"><p>{{ mutationError() || error() }}</p><app-button variant="outline" [disabled]="loading() || busy()" (clicked)="retryStatus()">Reintentar consulta</app-button></div> }
+          @if (mutationError() || error()) { <div role="alert" class="rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error"><p>{{ mutationError() || error() }}</p><app-button customClasses="min-h-11" variant="outline" [disabled]="loading() || busy()" (clicked)="retryStatus()">Reintentar consulta</app-button></div> }
           @if (loading() && !status()) { <p role="status" class="text-sm text-text-secondary">Consultando tu recepción…</p> }
           @if (status() && !status()!.pilot_available) {
             <p role="note" class="text-sm text-text-secondary">La recepción por correo todavía no está disponible para esta tienda. Consulta con tu administrador.</p>
@@ -44,17 +44,17 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
               <p class="text-sm text-text-secondary">Activa tu dirección Vendix. No necesitamos la contraseña de tu correo.</p>
               @if (configurationForContext()?.address) {
                 <app-input label="Tu correo de facturas" [formControl]="addressControl" [readonly]="true" size="lg" />
-                <app-button variant="outline" (clicked)="copyAddress()"><app-icon name="copy" slot="icon" />Copiar dirección</app-button>
+                <app-button customClasses="min-h-11" variant="outline" (clicked)="copyAddress()"><app-icon name="copy" slot="icon" />Copiar dirección</app-button>
                 @if (!configurationForContext()?.enabled) {
                   <p class="text-sm text-text-secondary">Pausado. Las facturas guardadas siguen en tu Buzón.</p>
-                  <app-button [disabled]="busy() || !mayConfigure()" [loading]="busy()" (clicked)="resume()">Reanudar recepción</app-button>
+                  <app-button customClasses="min-h-11" [disabled]="busy() || !mayConfigure()" [loading]="busy()" (clicked)="resume()">Reanudar recepción</app-button>
                 }
               } @else {
                 <label class="email-consent text-sm text-text-primary">
                   <input type="checkbox" [formControl]="consentControl" />
                   <span>Sólo reenvía facturas. Vendix procesará los datos del correo y guardará sus archivos para que puedas revisarlos; usaremos almacenamiento AWS en Estados Unidos, región Norte de Virginia.</span>
                 </label>
-                <app-button [disabled]="!mayActivate()" [loading]="busy()" [showTextWhileLoading]="true" (clicked)="activate()">{{ busy() ? 'Creando tu dirección…' : 'Activar recepción' }}</app-button>
+                <app-button customClasses="min-h-11" [disabled]="!mayActivate()" [loading]="busy()" [showTextWhileLoading]="true" (clicked)="activate()">{{ busy() ? 'Creando tu dirección…' : 'Activar recepción' }}</app-button>
               }
             </section>
           } @else if (step() === 1) {
@@ -62,7 +62,7 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
               <h2 id="email-provider-heading" class="font-semibold text-text-primary">¿Dónde recibes las facturas de tus proveedores?</h2>
               <div role="group" aria-label="Elige dónde recibes las facturas" class="email-options">
                 @for (option of providers; track option.value) {
-                  <app-button variant="outline" [ariaPressed]="provider() === option.value" (clicked)="chooseProvider(option.value)">{{ option.label }}</app-button>
+                  <app-button customClasses="min-h-11" variant="outline" [ariaPressed]="provider() === option.value" (clicked)="chooseProvider(option.value)">{{ option.label }}</app-button>
                 }
               </div>
               @if (provider() === 'gmail') {
@@ -78,7 +78,7 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
                   <div role="status" class="rounded-lg border border-primary/30 bg-surface p-3 text-sm text-text-primary">
                     <p>Gmail te envió un código: <strong>{{ code }}</strong></p>
                     <p>Pégalo en Gmail → Configuración → Reenvío. Hazlo sólo si tú solicitaste el reenvío.</p>
-                    <app-button variant="outline" (clicked)="copyCode()">Copiar código</app-button>
+                    <app-button customClasses="min-h-11" variant="outline" (clicked)="copyCode()">Copiar código</app-button>
                   </div>
                 } @else {
                   <p class="text-sm text-text-secondary">{{ codeExpired() ? 'Solicita otro código desde Gmail.' : 'Esperando el código de Gmail. Si sólo recibes un enlace o no aparece un código, puedes usar esta dirección directamente con tus proveedores mientras soporte te ayuda.' }}</p>
@@ -92,7 +92,7 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
                 <p class="text-sm text-text-secondary">Dale esta dirección a tus proveedores y pídeles que envíen directamente sus facturas con el archivo ZIP o XML.</p>
               }
               <p class="text-sm text-text-secondary">También puedes dar esta dirección a tus proveedores para que envíen las facturas directamente.</p>
-              <app-button variant="outline" [disabled]="!configurationForContext()?.address" (clicked)="copyAddress()">Copiar dirección</app-button>
+              <app-button customClasses="min-h-11" variant="outline" [disabled]="!configurationForContext()?.address" (clicked)="copyAddress()">Copiar dirección</app-button>
               <details class="email-guide text-sm text-text-secondary"><summary>¿Facturas anteriores?</summary>
                 <p>En Gmail, selecciónalas → ⋮ → Reenviar como archivo adjunto. En Outlook, usa Reenviar como datos adjuntos. Envíalas a tu dirección Vendix en grupos pequeños: hasta 20 correos y 20 MB por envío. Si Gmail los convierte en un enlace de Drive, reduce el grupo.</p>
                 <p>El filtro sólo reenvía mensajes nuevos; no envía automáticamente tus facturas anteriores.</p>
@@ -103,7 +103,7 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
               <h2 id="email-test-heading" class="font-semibold text-text-primary">Prueba con una factura</h2>
               <p class="text-sm text-text-secondary">Reenvía ahora una factura con su archivo ZIP o XML. Revisaremos si está a nombre de tu negocio.</p>
               @if (provider() === 'gmail' && usableCode(); as code) {
-                <div role="status" class="rounded-lg border border-primary/30 bg-surface p-3 text-sm text-text-primary"><p>Gmail te envió un código: <strong>{{ code }}</strong>. Pégalo en Gmail → Configuración → Reenvío, sólo si tú lo solicitaste.</p><app-button variant="outline" (clicked)="copyCode()">Copiar código</app-button></div>
+                <div role="status" class="rounded-lg border border-primary/30 bg-surface p-3 text-sm text-text-primary"><p>Gmail te envió un código: <strong>{{ code }}</strong>. Pégalo en Gmail → Configuración → Reenvío, sólo si tú lo solicitaste.</p><app-button customClasses="min-h-11" variant="outline" (clicked)="copyCode()">Copiar código</app-button></div>
               }
               @if (hasReceivedInvoice()) {
                 <p role="status" class="font-medium text-text-primary">Factura recibida. Ya está en tu Buzón para revisar.</p>
@@ -111,8 +111,8 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
               } @else if (failureReason(); as reason) {
                 <div role="status" class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary">
                   <p>Recibimos tu correo, pero no pudimos agregar la factura.</p><p class="font-medium">{{ reason.title }}</p><p>{{ reason.description }}</p>
-                  <app-button variant="outline" (clicked)="historyRequested.emit()">Ver qué pasó</app-button>
-                  @if (reason.action === 'manual') { <app-button variant="outline" (clicked)="manualImportRequested.emit()">Importar manualmente</app-button> }
+                  <app-button customClasses="min-h-11" variant="outline" (clicked)="historyRequested.emit()">Ver qué pasó</app-button>
+                  @if (reason.action === 'manual') { <app-button customClasses="min-h-11" variant="outline" (clicked)="manualImportRequested.emit()">Importar manualmente</app-button> }
                 </div>
               } @else { <p role="status" class="font-medium text-text-primary">{{ statusCopy().title }}</p> }
               <p class="text-sm text-text-secondary">Se actualiza cada 30 segundos. Puedes cerrar y volver después. Sin conexión o si esta ventana no está visible, pausamos la consulta; ante un fallo esperamos más antes de reintentar.</p>
@@ -125,9 +125,9 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
         </div>
       }
       <div slot="footer" class="email-footer">
-        <app-button variant="outline" [disabled]="busy()" (clicked)="close()">Cerrar</app-button>
-        @if (step() > 0 && scope() === 'store' && canConfigure()) { <app-button variant="outline" [disabled]="busy()" (clicked)="previous()">Volver</app-button> }
-        @if (step() < 2 && scope() === 'store' && canConfigure()) { <app-button [disabled]="!mayContinue()" (clicked)="next()">{{ step() === 0 ? 'Continuar' : 'Continuar a la prueba' }}</app-button> }
+        <app-button customClasses="min-h-11" variant="outline" [disabled]="busy()" (clicked)="close()">Cerrar</app-button>
+        @if (step() > 0 && scope() === 'store' && canConfigure()) { <app-button customClasses="min-h-11" variant="outline" [disabled]="busy()" (clicked)="previous()">Volver</app-button> }
+        @if (step() < 2 && scope() === 'store' && canConfigure()) { <app-button customClasses="min-h-11" [disabled]="!mayContinue()" (clicked)="next()">{{ step() === 0 ? 'Continuar' : 'Continuar a la prueba' }}</app-button> }
       </div>
     </app-modal>
   `,

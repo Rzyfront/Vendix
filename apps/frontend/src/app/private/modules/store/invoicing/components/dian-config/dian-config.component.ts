@@ -8,7 +8,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
@@ -70,6 +70,7 @@ interface AxisStats {
   selector: 'vendix-dian-config',
   standalone: true,
   imports: [
+    RouterLink,
     CardComponent,
     ButtonComponent,
     IconComponent,
@@ -162,8 +163,11 @@ interface AxisStats {
               <div class="flex items-start gap-3">
                 <span class="rounded-lg bg-primary/10 p-2 text-primary" aria-hidden="true"><app-icon name="inbox" [size]="18" /></span>
                 <div>
-                  <h2 class="text-base font-semibold text-text-primary">Recepción de documentos</h2>
-                  <p class="mt-1 text-sm text-text-secondary">La entidad fiscal es de la organización. La recepción de esta tienda se administra allí; este panel conserva el alcance fiscal actual y no cambia su configuración.</p>
+                  <h2 class="text-base font-semibold text-text-primary">Recepción por correo</h2>
+                  <p class="mt-1 text-sm text-text-secondary">La entidad fiscal es de la organización. El correo se administra en el Buzón de esta tienda con su permiso operativo, sin cambiar la configuración fiscal.</p>
+                  @if (canReadReception()) {
+                    <a routerLink="/admin/invoicing/received-documents" class="inline-flex min-h-11 items-center font-medium text-primary underline">Abrir Buzón</a>
+                  }
                 </div>
               </div>
               </app-card>
@@ -171,7 +175,7 @@ interface AxisStats {
           </div>
         }
 
-        @if (!isSuperAdmin() && fiscalScope() !== 'ORGANIZATION' && canReadReception()) {
+        @if (!isSuperAdmin() && canReadReception()) {
           <div class="mt-4">
             <app-received-documents-configuration
               scope="store"
@@ -246,7 +250,7 @@ export class DianConfigComponent {
   readonly loadError = signal<string | null>(null);
   readonly axes = signal<FiscalReadinessAxis[]>([]);
   readonly fiscalScope = signal<string | null>(null);
-  readonly receptionScopeReady = computed(() => this.fiscalScope() === 'STORE');
+  readonly receptionScopeReady = computed(() => this.fiscalScope() === 'STORE' || this.fiscalScope() === 'ORGANIZATION');
 
   // Wizard
   readonly isWizardOpen = signal(false);

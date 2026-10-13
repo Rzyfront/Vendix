@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Component, DestroyRef, ElementRef, PLATFORM_ID, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { finalize } from 'rxjs';
+import { Subscription, finalize, timeout } from 'rxjs';
 import {
   ButtonComponent, CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent,
   OptionsDropdownComponent, PaginationComponent, ResponsiveDataViewComponent, StatsComponent, ToastService,
@@ -19,6 +19,10 @@ import { OrgFiscalScopeSelectorComponent } from '../../../organization/shared/co
 import { ReceivedDocumentImportComponent } from './received-document-import.component';
 import { ReceivedDocumentFormComponent } from './received-document-form.component';
 import type { ReceivedDocument, ReceivedDocumentInboxState, ReceivedDocumentLegalStatus, ReceivedDocumentQuery, ReceivedDocumentType, ReceivedDocumentsScope } from './received-documents.interface';
+import { isReceivedDocumentSafeNotice } from './received-documents.interface';
+import { ReceivedEmailReceptionWizardComponent } from './received-email-reception-wizard.component';
+import { ReceivedEmailReceptionService } from './received-email-reception.service';
+import { receivedEmailStatusCopy } from './received-email-reception-projection.util';
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentsInboxFacade } from './received-documents-inbox.facade';
 import {
@@ -31,7 +35,7 @@ import {
   providers: [ReceivedDocumentsInboxFacade],
   imports: [FormsModule, ButtonComponent, CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent,
     OptionsDropdownComponent, PaginationComponent, ResponsiveDataViewComponent, StatsComponent,
-    OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent],
+    OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent, ReceivedEmailReceptionWizardComponent],
   template: `
     <div class="w-full space-y-4">
       @if (scope === 'organization') {
@@ -62,7 +66,28 @@ import {
           <p>Última recepción: {{ formatTimestamp(inbox.health()?.last_received_at) }} · Última actualización: {{ formatTimestamp(inbox.lastUpdatedAt()) }}</p>
           @if (inbox.health()?.next_sync_at) { <p>Próxima consulta del proveedor: {{ formatTimestamp(inbox.health()?.next_sync_at) }}</p> }
           @if (inbox.summary() && !inbox.summaryError()) { <p>{{ inbox.summary()!.total }} facturas en búsqueda, canal y tipo · Corte: {{ formatTimestamp(inbox.summary()!.as_of) }}</p> }
-          @if (canConfigure()) { <app-button variant="ghost" size="sm" (clicked)="openConfiguration()">Configurar recepción</app-button> }
+          @if (emailAvailable() && canConfigureEmail()) {
+            <section class="mt-3 space-y-2 rounded-lg border border-border p-3 text-sm" aria-label="Recepción por correo">
+              @if (emailAddress(); as address) {
+                <p class="select-all break-all text-text-primary">Tu correo de facturas: {{ address }}</p>
+                <div class="flex flex-wrap gap-2">
+                  <app-button customClasses="min-h-11" variant="outline" (clicked)="copyEmailAddress()">Copiar</app-button>
+                  <app-button customClasses="min-h-11" variant="ghost" (clicked)="openEmailWizard()">Cómo configurarlo</app-button>
+                </div>
+              } @else {
+                <p class="font-semibold text-text-primary">Recibe tus facturas automáticamente por correo</p>
+                <p>Activa tu dirección Vendix y reenvía las facturas de tus proveedores. No necesitas conectar ni compartir la contraseña de tu correo.</p>
+                @if (inbox.health()?.dian_active === false) {
+                  <p>Primero termina la activación de facturación electrónica de tu negocio.</p>
+                  <app-button customClasses="min-h-11" variant="outline" (clicked)="openConfiguration()">Ver configuración</app-button>
+                } @else {
+                  <app-button customClasses="min-h-11" (clicked)="openEmailWizard()">{{ inbox.health()?.email?.configured ? 'Cómo configurarlo' : 'Activar' }}</app-button>
+                }
+              }
+              @if (addressError()) { <p role="status">{{ addressError() }}</p> }
+              @if (addressCopyMessage()) { <p role="status">{{ addressCopyMessage() }}</p> }
+            </section>
+          } @else if (canConfigure()) { <app-button variant="ghost" size="sm" (clicked)="openConfiguration()">Configurar recepción</app-button> }
         </div>
         @if (inbox.error()) {
           <div role="alert" class="mx-2 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error md:mx-6">
@@ -83,7 +108,7 @@ import {
         } @else if (inbox.loading() && inbox.rows().length === 0) {
           <div class="p-10 text-center text-sm text-text-secondary" role="status">Cargando facturas…</div>
         } @else if (!inbox.loading() && inbox.rows().length === 0 && !inbox.error()) {
-          <app-empty-state icon="inbox" [title]="emptyState().title" [description]="emptyState().description" [showActionButton]="emptyState().configure" actionButtonText="Configurar recepción" actionButtonIcon="settings" (actionClick)="openConfiguration()" [showClearFilters]="emptyState().clearFilters" (clearFiltersClick)="clearFilters()" [showRefreshButton]="true" (refreshClick)="inbox.refresh()" />
+          <app-empty-state icon="inbox" [title]="emptyState().title" [description]="emptyState().description" [showActionButton]="emptyState().configure" [actionButtonText]="emailAvailable() && canConfigureEmail() ? 'Configurar correo' : 'Configurar recepción'" actionButtonIcon="settings" (actionClick)="openReceptionSetup()" [showClearFilters]="emptyState().clearFilters" (clearFiltersClick)="clearFilters()" [showRefreshButton]="true" (refreshClick)="inbox.refresh()" />
         } @else {
           <div class="px-2 pb-2 pt-3 md:p-4" (focusin)="listFocused.set(true)" (focusout)="onListFocusOut($event)">
             <app-responsive-data-view [data]="inbox.rows()" [columns]="columns" [cardConfig]="cardConfig" [actions]="rowActions" [loading]="inbox.loading()" [sortable]="false" rowLabelKey="invoice_number" (rowClick)="openDetail($event)" />
@@ -92,9 +117,15 @@ import {
         }
       </app-card>
       <p class="text-xs text-text-secondary">Recepción, revisión, aceptación legal y conciliación son independientes. Leer por OCR no acepta ni contabiliza una factura.</p>
+      @if (scope === 'store' && canRead()) {
+        <app-received-email-reception-wizard [(isOpen)]="emailWizardOpen" [tenantKey]="tenantKey()"
+          [scope]="scope" [contextReady]="scopeReady()" [canRead]="canRead()" [canConfigure]="canConfigureEmail()"
+          (protectedChange)="emailWizardProtected.set($event)" (completed)="onEmailCompleted()"
+          (manualImportRequested)="openManualFromEmail()" />
+      }
       @if (canImport()) {
         <app-received-document-import [(isOpen)]="scanImportOpen" [scope]="scope" [selectedStoreId]="storeId() ?? null" (completed)="onScanCompleted($event)" />
-        <app-received-document-form [(isOpen)]="manualFormOpen" [scope]="scope" [selectedStoreId]="storeId() ?? null" (saved)="onManualSaved($event)" />
+        <app-received-document-form [(isOpen)]="manualFormOpen" [scope]="scope" [selectedStoreId]="storeId() ?? null" (saved)="onManualSaved($event)" (duplicateNotice)="onManualDuplicate()" />
       }
     </div>
   `,
@@ -104,6 +135,7 @@ export class ReceivedDocumentsPageComponent {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly service = inject(ReceivedDocumentsService);
+  private readonly emailApi = inject(ReceivedEmailReceptionService);
   private readonly toast = inject(ToastService);
   private readonly auth = inject(AuthFacade);
   private readonly currency = inject(CurrencyFormatService);
@@ -133,6 +165,15 @@ export class ReceivedDocumentsPageComponent {
   readonly scanImportOpen = signal(false);
   readonly manualFormOpen = signal(false);
   readonly listFocused = signal(false);
+  readonly emailWizardOpen = signal(false);
+  readonly emailWizardProtected = signal(false);
+  readonly addressError = signal<string | null>(null);
+  readonly addressCopyMessage = signal<string | null>(null);
+  private readonly addressValue = signal<string | null>(null);
+  private readonly addressSnapshotKey = signal('');
+  private addressRequest?: Subscription;
+  private addressGeneration = 0;
+  private emailDeepLinkContext = '';
   private scanContext = '';
   private manualContext = '';
   private writeContext(): string { return JSON.stringify([this.tenantKey(), this.storeId()]); }
@@ -145,7 +186,19 @@ export class ReceivedDocumentsPageComponent {
   readonly canConfigure = computed(() => this.inbox.health()?.dian_active === false
     ? this.auth.hasPermission(this.scope === 'store' ? 'invoicing:write' : 'organization:invoicing:dian:write')
     : this.auth.hasPermission(`${this.permissionPrefix}:connections:configure`));
-  readonly emptyState = computed(() => receivedInboxEmptyState(this.inbox.healthError() ? null : this.inbox.health(), this.hasFilters(), this.canConfigure()));
+  readonly canConfigureEmail = computed(() => this.scope === 'store' && this.canRead()
+    && this.auth.hasPermission('invoicing:received:connections:configure'));
+  readonly emailAvailable = computed(() => this.scope === 'store' && this.scopeReady() && !this.inbox.healthError()
+    && this.inbox.health()?.email?.pilot_available === true);
+  private readonly emailAddressContextKey = computed(() => JSON.stringify([this.tenantKey(), this.canConfigureEmail(),
+    this.emailAvailable(), this.inbox.health()?.email?.configured === true]));
+  readonly emailAddress = computed(() => this.emailAvailable() && this.canConfigureEmail()
+    && this.addressSnapshotKey() === this.emailAddressContextKey() ? this.addressValue() : null);
+  readonly emptyState = computed(() => {
+    if (this.emailAvailable() && this.canConfigureEmail() && !this.hasFilters() && !this.inbox.health()?.email?.configured)
+      return { title: 'Recibe tus facturas automáticamente por correo', description: 'Activa tu dirección Vendix y reenvía las facturas de tus proveedores. No necesitas compartir la contraseña de tu correo.', configure: true, clearFilters: false };
+    return receivedInboxEmptyState(this.inbox.healthError() ? null : this.inbox.health(), this.hasFilters(), this.canConfigure());
+  });
   readonly statsStrip = viewChild<ElementRef<HTMLElement>>('statsStrip');
   readonly statsOffset = signal(96);
   private readonly timezone = computed(() => this.storeSettings.settings()?.general?.timezone ?? 'America/Bogota');
@@ -153,12 +206,13 @@ export class ReceivedDocumentsPageComponent {
     if (this.inbox.healthError()) return 'No se pudo consultar la salud de recepción. El historial sigue disponible.';
     const health = this.inbox.health();
     if (!health) return 'Consultando el estado de recepción…';
+    if (health.email?.pilot_available && health.email.configured) return receivedEmailStatusCopy(health.email).title;
     if (health.requires_operational_store) return 'Selecciona una tienda operativa para configurar recepción automática. El historial fiscal sigue disponible.';
     if (health.error_code) return 'La conexión de recepción requiere atención. El historial se conserva; solicita revisión al administrador.';
     if (!health.dian_active) return 'DIAN no activa para recepción automática. El historial y la importación manual siguen disponibles.';
-    if (!health.configured) return this.canConfigure() ? 'Sin conexión automática: conecta un proveedor API o webhook compatible.' : 'Sin conexión automática. Solicita configuración al administrador.';
+    if (!health.configured) return this.canConfigure() ? 'Sin conexión automática: configura recepción por correo o una integración avanzada.' : 'Sin conexión automática. Solicita configuración al administrador.';
     if (!health.active_connections) return this.canConfigure() ? 'Activa un canal de recepción automática.' : 'Solicita al administrador que active un canal de recepción.';
-    return `Recibiendo por ${health.channels.map(receivedChannelLabel).join(' y ') || 'canal configurado'}`;
+    return 'Recibiendo por una integración avanzada configurada.';
   });
   readonly filterConfigs: FilterConfig[] = [
     { key: 'inbox_state', label: 'Estado de atención', type: 'select', options: Object.entries(RECEIVED_INBOX_LABELS).map(([value, label]) => ({ value, label })) },
@@ -208,7 +262,7 @@ export class ReceivedDocumentsPageComponent {
       const tenantKey = this.writeContext();
       if (tenantKey !== previousTenant) {
         previousTenant = tenantKey;
-        untracked(() => { this.scanImportOpen.set(false); this.manualFormOpen.set(false); this.listFocused.set(false); });
+        untracked(() => { this.scanImportOpen.set(false); this.manualFormOpen.set(false); this.emailWizardOpen.set(false); this.emailWizardProtected.set(false); this.listFocused.set(false); });
       }
     });
     effect(() => {
@@ -228,9 +282,23 @@ export class ReceivedDocumentsPageComponent {
       untracked(() => { this.searchValue.set(query.search ?? ''); this.inbox.setContext(this.scope, query, ready, tenantKey); });
     });
     effect(() => {
-      const protectedWork = this.uploading() || this.scanImportOpen() || this.manualFormOpen() || this.listFocused();
+      const protectedWork = this.uploading() || this.scanImportOpen() || this.manualFormOpen() || this.emailWizardOpen() || this.emailWizardProtected() || this.listFocused();
       untracked(() => this.inbox.setProtected(protectedWork));
     });
+    effect(() => {
+      const key = this.emailAddressContextKey();
+      untracked(() => { this.addressSnapshotKey.set(key); this.refreshEmailAddress(); });
+    });
+    effect(() => {
+      const requested = this.routeQueryParams().get('setup') === 'email';
+      const eligible = this.emailAvailable() && this.canConfigureEmail() && this.inbox.health()?.dian_active === true;
+      const key = this.tenantKey();
+      if (requested && eligible && this.emailDeepLinkContext !== key) {
+        this.emailDeepLinkContext = key;
+        untracked(() => this.emailWizardOpen.set(true));
+      }
+    });
+    this.destroyRef.onDestroy(() => { this.addressGeneration++; this.addressRequest?.unsubscribe(); });
     effect((onCleanup) => {
       const element = this.statsStrip()?.nativeElement;
       if (!element || !this.browser || typeof ResizeObserver === 'undefined') return;
@@ -287,8 +355,60 @@ export class ReceivedDocumentsPageComponent {
     if (action === 'scan') { this.scanContext = this.writeContext(); this.scanImportOpen.set(true); }
     if (action === 'xml') input.click();
   }
+  openReceptionSetup(): void {
+    if (this.emailAvailable() && this.canConfigureEmail() && this.inbox.health()?.dian_active) this.openEmailWizard();
+    else this.openConfiguration();
+  }
+  openEmailWizard(): void {
+    if (!this.emailAvailable() || !this.canConfigureEmail() || this.inbox.health()?.dian_active !== true) return;
+    this.emailWizardOpen.set(true);
+  }
+  onEmailCompleted(): void {
+    // The wizard remains open; protected rows/new membership stay buffered until the user closes it.
+    this.inbox.refreshAfterMutation();
+    this.refreshEmailAddress();
+  }
+  openManualFromEmail(): void {
+    if (!this.canImportInCurrentScope()) return;
+    this.manualContext = this.writeContext(); this.manualFormOpen.set(true);
+  }
+  onManualDuplicate(): void {
+    if (this.manualContext === this.writeContext()) this.inbox.refreshAfterMutation();
+  }
+  private refreshEmailAddress(): void {
+    this.addressGeneration++;
+    this.addressRequest?.unsubscribe();
+    this.addressValue.set(null); this.addressError.set(null); this.addressCopyMessage.set(null);
+    if (!this.emailAvailable() || !this.canConfigureEmail() || !this.inbox.health()?.email?.configured) return;
+    const generation = this.addressGeneration;
+    const key = this.emailAddressContextKey();
+    this.addressRequest = this.emailApi.configuration().pipe(timeout(20_000), takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (configuration) => {
+        if (generation !== this.addressGeneration || key !== this.emailAddressContextKey()) return;
+        const address = configuration?.address;
+        if (configuration?.configured === true && typeof address === 'string' && address.length <= 254 && /^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+$/.test(address)) {
+          this.addressValue.set(address); this.addressSnapshotKey.set(key);
+        } else this.addressError.set('No se pudo consultar tu dirección. Abre el asistente para actualizarla.');
+      },
+      error: (error: unknown) => {
+        if (generation === this.addressGeneration && key === this.emailAddressContextKey())
+          this.addressError.set(describeApiFailure(error).message || 'No se pudo consultar tu dirección.');
+      },
+    });
+  }
+  async copyEmailAddress(): Promise<void> {
+    const address = this.emailAddress(); const key = this.emailAddressContextKey();
+    if (!address || !this.browser) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(address);
+      if (key === this.emailAddressContextKey()) this.toast.success('Dirección copiada');
+    } catch {
+      if (key === this.emailAddressContextKey()) this.addressCopyMessage.set('Selecciona la dirección y cópiala manualmente.');
+    }
+  }
   openConfiguration(): void {
-    if (!this.canConfigure()) return;
+    if (!this.canConfigure() && !this.canConfigureEmail()) return;
     void this.router.navigate(['/admin/invoicing/dian-config'], { queryParams: this.storeId() ? { store_id: this.storeId() } : undefined });
   }
   onFileSelected(event: Event): void {
@@ -304,8 +424,11 @@ export class ReceivedDocumentsPageComponent {
     const tenantKey = this.tenantKey();
     this.uploading.set(true);
     this.service.importXml(scope, file, storeId).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { this.uploading.set(false); input.value = ''; })).subscribe({
-      next: () => {
+      next: (response) => {
         if (storeId !== this.storeId() || tenantKey !== this.tenantKey()) return;
+        if (isReceivedDocumentSafeNotice(response.data)) {
+          this.toast.info(response.data.message); this.inbox.refreshAfterMutation(); return;
+        }
         this.toast.success('XML importado. El documento quedó disponible para revisión.'); this.inbox.refreshAfterMutation();
       },
       error: (err: unknown) => { if (storeId === this.storeId() && tenantKey === this.tenantKey()) this.toast.error(describeApiFailure(err).message || 'No se pudo importar el XML.'); },
