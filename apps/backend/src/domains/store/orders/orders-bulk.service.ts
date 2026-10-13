@@ -11,7 +11,7 @@ import {
   PRINT_FORMATS,
   PrintFormat,
 } from '../settings/interfaces/store-settings.interface';
-import { order_state_enum } from '@prisma/client';
+import { order_state_enum, Prisma } from '@prisma/client';
 import { VALID_TRANSITIONS } from './order-flow/order-flow.service';
 import {
   computePendingOrderFingerprint,
@@ -45,7 +45,7 @@ interface CashPreviewOrderRow {
   origin_cash_session_id: number | null;
   order_number: string;
   state: order_state_enum;
-  remaining_balance: unknown;
+  remaining_balance: Prisma.Decimal | number | string | null;
   grand_total: unknown;
   payment_form: string | null;
   updated_at: Date | null;
