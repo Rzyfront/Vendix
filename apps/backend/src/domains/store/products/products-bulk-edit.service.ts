@@ -35,11 +35,11 @@ import {
   type ProductTaxComboCategory,
 } from './services/product-tax-combination.util';
 
-/** Fila de `products` leída para el preview. Genérica a propósito: el diff
- *  recorre `BULK_EDITABLE_FIELDS` contra las columnas homónimas de la fila. */
 const TRACK_INVENTORY_WITH_VARIANTS_MESSAGE =
   "Este producto maneja variantes: cambia 'Controla inventario' desde el editor del producto para decidir qué pasa con el stock";
 
+/** Fila de `products` leída para el preview. Genérica a propósito: el diff
+ *  recorre `BULK_EDITABLE_FIELDS` contra las columnas homónimas de la fila. */
 type ProductRow = Record<string, any> & {
   id: number;
   name: string;
