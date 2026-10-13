@@ -1,3 +1,8 @@
+import {
+  PlatformInvoicePaymentsService,
+  derivePlatformInvoiceState,
+  normalizeDueDate,
+} from './platform-invoice-payments.service';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -571,6 +576,9 @@ export class SubscriptionFiscalService {
     // `invoice.accepted` y `AccountingEventsListener` resuelve el subflujo
     // `invoicing` + las cuentas PUC; no usamos el `EventEmitter` de Node.
     private readonly eventEmitter: EventEmitter2,
+    // Cartera de la factura (pagos, saldo, estado de cobro) para el detalle.
+    // El servicio de pagos NO depende de este: sin ciclo de inyección.
+    private readonly platformPayments: PlatformInvoicePaymentsService,
   ) {}
 
   async getStatus() {
@@ -3369,6 +3377,7 @@ export class SubscriptionFiscalService {
                 subtotal: Number(subtotal),
                 tax_amount: Number(taxAmount),
                 total: Number(total),
+                discount_total: Number(computed.discountTotal),
               },
               period_start: dto.period_start ?? null,
               period_end: dto.period_end ?? null,
@@ -3890,43 +3899,75 @@ export class SubscriptionFiscalService {
     const invoiceNumber = transmission.document_number;
     const issuedAt = transmission.accepted_at ?? transmission.created_at ?? new Date();
     const issuedIso = issuedAt instanceof Date ? issuedAt.toISOString() : String(issuedAt);
-    const dueIso = new Date(
-      new Date(issuedIso).getTime() + 7 * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const metaExtras = (snapshot?.metadata ?? null) as unknown as
+      | Record<string, unknown>
+      | null;
+
+    // Vencimiento: el que se FIRMÓ (snapshot). Solo si el snapshot no lo trae
+    // (facturas anteriores) se cae a emisión + 7 días.
+    const dueDate =
+      normalizeDueDate(metaExtras?.['due_date']) ??
+      normalizeDueDate(
+        new Date(new Date(issuedIso).getTime() + 7 * 24 * 60 * 60 * 1000),
+      );
+
+    const state = derivePlatformInvoiceState(
+      transmission.dian_status,
+      transmission.transmission_status,
+    );
+
+    const lineDiscountCents = (Array.isArray(items) ? items : []).reduce(
+      (acc: number, it: any) => acc + Math.round(Number(it?.discount_amount ?? 0) * 100),
+      0,
+    );
+    const snapshotDiscount = (totals as any)?.discount_total;
+    const discountAmount =
+      snapshotDiscount !== undefined && snapshotDiscount !== null
+        ? Number(snapshotDiscount).toFixed(2)
+        : (lineDiscountCents / 100).toFixed(2);
+
+    const collection = await this.platformPayments.summarize({
+      transmissionId: transmission.id,
+      total: totals.total ?? 0,
+      dueDate,
+      state,
+    });
+
     const synthetic = {
       id: transmission.id,
       invoice_number: invoiceNumber,
-      state: 'custom_emitted',
+      invoice_type: 'sales_invoice',
+      state,
       issued_at: issuedIso,
-      due_at: dueIso,
+      due_at: dueDate,
       period_start: periodStart ?? issuedIso,
       period_end: periodEnd ?? issuedIso,
       subtotal: String(totals.subtotal ?? 0),
       tax_amount: String(totals.tax_amount ?? 0),
       total: String(totals.total ?? 0),
-      amount_paid: '0',
+      amount_paid: collection.amount_paid,
+      balance_due: collection.balance_due,
+      collection_status: collection.collection_status,
+      payments: collection.payments,
       currency,
       line_items: items,
+      items,
+      discount_amount: discountAmount,
     };
 
     // FB-13: la UI del rail tienda pide estos campos en `invoice.*`.
-    // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`
-    // (kind ya validado en la lectura) para que el detail page del rail
-    // plataforma renderice con la misma forma que el rail tienda.
-    // `snapshot.metadata` es Prisma.JsonValue (string|number|boolean|object|array);
-    // casteamos via unknown para leer campos arbitrarios sin revalidation por
-    // linea.
-    const metaExtras = (snapshot?.metadata ?? null) as unknown as
-      | Record<string, unknown>
-      | null;
+    // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`.
     const syntheticWithExtras = {
       ...synthetic,
-      customer: customer ?? null,
+      customer: this.normalizePlatformInvoiceCustomer(customer),
       payment_form: (metaExtras?.['payment_form'] as string | null) ?? null,
       payment_means_code: (metaExtras?.['payment_means_code'] as string | null) ?? null,
-      due_date: dueIso,
+      due_date: dueDate,
       operation_type: (metaExtras?.['operation_type'] as string | null) ?? null,
-      aiu_contract_object: (metaExtras?.['aiur_contract_object'] as string | null) ?? null,
+      aiu_contract_object:
+        (metaExtras?.['aiu_contract_object'] as string | null) ??
+        (metaExtras?.['aiur_contract_object'] as string | null) ??
+        null,
       global_discount_amount: (metaExtras?.['global_discount_amount'] as number | null) ?? null,
       withholding_amount: (metaExtras?.['withholding_amount'] as number | null) ?? null,
       exchange_rate: (metaExtras?.['exchange_rate'] as number | null) ?? null,
@@ -3988,6 +4029,53 @@ export class SubscriptionFiscalService {
             email: customer.email ?? null,
           }
         : null,
+    };
+  }
+
+  /** Cliente del snapshot en la forma plana que consume el detalle. */
+  private normalizePlatformInvoiceCustomer(raw: any): {
+    name: string | null;
+    document_type: string | null;
+    document_number: string | null;
+    verification_digit: string | null;
+    person_type: string | null;
+    tax_regime_code: string | null;
+    tax_responsibilities: string[];
+    email: string | null;
+    phone: string | null;
+    address_line: string | null;
+    city: string | null;
+    department: string | null;
+    country: string | null;
+  } | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const str = (v: unknown): string | null =>
+      v === undefined || v === null || v === '' ? null : String(v);
+    const addr = raw.address && typeof raw.address === 'object' ? raw.address : null;
+    const addressLine =
+      typeof raw.address === 'string'
+        ? raw.address
+        : (raw.address_line ??
+          (addr
+            ? [addr.address_line ?? addr.address_line1 ?? addr.line, addr.address_line2]
+                .filter(Boolean)
+                .join(' ')
+            : null));
+    const resp = raw.tax_responsibilities ?? raw.fiscal_responsibilities;
+    return {
+      name: str(raw.name ?? raw.legal_name),
+      document_type: str(raw.document_type),
+      document_number: str(raw.document_number ?? raw.tax_id),
+      verification_digit: str(raw.verification_digit ?? raw.tax_id_dv),
+      person_type: str(raw.person_type),
+      tax_regime_code: str(raw.tax_regime_code),
+      tax_responsibilities: Array.isArray(resp) ? resp.map(String) : [],
+      email: str(raw.email),
+      phone: str(raw.phone),
+      address_line: str(addressLine),
+      city: str(raw.city ?? addr?.city),
+      department: str(raw.department ?? raw.department_name ?? addr?.department ?? addr?.state),
+      country: str(raw.country ?? raw.country_code ?? addr?.country),
     };
   }
 
