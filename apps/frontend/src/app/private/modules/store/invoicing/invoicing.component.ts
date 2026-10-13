@@ -1,4 +1,4 @@
-import { of, Subscription } from 'rxjs';
+import { of } from 'rxjs';
 import { catchError, distinctUntilChanged, map, switchMap } from 'rxjs/operators';
 import { InvoicingService } from './services/invoicing.service';
 import { ToastService } from '../../../../shared/components';
@@ -51,6 +51,7 @@ import { InvoicingNotConfiguredComponent } from './components/invoicing-not-conf
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { SaveRequirementsModalComponent } from '../../../../shared/components/index';
 import { FiscalRequirementsService } from '../../../../shared/services/fiscal-requirements.service';
+import { InvoiceNoteSourceLoader } from './utils/invoice-note-source-loader.util';
 
 @Component({
   selector: 'vendix-invoicing',
@@ -186,8 +187,7 @@ export class InvoicingComponent {
   readonly creditNoteSourceInvoice = signal<Invoice | null>(null);
   readonly creditNoteLoading = signal(false);
   readonly creditNoteLoadError = signal<string | null>(null);
-  private creditNoteLoadSubscription: Subscription | null = null;
-  private creditNoteLoadEpoch = 0;
+  private readonly creditNoteSourceLoader = new InvoiceNoteSourceLoader();
 
   private readonly vexiHosts = inject(VexiUiHostRegistry);
   private readonly invoiceMeta = toSignal(this.store.select(selectInvoicesMeta), {
@@ -284,43 +284,28 @@ export class InvoicingComponent {
   }
 
   openCreditNoteModal(invoice: Invoice): void {
-    const requestEpoch = ++this.creditNoteLoadEpoch;
-    this.creditNoteLoadSubscription?.unsubscribe();
-    this.creditNoteLoadSubscription = null;
     this.creditNoteSourceInvoice.set(null);
     this.creditNoteLoadError.set(null);
     this.isCreditNoteModalOpen.set(false);
     this.isDetailModalOpen.set(false);
-    this.creditNoteLoading.set(true);
-
-    this.creditNoteLoadSubscription = this.invoiceApi
-      .getInvoice(invoice.id)
-      .subscribe({
-        next: (response) => {
-          if (requestEpoch !== this.creditNoteLoadEpoch) return;
-          this.creditNoteLoadSubscription = null;
-          this.creditNoteLoading.set(false);
-          const source = response?.data;
-          if (
-            !source ||
-            source.id !== invoice.id ||
-            !Array.isArray(source.invoice_items)
-          ) {
-            this.reportCreditNoteLoadError(
-              'No se pudo cargar la factura completa. Actualiza la lista e inténtalo de nuevo.',
-            );
-            return;
-          }
+    this.creditNoteSourceLoader.loadFullSource(
+      invoice.id,
+      (id) => this.invoiceApi.getInvoice(id),
+      {
+        loading: (isLoading) => this.creditNoteLoading.set(isLoading),
+        success: (source) => {
           this.creditNoteSourceInvoice.set(source);
           this.isCreditNoteModalOpen.set(true);
         },
-        error: (error: unknown) => {
-          if (requestEpoch !== this.creditNoteLoadEpoch) return;
-          this.creditNoteLoadSubscription = null;
-          this.creditNoteLoading.set(false);
-          this.reportCreditNoteLoadError(extractApiErrorMessage(error));
+        error: (error) => {
+          this.reportCreditNoteLoadError(
+            typeof error === 'string'
+              ? error
+              : extractApiErrorMessage(error),
+          );
         },
-      });
+      },
+    );
   }
 
   private reportCreditNoteLoadError(message: string): void {
@@ -329,9 +314,7 @@ export class InvoicingComponent {
   }
 
   cancelCreditNoteSourceLoad(): void {
-    this.creditNoteLoadEpoch += 1;
-    this.creditNoteLoadSubscription?.unsubscribe();
-    this.creditNoteLoadSubscription = null;
+    this.creditNoteSourceLoader.cancel();
     this.creditNoteLoading.set(false);
   }
 

@@ -1,25 +1,8 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { NO_ERRORS_SCHEMA, signal } from '@angular/core';
-import { ActivatedRoute, convertToParamMap, Router } from '@angular/router';
-import { Actions } from '@ngrx/effects';
-import { Store } from '@ngrx/store';
-import { Observable, of, Subject } from 'rxjs';
-import { Invoice } from './interfaces/invoice.interface';
-import { InvoicingService } from './services/invoicing.service';
-import { InvoicingComponent } from './invoicing.component';
-import { CurrencyFormatService } from '../../../../shared/pipes/currency';
-import { ToastService } from '../../../../shared/components';
-import { VexiUiHostRegistry } from '../../../../core/services/vexi-ui-host.registry';
-import { FiscalRequirementsService } from '../../../../shared/services/fiscal-requirements.service';
+import { Observable, Subject } from 'rxjs';
+import type { Invoice } from './interfaces/invoice.interface';
+import { InvoiceNoteSourceLoader } from './utils/invoice-note-source-loader.util';
 
-describe('InvoicingComponent note entry', () => {
-  let fixture: ComponentFixture<InvoicingComponent>;
-  let service: jasmine.SpyObj<InvoicingService>;
-  let requests: Subject<{ success: boolean; data: Invoice }>[];
-  let toast: jasmine.SpyObj<ToastService>;
-  let dispatch: jasmine.Spy;
-
-  const listRow = { id: 73 } as Invoice;
+describe('InvoiceNoteSourceLoader', () => {
   const fullInvoice = {
     id: 73,
     invoice_type: 'sales_invoice',
@@ -28,126 +11,120 @@ describe('InvoicingComponent note entry', () => {
     total_amount: 200,
   } as Invoice;
 
-  beforeEach(async () => {
-    requests = [];
-    service = jasmine.createSpyObj<InvoicingService>('InvoicingService', ['getInvoice']);
-    service.getInvoice.and.callFake((id: number) => {
-      const request = new Subject<{ success: boolean; data: Invoice }>();
-      requests.push(request);
-      return request.asObservable() as Observable<{ success: boolean; data: Invoice }>;
+  it('loads and validates the full source, reporting loading callbacks', () => {
+    const loader = new InvoiceNoteSourceLoader();
+    const response = new Subject<{ data?: Invoice | null }>();
+    const request = jasmine.createSpy('request').and.returnValue(response);
+    const loading = jasmine.createSpy('loading');
+    const success = jasmine.createSpy('success');
+    const error = jasmine.createSpy('error');
+
+    loader.loadFullSource(73, request, { loading, success, error });
+    expect(request).toHaveBeenCalledOnceWith(73);
+    expect(loading).toHaveBeenCalledOnceWith(true);
+
+    response.next({ data: fullInvoice });
+    expect(response.observed).toBeFalse();
+
+    expect(loading).toHaveBeenCalledTimes(2);
+    expect(loading).toHaveBeenCalledWith(false);
+    expect(success).toHaveBeenCalledOnceWith(fullInvoice);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale response after a newer source load starts', () => {
+    const loader = new InvoiceNoteSourceLoader();
+    const requests: Subject<{ data?: Invoice | null }>[] = [];
+    const request = jasmine.createSpy('request').and.callFake(() => {
+      const subject = new Subject<{ data?: Invoice | null }>();
+      requests.push(subject);
+      return subject;
     });
-    toast = jasmine.createSpyObj<ToastService>('ToastService', ['error']);
-    dispatch = jasmine.createSpy('dispatch');
+    const firstSuccess = jasmine.createSpy('firstSuccess');
+    const secondSuccess = jasmine.createSpy('secondSuccess');
 
-    await TestBed.configureTestingModule({
-      imports: [InvoicingComponent],
-      providers: [
-        {
-          provide: Store,
-          useValue: {
-            select: jasmine.createSpy('select').and.returnValue(of([])),
-            dispatch,
-          },
-        },
-        { provide: Router, useValue: { navigate: jasmine.createSpy('navigate') } },
-        { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({})) } },
-        { provide: InvoicingService, useValue: service },
-        { provide: ToastService, useValue: toast },
-        { provide: CurrencyFormatService, useValue: {
-          loadCurrency: () => Promise.resolve(null),
-          format: (value: number) => String(value),
-          currencyDecimals: () => 2,
-          currencyFormatStyle: () => 'comma_dot',
-        } },
-        { provide: Actions, useValue: new Subject<unknown>() },
-        { provide: VexiUiHostRegistry, useValue: { register: jasmine.createSpy(), unregister: jasmine.createSpy() } },
-        { provide: FiscalRequirementsService, useValue: {
-          close: jasmine.createSpy(),
-          isOpen: signal(false),
-          requirements: signal([]),
-          handleAction: jasmine.createSpy(),
-        } },
-      ],
-      schemas: [NO_ERRORS_SCHEMA],
+    loader.loadFullSource(73, request, {
+      loading: jasmine.createSpy('firstLoading'),
+      success: firstSuccess,
+      error: jasmine.createSpy('firstError'),
     });
-    TestBed.overrideComponent(InvoicingComponent, { set: { imports: [] } });
-    await TestBed.compileComponents();
+    loader.loadFullSource(74, request, {
+      loading: jasmine.createSpy('secondLoading'),
+      success: secondSuccess,
+      error: jasmine.createSpy('secondError'),
+    });
 
-    fixture = TestBed.createComponent(InvoicingComponent);
-    fixture.detectChanges();
+    const secondInvoice = { ...fullInvoice, id: 74 } as Invoice;
+    requests[1].next({ data: secondInvoice });
+    requests[0].next({ data: fullInvoice });
+
+    expect(secondSuccess).toHaveBeenCalledOnceWith(secondInvoice);
+    expect(firstSuccess).not.toHaveBeenCalled();
   });
 
-  afterEach(() => fixture.destroy());
+  it('cancels a pending load, ends loading, and ignores any late result', () => {
+    const loader = new InvoiceNoteSourceLoader();
+    const response = new Subject<{ data?: Invoice | null }>();
+    const loading = jasmine.createSpy('loading');
+    const success = jasmine.createSpy('success');
+    const error = jasmine.createSpy('error');
 
-  it('loads the full source before opening the replacement note modal', async () => {
-    const component = fixture.componentInstance;
-    component.isDetailModalOpen.set(true);
-    component.openCreditNoteModal(listRow);
+    loader.loadFullSource(73, () => response, { loading, success, error });
+    loader.cancel();
+    response.next({ data: fullInvoice });
 
-    expect(service.getInvoice).toHaveBeenCalledWith(73);
-    expect(component.creditNoteLoading()).toBeTrue();
-    expect(component.isDetailModalOpen()).toBeFalse();
-    expect(component.isCreditNoteModalOpen()).toBeFalse();
-    expect(component.creditNoteSourceInvoice()).toBeNull();
-
-    requests[0].next({ success: true, data: fullInvoice });
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-
-    expect(component.creditNoteLoading()).toBeFalse();
-    expect(component.creditNoteSourceInvoice()).toBe(fullInvoice);
-    expect(component.isCreditNoteModalOpen()).toBeTrue();
-    expect(fixture.nativeElement.querySelector('vendix-invoice-note-create')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('vendix-credit-note-create')).toBeNull();
+    expect(loading).toHaveBeenCalledWith(true);
+    expect(loading).toHaveBeenCalledWith(false);
+    expect(success).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
-  it('ignores the late result for a previous invoice when another source is opened', () => {
-    const component = fixture.componentInstance;
-    component.openCreditNoteModal(listRow);
-    const priorRequest = requests[0];
-    component.openCreditNoteModal({ id: 74 } as Invoice);
-    const currentRequest = requests[1];
-    const otherInvoice = { ...fullInvoice, id: 74 } as Invoice;
+  it('rejects a response whose invoice id does not match the requested source', () => {
+    const loader = new InvoiceNoteSourceLoader();
+    const loading = jasmine.createSpy('loading');
+    const success = jasmine.createSpy('success');
+    const error = jasmine.createSpy('error');
 
-    currentRequest.next({ success: true, data: otherInvoice });
-    priorRequest.next({ success: true, data: fullInvoice });
+    loader.loadFullSource(
+      73,
+      () => new Observable((subscriber) => subscriber.next({ data: { ...fullInvoice, id: 999 } })),
+      { loading, success, error },
+    );
 
-    expect(component.creditNoteSourceInvoice()).toBe(otherInvoice);
-    expect(component.isCreditNoteModalOpen()).toBeTrue();
-    expect(component.creditNoteLoading()).toBeFalse();
+    expect(loading).toHaveBeenCalledWith(false);
+    expect(success).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledOnceWith(jasmine.stringMatching('factura completa'));
   });
 
-  it('cancels a pending source load and rejects a mismatched or incomplete response', () => {
-    const component = fixture.componentInstance;
-    component.openCreditNoteModal(listRow);
-    const canceledRequest = requests[0];
-    component.cancelCreditNoteSourceLoad();
-    canceledRequest.next({ success: true, data: fullInvoice });
-    expect(component.creditNoteSourceInvoice()).toBeNull();
-    expect(component.isCreditNoteModalOpen()).toBeFalse();
+  it('rejects an incomplete invoice without an invoice_items array', () => {
+    const loader = new InvoiceNoteSourceLoader();
+    const success = jasmine.createSpy('success');
+    const error = jasmine.createSpy('error');
 
-    component.openCreditNoteModal(listRow);
-    requests[1].next({ success: true, data: { ...fullInvoice, id: 999 } as Invoice });
-    expect(component.isCreditNoteModalOpen()).toBeFalse();
-    expect(component.creditNoteLoadError()).toContain('factura completa');
-    expect(toast.error).toHaveBeenCalled();
+    loader.loadFullSource(
+      73,
+      () => new Observable((subscriber) => subscriber.next({ data: { ...fullInvoice, invoice_items: undefined } as Invoice })),
+      { loading: jasmine.createSpy('loading'), success, error },
+    );
+
+    expect(success).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledOnceWith(jasmine.stringMatching('factura completa'));
   });
 
-  it('surfaces load errors and refreshes the list when the note modal closes', () => {
-    const component = fixture.componentInstance;
-    component.openCreditNoteModal(listRow);
-    requests[0].error({ error: { message: 'No se pudo consultar la factura.' } });
+  it('passes request failures to the error callback and closes loading', () => {
+    const loader = new InvoiceNoteSourceLoader();
+    const failure = new Error('request failed');
+    const loading = jasmine.createSpy('loading');
+    const error = jasmine.createSpy('error');
 
-    expect(component.creditNoteLoading()).toBeFalse();
-    expect(component.creditNoteLoadError()).toBeTruthy();
-    expect(toast.error).toHaveBeenCalled();
+    loader.loadFullSource(
+      73,
+      () => new Observable((subscriber) => subscriber.error(failure)),
+      { loading, success: jasmine.createSpy('success'), error },
+    );
 
-    component.openCreditNoteModal(listRow);
-    requests[1].next({ success: true, data: fullInvoice });
-    const dispatchCountBeforeClose = dispatch.calls.count();
-    component.onCreditNoteModalOpenChange(false);
-    expect(component.creditNoteSourceInvoice()).toBeNull();
-    expect(dispatch.calls.count()).toBe(dispatchCountBeforeClose + 2);
+    expect(loading).toHaveBeenCalledWith(true);
+    expect(loading).toHaveBeenCalledWith(false);
+    expect(error).toHaveBeenCalledOnceWith(failure);
   });
 });
