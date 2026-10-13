@@ -1,17 +1,8 @@
 import { projectFinancialAccountInvoice } from './utils/split-invoice-projection.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, tax_type_enum } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
-/**
- * Los valores de `aiu_component_enum` viven en `prisma/schema.prisma`
- * (administracion / imprevistos / utilidad) pero el cliente Prisma
- * generado no los exporta como tipo top-level en este momento — sólo
- * como columna. Mantener la unión ACÁ, calcada del schema, evita
- * depender de la regeneración del cliente y mantiene un solo sitio de
- * verdad para los strings del dominio.
- */
-type AiuComponentValue = 'administracion' | 'imprevistos' | 'utilidad';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as bcrypt from 'bcrypt';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -115,7 +106,11 @@ import {
   contractAlreadyInvoiced,
   contractNotReadyForInvoice,
 } from './contract-invoice.errors';
-import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
+import {
+  buildInvoiceItemCreateInput as buildInvoiceItemCreateInputPersistence,
+  buildInvoiceTaxCreateInput as buildInvoiceTaxCreateInputPersistence,
+  needsPersistedLineTaxes as needsPersistedLineTaxesPersistence,
+} from './utils/invoice-calculation-persistence.util';
 // Impuesto TOTAL de una línea de orden, con su prioridad canónica
 // (Σ `order_item_taxes` → escalar × `resolveLineUnits`). Definición ÚNICA
 // compartida con mesas, pagos y remisiones: ver `createFromOrder`.
@@ -5462,42 +5457,7 @@ export class InvoicingService {
     line: CalculatedLine,
     snapshot: InvoiceLinePricingSnapshot,
   ) {
-    return {
-      product_id: item.product_id,
-      product_variant_id: item.product_variant_id,
-      description: item.description,
-      quantity: new Prisma.Decimal(item.quantity),
-      unit_price: new Prisma.Decimal(item.unit_price),
-      // Los cuatro importes salen del MOTOR, no del cliente. `line.*` ya viene
-      // truncado a 2 decimales (Anexo 1.9 §11.2) y con la base despejada
-      // cuando el precio lleva el impuesto dentro.
-      discount_amount: new Prisma.Decimal(line.discount_amount),
-      tax_amount: new Prisma.Decimal(line.tax_amount),
-      is_inclusive: line.is_inclusive,
-      total_amount: new Prisma.Decimal(line.total_amount),
-      // A cuántas unidades de `quantity` corresponde `unit_price`. NO se acepta
-      // del cliente —no está en el DTO a propósito—: es un atributo del
-      // producto, y dejarlo entrar por el request permitiría facturar un queso
-      // de $28.000/kg como $28.000/gramo. Snapshot para que un reenvío años
-      // después reproduzca el mismo importe de línea.
-      price_unit_quantity: snapshot.price_unit_quantity,
-      // Unidad de medida UN/ECE rec. 20 (`@unitCode`). Se resolvía en cada
-      // envío y, al fallar, caía a 'EA' EN SILENCIO: tres metros declarados
-      // como 'EA' le dicen a la DIAN "tres unidades". NULL conserva ese
-      // comportamiento histórico; un valor explícito lo congela para que un
-      // reenvío emita la misma unidad.
-      unit_code: snapshot.unit_code,
-      // Snapshot de la cuenta PUC de ingreso, ya resuelto por la cascada
-      // línea → variante → producto (ver `resolveLinePricingSnapshots`). Se
-      // congela acá y no al contabilizar porque entre crear y aceptar la factura
-      // el producto puede remaparse: el asiento cuadraría igual, contra otra
-      // subcuenta, y nada lo delataría. NULL ⇒ mapping por defecto.
-      account_code: snapshot.account_code,
-      // Componente AIU. NULL = línea normal, que es el 100% del histórico. El
-      // régimen que decide la base gravable (E.T. art. 462-1 vs Decreto
-      // 1372/1992) es configuración de la tienda, no se deduce de esta columna.
-      aiu_component: item.aiu_component as AiuComponentValue | undefined,
-    };
+    return buildInvoiceItemCreateInputPersistence(item, line, snapshot);
   }
 
   /**
@@ -5575,33 +5535,7 @@ export class InvoicingService {
   }
 
   private buildInvoiceTaxCreateInput(tax: InvoiceTaxRowInput) {
-    return {
-      // `?? undefined`: la columna es opcional, y un `null` explícito y un
-      // campo ausente no son lo mismo para el input de Prisma.
-      tax_rate_id: tax.tax_rate_id ?? undefined,
-      tax_name: tax.tax_name,
-      tax_rate: normalizeInvoiceTaxRate(tax.tax_rate, tax.tax_type),
-      // `?? 0`: la fila puede llegar sin `taxable_amount`/`tax_amount` cuando
-      // el DTO omitió lo que el servidor recalcula de todas formas. Persistir 0
-      // es seguro: el reconciliador de aceptación reescribe el valor real.
-      taxable_amount: new Prisma.Decimal(tax.taxable_amount ?? 0),
-      tax_amount: new Prisma.Decimal(tax.tax_amount ?? 0),
-      // QUI-INC — SIN `??`. El default de un campo fiscal se resuelve en la
-      // FILA FUENTE, nunca acá: este mapeador ya no sabe de dónde vino la fila,
-      // así que un `?? 'iva'` en este punto no puede distinguir «fuente sin
-      // tipar» de «fuente tipada INC y no propagada» — y convertía la segunda
-      // en la primera. Ahora `InvoiceTaxRowInput.tax_type` es requerido y el
-      // compilador obliga a cada productor a resolverlo donde sí hay contexto.
-      //
-      // El puente entre los dos enums es por VALOR, no por tipo: `TaxFiscalType`
-      // (enum nominal de TS) y `tax_type_enum` (unión de literales de Prisma)
-      // declaran exactamente los mismos seis — iva, inc, ica, withholding,
-      // reteiva, reteica— pero TS los trata como incompatibles. Si alguien
-      // añade un valor a uno solo, este cast lo deja pasar y revienta en el
-      // INSERT: mantenerlos en paridad es responsabilidad de quien los edite.
-      tax_type: tax.tax_type as unknown as tax_type_enum,
-      is_inclusive: tax.is_inclusive ?? false,
-    };
+    return buildInvoiceTaxCreateInputPersistence(tax);
   }
 
   /**
@@ -5650,31 +5584,7 @@ export class InvoicingService {
     header_taxes: CalculatedTax[],
     lines: CalculatedLine[],
   ): boolean {
-    if (header_taxes.length >= 2) return true;
-
-    // SEGUNDA razón, y no es el número de tributos: que la base gravable de la
-    // línea NO sea su propio importe.
-    //
-    // Todo el párrafo de arriba —«con un único tributo el camino histórico
-    // produce EXACTAMENTE el mismo XML»— descansa en una premisa que el Modelo 1
-    // del AIU (`'no_sumada'`) rompe: que `cbc:TaxableAmount` de la línea es
-    // `cbc:LineExtensionAmount`. En una línea con `aiu_component: 'contrato'` la
-    // línea ES el contrato entero y su base es sólo una fracción —bajo Decreto
-    // 1372/1992, la utilidad—, así que el camino histórico declara una base
-    // varias veces mayor que la real. La factura 63 (`FVJL11`) lo produjo:
-    // 852.000 de base declarada con 4.856,40 de IVA al 19 %.
-    //
-    // El predicado pregunta por el HECHO, no por el modelo: cualquier línea
-    // cuya base declarada difiera de su importe necesita persistir su desglose,
-    // porque es la única estructura donde esa base cabe. Una línea que calla su
-    // grupo (`omit_tax_total`) no declara ninguna y no cuenta.
-    return lines.some(
-      (line) =>
-        !line.omit_tax_total &&
-        !new Prisma.Decimal(line.taxable_amount).equals(
-          new Prisma.Decimal(line.line_extension_amount),
-        ),
-    );
+    return needsPersistedLineTaxesPersistence(header_taxes, lines);
   }
 
   /**
