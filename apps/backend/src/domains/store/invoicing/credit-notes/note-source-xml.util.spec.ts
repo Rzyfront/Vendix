@@ -43,7 +43,10 @@ function source(items: readonly NoteSourceItemSnapshot[]): NoteSourceInvoiceSnap
   };
 }
 
-function invoiceXml(lines: string[], namespace = UBL_NAMESPACES.INVOICE): string {
+function invoiceXml(
+  lines: string[],
+  namespace: string = UBL_NAMESPACES.INVOICE,
+): string {
   return `<Invoice xmlns="${namespace}" xmlns:cac="${UBL_NAMESPACES.CAC}" xmlns:cbc="${UBL_NAMESPACES.CBC}">
     ${lines.join('\n')}
   </Invoice>`;

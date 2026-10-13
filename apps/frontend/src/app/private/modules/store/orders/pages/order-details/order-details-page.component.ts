@@ -2956,23 +2956,6 @@ export class OrderDetailsPageComponent {
         }
       });
 
-    // Bug 2 — preselect the first payment method in the fast-track modal.
-    // paymentMethods() loads async, so we cannot set it in openFastTrackModal().
-    // This effect reacts to the methods list, the modal being open, and the
-    // order's payment state (hasSuccessfulPayment reads the order() signal),
-    // patching the control only while it is still empty.
-    effect(() => {
-      const methods = this.paymentMethods();
-      if (
-        this.showFastTrackModal() &&
-        !this.hasSuccessfulPayment() &&
-        methods.length > 0 &&
-        this.fastTrackForm.get('payment')?.get('payment_method_id')?.value == null
-      ) {
-        this.fastTrackForm.get('payment')?.patchValue({ payment_method_id: methods[0].id });
-      }
-    });
-
     // Carril B - B3: cuando llega un evento relevante al SSE, re-hidrata el
     // detalle. `lastRelevantEvent()` ya filtra por order_id en el cliente;
     // el effect solo dispara si el signal cambia. Sin debounce: el detalle

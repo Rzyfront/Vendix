@@ -141,12 +141,10 @@ function directChildren(parent: Element, namespace: string, localName: string): 
   const result: Element[] = [];
   for (let index = 0; index < parent.childNodes.length; index += 1) {
     const child = parent.childNodes.item(index);
-    if (
-      child?.nodeType === 1 &&
-      child.namespaceURI === namespace &&
-      child.localName === localName
-    ) {
-      result.push(child as Element);
+    if (child?.nodeType !== 1) continue;
+    const element = child as Element;
+    if (element.namespaceURI === namespace && element.localName === localName) {
+      result.push(element);
     }
   }
   return result;

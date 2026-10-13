@@ -593,7 +593,7 @@ export class CreditNoteBalanceService {
         accounting_entity_id: source.accounting_entity_id,
       },
       select: BALANCE_INVOICE_SELECT,
-    };
+    } satisfies Prisma.invoicesFindManyArgs;
     if (tx) return tx.invoices.findMany(args);
     return this.prisma.invoices.findMany(args);
   }
@@ -616,7 +616,7 @@ export class CreditNoteBalanceService {
         source_id: { in: noteIds },
       },
       select: TRANSMISSION_SELECT,
-    };
+    } satisfies Prisma.fiscal_transmissionsFindManyArgs;
     if (tx) return tx.fiscal_transmissions.findMany(args);
     return this.prisma.withoutScope().fiscal_transmissions.findMany(args);
   }
@@ -1064,7 +1064,6 @@ export class CreditNoteBalanceService {
       note.sent_at !== null ||
       note.accepted_at !== null ||
       note.status === 'sent' ||
-      note.status === 'accepted' ||
       EVER_SUBMITTED_STATUSES.has(note.transmission_status);
     const ledgerWasSubmitted = ledgerRows.some(
       (row) =>
@@ -1115,7 +1114,7 @@ export class CreditNoteBalanceService {
         dian_status: 'accepted',
       },
       select: { id: true },
-    };
+    } satisfies Prisma.fiscal_transmissionsFindFirstArgs;
     const ledger = tx
       ? await tx.fiscal_transmissions.findFirst(args)
       : await this.prisma.withoutScope().fiscal_transmissions.findFirst(args);
