@@ -201,9 +201,11 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     }));
   });
 
-  it('P0 — 3×1300 INC: una selección por source id recalcula con Decimal sin fuga de float', async () => {
-    // La tarifa y las cuotas vienen de la factura padre; el payload sólo elige
-    // líneas y valores comerciales, nunca fija tax_amount/taxes.
+  it('P0 — 3×1300 INC: aplica el truncamiento fiscal canónico de las cuotas', async () => {
+    // 1203.70 × 8% = 96.296; el motor fiscal trunca cada cuota a 96.29.
+    // La fuente conserva su snapshot histórico firmado (96.30 por línea);
+    // la selección parcial recalculada deriva cuotas canónicas. El payload sólo
+    // elige líneas y valores comerciales, nunca fija tax_amount/taxes.
     const parent = baseParent({
       id: 7100,
       subtotal_amount: money(3611.1),
@@ -242,8 +244,8 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     } as unknown as CreateCreditNoteDto);
 
     expect(note.subtotal_amount.toString()).toBe('3611.1');
-    expect(note.tax_amount.toString()).toBe('288.9');
-    expect(note.total_amount.toString()).toBe('3900');
+    expect(note.tax_amount.toString()).toBe('288.87');
+    expect(note.total_amount.toString()).toBe('3899.97');
   });
 
   it('rejects client-supplied fiscal taxes before numbering', async () => {
@@ -479,6 +481,8 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     // `credit-notes.b1-partial-kernel.spec.ts` («NC parcial de plato +
     // Envío»); acá se prueba que el SERVICIO persiste el vínculo
     // `invoice_taxes.invoice_item_id` contra los ids NUEVOS de la nota.
+    // El snapshot fuente preserva IVA histórico 2394.96; la selección parcial
+    // recalcula la cuota canónica 2394.95 sobre la base seleccionada.
     const parent = baseParent({
       id: 7400,
       subtotal_amount: money(62605.04),
@@ -564,7 +568,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     expect(incRow.taxable_amount.toString()).toBe('25000');
     expect(incRow.tax_amount.toString()).toBe('2000');
     expect(ivaRow.taxable_amount.toString()).toBe('12605.04');
-    expect(ivaRow.tax_amount.toString()).toBe('2394.96');
+    expect(ivaRow.tax_amount.toString()).toBe('2394.95');
   });
 
   it('P1 — factura legada con is_inclusive=true pero unit_price ya en forma BASE: no vuelve a despejar el impuesto', async () => {
@@ -634,6 +638,8 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
       customer_phone: '+57 3001234567',
       customer_tax_regime: '48',
       customer_fiscal_responsibilities: ['O-48', 'O-13'],
+      subtotal_amount: money(1000),
+      tax_amount: money(0),
       total_amount: money(1000),
       invoice_items: [
         {
