@@ -168,3 +168,83 @@ bash infra/email-reception/validate-template.sh
 No equivale a `cloudformation validate-template`, permiso IAM efectivo, identidad verificada, rule set activo, métricas observadas ni recepción externa. No hubo calls AWS/DNS/SSH/deploy en esta entrega.
 
 Referencias P0.4: [Reglas SES CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-ses-receiptrule-rule.html), [SQS CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-sqs-queue.html), [IAM redrive nativo](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-configure-dead-letter-queue-redrive.html), [AWS Budgets CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-budgets-budget.html), [Formato YAML CloudFormation — sin aliases](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/template-formats.html).
+
+## P0.7 — Honestidad de originales y documentos derivados
+
+**Bytes originales autoritativos:** ZIP, AttachedDocument completo, XML comercial/AR independientes y PDF recibidos se conservan sin transcodificarlos, con SHA256 de los bytes recibidos. BOM UTF8 y Latin1 no se pierden en esos originales. El XML comercial y AR **extraídos** desde `Description` del AttachedDocument son **evidencia derivada del DOM**, codificada según la declaración soportada y con SHA256 de esa representación. XML normaliza CRLF/CR a LF; no afirmar que el derivado reproduce los bytes del emisor ni valida su firma. AttachedDocument/ZIP originales permiten revisar la fuente exacta.
+
+`ApplicationResponse` incluido sólo permite mostrar **“Constancia DIAN incluida (no verificada)”** y un código de respuesta saneado; se compara la referencia real del documento, no un UUID arbitrario de la raíz AR. Referencia incompatible produce advertencia, no autenticidad. Todos los documentos conservan **“Sin verificar ante la DIAN”**. Los badges de transporte “Funcionando” y `source_channel=email` no son aceptación DIAN, verificación criptográfica, procedencia legal ni permiso para emitir eventos. Una etiqueta histórica de origen por sí sola no prueba que pasó por el transporte nuevo.
+
+## P0.11 — Purga técnica limitada y apagada por defecto
+
+Artefacto: `apps/backend/scripts/email-reception-purge.ts`. No está instalado como cron ni se ejecutó borrado en esta entrega. **Dry-run es el modo predeterminado**; `--execute` debe ser explícito. `--help` no construye/importa Prisma ni conecta DB.
+
+Desde `apps/backend`, con un turno de proceso y heap≤1536MiB:
+
+```bash
+TS_NODE_TRANSPILE_ONLY=1 NODE_OPTIONS=--max-old-space-size=1536 \
+  node -r ts-node/register -r tsconfig-paths/register scripts/email-reception-purge.ts --help
+# Futuro dry-run local supervisado; los IDs son autorizados, no valores inventados:
+TS_NODE_TRANSPILE_ONLY=1 NODE_OPTIONS=--max-old-space-size=1536 \
+  node -r ts-node/register -r tsconfig-paths/register scripts/email-reception-purge.ts \
+  --dry-run --environment production --organization-id "$ORG_ID" --store-id "$STORE_ID" \
+  --batch-size 50 --max-batches 1
+# Sólo después del dry-run revisado y autorización humana de escritura:
+TS_NODE_TRANSPILE_ONLY=1 NODE_OPTIONS=--max-old-space-size=1536 \
+  node -r ts-node/register -r tsconfig-paths/register scripts/email-reception-purge.ts \
+  --execute --environment production --organization-id "$ORG_ID" --store-id "$STORE_ID" \
+  --actor-id "$ACTOR_ID" --batch-size 50 --max-batches 1
+```
+
+### Guardias de conservación y concurrencia
+
+- Scope **obligatorio** ambiente+organización+tienda; no wildcard, scope global ni “todas las tiendas”. Validar tienda perteneciente a organización antes de leer candidatos. El actor debe pertenecer a esa organización para escrituras; no suplantación de usuario HTTP.
+- Lote50 predeterminado, máximo100; máximo de lotes por fase1 predeterminado, permitido1..20. Dos fases: limpiar códigos Gmail expirados y purgar historial técnico. `has_more` avisa que queda trabajo; no ejecutar barridos ilimitados por comodidad.
+- Candidatos de historial: `received_at < ahoraUTC−90d`, estado `processed|not_processed|ignored|failed|partial`, **retryable=false**, `processed_at` no nulo, `processing_token` y `processing_started_at` nulos. Falla cerrado: nunca `received`, `processing`, claim activo o pendiente reintentable. Los estados fallido/parcial con trabajo pendiente requieren revisión operativa, no rebajar banderas para purgarlos.
+- Códigos: fecha expiración≤ahora UTC y el mismo scope/estado terminal seguro; borrar ciphertext, alias y expiry, incluso si la fila tiene menos90d. TTL de exposición≤24h sigue aplicando aunque una fila activa/reintentable se excluya temporalmente de limpieza; jamás se imprime código/ciphertext ni se ofrece un link de confirmación.
+- Cada `updateMany`/`deleteMany` repite **ID+versión+scope+condiciones terminales** de los candidatos en el WHERE; versiones cambiadas/claims renovados se omiten. Mutation y audit se confirman en la misma transacción. Código expirado incrementa versión.
+- Auditoría por lote: actor, scope, motivo `EXPIRED_GMAIL_CODE|RETENTION_90_DAYS`, fechas y counts seleccionados/cambiados/CAS-omitidos. No correo, asunto, alias, NIT, raw key, XML, URLs o código. Dry-run sólo lee; no genera auditoría de mutaciones ficticias.
+- Sólo se actualizan/eliminan filas de `document_reception_email_messages`; audit existente se añade, **nunca** se borra. No cambia inboxes, documentos recibidos, entidades, estados legales, originales fiscales, S3 ni archivos locales. Un cliente GlobalPrisma explícito, pool1, desconexión pública y salida CLI tras flush.
+
+### Targets y autorización de producción
+
+Targets locales admitidos: localhost/127.0.0.1/::1 y hostnames Docker dev `db`/`vendix_postgres`, **únicamente database `/vendix_db` y puerto5432 o predeterminado**. Otra base/puerto local se rechaza para no purgar datos ajenos accidentalmente. El script no imprime DATABASE_URL ni errores ORM detallados. No-local **staging está bloqueado en este corte**, pendiente política operativa explícita.
+
+Un código cifrado expirado nunca se devuelve por la API aunque todavía exista en una fila activa/reintentable. La limpieza espera que esa fila termine y pierda su claim; no interrumpir un job ni borrar su historial90d para cumplir el TTL de exposición.
+
+Un target no-local production requiere **también en dry-run** `--approve-production-purge PURGE_TECHNICAL_EMAIL_METADATA_ONLY` y actor válido. Escrituras no-local production exigen además `NODE_ENV=production`, scope completo y `--execute`. Este token es confirmación operativa, **no una contraseña ni sustituto de aprobación humana/IAM**. No se ejecutó ninguna consulta/borrado de producción en esta sesión. Dry-run local verificado por raíz (2026-10-13T23:37Z): scope org1/store1, cero candidatos/cambios, exit0; prueba execute pendiente con filas sintéticas controladas y autorización separada.
+
+Política aprobada se mantiene separada: **raw factura30d; no-factura/spam7d tras clasificación durable; historial técnico90d elegible; código Gmail exposición≤24h; originales fiscales intención mínimo5años pendiente contador**. La purga técnica no implementa retención fiscal, legal hold nuevo, purga raw ni borrado de archivo fiscal.
+
+### Evidencia disponible y gates todavía manuales
+
+Resultados de specs puntuales observados antes de esta sección (heap1536, aislados, una invocación por archivo):
+
+| Superficie | Evidencia observada | No demuestra |
+| --- | --- | --- |
+| Corpus sintético |66fixtures/manifiesto: integridad offline PASS |Muestras reales, autenticación Google o DIAN |
+| IaC/workflow |Validador offline YAML/IAM/lifecycle/referencias PASS |Policies AWS efectivas, recursos creados o MX |
+| MIME |54/54 casos PASS |Correo Gmail/Outlook externo real |
+| ZIP |31/31 casos PASS |Escaneo antivirus real |
+| Adapter/preflight |70/70 casos PASS |GetStatus, firma o estado legal |
+| Parser fiscal |51/51 casos PASS |XSD/criptografía DIAN real |
+| Core recibido |105/105 casos PASS |Facturas productivas o piloto externo |
+| Purga técnica |`--help` y dry-run DB local PASS exit0; cero candidatos/cambios, originales intactos |Borrado probado o cron instalado |
+
+El corpus es sintético y el discovery DIAN sigue pendiente. **No afirmar simulador E2E, navegador, ejecución de purga con borrado, AWS redrive, alarmas/budget observados ni piloto externo verificados hasta anexar evidencia real de esas ejecuciones.** Runner `.ui.spec.ts` no se instala/inventa; UI se verifica con navegador/Playwright si el entorno permite, o gap explícito.
+
+### Gmail: código-only y plantilla todavía no validada con muestra real
+
+Mostrar/copy de código vigente pertenece al usuario que solicitó reenvío; usuario lo pega manualmente en Gmail. No abrir, seguir ni confirmar un enlace del correo. La plantilla puede ser link-only: fallback **“No pudimos leer un código de confirmación. Puedes usar esta dirección directamente con tus proveedores mientras soporte te ayuda”**. No inventar números a partir de URLs/asuntos.
+
+Reenvío general debe quedar desactivado; filtro sugerido `has:attachment {filename:zip filename:xml}`, revisar resultados antes de guardar y conservar copia. Workspace/Microsoft365 pueden requerir autorización del administrador para reenvío externo. Histórico: Gmail “Reenviar como archivo adjunto”/Outlook “Reenviar como datos adjuntos”, grupos pequeños≤20 correos/20MiB, no enlace Drive. [Guía Google reenvío](https://support.google.com/mail/answer/10957?hl=es), [Gmail histórico como adjunto](https://support.google.com/mail/answer/9261412?hl=es), [Reglas Outlook](https://support.microsoft.com/en-us/outlook/mail/use-rules-to-automatically-forward-messages), [Políticas Microsoft365](https://learn.microsoft.com/en-us/defender-office-365/outbound-spam-policies-external-email-forwarding).
+
+### Checklist final de rollout y rollback (no ejecutado)
+
+1. Responsable humano e inventario autorizados; SES clásico us-east-1, identidad subdominio verificada y MX exacto sólo `recepcion.vendix.online`/`recepcion-stg.vendix.online`. Conservar baseline y no tocar MX/apex/outbound.
+2. Receipt rule inicialmente deshabilitada, añadida al **ruleset existente** revisando orden/Stop; no crear/reemplazar/activar otro set por defecto. SNS envelope no-raw, S3 server-side AES256/privado/TLS, destinos separan raw y originales fiscales.
+3. Revisar/adjuntar IAM mínimo backend y **operador redrive separado**. Aprobar lecturas de DLQ y ventana de redrive antes de mover mensajes. Cola+DLQ Standard14d, maxReceiveCount5; no prometer28d. Redrive nativo preparado arriba a1mensaje/s, sin ejecutarlo aquí.
+4. Confirmar destinatario de **todas** alarmas, heartbeat/errores/memoria observados y budget/responsable. Publisher custom debe emitir nombres/dimensiones exactos de IaC; un template no prueba un sensor funcional.
+5. Aprobar muestras reales autorizadas, challenge Gmail, allowlist piloto, consentimiento/región de datos y confirmación fiscal5años con contador. Hacer prueba guiada comerciante≤5min separando espera externa.
+6. Antes de cron, revisar dry-run por tienda y auditoría; ejecutar sólo lotes autorizados, observar counts/CAS y asegurar originales intactos. No activar escrituras globales.
+7. Rollback seguro: `EMAIL_RECEPTION_ENABLED=false` pausa activación/procesamiento; deshabilitar **sólo** regla correo nueva si procede. Conservar cola según14d y raw según30/7d, originales fiscales e histórico legible. No schema rollback destructivo, purgeQueue, borrar bucket ni desmontar MX padre. Reanudar requiere gates/contexto y comprobación de seguridad otra vez.
