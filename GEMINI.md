@@ -327,6 +327,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Implementing sticky headers or refactoring module headers | `vendix-frontend-sticky-header` |
 | Implementing the per-table `scan_mode` override (currently GAP-6 — pendiente por mesa) | `vendix-restaurant-table-qr` |
+| Importing parent/child rows (product variants via SKU Padre) from an XLSX bulk file | `vendix-bulk-operations` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
