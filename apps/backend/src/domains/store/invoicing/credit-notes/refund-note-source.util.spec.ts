@@ -136,6 +136,37 @@ describe('deriveRefundNoteSelection', () => {
     expect(selected.bridge_rows[0]?.covered_amount).toEqual(decimal(30));
   });
 
+  it('accepts a mapping only for ambiguous refund rows while resolving a unique row automatically', () => {
+    const source = sourceInvoice([
+      sourceLine(71),
+      sourceLine(72),
+      sourceLine(73, {
+        product_id: 8,
+        description: 'Tea leaves',
+        unit_price: decimal(50),
+        total_amount: decimal(50),
+      }),
+    ]);
+    const refundSnapshot = refund([
+      refundItem({ id: 301, order_item_id: 100, refund_amount: decimal(30) }),
+      refundItem({ id: 302, order_item_id: 101, refund_amount: decimal(20) }),
+    ]);
+
+    const result = deriveRefundNoteSelection(
+      calculator,
+      source,
+      refundSnapshot,
+      [
+        orderItem(),
+        orderItem({ id: 101, product_id: 8, product_name: 'Tea leaves' }),
+      ],
+      { refund_item_sources: [{ refund_item_id: 301, source_invoice_item_id: 72 }] },
+    );
+
+    expect(result.items.map((item) => item.source_invoice_item_id)).toEqual([72, 73]);
+    expect(result.bridge_rows.map((row) => row.refund_item_id)).toEqual([301, 302]);
+  });
+
   it('prefers unique immutable financial provenance when the product description changed', () => {
     const source = sourceInvoice([
       sourceLine(71, {
@@ -152,7 +183,7 @@ describe('deriveRefundNoteSelection', () => {
     expect(result.items[0]?.source_invoice_item_id).toBe(71);
   });
 
-  it('rejects foreign, duplicate, and incomplete explicit mappings', () => {
+  it('rejects foreign and duplicate explicit source assignments', () => {
     const source = sourceInvoice([sourceLine(71)]);
     const twoRefundItems = refund([
       refundItem({ id: 301 }),
@@ -248,6 +279,22 @@ describe('deriveRefundNoteSelection', () => {
     ).toEqual(decimal('0.4'));
     expect(first.bridge_rows).toHaveLength(1);
     expect(first.bridge_rows[0]?.covered_amount).toEqual(decimal(10));
+  });
+
+  it('does not treat a sellable product named “Transporte” as a shipping source', () => {
+    const source = sourceInvoice([
+      sourceLine(71, { description: 'Transporte', product_id: 5 }),
+    ]);
+    const refundSnapshot = refund([], decimal(10));
+
+    try {
+      deriveRefundNoteSelection(calculator, source, refundSnapshot, []);
+      fail('expected shipping provenance to be unresolved');
+    } catch (error) {
+      const details = sourceErrorDetails(error);
+      expect(details.reason).toBe('refund_source_mapping_required');
+      expect(details.shipping_source_candidates).toEqual([]);
+    }
   });
 
   it('rejects refund tax or total snapshots that the source calculator cannot reproduce', () => {

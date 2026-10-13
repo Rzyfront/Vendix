@@ -5,7 +5,6 @@ import {
   type NoteSourceInvoiceSnapshot,
   type NoteSourceItemSnapshot,
   type ResolveNoteSourceOptions,
-  resolveNoteSourceLines,
 } from './note-source-resolver.util';
 import { recalculateNote } from './recalculate-note.util';
 import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
@@ -226,19 +225,31 @@ export function deriveRefundNoteSelection(
     workWithShipping.push(shippingWork);
   }
 
-  const seedRequests = workWithShipping.map((work) => ({
-    source_invoice_item_id: work.source.id,
-    quantity: dtoNumber(work.quantity, source, refund.id, 'quantity'),
-    unit_price: dtoNumber(money(work.source.unit_price, source, refund.id, 'source_unit_price'), source, refund.id, 'unit_price'),
-    discount_amount: 0,
-  } as CreateInvoiceNoteItemDto));
-  const seedLines = resolveNoteSourceLines(source, seedRequests, options);
-  if (seedLines.length !== workWithShipping.length) {
-    throw sourceError(source, refund.id, 'refund_source_line_count_mismatch');
-  }
+  // Resolve fiscal line inputs from the complete original commercial snapshot,
+  // with no caller-selected quantity or discount override. This preserves the
+  // source's inclusive flags, divisor, frozen taxes and special AIU proof.
+  const originalSourceSelection: CreateInvoiceNoteItemDto[] = source.invoice_items.map((item) => ({
+    source_invoice_item_id: item.id,
+    quantity: dtoNumber(
+      decimalValue(item.quantity, source, refund.id, 'source_quantity', 4, MAX_QUANTITY),
+      source,
+      refund.id,
+      'source_quantity',
+    ),
+    unit_price: dtoNumber(
+      money(item.unit_price, source, refund.id, 'source_unit_price'),
+      source,
+      refund.id,
+      'source_unit_price',
+    ),
+  }));
+  const sourceProof = calculateSelection(calculator, source, originalSourceSelection, options, refund.id);
+  const sourceLinesById = new Map<number, typeof sourceProof.resolved_lines[number]>(
+    sourceProof.resolved_lines.map((line) => [line.item.source_invoice_item_id, line] as const),
+  );
 
-  const derived = workWithShipping.map((work, index) => {
-    const seed = seedLines[index];
+  const derived = workWithShipping.map((work) => {
+    const seed = sourceLinesById.get(work.source.id);
     if (!seed) throw sourceError(source, refund.id, 'refund_source_line_missing');
     const effectiveInclusive = seed.item.is_inclusive === true || (
       seed.item.is_inclusive !== false &&
@@ -361,8 +372,16 @@ function calculateSelection(
 ): ReturnType<typeof recalculateNote> {
   try {
     return recalculateNote(calculator, source, requested, options);
-  } catch {
-    throw sourceError(source, refundId, 'refund_calculation_unreproducible');
+  } catch (error) {
+    if (!(error instanceof VendixHttpException)) throw error;
+    throw sourceError(
+      source,
+      refundId,
+      'refund_calculation_unreproducible',
+      undefined,
+      undefined,
+      error.errorCode,
+    );
   }
 }
 
@@ -448,7 +467,10 @@ function shippingSourceCandidates(source: RefundNoteSourceInvoice, occupied: Rea
   const candidates = provenance.length > 0
     ? provenance
     : source.invoice_items.filter(
-        (item) => isShippingDescription(item.description),
+        (item) =>
+          item.product_id === null &&
+          item.product_variant_id === null &&
+          isShippingDescription(item.description),
       );
   return candidates.filter((item) => !occupied.has(item.id)).map((item) => item.id);
 }
@@ -478,9 +500,6 @@ function validateExplicitMappings(
     seenRefund.add(row.refund_item_id);
     seenSource.add(row.source_invoice_item_id);
     result.set(row.refund_item_id, row.source_invoice_item_id);
-  }
-  if (seenRefund.size !== refundIds.size) {
-    throw sourceError(source, refund.id, 'refund_source_mapping_missing');
   }
   return result;
 }
@@ -607,6 +626,7 @@ function sourceError(
   reason: string,
   sourceItemId?: number,
   refundItemId?: number,
+  causeCode?: string,
 ): VendixHttpException {
   return new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
     reason,
@@ -614,5 +634,6 @@ function sourceError(
     parent_invoice_id: source.id,
     ...(sourceItemId === undefined ? {} : { source_invoice_item_id: sourceItemId }),
     ...(refundItemId === undefined ? {} : { refund_item_id: refundItemId }),
+    ...(causeCode === undefined ? {} : { cause_code: causeCode }),
   });
 }
