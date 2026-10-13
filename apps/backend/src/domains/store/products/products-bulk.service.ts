@@ -51,7 +51,7 @@ interface BarcodeOwner {
 @Injectable()
 export class ProductsBulkService {
   private readonly logger = new Logger(ProductsBulkService.name);
-  private readonly MAX_BATCH_SIZE = 1000;
+  private readonly MAX_BATCH_SIZE = 10000;
   private readonly MAX_BARCODE_LENGTH = 64;
   private readonly NULL_MARKER = '__NULL__';
   private readonly CATALOG_ONLY_IGNORED_FIELDS = new Set([
