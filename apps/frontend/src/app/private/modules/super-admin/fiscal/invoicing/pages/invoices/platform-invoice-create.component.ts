@@ -76,6 +76,11 @@ import {
 
 import { TenantPickerComponent } from '../../components/tenant-picker/tenant-picker.component';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
+import {
+  DOCUMENT_TYPE_OPTIONS,
+  PERSON_TYPE_OPTIONS,
+  TAX_REGIME_OPTIONS,
+} from '../../platform-invoicing.constants';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import type {
   PlatformResolution,
@@ -642,22 +647,9 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     { value: '1', label: 'Instrumento no definido' },
   ];
 
-  readonly documentTypeOptions: SelectorOption[] = [
-    { value: '31', label: 'NIT (Número de Identificación Tributaria)' },
-    { value: '13', label: 'Cédula de Ciudadanía (CC)' },
-    { value: '22', label: 'Cédula de Extranjería (CE)' },
-    { value: '41', label: 'Pasaporte' },
-  ];
-
-  readonly personTypeOptions: SelectorOption[] = [
-    { value: '1', label: 'Persona Jurídica' },
-    { value: '2', label: 'Persona Natural' },
-  ];
-
-  readonly taxRegimeOptions: SelectorOption[] = [
-    { value: '48', label: 'Responsable de IVA (Régimen Común)' },
-    { value: '49', label: 'No Responsable de IVA (Régimen Simplificado)' },
-  ];
+  readonly documentTypeOptions: SelectorOption[] = DOCUMENT_TYPE_OPTIONS;
+  readonly personTypeOptions: SelectorOption[] = PERSON_TYPE_OPTIONS;
+  readonly taxRegimeOptions: SelectorOption[] = TAX_REGIME_OPTIONS;
 
   /**
    * Departamentos DIVIPOLA. La dirección del adquiriente externo viaja al
@@ -1813,6 +1805,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
             fiscal_number: string;
             transmission_status?: string;
             dian_status?: string;
+            error_message?: string | null;
           };
         }>(url, dto),
       );
@@ -1820,14 +1813,17 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         const number = res.data.fiscal_number || '';
         const status = res.data.transmission_status;
         const dianStatus = res.data.dian_status;
+        // El motivo viaja literal: sin él el operador solo sabe «rechazada».
+        const reason = res.data.error_message?.trim();
+        const reasonSuffix = reason ? ` Motivo: ${reason}` : '';
         if (status === 'rejected' || dianStatus === 'rejected') {
           this.toast.error(
-            `La factura ${number} fue rechazada por la DIAN. Revisa el detalle.`,
+            `La factura ${number} fue rechazada por la DIAN.${reasonSuffix} Revisa el detalle.`,
             'Factura rechazada',
           );
         } else if (status === 'error' || dianStatus === 'error') {
           this.toast.error(
-            `La factura ${number} se creó pero la transmisión falló. Revisa el detalle.`,
+            `La factura ${number} se creó pero la transmisión falló.${reasonSuffix} Revisa el detalle.`,
             'Error de transmisión',
           );
         } else if (status === 'accepted') {
