@@ -4,6 +4,11 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { RequestContextService } from '@common/context/request-context.service';
+import { PurchaseOrderReceiveQueueService } from './purchase-order-receive-queue.service';
+import { ReceivePurchaseOrderAsyncDto } from './dto/receive-purchase-order-async.dto';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 
 /**
  * CP-PURCHASE-TRANSPARENCY K — el contrato de transporte de los 25 handlers.
@@ -110,6 +115,7 @@ describe('PurchaseOrdersController — un fallo no puede responder 2xx', () => {
       queue as any,
       { add: jest.fn(), getJob: jest.fn() } as any,
       { add: jest.fn(), getJob: jest.fn() } as any,
+      {} as any,
     );
 
     // El `catch` que sobrevive registra con `logger.error`. Silenciarlo evita
@@ -489,5 +495,141 @@ describe('PurchaseOrdersController — un fallo no puede responder 2xx', () => {
     expect(line).toContain('po=42');
     expect(line).toContain('lines=1');
     expect(line).toContain('FV-900');
+  });
+});
+
+describe('PurchaseOrdersController — receive/async y receive-jobs', () => {
+  const inStore = <T>(store_id: number, fn: () => Promise<T>) =>
+    RequestContextService.run(
+      {
+        store_id,
+        organization_id: 5,
+        user_id: 9,
+        is_super_admin: false,
+        is_owner: false,
+        request_id: 'r1',
+      } as any,
+      fn,
+    );
+
+  function build() {
+    const queue = { add: jest.fn(), getJob: jest.fn() };
+    const queueService = new PurchaseOrderReceiveQueueService(queue as any);
+    const controller = new PurchaseOrdersController(
+      {} as any,
+      {} as any,
+      new ResponseService(),
+      {} as any,
+      {} as any,
+      {} as any,
+      queueService,
+    );
+    return { controller, queue };
+  }
+
+  const items = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: i + 1, quantity_received: 1 }));
+
+  it('PATCH :id/receive/async => 202 con job_id, total_lines y batches_total; attempts 1', async () => {
+    const { controller, queue } = build();
+    queue.add.mockResolvedValue({ id: '77' });
+
+    const res: any = await inStore(1, () =>
+      controller.enqueueReceive('42', { items: items(250) } as any),
+    );
+
+    expect(res.data).toEqual({
+      job_id: '77',
+      total_lines: 250,
+      batches_total: 3,
+    });
+    const [name, payload, opts] = queue.add.mock.calls[0];
+    expect(name).toBe('receive');
+    expect(payload).toEqual(
+      expect.objectContaining({
+        store_id: 1,
+        organization_id: 5,
+        user_id: 9,
+        purchase_order_id: 42,
+      }),
+    );
+    expect(opts).toEqual(expect.objectContaining({ attempts: 1 }));
+    // 202 declarado en el decorador.
+    expect(
+      Reflect.getMetadata('__httpCode__', PurchaseOrdersController.prototype.enqueueReceive),
+    ).toBe(202);
+  });
+
+  it('getReceiveJob de OTRA tienda => 404 (AI_QUEUE_002), igual que un job inexistente', async () => {
+    const { controller, queue } = build();
+    queue.getJob.mockResolvedValue({
+      id: '77',
+      data: { store_id: 1, total_lines: 1, batches_total: 1 },
+      getState: jest.fn().mockResolvedValue('completed'),
+    });
+
+    const err: any = await inStore(2, () =>
+      controller.getReceiveJob('77'),
+    ).then(
+      () => null,
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(VendixHttpException);
+    expect(err.errorCode).toBe('AI_QUEUE_002');
+    expect(err.getStatus()).toBe(404);
+
+    queue.getJob.mockResolvedValue(null);
+    const err2: any = await inStore(1, () =>
+      controller.getReceiveJob('x'),
+    ).then(
+      () => null,
+      (e) => e,
+    );
+    expect(err2.errorCode).toBe('AI_QUEUE_002');
+  });
+
+  it('getReceiveJob de la misma tienda: progreso, resultado y error estructurado', async () => {
+    const { controller, queue } = build();
+    queue.getJob.mockResolvedValue({
+      id: '77',
+      data: { store_id: 1, total_lines: 250, batches_total: 3 },
+      progress: { processed_lines: 100, total_lines: 250, batches_done: 1, batches_total: 3 },
+      getState: jest.fn().mockResolvedValue('active'),
+    });
+    const active: any = await inStore(1, () => controller.getReceiveJob('77'));
+    expect(active.data).toEqual({
+      job_id: '77',
+      state: 'active',
+      progress: { processed_lines: 100, total_lines: 250, batches_done: 1, batches_total: 3 },
+    });
+
+    queue.getJob.mockResolvedValue({
+      id: '77',
+      data: { store_id: 1, total_lines: 250, batches_total: 3 },
+      progress: { processed_lines: 100, total_lines: 250, batches_done: 1, batches_total: 3 },
+      failedReason: JSON.stringify({ message: 'boom', batch_index: 1, failed_at_line: 100 }),
+      getState: jest.fn().mockResolvedValue('failed'),
+    });
+    const failed: any = await inStore(1, () => controller.getReceiveJob('77'));
+    expect(failed.data.state).toBe('failed');
+    expect(failed.data.error).toEqual({ message: 'boom', batch_index: 1, failed_at_line: 100 });
+
+    queue.getJob.mockResolvedValue({
+      id: '77',
+      data: { store_id: 1, total_lines: 250, batches_total: 3 },
+      returnvalue: { purchase_order_id: 42, status: 'received' },
+      getState: jest.fn().mockResolvedValue('completed'),
+    });
+    const done: any = await inStore(1, () => controller.getReceiveJob('77'));
+    expect(done.data.result).toEqual({ purchase_order_id: 42, status: 'received' });
+    expect(done.data.progress.total_lines).toBe(250);
+  });
+
+  it('DTO async acepta 10000 líneas y rechaza 10001 y 0', async () => {
+    const mk = (n: number) =>
+      plainToInstance(ReceivePurchaseOrderAsyncDto, { items: items(n) });
+    expect(await validate(mk(10000))).toHaveLength(0);
+    expect((await validate(mk(10001))).length).toBeGreaterThan(0);
+    expect((await validate(mk(0))).length).toBeGreaterThan(0);
   });
 });

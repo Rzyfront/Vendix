@@ -16,6 +16,7 @@ import {
   HttpStatus,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -27,6 +28,8 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
+import { ReceivePurchaseOrderAsyncDto } from './dto/receive-purchase-order-async.dto';
+import { PurchaseOrderReceiveQueueService } from './purchase-order-receive-queue.service';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { ConfigurePaymentPlanDto } from './dto/configure-payment-plan.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
@@ -130,6 +133,11 @@ export class PurchaseOrdersController {
     // Escaneo IA async de facturas de compra (cola `invoice-scan`).
     @InjectQueue('invoice-scan')
     private readonly invoiceScanQueue: Queue<InvoiceScanJob>,
+    // Recepción asíncrona por lotes (cola `purchase-order-receive`).
+    // @Optional solo para no romper los specs (construcción manual con 6
+    // args y TestingModule sin este provider); en la app real Nest lo inyecta.
+    @Optional()
+    private readonly receiveQueueService?: PurchaseOrderReceiveQueueService,
   ) {}
 
   @Post()
@@ -531,6 +539,28 @@ export class PurchaseOrdersController {
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
     };
+  }
+
+  // ===== Recepción asíncrona por lotes de 100 (OC grandes) =====
+  //   PATCH :id/receive/async       → 202 {job_id, total_lines, batches_total}
+  //   GET   receive-jobs/:jobId     → {job_id, state, progress, result?, error?}
+  // Declaradas ANTES de cualquier `@Get(':id')` / `@Post(':id/...')`.
+  @Patch(':id/receive/async')
+  @Permissions('store:orders:purchase_orders:receive')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async enqueueReceive(
+    @Param('id') id: string,
+    @Body() dto: ReceivePurchaseOrderAsyncDto,
+  ) {
+    const result = await this.receiveQueueService!.enqueueReceive(+id, dto);
+    return this.responseService.success(result, 'Recepción encolada');
+  }
+
+  @Get('receive-jobs/:jobId')
+  @Permissions('store:orders:purchase_orders:receive')
+  async getReceiveJob(@Param('jobId') jobId: string) {
+    const result = await this.receiveQueueService!.getReceiveJob(jobId);
+    return this.responseService.success(result);
   }
 
   @Post('cost-preview')
