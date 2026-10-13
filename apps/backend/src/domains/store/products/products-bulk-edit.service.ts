@@ -37,6 +37,9 @@ import {
 
 /** Fila de `products` leída para el preview. Genérica a propósito: el diff
  *  recorre `BULK_EDITABLE_FIELDS` contra las columnas homónimas de la fila. */
+const TRACK_INVENTORY_WITH_VARIANTS_MESSAGE =
+  "Este producto maneja variantes: cambia 'Controla inventario' desde el editor del producto para decidir qué pasa con el stock";
+
 type ProductRow = Record<string, any> & {
   id: number;
   name: string;
@@ -446,11 +449,25 @@ export class ProductsBulkEditService {
     const knownNames = new Map<number, string>();
     const rows = await this.prisma.products.findMany({
       where: { id: { in: ids } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, track_inventory: true },
     });
+    const currentTrackInventory = new Map<number, boolean>();
     for (const row of rows) {
       knownNames.set(row.id, row.name);
+      currentTrackInventory.set(row.id, row.track_inventory);
     }
+
+    // Misma regla que el preview (detectFailure 2b): `update()` no la impone
+    // sin `variants` en el payload, así que el apply la re-verifica.
+    const nextTrackInventory = (dto.changes as Record<string, any>)
+      .track_inventory;
+    const variantProductIds =
+      nextTrackInventory === undefined
+        ? new Set<number>()
+        : await this.loadProductIdsWithVariants(
+            { track_inventory: nextTrackInventory },
+            rows.map((row) => row.id),
+          );
 
     const taxAction = dto.changes.tax_category_action;
     // Validación de LOTE (falla rápido, igual que el preview): reglas por
@@ -484,6 +501,16 @@ export class ProductsBulkEditService {
     // siguientes. Delegación íntegra en `update()` (ver docblock de la clase).
     for (const id of ids) {
       try {
+        if (
+          nextTrackInventory !== undefined &&
+          nextTrackInventory !== currentTrackInventory.get(id) &&
+          variantProductIds.has(id)
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VALIDATE_001,
+            TRACK_INVENTORY_WITH_VARIANTS_MESSAGE,
+          );
+        }
         const productPayload: UpdateProductDto = {
           ...(scalarChanges as UpdateProductDto),
         };
@@ -1239,6 +1266,22 @@ export class ProductsBulkEditService {
       };
     }
 
+    // 2b. Cambiar `track_inventory` en un producto con variantes. El guard de
+    //    `products.service.ts` (~4544-4559, exige `stock_transfer_mode`) solo
+    //    corre cuando llega `variants`, y la edición masiva nunca lo manda:
+    //    sin este bloqueo se cambiaría el control de inventario sin decidir
+    //    qué pasa con el stock. Bloquea el producto completo, como el 2.
+    if (
+      effective.track_inventory !== undefined &&
+      effective.track_inventory !== product.track_inventory &&
+      variantProductIds.has(product.id)
+    ) {
+      return {
+        code: ErrorCodes.PROD_VALIDATE_001.code,
+        message: TRACK_INVENTORY_WITH_VARIANTS_MESSAGE,
+      };
+    }
+
     // 3. `products.service.ts:2025-2063` — reglas de consulta sobre el valor
     //    EFECTIVO (payload ?? producto). Solo se evalúan cuando el payload pide
     //    explícitamente `is_consultation === true`, igual que el original.
@@ -1369,7 +1412,12 @@ export class ProductsBulkEditService {
     payload: Record<string, any>,
     editableIds: number[],
   ): Promise<Set<number>> {
-    if (payload.product_type !== ProductType.SERVICE) return new Set();
+    if (
+      payload.product_type !== ProductType.SERVICE &&
+      payload.track_inventory === undefined
+    ) {
+      return new Set();
+    }
     if (editableIds.length === 0) return new Set();
     const variants = await this.prisma.product_variants.findMany({
       where: { product_id: { in: editableIds } },
