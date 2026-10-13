@@ -15,6 +15,7 @@ import { SuperAdminCertificatesPendingController } from './dian-config/dian-conf
 import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
+import { CreditNoteBalanceService } from './credit-notes/credit-note-balance.service';
 import { InvoiceEmissionGateService } from './services/invoice-emission-gate.service';
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
@@ -113,6 +114,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     InvoicingService,
     InvoiceFlowService,
     CreditNotesService,
+    CreditNoteBalanceService,
     ResolutionsService,
     ResolutionScannerService,
     DianHabilitationScannerService,

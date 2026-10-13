@@ -1740,7 +1740,21 @@ export class InvoicingService {
     return { ...invoice, retry_status };
   }
 
+  private assertNoteUsesSpecificRoute(invoice_type: string): void {
+    if (invoice_type !== 'credit_note' && invoice_type !== 'debit_note') return;
+    const path = invoice_type === 'credit_note' ? 'credit-notes' : 'debit-notes';
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_NOTE_SOURCE_001,
+      'Las notas crédito y débito se crean por su flujo específico, que valida la fuente y el saldo antes de asignar consecutivo.',
+      {
+        invoice_type,
+        required_route: `/store/invoicing/${path}`,
+      },
+    );
+  }
+
   async create(dto: CreateInvoiceDto) {
+    this.assertNoteUsesSpecificRoute(dto.invoice_type);
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
     const accounting_entity_id =
@@ -4705,6 +4719,24 @@ export class InvoicingService {
 
   async update(id: number, dto: UpdateInvoiceDto) {
     const invoice = await this.findOne(id);
+    const attemptedType = (dto as UpdateInvoiceDto & { invoice_type?: string }).invoice_type;
+    if (
+      invoice.invoice_type === 'credit_note' ||
+      invoice.invoice_type === 'debit_note' ||
+      attemptedType === 'credit_note' ||
+      attemptedType === 'debit_note'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_NOTE_SOURCE_001,
+        'Las notas crédito y débito se crean y emiten por su flujo específico. No se pueden crear ni modificar por la edición genérica de facturas.',
+        {
+          invoice_id: id,
+          invoice_type: invoice.invoice_type,
+          attempted_invoice_type: attemptedType ?? null,
+          required_route: `/store/invoicing/${attemptedType === 'debit_note' || invoice.invoice_type === 'debit_note' ? 'debit-notes' : 'credit-notes'}`,
+        },
+      );
+    }
     if (invoice.contract_id != null) {
       const frozenContractFields = [
         'items',
