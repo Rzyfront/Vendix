@@ -106,3 +106,65 @@ Contrato para esos artefactos:
 - [DLQ SQS y retención](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html).
 - [DIAN Anexo técnico FEV1.9](https://www.dian.gov.co/impuestos/factura-electronica/Documents/Anexo-Tecnico-Factura-Electronica-de-Venta-vr-1-9.pdf); su formato inspira el corpus, **no se afirma validación XSD/DIAN real**.
 - Plan/review aprobados externos: `~/.openclaw/tmp/vendix-email-reception/plan.md` V2 y `review.md`; Decisiones Rafael finales prevalecen sobre secciones antiguas pendientes.
+
+## P0.4 — Artefactos infraestructura preparados (no aplicados)
+
+| Ruta | Uso |
+| --- | --- |
+| `infra/email-reception/receipt-rules.yaml` | CloudFormation: regla SES deshabilitada dentro del ruleset existente; bucket raw separado, SNS/SQS+DLQ, policies, alarmas y budget |
+| `infra/email-reception/env.example` | Nombres env aprobados y parámetros sin credenciales ni valores AWS inventados |
+| `infra/email-reception/prepare-change-set.sh` | Acción futura autorizada: crea change set **sin ejecutarlo**, con `--no-execute-changeset`, región fija us-east-1 |
+| `infra/email-reception/validate-template.sh` | Revisión offline YAML/referencias/sin ciclos/contratos/workflow; no AWS, no build |
+| `.github/workflows/deploy-backend-ec2.yml` | Wiring tolerante desde configuración existente a API y worker; flag=false por defecto, sin activar cron ni deploy |
+
+La plantilla **no** crea ni activa `AWS::SES::ReceiptRuleSet`, identidad SES, records DNS, certificados, usuarios/roles backend ni recursos fiscales. Agrega una regla `ScanEnabled` con S3+Topic y StopRuleSet al ruleset que el humano seleccione. Se entregan managed policies **sin adjuntarlas**: revisar principal existente y permisos previos; backend y operador deben ser identidades separadas. `OriginalObjectArn` corresponde al namespace existente `arn:aws:s3:::<bucket-fiscal>/organizations/<org-o-*>/fiscal-entities/<entidad-o-*>/received-documents/*`; nunca usar `bucket/*` ni raw bucket como destino fiscal.
+
+**Guardias:** dominios se obtienen por mapping production/staging de los dos subdominios aprobados; región sólo us-east-1 (regla assertion/mapping y script fijo). Recurso inbound usa Retain/UpdateReplacePolicy Retain: deshabilitar/rollback no elimina raw/colas. Regla SES queda `ReceiptRuleEnabled=false` inicialmente; backend mantiene `EMAIL_RECEPTION_ENABLED=false`, allowlist vacía y `EMAIL_RECEPTION_DIAN_STATUS_ENABLED=false`. Una futura ejecución del workflow no configura AWS/MX ni confirma Gmail automáticamente. Procesamiento corre sólo rol worker/all; recibir env en API no autoriza segundo consumidor.
+
+### Aplicación futura por Rafael/operador — sin ejecutarla aquí
+
+1. Inventario autorizado: revisar cuenta, regla activa, DNS base y existencia/orden de ruleset. Dos stacks staging/prod comparten **el ruleset existente** en una misma cuenta/región. `AfterReceiptRuleName` requiere revisar precedencia y Stop para no interceptar otras reglas. Guardar baseline MX padre/ruleset y elegir rollback de deshabilitar sólo esta regla.
+2. Verificar subdominio SES y publicar TXT/CNAME emitidos por AWS; MX `10 inbound-smtp.us-east-1.amazonaws.com`, TTL300, sólo el subdominio aprobado. No alterar MX/identidad saliente del dominio padre.
+3. Poblar variables de `env.example` con metadata real, nunca pegar secrets al repo; ejecutar `prepare-change-set.sh --approved-inventory` **sólo con autorización**. Revisar change set/IAM: no reemplaza rule set, no resources fuera correo, originals namespace correcto, roles separados/cuenta esperada. Ejecutarlo es una aprobación humana **separada**; el script no lo hace.
+4. Revisar outputs, asociar managed policy BackendPolicy al principal backend existente y OperatorRedrivePolicy sólo al operador. El budget mide conservadoramente **SES/S3/SNS/SQS de toda la cuenta**, no costo exclusivo correo, porque SES inbound no ofrece una atribución fiable por tenant/tag en este corte. Ajustar monto con responsable, sin creer que25USD es cotización.
+5. Confirmar suscripción SNS de `OperationsEmail`; verificar sensor custom antes de piloto. Activar la regla dentro del ruleset ya activo sin cambiar otras; wiring de config desde outputs; activar allowlist+flag sólo después de correo staging autorizado y controles negativos.
+6. Validar backend detenido→entrada durable→consumo tras reinicio, otro topic/pointer rechazado antes de GetObject, raw cifrado/privado, ScanEnabled, lifecycle, no ejecución URL y códigos DIAN honestos. No declarar listo externo por un YAML válido.
+
+Comandos **futuros**, requieren aprobación y variables verificadas:
+
+```bash
+aws ses describe-active-receipt-rule-set --profile "$AWS_PROFILE" --region us-east-1
+aws ses get-identity-verification-attributes --identities "$RECEPTION_DOMAIN" --profile "$AWS_PROFILE" --region us-east-1
+# Baseline: revisar también records del dominio padre antes/después, sin modificarlos.
+aws route53 list-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" --profile "$AWS_PROFILE"
+# Comprobar transporte real sólo después de provisioning revisado.
+dig +short MX "$RECEPTION_DOMAIN"
+aws s3api get-public-access-block --bucket "$INBOUND_BUCKET" --profile "$AWS_PROFILE"
+aws s3api get-bucket-encryption --bucket "$INBOUND_BUCKET" --profile "$AWS_PROFILE"
+aws s3api get-bucket-lifecycle-configuration --bucket "$INBOUND_BUCKET" --profile "$AWS_PROFILE"
+aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names QueueArn Policy RedrivePolicy VisibilityTimeout ReceiveMessageWaitTimeSeconds MessageRetentionPeriod SqsManagedSseEnabled --profile "$AWS_PROFILE" --region us-east-1
+aws sqs get-queue-attributes --queue-url "$DLQ_URL" --attribute-names RedriveAllowPolicy MessageRetentionPeriod --profile "$AWS_PROFILE" --region us-east-1
+aws sns get-subscription-attributes --subscription-arn "$SUBSCRIPTION_ARN" --profile "$AWS_PROFILE" --region us-east-1
+# Operador separado, ventana aprobada, recepción segura y raw aún vigente:
+aws sqs start-message-move-task --source-arn "$DLQ_ARN" --destination-arn "$QUEUE_ARN" --max-number-of-messages-per-second 1 --profile "$AWS_PROFILE" --region us-east-1
+```
+
+### Alarmas, métricas y cron: dependencias explícitas
+
+Alarmas nativas SQS: DLQ visible≥1; edad por defecto300s; backlog100 (umbrales paramétricos). Alarmas custom preparadas, namespace `Vendix/EmailReception`, dimensión **Environment** con valor production/staging: `ConsumerErrors`, `StorageErrors` (Sum≥1), `ConsumerHeartbeat` (Sum<1 durante3min, missing=breaching), `ConsumerMemoryPercent` (Maximum≥80 durante3min). Responsable es `OperationsEmail`; verificar confirmación SNS y dueño de respuesta a incidentes. Un consumer pausado intencionalmente puede disparar heartbeat: reconocer alarma/ventana de pausa, no afirmar que Gmail desconectó.
+
+**Gap operativo a resolver en P0.5/P0.11:** el YAML no instala/emite sensores custom. El consumidor deberá publicar esos cuatro métricos con la dimensión exacta (y medir memoria contra presupuesto real), o el operador aportar un sensor autorizado equivalente. BackendPolicy sólo permite `cloudwatch:PutMetricData` en ese namespace. Hasta observar datapoints/alarma real y presupuesto vigente no dar monitoreo por validado. Budget notifica80% actual/100% forecast directamente al responsable; no auto-apaga recursos ni evita costo previo al backend.
+
+Lifecycle7d depende del tag `email-reception-classification=non-invoice|spam`, aplicado **después** del commit final seguro. No taggear failed/processing/partial con factura ni deducir clasificación desde headers. Para raw compartido por varios aliases esperar resultados durables de todos y no marcar no-factura si alguno conserva una factura. SSE-S3+TLS no son cifrado cliente SES; jamás añadir `KmsKeyArn` a la acción sin nueva integración de descifrado.
+
+Cron de purga **no se instala desde workflow**. P0.11 debe entregar comando verificado, ejecutar dry-run supervisado, luego Rafael autoriza programación diaria por lotes; no inventar ruta ejecutable que aún no existe ni abrir servicio nuevo. Hora sugerida03:15UTC con exclusión mutua (flock), logs sólo counts/códigos técnicos y alertar errores; validar90d estados terminales/raw expirado y cero borrado fiscal antes de habilitar writes. No purgar cola ni raw para recuperar un fallo del parser.
+
+Verificación offline preparada, coordinar procesos y ejecutar uno por vez:
+
+```bash
+bash infra/email-reception/validate-template.sh
+```
+
+No equivale a `cloudformation validate-template`, permiso IAM efectivo, identidad verificada, rule set activo, métricas observadas ni recepción externa. No hubo calls AWS/DNS/SSH/deploy en esta entrega.
+
+Referencias P0.4: [Reglas SES CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-ses-receiptrule-rule.html), [SQS CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-sqs-queue.html), [IAM redrive nativo](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-configure-dead-letter-queue-redrive.html), [AWS Budgets CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-budgets-budget.html), [Formato YAML CloudFormation — sin aliases](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/template-formats.html).

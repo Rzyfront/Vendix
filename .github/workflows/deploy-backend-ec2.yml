@@ -138,6 +138,19 @@ jobs:
           GOOGLE_GEOCODING_API_KEY=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('GOOGLE_GEOCODING_API_KEY', ''))")
           GOOGLE_GEOCODING_MONTHLY_CAP=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('GOOGLE_GEOCODING_MONTHLY_CAP', ''))")
 
+          # Email reception P0: independent pilot flag, default disabled; no provisioning here.
+          EMAIL_RECEPTION_ENABLED=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_ENABLED', 'false')).lower())")
+          EMAIL_RECEPTION_STORE_ALLOWLIST=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_STORE_ALLOWLIST', '')))")
+          EMAIL_RECEPTION_ENVIRONMENT=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_ENVIRONMENT', 'production')))")
+          EMAIL_RECEPTION_DOMAIN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_DOMAIN', 'recepcion.vendix.online')))")
+          EMAIL_RECEPTION_AWS_REGION=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_AWS_REGION', 'us-east-1')))")
+          EMAIL_RECEPTION_SQS_QUEUE_URL=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_SQS_QUEUE_URL', '')))")
+          EMAIL_RECEPTION_SNS_TOPIC_ARN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_SNS_TOPIC_ARN', '')))")
+          EMAIL_RECEPTION_RAW_BUCKET=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_RAW_BUCKET', '')))")
+          EMAIL_RECEPTION_RAW_PREFIX=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_RAW_PREFIX', 'raw/')))")
+          EMAIL_RECEPTION_DIAN_STATUS_ENABLED=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_DIAN_STATUS_ENABLED', 'false')).lower())")
+          # Retention cron is deliberately NOT installed: approve dry-run and P0.11 purge command first.
+
           echo "🔧 Ensuring Redis env vars are in /opt/vendix/.env..."
           sudo grep -q '^REDIS_HOST=' /opt/vendix/.env || echo 'REDIS_HOST=vendix-redis' | sudo tee -a /opt/vendix/.env > /dev/null
           sudo grep -q '^REDIS_PORT=' /opt/vendix/.env || echo 'REDIS_PORT=6379' | sudo tee -a /opt/vendix/.env > /dev/null
@@ -243,6 +256,16 @@ jobs:
               -e TRUST_PROXY_HOPS="\$TRUST_PROXY_HOPS" \\
               -e GOOGLE_GEOCODING_API_KEY="\$GOOGLE_GEOCODING_API_KEY" \\
               -e GOOGLE_GEOCODING_MONTHLY_CAP="\$GOOGLE_GEOCODING_MONTHLY_CAP" \\
+              -e EMAIL_RECEPTION_ENABLED="\$EMAIL_RECEPTION_ENABLED" \\
+              -e EMAIL_RECEPTION_STORE_ALLOWLIST="\$EMAIL_RECEPTION_STORE_ALLOWLIST" \\
+              -e EMAIL_RECEPTION_ENVIRONMENT="\$EMAIL_RECEPTION_ENVIRONMENT" \\
+              -e EMAIL_RECEPTION_DOMAIN="\$EMAIL_RECEPTION_DOMAIN" \\
+              -e EMAIL_RECEPTION_AWS_REGION="\$EMAIL_RECEPTION_AWS_REGION" \\
+              -e EMAIL_RECEPTION_SQS_QUEUE_URL="\$EMAIL_RECEPTION_SQS_QUEUE_URL" \\
+              -e EMAIL_RECEPTION_SNS_TOPIC_ARN="\$EMAIL_RECEPTION_SNS_TOPIC_ARN" \\
+              -e EMAIL_RECEPTION_RAW_BUCKET="\$EMAIL_RECEPTION_RAW_BUCKET" \\
+              -e EMAIL_RECEPTION_RAW_PREFIX="\$EMAIL_RECEPTION_RAW_PREFIX" \\
+              -e EMAIL_RECEPTION_DIAN_STATUS_ENABLED="\$EMAIL_RECEPTION_DIAN_STATUS_ENABLED" \\
               $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           }
 
@@ -321,6 +344,16 @@ jobs:
             -e NODE_ENV="\$NODE_ENV" \\
             -e GOOGLE_GEOCODING_API_KEY="\$GOOGLE_GEOCODING_API_KEY" \\
             -e GOOGLE_GEOCODING_MONTHLY_CAP="\$GOOGLE_GEOCODING_MONTHLY_CAP" \\
+            -e EMAIL_RECEPTION_ENABLED="\$EMAIL_RECEPTION_ENABLED" \\
+            -e EMAIL_RECEPTION_STORE_ALLOWLIST="\$EMAIL_RECEPTION_STORE_ALLOWLIST" \\
+            -e EMAIL_RECEPTION_ENVIRONMENT="\$EMAIL_RECEPTION_ENVIRONMENT" \\
+            -e EMAIL_RECEPTION_DOMAIN="\$EMAIL_RECEPTION_DOMAIN" \\
+            -e EMAIL_RECEPTION_AWS_REGION="\$EMAIL_RECEPTION_AWS_REGION" \\
+            -e EMAIL_RECEPTION_SQS_QUEUE_URL="\$EMAIL_RECEPTION_SQS_QUEUE_URL" \\
+            -e EMAIL_RECEPTION_SNS_TOPIC_ARN="\$EMAIL_RECEPTION_SNS_TOPIC_ARN" \\
+            -e EMAIL_RECEPTION_RAW_BUCKET="\$EMAIL_RECEPTION_RAW_BUCKET" \\
+            -e EMAIL_RECEPTION_RAW_PREFIX="\$EMAIL_RECEPTION_RAW_PREFIX" \\
+            -e EMAIL_RECEPTION_DIAN_STATUS_ENABLED="\$EMAIL_RECEPTION_DIAN_STATUS_ENABLED" \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG; then
             # PR 2 — gate robusto. set +e local para que un fallo del gate no
             # aborte el script antes del fallback a 'all' (bash de GitHub
