@@ -11,6 +11,7 @@ import {
   dianUnitPrice,
   toDecimal,
 } from './dian-money.util';
+import { dianAllowanceFactor } from '@common/money-kernel';
 
 describe('dian-money.util', () => {
   describe('dianAmount — scale', () => {
@@ -386,6 +387,22 @@ describe('dian-money.util', () => {
           price_unit_quantity: '1000',
         }),
       ).toBe('28.00');
+    });
+  });
+
+  describe('dianAllowanceFactor — cbc:MultiplierFactorNumeric (FBE05/FAQ06)', () => {
+    it('amount ÷ base × 100, truncated to 2 decimals (§11.2)', () => {
+      expect(dianAllowanceFactor('75630.25', '285714.29')).toBe('26.47');
+      expect(dianAllowanceFactor('10000', '120000')).toBe('8.33');
+    });
+
+    it('base <= 0 yields 0.00 instead of dividing by zero', () => {
+      expect(dianAllowanceFactor('5', '0')).toBe('0.00');
+      expect(dianAllowanceFactor('5', '-10')).toBe('0.00');
+    });
+
+    it('caps at 100.00', () => {
+      expect(dianAllowanceFactor('200', '100')).toBe('100.00');
     });
   });
 });

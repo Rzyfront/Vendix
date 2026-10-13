@@ -4,6 +4,7 @@ import { UblCommonBuilder } from './ubl-common.builder';
 import {
   dianLineExtension,
   dianPriceAmount,
+  toDecimal,
 } from '../../../utils/dian-money.util';
 import {
   DIAN_DOCUMENT_TYPES,
@@ -347,6 +348,7 @@ export class UblSupportDocumentBuilder {
     data: ProviderInvoiceData,
     currency: string,
   ): void {
+    let allowance_id = 0;
     data.items.forEach((item, index) => {
       const line = doc.ele(UBL_NAMESPACES.CAC, 'CreditNoteLine');
       line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
@@ -358,6 +360,15 @@ export class UblSupportDocumentBuilder {
         .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
         .att('currencyID', currency)
         .txt(dianLineExtension(item));
+      if (!toDecimal(item.discount_amount).isZero()) {
+        allowance_id += 1;
+        UblCommonBuilder.buildLineAllowanceCharge(
+          line,
+          item,
+          currency,
+          allowance_id,
+        );
+      }
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
       ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');

@@ -95,6 +95,44 @@ describe('UblCommonBuilder monetary totals', () => {
     return doc.end({ prettyPrint: false });
   }
 
+  describe('rules FBE01/FBE02/FBE05 — AllowanceCharge de línea completo', () => {
+    it('numera ID desde 1 por documento, con factor antes de Amount', () => {
+      const xml = buildLines([
+        item({ quantity: '1', unit_price: '1000.00', discount_amount: '100.00' }),
+        item({ quantity: '1', unit_price: '500.00' }),
+        item({ quantity: '2', unit_price: '500.00', discount_amount: '250.00' }),
+      ]);
+      const groups = [
+        ...xml.matchAll(/<cac:AllowanceCharge>([\s\S]*?)<\/cac:AllowanceCharge>/g),
+      ].map((m) => m[1]);
+
+      expect(groups).toHaveLength(2);
+      expect(groups[0]).toContain('<cbc:ID>1</cbc:ID>');
+      expect(groups[1]).toContain('<cbc:ID>2</cbc:ID>');
+      expect(groups[0]).toContain(
+        '<cbc:MultiplierFactorNumeric>10.00</cbc:MultiplierFactorNumeric>',
+      );
+      expect(groups[1]).toContain(
+        '<cbc:MultiplierFactorNumeric>25.00</cbc:MultiplierFactorNumeric>',
+      );
+      for (const g of groups) {
+        expect(g.indexOf('<cbc:ID>')).toBeLessThan(g.indexOf('<cbc:ChargeIndicator>'));
+        expect(g.indexOf('<cbc:MultiplierFactorNumeric>')).toBeLessThan(
+          g.indexOf('<cbc:Amount '),
+        );
+        expect(g.indexOf('<cbc:Amount ')).toBeLessThan(g.indexOf('<cbc:BaseAmount '));
+      }
+    });
+
+    it('el contador no persiste entre documentos', () => {
+      const one = [
+        item({ quantity: '1', unit_price: '1000.00', discount_amount: '100.00' }),
+      ];
+      buildLines(one);
+      expect(buildLines(one)).toContain('<cbc:ID>1</cbc:ID><cbc:ChargeIndicator>');
+    });
+  });
+
   describe('rule FAZ09 — StandardItemIdentification informado en toda línea', () => {
     it('emite el código del ítem con schemeID 999 cuando el llamador lo aporta', () => {
       const xml = buildLines([
@@ -248,6 +286,52 @@ describe('UblCommonBuilder monetary totals', () => {
       expect(readValues(totals, 'PayableAmount')[0]).toBe('1090.00');
       // BaseAmount is the net line extension the allowance applies to.
       expect(readValues(totals, 'BaseAmount')[0]).toBe('1000.00');
+    });
+
+    it('document AllowanceCharge carries ID, reason code 11 and factor, in content-model order (FAQ04/FAQ06)', () => {
+      const totals = buildTotals({
+        discount_amount: '100.00',
+        tax_amount: '190.00',
+        items: [item({ quantity: '1', unit_price: '1000.00' })],
+      });
+      const group = totals.match(
+        /<cac:AllowanceCharge>([\s\S]*?)<\/cac:AllowanceCharge>/,
+      )![1];
+
+      expect(group).toContain('<cbc:ID>1</cbc:ID>');
+      expect(group).toContain(
+        '<cbc:AllowanceChargeReasonCode>11</cbc:AllowanceChargeReasonCode>',
+      );
+      // 100 / 1000 × 100
+      expect(group).toContain(
+        '<cbc:MultiplierFactorNumeric>10.00</cbc:MultiplierFactorNumeric>',
+      );
+      const order = [
+        '<cbc:ID>',
+        '<cbc:ChargeIndicator>',
+        '<cbc:AllowanceChargeReasonCode>',
+        '<cbc:AllowanceChargeReason>',
+        '<cbc:MultiplierFactorNumeric>',
+        '<cbc:Amount ',
+        '<cbc:BaseAmount ',
+      ].map((tag) => group.indexOf(tag));
+      expect(order.every((i) => i >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    it('document AllowanceCharge ID follows the line allowances in one document sequence', () => {
+      const lines = [
+        item({ quantity: '1', unit_price: '1000.00', discount_amount: '100.00' }),
+        item({ quantity: '1', unit_price: '500.00' }),
+        item({ quantity: '1', unit_price: '500.00', discount_amount: '50.00' }),
+      ];
+      const totals = buildTotals({
+        discount_amount: '400.00',
+        tax_amount: '190.00',
+        items: lines,
+      });
+      // 150 explained by lines; 250 footer. Two line allowances ⇒ document ID 3.
+      expect(totals).toContain('<cbc:ID>3</cbc:ID>');
     });
 
     it('never emits a negative allowance when lines over-discount', () => {
