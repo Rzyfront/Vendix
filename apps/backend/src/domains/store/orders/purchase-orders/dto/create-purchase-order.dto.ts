@@ -464,6 +464,9 @@ export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Product SKU/Code (for new products)' })
   @IsString()
   @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   sku?: string;
 
   @ApiProperty({ description: 'Product Barcode (for new products)' })

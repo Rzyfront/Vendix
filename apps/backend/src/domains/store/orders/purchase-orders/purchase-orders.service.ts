@@ -174,6 +174,12 @@ class LineResolveContext {
     private readonly opts: {
       organizationId: number;
       locationId?: number | null;
+      /**
+       * Tienda FIJA del contexto de la petición. `resolveLines()` la pasa
+       * siempre: con ella `getStoreId` no consulta la ubicación ni cae a la
+       * «primera tienda de la organización», así que nunca escribe en otra tienda.
+       */
+      storeId?: number | null;
       orderType: string;
       header: { prices_include_tax?: boolean | null };
       allowedTaxCategoryIds: Set<number>;
@@ -195,6 +201,10 @@ class LineResolveContext {
   /** Tienda donde nace el producto: ubicación -> tienda, o la 1ra de la org. */
   async getStoreId(tx: any): Promise<number> {
     if (this.storeId !== undefined) return this.storeId;
+    if (this.opts.storeId) {
+      this.storeId = this.opts.storeId;
+      return this.storeId;
+    }
     let storeId: number | undefined;
     const location =
       this.opts.locationId != null
@@ -1150,9 +1160,14 @@ export class PurchaseOrdersService {
   ): Promise<{ id: number; product_id: number } | null> {
     const productScope = { store_id: storeId, state: { not: 'archived' } };
     const select = { id: true, product_id: true };
-    const bySku = sku
+    // Crudo y recortado: una variante guardada con espacios sigue siendo suya.
+    const trimmedSku = typeof sku === 'string' ? sku.trim() : '';
+    const skuCandidates = trimmedSku
+      ? Array.from(new Set([sku, trimmedSku]))
+      : [];
+    const bySku = trimmedSku
       ? await tx.product_variants.findFirst({
-          where: { sku, products: productScope },
+          where: { sku: { in: skuCandidates }, products: productScope },
           select,
         })
       : null;
@@ -1284,6 +1299,8 @@ export class PurchaseOrdersService {
     tx: any,
     item: any,
     ctx: LineResolveContext,
+    mode: 'create' | 'resolve' = 'create',
+    lineIndex?: number,
   ): Promise<{
     product_id: number;
     product_variant_id: number | null;
@@ -1388,11 +1405,17 @@ export class PurchaseOrdersService {
     // Sin SKU no se busca por SKU: `sku: undefined` hace que Prisma ignore
     // el filtro y la línea se uniría a cualquier producto de la tienda.
     const normalizedSku = typeof item.sku === 'string' ? item.sku.trim() : '';
+    // Se busca por el SKU crudo Y por el recortado: un producto que quedó
+    // guardado con espacios («ABC ») sigue siendo el dueño del SKU. Al crear se
+    // usa el recortado (`desiredSku`), así que no nacen más con espacios.
+    const skuCandidates = normalizedSku
+      ? Array.from(new Set([item.sku as string, normalizedSku]))
+      : [];
     const existingProduct =
       (normalizedSku
         ? await tx.products.findFirst({
             where: {
-              sku: normalizedSku,
+              sku: { in: skuCandidates },
               store_id: storeId,
               state: { not: 'archived' },
             },
@@ -1417,7 +1440,7 @@ export class PurchaseOrdersService {
       : await this.findVariantByCode(
           tx,
           storeId,
-          typeof item.sku === 'string' ? item.sku.trim() : '',
+          typeof item.sku === 'string' ? item.sku : '',
           normalizedBarcode,
         );
     if (matchedVariant) {
@@ -1513,8 +1536,11 @@ export class PurchaseOrdersService {
     // @@unique([store_id, name]); searching and creating by slug+store_id
     // keeps a PO-created brand indistinguishable from a UI-created one.
     let brandId: number | undefined;
+    // Modo `resolve` sobre un producto EXISTENTE: es de solo lectura, no se
+    // crean marcas ni categorías que el producto nunca recibirá.
+    const readOnlyExisting = mode === 'resolve' && !!existingProduct;
     // Línea a variante: no se toca catálogo (ni marca ni categorías).
-    if (!matchedVariant && item.brand_name?.trim()) {
+    if (!matchedVariant && !readOnlyExisting && item.brand_name?.trim()) {
       const brandName = item.brand_name.trim();
       const brandSlug = generateSlug(brandName);
       if (brandSlug) {
@@ -1551,7 +1577,7 @@ export class PurchaseOrdersService {
               ? item.category_names
               : '';
           const hasCategoryNames =
-      !matchedVariant && categoryNames.trim().length > 0;
+      !matchedVariant && !readOnlyExisting && categoryNames.trim().length > 0;
           if (hasCategoryNames) {
             const names = categoryNames
         .split(',')
@@ -1600,6 +1626,17 @@ export class PurchaseOrdersService {
       // La línea compra la variante: se enlaza al producto padre y no se
       // toca ni se crea ningún producto.
       finalProductId = matchedVariant.product_id;
+    } else if (existingProduct && mode === 'resolve') {
+      // `resolve-lines` corre FUERA de la orden y confirma por fila: si la OC
+      // nunca se crea, el catálogo no puede haber cambiado. Un producto
+      // existente solo devuelve sus ids; create() es quien lo actualiza.
+      finalProductId = existingProduct.id;
+      // Mismo guard que create(): el padre con variantes exige elegir variante.
+      await this.assertNoBaseLineOnVariantProduct(
+        tx,
+        [{ product_id: existingProduct.id, product_variant_id: finalVariantId }],
+        { stage: 'create' },
+      );
     } else if (existingProduct) {
       finalProductId = existingProduct.id;
       // Update existing product with new metadata if provided
@@ -1745,7 +1782,14 @@ export class PurchaseOrdersService {
       // la línea se enlazó a ella). Llegar acá significa que nadie lo ocupa;
       // si otra petición lo toma entre la lectura y el INSERT, el mapeo del
       // P2002 de abajo lo devuelve como PROD_SKU_COLLISION_001.
-      const desiredSku = item.sku || `GEN-${Date.now()}`;
+      // SKU recortado (la búsqueda ya lo trata así) y, si no hay, uno generado
+      // único por línea: `Date.now()` solo se repetía entre dos líneas del mismo
+      // milisegundo.
+      const desiredSku =
+        normalizedSku ||
+        `GEN-${Date.now()}-${lineIndex ?? 0}-${Math.random()
+          .toString(36)
+          .slice(2, 6)}`;
 
       let newProduct: { id: number };
       try {
@@ -1857,15 +1901,74 @@ export class PurchaseOrdersService {
       throw new BadRequestException('Organization ID not found in context');
     }
     const items = dto.items ?? [];
-    const allowedTaxCategoryIds = await this.validateLineTaxCategories(
-      items,
-      dto.location_id,
-      RequestContextService.getStoreId(),
-    );
+
+    // La tienda es SIEMPRE la del contexto de la petición: `$transaction` de
+    // StorePrismaService no lleva alcance, así que nada de lo que llegue en el
+    // cuerpo (ubicación, organización) puede decidir en qué tienda se escribe.
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo resolver la tienda de la petición para resolver las líneas.',
+      );
+    }
+    if (dto.location_id) {
+      // ANTES de abrir cualquier transacción: la bodega debe ser de la
+      // organización del contexto y de esta tienda (o de toda la organización,
+      // `store_id` nulo), la misma frontera que aplica create().
+      const location = await this.prisma
+        .withoutScope()
+        .inventory_locations.findFirst({
+          where: {
+            id: dto.location_id,
+            organization_id: organizationId,
+            OR: [{ store_id: storeId }, { store_id: null }],
+          },
+          select: { id: true },
+        });
+      if (!location) {
+        throw new BadRequestException(
+          `La bodega con ID ${dto.location_id} no existe o no pertenece a esta tienda.`,
+        );
+      }
+    }
+
+    // Las categorías de impuesto se validan en un solo viaje; si el lote falla
+    // por una línea, se revalida línea a línea para que el error sea POR FILA y
+    // las demás sigan (mismo contrato de detalle por fila que el resto).
+    const rowErrors = new Map<number, { code: string; message: string }>();
+    const needsResolve = (item: any) =>
+      !(Number(item?.product_id) > 0) && !!item?.product_name;
+    const toValidate = items.filter(needsResolve);
+    let allowedTaxCategoryIds: Set<number>;
+    try {
+      allowedTaxCategoryIds = await this.validateLineTaxCategories(
+        toValidate,
+        dto.location_id,
+        storeId,
+      );
+    } catch (error: any) {
+      if (typeof error?.getStatus !== 'function') throw error;
+      allowedTaxCategoryIds = new Set<number>();
+      for (let index = 0; index < items.length; index++) {
+        if (!needsResolve(items[index])) continue;
+        try {
+          const ok = await this.validateLineTaxCategories(
+            [items[index]],
+            dto.location_id,
+            storeId,
+          );
+          for (const id of ok) allowedTaxCategoryIds.add(id);
+        } catch (rowError: any) {
+          if (typeof rowError?.getStatus !== 'function') throw rowError;
+          rowErrors.set(index, errorToRowError(rowError));
+        }
+      }
+    }
     const header = { prices_include_tax: dto.prices_include_tax };
     const ctx = new LineResolveContext({
       organizationId,
       locationId: dto.location_id,
+      storeId,
       orderType: dto.order_type ?? 'retail',
       header,
       allowedTaxCategoryIds,
@@ -1898,9 +2001,20 @@ export class PurchaseOrdersService {
         });
         continue;
       }
+      const rowError = rowErrors.get(index);
+      if (rowError) {
+        results.push({
+          index,
+          product_id: null,
+          product_variant_id: null,
+          created: false,
+          error: rowError,
+        });
+        continue;
+      }
       try {
         const resolved = await this.prisma.$transaction(
-          (tx) => this.resolveNewLine(tx, item, ctx),
+          (tx) => this.resolveNewLine(tx, item, ctx, 'resolve', index),
           { timeout: 60_000, maxWait: 10_000 },
         );
         results.push({ index, ...resolved });
@@ -2075,14 +2189,22 @@ export class PurchaseOrdersService {
         productId: number;
         variantId: number | null | undefined;
       }> = [];
+      let lineIndexInOrder = -1;
       for (const item of createPurchaseOrderDto.items) {
+        lineIndexInOrder++;
         let finalProductId = item.product_id;
         let finalVariantId: number | null | undefined =
           (item as any).product_variant_id;
 
         // If product_id is 0 or missing, and we have name/sku, create the product
         if ((!finalProductId || finalProductId === 0) && item.product_name) {
-          const resolved = await this.resolveNewLine(tx, item, lineCtx);
+          const resolved = await this.resolveNewLine(
+            tx,
+            item,
+            lineCtx,
+            'create',
+            lineIndexInOrder,
+          );
           finalProductId = resolved.product_id;
           finalVariantId = resolved.product_variant_id;
         }
@@ -3973,6 +4095,12 @@ export class PurchaseOrdersService {
     }
     if (Object.keys(data).length > 0) {
       await tx.products.update({ where: { id: productId }, data });
+      // La precarga se leyó UNA vez para todo el lote: si otra línea trae el
+      // mismo producto, tiene que comparar contra lo recién escrito y no contra
+      // el valor viejo (gana la última línea, como cuando se leía por línea).
+      if (preload?.products.has(productId)) {
+        preload.products.set(productId, { ...product, ...data });
+      }
     }
   }
 
