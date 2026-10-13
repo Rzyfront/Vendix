@@ -32,6 +32,7 @@ import {
   canDirectDeliver,
   canCollectViaShip,
   hasKitchenLinesAwaitingHandoff,
+  computePendingOrderFingerprint,
   describeKitchenHandoffBlocker,
   kitchenHandoffBlocker,
   getUnpaidBalanceForFinish,
@@ -915,9 +916,7 @@ export class OrderFlowService {
         const selectedRow = orderedSelection.find((item) => item.id === row.id)!;
         const version = row.updated_at?.toISOString() ?? null;
         const balance = Number(row.remaining_balance ?? 0);
-        const rowFingerprint = createHash('sha256')
-          .update(`${row.id}:${row.state}:${balance.toFixed(2)}:${version ?? ''}`)
-          .digest('hex');
+        const rowFingerprint = computePendingOrderFingerprint(row, version);
         if (
           row.origin_cash_session_id !== sessionId ||
           selectedRow.version !== version || selectedRow.fingerprint !== rowFingerprint ||

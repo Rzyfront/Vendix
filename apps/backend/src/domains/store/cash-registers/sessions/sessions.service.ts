@@ -37,7 +37,11 @@ import type {
   CashSalesSummary,
   CashIntegrity,
 } from './interfaces/cash-session-close-report.interface';
-import { getUnpaidBalanceForFinish } from '../../orders/order-flow/order-action-policy.util';
+import {
+  computePendingOrderFingerprint,
+  computePendingSessionFingerprint,
+  getUnpaidBalanceForFinish,
+} from '../../orders/order-flow/order-action-policy.util';
 
 /** Dinero en céntimos enteros: evita acumular floats. */
 const toCents = (v: unknown): number => Math.round(Number(v ?? 0) * 100);
@@ -441,6 +445,17 @@ export class SessionsService {
         order_state_enum.cancelled,
         order_state_enum.refunded,
       ];
+      const missing_payment_where = {
+        grand_total: { gt: 0 },
+        OR: [{ payment_form: { not: '2' } }, { payment_form: null }],
+        payments: {
+          none: {
+            state: {
+              in: ['succeeded', 'captured', 'partially_refunded', 'refunded'],
+            },
+          },
+        },
+      };
       const pending_orders = session.pending_orders_tracking_enabled
         ? await tx.orders.findMany({
             where: {
@@ -449,6 +464,7 @@ export class SessionsService {
               OR: [
                 { state: { notIn: terminal_states } },
                 { remaining_balance: { gt: 0 } },
+                missing_payment_where,
               ],
             },
             select: {
@@ -462,15 +478,7 @@ export class SessionsService {
             orderBy: { id: 'asc' },
           })
         : [];
-      const global_fingerprint_hash = createHash('sha256');
-      for (const order of pending_orders) {
-        const balance = Number(order.remaining_balance ?? 0);
-        const version = order.updated_at?.toISOString?.() ?? '';
-        global_fingerprint_hash.update(
-          `${order.id}:${order.state}:${balance.toFixed(2)}:${version}\n`,
-        );
-      }
-      const pending_fingerprint = global_fingerprint_hash.digest('hex');
+      const pending_fingerprint = computePendingSessionFingerprint(pending_orders);
       const tracking_enabled = Boolean(session.pending_orders_tracking_enabled);
       const has_pending = pending_orders.length > 0;
       const decision = dto.pending_decision;
@@ -809,16 +817,7 @@ export class SessionsService {
       }),
     ]);
 
-    const global_fingerprint_hash = createHash('sha256');
-    for (const order of pending_snapshot_rows) {
-      const balance = Number(order.remaining_balance ?? 0);
-      const version = order.updated_at?.toISOString?.() ?? '';
-      const all_items_delivered = this.allOrderItemsDelivered(order.order_items);
-      global_fingerprint_hash.update(
-        `${order.id}:${order.state}:${balance.toFixed(2)}:${version}:${all_items_delivered}\n`,
-      );
-    }
-    const fingerprint = global_fingerprint_hash.digest('hex');
+    const fingerprint = computePendingSessionFingerprint(pending_snapshot_rows);
     const effectiveBalance = (order: any) =>
       Math.max(
         Number(order.remaining_balance ?? 0),
@@ -838,11 +837,7 @@ export class SessionsService {
       const operational = !terminal_states.includes(order.state);
       const all_items_delivered = this.allOrderItemsDelivered(order.order_items);
       const version = order.updated_at?.toISOString?.() ?? null;
-      const fingerprint = createHash('sha256')
-        .update(
-          `${order.id}:${order.state}:${balance.toFixed(2)}:${version ?? ''}:${all_items_delivered}`,
-        )
-        .digest('hex');
+      const fingerprint = computePendingOrderFingerprint(order, version);
       return {
         id: order.id,
         order_number: order.order_number,

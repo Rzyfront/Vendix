@@ -14,6 +14,7 @@ import {
 import { order_state_enum } from '@prisma/client';
 import { VALID_TRANSITIONS } from './order-flow/order-flow.service';
 import {
+  computePendingOrderFingerprint,
   describeKitchenHandoffBlocker,
   getUnpaidBalanceForFinish,
   kitchenHandoffBlocker,
@@ -504,10 +505,7 @@ export class OrdersBulkService {
     row: Pick<CashPreviewOrderRow, 'id' | 'state' | 'remaining_balance'>,
     version: string | null,
   ): string {
-    const balance = Number(row.remaining_balance ?? 0);
-    return createHash('sha256')
-      .update(`${row.id}:${row.state}:${balance.toFixed(2)}:${version ?? ''}`)
-      .digest('hex');
+    return computePendingOrderFingerprint(row, version);
   }
 
   // ─── Transition ────────────────────────────────────────────────────
