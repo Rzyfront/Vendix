@@ -92,7 +92,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
                     }
                     @if (subtitle()) {
                       <p
-                        class="text-[var(--fs-xs)] md:text-[var(--fs-sm)] leading-tight text-[var(--color-text-primary)] mt-0.5 truncate"
+                        class="text-[var(--fs-xs)] md:text-[var(--fs-sm)] leading-tight text-[var(--color-text-secondary)] mt-0.5 truncate"
                       >
                         {{ subtitle() }}
                       </p>
@@ -104,7 +104,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
                 @if (showCloseButton()) {
                   <button
                     type="button"
-                    class="inline-flex items-center justify-center flex-shrink-0 h-11 w-11 border border-[rgba(var(--color-error-rgb),0.45)] text-[var(--color-error)] hover:bg-[rgba(var(--color-error-rgb),0.12)] hover:border-[var(--color-error)] active:bg-[var(--color-error)] active:text-white active:border-[var(--color-error)] transition-all duration-200 motion-reduce:transition-none rounded-[var(--radius-md)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-primary)]"
+                    class="inline-flex items-center justify-center flex-shrink-0 h-8 w-8 md:h-9 md:w-9 border border-[rgba(var(--color-error-rgb),0.45)] text-[var(--color-error)] hover:bg-[rgba(var(--color-error-rgb),0.12)] hover:border-[var(--color-error)] active:bg-[var(--color-error)] active:text-white active:border-[var(--color-error)] transition-all duration-200 motion-reduce:transition-none rounded-[var(--radius-md)] focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-error-rgb),0.4)]"
                     [class.absolute]="overlayCloseButton()"
                     [class.top-4]="overlayCloseButton()"
                     [class.right-4]="overlayCloseButton()"
