@@ -1104,7 +1104,7 @@ export interface CreateCreditNoteDto {
   currency?: string;
   notes?: string;
   items?: CreateInvoiceNoteItemDto[];
-  refund_source_mappings?: { refund_item_id: number; source_invoice_item_id: number }[];
+  refund_item_sources?: { refund_item_id: number; source_invoice_item_id: number }[];
   shipping_source_invoice_item_id?: number;
 }
 
@@ -1118,7 +1118,6 @@ export interface CreateDebitNoteDto {
   currency?: string;
   notes?: string;
   items?: CreateInvoiceNoteItemDto[];
-  shipping_source_invoice_item_id?: number;
 }
 
 export interface CreateResolutionDto {
