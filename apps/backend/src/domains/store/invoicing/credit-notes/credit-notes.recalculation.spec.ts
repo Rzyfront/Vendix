@@ -254,6 +254,43 @@ describe('CreditNotesService calculator-backed writer and note context', () => {
     expect(h.prisma.invoice_taxes.createMany).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['export_invoice', 'sales_invoice'],
+    ['purchase_invoice', 'support_document'],
+  ])('resolves accepted ledger XML for %s using its canonical fiscal document type', async (invoiceType, documentType) => {
+    const parent = { ...sourceInvoice(), invoice_type: invoiceType, xml_document: null,
+      invoice_items: sourceInvoice().invoice_items.map((item) => ({ ...item, unit_code: null })),
+    };
+    const h = setup(parent);
+    const acceptedXml = `<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"><cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="NIU">2</cbc:InvoicedQuantity><cbc:LineExtensionAmount>200.00</cbc:LineExtensionAmount><cac:Item><cbc:Description>Servicio fuente</cbc:Description></cac:Item></cac:InvoiceLine></Invoice>`;
+    h.prisma.fiscal_transmissions.findFirst.mockResolvedValue({ xml_document: acceptedXml } as never);
+
+    const context = await h.service.getNoteContext(7100, 'credit_note');
+    expect(context.items[0]?.unit_code).toBe('NIU');
+    expect(h.prisma.fiscal_transmissions.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        source_id: 7100,
+        document_type: documentType,
+        transmission_status: 'accepted',
+        dian_status: 'accepted',
+      }),
+    }));
+    expect(h.numberGenerator.generateNextNumber).not.toHaveBeenCalled();
+
+    await h.service.createCreditNote({
+      related_invoice_id: 7100,
+      items: [{ source_invoice_item_id: 501, quantity: 1, unit_price: 100 }],
+    });
+    expect(h.prisma.fiscal_transmissions.findFirst).toHaveBeenCalledTimes(2);
+    for (const call of h.prisma.fiscal_transmissions.findFirst.mock.calls) {
+      expect(call[0]).toMatchObject({ where: { document_type: documentType } });
+    }
+    expect(h.prisma.invoice_items.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ source_invoice_item_id: 501, unit_code: 'NIU' })],
+    });
+    expect(h.numberGenerator.generateNextNumber).toHaveBeenCalledTimes(1);
+  });
+
   it('derives partial foreign total from the frozen exchange rate, not the parent foreign total', async () => {
     const base = sourceInvoice();
     const parent = {

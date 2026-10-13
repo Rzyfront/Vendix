@@ -5,7 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
 // sin un solo cast. El `TaxFiscalType` de la capa de dominio refleja los
 // mismos seis valores, pero es un enum NOMINAL de TS y no es asignable a la
 // unión de literales de Prisma — de ahí venía el `as any` de salida.
-import { Prisma, refunds_state_enum, tax_type_enum } from '@prisma/client';
+import { Prisma, fiscal_document_type_enum, refunds_state_enum, tax_type_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -70,6 +70,21 @@ const INVOICE_INCLUDE = {
     select: { id: true, first_name: true, last_name: true },
   },
 };
+
+type CorrectableNoteSourceInvoiceType = 'sales_invoice' | 'export_invoice' | 'purchase_invoice';
+
+function isCorrectableNoteSourceInvoiceType(value: string): value is CorrectableNoteSourceInvoiceType {
+  return value === 'sales_invoice' || value === 'export_invoice' || value === 'purchase_invoice';
+}
+
+/** Fiscal ledger stores DIAN document types, not Vendix invoice aliases. */
+function fiscalTransmissionDocumentType(invoiceType: CorrectableNoteSourceInvoiceType): fiscal_document_type_enum {
+  switch (invoiceType) {
+    case 'export_invoice': return fiscal_document_type_enum.sales_invoice;
+    case 'purchase_invoice': return fiscal_document_type_enum.support_document;
+    case 'sales_invoice': return fiscal_document_type_enum.sales_invoice;
+  }
+}
 
 /**
  * QUI-INC — la fila de impuesto de una nota, TAL COMO LLEGA. `tax_type` es
@@ -329,7 +344,7 @@ export class CreditNotesService {
     if (!sourceInvoice) throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
     if (
       sourceInvoice.status !== 'accepted' ||
-      !['sales_invoice', 'export_invoice', 'purchase_invoice'].includes(sourceInvoice.invoice_type)
+      !isCorrectableNoteSourceInvoiceType(sourceInvoice.invoice_type)
     ) {
       throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002, undefined, {
         related_invoice_id,
@@ -383,7 +398,7 @@ export class CreditNotesService {
             accounting_entity_id: sourceInvoice.accounting_entity_id,
             source_type: 'invoice',
             source_id: sourceInvoice.id,
-            document_type: sourceInvoice.invoice_type,
+            document_type: fiscalTransmissionDocumentType(sourceInvoice.invoice_type),
             transmission_status: 'accepted',
             dian_status: 'accepted',
           },
@@ -502,8 +517,7 @@ export class CreditNotesService {
     });
     if (!related_invoice) throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
 
-    const correctable = ['sales_invoice', 'export_invoice', 'purchase_invoice'];
-    if (!correctable.includes(related_invoice.invoice_type)) {
+    if (!isCorrectableNoteSourceInvoiceType(related_invoice.invoice_type)) {
       throw new VendixHttpException(ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED, undefined, {
         related_invoice_id: related_invoice.id,
         related_invoice_type: related_invoice.invoice_type,
@@ -568,7 +582,7 @@ export class CreditNotesService {
             accounting_entity_id: related_invoice.accounting_entity_id,
             source_type: 'invoice',
             source_id: related_invoice.id,
-            document_type: related_invoice.invoice_type,
+            document_type: fiscalTransmissionDocumentType(related_invoice.invoice_type),
             transmission_status: 'accepted',
             dian_status: 'accepted',
           },
