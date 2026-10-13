@@ -41,7 +41,7 @@ import {
   lineTaxRate,
   noteTotals,
   num,
-  scaleLine,
+  estimateLine,
 } from './invoice-note-payload.util';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -718,7 +718,7 @@ export class InvoiceNoteCreateComponent {
       const selected = entry?.selected ?? false;
       const quantity = entry?.quantity ?? num(item.quantity);
       const maxQuantity = num(item.quantity);
-      const scaled = scaleLine(item, selected ? quantity : 0);
+      const scaled = estimateLine({ item, quantity: selected ? quantity : 0 });
       return {
         item,
         name: item.product_name || item.description || 'Línea sin descripción',
