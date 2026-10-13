@@ -809,6 +809,9 @@ export class PosPaymentResponseDto {
     status: string;
     payment_status: string;
     total_amount: number;
+    grand_total?: number | string;
+    total_paid?: number | string;
+    remaining_balance?: number | string;
   };
   payment?: {
     id: number;
