@@ -6225,6 +6225,9 @@ model invoices {
   /// (100 % del histórico). Restrict: un refund con NC vinculada no se
   /// elimina — los refunds nunca se borran, sólo cambian de estado.
   refund_id                        Int?
+  /// Marca durable de reserva de saldo de crédito para una nota en proceso.
+  /// NULL para notas débito, facturas y notas sin reserva activa.
+  credit_limit_reserved_at         DateTime?                       @db.Timestamp(6)
   /// D.1 (DB-05, ADR-03) — contrato de obra que origina ESTE documento
   /// (FB-08 `POST /contracts/:id/invoice`). Nullable: el 100 % del historico
   /// factura ordenes o captura manual y sigue intacto. La unicidad "un
@@ -6400,9 +6403,14 @@ model invoice_items {
   ///
   /// NULL = línea normal, no AIU — que es el 100% del histórico.
   aiu_component           aiu_component_enum?
+  /// Línea de factura de origen de una nota de corrección. SET NULL al borrar
+  /// la fuente para conservar la nota y su snapshot fiscal independiente.
+  source_invoice_item_id  Int?
   created_at              DateTime?           @default(now()) @db.Timestamp(6)
 
   invoice         invoices          @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  source_invoice_item invoice_items? @relation("InvoiceNoteSource", fields: [source_invoice_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  note_correction_items invoice_items[] @relation("InvoiceNoteSource")
   product         products?         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   /// Tributos que declaran gravar ESTA línea. Ver `invoice_taxes.invoice_item_id`:
@@ -6412,6 +6420,7 @@ model invoice_items {
   invoice_taxes   invoice_taxes[]
 
   @@index([invoice_id])
+  @@index([source_invoice_item_id])
 }
 
 model invoice_taxes {
