@@ -19,6 +19,7 @@ import {
   ReceivedDocumentTax,
 } from './interfaces/received-document.interface';
 import { DOCUMENT_EMAIL_WARNINGS } from './interfaces/document-email-reception.interface';
+import { receivedFiscalDocumentTypeCode } from './services/received-document-buyer-event-policy';
 import {
   operationalValidationStatus,
   receivedDocumentValidationSnapshot,
@@ -253,8 +254,9 @@ export class ReceivedDocumentsService {
     const scope = await this.resolveScope(ctx);
     this.assertXmlFile(file);
     this.assertSourceChannel(source);
+    const parsed = this.parser.parseDetailed(file.buffer.toString('utf8'));
     const normalized = await this.validateReceiverIdentity(
-      this.parser.parse(file.buffer.toString('utf8')),
+      parsed.normalized,
       await this.expectedReceiverTaxId(scope),
     );
     const sha256 = this.sha256(file.buffer);
@@ -270,7 +272,7 @@ export class ReceivedDocumentsService {
       idempotencyKey,
       sourceHash: sha256,
       rawPayload,
-      metadata: { source_format: 'ubl_xml' },
+      metadata: { source_format: 'ubl_xml', fiscal_document_type_code: parsed.fiscal.document_type_code },
       processingStatus: 'processing',
     });
     if (recorded.outcome === 'duplicate_other_store') return recorded;
@@ -903,7 +905,7 @@ export class ReceivedDocumentsService {
         const existing = await tx.received_documents.findFirst({ where: existingWhere });
         if (existing) {
           this.assertSameNormalizedFacts(existing, normalized);
-          if (input.source === 'email') this.assertSameEmailFiscalMetadata(existing.metadata, input.metadata);
+          if (input.source === 'email' || receivedFiscalDocumentTypeCode(input.metadata) != null) this.assertSameEmailFiscalMetadata(existing.metadata, input.metadata);
           return this.normalizedDuplicateOutcome(input.scope, existing);
         }
 
@@ -967,7 +969,7 @@ export class ReceivedDocumentsService {
         const winner = await this.prisma.received_documents.findFirst({ where: this.fiscalIdempotencyWhere(input.scope, input.idempotencyKey) });
         if (winner) {
           this.assertSameNormalizedFacts(winner, normalized);
-          if (input.source === 'email') this.assertSameEmailFiscalMetadata(winner.metadata, input.metadata);
+          if (input.source === 'email' || receivedFiscalDocumentTypeCode(input.metadata) != null) this.assertSameEmailFiscalMetadata(winner.metadata, input.metadata);
           return this.normalizedDuplicateOutcome(input.scope, winner);
         }
         throw new ConflictException('La clave de documento ya está registrada en esta entidad fiscal.');
@@ -1803,10 +1805,15 @@ export class ReceivedDocumentsService {
   }
 
   private assertSameEmailFiscalMetadata(existing: unknown, incoming: unknown): void {
+    const knownCode = receivedFiscalDocumentTypeCode(existing);
+    const nextCode = receivedFiscalDocumentTypeCode(incoming);
+    if (knownCode != null && nextCode != null && knownCode !== nextCode) {
+      throw new ConflictException({ reason_code: 'DOCUMENT_KEY_CONFLICT', message: 'La clave del documento ya existe con una clasificación fiscal diferente.' });
+    }
     const known = this.asObject(this.asObject(existing).email_reception);
     const next = this.asObject(this.asObject(incoming).email_reception);
     for (const field of ['document_type_code', 'profile_execution_id', 'uuid_scheme_name']) {
-      if (typeof known[field] === 'string' && known[field] && known[field] !== next[field]) {
+      if (typeof known[field] === 'string' && known[field] && typeof next[field] === 'string' && known[field] !== next[field]) {
         throw new ConflictException({ reason_code: 'DOCUMENT_KEY_CONFLICT', message: 'La clave del documento ya existe con una clasificación fiscal diferente.' });
       }
     }
@@ -1824,7 +1831,9 @@ export class ReceivedDocumentsService {
     const metadata = this.asObject(value);
     const email = this.asObject(metadata.email_reception);
     const received = Number.isSafeInteger(email.message_id) && email.message_id > 0;
+    const fiscalCode = receivedFiscalDocumentTypeCode(metadata);
     return {
+      fiscal_document_type_code: fiscalCode != null && /^\d{2}$/.test(fiscalCode) ? fiscalCode : null,
       email_transport_received: received,
       email_reception: received ? {
         document_type_code: typeof email.document_type_code === 'string' && /^(?:01|02|03|04|20|91|92)$/.test(email.document_type_code) ? email.document_type_code : null,

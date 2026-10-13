@@ -6,6 +6,8 @@ import { ReceivedDocumentParserService } from './services/received-document-pars
 import { DocumentReceptionIngestService } from './services/document-reception-ingest.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 import type { S3Service } from '../../common/services/s3.service';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const context: ReceivedDocumentsContext = {
   organization_id: 2,
@@ -128,6 +130,14 @@ function makeHarness() {
     },
   };
   const parser: any = { parse: jest.fn(() => normalized()) };
+  parser.parseDetailed = jest.fn((xml: string) => {
+    const parsed = parser.parse(xml);
+    return { normalized: parsed, commercial_xml: xml, application_responses: [], fiscal: {
+      root: 'Invoice', profile_execution_id: null, document_type_code: null,
+      uuid: { value: parsed.document_key ?? null, scheme_id: null, scheme_name: null },
+      receiver_company_id: { value: parsed.receiver_tax_id, scheme_name: null, scheme_id: null },
+    } };
+  });
   const storage: any = {
     upload: jest.fn(async (_ctx: any, _id: number, file: any) => ({
       file_key: 'organizations/2/fiscal-entities/8/received-documents/50/key',
@@ -1216,6 +1226,53 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
 });
 
 describe('ReceivedDocumentsService prepared email evidence', () => {
+  it.each(['manual', 'api'])('preserves real POS20 XML classification on legacy %s import without inventing email transport', async (source) => {
+    const h = makeEmailHarness();
+    const xml = readFileSync(join(__dirname, '__fixtures__/email/pos-20.xml'), 'utf8');
+    h.parser.parseDetailed.mockImplementation((text: string) => new ReceivedDocumentParserService().parseDetailed(text));
+    h.baseClient.organization_settings.findFirst.mockResolvedValue({ settings: { fiscal_data: { nit: '800765432' } } });
+    const bytes = Buffer.from(xml);
+    const result = await h.service.importXmlWithOutcome(context, { buffer: bytes, originalname: 'pos.xml', mimetype: 'application/xml', size: bytes.length } as Express.Multer.File, source);
+    expect(result.outcome).toBe('created');
+    const row = [...h.createdDocs.values()][0];
+    expect(row.metadata).toEqual({ source_format: 'ubl_xml', fiscal_document_type_code: '20' });
+    expect(row.source_channel).toBe(source);
+    expect(row.raw_payload.normalized.document_type).toBe('invoice');
+    expect(h.parser.parse).not.toHaveBeenCalled();
+    if (result.outcome === 'duplicate_other_store') throw new Error('Expected an imported document');
+    expect(result.document).toMatchObject({ fiscal_document_type_code: '20', email_transport_received: false, email_reception: null });
+    expect(row.dian_validation_status).toBe('not_checked');
+    expect(row.processing_status).toBe('ready');
+  });
+
+  it('rejects FEV01 email against a legacy XML POS20 classification before attaching evidence or changing history', async () => {
+    const h = makeEmailHarness();
+    const xml = readFileSync(join(__dirname, '__fixtures__/email/pos-20.xml'), 'utf8');
+    h.parser.parseDetailed.mockImplementation((text: string) => new ReceivedDocumentParserService().parseDetailed(text));
+    h.baseClient.organization_settings.findFirst.mockResolvedValue({ settings: { fiscal_data: { nit: '800765432' } } });
+    const bytes = Buffer.from(xml);
+    await h.service.importXml(context, { buffer: bytes, originalname: 'pos.xml', mimetype: 'application/xml', size: bytes.length } as Express.Multer.File);
+    const row = [...h.createdDocs.values()][0];
+    const incoming = preparedEmail();
+    incoming.parsed.normalized = JSON.parse(JSON.stringify(row.raw_payload.normalized));
+    incoming.parsed.fiscal.uuid.value = incoming.parsed.normalized.document_key!;
+    const preserved = JSON.stringify(row);
+    h.prisma.received_documents.findFirst.mockClear();
+    await expect(h.service.ingestPreparedEmail(context, incoming)).rejects.toBeInstanceOf(ConflictException);
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(JSON.stringify(row)).toBe(preserved);
+  });
+
+  it('does not apply strict email environment preflight to legacy XML import', async () => {
+    const h = makeEmailHarness();
+    const xml = readFileSync(join(__dirname, '__fixtures__/email/pos-20.xml'), 'utf8').replace('<cbc:ProfileExecutionID>1</cbc:ProfileExecutionID>', '<cbc:ProfileExecutionID>2</cbc:ProfileExecutionID>');
+    h.parser.parseDetailed.mockImplementation((text: string) => new ReceivedDocumentParserService().parseDetailed(text));
+    h.baseClient.organization_settings.findFirst.mockResolvedValue({ settings: { fiscal_data: { nit: '800765432' } } });
+    const bytes = Buffer.from(xml);
+    await expect(h.service.importXml(context, { buffer: bytes, originalname: 'pos.xml', mimetype: 'application/xml', size: bytes.length } as Express.Multer.File)).resolves.toMatchObject({ fiscal_document_type_code: '20' });
+  });
+
   it('creates processing and only finalizes ready after every exact evidence hash is durable', async () => {
     const h = makeEmailHarness();
     const prepared = preparedEmail();
