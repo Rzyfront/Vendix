@@ -299,10 +299,11 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
       }, data: { status: result.status, reason_code: result.reason_code, retryable: result.retryable, parts,
         processed_at: result.retryable ? null : new Date(), processing_token: null, processing_started_at: null, version: { increment: 1 } } });
       if (changed.count !== 1) throw new ConsumerInterrupted();
-      if (result.valid_document && !result.retryable) {
+      if (result.valid_document) {
         const where = { id: row.inbox_id, organization_id: row.organization_id, store_id: row.store_id, accounting_entity_id: row.accounting_entity_id };
         await tx.document_reception_email_inboxes.updateMany({ where: { ...where, first_valid_received_at: null }, data: { first_valid_received_at: row.received_at } });
-        await tx.document_reception_email_inboxes.updateMany({ where: { ...where, OR: [{ last_valid_received_at: null }, { last_valid_received_at: { lt: row.received_at } }] }, data: { last_valid_received_at: row.received_at, last_error_code: null } });
+        await tx.document_reception_email_inboxes.updateMany({ where: { ...where, OR: [{ last_valid_received_at: null }, { last_valid_received_at: { lt: row.received_at } }] }, data: { last_valid_received_at: row.received_at } });
+        await tx.document_reception_email_inboxes.updateMany({ where, data: { last_error_code: result.reason_code } });
       } else if (result.reason_code) await tx.document_reception_email_inboxes.updateMany({ where: { id: row.inbox_id, organization_id: row.organization_id, store_id: row.store_id }, data: { last_error_code: result.reason_code } });
       return !result.retryable;
     });

@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
@@ -202,6 +203,21 @@ describe('DocumentEmailSqsConsumerService durable SQS protocol', () => {
     await h.service.sendInternalRetry(1, row(h).version, snapshot, h.transport);
     expect((await receive(h, JSON.stringify(h.transport.sendRetry.mock.calls[0][0]))).acknowledged).toBe(true);
     expect(h.rows.size).toBe(1);
+  });
+  it('credits a complete valid document even when another part remains a retryable technical failure', async () => {
+    const h = harness(); h.processor.processEmail.mockResolvedValueOnce({ ...success, status: 'partial', reason_code: 'TECHNICAL_PROCESSING_ERROR', retryable: true,
+      parts: [{ message_index: 0, ordinal: 1, filename: 'invoice.xml', kind: 'xml', status: 'processed' }] });
+    expect((await receive(h)).acknowledged).toBe(false);
+    expect(h.inboxRow.first_valid_received_at).toBeInstanceOf(Date);
+    expect(h.inboxRow.last_valid_received_at).toBeInstanceOf(Date);
+    expect(h.inboxRow.last_error_code).toBe('TECHNICAL_PROCESSING_ERROR');
+    expect(row(h)).toMatchObject({ status: 'partial', retryable: true, processed_at: null });
+  });
+  it('a subscription resolver outage remains technical and never acknowledges a business rejection', async () => {
+    const h = harness(); h.inboxes.revalidateSnapshot.mockRejectedValueOnce(new ServiceUnavailableException('Suscripción temporalmente no disponible'));
+    expect((await receive(h)).acknowledged).toBe(false);
+    expect(row(h)).toMatchObject({ status: 'failed', retryable: true, processed_at: null, reason_code: 'TECHNICAL_PROCESSING_ERROR' });
+    expect(h.transport.delete).not.toHaveBeenCalled();
   });
   it('a timer-observed pause aborts IO but persists the business reason under the still-owned claim', async () => {
     jest.useFakeTimers();

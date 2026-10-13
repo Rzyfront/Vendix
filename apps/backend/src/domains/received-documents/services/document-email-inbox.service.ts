@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, document_reception_email_inboxes } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
@@ -183,7 +183,13 @@ export class DocumentEmailInboxService {
       store_id: organization.fiscal_scope === 'STORE' ? storeId : null,
     }, select: { nit: true, name: true } });
     if (!entity || !dian) throw new VendixHttpException(ErrorCodes.EMAIL_RECEPTION_FISCAL_GATE);
-    const access = await this.subscriptions.canUseModule(storeId, 'received_documents');
+    let access: Awaited<ReturnType<SubscriptionAccessService['canUseModule']>>;
+    try { access = await this.subscriptions.canUseModule(storeId, 'received_documents'); }
+    catch { throw new ServiceUnavailableException('No fue posible consultar la suscripción. Intenta nuevamente.'); }
+    // Resolver outages are technical retries, not a durable business rejection of this email.
+    if (access.reason === 'SUBSCRIPTION_INTERNAL_ERROR' || (access.allowed && !access.has_record)) {
+      throw new ServiceUnavailableException('No fue posible consultar la suscripción. Intenta nuevamente.');
+    }
     if (!access.allowed || !access.has_record) throw new VendixHttpException(ErrorCodes.EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED);
     const settings = organization.fiscal_scope === 'STORE' ? entity.store?.store_settings?.settings : entity.organization.organization_settings?.settings;
     const fiscalData = this.fiscalData(settings);

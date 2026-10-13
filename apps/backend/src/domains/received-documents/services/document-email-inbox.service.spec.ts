@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
@@ -100,6 +101,22 @@ describe('DocumentEmailInboxService', () => {
     await expect(off.service.activate(ctx, activate)).rejects.toMatchObject({ errorCode: 'EMAIL_RECEPTION_UNAVAILABLE' });
     const blocked = harness(); blocked.subscriptions.canUseModule.mockResolvedValue({ allowed: false, has_record: true });
     await expect(blocked.service.activate(ctx, activate)).rejects.toMatchObject({ errorCode: 'EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED' });
+  });
+  it.each([
+    { allowed: true, has_record: false },
+    { allowed: false, has_record: false, reason: 'SUBSCRIPTION_INTERNAL_ERROR' },
+  ])('propagates resolver fallback %j as a technical 503, not a subscription business rejection', async (access) => {
+    const h = harness(); h.subscriptions.canUseModule.mockResolvedValueOnce(access);
+    await expect(h.service.activate(ctx, activate)).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(h.inbox.create).not.toHaveBeenCalled();
+  });
+  it('propagates a thrown subscription resolver error as a technical 503', async () => {
+    const h = harness(); h.subscriptions.canUseModule.mockRejectedValueOnce(new Error('resolver offline'));
+    await expect(h.service.activate(ctx, activate)).rejects.toMatchObject({ status: 503 });
+  });
+  it('still rejects a genuine missing subscription as a business gate', async () => {
+    const h = harness(); h.subscriptions.canUseModule.mockResolvedValueOnce({ allowed: false, has_record: false, reason: 'SUBSCRIPTION_004' });
+    await expect(h.service.activate(ctx, activate)).rejects.toMatchObject({ errorCode: 'EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED' });
   });
   it('reads configuration and historical status with no create/ensure/subscription side effects', async () => {
     const h = harness({ EMAIL_RECEPTION_ENABLED: 'false' }); h.setInbox(record());
