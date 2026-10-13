@@ -229,6 +229,9 @@ describe('buildCreditNoteCandidate', () => {
       }),
     ).toThrow(VendixHttpException);
     expect(() =>
+      buildCreditNoteCandidate({ total_amount: 0, tax_amount: 0, invoice_items: [] }),
+    ).toThrow(VendixHttpException);
+    expect(() =>
       buildCreditNoteCandidate({
         total_amount: 2,
         tax_amount: 1,
@@ -554,5 +557,225 @@ describe('CreditNoteBalanceService', () => {
       late.service.transition(91, { status: 'accepted', dian_status: 'accepted' }, { invoice_items: true }, 'none', 'sent'),
     );
     expect(late.updates[0]).toMatchObject({ status: 'accepted', credit_limit_reserved_at: expect.any(Date) });
+  });
+
+  it('records a real late DIAN acceptance even while the scoped parent projection is rejected', async () => {
+    const lateNote = note({
+      status: 'sent',
+      transmission_status: 'submitted',
+      credit_limit_reserved_at: NOW,
+      sent_at: NOW,
+    });
+    const late = createHarness({
+      parent: invoice({
+        status: 'rejected',
+        transmission_status: 'rejected',
+        dian_status: 'rejected',
+        accepted_at: null,
+      }),
+      notes: [lateNote],
+      ledgers: [{
+        source_id: lateNote.id,
+        transmission_status: 'accepted',
+        dian_status: 'accepted',
+        sent_at: NOW,
+        accepted_at: NOW,
+        rejected_at: null,
+      }],
+    });
+
+    await runInStoreContext(() =>
+      late.service.transition(
+        91,
+        { status: 'accepted', dian_status: 'accepted', transmission_status: 'accepted' },
+        { invoice_items: true },
+        'none',
+        'sent',
+      ),
+    );
+    expect(late.updates[0]).toMatchObject({ status: 'accepted', credit_limit_reserved_at: NOW });
+  });
+
+  it('matches an accepted historical note by unique core metadata when optional snapshots are absent', async () => {
+    const historical = note({
+      status: 'accepted',
+      transmission_status: 'accepted',
+      dian_status: 'accepted',
+      accepted_at: NOW,
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: null,
+        unit_code: null,
+        account_code: null,
+        price_unit_quantity: null,
+        quantity: decimal(0.5),
+        unit_price: decimal(20000),
+        total_amount: decimal(10000),
+      })],
+    });
+    const harness = createHarness({ notes: [historical] });
+
+    const remaining = await runInStoreContext(() => harness.service.remaining(PARENT_ID));
+    expect(remaining.lines.get(SOURCE_ITEM_ID)?.remaining_quantity).toEqual(decimal(1.5));
+  });
+
+  it('accepts legacy null source unit/divisor snapshots only after unique product-description proof', async () => {
+    const parent = invoice({
+      invoice_items: [item({ unit_code: null, price_unit_quantity: null })],
+    });
+    const historical = note({
+      status: 'accepted',
+      transmission_status: 'accepted',
+      dian_status: 'accepted',
+      accepted_at: NOW,
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: null,
+        unit_code: 'NIU',
+        price_unit_quantity: 1,
+      })],
+    });
+    const harness = createHarness({ parent, notes: [historical] });
+
+    const remaining = await runInStoreContext(() => harness.service.remaining(PARENT_ID));
+    expect(remaining.lines.get(SOURCE_ITEM_ID)?.remaining_quantity).toEqual(decimal(1.5));
+  });
+
+  it('uses a unique financial source-line snapshot to resolve repeated SKU and description', async () => {
+    const firstSource = item({ financial_source_line_id: 501 });
+    const secondSource = item({ id: 72, financial_source_line_id: 502 });
+    const prior = note({
+      status: 'accepted',
+      transmission_status: 'accepted',
+      dian_status: 'accepted',
+      accepted_at: NOW,
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: null,
+        description: 'Historical description differs',
+        financial_source_line_id: 502,
+        quantity: decimal(0.5),
+        unit_price: decimal(20000),
+        total_amount: decimal(10000),
+      })],
+    });
+    const parent = invoice({
+      subtotal_amount: decimal(90000),
+      total_amount: decimal(90000),
+      invoice_items: [firstSource, secondSource],
+    });
+    const harness = createHarness({ parent, notes: [prior] });
+
+    const remaining = await runInStoreContext(() => harness.service.remaining(PARENT_ID));
+    expect(remaining.lines.get(71)?.remaining_quantity).toEqual(decimal(2));
+    expect(remaining.lines.get(72)?.remaining_quantity).toEqual(decimal(1.5));
+  });
+
+  it('rejects a conflicting non-null unit snapshot and ambiguous repeated product-description lineage', async () => {
+    const conflicting = note({
+      status: 'accepted',
+      transmission_status: 'accepted',
+      dian_status: 'accepted',
+      accepted_at: NOW,
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: null,
+        unit_code: 'EA',
+        quantity: decimal(0.5),
+        unit_price: decimal(20000),
+        total_amount: decimal(10000),
+      })],
+    });
+    const unitConflict = createHarness({ notes: [conflicting] });
+    await expect(
+      runInStoreContext(() => unitConflict.service.remaining(PARENT_ID)),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_SOURCE_001.code });
+
+    const repeatedParent = invoice({
+      subtotal_amount: decimal(90000),
+      total_amount: decimal(90000),
+      invoice_items: [item(), item({ id: 72 })],
+    });
+    const ambiguousPrior = note({
+      ...conflicting,
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: null,
+        unit_code: 'NIU',
+        quantity: decimal(0.5),
+        unit_price: decimal(20000),
+        total_amount: decimal(10000),
+      })],
+    });
+    const ambiguous = createHarness({ parent: repeatedParent, notes: [ambiguousPrior] });
+    await expect(
+      runInStoreContext(() => ambiguous.service.remaining(PARENT_ID)),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_SOURCE_001.code });
+  });
+
+  it('checks both note types before numbering, caps only credits, and rejects non-correctable parents or DB overflow', async () => {
+    const overCredit = note({
+      total_amount: decimal(50000),
+      subtotal_amount: decimal(50000),
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: SOURCE_ITEM_ID,
+        quantity: decimal(1),
+        unit_price: decimal(50000),
+        total_amount: decimal(50000),
+      })],
+    });
+    const credit = createHarness({ notes: [overCredit] });
+    await expect(
+      runInStoreContext(() => credit.service.assertNoteBeforeNumbering(overCredit.id)),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_LIMIT_001.code });
+
+    const overDebit = note({
+      invoice_type: 'debit_note',
+      total_amount: decimal(50000),
+      subtotal_amount: decimal(50000),
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: SOURCE_ITEM_ID,
+        quantity: decimal(1),
+        unit_price: decimal(50000),
+        total_amount: decimal(50000),
+      })],
+    });
+    const debit = createHarness({ notes: [overDebit] });
+    await expect(
+      runInStoreContext(() => debit.service.assertNoteBeforeNumbering(overDebit.id)),
+    ).resolves.toBeUndefined();
+
+    const unsupported = createHarness({
+      parent: invoice({ invoice_type: 'support_document' }),
+      notes: [note()],
+    });
+    await expect(
+      runInStoreContext(() => unsupported.service.assertNoteBeforeNumbering(91)),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_SOURCE_001.code });
+    await expect(
+      runInStoreContext(() => unsupported.service.assertCanCreate(PARENT_ID, candidate())),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_SOURCE_001.code });
+
+    const overflow = note({
+      invoice_items: [item({
+        id: 171,
+        invoice_id: 91,
+        source_invoice_item_id: SOURCE_ITEM_ID,
+        quantity: decimal('100000000'),
+      })],
+    });
+    const tooLarge = createHarness({ notes: [overflow] });
+    await expect(
+      runInStoreContext(() => tooLarge.service.assertNoteBeforeNumbering(overflow.id)),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_SOURCE_001.code });
   });
 });

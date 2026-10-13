@@ -163,6 +163,9 @@ export function buildCreditNoteCandidate(
   };
   const headerTotal = decimal(document.total_amount, 'header_total', 2);
   const headerTax = decimal(document.tax_amount, 'header_tax', 2);
+  if (document.invoice_items.length === 0) {
+    throw candidateError('candidate_lines_empty');
+  }
   const lines = document.invoice_items.map((item) => {
     if (!Number.isInteger(item.source_invoice_item_id) || item.source_invoice_item_id < 1) {
       throw candidateError('candidate_source_invalid', item.source_invoice_item_id);
@@ -247,11 +250,48 @@ export class CreditNoteBalanceService {
   ): Promise<void> {
     const context = this.getTenantContext();
     await this.withLockedParent(sourceId, context, async (tx, source) => {
+      this.assertCorrectableSource(source);
+      this.assertCandidateDatabasePrecision(candidate, source.id);
       const notes = await this.readCreditNotes(source, context, tx);
       const noteIds = notes.map((note) => note.id);
       const ledgers = await this.readTransmissionRows(source, noteIds, tx);
       const remaining = this.computeRemaining(source, notes, ledgers);
       this.assertCandidateWithinRemaining(source.id, candidate, remaining);
+    });
+  }
+
+  /** Validates a draft note and reserves credit, if applicable, before a number is allocated. */
+  async assertNoteBeforeNumbering(noteId: number): Promise<void> {
+    const context = this.getTenantContext();
+    const visibleNote = await this.readVisibleNote(noteId, context);
+    if (visibleNote.status !== 'draft') {
+      throw this.stateException(visibleNote.id, 'note_not_draft');
+    }
+    const sourceId = visibleNote.related_invoice_id;
+    if (!sourceId) {
+      throw this.sourceException(undefined, undefined, 'source_invoice_missing');
+    }
+
+    await this.withLockedParent(sourceId, context, async (tx, source) => {
+      const note = await this.readNoteInTransaction(tx, noteId, context);
+      this.assertSameFiscalEntity(source, note);
+      this.assertCorrectableSource(source);
+      if (note.status !== 'draft') {
+        throw this.stateException(note.id, 'note_not_draft');
+      }
+      const candidate = this.candidateFromInvoice(note, source);
+      this.assertCandidateDatabasePrecision(candidate, source.id);
+      const noteLedger = await this.readTransmissionRows(source, [note.id], tx);
+      if (this.hasAcceptedEvidence(note, noteLedger)) {
+        throw this.stateException(note.id, 'note_already_accepted');
+      }
+      if (note.invoice_type === 'credit_note') {
+        const notes = await this.readCreditNotes(source, context, tx);
+        const noteIds = notes.map((row) => row.id);
+        const ledgers = await this.readTransmissionRows(source, noteIds, tx);
+        const remaining = this.computeRemaining(source, notes, ledgers, note.id);
+        this.assertCandidateWithinRemaining(source.id, candidate, remaining);
+      }
     });
   }
 
@@ -279,6 +319,9 @@ export class CreditNoteBalanceService {
       if (note.status !== 'draft') {
         throw this.stateException(note.id, 'note_not_draft');
       }
+      this.assertCorrectableSource(source);
+      const candidate = this.candidateFromInvoice(note, source);
+      this.assertCandidateDatabasePrecision(candidate, source.id);
       if (note.invoice_type === 'debit_note') {
         const updated = await tx.invoices.updateMany({
           where: {
@@ -304,7 +347,7 @@ export class CreditNoteBalanceService {
       const remaining = this.computeRemaining(source, notes, ledgers, note.id);
       this.assertCandidateWithinRemaining(
         source.id,
-        this.candidateFromInvoice(note, source),
+        candidate,
         remaining,
       );
 
@@ -354,6 +397,8 @@ export class CreditNoteBalanceService {
       }
 
       const reserve = note.invoice_type === 'credit_note';
+      const candidate = this.candidateFromInvoice(note, source);
+      this.assertCandidateDatabasePrecision(candidate, source.id);
       if (reserve) {
         const notes = await this.readCreditNotes(source, context, tx);
         const noteIds = notes.map((row) => row.id);
@@ -361,7 +406,7 @@ export class CreditNoteBalanceService {
         const remaining = this.computeRemaining(source, notes, ledgers, note.id);
         this.assertCandidateWithinRemaining(
           source.id,
-          this.candidateFromInvoice(note, source),
+          candidate,
           remaining,
         );
       }
@@ -402,6 +447,10 @@ export class CreditNoteBalanceService {
       throw this.sourceException(undefined, undefined, 'source_invoice_missing');
     }
 
+    const acceptanceRequest =
+      data?.status === 'accepted' ||
+      data?.dian_status === 'accepted' ||
+      data?.transmission_status === 'accepted';
     return this.withLockedParent(sourceId, context, async (tx, source) => {
       const note = await this.readNoteInTransaction(tx, noteId, context);
       this.assertSameFiscalEntity(source, note);
@@ -446,7 +495,7 @@ export class CreditNoteBalanceService {
         where: this.noteWhere(note.id, context),
         include,
       });
-    });
+    }, !acceptanceRequest);
   }
 
   private getTenantContext(): TenantContext {
@@ -467,6 +516,7 @@ export class CreditNoteBalanceService {
   private async readVisibleInvoice(
     id: number,
     context: TenantContext,
+    requireAcceptedSource = true,
   ): Promise<BalanceInvoice> {
     const invoice = await this.prisma.invoices.findFirst({
       where: {
@@ -479,7 +529,8 @@ export class CreditNoteBalanceService {
     if (!invoice) {
       throw this.sourceException(id, undefined, 'source_invoice_not_found');
     }
-    await this.assertSourceAccepted(invoice);
+    this.assertCorrectableSource(invoice);
+    if (requireAcceptedSource) await this.assertSourceAccepted(invoice);
     return invoice;
   }
 
@@ -577,8 +628,9 @@ export class CreditNoteBalanceService {
       tx: Prisma.TransactionClient,
       source: BalanceInvoice,
     ) => Promise<T>,
+    requireAcceptedSource = true,
   ): Promise<T> {
-    const visibleSource = await this.readVisibleInvoice(sourceId, context);
+    const visibleSource = await this.readVisibleInvoice(sourceId, context, requireAcceptedSource);
     return this.prisma.$transaction(async (rawTx: Prisma.TransactionClient) => {
       const locked = await rawTx.$queryRaw<Array<{ id: number }>>`
         SELECT "id"
@@ -604,7 +656,8 @@ export class CreditNoteBalanceService {
       if (!source) {
         throw this.sourceException(sourceId, undefined, 'source_invoice_not_found');
       }
-      await this.assertSourceAccepted(source, rawTx);
+      this.assertCorrectableSource(source);
+      if (requireAcceptedSource) await this.assertSourceAccepted(source, rawTx);
       return work(rawTx, source);
     });
   }
@@ -640,14 +693,12 @@ export class CreditNoteBalanceService {
       if (!this.noteConsumesCredit(note, rows)) continue;
       consumedTotal = consumedTotal.plus(this.money(note.total_amount, source.id));
       const seenSources = new Set<number>();
-      const totalCopy = this.isExactTotalCopy(source, note);
       const noteSourceIds = new Map<number, number>();
       for (const item of note.invoice_items) {
         const sourceItemId = this.resolveLegacySourceId(
           source,
           item,
           sourceById,
-          totalCopy,
         );
         if (seenSources.has(sourceItemId)) {
           throw this.sourceException(source.id, sourceItemId, 'duplicate_prior_source_line');
@@ -704,6 +755,9 @@ export class CreditNoteBalanceService {
     effective_base: Prisma.Decimal;
     effective_total: Prisma.Decimal;
   }> {
+    if (invoice.invoice_items.length === 0) {
+      throw this.sourceException(invoice.id, undefined, 'source_invoice_lines_empty');
+    }
     const candidate = buildCreditNoteCandidate({
       total_amount: invoice.total_amount,
       tax_amount: invoice.tax_amount,
@@ -789,26 +843,10 @@ export class CreditNoteBalanceService {
     );
   }
 
-  private isExactTotalCopy(source: BalanceInvoice, note: BalanceInvoice): boolean {
-    return (
-      source.invoice_items.length === note.invoice_items.length &&
-      this.money(source.subtotal_amount, source.id).equals(
-        this.money(note.subtotal_amount, note.id),
-      ) &&
-      this.money(source.tax_amount, source.id).equals(
-        this.money(note.tax_amount, note.id),
-      ) &&
-      this.money(source.total_amount, source.id).equals(
-        this.money(note.total_amount, note.id),
-      )
-    );
-  }
-
   private resolveLegacySourceId(
     source: BalanceInvoice,
     noteItem: BalanceInvoice['invoice_items'][number],
     sourceById: Map<number, ReturnType<CreditNoteBalanceService['effectiveLines']>[number]>,
-    totalCopy: boolean,
   ): number {
     if (noteItem.source_invoice_item_id !== null) {
       if (!sourceById.has(noteItem.source_invoice_item_id)) {
@@ -817,32 +855,37 @@ export class CreditNoteBalanceService {
       return noteItem.source_invoice_item_id;
     }
 
-    const candidates = [...sourceById.values()].filter(({ item }) => {
-      const metadataMatches =
+    const sourceLines = [...sourceById.values()];
+    const optionalSnapshotsMatch = (item: (typeof sourceLines)[number]['item']) =>
+      (noteItem.unit_code === null || item.unit_code === null || item.unit_code === noteItem.unit_code) &&
+      (noteItem.account_code === null || item.account_code === null || item.account_code === noteItem.account_code) &&
+      (noteItem.price_unit_quantity === null ||
+        (item.price_unit_quantity ?? 1) === noteItem.price_unit_quantity) &&
+      (noteItem.is_inclusive === null || item.is_inclusive === null || item.is_inclusive === noteItem.is_inclusive) &&
+      (noteItem.aiu_component === null || item.aiu_component === null || item.aiu_component === noteItem.aiu_component);
+    let candidates: typeof sourceLines;
+    if (noteItem.financial_source_line_id !== null) {
+      candidates = sourceLines.filter(({ item }) =>
+        item.financial_source_line_id === noteItem.financial_source_line_id &&
+        item.product_id === noteItem.product_id &&
+        item.product_variant_id === noteItem.product_variant_id,
+      );
+    } else {
+      candidates = sourceLines.filter(({ item }) =>
         item.product_id === noteItem.product_id &&
         item.product_variant_id === noteItem.product_variant_id &&
-        item.description === noteItem.description &&
-        item.account_code === noteItem.account_code &&
-        item.price_unit_quantity === noteItem.price_unit_quantity &&
-        item.is_inclusive === noteItem.is_inclusive &&
-        item.aiu_component === noteItem.aiu_component &&
-        item.financial_source_line_id === noteItem.financial_source_line_id;
-      if (!metadataMatches) return false;
-      if (!totalCopy) return true;
-      return (
-        this.money(item.quantity, source.id).equals(this.money(noteItem.quantity, source.id)) &&
-        this.money(item.unit_price, source.id).equals(this.money(noteItem.unit_price, source.id)) &&
-        this.money(item.discount_amount, source.id).equals(this.money(noteItem.discount_amount, source.id)) &&
-        this.money(item.tax_amount, source.id).equals(this.money(noteItem.tax_amount, source.id)) &&
-        this.money(item.total_amount, source.id).equals(this.money(noteItem.total_amount, source.id))
+        item.description === noteItem.description,
       );
-    });
+    }
     if (candidates.length !== 1) {
       throw this.sourceException(
         source.id,
         undefined,
         candidates.length === 0 ? 'legacy_source_unproven' : 'legacy_source_ambiguous',
       );
+    }
+    if (!optionalSnapshotsMatch(candidates[0].item)) {
+      throw this.sourceException(source.id, candidates[0].item.id, 'legacy_source_snapshot_mismatch');
     }
     return candidates[0].item.id;
   }
@@ -854,7 +897,6 @@ export class CreditNoteBalanceService {
     const sourceLines = this.effectiveLines(source);
     const sourceById = new Map<number, (typeof sourceLines)[number]>();
     for (const line of sourceLines) sourceById.set(line.item.id, line);
-    const totalCopy = this.isExactTotalCopy(source, note);
     return buildCreditNoteCandidate({
       total_amount: note.total_amount,
       tax_amount: note.tax_amount,
@@ -864,7 +906,6 @@ export class CreditNoteBalanceService {
             source,
             item,
             sourceById,
-            totalCopy,
           ),
           quantity: item.quantity,
           tax_amount: item.tax_amount,
@@ -882,6 +923,7 @@ export class CreditNoteBalanceService {
       lines: Map<number, CreditNoteRemainingLine>;
     },
   ): void {
+    this.assertCandidateDatabasePrecision(candidate, sourceId);
     const attemptedTotal = this.candidateDecimal(
       candidate.total_amount,
       sourceId,
@@ -924,6 +966,41 @@ export class CreditNoteBalanceService {
           },
         });
       }
+    }
+  }
+
+  private assertCandidateDatabasePrecision(
+    candidate: CreditNoteCandidate,
+    parentId: number,
+  ): void {
+    if (candidate.lines.length === 0) {
+      throw this.sourceException(parentId, undefined, 'candidate_lines_empty');
+    }
+    const maxMoney = new Prisma.Decimal('10000000000');
+    const maxQuantity = new Prisma.Decimal('100000000');
+    const validate = (
+      value: Prisma.Decimal.Value,
+      scale: number,
+      exclusiveMax: Prisma.Decimal,
+      itemId: number | undefined,
+      reason: string,
+    ) => {
+      const amount = this.candidateDecimal(value, parentId, itemId, reason);
+      if (amount.decimalPlaces() > scale || amount.gte(exclusiveMax)) {
+        throw this.sourceException(parentId, itemId, reason);
+      }
+    };
+    validate(candidate.total_amount, 2, maxMoney, undefined, 'candidate_header_precision');
+    for (const line of candidate.lines) {
+      validate(line.quantity, 4, maxQuantity, line.source_invoice_item_id, 'candidate_quantity_precision');
+      validate(line.base_amount, 2, maxMoney, line.source_invoice_item_id, 'candidate_base_precision');
+      validate(line.total_amount, 2, maxMoney, line.source_invoice_item_id, 'candidate_line_total_precision');
+    }
+  }
+
+  private assertCorrectableSource(source: BalanceInvoice): void {
+    if (!['sales_invoice', 'export_invoice', 'purchase_invoice'].includes(source.invoice_type)) {
+      throw this.sourceException(source.id, undefined, 'source_invoice_type_not_correctable');
     }
   }
 
