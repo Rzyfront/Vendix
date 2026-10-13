@@ -38,6 +38,7 @@ import { DianDirectModule } from '../store/invoicing/providers/dian-direct/dian-
 import { ReceivedBuyerEventReservationService } from './services/received-buyer-event-reservation.service';
 import { ReceivedBuyerEventPayloadService } from './services/received-buyer-event-payload.service';
 import { ReceivedBuyerEventDispatchService } from './services/received-buyer-event-dispatch.service';
+import { DocumentEmailInboxService } from './services/document-email-inbox.service';
 import { ReceivedDocumentInboxStatusService } from './services/received-document-inbox-status.service';
 
 /** Shared reception pipeline; this module also owns narrow read-only evidence routes. */
@@ -52,6 +53,7 @@ import { ReceivedDocumentInboxStatusService } from './services/received-document
   ],
   controllers: [PublicDocumentReceptionWebhookController, StoreReceivedDocumentAccountingController, OrganizationReceivedDocumentAccountingController, SuperAdminReceivedBuyerEventsController],
   providers: [
+    DocumentEmailInboxService,
     FiscalContextResolverService,
     ReceivedDocumentsContextService,
     ReceivedDocumentAccountingEvidenceService,
@@ -84,6 +86,7 @@ import { ReceivedDocumentInboxStatusService } from './services/received-document
     DocumentReceptionRunResolutionService,
   ],
   exports: [
+    DocumentEmailInboxService,
     ReceivedDocumentsContextService,
     ReceivedDocumentAccountingEvidenceService,
     ReceivedBuyerEventEnablementService,

@@ -1,3 +1,4 @@
+import { DocumentEmailInboxService } from './document-email-inbox.service';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ReceivedDocumentInboxStatusService } from './received-document-inbox-status.service';
@@ -10,6 +11,7 @@ const context: ReceivedDocumentsReadContext = {
   is_organization: false, fiscal_scope: 'ORGANIZATION', actor_id: 55,
 };
 const now = new Date('2026-10-13T10:00:00Z');
+const emailStatus = { pilot_available: false, configured: false, enabled: false, active_inboxes: 0, state: 'inactive' as const, first_valid_received_at: null, last_email_at: null, last_valid_received_at: null, last_error_code: null, not_processed_count: 0 };
 function harness() {
   const tx = {
     received_documents: {
@@ -29,8 +31,9 @@ function harness() {
     document_reception_runs: { findFirst: jest.fn().mockResolvedValue({ status: 'completed', received_count: 2, duplicate_count: 1, error_count: 0, finished_at: now }) },
   };
   const transaction = jest.fn(async (callback: (db: typeof tx) => Promise<unknown>) => callback(tx));
-  const service = new ReceivedDocumentInboxStatusService({ $transaction: transaction } as unknown as GlobalPrismaService);
-  return { tx, transaction, service };
+  const email = { status: jest.fn().mockResolvedValue(emailStatus) };
+  const service = new ReceivedDocumentInboxStatusService({ $transaction: transaction } as unknown as GlobalPrismaService, email as unknown as DocumentEmailInboxService);
+  return { tx, transaction, service, email };
 }
 
 describe('received inbox summary and secret-free reception health', () => {
@@ -61,6 +64,7 @@ describe('received inbox summary and secret-free reception health', () => {
     const h = harness();
     const health = await h.service.receptionStatus(context, context);
     expect(health).toEqual({
+      email: emailStatus,
       dian_active: true, configured: true, active_connections: 3, channels: ['api_poll', 'webhook'],
       last_received_at: now, last_synced_at: now, next_sync_at: now,
       last_run: { status: 'completed', received_count: 2, duplicate_count: 1, error_count: 0, finished_at: now },
@@ -92,7 +96,10 @@ describe('received inbox summary and secret-free reception health', () => {
   it('allows aggregate organization history while requiring a selected store for configuration', async () => {
     const h = harness();
     const organization = { ...context, is_organization: true, store_id: null };
-    expect((await h.service.receptionStatus(organization, organization)).requires_operational_store).toBe(true);
+    const status = await h.service.receptionStatus(organization, organization);
+    expect(status.requires_operational_store).toBe(true);
+    expect(status.email).toEqual(emailStatus);
+    expect(h.email.status).toHaveBeenCalledWith(organization);
     expect(h.tx.document_reception_connections.count).toHaveBeenNthCalledWith(1, { where: { organization_id: 3, accounting_entity_id: 8 } });
   });
 

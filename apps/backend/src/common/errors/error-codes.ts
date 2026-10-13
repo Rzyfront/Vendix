@@ -5,6 +5,15 @@ export interface ErrorCodeEntry {
 }
 
 export const ErrorCodes = {
+  // Dedicated email intake; independent of API/webhook connection contracts.
+  EMAIL_RECEPTION_UNAVAILABLE: { code: 'EMAIL_RECEPTION_UNAVAILABLE', httpStatus: 503, devMessage: 'La recepción por correo no está disponible para esta tienda.' },
+  EMAIL_RECEPTION_CONSENT_REQUIRED: { code: 'EMAIL_RECEPTION_CONSENT_REQUIRED', httpStatus: 400, devMessage: 'Confirma la política vigente para activar o cambiar tu dirección.' },
+  EMAIL_RECEPTION_FISCAL_GATE: { code: 'EMAIL_RECEPTION_FISCAL_GATE', httpStatus: 403, devMessage: 'Completa la configuración fiscal de tu negocio para recibir facturas.' },
+  EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED: { code: 'EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED', httpStatus: 403, devMessage: 'La suscripción no permite agregar documentos ahora.' },
+  EMAIL_RECEPTION_PAUSED: { code: 'EMAIL_RECEPTION_PAUSED', httpStatus: 409, devMessage: 'La recepción por correo está pausada.' },
+  EMAIL_RECEPTION_NOT_FOUND: { code: 'EMAIL_RECEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la configuración de recepción por correo.' },
+  EMAIL_RECEPTION_VERSION_CONFLICT: { code: 'EMAIL_RECEPTION_VERSION_CONFLICT', httpStatus: 409, devMessage: 'La configuración cambió. Vuelve a cargarla antes de guardar.' },
+
   // System
   SYS_INTERNAL_001: {
     code: 'SYS_INTERNAL_001',
