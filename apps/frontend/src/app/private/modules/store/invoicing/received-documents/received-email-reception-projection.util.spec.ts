@@ -1,3 +1,4 @@
+import { receivedDianLabel, receivedDocumentSourceLabel, receivedIsElectronicPos, receivedMobileInboxLabel, receivedReceiptEvidence } from './received-documents-inbox-projection.util';
 import { RECEIVED_EMAIL_REASON_CODES, type ReceivedEmailMessage, type ReceivedEmailStatus } from './received-email-reception.interface';
 import { RECEIVED_EMAIL_DIAN_BADGE, RECEIVED_EMAIL_REASON_COPY, projectReceivedEmailMessage, receivedEmailReason, receivedEmailStatusCopy, receivedEmailUsableCode } from './received-email-reception-projection.util';
 
@@ -64,5 +65,41 @@ describe('received email reception display contracts', () => {
       expect(serialized).not.toContain(`"${forbidden}"`);
     }
     expect(projected.parts[0].reason_details).toEqual({ receiver_tax_id: '900123456', expected_receiver_tax_id: '800765432' });
+  });
+});
+
+
+describe('received invoice email trace display projections', () => {
+  it('keeps all DIAN states, missing and invented verification codes unverified', () => {
+    for (const code of [undefined, null, 'not_checked', 'accepted', 'verified', 'INVENTED_CODE'])
+      expect(receivedDianLabel({ dian_validation_status: code })).toBe('Sin verificar ante la DIAN');
+    expect(receivedMobileInboxLabel('new')).toBe('Nueva · Sin verificar ante la DIAN');
+    expect(receivedMobileInboxLabel('requires_review')).toBe('Requiere revisión · Sin verificar ante la DIAN');
+  });
+  it('labels electronic POS only from server-authored fiscal markers without altering invoice facts', () => {
+    expect(receivedIsElectronicPos({ fiscal_document_type_code: '20' })).toBe(true);
+    expect(receivedIsElectronicPos({ fiscal_document_type_code: '01' })).toBe(false);
+    expect(receivedIsElectronicPos({})).toBe(false);
+    const doc = { fiscal_document_type_code: '01', email_reception: { document_type_code: '20', profile_execution_id: '1', uuid_scheme_name: 'CUDE-SHA384', receipt_evidence: { included: false, reference_matches: false, response_code: null } } };
+    expect(receivedIsElectronicPos(doc)).toBe(true);
+    expect(doc.fiscal_document_type_code).toBe('01');
+  });
+  it('distinguishes declared email from actual transport and preserves historical API source', () => {
+    expect(receivedDocumentSourceLabel({ source_channel: 'email' })).toBe('Correo (origen declarado)');
+    expect(receivedDocumentSourceLabel({ source_channel: 'email', email_transport_received: false })).toBe('Correo (origen declarado)');
+    expect(receivedDocumentSourceLabel({ source_channel: 'email', email_transport_received: true })).toBe('Correo');
+    const historical = { source_channel: 'api', email_transport_received: true };
+    expect(receivedDocumentSourceLabel(historical)).toBe('Correo · origen inicial: API de proveedor');
+    expect(historical.source_channel).toBe('api');
+    expect(receivedDocumentSourceLabel({ source_channel: 'api' })).toBe('API de proveedor');
+  });
+  it('copies receipt evidence safe fields only, never AR XML, checkpoints or a claim of acceptance', () => {
+    const doc = { email_reception: { document_type_code: '01', profile_execution_id: '1', uuid_scheme_name: 'CUFE-SHA384',
+      receipt_evidence: { included: true, reference_matches: true, response_code: '02', raw_ar: '<ApplicationResponse/>', originals_checkpoint: [{ secret: true }] } } };
+    expect(receivedReceiptEvidence(doc)).toEqual({ included: true, reference_matches: true, response_code: '02' });
+    expect(receivedReceiptEvidence({})).toBeNull();
+    const evidence = { ...doc.email_reception, receipt_evidence: { included: true, reference_matches: false, response_code: '<script>private</script>' } };
+    expect(receivedReceiptEvidence({ email_reception: evidence })).toEqual({ included: true, reference_matches: false, response_code: null });
+    expect(receivedReceiptEvidence({ email_reception: { ...evidence, receipt_evidence: { included: true, reference_matches: false, response_code: 'x'.repeat(33) } } })?.response_code).toBeNull();
   });
 });

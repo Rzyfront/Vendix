@@ -3,6 +3,9 @@ import { join } from 'node:path';
 
 const page = readFileSync(join(__dirname, 'received-documents-page.component.ts'), 'utf8');
 const facade = readFileSync(join(__dirname, 'received-documents-inbox.facade.ts'), 'utf8');
+const emailChild = readFileSync(join(__dirname, 'received-email-messages.component.ts'), 'utf8');
+const emailTypes = readFileSync(join(__dirname, 'received-email-reception.interface.ts'), 'utf8');
+const backendEmailTypes = readFileSync(join(__dirname, '../../../../../../../../backend/src/domains/received-documents/interfaces/document-email-reception.interface.ts'), 'utf8');
 const service = readFileSync(join(__dirname, 'received-documents.service.ts'), 'utf8');
 
 describe('received inbox wiring source guards (static, not runtime E2E)', () => {
@@ -34,7 +37,7 @@ describe('received inbox wiring source guards (static, not runtime E2E)', () => 
   it('keeps table and cards on the same Spanish attention/legal labels and honest OCR wording', () => {
     expect(page).toContain('transform: receivedInboxLabel, badgeTransform: receivedInboxLabel');
     expect(page).toContain('transform: receivedLegalLabel, badgeTransform: receivedLegalLabel');
-    expect(page).toContain("badgeKey: 'inbox_state', badgeConfig: this.inboxBadgeConfig, badgeTransform: receivedInboxLabel");
+    expect(page).toContain("badgeKey: 'inbox_state', badgeConfig: this.inboxBadgeConfig, badgeTransform: receivedMobileInboxLabel");
     expect(page).toContain("{ key: 'legal_status', label: 'Legal', transform: receivedLegalLabel }");
     expect(page).toContain("label: 'Lectura / OCR'");
     expect(page).toContain('Leer por OCR no acepta ni contabiliza');
@@ -79,7 +82,7 @@ describe('received inbox wiring source guards (static, not runtime E2E)', () => 
     expect(facade).toContain('if (summary.value) this.summary.set(summary.value)');
   });
   it('buffers list membership changes during focused work or a modal without resetting the current page', () => {
-    expect(page).toContain('this.uploading() || this.scanImportOpen() || this.manualFormOpen() || this.listFocused()');
+    expect(page).toContain('this.uploading() || this.scanImportOpen() || this.manualFormOpen() || this.emailWizardOpen() || this.emailWizardProtected() || this.listFocused()');
     expect(page).toContain('Aplicar actualización');
     expect(facade).toContain('receivedInboxProtectedRows(this.rows(), incoming)');
     expect(facade).toContain('this.pendingRows.set(incoming)');
@@ -96,5 +99,87 @@ describe('received inbox wiring source guards (static, not runtime E2E)', () => 
     expect(page).toContain('Solicita configuración al administrador');
     expect(service).toContain('/reception-status');
     expect(facade).not.toContain('getConnections');
+  });
+});
+
+
+describe('email inbox area integration contracts (source guards, no runtime claim)', () => {
+  it('uses local invoice/email areas with only one active paginator and preserves invoice URL state', () => {
+    expect(page).toContain("readonly areaView = signal<'invoices' | 'not_processed' | 'history'>('invoices')");
+    expect(page).toContain("@if (areaView() === 'invoices')");
+    expect(page).toContain('[isActive]="areaView() !== \'invoices\'"');
+    expect(page).toContain("No procesados ({{ emailNotProcessedCount() }})");
+    expect(page).toContain('Historial de correo');
+    expect((page.match(/<app-stats\b/g) ?? []).length).toBe(4);
+    expect((page.match(/<app-pagination\b/g) ?? []).length).toBe(1);
+    expect((emailChild.match(/<app-pagination\b/g) ?? []).length).toBe(1);
+    const change = page.match(/setAreaView\(view:[\s\S]*?\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(change).toContain('this.areaView.set(view)');
+    expect(change).not.toContain('navigate');
+    expect(change).not.toContain('form.reset');
+    expect(change).not.toContain('searchValue.set');
+  });
+  it('binds authenticated store context and independent permissions, actual store timezone and safe child outputs', () => {
+    expect(page).toContain('[tenantKey]="tenantKey()" [contextReady]="scopeReady()"');
+    expect(page).toContain('[canImport]="canImportInCurrentScope()" [canConfigure]="canConfigureEmail()" [canSync]="canSyncEmail()"');
+    expect(page).toContain("this.auth.hasPermission('invoicing:received:connections:sync')");
+    expect(page).toContain('[timezone]="timezone()"');
+    expect(page).toContain("readonly timezone = computed(() => this.storeSettings.settings()?.general?.timezone ?? 'America/Bogota')");
+    expect(page).toContain('(documentRequested)="onEmailDocumentRequested($event)"');
+    expect(page).toContain('this.emailMessages()?.tenantKey() !== this.tenantKey()');
+    expect(emailChild).toContain('this.detail()?.parts.some((part) => part.document_id === id)');
+    expect(page).not.toContain('rejected_raw');
+    expect(page).not.toContain('transport_facts');
+  });
+  it('protects buffers and drafts on tabs, and closes wizard only on explicit history intent', () => {
+    expect(page).toContain('[disabled]="areaChangeLocked()"');
+    expect(page).toContain('(protectedChange)="emailMessagesProtected.set($event)"');
+    expect(page).toContain("this.emailMessagesProtected() || this.areaView() !== 'invoices'");
+    expect(page).toContain('(historyRequested)="onEmailHistoryRequested()"');
+    const completed = page.match(/onEmailCompleted\(\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(completed).not.toContain('emailWizardOpen.set(false)');
+    const history = page.match(/onEmailHistoryRequested\(\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(history).toContain('wizard.busy()');
+    expect(history).toContain('wizard.tenantKey() !== this.tenantKey()');
+    expect(history).toContain('this.emailWizardOpen.set(false)');
+    expect(history).toContain("this.areaView.set('not_processed')");
+  });
+  it('uses an honest desktop DIAN badge and exactly one composed mobile attention badge with POS and source labels', () => {
+    expect(page).toContain("label: 'Verificación DIAN', badge: true");
+    expect(page).toContain('badgeTransform: receivedDianLabel');
+    expect(page).toContain("badgeKey: 'inbox_state', badgeConfig: this.inboxBadgeConfig, badgeTransform: receivedMobileInboxLabel");
+    expect(page).toContain("receivedIsElectronicPos(doc) ? 'Documento POS electrónico'");
+    expect(page).toContain('receivedDocumentSourceLabel(row)');
+    expect(page).not.toContain("badgeKey: 'dian_validation_status'");
+  });
+  it('keeps the exhaustive 32 reason-code mirror aligned with the backend closed catalog', () => {
+    const codes = (source: string, name: string) => [...(source.match(new RegExp(name + ' = \\[([\\s\\S]*?)\\] as const'))?.[1] ?? '').matchAll(/'([A-Z_]+)'/g)].map((match) => match[1]);
+    const backend = codes(backendEmailTypes, 'DOCUMENT_EMAIL_REASON_CODES');
+    expect(backend).toHaveLength(32);
+    expect(codes(emailTypes, 'RECEIVED_EMAIL_REASON_CODES')).toEqual(backend);
+  });
+});
+
+
+describe('email manual-import fallback selector (source contract, not browser QA)', () => {
+  it('offers the three existing import paths without using the rejected email attachments', () => {
+    expect(page).toContain('title="Importar manualmente"');
+    expect(page).toContain('(clicked)="chooseManualImport(\'xml\')">Importar XML');
+    expect(page).toContain('(clicked)="chooseManualImport(\'scan\')">Escanear PDF/foto');
+    expect(page).toContain('(clicked)="chooseManualImport(\'manual\')">Capturar manualmente');
+    expect(page).toContain('No usamos ni transferimos los adjuntos rechazados del correo.');
+    expect(page).toContain("viewChild<ElementRef<HTMLInputElement>>('xmlInput')");
+    expect((page.match(/#xmlInput\b/g) ?? []).length).toBe(1);
+    expect(page).toContain('this.manualImportOptionsContext() === this.writeContext()');
+    expect(page).toContain('if (!this.canUseManualImportOptions()) return;');
+    expect(page).toContain('context !== this.writeContext()) return;');
+    const choose = page.match(/chooseManualImport\(kind:[\s\S]*?\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(choose.indexOf('this.closeManualImportOptions()')).toBeLessThan(choose.indexOf('this.scanImportOpen.set(true)'));
+    expect(choose.indexOf('this.closeManualImportOptions()')).toBeLessThan(choose.indexOf('this.manualFormOpen.set(true)'));
+    expect(choose).toContain('input.click()');
+    expect(choose).not.toContain('row.');
+    expect(choose).not.toContain('bytes');
+    expect(page).toContain('|| this.manualImportOptionsOpen()');
+    expect(page).toContain('(cancel)="closeManualImportOptions()" (closed)="closeManualImportOptions()"');
   });
 });
