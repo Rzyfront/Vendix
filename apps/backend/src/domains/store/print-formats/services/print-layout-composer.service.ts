@@ -1785,25 +1785,27 @@ export class PrintLayoutComposerService {
     const mRight = paper.margin_right_mm ?? paper.margin_mm ?? defaultMm;
     const mBottom = paper.margin_bottom_mm ?? paper.margin_mm ?? defaultMm;
     const mLeft = paper.margin_left_mm ?? paper.margin_mm ?? defaultMm;
-    const maxMargin = Math.max(mTop, mRight, mBottom, mLeft);
-
-    let pageSize: string;
-    if (paper.format === 'custom') {
-      const w = Number(paper.width_mm) || 80;
-      const h = Number(paper.height_mm) || w;
-      pageSize = `${w}mm ${h}mm`;
-    } else {
-      try {
-        pageSize = resolvePaperDefinition(paper.format).css_page_size;
-      } catch {
-        try {
-          pageSize = getPaperGeometry(paper.format as PaperFormat).css_page_size;
-        } catch {
-          pageSize = paper.is_roll ? `${paper.width_mm}mm auto` : paper.format;
-        }
-      }
-    }
-    const margin = maxMargin > 0 ? `${maxMargin}mm` : '0';
+    const knownPaper = paper.format === 'custom'
+      ? null
+      : (() => {
+          try {
+            return resolvePaperDefinition(paper.format);
+          } catch {
+            try {
+              return getPaperGeometry(paper.format as PaperFormat);
+            } catch {
+              return null;
+            }
+          }
+        })();
+    const paperWidth = (knownPaper?.width_mm ?? Number(paper.width_mm)) || 80;
+    const paperHeight = (knownPaper?.height_mm ?? Number(paper.height_mm)) || paperWidth;
+    const isLandscape = !paper.is_roll && paper.orientation === 'landscape';
+    const pageWidth = isLandscape ? paperHeight : paperWidth;
+    const pageHeight = isLandscape ? paperWidth : paperHeight;
+    const pageSize = paper.is_roll
+      ? `${paperWidth}mm auto`
+      : `${pageWidth}mm ${pageHeight}mm`;
 
     return `<!DOCTYPE html>
 <html lang="es">
@@ -1813,7 +1815,7 @@ export class PrintLayoutComposerService {
   <style>
     @page {
       size: ${pageSize};
-      margin: ${margin};
+      margin: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
     }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff !important; }
@@ -1830,9 +1832,13 @@ export class PrintLayoutComposerService {
     }
     .print-container {
       width: 100%;
-      max-width: ${paper.is_roll ? `${paper.width_mm}mm` : '100%'};
+      max-width: ${paper.is_roll ? `${paperWidth}mm` : '100%'};
       margin: 0 auto;
-      padding: ${paper.is_roll ? '4px' : '8px'};
+      padding: 0;
+    }
+    @media print {
+      body { padding: 0; }
+      .print-container { padding: 0; }
     }
     .company-block {
       margin-top: 4px;

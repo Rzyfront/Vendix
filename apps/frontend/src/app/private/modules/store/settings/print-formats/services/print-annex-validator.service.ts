@@ -55,6 +55,29 @@ export class PrintAnnexValidatorService {
 
     const rules: PrintAnnexValidationRule[] = [];
 
+    if (formatType === 'pos_sale_ticket') {
+      const customTemplate = definition.custom_template;
+      const usesCustomTemplate = typeof customTemplate === 'string' && customTemplate.trim().length > 0;
+      const hasDisclaimerToken = usesCustomTemplate && /\{\{document\.non_fiscal_disclaimer\}\}/.test(customTemplate);
+      const structuredDisclaimerIsEnabled = !usesCustomTemplate && sections.some(
+        (section) => section.type === 'footer' && section.enabled === true &&
+          section.fields?.some((field) => field.id === 'f_disclaimer' && field.enabled === true),
+      );
+
+      rules.push({
+        id: 'pos_non_fiscal_disclaimer',
+        category: 'documento',
+        name: 'Leyenda No Fiscal del Ticket POS',
+        description: usesCustomTemplate
+          ? 'La plantilla personalizada debe incluir el token {{document.non_fiscal_disclaimer}}.'
+          : 'Activa el pie de página y el campo «Leyenda No Fiscal» para indicar que este ticket no es factura electrónica.',
+        reference: 'Requisito de guardado del formato POS',
+        severity: 'error',
+        passed: usesCustomTemplate ? hasDisclaimerToken : structuredDisclaimerIsEnabled,
+        fixAction: { label: 'Revisar leyenda del ticket', sectionId: 'sec_footer', fieldKey: 'f_disclaimer' },
+      });
+    }
+
     // ─────────────────────────────────────────────────────────
     // 1. Emisor (Obligado a facturar) — Art. 617 lit a, b, d
     // ─────────────────────────────────────────────────────────

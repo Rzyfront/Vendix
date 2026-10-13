@@ -13,6 +13,7 @@ import { ButtonComponent } from '../../../../../../../shared/components/button/b
 import { PrintFormatsFacade } from '../../services/print-formats.facade';
 import { DocumentPrintService } from '../../../../../../../shared/services/print/document-print.service';
 import { MmToPxService } from '../../../../../../../shared/services/print/mm-to-px.service';
+import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
 
 @Component({
   selector: 'app-print-live-preview',
@@ -87,10 +88,10 @@ import { MmToPxService } from '../../../../../../../shared/services/print/mm-to-
             <iframe
               #previewIframe
               id="print-preview-iframe"
-              [srcdoc]="facade.previewHtml() || previewPlaceholderHtml"
+              [srcdoc]="facade.safePreviewHtml() || previewPlaceholderHtml"
               class="w-full h-full border-0 min-h-[520px] bg-white block"
               [style.width]="'100%'"
-              sandbox="allow-same-origin allow-scripts"
+              sandbox="allow-same-origin"
             ></iframe>
           </div>
         </div>
@@ -134,7 +135,13 @@ export class PrintLivePreviewComponent {
 
   readonly containerWidth = computed(() => {
     const isRoll = this.facade.previewIsRoll();
-    const widthMm = this.facade.previewWidthMm();
+    const paper = this.facade.draftDefinition()?.paper;
+    const geometry = paper ? PAPER_GEOMETRY[paper.format as keyof typeof PAPER_GEOMETRY] : null;
+    const width = geometry?.width_mm ?? paper?.width_mm ?? this.facade.previewWidthMm();
+    const height = geometry?.height_mm ?? paper?.height_mm;
+    const widthMm = !isRoll && paper?.orientation === 'landscape' && height != null
+      ? height
+      : width;
     const box = this.mmToPxService.paperToContainerPx({
       width_mm: widthMm,
       is_roll: isRoll,
@@ -145,10 +152,17 @@ export class PrintLivePreviewComponent {
   readonly containerHeight = computed(() => {
     const isRoll = this.facade.previewIsRoll();
     if (isRoll) return 'auto';
-    const widthMm = this.facade.previewWidthMm();
+    const paper = this.facade.draftDefinition()?.paper;
+    const geometry = paper ? PAPER_GEOMETRY[paper.format as keyof typeof PAPER_GEOMETRY] : null;
+    const width = geometry?.width_mm ?? paper?.width_mm ?? this.facade.previewWidthMm();
+    const height = geometry?.height_mm ?? paper?.height_mm ?? width;
+    const isLandscape = paper?.orientation === 'landscape';
+    const pageWidth = isLandscape ? height : width;
+    const heightMm = isLandscape ? width : height;
     const box = this.mmToPxService.paperToContainerPx({
-      width_mm: widthMm,
+      width_mm: pageWidth,
       is_roll: false,
+      height_mm: heightMm,
     });
     return box.height_px ? `${box.height_px}px` : 'auto';
   });
@@ -168,7 +182,7 @@ export class PrintLivePreviewComponent {
   async printTest(): Promise<void> {
     const html = this.facade.previewHtml();
     if (html) {
-      await this.printService.printGatewayHtml(html);
+      await this.printService.printGatewayHtml(html, this.facade.draftDefinition()?.paper.copies ?? 1);
     }
   }
 }

@@ -4,7 +4,7 @@
  *
  *   1. paper.margin_mm (legacy, v1) — still honored when per-side absent
  *   2. paper.margin_top_mm / right / bottom / left (v2) — drive per-side
- *      body padding; @page margin uses the max
+ *      body padding in preview and @page margins in print
  *   3. paper.format === 'custom' — emits `${width_mm}mm ${height_mm}mm`
  *   4. definition.logo.url — fallback when data.store.logo_url is empty
  *   5. definition.company_block.fields — rendered ONLY for fiscal formats
@@ -85,10 +85,11 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
       ],
     };
     const html = composer.compose(def, baseData);
-    // @page margin: max(top/right/bottom/left) = 10mm (todos heredan de margin_mm)
-    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*10mm/);
+    // @page receives physical margins once; body padding is screen-preview only.
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*10mm\s+10mm\s+10mm\s+10mm/);
     // Body padding per-side: todos 10mm
     expect(html).toMatch(/padding:\s*10mm\s*10mm\s*10mm\s*10mm/);
+    expect(html).toMatch(/@media print\s*\{\s*body\s*\{\s*padding:\s*0;\s*\}\s*\.print-container\s*\{\s*padding:\s*0;/);
   });
 
   it('2. v2 paper (per-side margins) — body padding uses all 4 sides', () => {
@@ -106,8 +107,8 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
       ],
     };
     const html = composer.compose(def, baseData);
-    // @page margin: max(5, 12, 8, 20) = 20mm
-    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*20mm/);
+    // Asymmetric sides are retained; there is no max-margin expansion.
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*5mm\s+12mm\s+8mm\s+20mm/);
     // Body padding per-side respeta los 4 lados en orden CSS (T R B L)
     expect(html).toMatch(/padding:\s*5mm\s*12mm\s*8mm\s*20mm/);
   });
@@ -129,6 +130,43 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
     };
     const html = composer.compose(def, baseData);
     expect(html).toMatch(/@page\s*\{[\s\S]*size:\s*100mm\s*200mm/);
+  });
+
+  it.each([
+    ['a4', 210, 297],
+    ['letter', 215.9, 279.4],
+    ['half_letter', 215.9, 139.7],
+  ] as const)('uses canonical %s sheet geometry and swaps it for landscape', (format, width, height) => {
+    const portrait = composer.compose({
+      v: 2,
+      paper: { format, width_mm: 80, is_roll: false, margin_mm: 0, copies: 1, orientation: 'portrait' },
+      sections: [],
+    } as PrintFormatDefinition, baseData);
+    const landscape = composer.compose({
+      v: 2,
+      paper: { format, width_mm: 80, is_roll: false, margin_mm: 0, copies: 1, orientation: 'landscape' },
+      sections: [],
+    } as PrintFormatDefinition, baseData);
+    expect(portrait).toContain(`size: ${width}mm ${height}mm;`);
+    expect(landscape).toContain(`size: ${height}mm ${width}mm;`);
+    expect(portrait).toMatch(/@page\s*\{[\s\S]*margin:\s*0mm\s+0mm\s+0mm\s+0mm/);
+  });
+
+  it('rotates custom sheets but ignores orientation for thermal rolls', () => {
+    const custom = composer.compose({
+      v: 2,
+      paper: { format: 'custom', width_mm: 100, height_mm: 200, is_roll: false, margin_mm: 0, copies: 1, orientation: 'landscape' },
+      sections: [],
+    } as PrintFormatDefinition, baseData);
+    const roll = composer.compose({
+      v: 2,
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1, orientation: 'landscape' },
+      sections: [],
+    } as PrintFormatDefinition, baseData);
+    expect(custom).toContain('size: 200mm 100mm;');
+    expect(roll).toContain('size: 80mm auto;');
+    expect(roll).toContain('font-family: Arial, Helvetica, sans-serif;');
+    expect(roll).toContain('color: #000;');
   });
 
   it('4. definition.logo.url set + empty data.store.logo_url — logo rendered from definition', () => {
@@ -601,7 +639,7 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
     };
     const html = composer.compose(def, richData);
     expect(html).toMatch(/padding:\s*0mm\s*0mm\s*0mm\s*0mm/);
-    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*0;/);
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*0mm\s+0mm\s+0mm\s+0mm/);
   });
 
   it('5. hoja sin márgenes — sigue dando 10mm (sin regresión en el carril de hoja)', () => {

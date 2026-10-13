@@ -162,6 +162,41 @@ describe('PrintFormatDefinition v2 — AJV schema validation', () => {
     expect(ok).toBe(true);
   });
 
+  it.each([true, false])(
+    'accepts paper.auto_print_after_pos_sale=%s',
+    (autoPrintAfterPosSale) => {
+      const def = JSON.parse(JSON.stringify(validDefinition));
+      def.paper.auto_print_after_pos_sale = autoPrintAfterPosSale;
+
+      expect(validate(def)).toBe(true);
+    },
+  );
+
+  it('accepts paper without auto_print_after_pos_sale and leaves it absent', () => {
+    const def = JSON.parse(JSON.stringify(validDefinition));
+
+    expect(validate(def)).toBe(true);
+    expect(def.paper).not.toHaveProperty('auto_print_after_pos_sale');
+  });
+
+  it.each(['true', {}, 1])(
+    'rejects invalid paper.auto_print_after_pos_sale value %j',
+    (autoPrintAfterPosSale) => {
+      const def = JSON.parse(JSON.stringify(validDefinition));
+      def.paper.auto_print_after_pos_sale = autoPrintAfterPosSale;
+
+      expect(validate(def)).toBe(false);
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            instancePath: '/paper/auto_print_after_pos_sale',
+            keyword: 'type',
+          }),
+        ]),
+      );
+    },
+  );
+
   it('2. rejects paper.width_mm=0 (minimum is 58)', () => {
     const def = JSON.parse(JSON.stringify(validDefinition));
     def.paper = { ...(def.paper as object), width_mm: 0 };

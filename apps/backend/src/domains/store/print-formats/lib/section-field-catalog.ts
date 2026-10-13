@@ -101,6 +101,7 @@ const TOTALS_FIELDS: SectionFieldCatalogEntry[] = [
 ];
 
 const FOOTER_FIELDS: SectionFieldCatalogEntry[] = [
+  { id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda No Fiscal', format: 'text', position: 'center' },
   { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje de Despedida', format: 'text', position: 'center' },
   { id: 'f_notes', key: 'document.notes', label: 'Notas del Documento', format: 'text', position: 'center' },
   { id: 'f_terms', key: 'document.terms_and_conditions', label: 'Términos y Condiciones', format: 'text', position: 'center' },

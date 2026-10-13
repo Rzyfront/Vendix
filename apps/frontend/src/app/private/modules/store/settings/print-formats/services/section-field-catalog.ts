@@ -1,4 +1,4 @@
-import { PrintFieldDefinition } from '../../../../../../core/models/print-formats.model';
+import { PrintFieldDefinition, PrintFormatDefinition } from '../../../../../../core/models/print-formats.model';
 
 /**
  * Mirror FE del catálogo BE (`print-formats/lib/section-field-catalog.ts`).
@@ -88,6 +88,7 @@ const TOTALS: CatalogField[] = [
 ];
 
 const FOOTER: CatalogField[] = [
+  { id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda No Fiscal', format: 'text', position: 'center' },
   { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje de Despedida', format: 'text', position: 'center' },
   { id: 'f_notes', key: 'document.notes', label: 'Notas del Documento', format: 'text', position: 'center' },
   { id: 'f_terms', key: 'document.terms_and_conditions', label: 'Términos y Condiciones', format: 'text', position: 'center' },
@@ -182,4 +183,21 @@ export function mergeSectionFields(
   const seenIds = new Set(stored.map((f) => f.id));
   const missing = catalog.filter((c) => !seenIds.has(c.id));
   return [...missing.map((c) => ({ ...c }))];
+}
+
+/** Prepara un borrador POS legacy sin modificar la definición recibida. */
+export function preparePosSaleTicketDraft(definition: PrintFormatDefinition): { definition: PrintFormatDefinition; repaired: boolean } {
+  const draft = JSON.parse(JSON.stringify(definition)) as PrintFormatDefinition;
+  if (draft.custom_template?.trim()) return { definition: draft, repaired: false };
+
+  const footer = draft.sections.find((section) => section.type === 'footer' && section.enabled === true);
+  if (!footer) return { definition: draft, repaired: false };
+  if (footer.fields?.some((field) => field.id === 'f_disclaimer')) {
+    return { definition: draft, repaired: false };
+  }
+
+  const disclaimer = SECTION_FIELD_CATALOG['footer'].find((field) => field.id === 'f_disclaimer');
+  if (!disclaimer) return { definition: draft, repaired: false };
+  footer.fields = [...(footer.fields ?? []), { ...disclaimer, enabled: true }];
+  return { definition: draft, repaired: true };
 }

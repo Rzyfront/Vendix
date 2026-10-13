@@ -41,6 +41,7 @@ const FONT_FAMILIES: ReadonlyArray<{ value: string; label: string }> = [
           <select
             [ngModel]="fontFamilyPreset()"
             (ngModelChange)="setFontFamilyPreset($event)"
+            [disabled]="isThermalRoll()"
             class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none mb-1"
           >
             @for (f of fontFamilies; track f.value) {
@@ -53,11 +54,17 @@ const FONT_FAMILIES: ReadonlyArray<{ value: string; label: string }> = [
               type="text"
               [ngModel]="styles().font_family ?? ''"
               (ngModelChange)="updateFontFamily($event)"
+              [disabled]="isThermalRoll()"
               placeholder="CSS font-family"
               class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs font-mono text-text-primary focus:border-primary-500 focus:outline-none"
             />
           }
         </div>
+        @if (isThermalRoll()) {
+          <p class="text-[10px] text-text-tertiary -mt-2">
+            En rollos térmicos se fuerza Arial y negro para conservar la legibilidad; estos controles no aplican.
+          </p>
+        }
 
         <!-- Font size -->
         <div>
@@ -100,12 +107,14 @@ const FONT_FAMILIES: ReadonlyArray<{ value: string; label: string }> = [
               type="color"
               [ngModel]="styles().primary_color ?? '#111827'"
               (ngModelChange)="updatePrimaryColor($event)"
+              [disabled]="isThermalRoll()"
               class="w-8 h-8 rounded border border-border bg-surface-secondary cursor-pointer p-0.5"
             />
             <input
               type="text"
               [ngModel]="styles().primary_color ?? '#111827'"
               (ngModelChange)="updatePrimaryColor($event)"
+              [disabled]="isThermalRoll()"
               class="flex-1 px-2 py-1 bg-surface-secondary border border-border rounded text-xs font-mono text-text-primary focus:border-primary-500 focus:outline-none uppercase"
             />
           </div>
@@ -211,6 +220,11 @@ export class PrintStylesPanelComponent {
     return this.fontFamilyPreset() === '__custom__';
   });
 
+  isThermalRoll(): boolean {
+    const paper = this.definition().paper;
+    return paper.is_roll || paper.format === 'thermal_58' || paper.format === 'thermal_80';
+  }
+
   emit(next: PrintFormatDefinition): void {
     this.definitionChanged.emit(next);
   }
@@ -221,6 +235,7 @@ export class PrintStylesPanelComponent {
   }
 
   setFontFamilyPreset(value: string): void {
+    if (this.isThermalRoll()) return;
     if (value === '__custom__') {
       // Keep the current custom value; if none, seed with system-ui.
       const cur = this.styles().font_family;
@@ -231,6 +246,7 @@ export class PrintStylesPanelComponent {
   }
 
   updateFontFamily(value: string): void {
+    if (this.isThermalRoll()) return;
     this.withStyles({ font_family: value });
   }
 
@@ -240,6 +256,7 @@ export class PrintStylesPanelComponent {
   }
 
   updatePrimaryColor(color: string): void {
+    if (this.isThermalRoll()) return;
     this.withStyles({ primary_color: color });
   }
 
