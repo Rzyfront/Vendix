@@ -81,7 +81,7 @@ export type TooltipColor =
           visibility 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
         transform: translate3d(0, -2px, 0) scale(0.95);
         pointer-events: none;
-        filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 15%, transparent));
+        filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
         box-sizing: border-box;
       }
 
@@ -100,8 +100,8 @@ export type TooltipColor =
         color: var(--tooltip-text);
         border: none;
         box-shadow:
-          0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 15%, transparent),
-          0 2px 4px color-mix(in srgb, var(--color-neutral-900, #111827) 10%, transparent);
+          0 4px 12px rgba(0, 0, 0, 0.15),
+          0 2px 4px rgba(0, 0, 0, 0.1);
         border-radius: 6px;
         padding: var(--tooltip-padding);
         font-size: var(--tooltip-font-size);
@@ -140,9 +140,9 @@ export type TooltipColor =
         bottom: 0;
         background: linear-gradient(
           135deg,
-          color-mix(in srgb, var(--color-surface, #fff) 10%, transparent) 0%,
-          color-mix(in srgb, var(--color-surface, #fff) 5%, transparent) 50%,
-          transparent 100%
+          rgba(255, 255, 255, 0.1) 0%,
+          rgba(255, 255, 255, 0.05) 50%,
+          rgba(255, 255, 255, 0) 100%
         );
         pointer-events: none;
       }
@@ -269,20 +269,20 @@ export type TooltipColor =
         white-space: normal;
         background: linear-gradient(
           135deg,
-          color-mix(in srgb, var(--color-surface, #fff) 94%, var(--color-primary, #6d28d9)) 0%,
-          color-mix(in srgb, var(--color-surface, #fff) 90%, var(--color-primary, #6d28d9)) 50%,
-          color-mix(in srgb, var(--color-surface, #fff) 94%, var(--color-primary, #6d28d9)) 100%
+          rgba(var(--color-primary-rgb), 0.85) 0%,
+          rgba(var(--color-primary-rgb), 0.95) 50%,
+          rgba(var(--color-primary-rgb), 0.85) 100%
         );
         background-size: 200% 200%;
         animation: ai-tooltip-shimmer 3s ease-in-out infinite;
-        color: var(--color-text-primary, #111827);
-        border: 1px solid color-mix(in srgb, var(--color-primary, #6d28d9) 24%, transparent);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 8px;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
         box-shadow:
-          0 4px 12px color-mix(in srgb, var(--color-neutral-900, #111827) 25%, transparent),
-          inset 0 1px 1px color-mix(in srgb, var(--color-surface, #fff) 15%, transparent);
+          0 4px 12px rgba(0, 0, 0, 0.25),
+          inset 0 1px 1px rgba(255, 255, 255, 0.15);
       }
 
       .tooltip-container[data-color='ai'] .tooltip-content::before {
@@ -303,7 +303,7 @@ export type TooltipColor =
         width: 0;
         height: 0;
         border: 6px solid transparent;
-        filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--color-neutral-900, #111827) 10%, transparent));
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
       }
 
       .tooltip-container[data-position='top'] .tooltip-arrow {
