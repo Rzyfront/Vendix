@@ -1385,14 +1385,19 @@ export class PurchaseOrdersService {
     // en esta OC) intentaba crear un duplicado y moría en P2002.
     const normalizedBarcode =
       typeof item.barcode === 'string' ? item.barcode.trim() : '';
+    // Sin SKU no se busca por SKU: `sku: undefined` hace que Prisma ignore
+    // el filtro y la línea se uniría a cualquier producto de la tienda.
+    const normalizedSku = typeof item.sku === 'string' ? item.sku.trim() : '';
     const existingProduct =
-      (await tx.products.findFirst({
-        where: {
-          sku: item.sku,
-          store_id: storeId,
-          state: { not: 'archived' },
-        },
-      })) ??
+      (normalizedSku
+        ? await tx.products.findFirst({
+            where: {
+              sku: normalizedSku,
+              store_id: storeId,
+              state: { not: 'archived' },
+            },
+          })
+        : null) ??
       (normalizedBarcode
         ? await tx.products.findFirst({
             where: {
