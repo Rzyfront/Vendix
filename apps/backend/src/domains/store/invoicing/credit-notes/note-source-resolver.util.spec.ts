@@ -67,6 +67,14 @@ function noteItem(
 }
 
 describe('note-source-resolver.util', () => {
+  it('accepts the immutable profile-version snapshot as source evidence without consulting live settings', () => {
+    const profile_snapshot = { config: { aiu: { components: { administracion: 10, imprevistos: 5, utilidad: 85 }, components_basis: 'contract' } } };
+    const source = sourceInvoice({ profile_snapshot });
+
+    expect(resolveNoteSourceLines(source)[0]?.source).toBe(source.invoice_items[0]);
+    expect(source.profile_snapshot).toBe(profile_snapshot);
+  });
+
   it('rejects missing/foreign source ids and duplicate source selections as SOURCE', () => {
     const source = sourceInvoice();
     expect(() => resolveNoteSourceLines(source, [noteItem(999)])).toThrow(

@@ -826,6 +826,12 @@ export interface InvoiceCalculatorResult {
   divergences: InvoiceCalculatorDivergence[];
   /** Resumen AIU. Ausente cuando el documento no es AIU. */
   aiu?: CalculatedAiu;
+  /**
+   * Tax rows copied from the immutable invoice snapshot in reversal mode.
+   * Unlike `header_taxes`, these rows are not aggregated and retain their
+   * original source-line linkage through `line_index`.
+   */
+  trusted_snapshot_tax_rows?: Array<CalculatedTax & { line_index?: number }>;
 }
 
 @Injectable()
@@ -1020,6 +1026,27 @@ export class InvoiceCalculatorService {
         );
       }),
     ];
+    const exact_tax_rows: Array<{ tax: TrustedInvoiceReversalTax; line_index?: number }> =
+      snapshot.taxes.map((tax) => ({ tax, line_index: tax.line_index }));
+    snapshot.lines.forEach((line, index) => {
+      const hasSnapshotRows = snapshot.taxes.some((tax) => tax.line_index === index);
+      if (!hasSnapshotRows) {
+        (line.taxes ?? []).forEach((tax) => {
+          exact_tax_rows.push({ tax, line_index: index });
+        });
+      }
+    });
+    const trusted_snapshot_tax_rows = exact_tax_rows.map(({ tax, line_index }) => {
+      const line = line_index === undefined ? undefined : snapshot.lines[line_index];
+      const line_inclusive = line?.is_inclusive ??
+        (line_index === undefined
+          ? false
+          : (line?.taxes ?? []).some((row) => row.is_inclusive === true));
+      return {
+        ...this.mapTrustedSnapshotTax(tax, line_inclusive),
+        ...(line_index === undefined ? {} : { line_index }),
+      };
+    });
     const header_taxes = this.aggregateTaxRows(all_tax_rows);
     const tax_schemes = this.aggregateTaxSchemes(header_taxes);
     const total_before_tax = dianAmount(snapshot.subtotal_amount);
@@ -1036,6 +1063,7 @@ export class InvoiceCalculatorService {
     return {
       lines,
       header_taxes,
+      trusted_snapshot_tax_rows,
       tax_schemes,
       withholdings: [],
       divergences: [],

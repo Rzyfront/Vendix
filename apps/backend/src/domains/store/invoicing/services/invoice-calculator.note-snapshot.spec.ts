@@ -139,6 +139,13 @@ describe('InvoiceCalculatorService trusted snapshot reversal', () => {
       '19.00',
       '8.00',
     ]);
+    expect(result.trusted_snapshot_tax_rows?.map(({ line_index, tax_amount }) => ({
+      line_index,
+      tax_amount,
+    }))).toEqual([
+      { line_index: 0, tax_amount: '19.00' },
+      { line_index: 0, tax_amount: '8.00' },
+    ]);
     expect(result.tax_schemes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ dian_tax_code: '01', tax_amount: '19.00' }),
@@ -146,6 +153,38 @@ describe('InvoiceCalculatorService trusted snapshot reversal', () => {
       ]),
     );
     expect(result.totals.tax_amount).toBe('27.00');
+  });
+
+  it('returns raw source tax rows once, using per-line fallback only when the snapshot has no linked rows', () => {
+    const sourceTax = tax({ line_index: 0, tax_rate: 19, taxable_amount: 100, tax_amount: 19 });
+    const fallbackOnly = calculator.calculate({
+      items: [],
+      mode: 'trusted_snapshot_reversal',
+      trusted_snapshot: {
+        lines: [{ quantity: 1, unit_price: 119, discount_amount: 0, tax_amount: 19, total_amount: 119, line_extension_amount: 100, taxes: [sourceTax] }],
+        taxes: [],
+        subtotal_amount: 100,
+        discount_amount: 0,
+        tax_amount: 19,
+        total_amount: 119,
+      },
+    });
+    expect(fallbackOnly.trusted_snapshot_tax_rows).toHaveLength(1);
+    expect(fallbackOnly.trusted_snapshot_tax_rows?.[0]).toMatchObject({ line_index: 0, tax_amount: '19.00' });
+
+    const linkedWins = calculator.calculate({
+      items: [],
+      mode: 'trusted_snapshot_reversal',
+      trusted_snapshot: {
+        lines: [{ quantity: 1, unit_price: 119, discount_amount: 0, tax_amount: 19, total_amount: 119, line_extension_amount: 100, taxes: [sourceTax] }],
+        taxes: [sourceTax],
+        subtotal_amount: 100,
+        discount_amount: 0,
+        tax_amount: 19,
+        total_amount: 119,
+      },
+    });
+    expect(linkedWins.trusted_snapshot_tax_rows).toHaveLength(1);
   });
 
   it('reports missing trusted snapshot as a typed divergence, not an exception', () => {

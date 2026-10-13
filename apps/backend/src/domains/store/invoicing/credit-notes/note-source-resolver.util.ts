@@ -33,6 +33,7 @@ export interface NoteSourceItemSnapshot {
   serial_numbers_snapshot: string | null;
   aiu_component: string | null;
   financial_source_line_id: number | null;
+  applied_price_tier_name?: string | null;
 }
 
 /** Persisted tax snapshot. A NULL item id denotes a document-level row. */
@@ -65,6 +66,8 @@ export interface NoteSourceInvoiceSnapshot {
   aiu_minimum_percent?: NoteSourceNumeric | null;
   aiu_taxable_matrix?: unknown;
   metadata?: unknown;
+  /** Append-only invoice-profile version captured with the source invoice. */
+  profile_snapshot?: { config: unknown } | null;
 }
 
 export interface ResolvedNoteSourceItem {
@@ -83,6 +86,7 @@ export interface ResolvedNoteSourceItem {
   serial_numbers_snapshot: string | null;
   aiu_component: string | null;
   financial_source_line_id: number | null;
+  applied_price_tier_name?: string | null;
 }
 
 export interface ResolvedNoteSourceLine {
@@ -741,6 +745,7 @@ export function resolveNoteSourceLines(
       serial_numbers_snapshot: line.serial_numbers_snapshot,
       aiu_component: line.aiu_component,
       financial_source_line_id: line.financial_source_line_id,
+      applied_price_tier_name: line.applied_price_tier_name ?? null,
     };
     const calculator_input: InvoiceCalculatorLineInput = {
       description: line.description,
