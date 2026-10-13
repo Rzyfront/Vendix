@@ -77,7 +77,7 @@ export class ReceivedDocumentsContextService {
         store_id: storeId,
       });
       if (candidateId != null) {
-        const entity = await this.prisma.accounting_entities.findFirst({
+        const entity = await this.prisma.withoutScope().accounting_entities.findFirst({
           where: {
             id: candidateId,
             organization_id: organizationId,

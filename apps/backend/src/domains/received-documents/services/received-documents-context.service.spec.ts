@@ -120,10 +120,13 @@ describe('ReceivedDocumentsContextService', () => {
 describe('ReceivedDocumentsContextService read-only nullable fiscal context', () => {
   let requestSpy: jest.SpyInstance;
   function readHarness(fiscalScope: 'STORE' | 'ORGANIZATION' = 'ORGANIZATION') {
+    const baseClient = {
+      accounting_entities: { findFirst: jest.fn().mockResolvedValue({ id: 8 }), upsert: jest.fn() },
+    };
     const db = {
       organizations: { findFirst: jest.fn().mockResolvedValue({ id: 3 }) },
       stores: { findFirst: jest.fn().mockResolvedValue({ id: 21 }) },
-      accounting_entities: { findFirst: jest.fn().mockResolvedValue({ id: 8 }), upsert: jest.fn() },
+      withoutScope: jest.fn(() => baseClient),
     };
     const fiscalScopes = {
       requireFiscalScope: jest.fn().mockResolvedValue(fiscalScope),
@@ -135,7 +138,7 @@ describe('ReceivedDocumentsContextService read-only nullable fiscal context', ()
     const writerResolver = { resolveForStore: jest.fn(), resolveForOrganization: jest.fn() };
     const service = new ReceivedDocumentsContextService(writerResolver as unknown as FiscalContextResolverService, db as unknown as GlobalPrismaService);
     Object.assign(service, { fiscalScopes, operatingScopes });
-    return { service, db, fiscalScopes, writerResolver };
+    return { service, db, baseClient, fiscalScopes, writerResolver };
   }
   beforeEach(() => { requestSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue(authenticatedRequest); });
   afterEach(() => requestSpy.mockRestore());
@@ -146,10 +149,12 @@ describe('ReceivedDocumentsContextService read-only nullable fiscal context', ()
       organization_id: 3, store_id: 21, accounting_entity_id: 8, actor_id: 55,
       is_organization: false, fiscal_scope: 'ORGANIZATION',
     });
-    expect(h.db.accounting_entities.findFirst).toHaveBeenCalledWith({
+    expect(h.db).not.toHaveProperty('accounting_entities');
+    expect(h.db.withoutScope).toHaveBeenCalledTimes(1);
+    expect(h.baseClient.accounting_entities.findFirst).toHaveBeenCalledWith({
       where: { id: 8, organization_id: 3, store_id: null, scope: 'ORGANIZATION', fiscal_scope: 'ORGANIZATION', is_active: true }, select: { id: true },
     });
-    expect(h.db.accounting_entities.upsert).not.toHaveBeenCalled();
+    expect(h.baseClient.accounting_entities.upsert).not.toHaveBeenCalled();
     expect(h.fiscalScopes.ensureFiscalAccountingEntity).not.toHaveBeenCalled();
     expect(h.writerResolver.resolveForStore).not.toHaveBeenCalled();
     expect(h.writerResolver.resolveForOrganization).not.toHaveBeenCalled();
@@ -159,11 +164,12 @@ describe('ReceivedDocumentsContextService read-only nullable fiscal context', ()
     const missing = readHarness();
     missing.fiscalScopes.findFiscalAccountingEntityId.mockResolvedValue(null);
     expect((await missing.service.resolveStoreRead()).accounting_entity_id).toBeNull();
-    expect(missing.db.accounting_entities.findFirst).not.toHaveBeenCalled();
+    expect(missing.baseClient.accounting_entities.findFirst).not.toHaveBeenCalled();
+    expect(missing.db.withoutScope).not.toHaveBeenCalled();
     const inactive = readHarness();
-    inactive.db.accounting_entities.findFirst.mockResolvedValue(null);
+    inactive.baseClient.accounting_entities.findFirst.mockResolvedValue(null);
     expect((await inactive.service.resolveStoreRead()).accounting_entity_id).toBeNull();
-    expect(inactive.db.accounting_entities.upsert).not.toHaveBeenCalled();
+    expect(inactive.baseClient.accounting_entities.upsert).not.toHaveBeenCalled();
   });
 
   it('rejects a foreign/inactive store before fiscal lookup', async () => {
@@ -196,7 +202,7 @@ describe('ReceivedDocumentsContextService read-only nullable fiscal context', ()
   it('preserves selected operational scope for both fiscal modes and invalid-scope enforcement', async () => {
     const h = readHarness('STORE');
     expect(await h.service.resolveOrganizationRead(21)).toMatchObject({ store_id: 21, accounting_entity_id: 8 });
-    expect(h.db.accounting_entities.findFirst).toHaveBeenCalledWith({
+    expect(h.baseClient.accounting_entities.findFirst).toHaveBeenCalledWith({
       where: { id: 8, organization_id: 3, store_id: 21, scope: 'STORE', fiscal_scope: 'STORE', is_active: true }, select: { id: true },
     });
     h.fiscalScopes.assertValidScopeCombination.mockImplementation(() => { throw new BadRequestException('Invalid scopes'); });
