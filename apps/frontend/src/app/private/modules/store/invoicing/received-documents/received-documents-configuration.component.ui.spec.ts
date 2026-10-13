@@ -121,7 +121,8 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(component).toContain('this.auth.userOrganization()?.id');
     expect(component).toContain('healthLoading()');
     expect(component).toContain('healthError(); as message');
-    expect(component).toContain('!response.success || !this.isValidHealth(response.data)');
+    expect(component).toContain('!this.isValidHealth(response.data)');
+    expect(component).not.toContain('!response.success');
     expect(component).toContain('La respuesta de salud de recepción no tiene un formato válido.');
     expect(component).not.toContain('?.data ?? response');
   });

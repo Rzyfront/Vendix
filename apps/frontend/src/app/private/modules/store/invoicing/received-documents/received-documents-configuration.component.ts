@@ -193,7 +193,7 @@ export class ReceivedDocumentsConfigurationComponent {
       .subscribe({
         next: (response) => {
           if (generation !== this.generation) return;
-          if (!response.success || !this.isValidHealth(response.data)) {
+          if (!this.isValidHealth(response.data)) {
             this.healthError.set('La respuesta de salud de recepción no tiene un formato válido. Reintenta la consulta.');
           } else {
             this.health.set(response.data);

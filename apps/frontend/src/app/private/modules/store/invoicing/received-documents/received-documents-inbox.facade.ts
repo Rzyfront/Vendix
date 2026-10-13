@@ -124,7 +124,7 @@ export class ReceivedDocumentsInboxFacade {
     this.loading.set(initial && this.rows().length === 0);
     this.refreshing.set(true);
     const checkedEnvelope = <T>(result: ApiEnvelope<T>): T => {
-      if (!result.success || result.data == null) throw new Error('Respuesta no disponible.');
+      if (result.data == null) throw new Error('Respuesta no disponible.');
       return result.data;
     };
     this.activeRequest = forkJoin({

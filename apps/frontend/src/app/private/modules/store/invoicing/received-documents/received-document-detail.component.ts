@@ -253,7 +253,7 @@ export class ReceivedDocumentDetailComponent {
       .subscribe({
         next: (response) => {
           if (generation !== this.generation) return;
-          if (!response.success || !response.data || response.data.id !== id) {
+          if (!response.data || response.data.id !== id) {
             this.error.set('La respuesta del documento no tiene un formato válido. Reintenta la consulta.');
             return;
           }
