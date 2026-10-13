@@ -92,7 +92,7 @@ export const invoicingRoutes: Routes = [
                 },
                 {
                     id: 'received-documents',
-                    label: 'Documentos recibidos',
+                    label: 'Buzón de facturas',
                     description: 'Documentos de proveedores pendientes de revisión, conciliación y reconocimiento fiscal.',
                     icon: 'inbox',
                     route: '/admin/invoicing/received-documents',
