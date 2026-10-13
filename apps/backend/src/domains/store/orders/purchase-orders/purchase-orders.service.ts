@@ -959,6 +959,33 @@ export class PurchaseOrdersService {
   }
 
   /**
+   * Busca una variante de la tienda por SKU y, si no, por código de barras
+   * (productos NO archivados). Devuelve `null` si ninguna coincide.
+   */
+  private async findVariantByCode(
+    tx: any,
+    storeId: number,
+    sku: string,
+    barcode: string,
+  ): Promise<{ id: number; product_id: number } | null> {
+    const productScope = { store_id: storeId, state: { not: 'archived' } };
+    const select = { id: true, product_id: true };
+    const bySku = sku
+      ? await tx.product_variants.findFirst({
+          where: { sku, products: productScope },
+          select,
+        })
+      : null;
+    if (bySku) return bySku;
+    return barcode
+      ? ((await tx.product_variants.findFirst({
+          where: { barcode, products: productScope },
+          select,
+        })) ?? null)
+      : null;
+  }
+
+  /**
    * Tienda contra la que se valida el alcance de las categorías de impuesto
    * cuando el contexto no la trae (la puerta de ORGANIZACIÓN llama a `create()`
    * directamente). Replica la cascada que el bloque de alta de productos usa
@@ -1198,6 +1225,8 @@ export class PurchaseOrdersService {
 
       for (const item of createPurchaseOrderDto.items) {
         let finalProductId = item.product_id;
+        let finalVariantId: number | null | undefined =
+          (item as any).product_variant_id;
 
         // If product_id is 0 or missing, and we have name/sku, create the product
         if ((!finalProductId || finalProductId === 0) && item.product_name) {
@@ -1336,6 +1365,22 @@ export class PurchaseOrdersService {
                   },
                 })
               : null);
+
+          // QUI-486 (bulk): un SKU / código de barras puede pertenecer a una
+          // VARIANTE y no a un producto. Solo se consulta si ningún producto
+          // lo reclamó (el producto gana, como siempre). Sin esto la línea caía
+          // al alta de producto y creaba un duplicado con el SKU de la variante.
+          const matchedVariant = existingProduct
+            ? null
+            : await this.findVariantByCode(
+                tx,
+                storeId,
+                typeof item.sku === 'string' ? item.sku.trim() : '',
+                normalizedBarcode,
+              );
+          if (matchedVariant) {
+            finalVariantId = matchedVariant.id;
+          }
 
           const availableForEcommerce = normalizeBool(
             item.available_for_ecommerce ?? true,
@@ -1497,7 +1542,11 @@ export class PurchaseOrdersService {
             allowedTaxCategoryIds.has(id),
           );
 
-          if (existingProduct) {
+          if (matchedVariant) {
+            // La línea compra la variante: se enlaza al producto padre y no se
+            // toca ni se crea ningún producto.
+            finalProductId = matchedVariant.product_id;
+          } else if (existingProduct) {
             finalProductId = existingProduct.id;
             // Update existing product with new metadata if provided
             const productUpdateData: any = {
@@ -1649,6 +1698,34 @@ export class PurchaseOrdersService {
               },
               select: { id: true, name: true, state: true },
             });
+            // Un SKU ocupado por una VARIANTE también es colisión (nunca debería
+            // llegar acá porque la línea se enlaza a la variante, pero el
+            // chequeo cubre `desiredSku` generado/distinto del código de línea).
+            const variantSkuOwner = skuOwner
+              ? null
+              : await tx.product_variants.findFirst({
+                  where: {
+                    sku: desiredSku,
+                    products: { store_id: storeId, state: { not: 'archived' } },
+                  },
+                  select: {
+                    id: true,
+                    products: { select: { id: true, name: true } },
+                  },
+                });
+            if (variantSkuOwner) {
+              throw new VendixHttpException(
+                ErrorCodes.PROD_SKU_COLLISION_001,
+                `El SKU «${desiredSku}» ya está ocupado por una variante del producto «${variantSkuOwner.products.name}» (id ${variantSkuOwner.products.id}) en esta tienda.`,
+                {
+                  sku: desiredSku,
+                  product_id: variantSkuOwner.products.id,
+                  product_name: variantSkuOwner.products.name,
+                  product_variant_id: variantSkuOwner.id,
+                  is_variant: true,
+                },
+              );
+            }
             if (skuOwner) {
               throw new VendixHttpException(
                 ErrorCodes.PROD_SKU_COLLISION_001,
@@ -1775,11 +1852,21 @@ export class PurchaseOrdersService {
         processedItems.push({
           ...item,
           product_id: finalProductId,
+          ...(finalVariantId ? { product_variant_id: finalVariantId } : {}),
           product_name: undefined,
           sku: undefined,
           product_description: undefined,
         });
       }
+
+      // QUI-486 (bulk): la validación temprana solo ve `product_id > 0` del DTO.
+      // Las líneas nuevas (product_id 0) se resuelven por SKU/código en el
+      // bucle de arriba y pueden caer en un producto CON variantes sin variante.
+      // Se re-valida sobre las líneas YA resueltas antes de persistir la OC; el
+      // helper es el mismo, así el mensaje y el código (PO_VARIANT_001) son uno.
+      await this.assertNoBaseLineOnVariantProduct(tx, processedItems, {
+        stage: 'create',
+      });
 
       // FASE 4 — total_amount BRUTO consistente. Antes se sumaba
       // Σ(qty×unit_price) (bruto en modo include-tax, neto en exclude-tax) + un
@@ -5587,6 +5674,33 @@ export class PurchaseOrdersService {
       if (p.barcode) byBarcode.set(p.barcode, p);
     }
 
+    // Variantes: solo cuentan cuando ningún producto reclama el código (el
+    // producto gana, igual que en `create()`).
+    const variantFilters: any[] = [];
+    if (skus.length) variantFilters.push({ sku: { in: skus } });
+    if (barcodes.length) variantFilters.push({ barcode: { in: barcodes } });
+    const variants = variantFilters.length
+      ? await this.prisma.product_variants.findMany({
+          where: {
+            products: { store_id: storeId, state: { not: 'archived' } },
+            OR: variantFilters,
+          },
+          select: {
+            id: true,
+            sku: true,
+            barcode: true,
+            product_id: true,
+            products: { select: { name: true, sku: true, state: true } },
+          },
+        })
+      : [];
+    const variantBySku = new Map<string, (typeof variants)[number]>();
+    const variantByBarcode = new Map<string, (typeof variants)[number]>();
+    for (const v of variants) {
+      if (v.sku) variantBySku.set(v.sku, v);
+      if (v.barcode) variantByBarcode.set(v.barcode, v);
+    }
+
     const conflicts: Array<Record<string, unknown>> = [];
     // Código de barras -> primera línea que NO resolvió a un producto existente.
     const firstLineByBarcode = new Map<string, number>();
@@ -5607,6 +5721,29 @@ export class PurchaseOrdersService {
           product_name: match.name,
           product_sku: match.sku,
           product_state: match.state,
+        });
+        continue;
+      }
+
+      const variantBySkuMatch = line.sku
+        ? variantBySku.get(line.sku)
+        : undefined;
+      const variantMatch =
+        variantBySkuMatch ??
+        (line.barcode ? variantByBarcode.get(line.barcode) : undefined);
+      if (variantMatch) {
+        conflicts.push({
+          line_index: line.line_index,
+          kind: variantBySkuMatch ? 'sku' : 'barcode',
+          sku: line.sku || null,
+          barcode: line.barcode || null,
+          product_id: variantMatch.product_id,
+          product_name: variantMatch.products.name,
+          product_sku: variantMatch.products.sku,
+          product_state: variantMatch.products.state,
+          is_variant: true,
+          product_variant_id: variantMatch.id,
+          variant_sku: variantMatch.sku,
         });
         continue;
       }
