@@ -2,12 +2,12 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsInt,
   IsNumber,
-  IsOptional,
   IsString,
   Max,
   MaxLength,
   Min,
   Validate,
+  ValidateIf,
   ValidationArguments,
   ValidatorConstraint,
   ValidatorConstraintInterface,
@@ -81,7 +81,7 @@ export class CreateInvoiceNoteItemDto {
   })
   unit_price!: number;
 
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @Type(() => Number)
   @IsNumber(
     { maxDecimalPlaces: 2, allowNaN: false, allowInfinity: false },
@@ -99,7 +99,7 @@ export class CreateInvoiceNoteItemDto {
   })
   discount_amount?: number;
 
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(5)

@@ -50,6 +50,8 @@ describe('CreateInvoiceNoteItemDto', () => {
     ['non-finite unit price', { unit_price: Number.POSITIVE_INFINITY }],
     ['unit price with excessive scale', { unit_price: 1.001 }],
     ['negative discount', { discount_amount: -0.01 }],
+    ['null discount', { discount_amount: null }],
+    ['null unit code', { unit_code: null }],
     ['discount outside Decimal(12,2)', { discount_amount: 10000000000 }],
     ['unknown DIAN unit', { unit_code: 'NOT-A-UNIT' }],
   ])('rejects %s', async (_label, replacement) => {
