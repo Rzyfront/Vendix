@@ -33,7 +33,7 @@ export class DocumentEmailGmailCodeService {
     await beforeWrite();
     return this.prisma.$transaction(async (tx) => {
       // Rotation and transport acceptance use this same store lock.
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${ctx.organization_id}:${ctx.store_id}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${ctx.organization_id}:${ctx.store_id}`}))`;
       const current = await tx.document_reception_email_inboxes.findFirst({ where: {
         id: ctx.inbox_id, organization_id: ctx.organization_id, store_id: ctx.store_id, accounting_entity_id: ctx.accounting_entity_id,
         local_part: ctx.local_part, domain: ctx.domain, environment: ctx.environment,

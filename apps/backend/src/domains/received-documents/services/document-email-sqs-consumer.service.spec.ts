@@ -64,7 +64,7 @@ function harness(configOverrides = {}) {
     findFirst: jest.fn(async ({ where }) => matches(inboxRow, where) ? cloneRecord(inboxRow) : null),
     updateMany: jest.fn(async ({ where, data }) => { if (!matches(inboxRow, where)) return { count: 0 }; Object.assign(inboxRow, data); return { count: 1 }; }),
   };
-  const prisma: any = { document_reception_email_messages: message, document_reception_email_inboxes: inbox, $queryRaw: jest.fn().mockResolvedValue([]), $transaction: jest.fn() };
+  const prisma: any = { document_reception_email_messages: message, document_reception_email_inboxes: inbox, $executeRaw: jest.fn().mockResolvedValue(1), $transaction: jest.fn() };
   prisma.$transaction.mockImplementation(async (fn) => fn(prisma));
   const configValues: any = { NODE_ENV: 'development', EMAIL_RECEPTION_ENABLED: 'true', EMAIL_RECEPTION_ENVIRONMENT: 'production', EMAIL_RECEPTION_DOMAIN: domain, EMAIL_RECEPTION_SNS_TOPIC_ARN: topic, EMAIL_RECEPTION_RAW_BUCKET: bucket, EMAIL_RECEPTION_SQS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/email-reception-production', ...configOverrides };
   const config = { get: jest.fn((key, fallback) => configValues[key] ?? fallback) };

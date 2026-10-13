@@ -24,7 +24,7 @@ function harness() {
     }),
   };
   const inboxes = { findFirst: jest.fn(async ({ select }) => inboxCurrent ? select?.local_part ? { id: 4, local_part: ctx.local_part, domain: ctx.domain } : { id: 4 } : null) };
-  const prisma: any = { document_reception_email_messages: messages, document_reception_email_inboxes: inboxes, $queryRaw: jest.fn().mockResolvedValue([]), $transaction: jest.fn() };
+  const prisma: any = { document_reception_email_messages: messages, document_reception_email_inboxes: inboxes, $executeRaw: jest.fn().mockResolvedValue(1), $transaction: jest.fn() };
   prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
   const encryption = { encrypt: jest.fn(() => 'ciphertext-only'), decrypt: jest.fn(() => '123456789') };
   const service = new DocumentEmailGmailCodeService(prisma, encryption as never);

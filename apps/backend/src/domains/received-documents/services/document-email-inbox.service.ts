@@ -80,7 +80,7 @@ export class DocumentEmailInboxService {
     // A store lock serializes first activation; the unique store key is the final database fence.
     try {
       return await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${ctx.organization_id}:${ctx.store_id}`}))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${ctx.organization_id}:${ctx.store_id}`}))`;
         const current = await tx.document_reception_email_inboxes.findFirst({ where: { organization_id: ctx.organization_id, store_id: ctx.store_id! } });
         if (current) {
           this.assertBinding(current, ctx.accounting_entity_id!);
@@ -204,7 +204,7 @@ export class DocumentEmailInboxService {
     if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new VendixHttpException(ErrorCodes.SYS_VALIDATION_001);
     return this.prisma.$transaction(async (tx) => {
       // The transport registrar uses this same lock to fence acceptance against rotation.
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${ctx.organization_id}:${ctx.store_id}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${ctx.organization_id}:${ctx.store_id}`}))`;
       const current = await tx.document_reception_email_inboxes.findFirst({ where: { organization_id: ctx.organization_id, store_id: ctx.store_id! } });
       if (!current) throw new VendixHttpException(ErrorCodes.EMAIL_RECEPTION_NOT_FOUND);
       this.assertBinding(current, ctx.accounting_entity_id);

@@ -41,7 +41,7 @@ function harness(overrides: Record<string, string> = {}) {
   const prisma = {
     ...db, document_reception_email_inboxes: inbox, document_reception_email_messages: messages,
     audit_logs: { create: jest.fn().mockResolvedValue({ id: 1 }) },
-    withoutScope: jest.fn(() => db), $queryRaw: jest.fn().mockResolvedValue([]),
+    withoutScope: jest.fn(() => db), $executeRaw: jest.fn().mockResolvedValue(1),
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
@@ -65,7 +65,7 @@ describe('DocumentEmailInboxService', () => {
     expect(second.address).toBe(first.address);
     expect(first.address).toMatch(/^facturas-[0-9a-f]{32}@recepcion-stg\.vendix\.online$/);
     expect(h.inbox.create).toHaveBeenCalledTimes(1);
-    expect(h.prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(h.prisma.$executeRaw).toHaveBeenCalledTimes(2);
     expect(h.prisma.audit_logs.create).toHaveBeenCalledTimes(1);
     expect(h.inbox.create).toHaveBeenCalledWith({ data: expect.objectContaining({ organization_id: 3, store_id: 21, accounting_entity_id: 8, created_by: 55, updated_by: 55 }) });
     expect(Object.keys(first).sort()).toEqual(['address', 'configured', 'enabled', 'policy_version', 'version']);

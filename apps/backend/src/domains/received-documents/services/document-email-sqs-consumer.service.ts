@@ -177,7 +177,7 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
     const snapshot = await this.inboxes.lookupByAlias(recipient);
     if (!snapshot) return null;
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${snapshot.organization_id}:${snapshot.store_id}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-inbox:${snapshot.organization_id}:${snapshot.store_id}`}))`;
       const duplicate = await tx.document_reception_email_messages.findFirst({ where: transportWhere });
       if (duplicate) { this.assertRowBinding(duplicate); return duplicate; }
       const inbox = await tx.document_reception_email_inboxes.findFirst({ where: {
@@ -352,7 +352,7 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
   private snapshot(row: Message): DocumentEmailSnapshot { return { inbox_id: row.inbox_id, organization_id: row.organization_id, store_id: row.store_id, accounting_entity_id: row.accounting_entity_id, local_part: row.local_part, domain: row.domain, environment: row.environment }; }
   private rowWhere(row: Message) { return { id: row.id, organization_id: row.organization_id, store_id: row.store_id, accounting_entity_id: row.accounting_entity_id, inbox_id: row.inbox_id }; }
   private dailyWhere(storeId: number, date: Date) { const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())); return { store_id: storeId, received_at: { gte: start, lt: new Date(start.getTime() + 86_400_000) } }; }
-  private async quotaLock(tx: Prisma.TransactionClient, storeId: number, date: Date) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-quota:${storeId}:${date.toISOString().slice(0, 10)}`}))`; }
+  private async quotaLock(tx: Prisma.TransactionClient, storeId: number, date: Date) { await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-quota:${storeId}:${date.toISOString().slice(0, 10)}`}))`; }
   private final(row: Message): boolean { return row.processed_at != null && !row.retryable && FINAL_STATUSES.has(row.status); }
   private enabled(): boolean { return this.config.get<string>('EMAIL_RECEPTION_ENABLED', 'false') === 'true'; }
   private positive(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) > 0; }
