@@ -28,6 +28,10 @@ function setup(parts: DocumentEmailInternalPart[] = [part('invoice.xml')], optio
   return { service, mime, ingest, gmail, req: request(), prepared: (): PreparedEmailDocument => ingest.ingestPreparedEmail.mock.calls[0][1] as PreparedEmailDocument };
 }
 function changed(name: string, transform: (xml: string) => string, ordinal = 1): DocumentEmailInternalPart { return { ...part(name, ordinal), bytes: Buffer.from(transform(fixture(name).toString('utf8'))) }; }
+// This foreign NIT has its own legitimate DV 0, different from canonical DV 3.
+function foreignReceiver(ordinal = 1): DocumentEmailInternalPart {
+  return changed('receiver-mismatch.xml', (xml) => xml.replace(/schemeID="3">901999001/g, 'schemeID="0">901999002'), ordinal);
+}
 
 describe('DocumentEmailAttachmentService', () => {
   it('uses the prepared seam, canonical context, gate and immutable evidence only', async () => {
@@ -63,7 +67,7 @@ describe('DocumentEmailAttachmentService', () => {
     const env = setup([part(name)]); expect((await env.service.processEmail(env.req)).valid_document).toBe(true);
   });
   it.each([['profile-execution-2.xml', 'TEST_DOCUMENT'], ['support-05.xml', 'SUPPORT_DOCUMENT_NOT_RECEIVABLE'], ['final-consumer.xml', 'FINAL_CONSUMER'], ['receiver-mismatch.xml', 'RECEIVER_MISMATCH'], ['conflicting-encoding.xml', 'UNSUPPORTED_ENCODING'], ['xml-xxe.xml', 'INVALID_FISCAL_XML']])('rejects %s before any fiscal writes', async (name, code) => {
-    const env = setup([part(name)]); const result = await env.service.processEmail(env.req);
+    const env = setup([name === 'receiver-mismatch.xml' ? foreignReceiver() : part(name)]); const result = await env.service.processEmail(env.req);
     expect(result.reason_code).toBe(code); expect(result.valid_document).toBe(false); expect(result.retryable).toBe(false);
     expect(env.ingest.ingestPreparedEmail).not.toHaveBeenCalled(); expect(env.req.before_write).not.toHaveBeenCalled();
   });
@@ -90,6 +94,38 @@ describe('DocumentEmailAttachmentService', () => {
     expect((await env.service.processEmail(env.req)).reason_code).toBe('RECEIVER_ID_AMBIGUOUS');
     const scheme = setup([changed('receiver-nit-schemeid.xml', (xml) => xml.replace(/schemeName="31"/g, 'schemeName="99"'))]);
     expect((await scheme.service.processEmail(scheme.req)).reason_code).toBe('RECEIVER_ID_AMBIGUOUS');
+  });
+  it('classifies a foreign NIT with its own different valid schemeID DV as mismatch with safe identity facts', async () => {
+    const env = setup([foreignReceiver()]); const result = await env.service.processEmail(env.req);
+    expect(result).toMatchObject({ reason_code: 'RECEIVER_MISMATCH', valid_document: false, retryable: false });
+    expect(result.parts[0].reason_details).toEqual({ receiver_tax_id: '901999002', expected_receiver_tax_id: '800765432' });
+    expect(env.ingest.ingestPreparedEmail).not.toHaveBeenCalled();
+  });
+  it.each([['0', 'RECEIVER_MISMATCH'], ['3', 'RECEIVER_ID_AMBIGUOUS']])('validates a foreign explicit hyphen DV %s against its own base', async (tail, reason) => {
+    const source = foreignReceiver(); source.bytes = Buffer.from(source.bytes.toString('utf8').replace(/schemeID="0">901999002/g, `>901999002-${tail}`));
+    const env = setup([source]); const result = await env.service.processEmail(env.req);
+    expect(result.reason_code).toBe(reason); expect(result.valid_document).toBe(false);
+    if (tail === '0') expect(result.parts[0].reason_details).toEqual({ receiver_tax_id: '901999002-0', expected_receiver_tax_id: '800765432' });
+    expect(env.ingest.ingestPreparedEmail).not.toHaveBeenCalled();
+  });
+  it('rejects an invalid foreign schemeID DV rather than comparing it against the canonical DV', async () => {
+    const source = foreignReceiver(); source.bytes = Buffer.from(source.bytes.toString('utf8').replace(/schemeID="0">901999002/g, 'schemeID="3">901999002'));
+    const env = setup([source]); const result = await env.service.processEmail(env.req);
+    expect(result.reason_code).toBe('RECEIVER_ID_AMBIGUOUS'); expect(result.parts[0].reason_details).toBeUndefined();
+    expect(env.ingest.ingestPreparedEmail).not.toHaveBeenCalled();
+  });
+  it('never strips a glued foreign identifier when its declared NIT type is otherwise clear', async () => {
+    const source = foreignReceiver(); source.bytes = Buffer.from(source.bytes.toString('utf8').replace(/schemeID="0">901999002/g, '>9019990020'));
+    const env = setup([source]); const result = await env.service.processEmail(env.req);
+    expect(result.reason_code).toBe('RECEIVER_MISMATCH');
+    expect(result.parts[0].reason_details?.receiver_tax_id).toBe('9019990020');
+    expect(env.ingest.ingestPreparedEmail).not.toHaveBeenCalled();
+  });
+  it.each(['NIT', 'CC'])('rejects an untyped foreign identifier against expected %s as ambiguous', async (type) => {
+    const source = foreignReceiver(); source.bytes = Buffer.from(source.bytes.toString('utf8').replace(/schemeName="31" schemeID="0">901999002/g, '>901999002'));
+    const env = setup([source]); env.req.context.fiscal_identity.nit_type = type;
+    expect((await env.service.processEmail(env.req)).reason_code).toBe('RECEIVER_ID_AMBIGUOUS');
+    expect(env.ingest.ingestPreparedEmail).not.toHaveBeenCalled();
   });
   it.each(['bom-utf8.xml', 'latin1.xml'])('preserves exact original bytes and SHA for encoding %s', async (name) => {
     const env = setup([part(name)]); expect((await env.service.processEmail(env.req)).valid_document).toBe(true);
@@ -186,9 +222,9 @@ describe('DocumentEmailAttachmentService', () => {
     const result = await env.service.processEmail(env.req); expect(result.valid_document).toBe(true); expect(result.parts[0].reason_code).toBe('DUPLICATE'); expect(result.parts[0].originals_checkpoint?.every((entry) => entry.stored)).toBe(true);
   });
   it('returns partial/nonretryable for a valid invoice and wrong receiver', async () => {
-    const env = setup([part('invoice.xml'), part('receiver-mismatch.xml', 2)]); const result = await env.service.processEmail(env.req);
+    const env = setup([part('invoice.xml'), foreignReceiver(2)]); const result = await env.service.processEmail(env.req);
     expect(result).toMatchObject({ status: 'partial', retryable: false, valid_document: true, reason_code: 'RECEIVER_MISMATCH' }); expect(env.ingest.ingestPreparedEmail).toHaveBeenCalledTimes(1);
-    expect(result.parts.find((record) => record.reason_code === 'RECEIVER_MISMATCH')?.reason_details).toEqual({ receiver_tax_id: '901999001', expected_receiver_tax_id: '800765432' });
+    expect(result.parts.find((record) => record.reason_code === 'RECEIVER_MISMATCH')?.reason_details).toEqual({ receiver_tax_id: '901999002', expected_receiver_tax_id: '800765432' });
   });
   it('returns partial/retryable for a ready document and technical storage failure on another', async () => {
     const env = setup([part('invoice.xml'), part('credit-note.xml', 2)]); env.ingest.ingestPreparedEmail.mockResolvedValueOnce(created()).mockRejectedValueOnce(new ServiceUnavailableException('S3 unavailable'));
@@ -196,7 +232,7 @@ describe('DocumentEmailAttachmentService', () => {
     expect(result.parts.filter((record) => record.status === 'failed')[0]).not.toHaveProperty('originals_checkpoint');
   });
   it('keeps technical top-level reason when a prior business rejection also exists, preserving retry eligibility', async () => {
-    const env = setup([part('invoice.xml'), part('receiver-mismatch.xml', 2), part('credit-note.xml', 3)]);
+    const env = setup([part('invoice.xml'), foreignReceiver(2), part('credit-note.xml', 3)]);
     env.ingest.ingestPreparedEmail.mockResolvedValueOnce(created()).mockRejectedValueOnce(new ServiceUnavailableException('S3 unavailable'));
     const result = await env.service.processEmail(env.req);
     expect(result).toMatchObject({ status: 'partial', retryable: true, reason_code: 'TECHNICAL_PROCESSING_ERROR', valid_document: true });

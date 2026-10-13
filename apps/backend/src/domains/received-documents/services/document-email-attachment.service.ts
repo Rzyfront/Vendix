@@ -235,15 +235,22 @@ export class DocumentEmailAttachmentService implements DocumentEmailProcessor {
     if (receiver.scheme_name === '13') {
       if (!isCc || raw !== authority.nit) throw this.reject('RECEIVER_MISMATCH');
     } else if (receiver.scheme_name === '31' || receiver.scheme_name == null) {
-      if (receiver.scheme_name === '31' && !isNit) throw this.reject('RECEIVER_MISMATCH');
-      if (!isNit) { if (raw !== authority.nit) throw this.reject('RECEIVER_MISMATCH'); }
-      else {
-        const digit = computeNitDv(authority.nit);
+      const digit = isNit ? computeNitDv(authority.nit) : '';
+      const expectedNit = isNit && (raw === authority.nit || raw === `${authority.nit}-${digit}` || raw === authority.nit + digit);
+      if (expectedNit) {
         if (receiver.scheme_id != null && receiver.scheme_id !== digit) throw this.reject('RECEIVER_ID_AMBIGUOUS');
-        if (raw === authority.nit) { /* exact canonical base */ }
-        else if (raw === `${authority.nit}-${digit}`) { /* validated separated DV */ }
-        else if (raw === authority.nit + digit) warnings.push('RECEIVER_DV_ATTACHED');
-        else throw this.reject('RECEIVER_MISMATCH');
+        if (raw === authority.nit + digit) warnings.push('RECEIVER_DV_ATTACHED');
+      } else if (receiver.scheme_name == null) {
+        // An untyped foreign identifier cannot establish NIT/CC identity. Never strip it.
+        if (!isCc || raw !== authority.nit) throw this.reject('RECEIVER_ID_AMBIGUOUS');
+      } else {
+        // A declared foreign NIT is compared intact. Only an explicit hyphen
+        // establishes a separate DV; glued foreign digits are never guessed away.
+        const [incomingBase, attachedDigit] = raw.split('-');
+        const incomingDigit = computeNitDv(incomingBase);
+        if ((attachedDigit != null && attachedDigit !== incomingDigit)
+          || (receiver.scheme_id != null && receiver.scheme_id !== incomingDigit)) throw this.reject('RECEIVER_ID_AMBIGUOUS');
+        throw this.reject('RECEIVER_MISMATCH');
       }
     } else throw this.reject('RECEIVER_ID_AMBIGUOUS');
     // Only after verified scheme/DV/identity comparison; original fiscal metadata/bytes remain untouched.
