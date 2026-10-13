@@ -1,0 +1,855 @@
+{
+  "schema_version": 1,
+  "provenance": "100% synthetic; no original or anonymized customer email",
+  "generated_at": "2026-10-13T17:34:00.000Z",
+  "generator": "generate-fixtures.py",
+  "source_sample_directory": "~/Documents/Organizations/Quickss/Files/fixtures-recepcion-correo/",
+  "real_samples_available": false,
+  "anonymized_fields": [],
+  "invented_fields": [
+    "NIT/CC, legal names, amounts, document identifiers, unique codes, dates, email headers/body, Gmail code, SES verdicts/IDs, account, bucket, topic"
+  ],
+  "limitations": [
+    "No DIAN XSD/signature/cryptographic verification claimed.",
+    "96hex keys are SHA384 of fixture labels, not genuine CUFE/CUDE.",
+    "Gmail template and metadata are synthetic, not proven against a live Google delivery.",
+    "SES PASS/FAIL are test inputs, not real scan or sender authentication.",
+    "Expected outcomes are approved contracts, not observed application test results."
+  ],
+  "constants": {
+    "receiver_nit": "800765432",
+    "receiver_dv": "3",
+    "issuer_nit": "900123456",
+    "issuer_dv": "8",
+    "receiver_cc": "1118860776",
+    "alias": "facturas-00112233445566778899aabbccddeeff@recepcion.vendix.online",
+    "topic_arn": "arn:aws:sns:us-east-1:123456789012:email-reception-fixture-prod",
+    "bucket": "vendix-email-fixture-prod",
+    "environment": "production",
+    "raw_prefix": "raw/"
+  },
+  "files": [
+    {
+      "path": "invoice.xml",
+      "provenance": "synthetic",
+      "bytes": 3770,
+      "sha256": "87c09150654a840a1f267512a83987b127f485fae138fcc868e3a536d1be520a",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_type": "Invoice",
+        "document_code": "01"
+      },
+      "document_key": "0a701e5d87491f78b4cc5aa7ff6e557a1dea8313e272449c17a85bb81201e007b1e2fd0be3329aad73f72232c788dad1",
+      "receiver": {
+        "type": "31",
+        "number": "800765432",
+        "dv": "3"
+      }
+    },
+    {
+      "path": "invoice.attached.xml",
+      "provenance": "synthetic",
+      "bytes": 7485,
+      "sha256": "ba8f38c4d7562a7089f8c9f7cb53b422adf60b910ff61614eaedfb1c905ecc2f",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "application_response": "included_not_verified"
+      },
+      "document_key": "0a701e5d87491f78b4cc5aa7ff6e557a1dea8313e272449c17a85bb81201e007b1e2fd0be3329aad73f72232c788dad1"
+    },
+    {
+      "path": "invoice.application-response.xml",
+      "provenance": "synthetic",
+      "bytes": 991,
+      "sha256": "cfb00c302f8b1dc25ecf18f449c544d967132da38b65e9dafca3e5b4090d1b9c",
+      "expected": {
+        "action": "evidence_only",
+        "authenticated": false
+      },
+      "document_key": "0a701e5d87491f78b4cc5aa7ff6e557a1dea8313e272449c17a85bb81201e007b1e2fd0be3329aad73f72232c788dad1"
+    },
+    {
+      "path": "invoice.pdf",
+      "provenance": "synthetic",
+      "bytes": 605,
+      "sha256": "3f76e230775c72a7b24db662b301f3530168c27c219a8198e347dd53212a6384",
+      "expected": {
+        "action": "representation_only"
+      }
+    },
+    {
+      "path": "invoice.zip",
+      "provenance": "synthetic",
+      "bytes": 8326,
+      "sha256": "a636d2c8623138e19ab5811dcf2a5593082360a923f9d5008eadee17da8c064a",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "documents": 1,
+        "originals": [
+          "zip",
+          "attached_document",
+          "commercial_xml",
+          "application_response",
+          "pdf"
+        ]
+      }
+    },
+    {
+      "path": "invoice.eml",
+      "provenance": "synthetic",
+      "bytes": 12146,
+      "sha256": "070d859b3b298ad396895377cd8a3b7857c69e54dcac6d57577e8642329eca82",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "documents": 1
+      },
+      "ses_metadata": "ses-s3-notification.json"
+    },
+    {
+      "path": "credit-note.xml",
+      "provenance": "synthetic",
+      "bytes": 4324,
+      "sha256": "0b35ab815784503cfa5317b2f8314952a47a85025911755b34e0c993432f3b48",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_type": "CreditNote",
+        "document_code": "91"
+      },
+      "document_key": "230b0c32b79effe2da992a5988fd2363eb850e2540374c043bb8219d9623fb231878a3a4e1e100504b3df070da98db7d",
+      "receiver": {
+        "type": "31",
+        "number": "800765432",
+        "dv": "3"
+      }
+    },
+    {
+      "path": "credit-note.attached.xml",
+      "provenance": "synthetic",
+      "bytes": 8059,
+      "sha256": "7553ae9d63f0abca3bfa595fdedc7c2ca5bb174767be5710c11c3565352be5ca",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "application_response": "included_not_verified"
+      },
+      "document_key": "230b0c32b79effe2da992a5988fd2363eb850e2540374c043bb8219d9623fb231878a3a4e1e100504b3df070da98db7d"
+    },
+    {
+      "path": "credit-note.application-response.xml",
+      "provenance": "synthetic",
+      "bytes": 999,
+      "sha256": "2c91b1a2f2c254a562bdc523c3b75b070cdb61acbbf00ecd8680a087b3b7b401",
+      "expected": {
+        "action": "evidence_only",
+        "authenticated": false
+      },
+      "document_key": "230b0c32b79effe2da992a5988fd2363eb850e2540374c043bb8219d9623fb231878a3a4e1e100504b3df070da98db7d"
+    },
+    {
+      "path": "credit-note.eml",
+      "provenance": "synthetic",
+      "bytes": 11808,
+      "sha256": "4e33011e6e7200e58374ea021bb6b9ef2e302e83b5b9e164058399f2c415615f",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "documents": 1
+      },
+      "ses_metadata": null
+    },
+    {
+      "path": "debit-note.xml",
+      "provenance": "synthetic",
+      "bytes": 4272,
+      "sha256": "537f60c9269f4851a1b294efd9d4a5ac8d109b82bc44db59e1be06ef9abf6953",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_type": "DebitNote",
+        "document_code": "92"
+      },
+      "document_key": "965626cfe30b00808ad657f6f667d4bbedb9a28f9f6067fe1a505f8a17842f7d5c7273a509b9a495970c1576e3961ecd",
+      "receiver": {
+        "type": "31",
+        "number": "800765432",
+        "dv": "3"
+      }
+    },
+    {
+      "path": "debit-note.attached.xml",
+      "provenance": "synthetic",
+      "bytes": 8002,
+      "sha256": "9f51afb79701a5fb5720eea6b6931c0823548691f6a97bd42d1e1c7f476cebd5",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "application_response": "included_not_verified"
+      },
+      "document_key": "965626cfe30b00808ad657f6f667d4bbedb9a28f9f6067fe1a505f8a17842f7d5c7273a509b9a495970c1576e3961ecd"
+    },
+    {
+      "path": "debit-note.application-response.xml",
+      "provenance": "synthetic",
+      "bytes": 997,
+      "sha256": "0e842763f82b6e08dd8162d8f5aebe043d03a24fbaf63b0a55e2d8d9d7ad8337",
+      "expected": {
+        "action": "evidence_only",
+        "authenticated": false
+      },
+      "document_key": "965626cfe30b00808ad657f6f667d4bbedb9a28f9f6067fe1a505f8a17842f7d5c7273a509b9a495970c1576e3961ecd"
+    },
+    {
+      "path": "debit-note.eml",
+      "provenance": "synthetic",
+      "bytes": 11723,
+      "sha256": "d4cf7d4c9f27c2b462bcf08e2acbe9dc8bf2801eb282e527e0007e87f2d33ab5",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "documents": 1
+      },
+      "ses_metadata": null
+    },
+    {
+      "path": "bom-utf8.xml",
+      "provenance": "synthetic",
+      "bytes": 3774,
+      "sha256": "be609f66f5ee8e073be9cb428d65e97023182c9106f30509b5802d9c0a4ff932",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified"
+      },
+      "encoding": "utf-8",
+      "document_key": "05b36b7e795ee4717cd3cb951cff2be3864896f4f6ba011335eaaaeade8d9cd3ae3b524cd395b652194b3ad66f6aadff"
+    },
+    {
+      "path": "latin1.xml",
+      "provenance": "synthetic",
+      "bytes": 3763,
+      "sha256": "5183b033057ffc0bf8ec67764e9f6a19f827cc8eb43a6937cca78e6d94454678",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified"
+      },
+      "encoding": "latin1",
+      "document_key": "998fe4c18a3522588767a6e074fe9f2d471f19381d91079a74206fed3f20ba6a2a9adcfcd62bc0f6bd6d02b8864ccc22"
+    },
+    {
+      "path": "conflicting-encoding.xml",
+      "provenance": "synthetic",
+      "bytes": 3791,
+      "sha256": "7586080188637156dff5705b8c8d45a0670f4f228b00e4fd3f861a346e821bf4",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "UNSUPPORTED_ENCODING"
+      },
+      "encoding": "utf-8",
+      "document_key": "2018f703dc7cc0f5b2b7eea8bec77a40e3806fdae00af02b07b97c27fb9f18c4245d54c34eef7fee126a626555ba14cb"
+    },
+    {
+      "path": "profile-execution-2.xml",
+      "provenance": "synthetic",
+      "bytes": 3782,
+      "sha256": "2930cbd411c8201787a5ec1f0287eca83e90c06538dc042868020ea04f604c11",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "TEST_DOCUMENT"
+      },
+      "encoding": "utf-8",
+      "document_key": "2d9a083776b2a24eb90bb1987f331106db74425ffa0ca1f0e7a32eb3a73b1b81a59bfe0a5846aa0b1806a6a2e77b9e0f"
+    },
+    {
+      "path": "pos-20.xml",
+      "provenance": "synthetic",
+      "bytes": 3769,
+      "sha256": "015013519aea6ece86534b4961bed28aacad4d174264ddf10c600488393855bd",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_code": "20",
+        "key_scheme": "CUDE-SHA384",
+        "buyer_events_allowed": false
+      },
+      "encoding": "utf-8",
+      "document_key": "881e496a40a4a36f5f3d4cc957f2016c32e055131e716174af02bab6af22a504230500a981e2300ff76066adc52ad46d"
+    },
+    {
+      "path": "support-05.xml",
+      "provenance": "synthetic",
+      "bytes": 3773,
+      "sha256": "a4c3518dd4499acba1d08f7c08353d3d756f163ca3faa47eabbe80ab21cb0a85",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "SUPPORT_DOCUMENT_NOT_RECEIVABLE"
+      },
+      "encoding": "utf-8",
+      "document_key": "9b30dea982328b878828a90c6d0b400adf3087cac7436f540880bcd754dfd81e7ffb3448c8d321798919d235917c903a"
+    },
+    {
+      "path": "final-consumer.xml",
+      "provenance": "synthetic",
+      "bytes": 3757,
+      "sha256": "15dc93cdd2a2681963b760e2a59e78ce5936e8713484090eeea762d22a195082",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "FINAL_CONSUMER"
+      },
+      "encoding": "utf-8",
+      "document_key": "8b949b5c6f17697fa86e6f8897c9f644f5eb0b5d39a11ae8b4e848336df597c1e8d757dd44b6144a07568805dcd7becb"
+    },
+    {
+      "path": "receiver-nit-schemeid.xml",
+      "provenance": "synthetic",
+      "bytes": 3784,
+      "sha256": "b140f9f196168aa42b8b3b7667810c655968a3bc0eab0abb51b8b7a26a37f392",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified"
+      },
+      "encoding": "utf-8",
+      "document_key": "f6d8f64845a1066ab0fcff88f9d58b15d851cfcc5f2b62d38bff8f03a03a77e4e622af1966e9a47da2291c0987aa2c90"
+    },
+    {
+      "path": "receiver-nit-appended-dv.xml",
+      "provenance": "synthetic",
+      "bytes": 3763,
+      "sha256": "2862d5c3b24eea73ac98fd6ac9e24ac537221199785819983c94181e406a58a4",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "warnings": [
+          "RECEIVER_DV_ATTACHED"
+        ]
+      },
+      "encoding": "utf-8",
+      "document_key": "b395e5223e2a1bbd142c7f8c5a17209adb3116533803695fce591923dab164f7a1fc9699074642e09e58193397f43d2b"
+    },
+    {
+      "path": "receiver-nit-hyphen-dv.xml",
+      "provenance": "synthetic",
+      "bytes": 3763,
+      "sha256": "bf72931ec42c8ceaae9247eb3d445b267d175418a2b90be59c09014092367633",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified"
+      },
+      "encoding": "utf-8",
+      "document_key": "fb31fb5c8f1336fd3320937f3d02fc0250331fcd5398c5eb539786639dbaee87944ba108910828c12c3f9ed92811ca64"
+    },
+    {
+      "path": "receiver-cc-13.xml",
+      "provenance": "synthetic",
+      "bytes": 3753,
+      "sha256": "7e323b3fa30cbe347f323e2a82a5c037e7a2efd139b69fea9511322776f67915",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "expected_identity": {
+          "type": "13",
+          "number": "1118860776"
+        },
+        "with_nit_authority": "RECEIVER_MISMATCH"
+      },
+      "encoding": "utf-8",
+      "document_key": "2eed82498087e22c5c0ec01f30db3b0b9a2b0eec002e4bc00ba7b8677b7c71d85ae885dfacb513aad430aa78ebb5ac48"
+    },
+    {
+      "path": "receiver-mismatch.xml",
+      "provenance": "synthetic",
+      "bytes": 3780,
+      "sha256": "b9e204f962edd5e5c6d2760f31d0877d43924685a8618a38f47d46a7f0d2d090",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "RECEIVER_MISMATCH"
+      },
+      "encoding": "utf-8",
+      "document_key": "58a502ed666c56eb377fdad199b75254fbc74738acf866d63ec792b4cfff225b06517cd0d9315fe2728edd8492a69f8a"
+    },
+    {
+      "path": "invoice-type-01.xml",
+      "provenance": "synthetic",
+      "bytes": 3778,
+      "sha256": "879884e33721f776ef348db57881e8980f46bec5dbad86ce05db32b9db1e87c5",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_code": "01"
+      }
+    },
+    {
+      "path": "invoice-type-02.xml",
+      "provenance": "synthetic",
+      "bytes": 3778,
+      "sha256": "c82dbecf56b0746b7358aea7aac057a23cb5609e9929c3dfad3b1e50a9dd3667",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_code": "02"
+      }
+    },
+    {
+      "path": "invoice-type-03.xml",
+      "provenance": "synthetic",
+      "bytes": 3778,
+      "sha256": "23339eed54216dccbfc5e98d309bc5ea24bfd0f5a679433293e2209aef1dfedb",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_code": "03"
+      }
+    },
+    {
+      "path": "invoice-type-04.xml",
+      "provenance": "synthetic",
+      "bytes": 3778,
+      "sha256": "d338f66f393999dbed2482ff4a19bc27e2f3c549749886ee709a794554c0c7b0",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "document_code": "04"
+      }
+    },
+    {
+      "path": "attached-without-application-response.xml",
+      "provenance": "synthetic",
+      "bytes": 6004,
+      "sha256": "8da4e0dc1b700aab5c26e9da309b114d70f707104f6e862d391fc7f6279582ca",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "warnings": [
+          "No incluye constancia de validación DIAN"
+        ]
+      }
+    },
+    {
+      "path": "application-response-mismatched.xml",
+      "provenance": "synthetic",
+      "bytes": 991,
+      "sha256": "2f306496715086370e2e9ab173b0f63d2f6eb763a2c2b71f0b881692044c4f4b",
+      "expected": {
+        "action": "evidence_only",
+        "authenticated": false,
+        "warning": "reference_mismatch"
+      }
+    },
+    {
+      "path": "pdf-only.zip",
+      "provenance": "synthetic",
+      "bytes": 725,
+      "sha256": "2a7172fba3860afe58fdd49154637b786f69e2ebd538799ad6c598ce615e3a8c",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "MISSING_FISCAL_XML"
+      }
+    },
+    {
+      "path": "principal-double.zip",
+      "provenance": "synthetic",
+      "bytes": 8450,
+      "sha256": "86ea2a37aed2c4abe900d867ccb5320a18f3c975e69d2e4da0278543ba4420fa",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "zip_depth": 1,
+        "documents": 1
+      }
+    },
+    {
+      "path": "invoice-with-complement.zip",
+      "provenance": "synthetic",
+      "bytes": 7899,
+      "sha256": "82b86e789f2308dda0f9558e7ae43e61f9e5f428886988a357d9a2a0775454e6",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "warnings": [
+          "Archivo complementario guardado sin abrir"
+        ],
+        "complement_must_not_expand": true
+      }
+    },
+    {
+      "path": "outlook-forward-as-attachment.eml",
+      "provenance": "synthetic",
+      "bytes": 12947,
+      "sha256": "72bad37bbaeb534cfe6d2f5189f87dc393a0195eed52e8819812e4f9f57f1116",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "nested_messages": 1,
+        "documents": 1
+      }
+    },
+    {
+      "path": "gmail-multi-forward.eml",
+      "provenance": "synthetic",
+      "bytes": 36895,
+      "sha256": "d391fcb84cd616212e016b60448aaf813ecba51d239cb6bd5fe9984e1494da5a",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "nested_messages": 3,
+        "documents": 3
+      }
+    },
+    {
+      "path": "inline-zip.eml",
+      "provenance": "synthetic",
+      "bytes": 12169,
+      "sha256": "c0d594308f6038638d55bd16435e8f0bffe1798116a7109aab3f7842a89ca4c0",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "documents": 1,
+        "classification": "content_magic"
+      }
+    },
+    {
+      "path": "generic-mime-xml.eml",
+      "provenance": "synthetic",
+      "bytes": 11052,
+      "sha256": "8db1f11628b8a4802f681eb07168b295624ee5867d867b8a348eaac2c54214ad",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "documents": 1,
+        "classification": "content_magic"
+      }
+    },
+    {
+      "path": "provider-link.eml",
+      "provenance": "synthetic",
+      "bytes": 469,
+      "sha256": "7e274876995cb58b0e707ee994604ec5ac3ae47a8860029de40347fc574eb530",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "PROVIDER_SENT_LINK",
+        "network_calls": 0
+      }
+    },
+    {
+      "path": "winmail.eml",
+      "provenance": "synthetic",
+      "bytes": 782,
+      "sha256": "38daaec60fb04842abb447ea777cc133acae15f0d041f7035cdd290da5e9761b",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "TNEF_UNSUPPORTED"
+      }
+    },
+    {
+      "path": "unsupported-archive.eml",
+      "provenance": "synthetic",
+      "bytes": 857,
+      "sha256": "6c41486ed23111ad582f821101d5c6b63e80b9208ee56efc8958ffc8bed54b8f",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "ARCHIVE_FORMAT_UNSUPPORTED"
+      }
+    },
+    {
+      "path": "partial-batch.eml",
+      "provenance": "synthetic",
+      "bytes": 16391,
+      "sha256": "73ad1772e0ae2bbb3afc131a7387cf10f488259738820151e02b463dbccfa86b",
+      "expected": {
+        "action": "ingest_for_review",
+        "dian": "not_checked",
+        "signature": "not_verified",
+        "message_status": "partial",
+        "documents": 1,
+        "rejected_part_reason": "RECEIVER_MISMATCH"
+      }
+    },
+    {
+      "path": "non-invoice.eml",
+      "provenance": "synthetic",
+      "bytes": 442,
+      "sha256": "de89b5822143dc819d7f11764b8d9ceaacf672f41efc9acd04f4437d5f98c813",
+      "expected": {
+        "action": "ignored",
+        "reason_code": "NOT_AN_INVOICE"
+      }
+    },
+    {
+      "path": "gmail-forwarding-confirmation.eml",
+      "provenance": "synthetic",
+      "bytes": 635,
+      "sha256": "01ab1db1c37227b5deb935d124aa269adcd0a6a968fc8b97e62582da80597b2b",
+      "expected": {
+        "action": "gmail_code_only",
+        "code": "123456789",
+        "documents": 0,
+        "expires_within_hours": 24,
+        "requires_authoritative_metadata": true
+      },
+      "ses_metadata": "gmail-forwarding-confirmation.ses.json"
+    },
+    {
+      "path": "gmail-forwarding-confirmation.ses.json",
+      "provenance": "synthetic",
+      "bytes": 1445,
+      "sha256": "c67fd718bb02ba610e305afe3d8dbb6c297b70b3646f5dda5927bdee0643a09b",
+      "expected": {
+        "action": "gmail_challenge_authenticated_in_simulation",
+        "auth_evidence_is_synthetic": true
+      }
+    },
+    {
+      "path": "gmail-forwarding-spoof.eml",
+      "provenance": "synthetic",
+      "bytes": 580,
+      "sha256": "a5e23b8bc878b488c430b4ef97ad10ec84b564b0e35c0332804625184ead994f",
+      "expected": {
+        "action": "ignore_code",
+        "documents": 0,
+        "reason": "untrusted_spf_dkim_dmarc"
+      },
+      "ses_metadata": "gmail-forwarding-spoof.ses.json"
+    },
+    {
+      "path": "gmail-forwarding-spoof.ses.json",
+      "provenance": "synthetic",
+      "bytes": 1409,
+      "sha256": "2a796ed6e8e3684cae7126eae9b5aa9c5feed22042dd2a20833a098fd483d562",
+      "expected": {
+        "action": "no_gmail_code",
+        "authenticated": false
+      }
+    },
+    {
+      "path": "gmail-forwarding-link-only.eml",
+      "provenance": "synthetic",
+      "bytes": 491,
+      "sha256": "3fac51bf57ff6e16a5ec24d7aa23fc32238f52d8599cae726060c09c6f898029",
+      "expected": {
+        "action": "gmail_no_code_fallback",
+        "network_calls": 0,
+        "documents": 0
+      }
+    },
+    {
+      "path": "ses-s3-notification.json",
+      "provenance": "synthetic",
+      "bytes": 1593,
+      "sha256": "966052ab7823f657bf649e4ad1a8a5cb770c2d944670e5b268afb195a80db678",
+      "expected": {
+        "action": "resolve_receipt_recipients_only",
+        "mime_fixture": "invoice.eml",
+        "bucket": "vendix-email-fixture-prod",
+        "key": "raw/synthetic-ses-invoice"
+      }
+    },
+    {
+      "path": "ses-s3-notification-duplicate.json",
+      "provenance": "synthetic",
+      "bytes": 1593,
+      "sha256": "a77f470ee2e8b37500bbe9e32325908e5b6f4067b9030ad9f114cfae47abd992",
+      "expected": {
+        "action": "transport_duplicate",
+        "same_ses_message_alias": true,
+        "additional_quota": 0
+      }
+    },
+    {
+      "path": "ses-cross-environment.json",
+      "provenance": "synthetic",
+      "bytes": 1647,
+      "sha256": "f6bde430b17aecc9fc62876aca4ad4000495bdc722deaf8fdf14e2f3e716e86c",
+      "expected": {
+        "action": "reject_before_get_object",
+        "get_object_calls": 0
+      }
+    },
+    {
+      "path": "ses-virus-fail.json",
+      "provenance": "synthetic",
+      "bytes": 1602,
+      "sha256": "1d26c88f098bed7f11ee4f1c5cc7c1bae5181ab15760063af1883d78c53cf240",
+      "expected": {
+        "action": "do_not_process",
+        "documents": 0,
+        "reason_code": "VIRUS_BLOCKED"
+      }
+    },
+    {
+      "path": "ses-virus-gray.json",
+      "provenance": "synthetic",
+      "bytes": 1602,
+      "sha256": "3964414704c50bd08ac067b4f15f38ae2c6053c7e937381091aca4e96ea55645",
+      "expected": {
+        "action": "do_not_process",
+        "documents": 0,
+        "reason_code": "SECURITY_SCAN_UNAVAILABLE"
+      }
+    },
+    {
+      "path": "ses-virus-error.json",
+      "provenance": "synthetic",
+      "bytes": 1618,
+      "sha256": "1c01c1cce1322e01eb67008c6e05e37b65da2b71b7d9d12c6a2d21a538d56990",
+      "expected": {
+        "action": "do_not_process",
+        "documents": 0,
+        "reason_code": "SECURITY_SCAN_UNAVAILABLE"
+      }
+    },
+    {
+      "path": "ses-spam-fail.json",
+      "provenance": "synthetic",
+      "bytes": 1599,
+      "sha256": "b42b26b8cb0bde9689d3b8c57741ab0fa976af3517e3fa258aabc0401fdaf334",
+      "expected": {
+        "action": "do_not_process",
+        "documents": 0,
+        "reason_code": "SUSPICIOUS_EMAIL"
+      }
+    },
+    {
+      "path": "zip-traversal.zip",
+      "provenance": "synthetic",
+      "bytes": 3894,
+      "sha256": "a87adef37b4e3e090713096e7debff83dba67666a8b81f3e6bb611d9e8fd96dd",
+      "expected": {
+        "action": "reject_archive",
+        "reason_code": "CORRUPT_OR_ENCRYPTED_FILE"
+      }
+    },
+    {
+      "path": "zip-collision.zip",
+      "provenance": "synthetic",
+      "bytes": 7760,
+      "sha256": "e2120d7cb1504846a64d0911e9672e9e65ee0c378f043cc135119037b226436c",
+      "expected": {
+        "action": "reject_archive",
+        "reason_code": "CORRUPT_OR_ENCRYPTED_FILE"
+      }
+    },
+    {
+      "path": "zip-crc-invalid.zip",
+      "provenance": "synthetic",
+      "bytes": 3890,
+      "sha256": "8aeef7240a186f49bdb93b957ef32ab32e3b8a7c81d415feb39f0f8887cc57ec",
+      "expected": {
+        "action": "reject_archive",
+        "reason_code": "CORRUPT_OR_ENCRYPTED_FILE"
+      }
+    },
+    {
+      "path": "zip-encrypted-flag.zip",
+      "provenance": "synthetic",
+      "bytes": 3890,
+      "sha256": "be44e9ebefea990af1da8e960e2eddfc3aaa500e24d2451d30c1f11a46674549",
+      "expected": {
+        "action": "reject_archive_before_inflate",
+        "reason_code": "CORRUPT_OR_ENCRYPTED_FILE"
+      },
+      "note": "Encryption flag only, not a real encrypted archive or password."
+    },
+    {
+      "path": "zip-symlink.zip",
+      "provenance": "synthetic",
+      "bytes": 127,
+      "sha256": "9532b91fe2d9caf25cf1ed67074d3470d5f1257863e1f3692845de153c0d5429",
+      "expected": {
+        "action": "reject_archive",
+        "reason_code": "CORRUPT_OR_ENCRYPTED_FILE"
+      }
+    },
+    {
+      "path": "zip-ratio-limit.zip",
+      "provenance": "synthetic",
+      "bytes": 150,
+      "sha256": "6e092474e90da695c383c012dee9d62935ccb472f112ae1c16dcc898d5b84530",
+      "expected": {
+        "action": "reject_archive",
+        "reason_code": "LIMIT_EXCEEDED"
+      },
+      "test_limits": {
+        "max_ratio": 100
+      },
+      "note": "16 KiB expanded, no giant bomb."
+    },
+    {
+      "path": "zip-inflated-budget.zip",
+      "provenance": "synthetic",
+      "bytes": 458,
+      "sha256": "c8de5beb2069ce5e669531f2ac32f02ff5f7ce17f20b780bf7b7d001c623bb60",
+      "expected": {
+        "action": "reject_archive",
+        "reason_code": "LIMIT_EXCEEDED"
+      },
+      "test_limits": {
+        "max_inflated_bytes": 200
+      }
+    },
+    {
+      "path": "zip-entry-limit.zip",
+      "provenance": "synthetic",
+      "bytes": 283,
+      "sha256": "8410d97a5c9d097f655c4844aa538f71a4955b9e1e1e73933918b695b81def9f",
+      "expected": {
+        "action": "reject_archive",
+        "reason_code": "LIMIT_EXCEEDED"
+      },
+      "test_limits": {
+        "max_entries": 2
+      }
+    },
+    {
+      "path": "xml-xxe.xml",
+      "provenance": "synthetic",
+      "bytes": 135,
+      "sha256": "01809952f0070d8f6ceab6a72706170c83d43f0ca1963bf84d788aa636319bbb",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "INVALID_FISCAL_XML",
+        "network_calls": 0
+      }
+    },
+    {
+      "path": "eml-depth-2.eml",
+      "provenance": "synthetic",
+      "bytes": 13690,
+      "sha256": "95032ec1d289c5441bd1258336f0be19ed28b4b934d34f705892736b5acb2fd6",
+      "expected": {
+        "action": "not_processed",
+        "reason_code": "NESTING_LIMIT_EXCEEDED"
+      }
+    }
+  ]
+}
