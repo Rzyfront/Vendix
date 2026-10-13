@@ -34,6 +34,7 @@ import {
   BulkUploadProgress,
   BULK_UPLOAD_PAGE_SIZE,
   BulkValidationMessage,
+  BulkVariantAnalysisItem,
 } from '../../interfaces/bulk-product-analysis.interface';
 
 @Component({
@@ -512,6 +513,16 @@ import {
                   <div class="text-xl font-bold text-blue-700">
                     {{ analysisResult()!.total_products }}
                   </div>
+                  @if ((analysisResult()!.total_variants ?? 0) > 0) {
+                    <div class="text-[10px] text-blue-600">
+                      {{ analysisResult()!.total_variants }}
+                      {{
+                        analysisResult()!.total_variants === 1
+                          ? 'variante'
+                          : 'variantes'
+                      }}
+                    </div>
+                  }
                 </div>
                 <div
                   class="min-w-[100px] bg-green-50 px-3 py-2 rounded-lg border border-green-100 shrink-0"
@@ -898,6 +909,98 @@ import {
                             </td>
                           </tr>
                         }
+                        <!-- Variant sub-rows -->
+                        @if (item.variants?.length) {
+                          <tr>
+                            <td
+                              colspan="7"
+                              class="py-1 pl-8 pr-3 text-[11px] font-medium text-gray-500"
+                            >
+                              {{ item.variants!.length }}
+                              {{
+                                item.variants!.length === 1
+                                  ? 'variante'
+                                  : 'variantes'
+                              }}
+                            </td>
+                          </tr>
+                        }
+                        @for (v of item.variants ?? []; track v.row_number) {
+                          <tr class="bg-gray-50/60">
+                            <td colspan="7" class="py-1.5 pl-8 pr-3">
+                              <div
+                                class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-700 border-l-2 border-gray-200 pl-3"
+                              >
+                                <span class="flex flex-wrap gap-1">
+                                  @for (
+                                    attr of getVariantAttributeLabels(v);
+                                    track attr
+                                  ) {
+                                    <span
+                                      class="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[11px]"
+                                      >{{ attr }}</span
+                                    >
+                                  }
+                                </span>
+                                <span class="font-mono text-gray-500">{{
+                                  v.sku || '—'
+                                }}</span>
+                                @if (v.price === null) {
+                                  <span class="text-slate-400 italic"
+                                    >Hereda</span
+                                  >
+                                } @else {
+                                  <span>{{
+                                    v.price
+                                      | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                                  }}</span>
+                                }
+                                <span
+                                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                  [ngClass]="{
+                                    'bg-emerald-100 text-emerald-700':
+                                      v.action === 'create',
+                                    'bg-sky-100 text-sky-700':
+                                      v.action === 'update',
+                                  }"
+                                >
+                                  {{ getActionLabel(v.action) }}
+                                </span>
+                                <span
+                                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                                  [ngClass]="{
+                                    'bg-green-100 text-green-800':
+                                      v.status === 'ready',
+                                    'bg-amber-100 text-amber-800':
+                                      v.status === 'warning',
+                                    'bg-red-100 text-red-800':
+                                      v.status === 'error',
+                                  }"
+                                >
+                                  {{
+                                    v.status === 'ready'
+                                      ? 'Listo'
+                                      : v.status === 'warning'
+                                        ? 'Advertencia'
+                                        : 'Error'
+                                  }}
+                                </span>
+                              </div>
+                              @for (w of v.warnings; track $index) {
+                                <p
+                                  class="text-[11px] text-amber-700 pl-5 mt-0.5"
+                                >
+                                  ⚠ {{ getValidationText(w) }}
+                                </p>
+                              }
+                              @for (e of v.errors; track $index) {
+                                <p class="text-[11px] text-red-700 pl-5 mt-0.5">
+                                  ✗ {{ getValidationText(e) }}
+                                </p>
+                              }
+                            </td>
+                          </tr>
+                        }
                       }
                     </tbody>
                   </table>
@@ -1118,6 +1221,88 @@ import {
                             <span class="shrink-0">✗</span>
                             {{ getValidationText(error) }}
                           </p>
+                        }
+                      </div>
+                    }
+                    @if (item.variants?.length) {
+                      <div class="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
+                        <p class="text-[11px] font-medium text-gray-500">
+                          {{ item.variants!.length }}
+                          {{
+                            item.variants!.length === 1
+                              ? 'variante'
+                              : 'variantes'
+                          }}
+                        </p>
+                        @for (v of item.variants ?? []; track v.row_number) {
+                          <div class="border-l-2 border-gray-200 pl-2">
+                            <div
+                              class="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-700"
+                            >
+                              @for (
+                                attr of getVariantAttributeLabels(v);
+                                track attr
+                              ) {
+                                <span
+                                  class="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded"
+                                  >{{ attr }}</span
+                                >
+                              }
+                              <span class="font-mono text-gray-500">{{
+                                v.sku || '—'
+                              }}</span>
+                              @if (v.price === null) {
+                                <span class="text-slate-400 italic"
+                                  >Hereda</span
+                                >
+                              } @else {
+                                <span>{{
+                                  v.price
+                                    | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                                }}</span>
+                              }
+                              <span
+                                class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                [ngClass]="{
+                                  'bg-emerald-100 text-emerald-700':
+                                    v.action === 'create',
+                                  'bg-sky-100 text-sky-700':
+                                    v.action === 'update',
+                                }"
+                              >
+                                {{ getActionLabel(v.action) }}
+                              </span>
+                              <span
+                                class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                [ngClass]="{
+                                  'bg-green-100 text-green-800':
+                                    v.status === 'ready',
+                                  'bg-amber-100 text-amber-800':
+                                    v.status === 'warning',
+                                  'bg-red-100 text-red-800':
+                                    v.status === 'error',
+                                }"
+                              >
+                                {{
+                                  v.status === 'ready'
+                                    ? 'Listo'
+                                    : v.status === 'warning'
+                                      ? 'Advertencia'
+                                      : 'Error'
+                                }}
+                              </span>
+                            </div>
+                            @for (w of v.warnings; track $index) {
+                              <p class="text-[11px] text-amber-700">
+                                ⚠ {{ getValidationText(w) }}
+                              </p>
+                            }
+                            @for (e of v.errors; track $index) {
+                              <p class="text-[11px] text-red-700">
+                                ✗ {{ getValidationText(e) }}
+                              </p>
+                            }
+                          </div>
                         }
                       </div>
                     }
@@ -1555,6 +1740,10 @@ export class BulkUploadModalComponent {
     if (action === 'create') return 'Crear';
     if (action === 'reactivate') return 'Reactivar';
     return 'Actualizar';
+  }
+
+  getVariantAttributeLabels(v: BulkVariantAnalysisItem): string[] {
+    return Object.entries(v.attributes ?? {}).map(([k, val]) => `${k}: ${val}`);
   }
 
   getValidationText(w: string | BulkValidationMessage): string {
