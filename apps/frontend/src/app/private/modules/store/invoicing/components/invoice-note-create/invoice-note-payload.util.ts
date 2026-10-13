@@ -1,5 +1,6 @@
 import {
   CreateCreditNoteDto,
+  CreateInvoiceNoteItemDto,
   Invoice,
   InvoiceItem,
   InvoiceNoteContextLine,
@@ -11,6 +12,7 @@ export interface NoteLineSelection {
   quantity: number;
   unit_price?: number;
   discount_amount?: number;
+  discount_overridden?: boolean;
   unit_code?: string;
   context?: InvoiceNoteContextLine;
 }
@@ -150,7 +152,7 @@ export function noteTotals(selections: NoteLineSelection[]): NoteTotals {
 /** Minimal writable payload: source and editable commercial values only. */
 export function buildNoteItems(
   selections: NoteLineSelection[],
-): CreateCreditNoteDto['items'] {
+): CreateInvoiceNoteItemDto[] {
   return selections.map((selection) => {
     const { item } = selection;
     const scaled = estimateLine(selection);
@@ -158,7 +160,9 @@ export function buildNoteItems(
       source_invoice_item_id: selection.context?.source_invoice_item_id ?? item.id,
       quantity: scaled.quantity,
       unit_price: scaled.unit_price,
-      discount_amount: scaled.discount_amount,
+      ...((selection.discount_overridden ?? (selection.discount_amount !== undefined))
+        ? { discount_amount: scaled.discount_amount }
+        : {}),
       ...((selection.unit_code ?? selection.context?.unit_code ?? item.unit_code)
         ? { unit_code: selection.unit_code ?? selection.context?.unit_code ?? item.unit_code! }
         : {}),

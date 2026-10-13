@@ -8,15 +8,16 @@ import {
   input,
   model,
   signal,
+  untracked,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormBuilder, FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { startWith } from 'rxjs/operators';
 import { Actions, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 
-import { Invoice, InvoiceItem } from '../../interfaces/invoice.interface';
+import { Invoice, InvoiceItem, InvoiceNoteContext } from '../../interfaces/invoice.interface';
 import {
   createCreditNote,
   createCreditNoteFailure,
@@ -29,19 +30,18 @@ import {
   issueNoteSuccess,
   MutationFailure,
 } from '../../state/actions/invoicing.actions';
-import { extractValidationMessages } from '../../utils/invoicing-errors.util';
-import { findNoteConcept, noteConcepts } from './dian-note-concepts';
+import { describeApiFailure, describeNoteIntegrityDetails, extractValidationMessages } from '../../utils/invoicing-errors.util';
+import { findNoteConcept, noteConcepts, NOTE_CONCEPT_GUIDANCE } from './dian-note-concepts';
 import {
   NOTE_REASON_LIMIT,
-  NOTE_TEXT_LIMIT,
   NoteLineSelection,
   buildNotePayload,
   buildNoteReason,
   invoiceLines,
-  lineTaxRate,
   noteTotals,
   num,
   estimateLine,
+  round2,
 } from './invoice-note-payload.util';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -52,7 +52,30 @@ import {
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { UNIT_CODE_OPTIONS } from '../../../../../../shared/components/invoice-sections/invoice-dian-catalogs';
+import { InvoicingService } from '../../services/invoicing.service';
 import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
+
+interface NoteLineState {
+  selected: boolean;
+  quantity: number;
+  unit_price: number;
+  discount_amount: number;
+  unit_code: string;
+  discount_overridden: boolean;
+  controls: {
+    quantity: FormControl<number>;
+    unit_price: FormControl<number>;
+    discount_amount: FormControl<number>;
+    unit_code: FormControl<string>;
+  };
+}
+
+interface PendingNoteCreate {
+  relatedInvoiceId: number;
+  invoiceType: 'credit_note' | 'debit_note';
+}
 
 /**
  * F.6/defecto 2 (orquestador, 2026-08-25): este campo alimenta DOS DTO —
@@ -121,6 +144,7 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
     IconComponent,
     TextareaComponent,
     SelectorComponent,
+    InputComponent,
   ],
   template: `
     <!--
@@ -177,10 +201,11 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
                 <p class="text-sm text-error">{{ submitError() }}</p>
                 @if (submitErrorDetails().length) {
                   <ul class="mt-1 list-disc space-y-0.5 pl-4 text-xs text-error">
-                    @for (detail of submitErrorDetails(); track detail) {
-                      <li>{{ detail }}</li>
-                    }
+                    @for (detail of submitErrorDetails(); track detail) { <li>{{ detail }}</li> }
                   </ul>
+                }
+                @if (submitErrorCode() === 'INVOICING_NOTE_SOURCE_001' || submitErrorCode() === 'INVOICING_NOTE_LIMIT_001') {
+                  <button type="button" class="mt-2 min-h-11 rounded-lg border border-error px-3 text-sm text-error" (click)="retryContext()">Actualizar saldos y conservar cambios</button>
                 }
               </div>
             </div>
@@ -196,6 +221,7 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
             <button
               type="button"
               class="flex-1 rounded-lg border px-3 py-2 text-sm transition-colors"
+              [disabled]="submitting() || !!createdNote()"
               [ngClass]="
                 noteType() === 'credit'
                   ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
@@ -210,6 +236,7 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
             <button
               type="button"
               class="flex-1 rounded-lg border px-3 py-2 text-sm transition-colors"
+              [disabled]="submitting() || !!createdNote()"
               [ngClass]="
                 noteType() === 'debit'
                   ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
@@ -258,9 +285,14 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
             [options]="conceptOptions()"
             [searchable]="true"
             [required]="true"
+            [disabled]="submitting() || !!createdNote()"
             placeholder="¿Por qué se corrige la factura?"
             [helpText]="conceptHelp()"
           ></app-selector>
+
+          <div class="rounded-lg border border-info/30 bg-info-light p-3 text-xs text-text-secondary">
+            {{ conceptGuidance }}
+          </div>
 
           <div>
             <app-textarea
@@ -268,6 +300,7 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
               formControlName="reason"
               [rows]="3"
               [required]="true"
+              [disabled]="submitting() || !!createdNote()"
               placeholder="Explica qué pasó: qué se devolvió, qué se ajustó, por qué."
             ></app-textarea>
             <!--
@@ -329,11 +362,7 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
           }
         </form>
 
-        <!-- ── ALCANCE: TOTAL O PARCIAL ───────────────────────────────────
-             Fuera del <form> a propósito. Las cantidades por línea son
-             controles nativos con manejadores explícitos: meter un [(ngModel)]
-             dentro de un formGroup dispara NG01350 y aborta la detección de
-             cambios de todo el modal. -->
+        <!-- ── ALCANCE: TOTAL O PARCIAL ─────────────────────────────────── -->
         <div>
           <p class="mb-1.5 text-xs font-medium text-text-secondary">
             Alcance de la corrección
@@ -342,6 +371,7 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
             <button
               type="button"
               class="flex-1 rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+              [disabled]="submitting() || !!createdNote()"
               [ngClass]="
                 scope() === 'total'
                   ? 'border-primary bg-primary/10 text-text-primary'
@@ -358,6 +388,7 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
             <button
               type="button"
               class="flex-1 rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+              [disabled]="submitting() || !!createdNote()"
               [ngClass]="
                 scope() === 'partial'
                   ? 'border-primary bg-primary/10 text-text-primary'
@@ -374,96 +405,76 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
           </div>
         </div>
 
-        @if (scope() === 'partial') {
-          <div class="rounded-lg border border-border">
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-border">
-                    <th class="w-10 px-2 py-2"></th>
-                    <th class="px-2 py-2 text-left font-medium text-text-secondary">
-                      Línea
-                    </th>
-                    <th class="px-2 py-2 text-center font-medium text-text-secondary">
-                      Facturado
-                    </th>
-                    <th class="px-2 py-2 text-center font-medium text-text-secondary">
-                      A corregir
-                    </th>
-                    <th class="px-2 py-2 text-right font-medium text-text-secondary">
-                      Impuestos
-                    </th>
-                    <th class="px-2 py-2 text-right font-medium text-text-secondary">
-                      Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (row of rows(); track row.item.id) {
-                    <tr class="border-b border-border last:border-b-0">
-                      <td class="px-2 py-2 align-top">
-                        <input
-                          type="checkbox"
-                          class="mt-1 h-4 w-4 accent-[var(--color-primary)]"
-                          [checked]="row.selected"
-                          [attr.aria-label]="'Incluir ' + row.name"
-                          (change)="toggleLine(row.item, $event)"
-                        />
-                      </td>
-                      <td class="px-2 py-2 align-top text-text-primary">
-                        <span class="block">{{ row.name }}</span>
-                        <span class="block text-xs text-text-secondary">
-                          {{ money(row.item.unit_price) }} c/u
-                          @if (row.rate > 0) {
-                            <span> · {{ row.rate }}%</span>
-                          }
-                        </span>
-                      </td>
-                      <td class="px-2 py-2 text-center align-top text-text-secondary">
-                        {{ row.maxQuantity }}
-                      </td>
-                      <td class="px-2 py-2 text-center align-top">
-                        <input
-                          type="number"
-                          min="0"
-                          [max]="row.maxQuantity"
-                          step="any"
-                          class="w-24 rounded-lg border border-border bg-[var(--color-surface)]
-                                 px-2 py-1 text-right text-sm text-text-primary
-                                 focus:border-[var(--color-primary)] focus:outline-none
-                                 focus:ring-2 focus:ring-[var(--color-ring)]
-                                 disabled:opacity-50"
-                          [class.border-error]="row.overMax"
-                          [value]="row.quantity"
-                          [disabled]="!row.selected"
-                          [attr.aria-label]="'Cantidad a corregir de ' + row.name"
-                          (input)="setQuantity(row.item, $event)"
-                        />
-                        @if (row.overMax) {
-                          <span class="block text-[11px] text-error">
-                            Máx. {{ row.maxQuantity }}
-                          </span>
-                        }
-                      </td>
-                      <td class="px-2 py-2 text-right align-top text-text-secondary">
-                        {{ money(row.taxAmount) }}
-                      </td>
-                      <td class="px-2 py-2 text-right align-top font-medium text-text-primary">
-                        {{ money(row.total) }}
-                      </td>
-                    </tr>
-                  } @empty {
-                    <tr>
-                      <td colspan="6" class="px-2 py-4 text-center text-text-secondary">
-                        La factura no tiene líneas: no hay nada que corregir
-                        parcialmente.
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
+        @if (scope() === 'total' && contextError()) {
+          <div class="rounded-lg border border-error bg-error-light p-3" role="alert">
+            <p class="text-sm text-error">No se pudieron consultar los saldos de líneas para una nota parcial. La nota total copia la factura de origen y el servidor validará su creación.</p>
+            @for (detail of contextErrorDetails(); track detail) { <p class="text-xs text-error">{{ detail }}</p> }
+            <button type="button" class="mt-2 min-h-11 rounded-lg border border-error px-3 text-sm text-error" (click)="retryContext()">Reintentar consulta parcial</button>
           </div>
+        }
+
+        @if (scope() === 'partial') {
+          @if (contextLoading()) {
+            <p class="rounded-lg border border-border p-4 text-sm text-text-secondary" role="status">
+              Cargando saldos y valores de origen…
+            </p>
+          } @else if (contextError()) {
+            <div class="rounded-lg border border-error bg-error-light p-3" role="alert">
+              <p class="text-sm font-semibold text-error">No se pudo cargar el contexto de la nota</p>
+              <p class="text-sm text-error">{{ contextError() }}</p>
+              @if (contextErrorDetails().length) {
+                <ul class="mt-1 list-disc pl-4 text-xs text-error">
+                  @for (detail of contextErrorDetails(); track detail) { <li>{{ detail }}</li> }
+                </ul>
+              }
+              <button type="button" class="mt-2 min-h-11 rounded-lg border border-error px-3 text-sm text-error focus-visible:outline focus-visible:outline-2" (click)="retryContext()">
+                Reintentar
+              </button>
+            </div>
+          } @else {
+            @if (noteContext()?.warnings?.length) {
+              <div class="rounded-lg border border-warning bg-warning-light p-3" role="status">
+                <p class="text-sm font-semibold text-warning">Revisa el origen antes de continuar</p>
+                <ul class="mt-1 list-disc pl-4 text-xs text-warning">
+                  @for (warning of noteContext()!.warnings; track warning) { <li>{{ warning }}</li> }
+                </ul>
+              </div>
+            }
+            <p class="text-xs text-text-secondary">Estimación únicamente: el servidor calcula el resultado final con los datos capturados de la factura.</p>
+            <div class="space-y-3">
+              @for (row of rows(); track row.item.id) {
+                <article class="rounded-xl border border-border bg-[var(--color-surface)] p-3" [attr.data-source-id]="row.item.id">
+                  <div class="flex items-start gap-3">
+                    <input type="checkbox" class="mt-1 h-5 w-5 accent-[var(--color-primary)]" [checked]="row.selected" [disabled]="submitting() || !!createdNote()" [attr.aria-label]="'Incluir ' + row.name" (change)="toggleLine(row.item, $event)" />
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-semibold text-text-primary">{{ row.name }}</p>
+                      <p class="text-xs text-text-secondary">Origen {{ row.item.id }} · Facturado {{ row.maxQuantity }} {{ row.sourceUnit || 'unidad no informada' }}</p>
+                      @if (row.taxSummary) { <p class="mt-1 text-xs text-text-secondary">Tributos de origen (no editables): {{ row.taxSummary }}</p> }
+                      @if (row.remainingText) { <p class="mt-1 text-xs text-text-secondary">Saldo disponible: {{ row.remainingText }}</p> }
+                  @if (row.selected && !row.sourceAvailable) {
+                    <p class="mt-2 text-xs text-error" role="alert">No se pudo resolver una línea fiscal de origen para esta fila; no se enviará una selección ambigua.</p>
+                  }
+                    </div>
+                  </div>
+                  <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <app-input label="Cantidad a corregir" type="number" [min]="0.0001" [max]="row.quantityInputMax" [step]="0.0001" [disabled]="!row.selected || submitting() || !!createdNote()" [formControl]="lineControl(row.item.id, 'quantity')" (inputChange)="setLineValue(row.item, 'quantity', $event)" [error]="row.selected && row.quantityInvalid ? row.quantityError : undefined"></app-input>
+                    <app-input label="Precio unitario de la nota" [currency]="true" [currencyDecimals]="2" [max]="9_999_999_999.99" [disabled]="!row.selected || submitting() || !!createdNote()" [formControl]="lineControl(row.item.id, 'unit_price')" (inputChange)="setLineValue(row.item, 'unit_price', $event)" [error]="row.selected && row.priceInvalid ? 'Ingresa un precio entre 0 y 9.999.999.999,99, con máximo 2 decimales.' : undefined"></app-input>
+                    <app-input label="Descuento efectivo de la línea" [currency]="true" [currencyDecimals]="2" [max]="row.discountMax" [disabled]="!row.selected || submitting() || !!createdNote()" [formControl]="lineControl(row.item.id, 'discount_amount')" (inputChange)="setLineValue(row.item, 'discount_amount', $event)" [helperText]="row.discountOverridden ? 'Valor editado; reemplaza el descuento efectivo sugerido.' : 'Valor sugerido desde la factura y ajustado a la cantidad.'" [error]="row.selected && row.discountError ? row.discountError : undefined"></app-input>
+                    <app-selector label="Unidad de medida" [options]="row.unitOptions" [formControl]="lineControl(row.item.id, 'unit_code')" [disabled]="!row.selected || submitting() || !!createdNote()" [required]="true" placeholder="Selecciona la unidad" (valueChange)="setUnitCode(row.item, $event)" [errorText]="row.selected && !row.unitCode ? 'Selecciona una unidad para esta línea.' : ''"></app-selector>
+                  </div>
+                  @if (row.selected && row.remainingQuantity !== null && noteType() === 'credit' && row.quantity > row.remainingQuantity) {
+                    <p class="mt-2 text-xs text-error" role="alert">La cantidad supera el saldo de {{ row.remainingQuantity }} {{ row.sourceUnit || '' }} disponible para esta línea.</p>
+                  }
+                  <div class="mt-3 flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-xs">
+                    <span class="text-text-secondary">Estimación: {{ money(row.total) }} · Tributos en la estimación: {{ money(row.taxAmount) }}</span>
+                    @if (row.selected && row.invalidDiscount) { <span class="text-error" role="alert">El descuento no puede superar la base de la línea.</span> }
+                  </div>
+                </article>
+              } @empty {
+                <p class="rounded-lg border border-border p-4 text-center text-sm text-text-secondary">La factura no tiene líneas para corregir parcialmente.</p>
+              }
+            </div>
+          }
         }
 
         <!-- ── TOTALES DE LA NOTA ─────────────────────────────────────────
@@ -582,9 +593,11 @@ export class InvoiceNoteCreateComponent {
   private readonly actions$ = inject(Actions);
   private readonly destroyRef = inject(DestroyRef);
   private readonly currency = inject(CurrencyFormatService);
+  private readonly invoicing = inject(InvoicingService);
 
   readonly submitting = signal(false);
   readonly submitError = signal<string | null>(null);
+  readonly submitErrorCode = signal<string | null>(null);
   readonly submitErrorDetails = signal<string[]>([]);
   /**
    * Nota recién creada, a la espera de la pregunta "¿Emitirla ahora?"
@@ -595,18 +608,25 @@ export class InvoiceNoteCreateComponent {
   readonly issuing = signal(false);
   readonly issueError = signal<string | null>(null);
   readonly scope = signal<'total' | 'partial'>('total');
+  readonly noteContext = signal<InvoiceNoteContext | null>(null);
+  readonly conceptGuidance = NOTE_CONCEPT_GUIDANCE;
+  readonly contextLoading = signal(false);
+  readonly contextError = signal<string | null>(null);
+  readonly contextErrorDetails = signal<string[]>([]);
+  private readonly contextRetry = signal(0);
+  private preserveLineStateOnContextRefresh = false;
+  private preserveContextKey: string | null = null;
+  private lastContextIdentity: string | null = null;
+  private pendingCreate: PendingNoteCreate | null = null;
 
   /**
    * Selección por línea, indexada por `invoice_items.id`.
    *
-   * Signal y no `FormArray`: las cantidades se editan con `<input>` nativos
-   * fuera del `formGroup` (ver el comentario del template), y un objeto plano
-   * reemplazado entero es lo que hace que los `computed` de totales se
-   * recalculen sin más ceremonia.
+   * Signal y no `FormArray`: los controles por línea viven juntos en un objeto
+   * indexado por origen; reemplazar la entrada activa los `computed` que
+   * construyen selección, estimación y validación.
    */
-  private readonly lineState = signal<
-    Record<number, { selected: boolean; quantity: number }>
-  >({});
+  private readonly lineState = signal<Record<number, NoteLineState>>({});
 
   readonly noteForm = this.fb.group({
     conceptCode: ['', Validators.required],
@@ -710,23 +730,86 @@ export class InvoiceNoteCreateComponent {
     return buildNoteReason(chosen.code, chosen.label, reason);
   });
 
-  /** Las filas de la tabla parcial, ya con su aritmética resuelta. */
+  /** Card rows use only captured context and local editable values. */
   readonly rows = computed(() => {
     const state = this.lineState();
+    const context = this.noteContext();
     return invoiceLines(this.source()).map((item) => {
       const entry = state[item.id];
       const selected = entry?.selected ?? false;
       const quantity = entry?.quantity ?? num(item.quantity);
       const maxQuantity = num(item.quantity);
-      const scaled = estimateLine({ item, quantity: selected ? quantity : 0 });
+      const sourceContext = context?.items.find((line) => line.source_invoice_item_id === item.id);
+      const unitPrice = entry?.unit_price ?? num(sourceContext?.unit_price ?? item.unit_price);
+      const discount = entry?.discount_amount ?? num(sourceContext?.discount_amount ?? item.discount_amount);
+      const unitCode = entry?.unit_code ?? sourceContext?.unit_code ?? item.unit_code ?? '';
+      const scaled = estimateLine({
+        item,
+        quantity: selected ? quantity : 0,
+        unit_price: unitPrice,
+        ...(selected && entry?.discount_overridden ? { discount_amount: discount } : {}),
+        discount_overridden: entry?.discount_overridden ?? false,
+        unit_code: unitCode,
+        ...(sourceContext ? { context: sourceContext } : {}),
+      });
+      const divisor = num(sourceContext?.price_unit_quantity ?? item.price_unit_quantity) || 1;
+      const remainingQuantity = sourceContext?.remaining_quantity === null || sourceContext?.remaining_quantity === undefined
+        ? null
+        : num(sourceContext.remaining_quantity);
+      const quantityLimit = this.noteType() === 'credit'
+        ? (remainingQuantity ?? maxQuantity)
+        : null;
+      const quantityInputMax = this.noteType() === 'credit'
+        ? Math.min(quantityLimit ?? maxQuantity, 99_999_999.9999)
+        : 99_999_999.9999;
+      const discountMax = Math.max(0, Math.min(9_999_999_999.99, (quantity * unitPrice) / divisor));
+      const overCreditQuantity = this.noteType() === 'credit' && quantity > (quantityLimit ?? maxQuantity);
+      const quantityInvalid = !Number.isFinite(quantity) || quantity < 0.0001 || decimalPlaces(quantity) > 4 ||
+        quantity > 99_999_999.9999 || overCreditQuantity;
+      const priceInvalid = !Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 9_999_999_999.99 || decimalPlaces(unitPrice) > 2;
+      const discountError = selected && (!Number.isFinite(discount) || discount < 0 || discount > 9_999_999_999.99 || decimalPlaces(discount) > 2 || discount > (quantity * unitPrice) / divisor);
+      const remainingText = sourceContext
+        ? [remainingQuantity !== null ? `${remainingQuantity} ${unitCode}` : null,
+            sourceContext.remaining_base != null ? `base ${this.money(sourceContext.remaining_base)}` : null,
+            sourceContext.remaining_total != null ? `total ${this.money(sourceContext.remaining_total)}` : null]
+          .filter(Boolean).join(' · ')
+        : '';
+      const taxSummary = sourceContext?.taxes.map((tax) =>
+        `${tax.tax_name} ${tax.tax_rate}${tax.rate_basis === 'percent' ? '%' : tax.rate_basis === 'per_mil' ? '‰' : ''}${tax.is_inclusive ? ' incluido' : ' adicional'}`,
+      ).join(' · ') ?? '';
       return {
         item,
-        name: item.product_name || item.description || 'Línea sin descripción',
+        name: sourceContext?.description || item.product_name || item.description || 'Línea sin descripción',
         selected,
         quantity,
         maxQuantity,
-        overMax: selected && quantity > maxQuantity,
-        rate: lineTaxRate(item),
+        quantityLimit,
+        quantityInputMax,
+        discountMax,
+        overMax: selected && overCreditQuantity,
+        quantityInvalid,
+        quantityError: quantityLimit === 0
+          ? 'No queda cantidad acreditable disponible en esta línea.'
+          : overCreditQuantity
+            ? `Máximo disponible: ${quantityLimit ?? maxQuantity}.`
+            : decimalPlaces(quantity) > 4
+              ? 'La cantidad admite hasta 4 decimales.'
+              : quantity > 99_999_999.9999
+                ? 'La cantidad debe estar entre 0,0001 y 99.999.999,9999.'
+              : 'La cantidad mínima es 0,0001.',
+        priceInvalid,
+        discountError: discountError
+          ? `El descuento debe estar entre 0 y ${this.money(discountMax)} y admitir hasta 2 decimales.`
+          : '',
+        invalidDiscount: Boolean(discountError),
+        discountOverridden: entry?.discount_overridden ?? false,
+        unitCode,
+        sourceUnit: sourceContext?.unit_code ?? item.unit_code ?? null,
+        sourceAvailable: Boolean(sourceContext),
+        remainingQuantity,
+        remainingText,
+        taxSummary,
+        unitOptions: this.unitOptions(sourceContext?.unit_code ?? item.unit_code ?? null),
         taxAmount: scaled.tax_amount,
         total: scaled.total,
       };
@@ -736,14 +819,25 @@ export class InvoiceNoteCreateComponent {
   /**
    * Lo que de verdad se va a mandar.
    *
-   * En «total» son TODAS las líneas a su cantidad original — no porque se vayan
-   * a transmitir (una nota total omite `items` y deja que el backend las copie)
-   * sino para poder mostrar el total del documento antes de crearlo.
+   * Total-note inputs are omitted; partial selections contain only captured
+   * source context and the four editable commercial values.
    */
   readonly selections = computed<NoteLineSelection[]>(() => {
     const lines = invoiceLines(this.source());
+    const context = this.noteContext();
     if (this.scope() === 'total') {
-      return lines.map((item) => ({ item, quantity: num(item.quantity) }));
+      return lines.map((item) => {
+        const entry = this.lineState()[item.id];
+        const sourceContext = context?.items.find((line) => line.source_invoice_item_id === item.id);
+        return {
+          item,
+          quantity: num(item.quantity),
+          unit_price: entry?.unit_price ?? num(sourceContext?.unit_price ?? item.unit_price),
+          discount_amount: entry?.discount_amount ?? num(sourceContext?.discount_amount ?? item.discount_amount),
+          unit_code: entry?.unit_code ?? sourceContext?.unit_code ?? item.unit_code ?? undefined,
+          ...(sourceContext ? { context: sourceContext } : {}),
+        };
+      });
     }
     const state = this.lineState();
     return lines
@@ -752,23 +846,41 @@ export class InvoiceNoteCreateComponent {
         return {
           item,
           quantity: entry?.selected ? entry.quantity : 0,
+          unit_price: entry?.unit_price,
+          ...(entry?.discount_overridden ? { discount_amount: entry.discount_amount } : {}),
+          discount_overridden: entry?.discount_overridden ?? false,
+          unit_code: entry?.unit_code,
+          ...(context?.items.find((line) => line.source_invoice_item_id === item.id)
+            ? { context: context.items.find((line) => line.source_invoice_item_id === item.id)! }
+            : {}),
         };
       })
-      .filter((selection) => selection.quantity > 0);
+      .filter((selection) => selection.quantity >= 0.0001);
   });
 
-  readonly totals = computed(() => noteTotals(this.selections()));
+  readonly totals = computed(() => {
+    if (this.scope() === 'total') {
+      const source = this.source();
+      return {
+        subtotal: num(source.subtotal_amount), discount: num(source.discount_amount),
+        tax: num(source.tax_amount), total: num(source.total_amount),
+      };
+    }
+    return noteTotals(this.selections());
+  });
 
-  private readonly hasOverMax = computed(() =>
-    this.rows().some((row) => row.overMax),
-  );
+  private readonly hasInvalidLine = computed(() => this.rows().some((row) =>
+    row.selected && (row.quantityInvalid || row.priceInvalid || row.invalidDiscount || !row.unitCode ||
+      !this.noteContext()?.items.some((line) => line.source_invoice_item_id === row.item.id)),
+  ));
 
   readonly canSubmit = computed(() => {
     if (this.submitting() || this.formStatus() !== 'VALID') {
       return false;
     }
     if (this.scope() === 'partial') {
-      return this.selections().length > 0 && !this.hasOverMax();
+      return !this.contextLoading() && !this.contextError() && Boolean(this.noteContext()) &&
+        this.selections().length > 0 && !this.hasInvalidLine();
     }
     return invoiceLines(this.source()).length > 0;
   });
@@ -783,17 +895,59 @@ export class InvoiceNoteCreateComponent {
      * para la primera, indexadas por unos `invoice_items.id` que ya no existen
      * en el documento visible. Escribe `lineState` pero no lo lee: no hay ciclo.
      */
-    effect(() => {
+    effect((onCleanup) => {
       const open = this.isOpen();
       const invoice = this.invoice();
+      const noteType = this.noteType() === 'credit' ? 'credit_note' : 'debit_note';
+      this.contextRetry();
+      const contextKey = `${invoice?.id ?? ''}:${noteType}`;
+      const preserveLineState = this.preserveLineStateOnContextRefresh && this.preserveContextKey === contextKey;
+      this.preserveLineStateOnContextRefresh = false;
+      this.preserveContextKey = null;
       if (!open || !invoice) {
+        if (this.lastContextIdentity !== null) untracked(() => this.reset());
+        this.lastContextIdentity = null;
+        this.contextLoading.set(false);
         return;
       }
-      const fresh: Record<number, { selected: boolean; quantity: number }> = {};
-      for (const item of invoiceLines(invoice)) {
-        fresh[item.id] = { selected: false, quantity: num(item.quantity) };
+      if (this.lastContextIdentity !== contextKey && !preserveLineState) {
+        untracked(() => this.reset());
       }
-      this.lineState.set(fresh);
+      this.lastContextIdentity = contextKey;
+      if (!preserveLineState) this.lineState.set({});
+      this.noteContext.set(null);
+      this.contextError.set(null);
+      this.contextErrorDetails.set([]);
+
+      this.contextLoading.set(true);
+      const request = this.invoicing.getInvoiceNoteContext(invoice.id, noteType).subscribe({
+        next: (response) => {
+          this.noteContext.set(response.data);
+          if (!preserveLineState) {
+            const contextBySource = new Map(response.data.items.map((line) => [line.source_invoice_item_id, line]));
+            const nextState: Record<number, NoteLineState> = {};
+            for (const item of invoiceLines(invoice)) {
+              const source = contextBySource.get(item.id);
+              const quantity = num(source?.quantity ?? item.quantity);
+              const unitPrice = num(source?.unit_price ?? item.unit_price);
+              const discount = num(source?.discount_amount ?? item.discount_amount);
+              const unitCode = source?.unit_code ?? item.unit_code ?? '';
+              nextState[item.id] = this.createLineState({ quantity, unitPrice, discount, unitCode });
+            }
+            this.lineState.set(nextState);
+          } else {
+            this.clearSubmitError();
+          }
+          this.contextLoading.set(false);
+        },
+        error: (error: unknown) => {
+          const failure = describeApiFailure(error);
+          this.contextError.set(failure.message);
+          this.contextErrorDetails.set(describeNoteIntegrityDetails(failure.errorCode, failure.details));
+          this.contextLoading.set(false);
+        },
+      });
+      onCleanup(() => request.unsubscribe());
     });
 
     this.actions$
@@ -824,18 +978,22 @@ export class InvoiceNoteCreateComponent {
   }
 
   setNoteType(type: 'credit' | 'debit'): void {
-    if (this.submitting() || this.noteType() === type) {
+    if (this.submitting() || this.createdNote() || this.noteType() === type) {
       return;
     }
     this.noteType.set(type);
     // Los catálogos son distintos: arrastrar el código elegido para el otro
     // tipo declararía «Intereses» donde el usuario había elegido «Anulación».
     this.noteForm.controls.conceptCode.setValue('');
+    this.scope.set('total');
+    this.createdNote.set(null);
+    this.noteContext.set(null);
+    this.lineState.set({});
     this.clearSubmitError();
   }
 
   setScope(scope: 'total' | 'partial'): void {
-    if (this.submitting()) {
+    if (this.submitting() || this.createdNote()) {
       return;
     }
     this.scope.set(scope);
@@ -844,25 +1002,109 @@ export class InvoiceNoteCreateComponent {
 
   toggleLine(item: InvoiceItem, event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
+    const existing = this.lineState()[item.id] ?? this.createLineState({
+      quantity: num(item.quantity), unitPrice: num(item.unit_price),
+      discount: num(item.discount_amount), unitCode: item.unit_code ?? '',
+    });
+    let quantity = existing.quantity;
+    let discount = existing.discount_amount;
+    if (checked && this.noteType() === 'credit') {
+      const source = this.noteContext()?.items.find((line) => line.source_invoice_item_id === item.id);
+      const remaining = source?.remaining_quantity;
+      if (remaining != null) quantity = Math.min(quantity, num(remaining));
+      if (!existing.discount_overridden) {
+        const sourceQuantity = num(source?.quantity ?? item.quantity);
+        discount = sourceQuantity > 0
+          ? round2(num(source?.discount_amount ?? item.discount_amount) * quantity / sourceQuantity)
+          : 0;
+      }
+      existing.controls.quantity.setValue(quantity, { emitEvent: false });
+      existing.controls.discount_amount.setValue(discount, { emitEvent: false });
+    }
     this.lineState.update((state) => ({
       ...state,
       [item.id]: {
+        ...existing,
         selected: checked,
-        quantity: state[item.id]?.quantity ?? num(item.quantity),
+        quantity,
+        discount_amount: discount,
       },
     }));
   }
 
-  setQuantity(item: InvoiceItem, event: Event): void {
-    const raw = Number((event.target as HTMLInputElement).value);
-    const quantity = Number.isFinite(raw) && raw > 0 ? raw : 0;
+  lineControl(itemId: number, field: 'unit_code'): FormControl<string>;
+  lineControl(itemId: number, field: 'quantity' | 'unit_price' | 'discount_amount'): FormControl<number>;
+  lineControl(itemId: number, field: keyof NoteLineState['controls']): FormControl<number> | FormControl<string> {
+    const state = this.lineState()[itemId];
+    if (state) return state.controls[field] as FormControl<number> | FormControl<string>;
+    return (field === 'unit_code'
+      ? new FormControl('', { nonNullable: true })
+      : new FormControl(0, { nonNullable: true })) as FormControl<number> | FormControl<string>;
+  }
+
+  setLineValue(item: InvoiceItem, field: 'quantity' | 'unit_price' | 'discount_amount', raw: string): void {
+    const parsed = raw.trim() === '' ? 0 : Number(raw);
+    const value = Number.isFinite(parsed) ? parsed : 0;
+    const old = this.lineState()[item.id] ?? this.createLineState({
+      quantity: num(item.quantity), unitPrice: num(item.unit_price),
+      discount: num(item.discount_amount), unitCode: item.unit_code ?? '',
+    });
+    const patch: Partial<NoteLineState> = { [field]: value };
+    if (field === 'discount_amount') patch.discount_overridden = true;
+    if (field === 'quantity' && !old.discount_overridden) {
+      const contextLine = this.noteContext()?.items.find((line) => line.source_invoice_item_id === item.id);
+      const originalQuantity = num(contextLine?.quantity ?? item.quantity);
+      const proratedDiscount = originalQuantity > 0
+        ? round2((num(contextLine?.discount_amount ?? item.discount_amount) * value) / originalQuantity)
+        : 0;
+      patch.discount_amount = proratedDiscount;
+      old.controls.discount_amount.setValue(proratedDiscount, { emitEvent: false });
+    }
     this.lineState.update((state) => ({
       ...state,
       [item.id]: {
-        selected: state[item.id]?.selected ?? true,
-        quantity,
+        ...old,
+        ...patch,
+        selected: true,
       },
     }));
+  }
+
+  setUnitCode(item: InvoiceItem, code: string | number | null): void {
+    const old = this.lineState()[item.id];
+    if (!old || typeof code !== 'string') return;
+    old.controls.unit_code.setValue(code, { emitEvent: false });
+    this.lineState.update((state) => ({ ...state, [item.id]: { ...old, unit_code: code } }));
+  }
+
+  retryContext(): void {
+    this.preserveLineStateOnContextRefresh = Object.keys(this.lineState()).length > 0;
+    this.preserveContextKey = this.preserveLineStateOnContextRefresh
+      ? `${this.invoice().id}:${this.noteType() === 'credit' ? 'credit_note' : 'debit_note'}`
+      : null;
+    this.contextRetry.update((value) => value + 1);
+  }
+
+  private createLineState(values: { quantity: number; unitPrice: number; discount: number; unitCode: string }): NoteLineState {
+    return {
+      selected: false,
+      quantity: values.quantity,
+      unit_price: values.unitPrice,
+      discount_amount: round2(values.discount),
+      unit_code: values.unitCode,
+      discount_overridden: false,
+      controls: {
+        quantity: new FormControl(values.quantity, { nonNullable: true }),
+        unit_price: new FormControl(values.unitPrice, { nonNullable: true }),
+        discount_amount: new FormControl(values.discount, { nonNullable: true }),
+        unit_code: new FormControl(values.unitCode, { nonNullable: true }),
+      },
+    };
+  }
+
+  private unitOptions(sourceUnit: string | null): SelectorOption[] {
+    if (!sourceUnit || UNIT_CODE_OPTIONS.some((option) => option.value === sourceUnit)) return UNIT_CODE_OPTIONS;
+    return [...UNIT_CODE_OPTIONS, { value: sourceUnit, label: `${sourceUnit} (unidad original)` }];
   }
 
   onSubmit(): void {
@@ -877,7 +1119,6 @@ export class InvoiceNoteCreateComponent {
 
     this.clearSubmitError();
     this.submitting.set(true);
-
     const dto = buildNotePayload({
       invoice: this.source(),
       scope: this.scope(),
@@ -886,6 +1127,11 @@ export class InvoiceNoteCreateComponent {
       reason: this.formValue().reason ?? '',
       selections: this.selections(),
     });
+    this.pendingCreate = {
+      relatedInvoiceId: this.source().id,
+      invoiceType: this.noteType() === 'credit' ? 'credit_note' : 'debit_note',
+    };
+    this.noteForm.disable();
 
     this.store.dispatch(
       this.noteType() === 'credit'
@@ -900,9 +1146,14 @@ export class InvoiceNoteCreateComponent {
    * "Después".
    */
   private onSucceeded(invoice: Invoice): void {
-    if (!this.submitting()) {
+    const pending = this.pendingCreate;
+    const result = invoice as Invoice & { related_invoice_id?: number | null };
+    if (!this.submitting() || !pending ||
+      result.related_invoice_id !== pending.relatedInvoiceId ||
+      invoice.invoice_type !== pending.invoiceType) {
       return;
     }
+    this.pendingCreate = null;
     this.submitting.set(false);
     this.clearSubmitError();
     this.issueError.set(null);
@@ -961,8 +1212,14 @@ export class InvoiceNoteCreateComponent {
       return;
     }
     this.submitting.set(false);
+    this.pendingCreate = null;
+    this.noteForm.enable();
     this.submitError.set(failure.error);
-    this.submitErrorDetails.set(extractValidationMessages(failure.details));
+    this.submitErrorCode.set(failure.errorCode ?? null);
+    this.submitErrorDetails.set([
+      ...extractValidationMessages(failure.details),
+      ...describeNoteIntegrityDetails(failure.errorCode, failure.details),
+    ]);
   }
 
   onClose(): void {
@@ -976,16 +1233,31 @@ export class InvoiceNoteCreateComponent {
   }
 
   private reset(): void {
+    this.noteForm.enable({ emitEvent: false });
     this.noteForm.reset({ conceptCode: '', reason: '' });
     this.scope.set('total');
     this.clearSubmitError();
     this.createdNote.set(null);
     this.issuing.set(false);
     this.issueError.set(null);
+    this.lineState.set({});
+    this.noteContext.set(null);
+    this.contextError.set(null);
+    this.contextErrorDetails.set([]);
+    this.preserveLineStateOnContextRefresh = false;
+    this.preserveContextKey = null;
+    this.pendingCreate = null;
   }
 
   private clearSubmitError(): void {
     this.submitError.set(null);
+    this.submitErrorCode.set(null);
     this.submitErrorDetails.set([]);
   }
+}
+
+function decimalPlaces(value: number): number {
+  const text = String(value);
+  const decimal = text.split('.')[1];
+  return decimal?.length ?? 0;
 }
