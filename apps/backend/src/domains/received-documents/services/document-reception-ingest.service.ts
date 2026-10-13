@@ -46,6 +46,10 @@ export class DocumentReceptionIngestService {
         const outcome = this.isXml(document.mime_type)
           ? await this.documents.importXmlWithOutcome(ctx, file, source)
           : await this.scanQueue.enqueue(ctx, file, source);
+        if ('outcome' in outcome && outcome.outcome === 'duplicate_other_store') {
+          duplicateCount += 1;
+          continue;
+        }
         const documentId = 'document' in outcome ? outcome.document.id : outcome.document_id;
         const created = outcome.created;
         if (Number.isSafeInteger(documentId) && documentId > 0 && !seenDocumentIds.has(documentId)) {

@@ -3,6 +3,8 @@ import { NormalizedReceivedDocument, ReceivedDocumentTax } from './interfaces/re
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentStorageService } from './services/received-document-storage.service';
 import { ReceivedDocumentParserService } from './services/received-document-parser.service';
+import { DocumentReceptionIngestService } from './services/document-reception-ingest.service';
+import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 
 const context: ReceivedDocumentsContext = {
   organization_id: 2,
@@ -55,11 +57,15 @@ function makeHarness() {
     $queryRaw: jest.fn().mockResolvedValue([{ id: 50 }]),
     received_documents: {
       findFirst: jest.fn(async ({ where }: any) => where?.idempotency_key
-        ? createdDocs.get(where.idempotency_key) ?? null
+        ? [...createdDocs.entries()].find(([key, row]) =>
+          (key === where.idempotency_key || row.idempotency_key === where.idempotency_key) &&
+          (row.organization_id == null || row.organization_id === where.organization_id) &&
+          (row.accounting_entity_id == null || row.accounting_entity_id === where.accounting_entity_id) &&
+          (where.store_id == null || row.store_id === where.store_id))?.[1] ?? null
         : [...createdDocs.values()].find((row) => row.id === where?.id) ?? null),
       create: jest.fn(async ({ data }: any) => {
         const row = { id: nextId++, ...data };
-        createdDocs.set(data.idempotency_key, row);
+        createdDocs.set(`${data.accounting_entity_id}:${data.idempotency_key}`, row);
         return row;
       }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -222,11 +228,141 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     const h = makeHarness();
     const first = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
     expect(first.created).toBe(true);
+    if (first.outcome === 'duplicate_other_store') throw new Error('Expected a visible document');
     expect(first.document).toMatchObject({ id: 50 });
     const duplicate = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
     expect(duplicate.created).toBe(false);
+    if (duplicate.outcome === 'duplicate_other_store') throw new Error('Expected a visible duplicate');
     expect(duplicate.document).toMatchObject({ id: 50 });
     expect(h.storage.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])('deduplicates fiscal identity across stores without exposing or reading the other store (organization=%s)', async (isOrganization) => {
+    const h = makeHarness();
+    await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
+    h.storage.upload.mockClear();
+    h.storage.download.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    h.prisma.received_document_files.findFirst.mockClear();
+    const read = jest.spyOn(h.service, 'findOne');
+    const outcome = await h.service.importXmlWithOutcome({ ...context, store_id: 4, is_organization: isOrganization }, xmlFile(), 'api');
+
+    expect(outcome).toEqual({
+      outcome: 'duplicate_other_store', created: false,
+      message: 'Esta factura ya fue recibida en otra tienda de tu empresa.',
+    });
+    expect(h.tx.received_documents.findFirst).toHaveBeenLastCalledWith({
+      where: { organization_id: 2, accounting_entity_id: 8, idempotency_key: `key:${'a'.repeat(96)}` },
+    });
+    expect(h.tx.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('does not merge matching document keys from separate fiscal entities', async () => {
+    const h = makeHarness();
+    const first = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
+    h.baseClient.accounting_entities.findFirst.mockResolvedValueOnce({
+      id: 9, organization_id: 2, store_id: 4, tax_id: '800123456', is_active: true,
+    });
+    h.baseClient.store_settings.findFirst.mockResolvedValueOnce({ settings: { fiscal_data: { nit: '800123456' } } });
+    const second = await h.service.importXmlWithOutcome({ ...context, store_id: 4, accounting_entity_id: 9 }, xmlFile(), 'api');
+    expect(first.outcome).toBe('created');
+    expect(second.outcome).toBe('created');
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(2);
+    expect([...h.createdDocs.values()]).toMatchObject([
+      { id: 50, accounting_entity_id: 8, store_id: 3 },
+      { id: 51, accounting_entity_id: 9, store_id: 4 },
+    ]);
+  });
+
+  it.each([false, true])('returns a safe P2002 winner outcome and still rejects conflicting facts (conflict=%s)', async (conflict) => {
+    const h = makeHarness();
+    h.tx.received_documents.create.mockRejectedValueOnce({ code: 'P2002', meta: { target: ['accounting_entity_id', 'idempotency_key'] } });
+    const winner = {
+      id: 77, organization_id: 2, accounting_entity_id: 8, store_id: 3,
+      raw_payload: { normalized: normalized(conflict ? { total_amount: '120.00' } : {}) },
+      files: [{ id: 123, file_key: 'private-file-key' }],
+    };
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce(winner);
+    const read = jest.spyOn(h.service, 'findOne');
+    const result = h.service.importXmlWithOutcome({ ...context, store_id: 4 }, xmlFile(), 'api');
+    if (conflict) await expect(result).rejects.toBeInstanceOf(ConflictException);
+    else await expect(result).resolves.toEqual({
+      outcome: 'duplicate_other_store', created: false,
+      message: 'Esta factura ya fue recibida en otra tienda de tu empresa.',
+    });
+    expect(h.prisma.received_documents.findFirst).toHaveBeenCalledTimes(1);
+    expect(h.prisma.received_documents.findFirst).toHaveBeenCalledWith({
+      where: { organization_id: 2, accounting_entity_id: 8, idempotency_key: `key:${'a'.repeat(96)}` },
+    });
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('rejects conflicting cross-store facts before storage or a scoped document read', async () => {
+    const h = makeHarness();
+    await h.service.importXml(context, xmlFile());
+    h.parser.parse.mockReturnValueOnce(normalized({ total_amount: '120.00' }));
+    h.storage.upload.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    const read = jest.spyOn(h.service, 'findOne');
+    await expect(h.service.importXmlWithOutcome({ ...context, store_id: 4 }, xmlFile(), 'api'))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('returns only the safe notice for manual/XML wrappers encountering another store duplicate', async () => {
+    const h = makeHarness();
+    await h.service.importXml(context, xmlFile());
+    const dto = manualDto({ invoice_number: 'FV-1', document_key: 'a'.repeat(96), due_date: '2026-10-30' });
+    h.storage.upload.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    const read = jest.spyOn(h.service, 'findOne');
+    const expected = { outcome: 'duplicate_other_store', created: false, message: 'Esta factura ya fue recibida en otra tienda de tu empresa.' };
+    await expect(h.service.importXml({ ...context, store_id: 4 }, xmlFile())).resolves.toEqual(expected);
+    const manual = makeHarness();
+    await manual.service.createManual(context, dto);
+    manual.prisma.received_documents.findFirst.mockClear();
+    const manualRead = jest.spyOn(manual.service, 'findOne');
+    await expect(manual.service.createManual({ ...context, store_id: 4 }, dto)).resolves.toEqual(expected);
+    expect(manual.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(manual.storage.upload).not.toHaveBeenCalled();
+    expect(manual.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(manualRead).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(['api', 'automated'] as const)('counts the cross-store duplicate safely for %s ingestion without hidden document IDs', async (source) => {
+    const h = makeHarness();
+    await h.service.importXml(context, xmlFile());
+    const scanQueue = { enqueue: jest.fn() };
+    const ingest = new DocumentReceptionIngestService(h.service, scanQueue as unknown as ReceivedDocumentScanQueueService);
+    h.storage.upload.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    await expect(ingest.ingest({ ...context, store_id: 4 }, {
+      version: 1, next_cursor: 'next', documents: [{
+        external_id: 'provider-1', file_name: 'factura.xml', mime_type: 'application/xml', content: xmlFile().buffer,
+      }],
+    }, source)).resolves.toEqual({
+      received_count: 0, duplicate_count: 1, error_count: 0,
+      document_ids: [], error_codes: [], next_cursor: 'next',
+    });
+    expect(scanQueue.enqueue).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
   });
 
   it('uses canonical RUT NIT rather than a different accounting entity projection', async () => {

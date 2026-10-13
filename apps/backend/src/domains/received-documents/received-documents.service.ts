@@ -55,6 +55,18 @@ interface ImportResult {
   created: boolean;
 }
 
+export type NormalizedReceivedDocumentImportResult =
+  | {
+      outcome: 'created' | 'duplicate';
+      document: Prisma.received_documentsGetPayload<{}>;
+      created: boolean;
+    }
+  | {
+      outcome: 'duplicate_other_store';
+      created: false;
+      message: string;
+    };
+
 const MAX_XML_BYTES = 10 * 1024 * 1024;
 const MONEY_TOLERANCE = new Prisma.Decimal('0.01');
 const MONEY_MAX = new Prisma.Decimal('10000000000000');
@@ -226,6 +238,7 @@ export class ReceivedDocumentsService {
     source = 'manual',
   ) {
     const result = await this.importXmlWithOutcome(ctx, file, source);
+    if (result.outcome === 'duplicate_other_store') return result;
     return result.document;
   }
 
@@ -233,7 +246,7 @@ export class ReceivedDocumentsService {
     ctx: ReceivedDocumentsContext,
     file: Express.Multer.File,
     source = 'manual',
-  ): Promise<ImportResult> {
+  ): Promise<NormalizedReceivedDocumentImportResult> {
     const scope = await this.resolveScope(ctx);
     this.assertXmlFile(file);
     this.assertSourceChannel(source);
@@ -257,8 +270,9 @@ export class ReceivedDocumentsService {
       metadata: { source_format: 'ubl_xml' },
       processingStatus: 'processing',
     });
+    if (recorded.outcome === 'duplicate_other_store') return recorded;
     await this.persistOriginalFile(scope, recorded.document.id, file, sha256);
-    return { document: await this.findOne(ctx, recorded.document.id), created: recorded.created };
+    return { ...recorded, document: await this.findOne(ctx, recorded.document.id) };
   }
 
   async createManual(ctx: ReceivedDocumentsContext, dto: ManualReceivedDocumentDto) {
@@ -277,6 +291,7 @@ export class ReceivedDocumentsService {
       metadata: { source_format: 'manual_entry', ...(dto.reviewer_note ? { reviewer_note: dto.reviewer_note } : {}) },
       processingStatus: 'ready',
     });
+    if (result.outcome === 'duplicate_other_store') return result;
     return this.findOne(ctx, result.document.id);
   }
 
@@ -820,7 +835,7 @@ export class ReceivedDocumentsService {
     rawPayload: unknown;
     metadata: unknown;
     processingStatus: string;
-  }): Promise<ImportResult> {
+  }): Promise<NormalizedReceivedDocumentImportResult> {
     const normalized = this.withPendingWarnings(input.normalized);
     const ctx = input.scope.context;
     const storeId = ctx.store_id ?? input.scope.entity_store_id;
@@ -830,11 +845,11 @@ export class ReceivedDocumentsService {
         await tx.$executeRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
         `);
-        const existingWhere = this.idempotencyWhere(input.scope, input.idempotencyKey);
+        const existingWhere = this.fiscalIdempotencyWhere(input.scope, input.idempotencyKey);
         const existing = await tx.received_documents.findFirst({ where: existingWhere });
         if (existing) {
           this.assertSameNormalizedFacts(existing, normalized);
-          return { document: existing, created: false };
+          return this.normalizedDuplicateOutcome(input.scope, existing);
         }
 
         const document = await tx.received_documents.create({
@@ -887,14 +902,14 @@ export class ReceivedDocumentsService {
             }),
           },
         });
-        return { document, created: true };
+        return { outcome: 'created', document, created: true };
       });
     } catch (error) {
       if (this.isIdempotencyUniqueError(error)) {
-        const winner = await this.prisma.received_documents.findFirst({ where: this.idempotencyWhere(input.scope, input.idempotencyKey) });
+        const winner = await this.prisma.received_documents.findFirst({ where: this.fiscalIdempotencyWhere(input.scope, input.idempotencyKey) });
         if (winner) {
           this.assertSameNormalizedFacts(winner, normalized);
-          return { document: winner, created: false };
+          return this.normalizedDuplicateOutcome(input.scope, winner);
         }
         throw new ConflictException('La clave de documento ya está registrada en esta entidad fiscal.');
       }
@@ -1568,6 +1583,29 @@ export class ReceivedDocumentsService {
       idempotency_key: key,
       ...(scope.store_filter != null ? { store_id: scope.store_filter } : {}),
     };
+  }
+
+  /** Fiscal uniqueness is entity-wide; operational read visibility remains store-scoped. */
+  private fiscalIdempotencyWhere(scope: Scope, key: string): Prisma.received_documentsWhereInput {
+    return {
+      organization_id: scope.context.organization_id,
+      accounting_entity_id: scope.context.accounting_entity_id,
+      idempotency_key: key,
+    };
+  }
+
+  private normalizedDuplicateOutcome(
+    scope: Scope,
+    document: Prisma.received_documentsGetPayload<{}>,
+  ): NormalizedReceivedDocumentImportResult {
+    if (scope.store_filter != null && document.store_id !== scope.store_filter) {
+      return {
+        outcome: 'duplicate_other_store',
+        created: false,
+        message: 'Esta factura ya fue recibida en otra tienda de tu empresa.',
+      };
+    }
+    return { outcome: 'duplicate', document, created: false };
   }
 
   private storageContext(scope: Scope) {
