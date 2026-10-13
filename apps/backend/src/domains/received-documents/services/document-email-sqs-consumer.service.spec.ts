@@ -268,6 +268,13 @@ describe('DocumentEmailSqsConsumerService durable SQS protocol', () => {
     const h = harness(); h.processor.processEmail.mockResolvedValueOnce({ ...success, parts: [{ message_index: 0, ordinal: 1, filename: 'invoice.xml', kind: 'xml', status: 'processed', bytes: 'secret-bytes', body: '<script>', base64: 'AAAA' } as any] });
     await receive(h); expect(JSON.stringify(row(h).parts)).not.toMatch(/secret-bytes|script|AAAA/); expect(row(h).parts[0].transport_facts).toEqual(facts);
   });
+  it('whitelists only bounded receiver identity facts from a part reason', async () => {
+    const h = harness(); h.processor.processEmail.mockResolvedValueOnce({ ...success, parts: [{ message_index: 0, ordinal: 1, filename: 'invoice.xml', kind: 'xml', status: 'not_processed', reason_code: 'RECEIVER_MISMATCH',
+      reason_details: { receiver_tax_id: '900123456-8', expected_receiver_tax_id: '901999999', raw_error: 'secret', foreign_document_id: 999 } } as any,
+      { message_index: 0, ordinal: 2, filename: 'bad.xml', kind: 'xml', status: 'not_processed', reason_details: { receiver_tax_id: '<script>', expected_receiver_tax_id: '1'.repeat(51) } } as any] });
+    await receive(h); expect(row(h).parts[0].reason_details).toEqual({ receiver_tax_id: '900123456-8', expected_receiver_tax_id: '901999999' });
+    expect(row(h).parts[1]).not.toHaveProperty('reason_details'); expect(JSON.stringify(row(h).parts)).not.toMatch(/raw_error|foreign_document_id|script/);
+  });
   it('only complete valid documents count as first/last valid; challenge/error never does', async () => {
     const h = harness(); h.processor.processEmail.mockResolvedValueOnce({ status: 'ignored', reason_code: 'GMAIL_VERIFICATION_CODE', retryable: false, valid_document: false, parts: [] });
     await receive(h); expect(h.inboxRow.last_email_at).toBeInstanceOf(Date); expect(h.inboxRow.first_valid_received_at).toBeNull(); expect(h.inboxRow.last_valid_received_at).toBeNull();

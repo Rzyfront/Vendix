@@ -373,6 +373,14 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
       if (typeof p.sha256 === 'string' && /^[a-f0-9]{64}$/.test(p.sha256)) part.sha256 = p.sha256;
       if (['container', 'commercial', 'dian_receipt', 'representation', 'complement'].includes(p.role as string)) part.role = p.role as DocumentEmailPartResult['role'];
       if (DOCUMENT_EMAIL_REASON_CODES.includes(p.reason_code as never)) part.reason_code = p.reason_code as DocumentEmailReasonCode;
+      const details = this.object(p.reason_details);
+      if (details) {
+        const safe: NonNullable<DocumentEmailPartResult['reason_details']> = {};
+        for (const key of ['receiver_tax_id', 'expected_receiver_tax_id'] as const) {
+          if (typeof details[key] === 'string' && /^[0-9-]{1,50}$/.test(details[key])) safe[key] = details[key];
+        }
+        if (Object.keys(safe).length) part.reason_details = safe;
+      }
       if (Array.isArray(p.warnings)) part.warnings = p.warnings.filter((code) => DOCUMENT_EMAIL_WARNINGS.includes(code as never)).slice(0, 4) as DocumentEmailPartResult['warnings'];
       if (this.positive(p.document_id)) part.document_id = p.document_id;
       if (Array.isArray(p.originals_checkpoint)) part.originals_checkpoint = p.originals_checkpoint.slice(0, 40).flatMap((checkpoint) => {

@@ -51,6 +51,7 @@ export interface DocumentEmailPartResult {
   role?: 'container' | 'commercial' | 'dian_receipt' | 'representation' | 'complement';
   status: DocumentEmailState;
   reason_code?: DocumentEmailReasonCode;
+  reason_details?: DocumentEmailReasonDetails;
   warnings?: DocumentEmailWarning[];
   originals_checkpoint?: Array<{ sha256: string; stored: boolean }>;
   /** Only populated for a document readable in the same operational store. */
@@ -145,4 +146,59 @@ export interface DocumentEmailTransport {
   renew(handle: string, signal: AbortSignal): Promise<void>;
   sendRetry(payload: { type: 'internal_retry'; message_id: number; version: number }, signal: AbortSignal): Promise<void>;
   tagRaw?(bucket: string, key: string, classification: 'invoice' | 'noinvoice', signal: AbortSignal): Promise<void>;
+}
+
+/** Configure-only, private/no-store response. Never included in general intake history. */
+export interface DocumentEmailGmailCodeView {
+  available: boolean;
+  code: string | null;
+  expires_at: Date | null;
+}
+
+export interface DocumentEmailMessagePartView {
+  message_index: number;
+  ordinal: number;
+  filename: string;
+  kind: DocumentEmailPartResult['kind'];
+  role?: DocumentEmailPartResult['role'];
+  status: DocumentEmailState;
+  reason_code?: DocumentEmailReasonCode;
+  reason_details?: DocumentEmailReasonDetails;
+  warnings?: DocumentEmailWarning[];
+  document_id?: number;
+}
+
+/** Metadata-only HTTP view; no transport facts/checkpoints/body/pointers/codes or aliases. */
+export interface DocumentEmailMessageView {
+  id: number;
+  version: number;
+  received_at: Date;
+  processed_at: Date | null;
+  status: DocumentEmailState;
+  reason_code: DocumentEmailReasonCode | null;
+  retryable: boolean;
+  can_retry: boolean;
+  archived_at: Date | null;
+  sender: string | null;
+  subject: string | null;
+  parts: DocumentEmailMessagePartView[];
+}
+
+export interface DocumentEmailMessagesPage {
+  data: DocumentEmailMessageView[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface DocumentEmailRetryView {
+  id: number;
+  version: number;
+  requested: true;
+}
+
+/** Identity facts only from authorized incoming XML and this tenant's canonical taxpayer identity. */
+export interface DocumentEmailReasonDetails {
+  receiver_tax_id?: string;
+  expected_receiver_tax_id?: string;
 }
