@@ -440,7 +440,9 @@ interface PendingNoteCreate {
                 </ul>
               </div>
             }
-            <p class="text-xs text-text-secondary">Estimación únicamente: el servidor calcula el resultado final con los datos capturados de la factura.</p>
+            @if (!partialAiu()) {
+              <p class="text-xs text-text-secondary">Estimación únicamente: el servidor calcula el resultado final con los datos capturados de la factura.</p>
+            }
             <div class="space-y-3">
               @for (row of rows(); track row.item.id) {
                 <article class="rounded-xl border border-border bg-[var(--color-surface)] p-3" [attr.data-source-id]="row.item.id">
@@ -465,10 +467,14 @@ interface PendingNoteCreate {
                   @if (row.selected && row.remainingQuantity !== null && noteType() === 'credit' && row.quantity > row.remainingQuantity) {
                     <p class="mt-2 text-xs text-error" role="alert">La cantidad supera el saldo de {{ row.remainingQuantity }} {{ row.sourceUnit || '' }} disponible para esta línea.</p>
                   }
-                  <div class="mt-3 flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-xs">
-                    <span class="text-text-secondary">Estimación: {{ money(row.total) }} · Tributos en la estimación: {{ money(row.taxAmount) }}</span>
+                  @if (!partialAiu()) {
+                    <div class="mt-3 flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-xs">
+                      <span class="text-text-secondary">Estimación: {{ money(row.total) }} · Tributos en la estimación: {{ money(row.taxAmount) }}</span>
                     @if (row.selected && row.invalidDiscount) { <span class="text-error" role="alert">El descuento no puede superar la base de la línea.</span> }
-                  </div>
+                    </div>
+                  } @else if (row.selected && row.invalidDiscount) {
+                    <p class="mt-3 text-xs text-error" role="alert">El descuento no puede superar la base de la línea.</p>
+                  }
                 </article>
               } @empty {
                 <p class="rounded-lg border border-border p-4 text-center text-sm text-text-secondary">La factura no tiene líneas para corregir parcialmente.</p>
@@ -481,6 +487,11 @@ interface PendingNoteCreate {
              Se pintan también en la nota TOTAL: saber por cuánto va a salir el
              documento antes de emitirlo es justo lo que evita descubrirlo
              cuando ya gastó un consecutivo. -->
+        @if (partialAiu()) {
+          <div class="rounded-xl border border-border bg-surface-secondary/40 p-3 text-sm text-text-secondary" role="status" aria-live="polite">
+            El servidor calculará la base, los impuestos y el total AIU al crear la nota.
+          </div>
+        } @else {
         <div class="rounded-xl border border-border bg-surface-secondary/40 p-3">
           <div class="space-y-1 text-sm">
             <div class="flex justify-between">
@@ -509,6 +520,7 @@ interface PendingNoteCreate {
             </span>
           </div>
         </div>
+        }
 
         <!-- La nota nace en BORRADOR. Decirlo evita que el comerciante crea que
              ya corrigió la factura ante la DIAN y se entere semanas después. -->
@@ -608,6 +620,10 @@ export class InvoiceNoteCreateComponent {
   readonly issuing = signal(false);
   readonly issueError = signal<string | null>(null);
   readonly scope = signal<'total' | 'partial'>('total');
+  /** AIU on partial corrections is recomputed from the captured source server-side. */
+  readonly partialAiu = computed(() =>
+    this.scope() === 'partial' && this.source().operation_type === '09',
+  );
   readonly noteContext = signal<InvoiceNoteContext | null>(null);
   readonly conceptGuidance = NOTE_CONCEPT_GUIDANCE;
   readonly contextLoading = signal(false);

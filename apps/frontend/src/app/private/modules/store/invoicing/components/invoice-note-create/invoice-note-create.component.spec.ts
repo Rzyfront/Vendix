@@ -167,6 +167,31 @@ describe('InvoiceNoteCreateComponent source-aware editing', () => {
     fixture.destroy();
   });
 
+  it('hides partial AIU estimates while preserving exact source and created totals', () => {
+    open();
+    requests[0].next({ success: true, data: context('credit_note') });
+    const component = fixture.componentInstance;
+    fixture.componentRef.setInput('invoice', { ...invoice, operation_type: '09' } as Invoice);
+    component.setScope('partial');
+    component.toggleLine(sourceItem, { target: { checked: true } } as unknown as Event);
+    fixture.detectChanges();
+
+    expect(component.partialAiu()).toBeTrue();
+    expect(fixture.nativeElement.textContent).toContain(
+      'El servidor calculará la base, los impuestos y el total AIU al crear la nota.',
+    );
+    expect(fixture.nativeElement.textContent).not.toContain('Estimación:');
+    expect(fixture.nativeElement.textContent).not.toContain('Total de la nota crédito');
+
+    component.setScope('total');
+    expect(component.partialAiu()).toBeFalse();
+    expect(component.totals()).toEqual({ subtotal: 16.67, discount: 10, tax: 1.27, total: 7.94 });
+    component.createdNote.set({ ...invoice, id: 88, invoice_number: 'NC-88', total_amount: 123.45 } as Invoice);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('NC-88 creada en borrador por 123.45');
+    fixture.destroy();
+  });
+
   it('resets draft lifecycle on invoice change and ignores an older create success', () => {
     open('credit');
     requests[0].next({ success: true, data: context('credit_note') });
