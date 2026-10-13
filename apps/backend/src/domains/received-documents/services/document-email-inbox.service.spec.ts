@@ -33,7 +33,7 @@ function harness(overrides: Record<string, string> = {}) {
   const messages = { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
   const db = {
     organizations: { findFirst: jest.fn().mockResolvedValue({ id: 3, fiscal_scope: 'ORGANIZATION', operating_scope: 'ORGANIZATION' }) },
-    stores: { findFirst: jest.fn().mockResolvedValue({ id: 21, nit_type: 'NIT' }) },
+    stores: { findFirst: jest.fn().mockResolvedValue({ id: 21, nit_type: 'NIT' }), count: jest.fn().mockResolvedValue(0) },
     accounting_entities: { findFirst: jest.fn().mockResolvedValue({ id: 8, legal_name: 'Example', fiscal_scope: 'ORGANIZATION',
       organization: { name: 'Example', document_type: 'NIT', organization_settings: { settings: { fiscal_data: { nit: '900123456', nit_type: 'NIT' } } } }, store: null }) },
     dian_configurations: { findFirst: jest.fn().mockResolvedValue({ nit: '900123456', name: 'Example' }) },
@@ -133,6 +133,35 @@ describe('DocumentEmailInboxService', () => {
     expect(await h.service.status({ ...ctx, store_id: null })).toMatchObject({ configured: true, active_inboxes: 2, last_email_at: null });
     expect(h.inbox.findFirst).not.toHaveBeenCalled();
     expect(h.inbox.count).toHaveBeenNthCalledWith(1, { where: { organization_id: 3, accounting_entity_id: 8 } });
+  });
+  it('exposes only the org pilot boolean for an active allowlisted own store, preserving aggregate counts', async () => {
+    const h = harness({ EMAIL_RECEPTION_STORE_ALLOWLIST: ' 021,21,0,-1,*,999999999999999999999 ' });
+    h.db.stores.count.mockResolvedValue(1); h.inbox.count.mockResolvedValueOnce(3).mockResolvedValueOnce(2);
+    const status = await h.service.status({ ...ctx, store_id: null });
+    expect(status).toMatchObject({ pilot_available: true, configured: true, active_inboxes: 2, last_email_at: null });
+    expect(h.db.stores.count).toHaveBeenCalledWith({ where: { organization_id: 3, is_active: true, id: { in: [21] } } });
+    expect(Object.keys(status).sort()).toEqual(['active_inboxes', 'configured', 'enabled', 'first_valid_received_at', 'last_email_at', 'last_error_code', 'last_valid_received_at', 'not_processed_count', 'pilot_available', 'state']);
+    expect(h.db.stores.findFirst).not.toHaveBeenCalled();
+    expect(h.inbox.findFirst).not.toHaveBeenCalled();
+    expect(h.inbox.create).not.toHaveBeenCalled();
+    expect(h.fiscal.findFiscalAccountingEntityId).not.toHaveBeenCalled();
+    expect(h.subscriptions.canUseModule).not.toHaveBeenCalled();
+  });
+  it('keeps org pilot hidden when the flag is disabled without querying stores', async () => {
+    const h = harness({ EMAIL_RECEPTION_ENABLED: 'false' }); h.db.stores.count.mockResolvedValue(1);
+    expect(await h.service.status({ ...ctx, store_id: null })).toMatchObject({ pilot_available: false });
+    expect(h.db.stores.count).not.toHaveBeenCalled();
+  });
+  it('keeps org pilot hidden without valid allowlisted IDs, preserving historical counts', async () => {
+    const h = harness({ EMAIL_RECEPTION_STORE_ALLOWLIST: '0,-21,*,9007199254740993' });
+    h.inbox.count.mockResolvedValueOnce(3).mockResolvedValueOnce(2);
+    expect(await h.service.status({ ...ctx, store_id: null })).toMatchObject({ pilot_available: false, configured: true, active_inboxes: 2 });
+    expect(h.db.stores.count).not.toHaveBeenCalled();
+  });
+  it('does not enable org pilot for inactive or cross-organization allowlisted stores', async () => {
+    const h = harness({ EMAIL_RECEPTION_STORE_ALLOWLIST: '22' }); h.db.stores.count.mockResolvedValue(0);
+    expect(await h.service.status({ ...ctx, store_id: null })).toMatchObject({ pilot_available: false });
+    expect(h.db.stores.count).toHaveBeenCalledWith({ where: { organization_id: 3, is_active: true, id: { in: [22] } } });
   });
   it('pauses while the pilot is disabled without losing the address; stale CAS is 409', async () => {
     const h = harness({ EMAIL_RECEPTION_ENABLED: 'false' }); h.setInbox(record());

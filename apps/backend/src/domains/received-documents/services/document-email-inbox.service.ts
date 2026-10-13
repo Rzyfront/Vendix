@@ -46,7 +46,12 @@ export class DocumentEmailInboxService {
         this.prisma.document_reception_email_inboxes.count({ where }),
         this.prisma.document_reception_email_inboxes.count({ where: { ...where, enabled: true } }),
       ]);
-      return { ...empty, configured: configured > 0, active_inboxes: active };
+      const allowlistedIds = [...new Set(this.config.get<string>('EMAIL_RECEPTION_STORE_ALLOWLIST', '').split(',')
+        .map((value) => value.trim()).filter((value) => /^\d+$/.test(value)).map(Number)
+        .filter((id) => Number.isSafeInteger(id) && id > 0 && id <= 2_147_483_647))];
+      const pilotAvailable = this.config.get<string>('EMAIL_RECEPTION_ENABLED', 'false') === 'true' && allowlistedIds.length > 0
+        && await this.prisma.stores.count({ where: { organization_id: ctx.organization_id, is_active: true, id: { in: allowlistedIds } } }) > 0;
+      return { ...empty, pilot_available: pilotAvailable, configured: configured > 0, active_inboxes: active };
     }
     const inbox = await this.prisma.document_reception_email_inboxes.findFirst({ where,
       select: { enabled: true, first_valid_received_at: true, last_email_at: true, last_valid_received_at: true, last_error_code: true },
