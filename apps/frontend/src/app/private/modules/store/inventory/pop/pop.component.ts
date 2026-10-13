@@ -87,6 +87,7 @@ import {
   PopShippingAllocation,
 } from './interfaces';
 import {
+  AddToPopCartRequest,
   PopProductConfigResult,
   PopProductModalResult,
 } from './interfaces/pop-cart.interface';
@@ -1394,7 +1395,9 @@ export class PopComponent implements OnInit, OnDestroy {
   onBulkDataReceived(items: any[]): void {
     if (!items || items.length === 0) return;
 
-    let addedCount = 0;
+    // Se acumulan y se agregan de una vez: un solo set del carrito y un solo
+    // cálculo de resumen (fila por fila era O(N²) con 10.000 filas).
+    const requests: AddToPopCartRequest[] = [];
 
     items.forEach((row) => {
       const normalizedRow = this.normalizeBulkRow(row);
@@ -1545,8 +1548,7 @@ export class PopComponent implements OnInit, OnDestroy {
         is_active: true,
       };
 
-      this.popCartService
-        .addToCart({
+      requests.push({
           product: dummyProduct,
           quantity: quantity,
           unit_cost: unit_cost,
@@ -1573,15 +1575,16 @@ export class PopComponent implements OnInit, OnDestroy {
             is_on_sale: isOnSale,
             sale_price: salePrice,
           },
-        })
-        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-
-      addedCount++;
+        });
     });
 
-    if (addedCount > 0) {
+    if (requests.length > 0) {
+      this.popCartService
+        .addPrebulkItems(requests)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe();
       this.toastService.success(
-        `Se importaron ${addedCount} productos al carrito`,
+        `Se importaron ${requests.length} productos al carrito`,
       );
     } else {
       this.toastService.warning(
@@ -2601,8 +2604,16 @@ export class PopComponent implements OnInit, OnDestroy {
     // carrito) o si falló la creación (conservar carrito para reintentar).
     let createdOrder: any = pendingOrder;
 
+    // Reintento: se RELEE la OC del servidor para saber qué falta recibir
+    // (una recepción grande pudo quedar parcial). Si la relectura falla se usa
+    // la foto recordada y se pide la recepción completa, como antes.
     const order$: Observable<any> = pendingOrder
-      ? of(pendingOrder)
+      ? this.purchaseOrdersService.getPurchaseOrderById(pendingOrder.id).pipe(
+          map((response: any) =>
+            response?.success && response.data ? response.data : pendingOrder,
+          ),
+          catchError(() => of(pendingOrder)),
+        )
       : this._createApprovedOrder$(state);
 
     this.toastService.info(
@@ -2621,7 +2632,7 @@ export class PopComponent implements OnInit, OnDestroy {
           // original viaja junto al marcador de etapa: descartarlo dejaba al
           // operador con un mensaje genérico y el motivo real solo en consola.
           const reception$: Observable<unknown> = doReceive
-            ? this._buildReceptionViaDispatch$(order).pipe(
+            ? this._buildReceptionViaDispatch$(order, !!pendingOrder).pipe(
                 catchError((err) =>
                   throwError(() => ({ stage: 'receive' as const, err })),
                 ),
@@ -3174,8 +3185,25 @@ export class PopComponent implements OnInit, OnDestroy {
    * están definidos, para no forzar el path de pricing en el backend cuando el
    * operador ancla el costo (sin override).
    */
-  private _buildReceptionViaDispatch$(order: any): Observable<unknown> {
-    const orderItems = order.purchase_order_items || [];
+  private _buildReceptionViaDispatch$(
+    order: any,
+    pendingOnly = false,
+  ): Observable<unknown> {
+    let orderItems: any[] = order.purchase_order_items || [];
+    if (pendingOnly) {
+      // Reintento: solo lo pendiente (pedido - recibido). Una línea sin
+      // pendiente se omite; si no queda ninguna, no hay nada que recibir y la
+      // cadena sigue al pago y a la relectura del estado.
+      orderItems = orderItems
+        .map((item: any) => ({
+          ...item,
+          quantity_ordered:
+            (Number(item.quantity_ordered) || 0) -
+            (Number(item.quantity_received) || 0),
+        }))
+        .filter((item: any) => item.quantity_ordered > 0);
+      if (orderItems.length === 0) return of(null);
+    }
 
     // Overrides de precio/margen keyed por `${product_id}-${variant_id || 0}`
     // (mismo shape que usa el modal de confirmación).
