@@ -1,6 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ReceivedDocumentParserService } from './received-document-parser.service';
 import { operationalValidationStatus, summarizeReceivedDocumentValidation } from './received-document-validation';
 
@@ -71,7 +73,7 @@ describe('ReceivedDocumentParserService', () => {
     const xml = emailFixture('invoice.attached.xml');
     const detailed = service.parseDetailed(xml);
     expect(detailed.normalized).toEqual(service.parse(xml));
-    expect(detailed.commercial_xml).toBe(emailFixture('invoice.xml').trim());
+    expect(detailed.commercial_xml).toBe(emailFixture('invoice.xml'));
     expect(detailed.application_responses).toEqual([emailFixture('invoice.application-response.xml').trim()]);
     expect(detailed.fiscal.container).toEqual({
       profile_execution_id: '1', uuid: detailed.fiscal.uuid,
@@ -418,5 +420,45 @@ describe('ReceivedDocumentParserService', () => {
     expect(() => service.parse(`<Invoice>${' '.repeat(10 * 1024 * 1024)}</Invoice>`)).toThrow(BadRequestException);
     const nested = `${'<x>'.repeat(65)}z${'</x>'.repeat(65)}`;
     expect(() => service.parse(`<Invoice>${nested}</Invoice>`)).toThrow(BadRequestException);
+  });
+  it('projects actual ApplicationResponse document references from the existing AttachedDocument DOM', () => {
+    const xml = readFileSync(join(__dirname, '../__fixtures__/email/invoice.attached.xml'), 'utf8');
+    const detailed = service.parseDetailed(xml);
+    expect(detailed.application_response_evidence).toEqual([{ document_key: detailed.normalized.document_key, response_code: '00' }]);
+    expect(service.parse(xml)).toEqual(detailed.normalized);
+  });
+  it('exposes standalone AR evidence without turning it into a fiscal document or authenticated response', () => {
+    const xml = readFileSync(join(__dirname, '../__fixtures__/email/application-response-mismatched.xml'), 'utf8');
+    const detailed = service.parseDetailed(xml);
+    expect(detailed.normalized.document_type).toBe('non_electronic');
+    expect(detailed.application_response_evidence).toHaveLength(1);
+    expect(detailed.application_response_evidence![0].document_key).toMatch(/^[a-f0-9]{96}$/);
+    expect(detailed.application_response_evidence![0].response_code).toBe('00');
+    expect(detailed).not.toHaveProperty('authenticated');
+    expect(service.parse(xml)).toEqual(detailed.normalized);
+  });
+  it('does not mistake an AR root UUID for the actual DocumentReference UUID', () => {
+    const xml = readFileSync(join(__dirname, '../__fixtures__/email/invoice.application-response.xml'), 'utf8');
+    const modified = xml.replace('<cbc:ID>AR-invoice</cbc:ID>', `<cbc:ID>AR-invoice</cbc:ID><cbc:UUID>${'b'.repeat(96)}</cbc:UUID>`);
+    expect(service.parseDetailed(modified).application_response_evidence?.[0].document_key).not.toBe('b'.repeat(96));
+  });
+  it('preserves embedded trailing whitespace for derived evidence without changing legacy normalization', () => {
+    const xml = readFileSync(join(__dirname, '../__fixtures__/email/invoice.attached.xml'), 'utf8');
+    const invoice = readFileSync(join(__dirname, '../__fixtures__/email/invoice.xml'), 'utf8');
+    expect(service.parseDetailed(xml).commercial_xml).toBe(invoice);
+    expect(service.parse(xml).total_amount).toEqual(service.parse(invoice).total_amount);
+  });
+  it('keeps XML-standard EOL normalization: extracted DOM evidence is derived, not sender-original CRLF bytes', () => {
+    const xml = readFileSync(join(__dirname, '../__fixtures__/email/invoice.attached.xml'), 'utf8');
+    const detail = service.parseDetailed(xml.replace(/\n/g, '\r\n'));
+    expect(detail.commercial_xml).toBe(service.parseDetailed(xml).commercial_xml);
+    expect(detail.commercial_xml).not.toContain('\r\n');
+  });
+  it('bounds AR facts projection without rejecting a legacy AR or hiding extra-reference ambiguity', () => {
+    const xml = readFileSync(join(__dirname, '../__fixtures__/email/invoice.application-response.xml'), 'utf8');
+    const body = xml.slice(xml.indexOf('<cac:DocumentResponse>'), xml.indexOf('</cac:DocumentResponse>') + '</cac:DocumentResponse>'.length);
+    const repeated = xml.replace(body, body.repeat(5));
+    expect(service.parseDetailed(repeated).application_response_evidence?.at(-1)).toEqual({ document_key: null, response_code: null });
+    expect(service.parse(repeated).document_type).toBe('non_electronic');
   });
 });

@@ -65,7 +65,10 @@ export class ReceivedDocumentParserService {
         throw new BadRequestException('El documento contiene demasiados XML embebidos.');
       }
 
-      const parsed = embedded.map((source) => ({ source, node: this.parseXml(source) }));
+      const parsed = embedded.map((source) => {
+        if (Buffer.byteLength(source, 'utf8') > MAX_XML_BYTES) throw new BadRequestException('El XML embebido excede el límite de 10 MiB.');
+        return { source, node: this.parseXml(source.trim()) };
+      });
       const businessDocs = parsed.filter(({ node }) =>
         this.documentType(node),
       );
@@ -126,6 +129,7 @@ export class ReceivedDocumentParserService {
         },
         commercial_xml: commercial.source,
         application_responses: responses.map(({ source }) => source),
+        application_response_evidence: responses.flatMap(({ node }) => this.applicationResponseEvidence(node)),
       };
     }
 
@@ -133,6 +137,8 @@ export class ReceivedDocumentParserService {
       return {
         normalized: this.nonElectronic(warnings, 'UNSUPPORTED_UBL_ROOT', 'El elemento raíz no corresponde a Invoice, CreditNote o DebitNote UBL soportado.'),
         fiscal: this.fiscalMetadata(root), commercial_xml: null, application_responses: [],
+        ...(this.is(root, 'ApplicationResponse', XML_NS.applicationResponse)
+          ? { application_response_evidence: this.applicationResponseEvidence(root) } : {}),
       };
     }
     return {
@@ -148,6 +154,24 @@ export class ReceivedDocumentParserService {
       scheme_id: uuid?.getAttributeNode('schemeID')?.value ?? null,
       scheme_name: uuid?.getAttributeNode('schemeName')?.value ?? null,
     };
+  }
+
+  private applicationResponseEvidence(root: XmlElement): Array<{ document_key: string | null; response_code: string | null }> {
+    const responses = this.children(root, 'DocumentResponse', XML_NS.cac);
+    let overflow = responses.length > MAX_EMBEDDED_DOCUMENTS;
+    const evidence = responses.slice(0, MAX_EMBEDDED_DOCUMENTS).flatMap((response) => {
+      const references = this.children(response, 'DocumentReference', XML_NS.cac);
+      overflow ||= references.length > MAX_EMBEDDED_DOCUMENTS;
+      const outcomes = this.children(response, 'Response', XML_NS.cac);
+      const code = outcomes.length === 1 ? this.text(this.child(outcomes[0], 'ResponseCode', XML_NS.cbc)).slice(0, 32) || null : null;
+      return (references.length ? references.slice(0, MAX_EMBEDDED_DOCUMENTS) : [undefined]).map((reference) => ({
+        document_key: this.children(reference, 'UUID', XML_NS.cbc).length === 1 ? this.text(this.child(reference, 'UUID', XML_NS.cbc)) || null : null,
+        response_code: code,
+      }));
+    });
+    // Bounded evidence projection does not change legacy parse acceptance or hide ambiguity.
+    if (overflow) evidence.push({ document_key: null, response_code: null });
+    return evidence;
   }
 
   private fiscalMetadata(root: XmlElement): ReceivedDocumentFiscalMetadata {
@@ -263,7 +287,7 @@ export class ReceivedDocumentParserService {
           );
         }
       }
-      const description = this.text(descriptionElement);
+      const description = descriptionElement.textContent ?? '';
       if (!description.trim()) return [];
       // Description may hold escaped XML or CDATA. DOM textContent decodes XML
       // entities and leaves CDATA contents intact; parseXml then validates it.
@@ -282,7 +306,9 @@ export class ReceivedDocumentParserService {
       }
       // Parse the complete trimmed value; never extract/slice an apparent XML
       // substring out of unrelated surrounding text.
-      return [candidate];
+      // Preserve DOM text whitespace for derived evidence. xmldom normalizes XML
+      // line endings, so only the original AttachedDocument is byte-authoritative.
+      return [description];
     });
   }
 

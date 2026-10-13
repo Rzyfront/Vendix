@@ -42,6 +42,8 @@ export interface DetailedReceivedDocument {
   commercial_xml: string | null;
   /** Embedded source strings remain unverified evidence. */
   application_responses: string[];
+  /** References/codes read from the same validated DOM; never authentication or legal acceptance. */
+  application_response_evidence?: Array<{ document_key: string | null; response_code: string | null }>;
 }
 
 /** Internal-only package produced after bounded attachment and fiscal preflight. */

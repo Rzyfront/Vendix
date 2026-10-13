@@ -1299,7 +1299,7 @@ export class ReceivedDocumentsService {
     const metadata = this.asObject(existing.metadata);
     const prior = (payload.normalized ?? metadata.extraction_snapshot) as NormalizedReceivedDocument | undefined;
     if (!prior || this.canonicalFacts(prior) !== this.canonicalFacts(normalized)) {
-      throw new ConflictException('La misma clave de documento ya existe con datos fiscales diferentes.');
+      throw new ConflictException({ reason_code: 'DOCUMENT_KEY_CONFLICT', message: 'La misma clave de documento ya existe con datos fiscales diferentes.' });
     }
   }
 
