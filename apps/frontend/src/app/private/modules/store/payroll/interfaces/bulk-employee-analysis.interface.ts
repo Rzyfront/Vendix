@@ -47,3 +47,18 @@ export interface BulkEmployeeUploadResult {
   associated?: number;
   results: BulkEmployeeUploadItemResult[];
 }
+
+/** Máximo de filas por página del commit de sesión (contrato del backend). */
+export const BULK_EMPLOYEE_PAGE_SIZE = 100;
+
+/** Tope de filas y de tamaño de archivo de la carga masiva. */
+export const BULK_EMPLOYEE_MAX_ROWS = 10000;
+export const BULK_EMPLOYEE_MAX_FILE_MB = 20;
+
+/** Respuesta de una página del commit de sesión paginado. */
+export interface BulkEmployeeUploadPage extends BulkEmployeeUploadResult {
+  total: number;
+  offset: number;
+  limit: number;
+  done: boolean;
+}
