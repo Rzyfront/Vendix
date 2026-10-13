@@ -312,4 +312,29 @@ describe('UblCreditNoteBuilder', () => {
       expect(customer_block).not.toContain('<cac:Person>');
     });
   });
+
+  it('emits line AllowanceCharge with ID and MultiplierFactorNumeric before Amount (FBE02/FBE05)', () => {
+    const xml = build({
+      credit_note_data: {
+        ...credit_note_data,
+        items: [
+          {
+            ...credit_note_data.items[0],
+            discount_amount: '5000.00',
+          },
+        ],
+      },
+    });
+    const group = xml.match(
+      /<cac:CreditNoteLine>[\s\S]*?<cac:AllowanceCharge>([\s\S]*?)<\/cac:AllowanceCharge>/,
+    )![1];
+
+    expect(group).toContain('<cbc:ID>1</cbc:ID>');
+    expect(group).toContain(
+      '<cbc:MultiplierFactorNumeric>10.00</cbc:MultiplierFactorNumeric>',
+    );
+    expect(group.indexOf('<cbc:MultiplierFactorNumeric>')).toBeLessThan(
+      group.indexOf('<cbc:Amount '),
+    );
+  });
 });

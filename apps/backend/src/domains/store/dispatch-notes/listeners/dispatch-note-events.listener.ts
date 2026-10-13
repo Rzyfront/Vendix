@@ -16,6 +16,10 @@ import { OrderStockCommitService } from '../../inventory/shared/services/order-s
 import { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
+import {
+  PurchaseOrderReceiveQueueService,
+  PURCHASE_ORDER_RECEIVE_BATCH_SIZE,
+} from '../../orders/purchase-orders/purchase-order-receive-queue.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveLineStockUnits } from '../../products/services/packaging.util';
@@ -87,6 +91,10 @@ export class DispatchNoteEventsListener {
     // explicitly instead of relying on the event emitter's async boundary.
     private readonly storeContextRunner?: StoreContextRunner,
     private readonly stockValidator?: StockValidatorService,
+    // Recepción asíncrona por lotes: cuando la remisión de compra trae más de
+    // 100 líneas, se encola en vez de llamar receive() en línea (504 / P2028).
+    // Opcional por el mismo motivo que los demás (specs con pocos args).
+    private readonly poReceiveQueue?: PurchaseOrderReceiveQueueService,
   ) {}
 
   /**
@@ -185,7 +193,7 @@ export class DispatchNoteEventsListener {
       new_profit_margin?: Prisma.Decimal | null;
     }>,
     dispatchNumber: string,
-  ): Promise<void> {
+  ): Promise<{ po_receive_job_id?: string } | void> {
     if (!this.purchaseOrdersService) {
       this.logger.error(
         `[received] Dispatch note #${dispatchNumber}: PurchaseOrdersService not injected — cannot delegate PO-linked receipt (PO #${purchaseOrderId}). Skipping to avoid a wrong/duplicate stock-in.`,
@@ -311,13 +319,32 @@ export class DispatchNoteEventsListener {
       );
     }
 
+    // Stamp the remisión ref so the reception is deduped on re-fire (above)
+    // and the PO reception history is traceable back to the remisión document.
+    // La glosa legible se mantiene para el operador; el token delimitado es lo
+    // que leen los guards de idempotencia.
+    const receiveNotes = `Recepción por ${legacyReceiptMarker} ${receiptTag}`;
+
+    // > 100 líneas: receive() en línea haría un 504 (nginx 60 s) o P2028. Se
+    // encola el job de lotes de 100 y el id viaja de vuelta al emisor
+    // (`DispatchNoteFlowService.receive`) por el resultado del `emitAsync`.
+    if (
+      this.poReceiveQueue &&
+      receiveItems.length > PURCHASE_ORDER_RECEIVE_BATCH_SIZE
+    ) {
+      const { job_id } = await this.poReceiveQueue.enqueueReceive(
+        purchaseOrderId,
+        { items: receiveItems, notes: receiveNotes },
+      );
+      this.logger.log(
+        `[received] Dispatch note #${dispatchNumber}: ${receiveItems.length} line(s) > ${PURCHASE_ORDER_RECEIVE_BATCH_SIZE} — queued PO #${purchaseOrderId} receive job ${job_id}`,
+      );
+      return { po_receive_job_id: job_id };
+    }
+
     await this.purchaseOrdersService.receive(purchaseOrderId, {
       items: receiveItems,
-      // Stamp the remisión ref so the reception is deduped on re-fire (above)
-      // and the PO reception history is traceable back to the remisión document.
-      // La glosa legible se mantiene para el operador; el token delimitado es lo
-      // que leen los guards de idempotencia.
-      notes: `Recepción por ${legacyReceiptMarker} ${receiptTag}`,
+      notes: receiveNotes,
     });
 
     this.logger.log(
@@ -915,8 +942,11 @@ export class DispatchNoteEventsListener {
   // el purchase_receipt standalone sin OC) conservan el swallow-and-log histórico,
   // así que para ellos nada cambia.
   @OnEvent('dispatch_note.received', { suppressErrors: false })
-  async handleReceived(event: DispatchNoteReceivedEvent) {
+  async handleReceived(
+    event: DispatchNoteReceivedEvent,
+  ): Promise<{ po_receive_job_id?: string } | void> {
     let poLinkedReceipt = false;
+    let poReceiveJobId: string | undefined;
     try {
       const dispatch_note = await this.prisma.dispatch_notes.findFirst({
         where: { id: event.dispatch_note_id },
@@ -1006,12 +1036,13 @@ export class DispatchNoteEventsListener {
           // Desde acá el fallo DEBE viajar: se marca antes de delegar para que el
           // catch de este handler re-lance (ver `poLinkedReceipt` arriba).
           poLinkedReceipt = true;
-          await this.delegatePurchaseReceiptToPurchaseOrder(
+          const delegated = await this.delegatePurchaseReceiptToPurchaseOrder(
             dispatch_note.id,
             dispatch_note.purchase_order_id,
             dispatch_note.dispatch_note_items,
             event.dispatch_number,
           );
+          poReceiveJobId = delegated?.po_receive_job_id;
         } else {
           // Standalone purchase receipt (no PO). Stock-in with
           // movement_unit_cost = item unit_price.
@@ -1149,6 +1180,7 @@ export class DispatchNoteEventsListener {
       this.logger.log(
         `[received] Dispatch note #${event.dispatch_number} processed — subtype: ${subtype}`,
       );
+      if (poReceiveJobId) return { po_receive_job_id: poReceiveJobId };
     } catch (error) {
       this.logger.error(
         `[received] Error processing dispatch note #${event.dispatch_note_id}: ${error.message}`,

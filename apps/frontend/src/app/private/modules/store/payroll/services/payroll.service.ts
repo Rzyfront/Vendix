@@ -53,6 +53,7 @@ import {
 import {
   BulkEmployeeAnalysisResult,
   BulkEmployeeUploadResult,
+  BulkEmployeeUploadPage,
 } from '../interfaces/bulk-employee-analysis.interface';
 
 @Injectable({
@@ -163,6 +164,23 @@ export class PayrollService {
       .post<ApiResponse<BulkEmployeeUploadResult>>(
         this.getApiUrl('employees/bulk/upload-session'),
         { session_id: sessionId },
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** Una página (<=100 filas) del commit de sesión paginado. */
+  uploadBulkEmployeesSessionPage(
+    sessionId: string,
+    offset: number,
+    limit: number,
+  ): Observable<BulkEmployeeUploadPage> {
+    return this.http
+      .post<ApiResponse<BulkEmployeeUploadPage>>(
+        this.getApiUrl('employees/bulk/upload-session'),
+        { session_id: sessionId, offset, limit },
       )
       .pipe(
         map((response) => response.data),

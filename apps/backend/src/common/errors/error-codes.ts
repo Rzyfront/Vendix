@@ -1644,7 +1644,7 @@ export const ErrorCodes = {
   INV_BULK_002: {
     code: 'INV_BULK_002',
     httpStatus: 400,
-    devMessage: 'Bulk upload batch size exceeded (max 1000)',
+    devMessage: 'Bulk upload batch size exceeded (max 10000)',
   },
   INV_LOCATION_NOT_IN_STORE: {
     code: 'INV_LOCATION_NOT_IN_STORE',
@@ -4735,7 +4735,7 @@ export const ErrorCodes = {
   BULK_PROD_LIMIT_EXCEEDED: {
     code: 'BULK_PROD_LIMIT_EXCEEDED',
     httpStatus: 400,
-    devMessage: 'File exceeds maximum product limit (1000)',
+    devMessage: 'File exceeds maximum product limit (10000)',
   },
   BULK_PROD_SESSION_EXPIRED: {
     code: 'BULK_PROD_SESSION_EXPIRED',

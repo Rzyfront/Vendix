@@ -519,6 +519,16 @@ interface NormalizedWithholding {
                 <span>Total del documento</span>
                 <span class="text-primary">{{ total() | currency }}</span>
               </div>
+              @if (amountPaid() > 0 || balanceDue() > 0) {
+                <div class="flex justify-between text-text-secondary pt-1">
+                  <span>Pagado</span>
+                  <span class="font-medium text-text-primary">{{ amountPaid() | currency }}</span>
+                </div>
+                <div class="flex justify-between text-text-secondary">
+                  <span>Saldo</span>
+                  <span class="font-medium text-text-primary">{{ balanceDue() | currency }}</span>
+                </div>
+              }
               @if (withholdingTotal() > 0) {
                 <div class="flex justify-between text-text-secondary pt-1">
                   <span>Retenciones</span>
@@ -744,8 +754,11 @@ export class PlatformInvoiceDetailModalComponent {
   readonly acquirerName = computed<string>(() => {
     const org = this.payload()?.organization;
     const customer = this.document()?.customer;
+    // `customer.name` es el campo normalizado del backend; `legal_name`, el
+    // del snapshot antiguo.
+    const normalizedName = (customer as { name?: string | null } | null)?.name;
     return (
-      customer?.legal_name ?? org?.legal_name ?? org?.name ?? '—'
+      normalizedName ?? customer?.legal_name ?? org?.legal_name ?? org?.name ?? '—'
     );
   });
 
@@ -762,14 +775,32 @@ export class PlatformInvoiceDetailModalComponent {
   );
 
   readonly acquirerAddressLine = computed<string | null>(() => {
-    const address = this.document()?.customer?.address;
-    if (!address?.line) return null;
-    return address.city ? `${address.line} (${address.city})` : address.line;
+    // El backend normaliza la dirección como `address_line` + `city` planos;
+    // `address.line` queda como respaldo del snapshot anidado antiguo.
+    const customer = this.document()?.customer as
+      | {
+          address_line?: string | null;
+          city?: string | null;
+          address?: { line?: string | null; city?: string | null } | null;
+        }
+      | null
+      | undefined;
+    const line = customer?.address_line ?? customer?.address?.line ?? null;
+    if (!line) return null;
+    const city = customer?.city ?? customer?.address?.city ?? null;
+    return city ? `${line} (${city})` : line;
   });
 
   readonly subtotal = computed(() => this.toNumber(this.document()?.subtotal));
   readonly taxAmount = computed(() => this.toNumber(this.document()?.tax_amount));
   readonly total = computed(() => this.toNumber(this.document()?.total));
+  readonly amountPaid = computed(() => this.toNumber(this.document()?.amount_paid));
+  /** Saldo real que calcula el backend; respaldo: total − pagado. */
+  readonly balanceDue = computed(() => {
+    const raw = (this.document() as { balance_due?: number | string | null } | null)
+      ?.balance_due;
+    return raw != null ? this.toNumber(raw) : Math.max(0, this.total() - this.amountPaid());
+  });
   readonly discount = computed(
     () =>
       this.toNumber(this.document()?.discount_amount) ||

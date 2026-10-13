@@ -12,9 +12,10 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.2"
+  version: "1.3"
   scope: [root]
   auto_invoke:
+    - "Raising bulk caps or chunking high-volume uploads (10k)"
     - "Adding a column to an XLSX/CSV bulk import template or its header map"
     - "Paging a bulk upload session commit (offset/limit) with a progress bar"
     - "Importing parent/child rows (product variants via SKU Padre) from an XLSX bulk file"
@@ -221,6 +222,32 @@ Reference: `products-bulk.service.ts` (analyze → S3 session → paged commit),
 - **Batch only where there is real cost:** parsing ≤1000 rows in memory
   (POP) takes milliseconds, and a progress bar there is cosmetic. Page the
   server round-trips, not local maps.
+
+## Alto volumen (hasta 10.000)
+
+- **Regla:** el tope TOTAL es 10.000 (`MAX_BULK_RECORDS`); cada request lleva
+  como máximo 100 (`DEFAULT_BULK_CHUNK_SIZE`, `@ArrayMaxSize(100)`) y el CLIENTE
+  parte los lotes. Excepción: la recepción de OC se parte en el backend dentro
+  de un job, porque cada lote es una transacción contable.
+- **Archivos (productos, empleados, ajustes):** sesión S3 + commit paginado
+  `{session_id, offset?, limit≤100}` es el patrón estándar; límite de archivo 20 MB.
+  Clientes (JSON) va con `@ArrayMaxSize(100)` por request y chunking en cliente.
+- **`runChunked`** (`apps/frontend/src/app/shared/utils/run-chunked.ts`, con
+  `chunkArray`): emite progreso por lote. Si un lote falla, reporta `failedAt`;
+  se reintenta con `items.slice(failedAt)`. Los lotes ya confirmados NO se
+  revierten. La UI muestra barra de progreso y al cancelar hace DELETE de la sesión.
+- **Órdenes de compra:** `POST purchase-orders/resolve-lines` (≤100 líneas,
+  idempotente, con alcance a la tienda del contexto, no modifica productos
+  existentes) en lotes; luego UN `create`/`update`/`cost-preview` atómico (hasta
+  10k; `create` rechaza más de 100 líneas sin resolver). La recepción va por job
+  BullMQ `purchase-order-receive` (`PATCH :id/receive/async` → 202 + `job_id`, poll
+  `receive-jobs/:jobId`), lotes de 100, cada uno recepción parcial en su propia
+  transacción. La remisión con más de 100 líneas devuelve `po_receive_job_id`.
+  Al reintentar, el POP envía solo lo pendiente.
+- **Antipatrones:** subir timeouts de nginx o de la transacción en vez de
+  partir; meter N consultas por línea dentro de una transacción (precargar en
+  bloque y escribir en lote); `sku: undefined` en un `where` de Prisma (filtra
+  nada y puede casar cualquier fila).
 
 ## Related Skills
 

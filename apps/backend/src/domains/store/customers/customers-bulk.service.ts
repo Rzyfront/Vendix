@@ -67,7 +67,7 @@ export function mapBulkErrorToUserCopy(
 
 @Injectable()
 export class CustomersBulkService {
-  private readonly MAX_BATCH_SIZE = 1000;
+  private readonly MAX_BATCH_SIZE = 10000;
 
   constructor(
     private readonly prisma: StorePrismaService,
@@ -249,7 +249,7 @@ export class CustomersBulkService {
    * Procesa la carga masiva de clientes.
    *
    * Política de errores (QUI-606):
-   *  - Errores de lote (lote > 1000, sin store context) → 4xx con
+   *  - Errores de lote (lote > 10000, sin store context) → 4xx con
    *    `VendixHttpException` (cuerpo entero falla).
    *  - Errores por fila (validación de campo, email duplicado, doc duplicado)
    *    → NO revientan el lote: se acumulan en `results[].row_error` y el
