@@ -1,4 +1,4 @@
-import type { ReceivedDocumentReceptionStatus } from './received-documents.interface';
+import type { ReceivedDocument, ReceivedDocumentReceiptEvidence, ReceivedDocumentReceptionStatus } from './received-documents.interface';
 
 export const RECEIVED_INBOX_LABELS: Readonly<Record<string, string>> = {
   new: 'Nueva', requires_review: 'Requiere revisión', accepted: 'Aceptada', reclaimed: 'Reclamada',
@@ -69,4 +69,29 @@ export function receivedInboxEmptyState(
     title: 'Tu buzón está listo', description: 'Aquí aparecerán las próximas facturas recibidas.',
     configure: false, clearFilters: false,
   };
+}
+
+/** Classification is display-only; absence never invents a fiscal type or a positive verification. */
+export function receivedIsElectronicPos(doc: Pick<ReceivedDocument, 'fiscal_document_type_code' | 'email_reception'>): boolean {
+  return doc.fiscal_document_type_code === '20' || doc.email_reception?.document_type_code === '20';
+}
+export function receivedDianLabel(_doc: unknown): string {
+  return 'Sin verificar ante la DIAN';
+}
+export function receivedReceiptEvidence(doc: Pick<ReceivedDocument, 'email_reception'>): ReceivedDocumentReceiptEvidence | null {
+  const evidence = doc.email_reception?.receipt_evidence;
+  if (!evidence || typeof evidence.included !== 'boolean' || typeof evidence.reference_matches !== 'boolean') return null;
+  return {
+    included: evidence.included,
+    reference_matches: evidence.reference_matches,
+    response_code: typeof evidence.response_code === 'string' && /^[a-z\d._-]{1,32}$/i.test(evidence.response_code) ? evidence.response_code : null,
+  };
+}
+export function receivedDocumentSourceLabel(doc: Pick<ReceivedDocument, 'source_channel' | 'email_transport_received'>): string {
+  if (doc.email_transport_received !== true) return doc.source_channel === 'email' ? 'Correo (origen declarado)' : receivedChannelLabel(doc.source_channel);
+  return doc.source_channel === 'email' ? 'Correo' : `Correo · origen inicial: ${receivedChannelLabel(doc.source_channel)}`;
+}
+/** Mobile has one composed badge: attention remains visible beside honest DIAN wording. */
+export function receivedMobileInboxLabel(value: unknown): string {
+  return `${receivedInboxLabel(value)} · ${receivedDianLabel(null)}`;
 }

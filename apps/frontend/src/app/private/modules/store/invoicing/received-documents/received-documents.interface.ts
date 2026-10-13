@@ -112,11 +112,27 @@ export interface ReceivedDocumentEvent {
   result?: unknown;
 }
 
+/** Safe server-authored email trace; no AR XML, message checkpoint, raw body or document links. */
+export interface ReceivedDocumentReceiptEvidence {
+  included: boolean;
+  reference_matches: boolean;
+  response_code: string | null;
+}
+export interface ReceivedDocumentEmailReception {
+  document_type_code: string | null;
+  profile_execution_id: string | null;
+  uuid_scheme_name: string | null;
+  receipt_evidence: ReceivedDocumentReceiptEvidence;
+}
+
 export interface ReceivedDocument {
   id: number;
   store_id: number | null;
   document_type: ReceivedDocumentType;
   source_channel: string;
+  fiscal_document_type_code?: string | null;
+  email_transport_received?: boolean;
+  email_reception?: ReceivedDocumentEmailReception | null;
   issuer_tax_id: string;
   issuer_name: string;
   receiver_tax_id: string;
