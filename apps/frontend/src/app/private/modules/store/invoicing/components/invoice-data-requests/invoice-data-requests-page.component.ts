@@ -203,7 +203,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
         />
       </div>
       @if (summaryError()) {
-        <p role="status" class="px-2 pb-2 text-sm text-text-primary">
+        <p role="status" class="px-2 pb-2 text-sm text-text-secondary">
           No se pudo cargar el resumen. Selecciona Actualizar en el menú de opciones para reintentar.
         </p>
       }
@@ -258,7 +258,7 @@ const EMPTY_SUMMARY: InvoiceDataRequestSummary = {
                 [size]="16"
                 class="text-error shrink-0 mt-0.5"
               ></app-icon>
-              <p class="text-sm text-text-primary">{{ message }}</p>
+              <p class="text-sm text-error">{{ message }}</p>
             </div>
           }
 

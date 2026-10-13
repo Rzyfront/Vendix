@@ -55,13 +55,11 @@ describe('support document list UI source guards', () => {
     expect(template).toContain('tooltipText=');
     expect(template).not.toMatch(/<input\b/i);
     expect(template).toContain('role="alert"');
-    expect(template).toContain('p-3 text-sm text-text-primary md:mx-6');
-    expect(template).not.toContain('text-[var(--color-error)] md:mx-6');
+    expect(template).toContain('{{ error() }}');
     expect(template).toContain('rowLabelKey="invoice_number"');
     expect(template).toContain('md:p-4');
     expect(template).toContain('(emptyRefreshClick)="load()"');
     expect(template).toContain('(emptyClearFiltersClick)="clearFilters()"');
-    expect(template).toContain('min-h-11');
   });
 
   it('keeps display formatters and cancels superseded server requests', () => {

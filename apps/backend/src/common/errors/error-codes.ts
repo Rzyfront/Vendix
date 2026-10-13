@@ -3344,6 +3344,18 @@ export const ErrorCodes = {
     devMessage:
       'Credit note exceeds the remaining creditable balance of its parent invoice',
   },
+  INVOICING_NOTE_SOURCE_001: {
+    code: 'INVOICING_NOTE_SOURCE_001',
+    httpStatus: 422,
+    devMessage:
+      'Invoice note source item is missing, ambiguous, or does not belong to the corrected invoice',
+  },
+  INVOICING_NOTE_LIMIT_001: {
+    code: 'INVOICING_NOTE_LIMIT_001',
+    httpStatus: 422,
+    devMessage:
+      'Credit note exceeds the remaining source-item or invoice credit limit',
+  },
   /**
    * VENTA COBRADA SIN DOCUMENTO FISCAL — el dinero entró pero la venta no
    * quedó respaldada por ningún documento fiscal emitido.

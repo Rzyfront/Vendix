@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Inject,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -30,6 +31,9 @@ import {
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ReceivedDocumentParserService } from './services/received-document-parser.service';
 import { ReceivedDocumentStorageService } from './services/received-document-storage.service';
+import { ReceivedDocumentInboxStatusService } from './services/received-document-inbox-status.service';
+import type { ReceivedDocumentsReadContext } from './services/received-documents-context.service';
+import { inboxEventsSelect, inboxListWhere, projectReceivedDocumentInbox, ReceivedDocumentInboxScope } from './services/received-document-inbox-projection';
 
 export interface ReceivedDocumentsContext {
   organization_id: number;
@@ -61,6 +65,9 @@ const EVENT_IMPORTED = 'IMPORTED';
 
 @Injectable()
 export class ReceivedDocumentsService {
+  @Inject(ReceivedDocumentInboxStatusService)
+  private readonly inboxStatus!: ReceivedDocumentInboxStatusService;
+
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly parser: ReceivedDocumentParserService,
@@ -108,6 +115,85 @@ export class ReceivedDocumentsService {
     return { data, total, page, limit };
   }
 
+  async listInbox(ctx: ReceivedDocumentsReadContext, query: ReceivedDocumentQueryDto) {
+    const scope = await this.resolveInboxScope(ctx, query.store_id);
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    if (scope.accounting_entity_id == null) return { data: [], total: 0, page, limit };
+    const where = inboxListWhere(scope, query);
+    return this.prisma.$transaction(async (tx) => {
+      const [rows, total] = await Promise.all([
+        tx.received_documents.findMany({
+          where,
+          orderBy: query.sort === 'inbox'
+            ? [{ created_at: 'desc' }, { id: 'desc' }]
+            : [{ issue_date: 'desc' }, { created_at: 'desc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+          select: {
+            ...this.listSelect(),
+            structural_validation_status: true, signature_validation_status: true,
+            dian_validation_status: true, accepted_at: true, confirmed_goods_at: true,
+            reviewed_at: true, payment_condition: true,
+            events: inboxEventsSelect,
+          },
+        }),
+        tx.received_documents.count({ where }),
+      ]);
+      return {
+        data: rows.map((row) => {
+          const { events, ...safeRow } = row;
+          return { ...safeRow, ...projectReceivedDocumentInbox({ ...safeRow, events }) };
+        }),
+        total, page, limit,
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async inboxSummary(ctx: ReceivedDocumentsReadContext, query: ReceivedDocumentQueryDto) {
+    return this.inboxStatus.summary(await this.resolveInboxScope(ctx, query.store_id), query);
+  }
+
+  async receptionStatus(ctx: ReceivedDocumentsReadContext) {
+    return this.inboxStatus.receptionStatus(await this.resolveInboxScope(ctx), ctx);
+  }
+
+  async findOneInbox(ctx: ReceivedDocumentsReadContext, id: number) {
+    this.assertPositiveInteger(id, 'document_id');
+    const scope = await this.resolveInboxScope(ctx);
+    if (scope.accounting_entity_id == null) throw new NotFoundException('Documento recibido no encontrado.');
+    return this.findOne({ ...ctx, accounting_entity_id: scope.accounting_entity_id }, id);
+  }
+
+  private async resolveInboxScope(ctx: ReceivedDocumentsReadContext, requestedStoreId?: number): Promise<ReceivedDocumentInboxScope> {
+    if (ctx.accounting_entity_id != null) {
+      const scope = await this.resolveScope({ ...ctx, accounting_entity_id: ctx.accounting_entity_id }, requestedStoreId);
+      return { organization_id: ctx.organization_id, accounting_entity_id: ctx.accounting_entity_id, store_id: scope.store_filter ?? null };
+    }
+    // The context reader already validated ownership. Recheck a missing-entity
+    // context before returning empties so null is not an authorization bypass.
+    if (!Number.isSafeInteger(ctx.organization_id) || ctx.organization_id < 1 ||
+        (!ctx.is_organization && ctx.store_id == null)) {
+      throw new ForbiddenException('Se requiere un contexto autenticado válido.');
+    }
+    const organization = await this.prisma.organizations.findFirst({
+      where: { id: ctx.organization_id, state: 'active' }, select: { id: true },
+    });
+    if (!organization) throw new ForbiddenException('La organización autenticada no está activa.');
+    const storeId = ctx.store_id ?? requestedStoreId;
+    if (ctx.store_id != null && requestedStoreId != null && ctx.store_id !== requestedStoreId) {
+      throw new ForbiddenException('No puede consultar otra tienda.');
+    }
+    if (storeId != null) {
+      if (!Number.isSafeInteger(storeId) || storeId < 1) throw new ForbiddenException('El contexto de tienda no es válido.');
+      const store = await this.prisma.stores.findFirst({
+        where: { id: storeId, organization_id: ctx.organization_id, is_active: true }, select: { id: true },
+      });
+      if (!store) throw new ForbiddenException('La tienda no está activa o no pertenece a la organización indicada.');
+    }
+    return { organization_id: ctx.organization_id, accounting_entity_id: null, store_id: storeId ?? null };
+  }
+
   async findOne(ctx: ReceivedDocumentsContext, id: number) {
     this.assertPositiveInteger(id, 'document_id');
     const scope = await this.resolveScope(ctx);
@@ -131,7 +217,7 @@ export class ReceivedDocumentsService {
       },
     });
     if (!document) throw new NotFoundException('Documento recibido no encontrado.');
-    return document;
+    return { ...document, ...projectReceivedDocumentInbox(document) };
   }
 
   async importXml(
@@ -1463,7 +1549,7 @@ export class ReceivedDocumentsService {
       processing_status: true, validation_status: true, review_status: true,
       matching_status: true, fiscal_status: true, posting_status: true,
       version: true, created_at: true, updated_at: true,
-    };
+    } satisfies Prisma.received_documentsSelect;
   }
 
   private documentWhere(scope: Scope, id: number): Prisma.received_documentsWhereInput {

@@ -46,11 +46,12 @@ import {
 import { InvoiceStatsComponent } from './components/invoice-stats/invoice-stats.component';
 import { InvoiceListComponent } from './components/invoice-list/invoice-list.component';
 import { InvoiceDetailComponent } from './components/invoice-detail/invoice-detail.component';
-import { CreditNoteCreateComponent } from './components/credit-note-create/credit-note-create.component';
+import { InvoiceNoteCreateComponent } from './components/invoice-note-create/invoice-note-create.component';
 import { InvoicingNotConfiguredComponent } from './components/invoicing-not-configured/invoicing-not-configured.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { SaveRequirementsModalComponent } from '../../../../shared/components/index';
 import { FiscalRequirementsService } from '../../../../shared/services/fiscal-requirements.service';
+import { InvoiceNoteSourceLoader } from './utils/invoice-note-source-loader.util';
 
 @Component({
   selector: 'vendix-invoicing',
@@ -59,7 +60,7 @@ import { FiscalRequirementsService } from '../../../../shared/services/fiscal-re
     InvoiceStatsComponent,
     InvoiceListComponent,
     InvoiceDetailComponent,
-    CreditNoteCreateComponent,
+    InvoiceNoteCreateComponent,
     InvoicingNotConfiguredComponent,
     SaveRequirementsModalComponent,
   ],
@@ -90,10 +91,39 @@ import { FiscalRequirementsService } from '../../../../shared/services/fiscal-re
       }
 
       @defer (when isCreditNoteModalOpen()) {
-        <vendix-credit-note-create
-          [(isOpen)]="isCreditNoteModalOpen"
-          [sourceInvoice]="creditNoteSourceInvoice()"
-        ></vendix-credit-note-create>
+        @if (creditNoteSourceInvoice(); as sourceInvoice) {
+          <vendix-invoice-note-create
+            [isOpen]="isCreditNoteModalOpen()"
+            (isOpenChange)="onCreditNoteModalOpenChange($event)"
+            [invoice]="sourceInvoice"
+            [noteType]="'credit'"
+          ></vendix-invoice-note-create>
+        }
+      }
+
+      @if (creditNoteLoading()) {
+        <div
+          role="status"
+          aria-live="polite"
+          class="mb-3 rounded-lg border border-border bg-surface p-3 text-sm"
+        >
+          Cargando la factura completa para preparar la nota crédito…
+          <button
+            type="button"
+            class="ml-2 underline"
+            (click)="cancelCreditNoteSourceLoad()"
+          >
+            Cancelar
+          </button>
+        </div>
+      }
+      @if (creditNoteLoadError()) {
+        <div
+          role="alert"
+          class="mb-3 rounded-lg border border-error bg-error-light p-3 text-sm text-error"
+        >
+          {{ creditNoteLoadError() }}
+        </div>
       }
 
       @defer (when isNotConfiguredModalOpen()) {
@@ -155,6 +185,9 @@ export class InvoicingComponent {
   readonly notConfiguredReason = signal<DianGateReason>('missing');
   readonly selectedInvoice = signal<Invoice | null>(null);
   readonly creditNoteSourceInvoice = signal<Invoice | null>(null);
+  readonly creditNoteLoading = signal(false);
+  readonly creditNoteLoadError = signal<string | null>(null);
+  private readonly creditNoteSourceLoader = new InvoiceNoteSourceLoader();
 
   private readonly vexiHosts = inject(VexiUiHostRegistry);
   private readonly invoiceMeta = toSignal(this.store.select(selectInvoicesMeta), {
@@ -189,6 +222,7 @@ export class InvoicingComponent {
     this.destroyRef.onDestroy(() =>
       this.vexiHosts.unregister(this.vexiHostAdapter),
     );
+    this.destroyRef.onDestroy(() => this.cancelCreditNoteSourceLoad());
 
     // Limpia cualquier estado stale del modal dejado por otra superficie
     // (p.ej. una factura creada desde el POS) antes de que este contenedor
@@ -236,6 +270,10 @@ export class InvoicingComponent {
   }
 
   viewInvoice(invoice: Invoice): void {
+    this.cancelCreditNoteSourceLoad();
+    this.isCreditNoteModalOpen.set(false);
+    this.creditNoteSourceInvoice.set(null);
+    this.creditNoteLoadError.set(null);
     // El rechazo en estado pertenece a la factura anterior. `viewInvoice` no
     // despacha `loadInvoice` (el detalle se pinta con la fila de la lista), asi
     // que el reducer no tiene forma de enterarse: hay que limpiarlo aqui o el
@@ -246,8 +284,46 @@ export class InvoicingComponent {
   }
 
   openCreditNoteModal(invoice: Invoice): void {
-    this.creditNoteSourceInvoice.set(invoice);
-    this.isCreditNoteModalOpen.set(true);
+    this.creditNoteSourceInvoice.set(null);
+    this.creditNoteLoadError.set(null);
+    this.isCreditNoteModalOpen.set(false);
+    this.isDetailModalOpen.set(false);
+    this.creditNoteSourceLoader.loadFullSource(
+      invoice.id,
+      (id) => this.invoiceApi.getInvoice(id),
+      {
+        loading: (isLoading) => this.creditNoteLoading.set(isLoading),
+        success: (source) => {
+          this.creditNoteSourceInvoice.set(source);
+          this.isCreditNoteModalOpen.set(true);
+        },
+        error: (error) => {
+          this.reportCreditNoteLoadError(
+            typeof error === 'string'
+              ? error
+              : extractApiErrorMessage(error),
+          );
+        },
+      },
+    );
+  }
+
+  private reportCreditNoteLoadError(message: string): void {
+    this.creditNoteLoadError.set(message);
+    this.toast.error(message);
+  }
+
+  cancelCreditNoteSourceLoad(): void {
+    this.creditNoteSourceLoader.cancel();
+    this.creditNoteLoading.set(false);
+  }
+
+  onCreditNoteModalOpenChange(isOpen: boolean): void {
+    this.isCreditNoteModalOpen.set(isOpen);
+    if (isOpen) return;
+    this.cancelCreditNoteSourceLoad();
+    this.creditNoteSourceInvoice.set(null);
+    this.refreshInvoices();
   }
 
   refreshInvoices(): void {
@@ -418,7 +494,9 @@ export class InvoicingComponent {
         };
       }
       this.isDetailModalOpen.set(false);
-      this.isCreditNoteModalOpen.set(false);
+      if (this.isCreditNoteModalOpen()) {
+        this.onCreditNoteModalOpenChange(false);
+      }
       this.isNotConfiguredModalOpen.set(false);
       return { status: 'ok' as const, message: `Cerré ${open.title}.` };
     },

@@ -1,697 +1,440 @@
 import { Prisma } from '@prisma/client';
-import {
-  CreditNotesService,
-  derivePartialNoteLinesViaKernel,
-} from './credit-notes.service';
+import { CreditNotesService } from './credit-notes.service';
+import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
+import { deriveRefundNoteSelection, type RefundNoteSourceInvoice } from './refund-note-source.util';
+import { recalculateNote } from './recalculate-note.util';
 
-/**
- * CP-REFUND-FLOW-REDESIGN paso 10 — gate de NC guiada + puente refund↔NC (paso 7).
- *
- * Con FE aceptada la NC por lo reembolsado es guiada (1 clic, nunca
- * automática): deriva líneas de `refund_items` (ADR-03 movido a backend),
- * persiste `invoices.refund_id` y escribe el puente estructural por línea
- * en `credit_note_refund_items` — no comparación floja por monto/fecha.
- *
- * Ningún UPDATE toca documentos emitidos: todo rechazo sale ANTES de
- * numerar (inexistente, cruce de órdenes, doble vínculo vivo, mezcla
- * guiada+explícita, refund vacío).
- */
-describe('CreditNotesService — gate de NC guiada + puente refund↔NC (paso 7, CP-REFUND-FLOW-REDESIGN)', () => {
-  const refundItem = (over: any = {}) => ({
-    id: 201,
-    order_item_id: 11,
-    quantity: 2,
-    refund_amount: new Prisma.Decimal(5000),
-    discount_amount: new Prisma.Decimal(0),
-    tax_amount: new Prisma.Decimal(0),
-    ...over,
-  });
+const decimal = (value: number | string) => new Prisma.Decimal(value);
 
-  const refundRow = (over: any = {}) => ({
-    id: 55,
-    order_id: 1,
-    state: 'completed',
-    reason: 'cliente devolvió',
-    shipping_refund: new Prisma.Decimal(0),
-    refund_items: [refundItem()],
-    ...over,
-  });
-
-  const orderLine = (over: any = {}) => ({
-    id: 11,
+function sourceLine(
+  id: number,
+  overrides: Partial<RefundNoteSourceInvoice['invoice_items'][number]> = {},
+) {
+  return {
+    id,
+    invoice_id: 9,
     product_id: 3,
     product_variant_id: null,
-    product_name: 'Café',
-    quantity: 2,
-    unit_price: new Prisma.Decimal(2500),
-    ...over,
-  });
+    description: 'Café',
+    quantity: decimal(2),
+    unit_price: decimal(2500),
+    discount_amount: decimal(0),
+    tax_amount: decimal(0),
+    total_amount: decimal(5000),
+    is_inclusive: false,
+    price_unit_quantity: 1,
+    unit_code: 'NIU',
+    account_code: '413595',
+    stock_units_consumed: 2,
+    serial_numbers_snapshot: null,
+    aiu_component: null,
+    financial_source_line_id: null,
+    ...overrides,
+  };
+}
 
-  // Paso 2 (shipping-tax A1): copia del impuesto del envío SIN impuesto por
-  // defecto —los casos históricos esperan la línea de envío igual que hoy
-  // (sin flag, cuota 0) y nunca consultan previos.
-  const noTaxCopy = () => ({
-    shipping_cost: new Prisma.Decimal(3000),
-    shipping_tax_amount: new Prisma.Decimal(0),
-  });
+function sourceInvoice(
+  lines: readonly ReturnType<typeof sourceLine>[],
+  invoiceTaxes: RefundNoteSourceInvoice['invoice_taxes'] = [],
+): RefundNoteSourceInvoice {
+  const lineTotal = lines.reduce((sum, line) => sum.plus(decimal(line.total_amount)), decimal(0));
+  const taxTotal = lines.reduce((sum, line) => sum.plus(decimal(line.tax_amount)), decimal(0));
+  return {
+    id: 9,
+    organization_id: 1,
+    store_id: 100,
+    accounting_entity_id: 3,
+    invoice_items: lines,
+    invoice_taxes: invoiceTaxes,
+    subtotal_amount: lineTotal.minus(taxTotal),
+    discount_amount: decimal(0),
+    tax_amount: taxTotal,
+    total_amount: lineTotal,
+  };
+}
 
-  function createService(over: any = {}) {
-    const prisma = {
-      refunds: {
-        findFirst: jest.fn().mockResolvedValue(refundRow()),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-      order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-      orders: { findFirst: jest.fn().mockResolvedValue(noTaxCopy()) },
-      ...(over.prisma ?? {}),
+const refundItem = (overrides: Record<string, unknown> = {}) => ({
+  id: 201,
+  order_item_id: 11,
+  quantity: decimal(2),
+  refund_amount: decimal(5000),
+  discount_amount: decimal(0),
+  tax_amount: decimal(0),
+  ...overrides,
+});
+const refundRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 55,
+  order_id: 1,
+  state: 'completed',
+  reason: 'cliente devolvió',
+  shipping_refund: decimal(0),
+  refund_items: [refundItem()],
+  ...overrides,
+});
+const orderLine = (overrides: Record<string, unknown> = {}) => ({
+  id: 11,
+  product_id: 3,
+  product_variant_id: null,
+  product_name: 'Café',
+  quantity: decimal(2),
+  ...overrides,
+});
+
+function createService(overrides: Record<string, unknown> = {}) {
+  const prisma = {
+    refunds: { findFirst: jest.fn().mockResolvedValue(refundRow()) },
+    invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+    order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
+    ...(overrides.prisma as object | undefined),
+  };
+  const service = new CreditNotesService(
+    prisma as never,
+    {} as never,
+    { emit: jest.fn() } as never,
+    { findFiscalAccountingEntityId: jest.fn(async () => 3) } as never,
+    { assertAreaActive: jest.fn(async () => undefined) } as never,
+    {} as never,
+    new InvoiceCalculatorService(),
+    { assertCanCreate: jest.fn(async () => undefined), remaining: jest.fn() } as never,
+  );
+  return { service, prisma };
+}
+
+const resolve = (service: CreditNotesService, dto: unknown, type: string, invoice: unknown) =>
+  (service as unknown as { resolveRefundLink: (...args: unknown[]) => Promise<unknown> })
+    .resolveRefundLink(dto, type, invoice);
+
+const guidedDto = (over: Record<string, unknown> = {}) => ({ refund_id: 55, ...over });
+const invoiceOf = (order_id: number | null) => ({ id: 9, order_id });
+
+describe('CreditNotesService — refund provenance/lifecycle and source-backed selection', () => {
+  it('returns the refund snapshot and order identity only; no order price or derived tax is used', async () => {
+    const { service, prisma } = createService();
+    const link = await resolve(service, guidedDto(), 'credit_note', invoiceOf(1)) as {
+      refund: { id: number; order_id: number };
+      refund_snapshot: { refund_items: Array<{ id: number; refund_amount: Prisma.Decimal }> };
+      order_items: Array<Record<string, unknown>>;
+      concept_code: string;
+      default_reason: string;
     };
-    const service = new CreditNotesService(
-      prisma as any,
-      {} as any,
-      { emit: jest.fn() } as any,
-      {} as any,
-      {} as any,
-      {} as any,
+
+    expect(link.refund).toEqual({ id: 55, order_id: 1 });
+    expect(link.refund_snapshot.refund_items[0]).toMatchObject({ id: 201, refund_amount: decimal(5000) });
+    expect(link.order_items).toEqual([expect.objectContaining({ id: 11, product_name: 'Café', quantity: decimal(2) })]);
+    expect(link.order_items[0]).not.toHaveProperty('unit_price');
+    expect(link.concept_code).toBe('2');
+    expect(link.default_reason).toContain('Reembolso #55 de la orden #1');
+    expect(prisma.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.not.objectContaining({ unit_price: expect.anything() }),
+    }));
+  });
+
+  it('full refund defaults to concept 2; partial refund defaults to concept 1', async () => {
+    const { service } = createService();
+    const full = await resolve(service, guidedDto(), 'credit_note', invoiceOf(1)) as { concept_code: string };
+    expect(full.concept_code).toBe('2');
+
+    const { service: partial } = createService({
+      prisma: {
+        refunds: { findFirst: jest.fn().mockResolvedValue(refundRow({ refund_items: [refundItem({ quantity: decimal(1) })] })) },
+      },
+    });
+    const result = await resolve(partial, guidedDto(), 'credit_note', invoiceOf(1)) as { concept_code: string };
+    expect(result.concept_code).toBe('1');
+  });
+
+  it('maps refund amounts only through immutable source provenance and creates one structural bridge', () => {
+    const source = sourceInvoice([sourceLine(71, {
+      financial_source_line_id: 90,
+      financial_source_line: { source_order_item_id: 11, kind: 'order_item' },
+    })]);
+    const selected = deriveRefundNoteSelection(
+      new InvoiceCalculatorService(),
+      source,
+      { id: 55, order_id: 1, shipping_refund: 0, refund_items: [refundItem({ quantity: decimal(1), refund_amount: decimal(2500) })] },
+      [orderLine()],
     );
-    return { service, prisma };
-  }
 
-  const resolve = (service: CreditNotesService, dto: any, type: any, invoice: any) =>
-    (service as any).resolveRefundLink(dto, type, invoice);
-
-  const guidedDto = (over: any = {}) => ({ refund_id: 55, ...over });
-  const invoiceOf = (order_id: number | null) => ({ id: 9, order_id });
-
-  describe('derivación guiada + puente estructural', () => {
-    it('deriva líneas del refund (cant/montos del reembolso, precio/descripción de la orden)', async () => {
-      const { service } = createService();
-
-      const link = await resolve(service, guidedDto(), 'credit_note', invoiceOf(1));
-
-      expect(link.refund).toEqual({ id: 55, order_id: 1 });
-      expect(link.derived_items).toEqual([
-        {
-          product_id: 3,
-          description: 'Café',
-          quantity: 2,
-          unit_price: 2500,
-          discount_amount: 0,
-          tax_amount: 0,
-        },
-      ]);
-      expect(link.bridge_rows).toEqual([
-        {
-          refund_item_id: 201,
-          covered_qty: 2,
-          covered_amount: new Prisma.Decimal(5000),
-        },
-      ]);
-      expect(link.default_reason).toContain('Reembolso #55 de la orden #1');
-    });
-
-    it('cobertura total ⇒ concepto 2 (anulación); parcial ⇒ concepto 1 (devolución)', async () => {
-      const { service } = createService();
-
-      const full = await resolve(service, guidedDto(), 'credit_note', invoiceOf(1));
-      expect(full.concept_code).toBe('2');
-
-      const { service: partial } = createService({
-        prisma: {
-          refunds: {
-            findFirst: jest
-              .fn()
-              .mockResolvedValue(refundRow({ refund_items: [refundItem({ quantity: 1 })] })),
-          },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-      const part = await resolve(partial, guidedDto(), 'credit_note', invoiceOf(1));
-      expect(part.concept_code).toBe('1');
-      expect(part.bridge_rows).toEqual([
-        expect.objectContaining({ refund_item_id: 201, covered_qty: 1 }),
-      ]);
-    });
-
-    it('refund solo-envío: línea libre de envío SIN puente (no hay refund_item que cubrir)', async () => {
-      const { service } = createService({
-        prisma: {
-          refunds: {
-            findFirst: jest.fn().mockResolvedValue(
-              refundRow({ refund_items: [], shipping_refund: new Prisma.Decimal(3000) }),
-            ),
-          },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-
-      const link = await resolve(service, guidedDto(), 'credit_note', invoiceOf(1));
-
-      expect(link.derived_items).toEqual([
-        {
-          description: 'Reembolso de envío — orden #1',
-          quantity: 1,
-          unit_price: 3000,
-          discount_amount: 0,
-          tax_amount: 0,
-        },
-      ]);
-      expect(link.bridge_rows).toEqual([]);
-    });
-
-    it('sin refund_id ⇒ null: la NC manual sigue el flujo histórico intacto', async () => {
-      const { service, prisma } = createService();
-
-      await expect(resolve(service, {}, 'credit_note', invoiceOf(1))).resolves.toBeNull();
-      expect(prisma.refunds.findFirst).not.toHaveBeenCalled();
-    });
+    expect(selected.items).toEqual([expect.objectContaining({ source_invoice_item_id: 71, quantity: 1, unit_price: 2500 })]);
+    expect(selected.bridge_rows).toEqual([expect.objectContaining({
+      refund_item_id: 201,
+      covered_qty: 1,
+      covered_amount: decimal(2500),
+    })]);
   });
 
-  describe('rechazos antes de numerar (la FE jamás se toca)', () => {
-    it('nota débito + refund_id ⇒ FISCAL_DOCUMENT_UNSUPPORTED (solo la NC acredita)', async () => {
-      const { service } = createService();
-
-      await expect(resolve(service, guidedDto(), 'debit_note', invoiceOf(1))).rejects.toMatchObject({
-        errorCode: 'FISCAL_DOCUMENT_UNSUPPORTED',
-      });
+  it('shipping-only refund resolves from the frozen shipping source and has no refund-item bridge', () => {
+    const shipping = sourceLine(72, {
+      product_id: null,
+      product_variant_id: null,
+      description: 'Envío del pedido',
+      quantity: decimal(1),
+      unit_price: decimal(119),
+      tax_amount: decimal(19),
+      total_amount: decimal(119),
+      is_inclusive: true,
+      financial_source_line_id: 91,
+      financial_source_line: { source_order_item_id: null, kind: 'shipping' },
     });
+    const source = sourceInvoice([shipping], [{
+      invoice_item_id: 72,
+      tax_rate_id: 9,
+      tax_name: 'IVA 19%',
+      tax_type: 'iva',
+      tax_rate: decimal(19),
+      taxable_amount: decimal(100),
+      tax_amount: decimal(19),
+      is_inclusive: true,
+    }]);
+    const selected = deriveRefundNoteSelection(
+      new InvoiceCalculatorService(),
+      source,
+      { id: 55, order_id: 1, shipping_refund: decimal('23.80'), refund_items: [] },
+      [],
+    );
 
-    it('guiada + items explícitos ⇒ INVOICING_CALC_001 (el puente mentiría)', async () => {
-      const { service } = createService();
-
-      await expect(
-        resolve(service, guidedDto({ items: [{ description: 'x', quantity: 1, unit_price: 1 }] }), 'credit_note', invoiceOf(1)),
-      ).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
-    });
-
-    it('refund inexistente/ajeno ⇒ INVOICING_FIND_001', async () => {
-      const { service } = createService({
-        prisma: {
-          refunds: { findFirst: jest.fn().mockResolvedValue(null) },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: { findMany: jest.fn().mockResolvedValue([]) },
-        },
-      });
-
-      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
-        errorCode: 'INVOICING_FIND_001',
-      });
-    });
-
-    it('factura padre sin orden ⇒ INVOICING_CALC_001 (nada contra qué cruzar)', async () => {
-      const { service } = createService();
-
-      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(null))).rejects.toMatchObject({
-        errorCode: 'INVOICING_CALC_001',
-      });
-    });
-
-    it('cruce de órdenes ⇒ INVOICING_CALC_001', async () => {
-      const { service } = createService();
-
-      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(2))).rejects.toMatchObject({
-        errorCode: 'INVOICING_CALC_001',
-      });
-    });
-
-    it('doble vínculo vivo ⇒ INVOICING_CALC_001 (anti-doble nc_covered_qty)', async () => {
-      const { service, prisma } = createService({
-        prisma: {
-          refunds: { findFirst: jest.fn().mockResolvedValue(refundRow()) },
-          invoices: {
-            findFirst: jest.fn().mockResolvedValue({ id: 12, invoice_number: 'NC-1', status: 'draft' }),
-          },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-
-      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
-        errorCode: 'INVOICING_CALC_001',
-      });
-      expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            refund_id: 55,
-            invoice_type: 'credit_note',
-            status: { in: ['draft', 'validated', 'sent', 'accepted'] },
-          }),
-        }),
-      );
-    });
-
-    it('refund sin líneas ni envío ⇒ INVOICING_CALC_001 (no cae al copiado TOTAL)', async () => {
-      const { service } = createService({
-        prisma: {
-          refunds: {
-            findFirst: jest.fn().mockResolvedValue(refundRow({ refund_items: [] })),
-          },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-
-      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
-        errorCode: 'INVOICING_CALC_001',
-      });
-    });
+    expect(selected.items).toEqual([expect.objectContaining({
+      source_invoice_item_id: 72,
+      quantity: 0.2,
+      unit_price: 119,
+      discount_amount: 0,
+      unit_code: 'NIU',
+    })]);
+    expect(selected.bridge_rows).toEqual([]);
   });
 
-  describe('release-853 paso 8: estado válido, unicidad y envío (casos a, b y c)', () => {
-    it('(a) refund failed ⇒ INVOICING_CALC_001 (no 404: el refund existe pero no acredita)', async () => {
-      const { service } = createService({
-        prisma: {
-          refunds: {
-            findFirst: jest.fn().mockResolvedValue(refundRow({ state: 'failed' })),
-          },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-
-      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
-        errorCode: 'INVOICING_CALC_001',
-      });
+  it('refund lines plus shipping include the shipping line but bridge only the refund item', () => {
+    const product = sourceLine(71, {
+      quantity: decimal(2),
+      unit_price: decimal(2500),
+      total_amount: decimal(5000),
+      financial_source_line: { source_order_item_id: 11, kind: 'order_item' },
     });
-
-    it('(a) refund cancelled ⇒ INVOICING_CALC_001', async () => {
-      const { service } = createService({
-        prisma: {
-          refunds: {
-            findFirst: jest.fn().mockResolvedValue(refundRow({ state: 'cancelled' })),
-          },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-
-      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
-        errorCode: 'INVOICING_CALC_001',
-      });
+    const shipping = sourceLine(72, {
+      product_id: null,
+      description: 'Envío del pedido',
+      quantity: decimal(1),
+      unit_price: decimal(3000),
+      total_amount: decimal(3000),
+      financial_source_line: { source_order_item_id: null, kind: 'shipping' },
     });
+    const selected = deriveRefundNoteSelection(
+      new InvoiceCalculatorService(),
+      sourceInvoice([product, shipping]),
+      { id: 55, order_id: 1, shipping_refund: decimal(3000), refund_items: [refundItem({ quantity: decimal(2), refund_amount: decimal(5000) })] },
+      [orderLine()],
+    );
 
-    it('(b) P2002 con vínculo vivo ⇒ "refund ya vinculado" (carrera doble-clic, nunca 500)', async () => {
-      const { service, prisma } = createService({
-        prisma: {
-          refunds: { findFirst: jest.fn().mockResolvedValue(refundRow()) },
-          invoices: {
-            findFirst: jest.fn().mockResolvedValue({ id: 12, invoice_number: 'NC-1', status: 'draft' }),
-          },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-      const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
-
-      await expect(
-        (service as any).throwIfDuplicateRefundLink(p2002, { refund: { id: 55, order_id: 1 } }),
-      ).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
-      expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ refund_id: 55, invoice_type: 'credit_note' }),
-        }),
-      );
-    });
-
-    it('(b) P2002 sin vínculo vivo relanza el original (no era el índice de refund)', async () => {
-      const { service } = createService();
-      const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
-
-      await expect(
-        (service as any).throwIfDuplicateRefundLink(p2002, { refund: { id: 55, order_id: 1 } }),
-      ).rejects.toBe(p2002);
-    });
-
-    it('(b) error no-P2002 o NC manual relanza intacto', async () => {
-      const { service } = createService();
-      const other = new Error('db caída');
-
-      await expect(
-        (service as any).throwIfDuplicateRefundLink(other, { refund: { id: 55, order_id: 1 } }),
-      ).rejects.toBe(other);
-      const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
-      await expect((service as any).throwIfDuplicateRefundLink(p2002, null)).rejects.toBe(p2002);
-    });
-
-    it('(c) refund con líneas + envío: la NC incluye la línea de envío (sin puente)', async () => {
-      const { service } = createService({
-        prisma: {
-          refunds: {
-            findFirst: jest
-              .fn()
-              .mockResolvedValue(refundRow({ shipping_refund: new Prisma.Decimal(3000) })),
-          },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
-        },
-      });
-
-      const link = await resolve(service, guidedDto(), 'credit_note', invoiceOf(1));
-
-      expect(link.derived_items).toEqual([
-        expect.objectContaining({ description: 'Café', quantity: 2 }),
-        {
-          description: 'Reembolso de envío — orden #1',
-          quantity: 1,
-          unit_price: 3000,
-          discount_amount: 0,
-          tax_amount: 0,
-        },
-      ]);
-      // El envío no toca el puente: solo la línea de producto lo hace.
-      expect(link.bridge_rows).toEqual([
-        expect.objectContaining({ refund_item_id: 201, covered_qty: 2 }),
-      ]);
-    });
+    expect(selected.items.map((item) => item.source_invoice_item_id)).toEqual([71, 72]);
+    expect(selected.bridge_rows).toEqual([expect.objectContaining({ refund_item_id: 201, covered_qty: 2, covered_amount: decimal(5000) })]);
   });
 
-  describe('paso 2 (shipping-tax A1): envío gravado como línea incluida', () => {
-    const taxedCopy = (
-      shipping_cost: number = 15000,
-      shipping_tax_amount: number = 1111.11,
-    ) => ({
-      shipping_cost: new Prisma.Decimal(shipping_cost),
-      shipping_tax_amount: new Prisma.Decimal(shipping_tax_amount),
+  it('untaxed shipping remains a single source-linked line with zero taxes and no bridge', () => {
+    const shipping = sourceLine(72, {
+      product_id: null,
+      description: 'Envío del pedido',
+      quantity: decimal(1),
+      unit_price: decimal(3000),
+      total_amount: decimal(3000),
+      financial_source_line: { source_order_item_id: null, kind: 'shipping' },
     });
+    const selected = deriveRefundNoteSelection(
+      new InvoiceCalculatorService(),
+      sourceInvoice([shipping]),
+      { id: 55, order_id: 1, shipping_refund: decimal(3000), refund_items: [] },
+      [],
+    );
+    expect(selected.items).toEqual([expect.objectContaining({ source_invoice_item_id: 72, quantity: 1, unit_price: 3000 })]);
+    expect(selected.bridge_rows).toEqual([]);
+  });
 
-    const guidedWithShipping = (over: any = {}) =>
-      createService({
-        prisma: {
-          refunds: {
-            findFirst: jest
-              .fn()
-              .mockResolvedValue(refundRow(over.refund ?? {})),
-            findMany: jest.fn().mockResolvedValue(over.priors ?? []),
-          },
-          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
-          order_items: {
-            findMany: jest
-              .fn()
-              .mockResolvedValue(over.order_items ?? [orderLine()]),
-          },
-          orders: {
-            // `in`, no `??`: el caso de orden ausente pasa `copy: null`
-            // a propósito (fail-open) y `??` lo taparía con la copia gravada.
-            findFirst: jest.fn().mockResolvedValue(
-              'copy' in over ? over.copy : taxedCopy(),
-            ),
-          },
-        },
-      });
+  it('two fractional taxed-shipping refunds add by source quantity while each keeps its own bridge', () => {
+    const product = sourceLine(71, {
+      quantity: decimal(1),
+      unit_price: decimal(100),
+      total_amount: decimal(100),
+      financial_source_line: { source_order_item_id: 11, kind: 'order_item' },
+    });
+    const shipping = sourceLine(72, {
+      product_id: null,
+      description: 'Envío gravado',
+      quantity: decimal(1),
+      unit_price: decimal(119),
+      total_amount: decimal(119),
+      tax_amount: decimal(19),
+      is_inclusive: true,
+      financial_source_line: { source_order_item_id: null, kind: 'shipping' },
+    });
+    const source = sourceInvoice([product, shipping], [{
+      invoice_item_id: 72,
+      tax_rate_id: 9,
+      tax_name: 'IVA 19%',
+      tax_type: 'iva',
+      tax_rate: decimal(19),
+      taxable_amount: decimal(100),
+      tax_amount: decimal(19),
+      is_inclusive: true,
+    }]);
+    const calculator = new InvoiceCalculatorService();
+    const selected = [300, 301].map((id) => deriveRefundNoteSelection(
+      calculator,
+      source,
+      {
+        id,
+        order_id: 1,
+        shipping_refund: decimal('23.80'),
+        refund_items: [refundItem({ id: id + 1, quantity: decimal('0.1'), refund_amount: decimal(10) })],
+      },
+      [orderLine({ quantity: decimal(1) })],
+    ));
+    const shippingQuantities = selected.map((result) => result.items.find((item) => item.source_invoice_item_id === 72)?.quantity ?? 0);
+    expect(shippingQuantities).toEqual([0.2, 0.2]);
+    expect(decimal(shippingQuantities[0] ?? 0).plus(decimal(shippingQuantities[1] ?? 0))).toEqual(decimal('0.4'));
+    expect(selected.map((result) => result.bridge_rows[0]?.covered_amount)).toEqual([decimal(10), decimal(10)]);
+    expect(selected.map((result) => result.items.find((item) => item.source_invoice_item_id === 72)?.discount_amount)).toEqual([0, 0]);
+  });
 
-    it('envío 15.000 INC 8% ⇒ línea incluida 15.000 con pista 1.111,11; el kernel cierra 15.000', async () => {
-      const { service } = guidedWithShipping({
-        refund: {
-          refund_items: [],
-          shipping_refund: new Prisma.Decimal(15000),
-        },
-      });
-
-      const link = await resolve(
-        service,
-        guidedDto(),
-        'credit_note',
-        invoiceOf(1),
-      );
-
-      expect(link.derived_items).toEqual([
-        {
-          description: 'Reembolso de envío — orden #1',
-          quantity: 1,
-          unit_price: 15000,
-          discount_amount: 0,
-          tax_amount: 1111.11,
-          is_inclusive: true,
-        },
-      ]);
-      expect(link.bridge_rows).toEqual([]);
-
-      // El carril parcial por kernel: la factura persiste el Envío en forma
-      // base (`is_inclusive: false`); la línea incluida despeja base + cuota
-      // y el total queda en el bruto devuelto, no en 16.200.
-      const derived = derivePartialNoteLinesViaKernel(
-        link.derived_items,
-        [
-          {
-            id: 77,
-            product_id: null,
-            product_variant_id: null,
-            is_inclusive: false,
-            tax_amount: new Prisma.Decimal(1111.11),
-            quantity: new Prisma.Decimal(1),
-            unit_price: new Prisma.Decimal(13888.89),
-            discount_amount: new Prisma.Decimal(0),
-          },
-        ],
-        [
-          {
-            tax_rate_id: 9,
-            tax_name: 'INC 8%',
-            tax_rate: new Prisma.Decimal(8),
-            tax_type: 'inc',
-            invoice_item_id: 77,
-          },
-        ],
-        901,
-        'credit_note',
-      );
-      expect(derived.lines[0].base_amount.toString()).toBe('13888.89');
-      expect(derived.lines[0].tax_amount.toString()).toBe('1111.11');
-      expect(derived.lines[0].total_amount.toString()).toBe('15000');
-      expect(derived.totals.total.toString()).toBe('15000');
-      expect(derived.taxes).toHaveLength(1);
-      expect(derived.taxes[0]).toMatchObject({
+  it('recalculates a mixed IVA-product and INC-shipping refund to the exact frozen 115000 total', () => {
+    const product = sourceLine(71, {
+      quantity: decimal(1),
+      unit_price: decimal('84033.62'),
+      tax_amount: decimal('15966.38'),
+      total_amount: decimal(100000),
+      is_inclusive: false,
+      financial_source_line_id: 90,
+      financial_source_line: { source_order_item_id: 11, kind: 'order_item' },
+    });
+    const shipping = sourceLine(72, {
+      product_id: null,
+      description: 'Envío del pedido',
+      quantity: decimal(1),
+      unit_price: decimal(15000),
+      tax_amount: decimal('1111.11'),
+      total_amount: decimal(15000),
+      is_inclusive: true,
+      financial_source_line_id: 91,
+      financial_source_line: { source_order_item_id: null, kind: 'shipping' },
+    });
+    const source = sourceInvoice([product, shipping], [
+      {
+        invoice_item_id: 71,
+        tax_rate_id: 8,
+        tax_name: 'IVA 19%',
+        tax_type: 'iva',
+        tax_rate: decimal(19),
+        taxable_amount: decimal('84033.62'),
+        tax_amount: decimal('15966.38'),
+        is_inclusive: false,
+      },
+      {
+        invoice_item_id: 72,
+        tax_rate_id: 9,
         tax_name: 'INC 8%',
-        tax_amount: 1111.11,
-      });
-    });
-
-    it('reembolso total mixto (IVA productos + INC envío) ⇒ NC 115.000 exacta', async () => {
-      const productLine = orderLine({
-        id: 11,
-        product_id: 3,
-        product_variant_id: null,
-        product_name: 'Cena',
-        quantity: 1,
-        unit_price: new Prisma.Decimal(100000),
-      });
-      const { service } = guidedWithShipping({
-        refund: {
-          refund_items: [
-            refundItem({
-              order_item_id: 11,
-              quantity: 1,
-              refund_amount: new Prisma.Decimal(100000),
-            }),
-          ],
-          shipping_refund: new Prisma.Decimal(15000),
-        },
-        order_items: [productLine],
-      });
-
-      const link = await resolve(
-        service,
-        guidedDto(),
-        'credit_note',
-        invoiceOf(1),
-      );
-
-      expect(link.concept_code).toBe('2');
-      expect(link.derived_items).toHaveLength(2);
-      expect(link.derived_items[1]).toMatchObject({
-        unit_price: 15000,
-        tax_amount: 1111.11,
+        tax_type: 'inc',
+        tax_rate: decimal(8),
+        taxable_amount: decimal('13888.89'),
+        tax_amount: decimal('1111.11'),
         is_inclusive: true,
-      });
+      },
+    ]);
+    const calculator = new InvoiceCalculatorService();
+    const selected = deriveRefundNoteSelection(
+      calculator,
+      source,
+      {
+        id: 55,
+        order_id: 1,
+        shipping_refund: decimal(15000),
+        refund_items: [refundItem({ quantity: decimal(1), refund_amount: decimal(100000), tax_amount: decimal('15966.38') })],
+      },
+      [orderLine({ quantity: decimal(1) })],
+    );
+    const result = recalculateNote(calculator, source, selected.items);
 
-      const derived = derivePartialNoteLinesViaKernel(
-        link.derived_items,
-        [
-          {
-            id: 21,
-            product_id: 3,
-            product_variant_id: null,
-            is_inclusive: true,
-            tax_amount: new Prisma.Decimal(15966.38),
-            quantity: new Prisma.Decimal(1),
-            unit_price: new Prisma.Decimal(100000),
-            discount_amount: new Prisma.Decimal(0),
-          },
-          {
-            id: 22,
-            product_id: null,
-            product_variant_id: null,
-            is_inclusive: false,
-            tax_amount: new Prisma.Decimal(1111.11),
-            quantity: new Prisma.Decimal(1),
-            unit_price: new Prisma.Decimal(13888.89),
-            discount_amount: new Prisma.Decimal(0),
-          },
-        ],
-        [
-          {
-            tax_rate_id: 5,
-            tax_name: 'IVA 19%',
-            tax_rate: new Prisma.Decimal(19),
-            tax_type: 'iva',
-            invoice_item_id: 21,
-          },
-          {
-            tax_rate_id: 9,
-            tax_name: 'INC 8%',
-            tax_rate: new Prisma.Decimal(8),
-            tax_type: 'inc',
-            invoice_item_id: 22,
-          },
-        ],
-        902,
-        'credit_note',
-      );
-      // Cada línea despeja SU tributo (mixta por gemela) y la suma es el
-      // dinero devuelto al centavo: la guarda de saldo acreditable no ve
-      // exceso (el bug sumaba 16.200 y lanzaba INVOICING_CREDIT_NOTE_001).
-      expect(derived.taxes).toHaveLength(2);
-      expect(derived.taxes).toContainEqual(
-        expect.objectContaining({ tax_name: 'IVA 19%', tax_amount: 15966.38 }),
-      );
-      expect(derived.taxes).toContainEqual(
-        expect.objectContaining({ tax_name: 'INC 8%', tax_amount: 1111.11 }),
-      );
-      expect(derived.totals.tax.toString()).toBe('17077.49');
-      expect(derived.totals.total.toString()).toBe('115000');
-    });
+    expect(result.total_amount).toEqual(decimal(115000));
+    expect(result.tax_amount).toEqual(decimal('17077.49'));
+    expect(result.items.map((item) => item.source_invoice_item_id)).toEqual([71, 72]);
+    expect(result.calculated.header_taxes.map((tax) => [tax.tax_type, tax.tax_amount])).toEqual([
+      ['iva', '15966.38'],
+      ['inc', '1111.11'],
+    ]);
+    expect(selected.bridge_rows).toEqual([expect.objectContaining({
+      refund_item_id: 201,
+      covered_qty: 1,
+      covered_amount: decimal(100000),
+    })]);
+  });
 
-    it('dos parciales de 7.500: pistas 555,56 y 555,55 que cierran contra la copia', async () => {
-      const partial = (priors: any[]) =>
-        guidedWithShipping({
-          refund: {
-            refund_items: [],
-            shipping_refund: new Prisma.Decimal(7500),
-          },
-          priors,
-        });
+  it('fails closed when a refund order item has no source-invoice mapping', () => {
+    const source = sourceInvoice([sourceLine(71, {
+      financial_source_line_id: 90,
+      financial_source_line: { source_order_item_id: 999, kind: 'order_item' },
+    })]);
+    expect(() => deriveRefundNoteSelection(
+      new InvoiceCalculatorService(),
+      source,
+      { id: 55, order_id: 1, shipping_refund: 0, refund_items: [refundItem()] },
+      [orderLine()],
+    )).toThrow(expect.objectContaining({ errorCode: 'INVOICING_NOTE_SOURCE_001' }));
+  });
 
-      const { service: firstService } = partial([]);
-      const first = await resolve(
-        firstService,
-        guidedDto(),
-        'credit_note',
-        invoiceOf(1),
-      );
-      expect(first.derived_items).toEqual([
-        expect.objectContaining({
-          unit_price: 7500,
-          tax_amount: 555.56,
-          is_inclusive: true,
-        }),
-      ]);
+  it('no refund id returns null and does not query refunds', async () => {
+    const { service, prisma } = createService();
+    await expect(resolve(service, {}, 'credit_note', invoiceOf(1))).resolves.toBeNull();
+    expect(prisma.refunds.findFirst).not.toHaveBeenCalled();
+  });
 
-      const { service: secondService } = partial([
-        { shipping_refund: new Prisma.Decimal(7500) },
-      ]);
-      const second = await resolve(
-        secondService,
-        guidedDto(),
-        'credit_note',
-        invoiceOf(1),
-      );
-      expect(second.derived_items).toEqual([
-        expect.objectContaining({
-          unit_price: 7500,
-          tax_amount: 555.55,
-          is_inclusive: true,
-        }),
-      ]);
-      const hinted =
-        Number(first.derived_items[0].tax_amount) +
-        Number(second.derived_items[0].tax_amount);
-      expect(hinted).toBeCloseTo(1111.11, 2);
+  it('debit + refund, refund + explicit items, missing refund, missing order, and cross-order all reject', async () => {
+    const { service } = createService();
+    await expect(resolve(service, guidedDto(), 'debit_note', invoiceOf(1))).rejects.toMatchObject({ errorCode: 'FISCAL_DOCUMENT_UNSUPPORTED' });
+    await expect(resolve(service, guidedDto({ items: [{ source_invoice_item_id: 71, quantity: 1, unit_price: 1 }] }), 'credit_note', invoiceOf(1)))
+      .rejects.toMatchObject({ errorCode: 'INVOICING_NOTE_SOURCE_001' });
 
-      // La pista del primer parcial difiere 1 ¢ del re-despeje del kernel
-      // (555,55): el kernel gana, la NC cierra a 7.500 y queda aviso.
-      const warnings: string[] = [];
-      const derived = derivePartialNoteLinesViaKernel(
-        first.derived_items,
-        [
-          {
-            id: 77,
-            product_id: null,
-            product_variant_id: null,
-            is_inclusive: false,
-            tax_amount: new Prisma.Decimal(1111.11),
-            quantity: new Prisma.Decimal(1),
-            unit_price: new Prisma.Decimal(13888.89),
-            discount_amount: new Prisma.Decimal(0),
-          },
-        ],
-        [
-          {
-            tax_rate_id: 9,
-            tax_name: 'INC 8%',
-            tax_rate: new Prisma.Decimal(8),
-            tax_type: 'inc',
-            invoice_item_id: 77,
-          },
-        ],
-        903,
-        'credit_note',
-        { warn: (message: string) => warnings.push(message) },
-      );
-      expect(derived.lines[0].tax_amount.toString()).toBe('555.55');
-      expect(derived.totals.total.toString()).toBe('7500');
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain('server wins');
-    });
+    const missing = createService({ prisma: { refunds: { findFirst: jest.fn().mockResolvedValue(null) } } });
+    await expect(resolve(missing.service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({ errorCode: 'INVOICING_FIND_001' });
+    await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(null))).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
+    await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(2))).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
+  });
 
-    it('sin impuesto en el envío la línea queda igual que hoy (sin flag, cuota 0)', async () => {
-      const { service, prisma } = guidedWithShipping({
-        refund: {
-          refund_items: [],
-          shipping_refund: new Prisma.Decimal(3000),
-        },
-        copy: noTaxCopy(),
-      });
+  it('refund failed/cancelled, live/reserved uncertain link, and P2002 race remain blocked', async () => {
+    const failed = createService({ prisma: { refunds: { findFirst: jest.fn().mockResolvedValue(refundRow({ state: 'failed' })) } } });
+    await expect(resolve(failed.service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
+    const cancelled = createService({ prisma: { refunds: { findFirst: jest.fn().mockResolvedValue(refundRow({ state: 'cancelled' })) } } });
+    await expect(resolve(cancelled.service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
 
-      const link = await resolve(
-        service,
-        guidedDto(),
-        'credit_note',
-        invoiceOf(1),
-      );
+    const live = createService({ prisma: { invoices: { findFirst: jest.fn().mockResolvedValue({ id: 12, invoice_number: 'NC-1', status: 'draft' }) } } });
+    await expect(resolve(live.service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
+    expect(live.prisma.invoices.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        refund_id: 55,
+        invoice_type: 'credit_note',
+        OR: expect.arrayContaining([
+          expect.objectContaining({ credit_limit_reserved_at: { not: null } }),
+          expect.objectContaining({ transmission_status: expect.objectContaining({ in: expect.arrayContaining(['submitted', 'retrying']) }) }),
+        ]),
+      }),
+    }));
 
-      expect(link.derived_items).toEqual([
-        {
-          description: 'Reembolso de envío — orden #1',
-          quantity: 1,
-          unit_price: 3000,
-          discount_amount: 0,
-          tax_amount: 0,
-        },
-      ]);
-      // Sin impuesto no se consultan previos.
-      expect(prisma.refunds.findMany).not.toHaveBeenCalled();
-    });
+    const { service, prisma } = createService();
+    const p2002 = Object.assign(new Error('unique'), { code: 'P2002' });
+    const link = { refund: { id: 55, order_id: 1 } };
+    prisma.invoices.findFirst.mockResolvedValue({ id: 12, invoice_number: 'NC-1', status: 'draft' });
+    await expect((service as unknown as { throwIfDuplicateRefundLink: (...args: unknown[]) => Promise<never> }).throwIfDuplicateRefundLink(p2002, link))
+      .rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    await expect((service as unknown as { throwIfDuplicateRefundLink: (...args: unknown[]) => Promise<never> }).throwIfDuplicateRefundLink(p2002, link)).rejects.toBe(p2002);
+    const otherError = new Error('db failure');
+    await expect((service as unknown as { throwIfDuplicateRefundLink: (...args: unknown[]) => Promise<never> }).throwIfDuplicateRefundLink(otherError, link)).rejects.toBe(otherError);
+    await expect((service as unknown as { throwIfDuplicateRefundLink: (...args: unknown[]) => Promise<never> }).throwIfDuplicateRefundLink(p2002, null)).rejects.toBe(p2002);
+  });
 
-    it('orden ausente: fail-open con la línea de hoy, la nota no se bloquea', async () => {
-      const { service } = guidedWithShipping({
-        refund: {
-          refund_items: [],
-          shipping_refund: new Prisma.Decimal(3000),
-        },
-        copy: null,
-      });
-
-      const link = await resolve(
-        service,
-        guidedDto(),
-        'credit_note',
-        invoiceOf(1),
-      );
-
-      expect(link.derived_items).toEqual([
-        expect.objectContaining({ unit_price: 3000, tax_amount: 0 }),
-      ]);
-      expect(link.derived_items[0]).not.toHaveProperty('is_inclusive');
-    });
+  it('empty refund cannot fall back to total note; the source mapper rejects it', () => {
+    const source = sourceInvoice([sourceLine(71, { financial_source_line: { source_order_item_id: 11, kind: 'order_item' } })]);
+    expect(() => deriveRefundNoteSelection(
+      new InvoiceCalculatorService(),
+      source,
+      { id: 55, order_id: 1, shipping_refund: 0, refund_items: [] },
+      [orderLine()],
+    )).toThrow(expect.objectContaining({ errorCode: 'INVOICING_NOTE_SOURCE_001' }));
   });
 });

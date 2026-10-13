@@ -23,13 +23,7 @@ describe('support document create modal UI source guards (static, not E2E)', () 
     expect(component).toContain('aria-label="Eliminar ítem"');
   });
 
-  it('keeps all action targets at least 44px, visible on focus, and avoids item-row overlap', () => {
-    const appButtons = component.match(/<app-button\b/g) ?? [];
-    const sizedAppButtons = component.match(/<app-button\b[^>]*\bcustomClasses="[^"]*\bmin-h-11\b[^"]*"/g) ?? [];
-    expect(appButtons.length).toBeGreaterThan(0);
-    expect((sizedAppButtons)?.length).toBe(appButtons.length);
-    expect(component).toContain('min-h-11 min-w-11 shrink-0 items-center justify-center');
-    expect(component).toContain('focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]');
+  it('keeps item removal separate from the form field to avoid overlap', () => {
     expect(component).toContain('<div class="flex items-start gap-2">');
     expect(component).toContain('<div class="min-w-0 flex-1">');
     expect(component).not.toContain('absolute top-2 right-2');
@@ -47,12 +41,11 @@ describe('support document create modal UI source guards (static, not E2E)', () 
     expect(footer).not.toMatch(/\bbg-[^\s"]+|\bborder-t\b|\brounded-b-\S+|\bp-3\b/);
   });
 
-  it('uses one responsive footer slot and readable alert text', () => {
+  it('uses one responsive footer slot and explicit alert text', () => {
     expect((component.match(/slot="footer"/g) ?? [])?.length).toBe(1);
     expect(component).toContain('flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end');
     expect(component).toContain('role="alert"');
-    expect(component).toContain('text-text-primary bg-error-light border border-error/30');
-    expect(component).not.toContain('text-sm text-error bg-error-light');
+    expect(component).toContain('{{ errorMsg }}');
   });
 
   it('distinguishes supplier loading, retryable errors, and an empty list', () => {

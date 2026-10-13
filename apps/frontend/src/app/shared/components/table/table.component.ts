@@ -587,11 +587,7 @@ export class TableComponent {
       column.badgeConfig?.type === 'custom' &&
       (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
     ) {
-      const color = this.getBadgeColorFromMap(column, value);
-      if (!color) return null;
-      return color.startsWith('#') || color.startsWith('rgb')
-        ? color
-        : 'var(--color-text-primary)';
+      return this.getBadgeColorFromMap(column, value);
     }
     return null;
   }

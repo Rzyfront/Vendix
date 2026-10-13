@@ -4,11 +4,46 @@ export type ReceivedDocumentPaymentCondition = 'cash' | 'credit' | 'unknown';
 export type StructuralValidationStatus = 'pending' | 'valid' | 'needs_review' | 'invalid';
 export type SignatureValidationStatus = 'unsigned' | 'not_verified';
 export type DianValidationStatus = 'not_checked';
+export type ReceivedDocumentInboxState = 'new' | 'requires_review' | 'accepted' | 'reclaimed';
+export type ReceivedDocumentLegalStatus = 'none' | 'accepted' | 'reclaimed' | 'conflict' | 'not_applicable';
+
+export interface ReceivedDocumentInboxSummary {
+  new: number;
+  requires_review: number;
+  accepted: number;
+  reclaimed: number;
+  total: number;
+  as_of: string;
+}
+
+/** Safe reader-facing health; never connection credentials, URLs or cursors. */
+export interface ReceivedDocumentReceptionStatus {
+  dian_active: boolean;
+  configured: boolean;
+  active_connections: number;
+  channels: Array<'api_poll' | 'webhook'>;
+  last_received_at: string | null;
+  last_synced_at: string | null;
+  next_sync_at: string | null;
+  last_run: {
+    status: string;
+    received_count: number;
+    duplicate_count: number;
+    error_count: number;
+    finished_at: string | null;
+  } | null;
+  error_code: 'RECEPTION_CONNECTION_ERROR' | null;
+  requires_operational_store: boolean;
+}
 
 export interface ReceivedDocumentQuery {
   page?: number;
   limit?: number;
   search?: string;
+  inbox_state?: ReceivedDocumentInboxState;
+  legal_status?: ReceivedDocumentLegalStatus;
+  document_type?: ReceivedDocumentType;
+  sort?: 'inbox';
   processing_status?: string;
   validation_status?: string;
   review_status?: string;
@@ -114,6 +149,11 @@ export interface ReceivedDocument {
   version: number;
   created_at: string;
   updated_at: string;
+  arrived_at?: string;
+  inbox_state?: ReceivedDocumentInboxState;
+  legal_status?: ReceivedDocumentLegalStatus;
+  event_delivery_status?: string;
+  blocking_reasons?: string[];
   accepted_at?: string | null;
   confirmed_goods_at?: string | null;
   files?: ReceivedDocumentFile[];

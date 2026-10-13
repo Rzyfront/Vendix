@@ -12,7 +12,7 @@ import { ReceivedBuyerEventCommandService } from './received-buyer-event-command
 import type { BuyerClaimConcept, BuyerCommandCode, BuyerEventCommandResult } from './received-buyer-event-command.interface';
 
 const CODES: BuyerCommandCode[] = ['030', '031', '032', '033'];
-const LABELS: Record<BuyerCommandCode, string> = { '030': 'Emitir acuse de recibo de factura', '031': 'Presentar reclamo de la factura', '032': 'Emitir recibo del bien o servicio', '033': 'Emitir aceptación expresa' };
+const LABELS: Record<BuyerCommandCode, string> = { '030': 'Emitir acuse de recibo de factura', '031': 'Reclamar factura', '032': 'Emitir recibo del bien o servicio', '033': 'Aceptar expresamente ante DIAN' };
 const CLAIMS: Record<BuyerClaimConcept, string> = { '01': 'Documento con inconsistencias', '02': 'Mercancía no entregada totalmente', '03': 'Mercancía no entregada parcialmente', '04': 'Servicio no prestado' };
 const BLOCKERS: Record<string, string> = { not_configured: 'No hay una solicitud de activación.', not_verified: 'La solicitud aún no está verificada.', suspended: 'La activación está suspendida.', event_code_not_approved: 'Este código no está aprobado.', configuration_missing: 'Falta la configuración DIAN asociada.', configuration_type_invalid: 'La configuración DIAN no corresponde a facturación.', operation_mode_invalid: 'La configuración no usa software propio.', environment_invalid: 'La configuración no está en producción.', dian_not_enabled: 'La configuración aún no está habilitada por la DIAN.', certificate_missing: 'Falta el certificado DIAN.', credentials_missing: 'Faltan credenciales del certificado.', certificate_expired: 'El certificado DIAN está vencido.', accounting_entity_missing: 'La entidad fiscal ya no está activa.', nit_mismatch: 'El NIT no coincide con la entidad fiscal.', evidence_missing: 'Falta evidencia de verificación.' };
 
@@ -99,6 +99,13 @@ export class ReceivedBuyerEventCommandComponent {
       },
       error: (error: unknown) => { this.uncertain.set(true); this.uncertainCode.set(code); this.error.set(`No se pudo confirmar la respuesta. No se creará otra solicitud automáticamente. Si reintentas, se usará la misma clave. ${describeApiFailure(error).message || ''}`.trim()); },
     });
+  }
+  resultStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      accepted: 'Aceptado por la DIAN', rejected: 'Rechazado por la DIAN', unknown: 'Resultado desconocido',
+      preparing: 'En preparación', prepared: 'Preparado', sending: 'Enviando', preparation_failed: 'Preparación fallida',
+    };
+    return labels[status] || 'Estado no disponible';
   }
   blockers(): string[] { return (this.readiness()?.blockers ?? []).map((b) => BLOCKERS[b] ?? 'Hay un requisito pendiente de validar.'); }
   codeDisabled(code: BuyerCommandCode): boolean {
