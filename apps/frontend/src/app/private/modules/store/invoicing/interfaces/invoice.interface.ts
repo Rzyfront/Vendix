@@ -44,6 +44,8 @@ export function toDianConfigurationType(
 }
 
 export interface Invoice {
+  related_invoice_id?: number | null;
+  refund_id?: number | null;
   id: number;
   organization_id: number;
   store_id: number;
