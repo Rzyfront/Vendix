@@ -1,3 +1,5 @@
+import type { CreateCreditNoteDto, Invoice } from '../../../invoicing/interfaces/invoice.interface';
+
 export interface RefundSourceCandidate {
   source_invoice_item_id: number;
   description: string;
@@ -20,6 +22,23 @@ export interface RefundNoteMappingChallenge {
 export interface RefundNoteSourceMapping {
   refund_item_sources: { refund_item_id: number; source_invoice_item_id: number }[];
   shipping_source_invoice_item_id?: number;
+}
+
+export interface RefundNoteState {
+  refundId: number;
+  invoiceId: number;
+  stage: 'creating' | 'mapping' | 'ask' | 'issuing';
+  mapping?: RefundNoteMappingChallenge;
+  noteId?: number;
+  noteNumber?: string | null;
+  noteTotal?: number;
+  error?: string | null;
+}
+
+export interface RefundNoteCreateFailure {
+  error: string;
+  errorCode?: string | null;
+  details?: unknown;
 }
 
 const isId = (value: unknown): value is number =>
@@ -124,4 +143,60 @@ export function buildRefundNoteSourceMapping(
   }
   if (shippingChoice != null) return null;
   return { refund_item_sources: mappings };
+}
+/** Pure create-failure transition; unrelated/stale failures preserve identity. */
+export function refundNoteCreateFailureState(
+  current: RefundNoteState | null,
+  failure: RefundNoteCreateFailure,
+): RefundNoteState | null {
+  if (!current || current.stage !== 'creating') return current;
+  if (failure.errorCode === 'INVOICING_NOTE_SOURCE_001' &&
+      isForeignRefundNoteMappingChallenge(failure.details, current.refundId, current.invoiceId)) return current;
+  const challenge = failure.errorCode === 'INVOICING_NOTE_SOURCE_001'
+    ? parseRefundNoteMappingChallenge(failure.details, current.refundId, current.invoiceId)
+    : null;
+  return challenge
+    ? { ...current, stage: 'mapping', mapping: challenge, error: failure.error }
+    : { ...current, stage: 'ask', error: failure.error };
+}
+
+/** Pure create-success transition; only a result linked to this refund/source is accepted. */
+export function refundNoteCreatedState(
+  current: RefundNoteState | null,
+  invoice: Pick<Invoice, 'id' | 'invoice_number' | 'total_amount' | 'related_invoice_id' | 'refund_id'>,
+): RefundNoteState | null {
+  if (!current || current.stage !== 'creating' ||
+      invoice.related_invoice_id !== current.invoiceId || invoice.refund_id !== current.refundId) return current;
+  return {
+    ...current,
+    stage: 'ask',
+    noteId: invoice.id,
+    noteNumber: invoice.invoice_number,
+    noteTotal: Number(invoice.total_amount),
+  };
+}
+
+/** Only an issue failure belonging to the active issue transition may change it. */
+export function refundNoteIssueFailureState(
+  current: RefundNoteState | null,
+  error: string,
+): RefundNoteState | null {
+  return current?.stage === 'issuing' ? { ...current, stage: 'ask', error } : current;
+}
+
+export function matchesRefundNoteIssueResult(current: RefundNoteState | null, invoiceId: number): boolean {
+  return current?.stage === 'issuing' && current.noteId === invoiceId;
+}
+
+/** Build a retry request from the commercial base DTO plus explicit source IDs only. */
+export function buildRefundNoteRetryDto(
+  current: RefundNoteState | null,
+  itemChoices: Readonly<Record<number, number | null | undefined>>,
+  shippingChoice: number | null | undefined,
+  baseDto: CreateCreditNoteDto,
+): CreateCreditNoteDto | null {
+  if (!current || current.stage !== 'mapping' || !current.mapping ||
+      baseDto.related_invoice_id !== current.invoiceId || baseDto.refund_id !== current.refundId) return null;
+  const mapping = buildRefundNoteSourceMapping(current.mapping, itemChoices, shippingChoice);
+  return mapping ? { ...baseDto, ...mapping } : null;
 }

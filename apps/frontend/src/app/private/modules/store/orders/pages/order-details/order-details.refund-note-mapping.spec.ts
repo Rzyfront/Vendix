@@ -1,7 +1,13 @@
-import { signal } from '@angular/core';
-import { OrderDetailsPageComponent } from './order-details-page.component';
+import {
+  buildRefundNoteRetryDto,
+  matchesRefundNoteIssueResult,
+  refundNoteCreateFailureState,
+  refundNoteCreatedState,
+  refundNoteIssueFailureState,
+  type RefundNoteState,
+} from './refund-note-mapping.util';
 
-describe('OrderDetailsPageComponent refund source mapping flow', () => {
+describe('refund note flow used by order details', () => {
   const apiDetails = {
     reason: 'refund_source_mapping_required', refund_id: 11, parent_invoice_id: 21,
     refund_item_candidates: [{ refund_item_id: 31, description: 'Camisa', source_candidates: [
@@ -10,65 +16,56 @@ describe('OrderDetailsPageComponent refund source mapping flow', () => {
     ] }],
     shipping_source_candidates: [],
   };
+  const creating: RefundNoteState = { refundId: 11, invoiceId: 21, stage: 'creating', error: null };
 
-  function harness(): OrderDetailsPageComponent {
-    const instance = Object.create(OrderDetailsPageComponent.prototype) as OrderDetailsPageComponent;
-    const state = signal({ refundId: 11, invoiceId: 21, stage: 'creating' as const, error: null as string | null });
-    Object.assign(instance, {
-      refundNoteState: state,
-      refundSourceChoices: signal<Record<number, number | null>>({}),
-      refundShippingChoice: signal<number | null>(null),
-      orderRefunds: signal([{ id: 11 }]),
-      acceptedInvoice: signal({ id: 21 }),
-      showInvoiceDetailModal: signal(false),
-      loadInvoiceNotes: jasmine.createSpy('loadInvoiceNotes'),
-      store: { dispatch: jasmine.createSpy('dispatch') },
-      buildRefundNoteDto: jasmine.createSpy('buildRefundNoteDto').and.returnValue({ related_invoice_id: 21, refund_id: 11, reason: 'reembolso', note_concept_code: '1' }),
+  it('moves a scoped source error to mapping and builds an ID-only retry DTO', () => {
+    const mapping = refundNoteCreateFailureState(creating, {
+      error: 'Seleccione el origen', errorCode: 'INVOICING_NOTE_SOURCE_001', details: apiDetails,
     });
-    return instance;
-  }
-
-  it('turns a scoped mapping error into a mapping stage and ignores a foreign error', () => {
-    const page = harness();
-    page.onRefundNoteCreateFailed({ error: 'Seleccione el origen', errorCode: 'INVOICING_NOTE_SOURCE_001', details: apiDetails });
-    expect(page.refundNoteState()?.stage).toBe('mapping');
-    expect(page.refundNoteState()?.mapping?.refund_id).toBe(11);
-
-    const foreign = harness();
-    foreign.onRefundNoteCreateFailed({ error: 'Otro reembolso', errorCode: 'INVOICING_NOTE_SOURCE_001', details: { ...apiDetails, refund_id: 99 } });
-    expect(foreign.refundNoteState()?.stage).toBe('creating');
-    expect(foreign.refundNoteState()?.mapping).toBeUndefined();
-    expect(foreign.refundNoteState()?.error).toBeNull();
-  });
-
-  it('does not let an unrelated issue failure clear an active mapping selection', () => {
-    const page = harness();
-    page.onRefundNoteCreateFailed({ error: 'Seleccione el origen', errorCode: 'INVOICING_NOTE_SOURCE_001', details: apiDetails });
-    page.setRefundSourceChoice(31, 42);
-    page.onRefundNoteIssueFailed('Fallo de otra nota');
-    expect(page.refundNoteState()?.stage).toBe('mapping');
-    expect(page.refundSourceChoices()[31]).toBe(42);
-  });
-
-  it('retries with explicit source IDs only and ignores a stale create success', () => {
-    const page = harness();
-    page.onRefundNoteCreateFailed({ error: 'Seleccione el origen', errorCode: 'INVOICING_NOTE_SOURCE_001', details: apiDetails });
-    page.setRefundSourceChoice(31, 42);
-    expect(page.refundMappingReady()).toBe(true);
-    page.retryRefundNoteWithSources();
-    const dispatch = (page as unknown as { store: { dispatch: jasmine.Spy } }).store.dispatch;
-    const payload = dispatch.calls.mostRecent().args[0] as { dto: Record<string, unknown> };
-    expect(payload.dto).toEqual({
-      related_invoice_id: 21,
-      refund_id: 11,
-      reason: 'reembolso',
-      note_concept_code: '1',
+    expect(mapping?.stage).toBe('mapping');
+    const dto = buildRefundNoteRetryDto(mapping, { 31: 42 }, null, {
+      related_invoice_id: 21, refund_id: 11, reason: 'reembolso', note_concept_code: '1',
+    });
+    expect(dto).toEqual({
+      related_invoice_id: 21, refund_id: 11, reason: 'reembolso', note_concept_code: '1',
       refund_item_sources: [{ refund_item_id: 31, source_invoice_item_id: 42 }],
     });
-    expect(payload.dto['items']).toBeUndefined();
-    expect(payload.dto['total_amount']).toBeUndefined();
+    expect(dto?.items).toBeUndefined();
+    expect(dto && 'total_amount' in dto).toBeFalse();
+  });
 
-    page.onRefundNoteCreated({ id: 90, related_invoice_id: 99, refund_id: 11 } as never);
-    expect(page.refundNoteState()?.stage).toBe('creating');
+  it('preserves current state for a foreign failure and ignores stale create success', () => {
+    const foreign = refundNoteCreateFailureState(creating, {
+      error: 'Otro reembolso', errorCode: 'INVOICING_NOTE_SOURCE_001',
+      details: { ...apiDetails, refund_id: 99 },
+    });
+    expect(foreign).toBe(creating);
+    const stale = refundNoteCreatedState(creating, {
+      id: 90, related_invoice_id: 99, refund_id: 11, invoice_number: 'NC-90', total_amount: 80,
+    });
+    expect(stale).toBe(creating);
+  });
+
+  it('retains mapping on unrelated issue failure and accepts only the matching issue result', () => {
+    const mapping = refundNoteCreateFailureState(creating, {
+      error: 'Seleccione el origen', errorCode: 'INVOICING_NOTE_SOURCE_001', details: apiDetails,
+    })!;
+    expect(refundNoteIssueFailureState(mapping, 'Fallo de otra nota')).toBe(mapping);
+
+    const issuing: RefundNoteState = { refundId: 11, invoiceId: 21, stage: 'issuing', noteId: 51 };
+    expect(matchesRefundNoteIssueResult(issuing, 52)).toBeFalse();
+    expect(matchesRefundNoteIssueResult(issuing, 51)).toBeTrue();
+    expect(refundNoteIssueFailureState(issuing, 'Falló la emisión')).toEqual({
+      refundId: 11, invoiceId: 21, stage: 'ask', noteId: 51, error: 'Falló la emisión',
+    });
+  });
+
+  it('accepts only matching create success and preserves server total snapshot', () => {
+    const created = refundNoteCreatedState(creating, {
+      id: 50, related_invoice_id: 21, refund_id: 11, invoice_number: 'NC-50', total_amount: 123.45,
+    });
+    expect(created).toEqual({
+      ...creating, stage: 'ask', noteId: 50, noteNumber: 'NC-50', noteTotal: 123.45,
+    });
   });
 });

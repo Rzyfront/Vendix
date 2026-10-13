@@ -104,6 +104,7 @@ function setup(parent: Record<string, unknown> = sourceInvoice()) {
     refunds: ['findFirst'],
     order_items: ['findMany'],
     credit_note_refund_items: ['createMany'],
+    store_settings: ['findFirst'],
   });
   (prisma as unknown as { withoutScope: () => unknown }).withoutScope = () => prisma;
   const generated: Array<Record<string, unknown>> = [];
@@ -241,8 +242,8 @@ describe('CreditNotesService calculator-backed writer and note context', () => {
       })],
     });
     expect(context.items[0]?.taxes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ tax_type: 'iva', tax_rate: '19' }),
-      expect.objectContaining({ tax_type: 'inc', tax_rate: '8' }),
+      expect.objectContaining({ tax_type: 'iva', tax_rate: '19.00' }),
+      expect.objectContaining({ tax_type: 'inc', tax_rate: '8.00' }),
     ]));
     expect(h.balance.remaining).toHaveBeenCalledWith(7100);
     expect(h.fiscalScope.findFiscalAccountingEntityId).toHaveBeenCalledWith({ organization_id: 1, store_id: 100 });
@@ -357,6 +358,7 @@ describe('CreditNotesService calculator-backed writer and note context', () => {
 
     expect(note.total_amount).toEqual(decimal(127));
     expect(h.prisma.credit_note_refund_items.createMany).toHaveBeenCalledWith({
+      skipDuplicates: false,
       data: [{
         credit_note_id: 9000,
         refund_item_id: 55,
