@@ -36,12 +36,31 @@ const TAX_TYPE_VALUES = Object.values(tax_type_enum) as string[];
 const PURCHASE_TAX_TYPE_VALUES = ['iva', 'inc', 'icui', 'ibua'];
 
 /**
- * Cota de tamaño de los arreglos de línea. El mismo límite que el resto de las
- * operaciones masivas del repo (`BatchCreateAdjustmentsDto`): sin tope, una
- * orden de 5.000 líneas abre 5.000 escrituras dentro de una sola transacción y
- * deja el pool de Prisma en el suelo.
+ * Cota de tamaño de un LOTE de líneas por request: 100. Es el mismo límite que
+ * el resto de las operaciones masivas del repo (`BatchCreateAdjustmentsDto`) y
+ * lo siguen usando `receive`, `new-item-conflicts`, `resolve-lines` y el
+ * escáner: cada uno hace trabajo por línea (decenas de consultas) y un request
+ * no puede pasar de los 60 s de nginx.
  */
 export const PURCHASE_ORDER_ITEMS_MAX = 100;
+
+/**
+ * Tope TOTAL de líneas de una orden en `create` / `update` / `cost-preview` /
+ * puerta de organización: 10.000. Ya no abre un volumen de consultas por línea:
+ * `create()` lee el catálogo agrupado (`findMany({ id: { in } })`) y las líneas
+ * NUEVAS (sin `product_id`) se resuelven ANTES, en lotes de 100, con
+ * `POST purchase-orders/resolve-lines`. Lo que sí sigue siendo atómico y único
+ * es el cálculo de totales, IVA, prorrateos, plan de pago y anticipo.
+ */
+export const PURCHASE_ORDER_CREATE_ITEMS_MAX = 10000;
+
+/**
+ * Máximo de líneas SIN resolver (`product_id = 0`) que `create()` acepta en una
+ * sola orden. Resolver una línea nueva (SKU, código de barras, variante, marca,
+ * categorías) cuesta varias consultas por línea; más de 100 deben pasar antes
+ * por `resolve-lines`, que es idempotente y se pagina de 100 en 100.
+ */
+export const PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX = 100;
 
 /**
  * Modos de imputación del flete de la factura de compra.
@@ -1112,7 +1131,7 @@ export class CreatePurchaseOrderDto {
   })
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(PURCHASE_ORDER_ITEMS_MAX)
+  @ArrayMaxSize(PURCHASE_ORDER_CREATE_ITEMS_MAX)
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderItemDto)
   items: PurchaseOrderItemDto[];

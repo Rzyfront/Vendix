@@ -6,7 +6,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 /**
- * CP-PURCHASE-TRANSPARENCY K — el contrato de transporte de los 24 handlers.
+ * CP-PURCHASE-TRANSPARENCY K — el contrato de transporte de los 25 handlers.
  *
  * Esta suite NO prueba lógica de negocio (eso vive en
  * `purchase-orders.service.spec.ts`). Prueba UNA sola cosa, la que hacía que
@@ -73,6 +73,7 @@ describe('PurchaseOrdersController — un fallo no puede responder 2xx', () => {
       findPending: jest.fn(),
       findBySupplier: jest.fn(),
       getCostPreview: jest.fn(),
+      resolveLines: jest.fn(),
       getReceptions: jest.fn(),
       getCostSummary: jest.fn(),
       getTimeline: jest.fn(),
@@ -219,6 +220,13 @@ describe('PurchaseOrdersController — un fallo no puede responder 2xx', () => {
       expected: ok('Preview de costos obtenido'),
     },
     {
+      route: 'POST /store/orders/purchase-orders/resolve-lines',
+      stub: () => purchaseOrdersService.resolveLines as jest.Mock,
+      invoke: () => controller.resolveLines({ items: [{}] } as any),
+      payload: { items: [] },
+      expected: ok('Líneas resueltas'),
+    },
+    {
       route: 'GET /store/orders/purchase-orders/:id/receptions',
       stub: () => purchaseOrdersService.getReceptions as jest.Mock,
       invoke: () => controller.getReceptions('5'),
@@ -332,11 +340,11 @@ describe('PurchaseOrdersController — un fallo no puede responder 2xx', () => {
     },
   ];
 
-  it('cubre los 24 handlers que devolvían el sobre de error', () => {
+  it('cubre los 25 handlers que devolvían el sobre de error', () => {
     // Guarda contra el olvido: si alguien añade un handler con un `catch` que
     // retorna el sobre, esta tabla tiene que crecer con él.
-    expect(rows).toHaveLength(24);
-    expect(new Set(rows.map((r) => r.route)).size).toBe(24);
+    expect(rows).toHaveLength(25);
+    expect(new Set(rows.map((r) => r.route)).size).toBe(25);
   });
 
   describe.each(rows)('$route', (row) => {

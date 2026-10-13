@@ -33,6 +33,7 @@ import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
+import { ResolvePurchaseOrderLinesDto } from './dto/resolve-lines.dto';
 import {
   RevalidateInvoiceDto,
   REVALIDATE_CONSOLIDATED_MAX_BYTES,
@@ -548,6 +549,18 @@ export class PurchaseOrdersController {
       result,
       'Conflictos de líneas nuevas obtenidos',
     );
+  }
+
+  // Estática: declarada antes de cualquier `@Post(':id/...')`. Resuelve
+  // (encuentra o crea) producto, variante, marca y categorías de un lote de
+  // líneas nuevas FUERA de la transacción de la orden; HTTP 200 con el
+  // detalle por fila (un error de una fila no tumba al resto).
+  @Post('resolve-lines')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:orders:purchase_orders:create')
+  async resolveLines(@Body() dto: ResolvePurchaseOrderLinesDto) {
+    const result = await this.purchaseOrdersService.resolveLines(dto);
+    return this.responseService.success(result, 'Líneas resueltas');
   }
 
   // ===== Sub-resource routes (BEFORE :id to avoid route conflicts) =====

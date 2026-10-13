@@ -7,11 +7,16 @@ import {
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   CreatePurchaseOrderDto,
+  PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX,
   ScanAttachmentDto,
   ShippingCostAllocation,
   validateFreightAndTaxHeader,
 } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
+import {
+  ResolveLineResult,
+  ResolvePurchaseOrderLinesDto,
+} from './dto/resolve-lines.dto';
 import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
@@ -113,6 +118,181 @@ function normalizeTaxCategoryIds(value: unknown): number[] | undefined {
     .map((item) => Number(item))
     .filter((item) => Number.isInteger(item) && item > 0);
   return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+}
+
+/** Opciones de las transacciones largas de la orden (A.11). */
+const PO_TX_OPTIONS = { timeout: 120_000, maxWait: 10_000 };
+
+const normalizeText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const normalizeBool = (val: any, fallback = false) => {
+  if (val === undefined || val === null || val === '') return fallback;
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'number') return val !== 0;
+  const s = normalizeText(val);
+  if (['si', 'yes', 'verdadero', 'true', '1', 'activo', 'x'].includes(s)) {
+    return true;
+  }
+  if (['no', 'false', 'falso', '0', 'inactivo'].includes(s)) {
+    return false;
+  }
+  return fallback;
+};
+
+const normalizeProductType = (value: unknown) =>
+  ['servicio', 'service'].includes(normalizeText(value))
+    ? 'service'
+    : 'physical';
+
+const normalizePricingType = (value: unknown) =>
+  ['peso', 'weight', 'por peso'].includes(normalizeText(value))
+    ? 'weight'
+    : 'unit';
+
+/**
+ * Contexto de una resolución de líneas nuevas. Guarda lo que NO cambia entre
+ * líneas (tienda, industrias, unidades de medida, marcas y categorías ya
+ * resueltas) para que el costo en lecturas no crezca con el número de líneas.
+ * Las lecturas reciben el `tx` de quien llama: `create()` pasa el de la orden
+ * y `resolveLines()` el de cada línea, pero los valores se comparten.
+ */
+class LineResolveContext {
+  private storeId: number | undefined;
+  private readonly industries = new Map<number, any>();
+  private readonly uoms = new Map<number, any>();
+  /** slug de marca -> id (ya existente o creada en esta resolución). */
+  readonly brands = new Map<string, number>();
+  /** slug de categoría -> id (ya existente o creada en esta resolución). */
+  readonly categories = new Map<string, number>();
+
+  constructor(
+    private readonly opts: {
+      organizationId: number;
+      locationId?: number | null;
+      orderType: string;
+      header: { prices_include_tax?: boolean | null };
+      allowedTaxCategoryIds: Set<number>;
+    },
+  ) {}
+
+  get orderType(): string {
+    return this.opts.orderType;
+  }
+
+  get header(): { prices_include_tax?: boolean | null } {
+    return this.opts.header;
+  }
+
+  get allowedTaxCategoryIds(): Set<number> {
+    return this.opts.allowedTaxCategoryIds;
+  }
+
+  /** Tienda donde nace el producto: ubicación -> tienda, o la 1ra de la org. */
+  async getStoreId(tx: any): Promise<number> {
+    if (this.storeId !== undefined) return this.storeId;
+    let storeId: number | undefined;
+    const location =
+      this.opts.locationId != null
+        ? await tx.inventory_locations.findUnique({
+            where: { id: this.opts.locationId },
+            select: { store_id: true },
+          })
+        : null;
+    if (location?.store_id) {
+      storeId = location.store_id;
+    } else {
+      const firstStore = await tx.stores.findFirst({
+        where: { organization_id: this.opts.organizationId },
+      });
+      storeId = firstStore?.id;
+    }
+    if (!storeId) {
+      throw new BadRequestException(
+        'Cannot create new product: No store found for this organization.',
+      );
+    }
+    this.storeId = storeId;
+    return storeId;
+  }
+
+  async getIndustries(tx: any, storeId: number): Promise<any> {
+    if (!this.industries.has(storeId)) {
+      const store = await tx.stores.findUnique({
+        where: { id: storeId },
+        select: { industries: true },
+      });
+      this.industries.set(storeId, store?.industries);
+    }
+    return this.industries.get(storeId);
+  }
+
+  /** Un solo `findMany` por las unidades que todavía no se han leído. */
+  async loadUoms(tx: any, ids: number[]): Promise<Map<number, any>> {
+    const missing = Array.from(new Set(ids)).filter(
+      (id) => !this.uoms.has(id),
+    );
+    if (missing.length > 0) {
+      const rows = await tx.units_of_measure.findMany({
+        where: { id: { in: missing } },
+      });
+      for (const row of rows) this.uoms.set(row.id, row);
+    }
+    return this.uoms;
+  }
+}
+
+/**
+ * Lecturas agrupadas para `persistIngredientConfigToProduct` /
+ * `persistSaleUnitConfigToProduct`: en vez de leer producto, tienda, unidades,
+ * presentación y variantes POR LÍNEA, `create()` las trae una vez para todo el
+ * lote y se las pasa a esas funciones. Sin preload ellas leen por su cuenta.
+ */
+interface PersistPreload {
+  products: Map<number, any>;
+  industries: Map<number, any>;
+  uoms: Map<number, any>;
+  tiers: Map<string, any>;
+  variantCounts: Map<number, number>;
+}
+
+const PERSIST_PRODUCT_SELECT = {
+  id: true,
+  store_id: true,
+  cost_price: true,
+  price_unit_quantity: true,
+  is_ingredient: true,
+  is_sellable: true,
+  available_for_ecommerce: true,
+  is_featured: true,
+  purchase_uom_id: true,
+  stock_uom_id: true,
+  purchase_to_stock_factor: true,
+};
+
+/** Texto legible de un error cualquiera para el detalle por fila. */
+function errorToRowError(error: any): { code: string; message: string } {
+  if (error instanceof VendixHttpException) {
+    const response: any = error.getResponse();
+    return {
+      code: error.errorCode,
+      message:
+        (typeof response === 'object' && response?.message) || error.message,
+    };
+  }
+  const response: any = error?.getResponse?.();
+  const raw =
+    (typeof response === 'object' && response?.message) ||
+    error?.message ||
+    'Error al resolver la línea.';
+  return {
+    code: ErrorCodes.SYS_VALIDATION_001.code,
+    message: Array.isArray(raw) ? raw.join('; ') : String(raw),
+  };
 }
 
 @Injectable()
@@ -986,6 +1166,757 @@ export class PurchaseOrdersService {
   }
 
   /**
+   * Valida, FUERA de cualquier transacción, las categorías de impuesto que
+   * piden las líneas (existencia/alcance + regla de combinación P1-4) y devuelve
+   * las permitidas. Compartida por `create()` y `resolveLines()`: las dos
+   * puertas aceptan y rechazan lo mismo.
+   */
+  private async validateLineTaxCategories(
+    items: Array<unknown> | undefined,
+    locationId: number | null | undefined,
+    ctxStoreId: number | null | undefined,
+  ): Promise<Set<number>> {
+    // ===== HOTFIX impuestos — el escáner sugiere, esto valida =====
+    //
+    // La validación vivía DENTRO del `$transaction` y usaba `tx.tax_categories`
+    // (cliente CON alcance de tienda). `tax_categories` está en
+    // `store_scoped_models`, así que `mergeScopedWhere` sumaba
+    // `store_id = <contexto>` al where y anulaba con un AND el
+    // `OR ... store_id: null` que el código creía tener: ninguna categoría de
+    // nivel ORGANIZACIÓN pasaba nunca, y la orden moría con «Una o más
+    // categorías de impuesto no existen para esta tienda».
+    //
+    // Se resuelve ACÁ, antes de abrir la transacción, por dos razones: la
+    // lectura necesita `withoutScope()` (única forma de ver la rama global) y
+    // hacerla dentro del tx abriría una segunda conexión — el patrón que ya
+    // sigue `storeTz` unas líneas más arriba.
+    const requestedTaxCategoryIds = new Set<number>();
+    for (const item of items ?? []) {
+      for (const id of normalizeTaxCategoryIds(
+        (item as any)?.tax_category_ids,
+      ) ?? []) {
+        requestedTaxCategoryIds.add(id);
+      }
+    }
+    const allowedTaxCategoryIds = new Set<number>();
+    if (requestedTaxCategoryIds.size > 0) {
+      const taxScopeStoreId =
+        ctxStoreId ?? (await this.resolveTaxScopeStoreId({ location_id: locationId } as CreatePurchaseOrderDto));
+      if (!taxScopeStoreId) {
+        throw new BadRequestException(
+          'No se pudo resolver la tienda de la orden para validar las categorías de impuesto.',
+        );
+      }
+      const taxCategories = await this.prisma
+        .withoutScope()
+        .tax_categories.findMany({
+          where: {
+            id: { in: Array.from(requestedTaxCategoryIds) },
+            ...buildTaxCategoryScopeWhere(
+              taxScopeStoreId,
+              RequestContextService.getOrganizationId(),
+            ),
+          },
+          // `name` / `tax_type` / `tax_rates.store_id` alimentan la regla de
+          // combinación (P1-4) validada abajo por línea.
+          select: {
+            id: true,
+            name: true,
+            tax_type: true,
+            tax_rates: { select: { store_id: true } },
+          },
+        });
+      for (const taxCategory of taxCategories) {
+        allowedTaxCategoryIds.add(taxCategory.id);
+      }
+      const missing = Array.from(requestedTaxCategoryIds).filter(
+        (id) => !allowedTaxCategoryIds.has(id),
+      );
+      if (missing.length > 0) {
+        // El mensaje NOMBRA los ids: sin eso el operador veía un 400 opaco y no
+        // tenía cómo saber qué renglón corregir.
+        throw new BadRequestException(
+          `Una o más categorías de impuesto no existen para esta tienda (ids: ${missing.join(', ')}).`,
+        );
+      }
+
+      // P1-4 (auditoría impuestos por producto) — la OC crea o REEMPLAZA las
+      // `product_tax_assignments` del producto de cada línea (`deleteMany` +
+      // `create` más abajo). Se aplica la MISMA regla que products create /
+      // update / bulk: una categoría por tax_type, IVA⊕INC, sin retenciones,
+      // una tarifa aplicable por categoría. 400 PROD_TAX_COMBO_001 antes de
+      // abrir la transacción: ningún producto ni orden queda a medias.
+      const taxCategoryById = new Map<number, ProductTaxComboCategory>(
+        (taxCategories as ProductTaxComboCategory[]).map((c) => [c.id, c]),
+      );
+      for (const item of items ?? []) {
+        const ids = normalizeTaxCategoryIds((item as any)?.tax_category_ids);
+        if (!ids) continue;
+        assertProductTaxComboValid(
+          ids
+            .map((id) => taxCategoryById.get(id))
+            .filter((c): c is ProductTaxComboCategory => c != null),
+          { storeId: taxScopeStoreId },
+        );
+      }
+    }
+
+    return allowedTaxCategoryIds;
+  }
+
+  /**
+   * Resuelve UNA línea nueva (`product_id` vacío + `product_name`): encuentra o
+   * crea producto, variante, marca y categorías. Compartida por `create()`
+   * (dentro de la transacción de la orden) y por `resolveLines()` (una
+   * transacción corta por línea, FUERA de la orden).
+   *
+   * Idempotente: el SKU y el código de barras se buscan primero entre los
+   * productos no archivados y luego entre las variantes, así que repetir la
+   * misma línea devuelve el mismo producto/variante y `created = false`.
+   *
+   * Lecturas por línea (acotadas a `PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX`):
+   * producto por SKU, por código de barras y variante por código; marca y
+   * categorías solo la primera vez que aparece cada slug (caché del contexto).
+   * La tienda, las industrias y las unidades de medida se leen UNA vez por
+   * contexto.
+   */
+  private async resolveNewLine(
+    tx: any,
+    item: any,
+    ctx: LineResolveContext,
+  ): Promise<{
+    product_id: number;
+    product_variant_id: number | null;
+    created: boolean;
+  }> {
+    const orderType = ctx.orderType;
+    const allowedTaxCategoryIds = ctx.allowedTaxCategoryIds;
+    const header = ctx.header;
+    let finalProductId: number = item.product_id;
+    let finalVariantId: number | null | undefined = item.product_variant_id;
+    let created = false;
+
+    const storeId = await ctx.getStoreId(tx);
+
+    // Fase 2: ingredient inheritance for NEW products. The line is an
+    // ingredient if the parent order is `ingredient` OR the item opts in
+    // explicitly. We then gate that against the store's industries: a
+    // store whose `industries` do not support the ingredient capacity
+    // (helper: storeIndustriesSupportIngredients) NEVER persists an
+    // ingredient product — the flag is silently forced off.
+    const itemIsIngredient =
+      orderType === 'ingredient' || item.is_ingredient === true;
+    let effectiveIsIngredient = false;
+    if (itemIsIngredient) {
+      effectiveIsIngredient = storeIndustriesSupportIngredients(
+        await ctx.getIndustries(tx, storeId),
+      );
+    }
+
+    // Fase 2: derive purchase_to_stock_factor from the global
+    // units_of_measure catalog when BOTH UoM FKs are present. This
+    // mirrors ProductsService.derivePurchaseToStockFactor (private in
+    // that service) inline so the whole creation stays inside this
+    // transaction. The factor is a CRITICAL costing value (purchase →
+    // stock at receipt), so the catalog is the source of truth.
+    let purchaseToStockFactor: number | undefined;
+    if (
+      effectiveIsIngredient &&
+      item.purchase_uom_id != null &&
+      item.stock_uom_id != null
+    ) {
+      const uomMap = await ctx.loadUoms(tx, [
+        item.stock_uom_id,
+        item.purchase_uom_id,
+      ]);
+      const stockUom = uomMap.get(item.stock_uom_id);
+      const purchaseUom = uomMap.get(item.purchase_uom_id);
+      if (!stockUom || !purchaseUom) {
+        throw new BadRequestException(
+          'Unidad de medida no encontrada en el catálogo para el insumo.',
+        );
+      }
+
+      // "Contenido por envase" (cross-dimension): when the purchase unit
+      // is a discrete package (`count`, e.g. una bolsita) and the stock
+      // unit is a continuous magnitude (`mass`/`volume`, e.g. g/ml), the
+      // factor CANNOT be derived from factor_to_base. The operator sends
+      // it manually as `purchase_to_stock_factor` (= cuánto contenido
+      // trae cada envase, p.ej. 250 g). We trust that value and SKIP the
+      // same-dimension validation. The DTO guarantees Int >= 1.
+      const manualFactor = item.purchase_to_stock_factor;
+      const isCrossDimensionPackaging =
+        purchaseUom.dimension === 'count' &&
+        (stockUom.dimension === 'mass' ||
+          stockUom.dimension === 'volume');
+
+      if (
+        manualFactor != null &&
+        Number.isInteger(manualFactor) &&
+        manualFactor >= 1 &&
+        isCrossDimensionPackaging
+      ) {
+        purchaseToStockFactor = manualFactor;
+      } else {
+        // Same-dimension (or no manual factor): derive from the catalog
+        // and enforce shared dimension so factor_to_base is meaningful.
+        // (Validación defensiva intacta para todo caso no cross-dimension.)
+        if (stockUom.dimension !== purchaseUom.dimension) {
+          throw new BadRequestException(
+            `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
+          );
+        }
+        const derived = Math.round(
+          Number(purchaseUom.factor_to_base) /
+            Number(stockUom.factor_to_base),
+        );
+        if (!Number.isFinite(derived) || derived < 1) {
+          throw new BadRequestException(
+            `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
+          );
+        }
+        purchaseToStockFactor = derived;
+      }
+    }
+
+    // Producto existente: primero por SKU y, si no, por código de barras.
+    // Sin el respaldo por código, una línea "nueva" cuyo código ya tiene
+    // un producto no archivado (otra factura, o la misma línea repetida
+    // en esta OC) intentaba crear un duplicado y moría en P2002.
+    const normalizedBarcode =
+      typeof item.barcode === 'string' ? item.barcode.trim() : '';
+    const existingProduct =
+      (await tx.products.findFirst({
+        where: {
+          sku: item.sku,
+          store_id: storeId,
+          state: { not: 'archived' },
+        },
+      })) ??
+      (normalizedBarcode
+        ? await tx.products.findFirst({
+            where: {
+              barcode: normalizedBarcode,
+              store_id: storeId,
+              state: { not: 'archived' },
+            },
+          })
+        : null);
+
+    // QUI-486 (bulk): un SKU / código de barras puede pertenecer a una
+    // VARIANTE y no a un producto. Solo se consulta si ningún producto
+    // lo reclamó (el producto gana, como siempre). Sin esto la línea caía
+    // al alta de producto y creaba un duplicado con el SKU de la variante.
+    const matchedVariant = existingProduct
+      ? null
+      : await this.findVariantByCode(
+          tx,
+          storeId,
+          typeof item.sku === 'string' ? item.sku.trim() : '',
+          normalizedBarcode,
+        );
+    if (matchedVariant) {
+      finalVariantId = matchedVariant.id;
+    }
+
+    const availableForEcommerce = normalizeBool(
+      item.available_for_ecommerce ?? true,
+      true,
+    );
+    const isOnSale = normalizeBool((item as any).is_on_sale, false);
+    const productType = normalizeProductType((item as any).product_type);
+    const trackInventory =
+      productType === 'service'
+        ? false
+        : normalizeBool((item as any).track_inventory, true);
+    const pricingType = normalizePricingType((item as any).pricing_type);
+    const isFeatured = normalizeBool((item as any).is_featured, false);
+    const allowPosPriceOverride = normalizeBool(
+      (item as any).allow_pos_price_override,
+      false,
+    );
+    const hasMultiplePriceTiers = normalizeBool(
+      (item as any).has_multiple_price_tiers,
+      false,
+    );
+    const itemTaxCategoryIds = normalizeTaxCategoryIds(
+      (item as any).tax_category_ids,
+    );
+
+    // Normalize State
+    let productState: any = 'active';
+    if (item.state && typeof item.state === 'string') {
+      const s = normalizeText(item.state);
+      if (s === 'activo' || s === 'active' || s === 'habilitado')
+        productState = 'active';
+      else if (
+        s === 'inactivo' ||
+        s === 'inactive' ||
+        s === 'deshabilitado'
+      )
+        productState = 'inactive';
+      else if (s === 'archivado' || s === 'archived')
+        productState = 'archived';
+    }
+
+    // Price calculation
+    //
+    // QUI-661 + QUI-645: the cost a NEW product is born with must be the
+    // same NET, discounted figure the line persists in `unit_cost` — not
+    // the gross `unit_price`. Using the gross price anchored the product's
+    // margin to a cost it never had: with IVA included or a supplier
+    // discount, `cost_price` came out above what the FIFO layer would
+    // capitalize, so the product was born with an understated margin.
+    // The header discount is prorated in the totals pass below; here we
+    // honour the line's own discount and the include/added VAT mode,
+    // which is what `resolveLineTaxes` owns.
+    let basePrice = item.base_price || 0;
+    const cost = this.resolveLineTaxes(
+      item,
+      header,
+    ).unit_price_net;
+    let margin = item.profit_margin || 0;
+    if (margin > 0 && margin < 1) margin = margin * 100;
+
+    // QUI-645: a NEW product with margin 0 is a deliberate decision, not
+    // a missing value — it is born priced at cost and the operator can
+    // raise it later. So the price is derived whenever a base price was
+    // not pinned, including `margin === 0`, instead of leaving
+    // `base_price = 0` (which read as "free" in the catalog).
+    //
+    // QUI-648 — el costo se lleva a la ESCALA en la que el producto
+    // publica su precio antes de derivar `base_price`, porque el destino
+    // de este número es `products.base_price` (líneas de abajo) y esa
+    // columna vale por `price_unit_quantity` unidades de stock. Sobre un
+    // producto existente vendido por metro, derivar desde el costo crudo
+    // le reescribía el precio del metro con el del milímetro. Un producto
+    // NUEVO nace siempre en escala 1 —el DTO de la orden de compra no
+    // tiene `price_unit_quantity`—, así que ahí `resolvePricedUnits`
+    // devuelve 1 y el resultado es el histórico.
+    const basePriceScale = resolvePricedUnits(
+      null,
+      (existingProduct as { price_unit_quantity?: number | null } | null)
+        ?.price_unit_quantity,
+    );
+    if (cost > 0 && (!item.base_price || item.base_price === 0)) {
+      basePrice = cost * basePriceScale * (1 + margin / 100);
+    }
+
+    // Resolve Brand: derive a deterministic slug (mirrors the categories
+    // block below) and search/create scoped by store_id. `brands` requires
+    // a non-null `slug` and enforces @@unique([store_id, slug]) +
+    // @@unique([store_id, name]); searching and creating by slug+store_id
+    // keeps a PO-created brand indistinguishable from a UI-created one.
+    let brandId: number | undefined;
+    // Línea a variante: no se toca catálogo (ni marca ni categorías).
+    if (!matchedVariant && item.brand_name?.trim()) {
+      const brandName = item.brand_name.trim();
+      const brandSlug = generateSlug(brandName);
+      if (brandSlug) {
+        const cachedBrandId = ctx.brands.get(brandSlug);
+        if (cachedBrandId !== undefined) {
+          brandId = cachedBrandId;
+        } else {
+          const brand = await tx.brands.findFirst({
+            where: { slug: brandSlug, store_id: storeId },
+          });
+          if (brand) {
+            brandId = brand.id;
+          } else {
+            const newBrand = await tx.brands.create({
+              data: {
+                name: toTitleCase(brandName),
+                slug: brandSlug,
+                store_id: storeId,
+                description: 'Creada automáticamente por carga masiva PO',
+                state: 'active',
+              },
+            });
+            brandId = newBrand.id;
+          }
+          ctx.brands.set(brandSlug, brandId as number);
+        }
+      }
+    }
+
+    // Resolve Categories: split by ",", trim + lowercase for search, Title Case for creation
+          const categoryIds: number[] = [];
+          const categoryNames =
+            typeof item.category_names === 'string'
+              ? item.category_names
+              : '';
+          const hasCategoryNames =
+      !matchedVariant && categoryNames.trim().length > 0;
+          if (hasCategoryNames) {
+            const names = categoryNames
+        .split(',')
+        .map((n) => n.trim())
+        .filter((n) => n);
+      for (const name of names) {
+        const normalizedCatName = name.toLowerCase();
+        const slug = normalizedCatName
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)+/g, '');
+
+        // Search by slug (already lowercase/normalized)
+        let catId = ctx.categories.get(slug);
+        if (catId === undefined) {
+          const cat = await tx.categories.findFirst({
+            where: { slug: slug, store_id: storeId },
+          });
+          if (cat) {
+            catId = cat.id;
+          } else {
+            const newCat = await tx.categories.create({
+              data: {
+                name: toTitleCase(name),
+                slug: slug,
+                store_id: storeId,
+                state: 'active',
+              },
+            });
+            catId = newCat.id;
+          }
+          ctx.categories.set(slug, catId as number);
+        }
+        categoryIds.push(catId as number);
+      }
+    }
+
+    // Las categorías ya se validaron ANTES de abrir la transacción
+    // (`allowedTaxCategoryIds`): acá solo se toman las que sobrevivieron.
+    // Leerlas de nuevo con `tx` volvería a aplicar el alcance de tienda
+    // que dejaba fuera a las de nivel ORGANIZACIÓN.
+    const taxCategoryIds = itemTaxCategoryIds?.filter((id) =>
+      allowedTaxCategoryIds.has(id),
+    );
+
+    if (matchedVariant) {
+      // La línea compra la variante: se enlaza al producto padre y no se
+      // toca ni se crea ningún producto.
+      finalProductId = matchedVariant.product_id;
+    } else if (existingProduct) {
+      finalProductId = existingProduct.id;
+      // Update existing product with new metadata if provided
+      const productUpdateData: any = {
+        state: productState,
+        weight: item.weight || existingProduct.weight,
+        brand_id:
+          brandId !== undefined ? brandId : existingProduct.brand_id,
+        base_price:
+          basePrice > 0 ? basePrice : existingProduct.base_price,
+        profit_margin:
+          margin > 0 ? margin : existingProduct.profit_margin,
+        cost_price: cost > 0 ? cost : existingProduct.cost_price,
+        description:
+          item.product_description || existingProduct.description,
+      };
+
+      if ((item as any).available_for_ecommerce !== undefined) {
+        productUpdateData.available_for_ecommerce =
+          availableForEcommerce;
+      }
+      if ((item as any).is_on_sale !== undefined) {
+        productUpdateData.is_on_sale = isOnSale;
+      }
+      if (item.sale_price !== undefined) {
+        productUpdateData.sale_price = item.sale_price;
+      }
+
+      if ((item as any).product_type !== undefined) {
+        productUpdateData.product_type = productType;
+      }
+      if (
+        (item as any).track_inventory !== undefined ||
+        (item as any).product_type !== undefined
+      ) {
+        productUpdateData.track_inventory = trackInventory;
+      }
+      if ((item as any).pricing_type !== undefined) {
+        productUpdateData.pricing_type = pricingType;
+      }
+      if ((item as any).is_featured !== undefined) {
+        productUpdateData.is_featured = isFeatured;
+      }
+      if ((item as any).allow_pos_price_override !== undefined) {
+        productUpdateData.allow_pos_price_override =
+          allowPosPriceOverride;
+      }
+      if ((item as any).has_multiple_price_tiers !== undefined) {
+        productUpdateData.has_multiple_price_tiers =
+          hasMultiplePriceTiers;
+      }
+
+      if (hasCategoryNames) {
+        productUpdateData.product_categories = {
+          deleteMany: {},
+          create: categoryIds.map((id) => ({ category_id: id })),
+        };
+      }
+
+      if (taxCategoryIds !== undefined) {
+        productUpdateData.product_tax_assignments = {
+          deleteMany: {},
+          create: taxCategoryIds.map((id) => ({ tax_category_id: id })),
+        };
+      }
+
+      // Insumo (configure de producto existente): persistir la config UoM
+      // + factor en el producto YA en el create. `purchase_order_items` no
+      // almacena `purchase_to_stock_factor`, y el caso cross-dimension
+      // (count→mass/volume) NO es re-derivable del catálogo en receive, por
+      // lo que el producto es el único portador del factor hasta la
+      // recepción. resolveUoMConversion exige `is_ingredient=true` + factor
+      // para multiplicar, así que ambos deben quedar en el producto aquí.
+      // (syncIngredientConfigOnReceipt sigue como backfill de labels /
+      // same-dimension al recibir.) No se neutraliza pricing/ecommerce del
+      // producto existente para no clobberear su config de venta.
+      if (effectiveIsIngredient) {
+        productUpdateData.is_ingredient = true;
+        if (item.purchase_uom_id != null) {
+          productUpdateData.purchase_uom_id = item.purchase_uom_id;
+        }
+        if (item.stock_uom_id != null) {
+          productUpdateData.stock_uom_id = item.stock_uom_id;
+        }
+        if (purchaseToStockFactor != null) {
+          productUpdateData.purchase_to_stock_factor =
+            purchaseToStockFactor;
+        }
+      }
+
+      // Regla del dueño: un insumo (vendible o no) nunca se publica ni se
+      // destaca en la tienda en línea.
+      if (effectiveIsIngredient || existingProduct.is_ingredient === true) {
+        productUpdateData.available_for_ecommerce = false;
+        productUpdateData.is_featured = false;
+      }
+
+      await tx.products.update({
+        where: { id: existingProduct.id },
+        data: productUpdateData,
+      });
+    } else {
+      // Fase 2: a pure ingredient neutralizes every retail-sale
+      // construct (mirrors ProductsService.sanitizeIngredientPayload)
+      // and carries the UoM FKs + derived factor. Retail lines
+      // (effectiveIsIngredient === false) keep the exact legacy values.
+      const ingredientOverrides = effectiveIsIngredient
+        ? {
+            is_ingredient: true,
+            is_sellable: false,
+            purchase_uom_id: item.purchase_uom_id ?? null,
+            stock_uom_id: item.stock_uom_id ?? null,
+            purchase_to_stock_factor: purchaseToStockFactor ?? null,
+            base_price: 0,
+            sale_price: 0,
+            is_on_sale: false,
+            available_for_ecommerce: false,
+            is_featured: false,
+            allow_pos_price_override: false,
+            has_multiple_price_tiers: false,
+          }
+        : {
+            base_price: basePrice,
+            sale_price: item.sale_price || 0,
+            is_on_sale: isOnSale,
+            available_for_ecommerce: availableForEcommerce,
+            is_featured: isFeatured,
+            allow_pos_price_override: allowPosPriceOverride,
+            has_multiple_price_tiers: hasMultiplePriceTiers,
+          };
+
+      // ===== A.7 — la colisión de SKU no puede terminar en un 500 =====
+      //
+      // La unicidad de `products` (store_id, sku) es un índice único
+      // PARCIAL `WHERE state <> 'archived'`: un producto ARCHIVADO ya no
+      // ocupa su SKU, así que la OC no lo «actualiza» ni choca con él: crea
+      // uno nuevo. Un dueño NO archivado del SKU o del código es colisión.
+      //
+      // El chequeo previo por línea (`skuOwner` / `variantSkuOwner`) se
+      // ELIMINÓ por redundante: `existingProduct` ya buscó EXACTAMENTE ese
+      // SKU entre los no archivados (si lo tuviera, la línea se unió a él) y
+      // `findVariantByCode` ya buscó una variante con ese SKU (si la tuviera,
+      // la línea se enlazó a ella). Llegar acá significa que nadie lo ocupa;
+      // si otra petición lo toma entre la lectura y el INSERT, el mapeo del
+      // P2002 de abajo lo devuelve como PROD_SKU_COLLISION_001.
+      const desiredSku = item.sku || `GEN-${Date.now()}`;
+
+      let newProduct: { id: number };
+      try {
+        newProduct = await tx.products.create({
+        data: {
+          name: item.product_name,
+          slug:
+            item.product_name
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
+          description: item.product_description || '',
+          sku: desiredSku,
+          barcode: item.barcode || undefined,
+          cost_price: cost,
+          profit_margin: margin,
+          stock_quantity: 0,
+          state: productState,
+          store_id: storeId,
+          weight: item.weight || 0,
+          product_type: productType,
+          track_inventory: trackInventory,
+          min_stock_level:
+            item.min_stock_level !== undefined && item.min_stock_level !== null
+              ? Number(item.min_stock_level)
+              : 0,
+          pricing_type: pricingType,
+          brand_id: brandId,
+          ...ingredientOverrides,
+          product_categories: {
+            create: categoryIds.map((id) => ({ category_id: id })),
+          },
+          product_tax_assignments:
+            taxCategoryIds !== undefined
+              ? {
+                  create: taxCategoryIds.map((id) => ({
+                    tax_category_id: id,
+                  })),
+                }
+              : undefined,
+        },
+        });
+      } catch (error: any) {
+        // Carrera: entre la comprobación de arriba y este INSERT otra
+        // petición pudo tomar el SKU. Se mapea igual, pero SIN volver a
+        // consultar: el P2002 ya abortó la transacción de Postgres y
+        // cualquier lectura posterior fallaría con "current transaction is
+        // aborted". El código y el SKU bastan para que el frontend
+        // reintente o mande al catálogo.
+        //
+        // El filtro por `target` es deliberadamente estrecho: mapear todo
+        // P2002 escondería colisiones de `slug` o `barcode`, que exigen
+        // otra explicación y otro remedio.
+        const rawTarget = error?.meta?.target;
+        const constraint =
+          error?.meta?.driverAdapterError?.cause?.constraint;
+        const targetText = [
+          Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
+          // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
+          constraint ? JSON.stringify(constraint) : undefined,
+        ]
+          .filter((v) => typeof v === 'string' && v)
+          .join(' ');
+        const hitsSku = targetText.includes('sku');
+        const hitsBarcode = targetText.includes('barcode');
+        if (error?.code === 'P2002' && hitsBarcode) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_BARCODE_DUP_001,
+            'El código de barras ya está en uso por otro producto de la tienda.',
+            { concurrent: true },
+          );
+        }
+        if (error?.code === 'P2002' && hitsSku) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_SKU_COLLISION_001,
+            `El SKU «${desiredSku}» quedó ocupado por otra operación mientras se creaba el producto.`,
+            { sku: desiredSku, concurrent: true },
+          );
+        }
+        throw error;
+      }
+      finalProductId = newProduct.id;
+      created = true;
+    }
+
+
+    return {
+      product_id: finalProductId,
+      product_variant_id: finalVariantId ?? null,
+      created,
+    };
+  }
+
+  /**
+   * `POST store/orders/purchase-orders/resolve-lines`. Resuelve (encuentra o
+   * crea) producto, variante, marca y categorías de un lote de líneas NUEVAS
+   * fuera de la transacción de la orden, para que una compra de miles de líneas
+   * no tenga que crear todo el catálogo dentro de UNA transacción.
+   *
+   * Cada línea corre en su propia transacción corta: un error en una fila no
+   * revierte las demás y se devuelve por fila (HTTP 200). Idempotente: una
+   * segunda llamada con el mismo SKU no crea nada y devuelve los mismos ids.
+   */
+  async resolveLines(
+    dto: ResolvePurchaseOrderLinesDto,
+  ): Promise<{ items: ResolveLineResult[] }> {
+    const organizationId = RequestContextService.getOrganizationId();
+    if (!organizationId) {
+      throw new BadRequestException('Organization ID not found in context');
+    }
+    const items = dto.items ?? [];
+    const allowedTaxCategoryIds = await this.validateLineTaxCategories(
+      items,
+      dto.location_id,
+      RequestContextService.getStoreId(),
+    );
+    const header = { prices_include_tax: dto.prices_include_tax };
+    const ctx = new LineResolveContext({
+      organizationId,
+      locationId: dto.location_id,
+      orderType: dto.order_type ?? 'retail',
+      header,
+      allowedTaxCategoryIds,
+    });
+
+    const results: ResolveLineResult[] = [];
+    for (let index = 0; index < items.length; index++) {
+      const item: any = items[index];
+      if (Number(item.product_id) > 0) {
+        // Ya resuelta: se devuelve tal cual, sin tocar la base.
+        results.push({
+          index,
+          product_id: Number(item.product_id),
+          product_variant_id: item.product_variant_id ?? null,
+          created: false,
+        });
+        continue;
+      }
+      if (!item.product_name) {
+        results.push({
+          index,
+          product_id: null,
+          product_variant_id: null,
+          created: false,
+          error: {
+            code: ErrorCodes.SYS_VALIDATION_001.code,
+            message:
+              'La línea no trae product_id ni product_name: no hay nada que resolver.',
+          },
+        });
+        continue;
+      }
+      try {
+        const resolved = await this.prisma.$transaction(
+          (tx) => this.resolveNewLine(tx, item, ctx),
+          { timeout: 60_000, maxWait: 10_000 },
+        );
+        results.push({ index, ...resolved });
+      } catch (error: any) {
+        // La transacción de la fila se revirtió: una marca o categoría creada
+        // en ella ya no existe, así que su id cacheado dejó de ser válido.
+        ctx.brands.clear();
+        ctx.categories.clear();
+        results.push({
+          index,
+          product_id: null,
+          product_variant_id: null,
+          created: false,
+          error: errorToRowError(error),
+        });
+      }
+    }
+    return { items: results };
+  }
+
+  /**
    * Tienda contra la que se valida el alcance de las categorías de impuesto
    * cuando el contexto no la trae (la puerta de ORGANIZACIÓN llama a `create()`
    * directamente). Replica la cascada que el bloque de alta de productos usa
@@ -1042,6 +1973,18 @@ export class PurchaseOrdersService {
       throw new BadRequestException(freightContractError);
     }
 
+    // Tope de líneas SIN resolver (product_id vacío): cada una crea producto,
+    // marca y categorías dentro de la transacción de la orden. Más de eso va
+    // primero a `POST .../resolve-lines` en lotes y recién después a `create`.
+    const unresolvedCount = (createPurchaseOrderDto.items ?? []).filter(
+      (item) => !item?.product_id,
+    ).length;
+    if (unresolvedCount > PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX) {
+      throw new BadRequestException(
+        `La orden trae ${unresolvedCount} líneas sin resolver (product_id vacío) y el máximo es ${PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX} por solicitud. Resuelve primero los productos nuevos con POST /store/orders/purchase-orders/resolve-lines (lotes de hasta ${PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX}) y envía la orden con los product_id ya asignados.`,
+      );
+    }
+
     // QUI-647 — timezone de la tienda para comparar las fechas del plan de
     // pago contra "hoy" en el CALENDARIO local (fecha-sólo, sin convertir a
     // instante: pasar a UTC correría la fecha un día en tiendas con offset
@@ -1063,90 +2006,11 @@ export class PurchaseOrdersService {
         ? await resolveStoreTimezone(this.prisma, ctxStoreId)
         : DEFAULT_STORE_TIMEZONE;
 
-    // ===== HOTFIX impuestos — el escáner sugiere, esto valida =====
-    //
-    // La validación vivía DENTRO del `$transaction` y usaba `tx.tax_categories`
-    // (cliente CON alcance de tienda). `tax_categories` está en
-    // `store_scoped_models`, así que `mergeScopedWhere` sumaba
-    // `store_id = <contexto>` al where y anulaba con un AND el
-    // `OR ... store_id: null` que el código creía tener: ninguna categoría de
-    // nivel ORGANIZACIÓN pasaba nunca, y la orden moría con «Una o más
-    // categorías de impuesto no existen para esta tienda».
-    //
-    // Se resuelve ACÁ, antes de abrir la transacción, por dos razones: la
-    // lectura necesita `withoutScope()` (única forma de ver la rama global) y
-    // hacerla dentro del tx abriría una segunda conexión — el patrón que ya
-    // sigue `storeTz` unas líneas más arriba.
-    const requestedTaxCategoryIds = new Set<number>();
-    for (const item of createPurchaseOrderDto.items ?? []) {
-      for (const id of normalizeTaxCategoryIds(
-        (item as any)?.tax_category_ids,
-      ) ?? []) {
-        requestedTaxCategoryIds.add(id);
-      }
-    }
-    const allowedTaxCategoryIds = new Set<number>();
-    if (requestedTaxCategoryIds.size > 0) {
-      const taxScopeStoreId =
-        ctxStoreId ?? (await this.resolveTaxScopeStoreId(createPurchaseOrderDto));
-      if (!taxScopeStoreId) {
-        throw new BadRequestException(
-          'No se pudo resolver la tienda de la orden para validar las categorías de impuesto.',
-        );
-      }
-      const taxCategories = await this.prisma
-        .withoutScope()
-        .tax_categories.findMany({
-          where: {
-            id: { in: Array.from(requestedTaxCategoryIds) },
-            ...buildTaxCategoryScopeWhere(
-              taxScopeStoreId,
-              RequestContextService.getOrganizationId(),
-            ),
-          },
-          // `name` / `tax_type` / `tax_rates.store_id` alimentan la regla de
-          // combinación (P1-4) validada abajo por línea.
-          select: {
-            id: true,
-            name: true,
-            tax_type: true,
-            tax_rates: { select: { store_id: true } },
-          },
-        });
-      for (const taxCategory of taxCategories) {
-        allowedTaxCategoryIds.add(taxCategory.id);
-      }
-      const missing = Array.from(requestedTaxCategoryIds).filter(
-        (id) => !allowedTaxCategoryIds.has(id),
-      );
-      if (missing.length > 0) {
-        // El mensaje NOMBRA los ids: sin eso el operador veía un 400 opaco y no
-        // tenía cómo saber qué renglón corregir.
-        throw new BadRequestException(
-          `Una o más categorías de impuesto no existen para esta tienda (ids: ${missing.join(', ')}).`,
-        );
-      }
-
-      // P1-4 (auditoría impuestos por producto) — la OC crea o REEMPLAZA las
-      // `product_tax_assignments` del producto de cada línea (`deleteMany` +
-      // `create` más abajo). Se aplica la MISMA regla que products create /
-      // update / bulk: una categoría por tax_type, IVA⊕INC, sin retenciones,
-      // una tarifa aplicable por categoría. 400 PROD_TAX_COMBO_001 antes de
-      // abrir la transacción: ningún producto ni orden queda a medias.
-      const taxCategoryById = new Map<number, ProductTaxComboCategory>(
-        (taxCategories as ProductTaxComboCategory[]).map((c) => [c.id, c]),
-      );
-      for (const item of createPurchaseOrderDto.items ?? []) {
-        const ids = normalizeTaxCategoryIds((item as any)?.tax_category_ids);
-        if (!ids) continue;
-        assertProductTaxComboValid(
-          ids
-            .map((id) => taxCategoryById.get(id))
-            .filter((c): c is ProductTaxComboCategory => c != null),
-          { storeId: taxScopeStoreId },
-        );
-      }
-    }
+    const allowedTaxCategoryIds = await this.validateLineTaxCategories(
+      createPurchaseOrderDto.items,
+      createPurchaseOrderDto.location_id,
+      ctxStoreId,
+    );
 
     // La transacción devuelve la orden + (si hubo abono) el pago de anticipo
     // registrado: el evento contable se emite por FUERA, después del commit.
@@ -1190,39 +2054,22 @@ export class PurchaseOrdersService {
       const orderType =
         (createPurchaseOrderDto as any).order_type ?? 'retail';
 
-      const normalizeText = (value: unknown) =>
-        String(value ?? '')
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .trim()
-          .toLowerCase();
-
-      const normalizeBool = (val: any, fallback = false) => {
-        if (val === undefined || val === null || val === '') return fallback;
-        if (typeof val === 'boolean') return val;
-        if (typeof val === 'number') return val !== 0;
-        const s = normalizeText(val);
-        if (
-          ['si', 'yes', 'verdadero', 'true', '1', 'activo', 'x'].includes(s)
-        ) {
-          return true;
-        }
-        if (['no', 'false', 'falso', '0', 'inactivo'].includes(s)) {
-          return false;
-        }
-        return fallback;
-      };
-
-      const normalizeProductType = (value: unknown) =>
-        ['servicio', 'service'].includes(normalizeText(value))
-          ? 'service'
-          : 'physical';
-
-      const normalizePricingType = (value: unknown) =>
-        ['peso', 'weight', 'por peso'].includes(normalizeText(value))
-          ? 'weight'
-          : 'unit';
-
+      // FASE A — resolver las líneas nuevas (producto / variante / marca /
+      // categorías). Tienda, industrias, unidades, marcas y categorías se leen
+      // UNA vez por contexto; el resto (SKU, código, variante) es por línea y
+      // está acotado a PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX líneas sin resolver.
+      const lineCtx = new LineResolveContext({
+        organizationId: organization_id,
+        locationId: createPurchaseOrderDto.location_id,
+        orderType,
+        header: createPurchaseOrderDto,
+        allowedTaxCategoryIds,
+      });
+      const resolvedLines: Array<{
+        item: any;
+        productId: number;
+        variantId: number | null | undefined;
+      }> = [];
       for (const item of createPurchaseOrderDto.items) {
         let finalProductId = item.product_id;
         let finalVariantId: number | null | undefined =
@@ -1230,603 +2077,29 @@ export class PurchaseOrdersService {
 
         // If product_id is 0 or missing, and we have name/sku, create the product
         if ((!finalProductId || finalProductId === 0) && item.product_name) {
-          // Check if product with SKU exists to avoid duplicates?
-          // Start simple: Create new product
-          // Resolve store_id for the new product
-          let storeId: number | undefined;
-
-          // Try to get store from location if possible, or fallback to first store of org
-          const location = await tx.inventory_locations.findUnique({
-            where: { id: createPurchaseOrderDto.location_id },
-            select: { store_id: true },
-          });
-
-          if (location?.store_id) {
-            storeId = location.store_id;
-          } else {
-            const firstStore = await tx.stores.findFirst({
-              where: { organization_id },
-            });
-            storeId = firstStore?.id;
-          }
-
-          if (!storeId) {
-            throw new BadRequestException(
-              'Cannot create new product: No store found for this organization.',
-            );
-          }
-
-          // Fase 2: ingredient inheritance for NEW products. The line is an
-          // ingredient if the parent order is `ingredient` OR the item opts in
-          // explicitly. We then gate that against the store's industries: a
-          // store whose `industries` do not support the ingredient capacity
-          // (helper: storeIndustriesSupportIngredients) NEVER persists an
-          // ingredient product — the flag is silently forced off.
-          const itemIsIngredient =
-            orderType === 'ingredient' || item.is_ingredient === true;
-          let effectiveIsIngredient = false;
-          if (itemIsIngredient) {
-            const storeForCaps = await tx.stores.findUnique({
-              where: { id: storeId },
-              select: { industries: true },
-            });
-            effectiveIsIngredient = storeIndustriesSupportIngredients(
-              storeForCaps?.industries,
-            );
-          }
-
-          // Fase 2: derive purchase_to_stock_factor from the global
-          // units_of_measure catalog when BOTH UoM FKs are present. This
-          // mirrors ProductsService.derivePurchaseToStockFactor (private in
-          // that service) inline so the whole creation stays inside this
-          // transaction. The factor is a CRITICAL costing value (purchase →
-          // stock at receipt), so the catalog is the source of truth.
-          let purchaseToStockFactor: number | undefined;
-          if (
-            effectiveIsIngredient &&
-            item.purchase_uom_id != null &&
-            item.stock_uom_id != null
-          ) {
-            const uoms = await tx.units_of_measure.findMany({
-              where: { id: { in: [item.stock_uom_id, item.purchase_uom_id] } },
-            });
-            const stockUom = uoms.find((u) => u.id === item.stock_uom_id);
-            const purchaseUom = uoms.find(
-              (u) => u.id === item.purchase_uom_id,
-            );
-            if (!stockUom || !purchaseUom) {
-              throw new BadRequestException(
-                'Unidad de medida no encontrada en el catálogo para el insumo.',
-              );
-            }
-
-            // "Contenido por envase" (cross-dimension): when the purchase unit
-            // is a discrete package (`count`, e.g. una bolsita) and the stock
-            // unit is a continuous magnitude (`mass`/`volume`, e.g. g/ml), the
-            // factor CANNOT be derived from factor_to_base. The operator sends
-            // it manually as `purchase_to_stock_factor` (= cuánto contenido
-            // trae cada envase, p.ej. 250 g). We trust that value and SKIP the
-            // same-dimension validation. The DTO guarantees Int >= 1.
-            const manualFactor = item.purchase_to_stock_factor;
-            const isCrossDimensionPackaging =
-              purchaseUom.dimension === 'count' &&
-              (stockUom.dimension === 'mass' ||
-                stockUom.dimension === 'volume');
-
-            if (
-              manualFactor != null &&
-              Number.isInteger(manualFactor) &&
-              manualFactor >= 1 &&
-              isCrossDimensionPackaging
-            ) {
-              purchaseToStockFactor = manualFactor;
-            } else {
-              // Same-dimension (or no manual factor): derive from the catalog
-              // and enforce shared dimension so factor_to_base is meaningful.
-              // (Validación defensiva intacta para todo caso no cross-dimension.)
-              if (stockUom.dimension !== purchaseUom.dimension) {
-                throw new BadRequestException(
-                  `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
-                );
-              }
-              const derived = Math.round(
-                Number(purchaseUom.factor_to_base) /
-                  Number(stockUom.factor_to_base),
-              );
-              if (!Number.isFinite(derived) || derived < 1) {
-                throw new BadRequestException(
-                  `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
-                );
-              }
-              purchaseToStockFactor = derived;
-            }
-          }
-
-          // Producto existente: primero por SKU y, si no, por código de barras.
-          // Sin el respaldo por código, una línea "nueva" cuyo código ya tiene
-          // un producto no archivado (otra factura, o la misma línea repetida
-          // en esta OC) intentaba crear un duplicado y moría en P2002.
-          const normalizedBarcode =
-            typeof item.barcode === 'string' ? item.barcode.trim() : '';
-          const existingProduct =
-            (await tx.products.findFirst({
-              where: {
-                sku: item.sku,
-                store_id: storeId,
-                state: { not: 'archived' },
-              },
-            })) ??
-            (normalizedBarcode
-              ? await tx.products.findFirst({
-                  where: {
-                    barcode: normalizedBarcode,
-                    store_id: storeId,
-                    state: { not: 'archived' },
-                  },
-                })
-              : null);
-
-          // QUI-486 (bulk): un SKU / código de barras puede pertenecer a una
-          // VARIANTE y no a un producto. Solo se consulta si ningún producto
-          // lo reclamó (el producto gana, como siempre). Sin esto la línea caía
-          // al alta de producto y creaba un duplicado con el SKU de la variante.
-          const matchedVariant = existingProduct
-            ? null
-            : await this.findVariantByCode(
-                tx,
-                storeId,
-                typeof item.sku === 'string' ? item.sku.trim() : '',
-                normalizedBarcode,
-              );
-          if (matchedVariant) {
-            finalVariantId = matchedVariant.id;
-          }
-
-          const availableForEcommerce = normalizeBool(
-            item.available_for_ecommerce ?? true,
-            true,
-          );
-          const isOnSale = normalizeBool((item as any).is_on_sale, false);
-          const productType = normalizeProductType((item as any).product_type);
-          const trackInventory =
-            productType === 'service'
-              ? false
-              : normalizeBool((item as any).track_inventory, true);
-          const pricingType = normalizePricingType((item as any).pricing_type);
-          const isFeatured = normalizeBool((item as any).is_featured, false);
-          const allowPosPriceOverride = normalizeBool(
-            (item as any).allow_pos_price_override,
-            false,
-          );
-          const hasMultiplePriceTiers = normalizeBool(
-            (item as any).has_multiple_price_tiers,
-            false,
-          );
-          const itemTaxCategoryIds = normalizeTaxCategoryIds(
-            (item as any).tax_category_ids,
-          );
-
-          // Normalize State
-          let productState: any = 'active';
-          if (item.state && typeof item.state === 'string') {
-            const s = normalizeText(item.state);
-            if (s === 'activo' || s === 'active' || s === 'habilitado')
-              productState = 'active';
-            else if (
-              s === 'inactivo' ||
-              s === 'inactive' ||
-              s === 'deshabilitado'
-            )
-              productState = 'inactive';
-            else if (s === 'archivado' || s === 'archived')
-              productState = 'archived';
-          }
-
-          // Price calculation
-          //
-          // QUI-661 + QUI-645: the cost a NEW product is born with must be the
-          // same NET, discounted figure the line persists in `unit_cost` — not
-          // the gross `unit_price`. Using the gross price anchored the product's
-          // margin to a cost it never had: with IVA included or a supplier
-          // discount, `cost_price` came out above what the FIFO layer would
-          // capitalize, so the product was born with an understated margin.
-          // The header discount is prorated in the totals pass below; here we
-          // honour the line's own discount and the include/added VAT mode,
-          // which is what `resolveLineTaxes` owns.
-          let basePrice = item.base_price || 0;
-          const cost = this.resolveLineTaxes(
-            item,
-            createPurchaseOrderDto,
-          ).unit_price_net;
-          let margin = item.profit_margin || 0;
-          if (margin > 0 && margin < 1) margin = margin * 100;
-
-          // QUI-645: a NEW product with margin 0 is a deliberate decision, not
-          // a missing value — it is born priced at cost and the operator can
-          // raise it later. So the price is derived whenever a base price was
-          // not pinned, including `margin === 0`, instead of leaving
-          // `base_price = 0` (which read as "free" in the catalog).
-          //
-          // QUI-648 — el costo se lleva a la ESCALA en la que el producto
-          // publica su precio antes de derivar `base_price`, porque el destino
-          // de este número es `products.base_price` (líneas de abajo) y esa
-          // columna vale por `price_unit_quantity` unidades de stock. Sobre un
-          // producto existente vendido por metro, derivar desde el costo crudo
-          // le reescribía el precio del metro con el del milímetro. Un producto
-          // NUEVO nace siempre en escala 1 —el DTO de la orden de compra no
-          // tiene `price_unit_quantity`—, así que ahí `resolvePricedUnits`
-          // devuelve 1 y el resultado es el histórico.
-          const basePriceScale = resolvePricedUnits(
-            null,
-            (existingProduct as { price_unit_quantity?: number | null } | null)
-              ?.price_unit_quantity,
-          );
-          if (cost > 0 && (!item.base_price || item.base_price === 0)) {
-            basePrice = cost * basePriceScale * (1 + margin / 100);
-          }
-
-          // Resolve Brand: derive a deterministic slug (mirrors the categories
-          // block below) and search/create scoped by store_id. `brands` requires
-          // a non-null `slug` and enforces @@unique([store_id, slug]) +
-          // @@unique([store_id, name]); searching and creating by slug+store_id
-          // keeps a PO-created brand indistinguishable from a UI-created one.
-          let brandId: number | undefined;
-          // Línea a variante: no se toca catálogo (ni marca ni categorías).
-          if (!matchedVariant && item.brand_name?.trim()) {
-            const brandName = item.brand_name.trim();
-            const brandSlug = generateSlug(brandName);
-            if (brandSlug) {
-              const brand = await tx.brands.findFirst({
-                where: { slug: brandSlug, store_id: storeId },
-              });
-              if (brand) {
-                brandId = brand.id;
-              } else {
-                const newBrand = await tx.brands.create({
-                  data: {
-                    name: toTitleCase(brandName),
-                    slug: brandSlug,
-                    store_id: storeId,
-                    description: 'Creada automáticamente por carga masiva PO',
-                    state: 'active',
-                  },
-                });
-                brandId = newBrand.id;
-              }
-            }
-          }
-
-          // Resolve Categories: split by ",", trim + lowercase for search, Title Case for creation
-	          const categoryIds: number[] = [];
-	          const categoryNames =
-	            typeof item.category_names === 'string'
-	              ? item.category_names
-	              : '';
-	          const hasCategoryNames =
-            !matchedVariant && categoryNames.trim().length > 0;
-	          if (hasCategoryNames) {
-	            const names = categoryNames
-              .split(',')
-              .map((n) => n.trim())
-              .filter((n) => n);
-            for (const name of names) {
-              const normalizedCatName = name.toLowerCase();
-              const slug = normalizedCatName
-                .replace(/[^a-z0-9]+/g, '-')
-                .replace(/(^-|-$)+/g, '');
-
-              // Search by slug (already lowercase/normalized)
-              const cat = await tx.categories.findFirst({
-                where: { slug: slug, store_id: storeId },
-              });
-              if (cat) {
-                categoryIds.push(cat.id);
-              } else {
-                const titleCaseCatName = toTitleCase(name);
-                const newCat = await tx.categories.create({
-                  data: {
-                    name: titleCaseCatName,
-                    slug: slug,
-                    store_id: storeId,
-                    state: 'active',
-                  },
-                });
-                categoryIds.push(newCat.id);
-              }
-            }
-          }
-
-          // Las categorías ya se validaron ANTES de abrir la transacción
-          // (`allowedTaxCategoryIds`): acá solo se toman las que sobrevivieron.
-          // Leerlas de nuevo con `tx` volvería a aplicar el alcance de tienda
-          // que dejaba fuera a las de nivel ORGANIZACIÓN.
-          const taxCategoryIds = itemTaxCategoryIds?.filter((id) =>
-            allowedTaxCategoryIds.has(id),
-          );
-
-          if (matchedVariant) {
-            // La línea compra la variante: se enlaza al producto padre y no se
-            // toca ni se crea ningún producto.
-            finalProductId = matchedVariant.product_id;
-          } else if (existingProduct) {
-            finalProductId = existingProduct.id;
-            // Update existing product with new metadata if provided
-            const productUpdateData: any = {
-              state: productState,
-              weight: item.weight || existingProduct.weight,
-              brand_id:
-                brandId !== undefined ? brandId : existingProduct.brand_id,
-              base_price:
-                basePrice > 0 ? basePrice : existingProduct.base_price,
-              profit_margin:
-                margin > 0 ? margin : existingProduct.profit_margin,
-              cost_price: cost > 0 ? cost : existingProduct.cost_price,
-              description:
-                item.product_description || existingProduct.description,
-            };
-
-            if ((item as any).available_for_ecommerce !== undefined) {
-              productUpdateData.available_for_ecommerce =
-                availableForEcommerce;
-            }
-            if ((item as any).is_on_sale !== undefined) {
-              productUpdateData.is_on_sale = isOnSale;
-            }
-            if (item.sale_price !== undefined) {
-              productUpdateData.sale_price = item.sale_price;
-            }
-
-            if ((item as any).product_type !== undefined) {
-              productUpdateData.product_type = productType;
-            }
-            if (
-              (item as any).track_inventory !== undefined ||
-              (item as any).product_type !== undefined
-            ) {
-              productUpdateData.track_inventory = trackInventory;
-            }
-            if ((item as any).pricing_type !== undefined) {
-              productUpdateData.pricing_type = pricingType;
-            }
-            if ((item as any).is_featured !== undefined) {
-              productUpdateData.is_featured = isFeatured;
-            }
-            if ((item as any).allow_pos_price_override !== undefined) {
-              productUpdateData.allow_pos_price_override =
-                allowPosPriceOverride;
-            }
-            if ((item as any).has_multiple_price_tiers !== undefined) {
-              productUpdateData.has_multiple_price_tiers =
-                hasMultiplePriceTiers;
-            }
-
-            if (hasCategoryNames) {
-              productUpdateData.product_categories = {
-                deleteMany: {},
-                create: categoryIds.map((id) => ({ category_id: id })),
-              };
-            }
-
-            if (taxCategoryIds !== undefined) {
-              productUpdateData.product_tax_assignments = {
-                deleteMany: {},
-                create: taxCategoryIds.map((id) => ({ tax_category_id: id })),
-              };
-            }
-
-            // Insumo (configure de producto existente): persistir la config UoM
-            // + factor en el producto YA en el create. `purchase_order_items` no
-            // almacena `purchase_to_stock_factor`, y el caso cross-dimension
-            // (count→mass/volume) NO es re-derivable del catálogo en receive, por
-            // lo que el producto es el único portador del factor hasta la
-            // recepción. resolveUoMConversion exige `is_ingredient=true` + factor
-            // para multiplicar, así que ambos deben quedar en el producto aquí.
-            // (syncIngredientConfigOnReceipt sigue como backfill de labels /
-            // same-dimension al recibir.) No se neutraliza pricing/ecommerce del
-            // producto existente para no clobberear su config de venta.
-            if (effectiveIsIngredient) {
-              productUpdateData.is_ingredient = true;
-              if (item.purchase_uom_id != null) {
-                productUpdateData.purchase_uom_id = item.purchase_uom_id;
-              }
-              if (item.stock_uom_id != null) {
-                productUpdateData.stock_uom_id = item.stock_uom_id;
-              }
-              if (purchaseToStockFactor != null) {
-                productUpdateData.purchase_to_stock_factor =
-                  purchaseToStockFactor;
-              }
-            }
-
-            // Regla del dueño: un insumo (vendible o no) nunca se publica ni se
-            // destaca en la tienda en línea.
-            if (effectiveIsIngredient || existingProduct.is_ingredient === true) {
-              productUpdateData.available_for_ecommerce = false;
-              productUpdateData.is_featured = false;
-            }
-
-            await tx.products.update({
-              where: { id: existingProduct.id },
-              data: productUpdateData,
-            });
-          } else {
-            // Fase 2: a pure ingredient neutralizes every retail-sale
-            // construct (mirrors ProductsService.sanitizeIngredientPayload)
-            // and carries the UoM FKs + derived factor. Retail lines
-            // (effectiveIsIngredient === false) keep the exact legacy values.
-            const ingredientOverrides = effectiveIsIngredient
-              ? {
-                  is_ingredient: true,
-                  is_sellable: false,
-                  purchase_uom_id: item.purchase_uom_id ?? null,
-                  stock_uom_id: item.stock_uom_id ?? null,
-                  purchase_to_stock_factor: purchaseToStockFactor ?? null,
-                  base_price: 0,
-                  sale_price: 0,
-                  is_on_sale: false,
-                  available_for_ecommerce: false,
-                  is_featured: false,
-                  allow_pos_price_override: false,
-                  has_multiple_price_tiers: false,
-                }
-              : {
-                  base_price: basePrice,
-                  sale_price: item.sale_price || 0,
-                  is_on_sale: isOnSale,
-                  available_for_ecommerce: availableForEcommerce,
-                  is_featured: isFeatured,
-                  allow_pos_price_override: allowPosPriceOverride,
-                  has_multiple_price_tiers: hasMultiplePriceTiers,
-                };
-
-            // ===== A.7 — la colisión de SKU no puede terminar en un 500 =====
-            //
-            // La unicidad de `products` (store_id, sku) es un índice único
-            // PARCIAL `WHERE state <> 'archived'`: un producto ARCHIVADO ya no
-            // ocupa su SKU, así que la OC no lo «actualiza» ni choca con él:
-            // crea uno nuevo. Solo un dueño NO archivado es colisión.
-            //
-            // Se comprueba ANTES de crear, no en un `catch`: un error de Postgres
-            // ABORTA la transacción, así que dentro del `catch` ya no se puede
-            // consultar quién ocupa el SKU, que es precisamente el dato que el
-            // frontend necesita para ofrecer «reactivar» (D.1). El costo es una
-            // consulta indexada por línea, y solo por línea con producto NUEVO.
-            const desiredSku = item.sku || `GEN-${Date.now()}`;
-            const skuOwner = await tx.products.findFirst({
-              where: {
-                store_id: storeId,
-                sku: desiredSku,
-                state: { not: 'archived' },
-              },
-              select: { id: true, name: true, state: true },
-            });
-            // Un SKU ocupado por una VARIANTE también es colisión (nunca debería
-            // llegar acá porque la línea se enlaza a la variante, pero el
-            // chequeo cubre `desiredSku` generado/distinto del código de línea).
-            const variantSkuOwner = skuOwner
-              ? null
-              : await tx.product_variants.findFirst({
-                  where: {
-                    sku: desiredSku,
-                    products: { store_id: storeId, state: { not: 'archived' } },
-                  },
-                  select: {
-                    id: true,
-                    products: { select: { id: true, name: true } },
-                  },
-                });
-            if (variantSkuOwner) {
-              throw new VendixHttpException(
-                ErrorCodes.PROD_SKU_COLLISION_001,
-                `El SKU «${desiredSku}» ya está ocupado por una variante del producto «${variantSkuOwner.products.name}» (id ${variantSkuOwner.products.id}) en esta tienda.`,
-                {
-                  sku: desiredSku,
-                  product_id: variantSkuOwner.products.id,
-                  product_name: variantSkuOwner.products.name,
-                  product_variant_id: variantSkuOwner.id,
-                  is_variant: true,
-                },
-              );
-            }
-            if (skuOwner) {
-              throw new VendixHttpException(
-                ErrorCodes.PROD_SKU_COLLISION_001,
-                `El SKU «${desiredSku}» ya está ocupado por el producto «${skuOwner.name}» (id ${skuOwner.id}, estado ${skuOwner.state}) en esta tienda.`,
-                {
-                  sku: desiredSku,
-                  product_id: skuOwner.id,
-                  product_name: skuOwner.name,
-                  product_state: skuOwner.state,
-                  // El archivado es el caso que el operador no entiende: el
-                  // producto «no está» en su catálogo pero su SKU sigue ahí.
-                  is_archived: skuOwner.state === 'archived',
-                },
-              );
-            }
-
-            let newProduct: { id: number };
-            try {
-              newProduct = await tx.products.create({
-              data: {
-                name: item.product_name,
-                slug:
-                  item.product_name
-                    .toLowerCase()
-                    .replace(/[^a-z0-9]+/g, '-')
-                    .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
-                description: item.product_description || '',
-                sku: desiredSku,
-                barcode: item.barcode || undefined,
-                cost_price: cost,
-                profit_margin: margin,
-                stock_quantity: 0,
-                state: productState,
-                store_id: storeId,
-                weight: item.weight || 0,
-                product_type: productType,
-                track_inventory: trackInventory,
-                min_stock_level:
-                  item.min_stock_level !== undefined && item.min_stock_level !== null
-                    ? Number(item.min_stock_level)
-                    : 0,
-                pricing_type: pricingType,
-                brand_id: brandId,
-                ...ingredientOverrides,
-                product_categories: {
-                  create: categoryIds.map((id) => ({ category_id: id })),
-                },
-                product_tax_assignments:
-                  taxCategoryIds !== undefined
-                    ? {
-                        create: taxCategoryIds.map((id) => ({
-                          tax_category_id: id,
-                        })),
-                      }
-                    : undefined,
-              },
-              });
-            } catch (error: any) {
-              // Carrera: entre la comprobación de arriba y este INSERT otra
-              // petición pudo tomar el SKU. Se mapea igual, pero SIN volver a
-              // consultar: el P2002 ya abortó la transacción de Postgres y
-              // cualquier lectura posterior fallaría con "current transaction is
-              // aborted". El código y el SKU bastan para que el frontend
-              // reintente o mande al catálogo.
-              //
-              // El filtro por `target` es deliberadamente estrecho: mapear todo
-              // P2002 escondería colisiones de `slug` o `barcode`, que exigen
-              // otra explicación y otro remedio.
-              const rawTarget = error?.meta?.target;
-              const constraint =
-                error?.meta?.driverAdapterError?.cause?.constraint;
-              const targetText = [
-                Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
-                // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
-                constraint ? JSON.stringify(constraint) : undefined,
-              ]
-                .filter((v) => typeof v === 'string' && v)
-                .join(' ');
-              const hitsSku = targetText.includes('sku');
-              const hitsBarcode = targetText.includes('barcode');
-              if (error?.code === 'P2002' && hitsBarcode) {
-                throw new VendixHttpException(
-                  ErrorCodes.PROD_BARCODE_DUP_001,
-                  'El código de barras ya está en uso por otro producto de la tienda.',
-                  { concurrent: true },
-                );
-              }
-              if (error?.code === 'P2002' && hitsSku) {
-                throw new VendixHttpException(
-                  ErrorCodes.PROD_SKU_COLLISION_001,
-                  `El SKU «${desiredSku}» quedó ocupado por otra operación mientras se creaba el producto.`,
-                  { sku: desiredSku, concurrent: true },
-                );
-              }
-              throw error;
-            }
-            finalProductId = newProduct.id;
-          }
+          const resolved = await this.resolveNewLine(tx, item, lineCtx);
+          finalProductId = resolved.product_id;
+          finalVariantId = resolved.product_variant_id;
         }
+        resolvedLines.push({
+          item,
+          productId: finalProductId,
+          variantId: finalVariantId,
+        });
+      }
+
+      // FASE B — configuración de insumo / unidad de venta por línea, con las
+      // lecturas (producto, tienda, unidades, presentación, variantes)
+      // agrupadas en una sola pasada para todo el lote.
+      const preload = await this.buildPersistPreload(
+        tx,
+        resolvedLines,
+        orderType,
+        lineCtx,
+      );
+      for (const { item, productId, variantId } of resolvedLines) {
+        const finalProductId = productId;
+        const finalVariantId = variantId;
 
         // Insumo por product_id (flujo POP: configure de producto EXISTENTE). El
         // bloque de creación anterior solo corre para líneas SIN product_id; el
@@ -1836,7 +2109,12 @@ export class PurchaseOrdersService {
         // en receive, así que el producto es el único portador del factor hasta
         // la recepción (resolveUoMConversion exige is_ingredient=true + factor).
         if (orderType === 'ingredient' && item.product_id && finalProductId) {
-          await this.persistIngredientConfigToProduct(finalProductId, item, tx);
+          await this.persistIngredientConfigToProduct(
+            finalProductId,
+            item,
+            tx,
+            preload,
+          );
         }
 
         // Unidad de venta (QUI-648): configurar en qué presentación se venderá
@@ -1848,7 +2126,12 @@ export class PurchaseOrdersService {
           item.sale_unit_name &&
           orderType !== 'ingredient'
         ) {
-          await this.persistSaleUnitConfigToProduct(finalProductId, item, tx);
+          await this.persistSaleUnitConfigToProduct(
+            finalProductId,
+            item,
+            tx,
+            preload,
+          );
         }
 
         processedItems.push({
@@ -3039,7 +3322,7 @@ export class PurchaseOrdersService {
           },
         },
       });
-    });
+    }, PO_TX_OPTIONS);
   }
 
   async approve(id: number) {
@@ -3068,7 +3351,7 @@ export class PurchaseOrdersService {
           },
         },
       });
-    });
+    }, PO_TX_OPTIONS);
 
     // Audit log
     try {
@@ -3114,7 +3397,7 @@ export class PurchaseOrdersService {
           },
         },
       });
-    });
+    }, PO_TX_OPTIONS);
 
     // Audit log
     try {
@@ -3306,21 +3589,24 @@ export class PurchaseOrdersService {
       sale_unit_is_default?: any;
     },
     tx: any,
+    preload?: PersistPreload,
   ): Promise<void> {
     const name = item.sale_unit_name?.trim();
     if (!name) return;
 
-    const product = await tx.products.findFirst({
-      where: { id: productId },
-      select: {
-        id: true,
-        store_id: true,
-        cost_price: true,
-        price_unit_quantity: true,
-        is_ingredient: true,
-        is_sellable: true,
-      },
-    });
+    const product = preload?.products.has(productId)
+      ? preload.products.get(productId)
+      : await tx.products.findFirst({
+          where: { id: productId },
+          select: {
+            id: true,
+            store_id: true,
+            cost_price: true,
+            price_unit_quantity: true,
+            is_ingredient: true,
+            is_sellable: true,
+          },
+        });
     if (!product?.store_id) return;
     // Un insumo puro no se vende, así que no puede tener presentaciones de
     // venta. La rama de insumo del create fuerza `has_multiple_price_tiers=false`
@@ -3332,18 +3618,31 @@ export class PurchaseOrdersService {
     // comprador sepa por qué su configuración no se aplicó — la OC entera se
     // revierte con la transacción y él decide si quita las variantes o la
     // presentación.
-    await assertTiersAllowed(tx, productId, {
-      action: 'purchase_order_sale_unit_config',
-    });
+    await assertTiersAllowed(
+      preload
+        ? ({
+            // Conteo ya leído para todo el lote: mismo contrato que
+            // `countProductVariants`, sin una consulta por línea.
+            product_variants: {
+              count: async () => preload.variantCounts.get(productId) ?? 0,
+            },
+          } as any)
+        : tx,
+      productId,
+      { action: 'purchase_order_sale_unit_config' },
+    );
 
     // 1. La presentación. `(store_id, name)` es único, así que un nombre repetido
     //    reutiliza la tarifa en vez de fallar. `is_package_unit` se deriva del
     //    factor igual que en PriceTiersService, para no dejar el flag inconsistente.
     const unitsPerPackage = item.sale_unit_units_per_package ?? null;
-    let tier = await tx.price_tiers.findFirst({
-      where: { store_id: product.store_id, name },
-      select: { id: true, kind: true, units_per_package: true },
-    });
+    const tierKey = `${product.store_id}|${name}`;
+    let tier = preload
+      ? (preload.tiers.get(tierKey) ?? null)
+      : await tx.price_tiers.findFirst({
+          where: { store_id: product.store_id, name },
+          select: { id: true, kind: true, units_per_package: true },
+        });
     if (!tier) {
       tier = await tx.price_tiers.create({
         data: {
@@ -3359,6 +3658,8 @@ export class PurchaseOrdersService {
         },
         select: { id: true, kind: true, units_per_package: true },
       });
+      // Las líneas siguientes con la misma presentación la reutilizan.
+      preload?.tiers.set(tierKey, tier);
     }
 
     // 2. Allowlist del par (producto, presentación). El default se aplica solo si
@@ -3445,6 +3746,125 @@ export class PurchaseOrdersService {
     });
   }
 
+  /**
+   * Trae de una vez lo que `persistIngredientConfigToProduct` y
+   * `persistSaleUnitConfigToProduct` leerían línea por línea: productos,
+   * industrias de la tienda, unidades de medida, presentaciones de venta y
+   * conteo de variantes. El número de consultas depende de cuántos TIPOS de
+   * lectura hay, no de cuántas líneas trae la orden.
+   */
+  private async buildPersistPreload(
+    tx: any,
+    lines: Array<{ item: any; productId: number }>,
+    orderType: string,
+    lineCtx: LineResolveContext,
+  ): Promise<PersistPreload> {
+    const preload: PersistPreload = {
+      products: new Map(),
+      industries: new Map(),
+      uoms: new Map(),
+      tiers: new Map(),
+      variantCounts: new Map(),
+    };
+    const ingredientLines = lines.filter(
+      ({ item, productId }) =>
+        orderType === 'ingredient' &&
+        item.product_id &&
+        productId &&
+        (item.purchase_uom_id != null || item.stock_uom_id != null),
+    );
+    const saleLines = lines.filter(
+      ({ item, productId }) =>
+        orderType !== 'ingredient' &&
+        productId &&
+        typeof item.sale_unit_name === 'string' &&
+        item.sale_unit_name.trim().length > 0,
+    );
+    const productIds = Array.from(
+      new Set([...ingredientLines, ...saleLines].map((l) => l.productId)),
+    );
+    if (productIds.length === 0) return preload;
+
+    const products = await tx.products.findMany({
+      where: { id: { in: productIds } },
+      select: PERSIST_PRODUCT_SELECT,
+    });
+    for (const product of products) preload.products.set(product.id, product);
+
+    if (ingredientLines.length > 0) {
+      const storeIds = Array.from(
+        new Set(
+          ingredientLines
+            .map((l) => preload.products.get(l.productId)?.store_id)
+            .filter((id): id is number => typeof id === 'number'),
+        ),
+      );
+      if (storeIds.length > 0) {
+        const stores = await tx.stores.findMany({
+          where: { id: { in: storeIds } },
+          select: { id: true, industries: true },
+        });
+        for (const store of stores) {
+          preload.industries.set(store.id, store.industries);
+        }
+      }
+      const uomIds = ingredientLines.flatMap(({ item }) =>
+        [item.stock_uom_id, item.purchase_uom_id].filter(
+          (id): id is number => id != null,
+        ),
+      );
+      if (uomIds.length > 0) {
+        const uoms = await lineCtx.loadUoms(tx, uomIds);
+        for (const [id, uom] of uoms) preload.uoms.set(id, uom);
+      }
+    }
+
+    if (saleLines.length > 0) {
+      const saleProductIds = Array.from(
+        new Set(saleLines.map((l) => l.productId)),
+      );
+      const variants = await tx.product_variants.findMany({
+        where: { product_id: { in: saleProductIds } },
+        select: { product_id: true },
+      });
+      for (const variant of variants) {
+        preload.variantCounts.set(
+          variant.product_id,
+          (preload.variantCounts.get(variant.product_id) ?? 0) + 1,
+        );
+      }
+      const tierStoreIds = Array.from(
+        new Set(
+          saleLines
+            .map((l) => preload.products.get(l.productId)?.store_id)
+            .filter((id): id is number => typeof id === 'number'),
+        ),
+      );
+      const tierNames = Array.from(
+        new Set(saleLines.map((l) => String(l.item.sale_unit_name).trim())),
+      );
+      if (tierStoreIds.length > 0) {
+        const tiers = await tx.price_tiers.findMany({
+          where: {
+            store_id: { in: tierStoreIds },
+            name: { in: tierNames },
+          },
+          select: {
+            id: true,
+            store_id: true,
+            name: true,
+            kind: true,
+            units_per_package: true,
+          },
+        });
+        for (const tier of tiers) {
+          preload.tiers.set(`${tier.store_id}|${tier.name}`, tier);
+        }
+      }
+    }
+    return preload;
+  }
+
   private async persistIngredientConfigToProduct(
     productId: number,
     item: {
@@ -3453,37 +3873,53 @@ export class PurchaseOrdersService {
       purchase_to_stock_factor?: number | null;
     },
     tx: any,
+    preload?: PersistPreload,
   ): Promise<void> {
     if (item.purchase_uom_id == null && item.stock_uom_id == null) return;
 
-    const product = await tx.products.findFirst({
-      where: { id: productId },
-      select: {
-        id: true,
-        store_id: true,
-        is_ingredient: true,
-        available_for_ecommerce: true,
-        is_featured: true,
-        purchase_uom_id: true,
-        stock_uom_id: true,
-        purchase_to_stock_factor: true,
-      },
-    });
+    const product = preload?.products.has(productId)
+      ? preload.products.get(productId)
+      : await tx.products.findFirst({
+          where: { id: productId },
+          select: {
+            id: true,
+            store_id: true,
+            is_ingredient: true,
+            available_for_ecommerce: true,
+            is_featured: true,
+            purchase_uom_id: true,
+            stock_uom_id: true,
+            purchase_to_stock_factor: true,
+          },
+        });
     if (!product) return;
 
-    const store = await tx.stores.findUnique({
-      where: { id: product.store_id },
-      select: { industries: true },
-    });
-    if (!storeIndustriesSupportIngredients(store?.industries)) return;
+    const industries = preload?.industries.has(product.store_id)
+      ? preload.industries.get(product.store_id)
+      : (
+          await tx.stores.findUnique({
+            where: { id: product.store_id },
+            select: { industries: true },
+          })
+        )?.industries;
+    if (!storeIndustriesSupportIngredients(industries)) return;
 
     // Deriva el factor: manual cross-dimension (count→mass/volume) o catálogo
     // same-dimension. Cross-dimension NO es derivable del factor_to_base.
     let factor: number | undefined;
     if (item.purchase_uom_id != null && item.stock_uom_id != null) {
-      const uoms = await tx.units_of_measure.findMany({
-        where: { id: { in: [item.stock_uom_id, item.purchase_uom_id] } },
-      });
+      const hasPreloadedUoms =
+        !!preload &&
+        preload.uoms.has(item.stock_uom_id) &&
+        preload.uoms.has(item.purchase_uom_id);
+      const uoms = hasPreloadedUoms
+        ? [
+            preload!.uoms.get(item.stock_uom_id),
+            preload!.uoms.get(item.purchase_uom_id),
+          ]
+        : await tx.units_of_measure.findMany({
+            where: { id: { in: [item.stock_uom_id, item.purchase_uom_id] } },
+          });
       const stockUom = uoms.find((u) => u.id === item.stock_uom_id);
       const purchaseUom = uoms.find((u) => u.id === item.purchase_uom_id);
       if (stockUom && purchaseUom) {

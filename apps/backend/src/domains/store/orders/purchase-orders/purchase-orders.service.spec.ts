@@ -2656,7 +2656,9 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       const skuLookups = tx.products.findFirst.mock.calls.filter(
         (c: any) => c[0].where.sku === 'SKU-ARCH',
       );
-      expect(skuLookups).toHaveLength(2);
+      // Una sola lectura por SKU: el chequeo previo A.7 (`skuOwner`) se
+      // eliminó por redundante; la carrera la cubre el mapeo del P2002.
+      expect(skuLookups).toHaveLength(1);
       for (const [arg] of skuLookups) {
         expect(arg.where).toEqual({
           store_id: STORE_ID,
@@ -2673,15 +2675,19 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       expect(tx.products.update).toBeUndefined();
     });
 
-    it('un SKU ocupado por un producto NO archivado sigue siendo PROD_SKU_COLLISION_001', async () => {
+    it('un SKU que otra petición ocupa entre la lectura y el INSERT sigue siendo PROD_SKU_COLLISION_001', async () => {
       const tx: any = mockCreateTx();
-      // `existingProduct` (1ª consulta) no lo ve; el chequeo A.7 (2ª) sí.
-      const owner = { id: 5, name: 'Camisa Activa', state: 'active' };
-      tx.products.findFirst = jest
+      // `existingProduct` no lo ve (nadie lo ocupaba al leer); el INSERT choca
+      // contra el índice único parcial porque otra petición lo tomó en medio.
+      tx.products.findFirst = jest.fn().mockResolvedValue(null);
+      tx.products.create = jest
         .fn()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(owner);
-      tx.products.create = jest.fn();
+        .mockRejectedValue(
+          Object.assign(new Error('Unique constraint failed'), {
+            code: 'P2002',
+            meta: { target: ['store_id', 'sku'] },
+          }),
+        );
       prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
 
       let caught: any = null;
@@ -2693,10 +2699,23 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       expect(caught?.errorCode).toBe('PROD_SKU_COLLISION_001');
       expect(caught.getResponse().details).toMatchObject({
         sku: 'SKU-ARCH',
-        product_id: 5,
-        is_archived: false,
+        concurrent: true,
       });
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('un SKU ocupado por un producto NO archivado une la línea a ese producto (no choca)', async () => {
+      const tx: any = mockCreateTx();
+      const owner = { id: 5, name: 'Camisa Activa', state: 'active' };
+      tx.products.findFirst = jest.fn().mockResolvedValue(owner);
+      tx.products.create = jest.fn();
+      tx.products.update = jest.fn().mockResolvedValue({ id: 5 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(newProductDto() as any);
+
       expect(tx.products.create).not.toHaveBeenCalled();
+      expect(tx.products.update).toHaveBeenCalledTimes(1);
     });
 
     it('una línea nueva con código de barras ya usado se une al producto existente (sin crear)', async () => {
@@ -2967,6 +2986,268 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       arrangeCategories();
       const tx: any = await runCreate(dtoWithTaxes([1]));
       expect(tx.purchase_orders.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Lote grande (plan bulk-high-volume-chunking, paso 4): `resolve-lines`
+   * idempotente, tope de 10.000 líneas, tope de 100 sin resolver y número de
+   * lecturas de `create()` independiente de cuántas líneas trae la orden.
+   */
+  describe('lote grande: resolve-lines, topes y lecturas agrupadas', () => {
+    const resolvedLines = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        product_id: 1000 + i,
+        quantity: 1,
+        unit_price: 1000,
+      }));
+
+    const READ_METHODS = ['findMany', 'findFirst', 'findUnique', 'count'];
+    const countReads = (tx: any) => {
+      const perCall: Record<string, number> = {};
+      for (const [model, api] of Object.entries<any>(tx)) {
+        for (const method of READ_METHODS) {
+          const calls = api?.[method]?.mock?.calls?.length ?? 0;
+          if (calls > 0) perCall[`${model}.${method}`] = calls;
+        }
+      }
+      return {
+        total: Object.values(perCall).reduce((a, b) => a + b, 0),
+        perCall,
+      };
+    };
+
+    /** Producto/variante en memoria: lo que `resolve-lines` crea, lo encuentra. */
+    function statefulCatalogTx() {
+      const tx: any = mockCreateTx();
+      const rows: any[] = [];
+      tx.products.findFirst = jest.fn(async ({ where }: any) => {
+        return (
+          rows.find(
+            (r) =>
+              r.sku === where.sku &&
+              r.store_id === where.store_id &&
+              r.state !== 'archived',
+          ) ?? null
+        );
+      });
+      tx.products.create = jest.fn(async ({ data }: any) => {
+        const row = {
+          id: 9000 + rows.length,
+          sku: data.sku,
+          store_id: data.store_id,
+          state: data.state,
+        };
+        rows.push(row);
+        return row;
+      });
+      tx.products.update = jest.fn().mockResolvedValue({});
+      return { tx, rows };
+    }
+
+    it('resolve-lines es idempotente: la 2ª llamada no crea nada y devuelve los mismos ids', async () => {
+      const { tx } = statefulCatalogTx();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      const dto = {
+        location_id: LOCATION_ID,
+        items: [
+          { product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1000 },
+          { product_name: 'Camisa B', sku: 'SKU-B', unit_price: 2000 },
+          { product_id: 77, quantity: 1, unit_price: 5 },
+        ],
+      };
+
+      const first = await service.resolveLines(dto as any);
+      expect(tx.products.create).toHaveBeenCalledTimes(2);
+      expect(first.items.map((r) => r.created)).toEqual([true, true, false]);
+      expect(first.items[2]).toMatchObject({ index: 2, product_id: 77 });
+
+      const second = await service.resolveLines(dto as any);
+      // Nada nuevo en el catálogo.
+      expect(tx.products.create).toHaveBeenCalledTimes(2);
+      expect(second.items.map((r) => r.created)).toEqual([false, false, false]);
+      expect(second.items.map((r) => r.product_id)).toEqual(
+        first.items.map((r) => r.product_id),
+      );
+      expect(second.items.map((r) => r.product_variant_id)).toEqual(
+        first.items.map((r) => r.product_variant_id),
+      );
+    });
+
+    it('resolve-lines: la fila que falla se informa por fila y no tumba a las demás', async () => {
+      const { tx } = statefulCatalogTx();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [
+          { unit_price: 1 }, // sin product_id ni product_name
+          { product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1000 },
+        ],
+      } as any);
+
+      expect(res.items[0]).toMatchObject({
+        index: 0,
+        product_id: null,
+        created: false,
+        error: { code: 'SYS_VALIDATION_001' },
+      });
+      expect(res.items[1]).toMatchObject({ index: 1, created: true });
+    });
+
+    it('resolve-lines: una colisión de SKU concurrente sale como error de fila con su código', async () => {
+      const { tx } = statefulCatalogTx();
+      tx.products.create = jest.fn().mockRejectedValue(
+        Object.assign(new Error('Unique'), {
+          code: 'P2002',
+          meta: { target: ['store_id', 'sku'] },
+        }),
+      );
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [{ product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1 }],
+      } as any);
+
+      expect(res.items[0].error?.code).toBe('PROD_SKU_COLLISION_001');
+    });
+
+    it('create() con 150 líneas ya resueltas nace sin error', async () => {
+      const tx = await runCreate({ ...baseDto(), items: resolvedLines(150) });
+      const data = tx.purchase_orders.create.mock.calls[0][0].data;
+      expect(data.purchase_order_items.create).toHaveLength(150);
+    });
+
+    it('10.001 líneas se rechazan en la puerta HTTP (DTO) y 10.000 pasan', async () => {
+      const { validate } = await import('class-validator');
+      const { plainToInstance } = await import('class-transformer');
+      const { CreatePurchaseOrderDto } = await import(
+        './dto/create-purchase-order.dto'
+      );
+      const itemsErrors = async (n: number) => {
+        const dto = plainToInstance(CreatePurchaseOrderDto, {
+          ...baseDto(),
+          items: resolvedLines(n),
+        });
+        const errors = await validate(dto);
+        return errors.filter((e) => e.property === 'items');
+      };
+      const tooMany = await itemsErrors(10_001);
+      expect(tooMany).toHaveLength(1);
+      expect(Object.keys(tooMany[0].constraints ?? {})).toContain(
+        'arrayMaxSize',
+      );
+      expect(await itemsErrors(10_000)).toHaveLength(0);
+    });
+
+    it('101 líneas sin resolver se rechazan con un 400 que manda a resolve-lines', async () => {
+      const dto = {
+        ...baseDto(),
+        items: Array.from({ length: 101 }, (_, i) => ({
+          product_id: 0,
+          product_name: `Producto ${i}`,
+          sku: `SKU-${i}`,
+          quantity: 1,
+          unit_price: 1000,
+        })),
+      };
+
+      let caught: any = null;
+      try {
+        await service.create(dto as any);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught?.getStatus()).toBe(400);
+      expect(caught.message).toContain('resolve-lines');
+      expect(caught.message).toContain('101');
+      // Se rechaza ANTES de abrir la transacción.
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('lecturas de create() con líneas resueltas: 10 y 300 líneas leen lo mismo', async () => {
+      const small = countReads(
+        await runCreate({ ...baseDto(), items: resolvedLines(10) }),
+      );
+      jest.clearAllMocks();
+      const large = countReads(
+        await runCreate({ ...baseDto(), items: resolvedLines(300) }),
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        'lecturas create() 10 líneas:',
+        JSON.stringify(small),
+        '| 300 líneas:',
+        JSON.stringify(large),
+      );
+      expect(large.total).toBe(small.total);
+      expect(large.perCall).toEqual(small.perCall);
+    });
+
+    it('lecturas con unidad de venta: solo el override por línea crece con N', async () => {
+      const build = (n: number) => {
+        const tx: any = mockCreateTx();
+        tx.products.findMany = jest.fn(async ({ where }: any) =>
+          (where.id?.in ?? []).map((id: number) => ({
+            id,
+            store_id: STORE_ID,
+            cost_price: 100,
+            price_unit_quantity: 1,
+            is_ingredient: false,
+            is_sellable: true,
+          })),
+        );
+        tx.products.update = jest.fn().mockResolvedValue({});
+        tx.price_tiers = {
+          findMany: jest.fn().mockResolvedValue([]),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 5, kind: 'sale_unit', units_per_package: 12 }),
+        };
+        tx.product_price_tier_assignments = {
+          updateMany: jest.fn(),
+          upsert: jest.fn(),
+          count: jest.fn().mockResolvedValue(0),
+        };
+        tx.product_price_tier_overrides = {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn(),
+          update: jest.fn(),
+        };
+        const items = resolvedLines(n).map((l) => ({
+          ...l,
+          sale_unit_name: 'Caja x12',
+          sale_unit_units_per_package: 12,
+        }));
+        prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+        return { tx, dto: { ...baseDto(), items } };
+      };
+
+      const a = build(10);
+      await service.create(a.dto as any);
+      const small = countReads(a.tx);
+      jest.clearAllMocks();
+      const b = build(300);
+      await service.create(b.dto as any);
+      const large = countReads(b.tx);
+      // eslint-disable-next-line no-console
+      console.log(
+        'lecturas con unidad de venta 10:',
+        JSON.stringify(small),
+        '| 300:',
+        JSON.stringify(large),
+      );
+
+      const growing = Object.keys(large.perCall).filter(
+        (k) => large.perCall[k] !== small.perCall[k],
+      );
+      // Lo ÚNICO que sigue siendo por línea: el override de la presentación.
+      expect(growing).toEqual(['product_price_tier_overrides.findFirst']);
+      expect(large.perCall['product_price_tier_overrides.findFirst']).toBe(300);
+      // Presentación creada UNA vez y reutilizada por las demás líneas.
+      expect(b.tx.price_tiers.create).toHaveBeenCalledTimes(1);
     });
   });
 });
