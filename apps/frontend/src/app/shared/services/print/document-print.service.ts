@@ -185,6 +185,36 @@ export class DocumentPrintService {
   private readonly gatewayClient = inject(PrintGatewayClientService);
   private readonly mmToPx = inject(MmToPxService);
 
+  /** Gateway copy metadata is normalized before body expansion. */
+  normalizeGatewayCopies(copies: unknown): number {
+    if (typeof copies !== 'number' || !Number.isFinite(copies)) return 1;
+    return Math.min(10, Math.max(1, Math.trunc(copies)));
+  }
+
+  /**
+   * Materializes copies in the HTML body only. The document shell, head and
+   * its styles remain byte-for-byte singletons; duplicating complete HTML
+   * documents would create invalid nested documents and duplicate @page.
+   */
+  private expandGatewayHtmlCopies(documentHtml: string, copies: number): string {
+    if (copies === 1) return documentHtml;
+
+    const bodyMatch = documentHtml.match(/<body\b[^>]*>[\s\S]*?<\/body\s*>/i);
+    if (!bodyMatch) {
+      throw new Error('Print gateway HTML has no <body>; cannot safely expand multiple copies.');
+    }
+
+    const body = bodyMatch[0];
+    const openingTag = body.match(/^<body\b[^>]*>/i)?.[0];
+    const closingTag = body.match(/<\/body\s*>$/i)?.[0];
+    if (!openingTag || !closingTag) {
+      throw new Error('Print gateway HTML has an invalid <body>; cannot safely expand multiple copies.');
+    }
+    const content = body.slice(openingTag.length, body.length - closingTag.length);
+    const expandedBody = `${openingTag}${this.composeBlocks([content], copies)}${closingTag}`;
+    return documentHtml.replace(body, () => expandedBody);
+  }
+
   /**
    * Print Formats is the authority for automatic printing. Read the detail on
    * each decision (rather than trusting the auth/settings snapshot) so a
@@ -371,11 +401,12 @@ export class DocumentPrintService {
         // mis-report a 76mm POS format as thermal_58; the format the gateway
         // was asked for is the source of truth.
         const requestedFormat = params.formatType as unknown as PrintFormat;
-        await this.sendToPrinter(response.html);
+        const copies = this.normalizeGatewayCopies(response.copies);
+        await this.sendToPrinter(this.expandGatewayHtmlCopies(response.html, copies));
         return {
           documents: 1,
-          pages: response.copies || 1,
-          copies: response.copies || 1,
+          pages: copies,
+          copies,
           format: requestedFormat,
         };
       }
@@ -455,11 +486,12 @@ export class DocumentPrintService {
     }
 
     const requestedFormat = resolved.format_type as unknown as PrintFormat;
-    await this.sendToPrinter(response.html);
+    const copies = this.normalizeGatewayCopies(response.copies);
+    await this.sendToPrinter(this.expandGatewayHtmlCopies(response.html, copies));
     return {
       documents: 1,
-      pages: response.copies || 1,
-      copies: response.copies || 1,
+      pages: copies,
+      copies,
       format: requestedFormat,
     };
   }
@@ -492,8 +524,9 @@ export class DocumentPrintService {
   /**
    * Imprime directamente un HTML completo compilado por el Print Gateway (ej: preview o render directo)
    */
-  async printGatewayHtml(documentHtml: string): Promise<void> {
-    await this.printHtmlDocument(documentHtml);
+  async printGatewayHtml(documentHtml: string, copies = 1): Promise<void> {
+    const normalizedCopies = this.normalizeGatewayCopies(copies);
+    await this.printHtmlDocument(this.expandGatewayHtmlCopies(documentHtml, normalizedCopies));
   }
 
   /**

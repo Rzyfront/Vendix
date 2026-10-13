@@ -266,6 +266,24 @@ describe('ProductsBulkEditService', () => {
       expect(result.items[0].message).toContain('variantes existentes');
     });
 
+    it('bloquea track_inventory en un producto con variantes y deja pasar al simple', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, track_inventory: true }),
+        makeProduct({ id: 2, track_inventory: true, sku: 'SKU-2' }),
+      ]);
+      prisma.product_variants.findMany.mockResolvedValue([{ product_id: 1 }]);
+
+      const result = await service.preview(
+        makeDto([1, 2], { track_inventory: false }),
+      );
+
+      expect(result.errors).toBe(1);
+      expect(result.items[0].status).toBe('error');
+      expect(result.items[0].code).toBe('PROD_VALIDATE_001');
+      expect(result.items[0].message).toContain('Controla inventario');
+      expect(result.items[1].status).toBe('ok');
+    });
+
     it('no ejecuta NINGUNA escritura en Prisma', async () => {
       prisma.products.findMany.mockResolvedValue([
         makeProduct({ id: 1, store_id: 10 }),
@@ -618,6 +636,35 @@ describe('ProductsBulkEditService', () => {
       expect(result.results[1].message).toContain('active stock reservations');
       expect(result.results[2]).toMatchObject({ id: 3, status: 'ok' });
       expect(productsService.update).toHaveBeenCalledTimes(3);
+    });
+
+    it('bloquea track_inventory en un producto con variantes: update() no lo recibe', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 1, name: 'ConVariantes', track_inventory: true },
+        { id: 2, name: 'Simple', track_inventory: true },
+      ]);
+      prisma.product_variants.findMany.mockResolvedValue([{ product_id: 1 }]);
+      productsService.update.mockResolvedValue({ id: 2, name: 'Simple' });
+
+      const result = await service.apply(
+        makeDto([1, 2], { track_inventory: false }),
+      );
+
+      expect(result.successful).toBe(1);
+      expect(result.failed).toBe(1);
+      expect(result.results[0]).toMatchObject({
+        id: 1,
+        status: 'error',
+        code: 'PROD_VALIDATE_001',
+      });
+      expect(result.results[0].message).toContain('Controla inventario');
+      expect(result.results[1]).toMatchObject({ id: 2, status: 'ok' });
+      expect(productsService.update).toHaveBeenCalledTimes(1);
+      expect(productsService.update).toHaveBeenCalledWith(
+        2,
+        { track_inventory: false },
+        { lean: true },
+      );
     });
 
     it('delega en update() con lean:true y el payload de cambios tal cual', async () => {

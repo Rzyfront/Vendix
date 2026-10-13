@@ -19,6 +19,7 @@ import {
 } from '../../../../../../../core/models/print-formats.model';
 import { definitionToRegions } from '../print-canvas/canvas-region';
 import { DocumentPrintService } from '../../../../../../../shared/services/print/document-print.service';
+import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
 
 export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
 
@@ -335,15 +336,16 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
                   class="vendix-physical-sheet"
                   [class.is-roll]="draft.paper.is_roll !== false"
                   [class.is-sheet]="draft.paper.is_roll === false"
+                  [style.min-height.mm]="draft.paper.is_roll === false ? paperHeightMm() : 0"
                 >
-                  @if (facade.previewHtml()) {
+                  @if (facade.safePreviewHtml()) {
                     <iframe
                       #previewIframe
                       id="vendix-preview-iframe"
-                      [srcdoc]="facade.previewHtml()"
+                      [srcdoc]="facade.safePreviewHtml()"
                       class="vendix-preview-iframe"
                       (load)="onIframeLoad($event)"
-                      sandbox="allow-same-origin allow-scripts"
+                      sandbox="allow-same-origin"
                     ></iframe>
                   } @else {
                     <div class="p-8 text-center text-xs text-text-tertiary">
@@ -393,6 +395,7 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
               <div class="vendix-workbench-content p-0">
                 <app-print-properties-panel
                   [definition]="draft"
+                  [formatType]="detail()?.format_type ?? null"
                   [selectedRegion]="selectedRegion()"
                   (definitionChanged)="onPropertiesChanged($event)"
                   (unselectRequested)="facade.selectElement(null)"
@@ -574,6 +577,7 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
         overflow: auto;
       }
       .vendix-physical-paper-container {
+        flex-shrink: 0;
         transform-origin: top center;
         transition: transform 0.15s ease-out;
       }
@@ -631,7 +635,22 @@ export class PrintFormatEditorComponent {
 
   readonly paperWidthMm = computed<number>(() => {
     const draft = this.facade.draftDefinition();
-    return draft?.paper?.width_mm || 80;
+    if (!draft?.paper) return 80;
+    const geometry = PAPER_GEOMETRY[draft.paper.format as keyof typeof PAPER_GEOMETRY];
+    const width = geometry?.width_mm ?? draft.paper.width_mm ?? 80;
+    const height = geometry?.height_mm ?? draft.paper.height_mm;
+    return !draft.paper.is_roll && draft.paper.orientation === 'landscape' && height != null
+      ? height
+      : width;
+  });
+
+  readonly paperHeightMm = computed<number>(() => {
+    const paper = this.facade.draftDefinition()?.paper;
+    if (!paper || paper.is_roll) return 0;
+    const geometry = PAPER_GEOMETRY[paper.format as keyof typeof PAPER_GEOMETRY];
+    const width = geometry?.width_mm ?? paper.width_mm ?? 80;
+    const height = geometry?.height_mm ?? paper.height_mm ?? width;
+    return paper.orientation === 'landscape' ? width : height;
   });
 
   readonly regions = computed<CanvasRegion[]>(() => {
@@ -652,7 +671,10 @@ export class PrintFormatEditorComponent {
       const doc = iframe.contentWindow?.document;
       if (doc && doc.documentElement) {
         // Auto-expand physical height
-        const height = doc.documentElement.scrollHeight;
+        const contentHeight = doc.documentElement.scrollHeight;
+        const isSheet = this.facade.draftDefinition()?.paper.is_roll === false;
+        const physicalHeight = isSheet ? this.paperHeightMm() * 96 / 25.4 : 0;
+        const height = Math.max(contentHeight, physicalHeight);
         if (height > 0) {
           iframe.style.height = `${height}px`;
         }
@@ -769,6 +791,65 @@ export class PrintFormatEditorComponent {
     if (!draft) return;
     const next = JSON.parse(JSON.stringify(draft)) as PrintFormatDefinition;
 
+    if (rule.id === 'pos_non_fiscal_disclaimer') {
+      const formatType = this.detail()?.format_type;
+      if (formatType !== 'pos_sale_ticket') return;
+
+      const disclaimerKey = 'document.non_fiscal_disclaimer';
+      if (next.custom_template?.trim()) {
+        if (!next.custom_template.includes(`{{${disclaimerKey}}}`)) {
+          next.custom_template = `${next.custom_template}\n<p>{{${disclaimerKey}}}</p>`;
+        }
+      } else {
+        const sections = [...(next.sections ?? [])];
+        let footer = sections.find((section) => section.type === 'footer');
+        if (!footer) {
+          const occupiedIds = new Set(sections.map((section) => section.id));
+          let footerId = 'sec_footer';
+          for (let suffix = 2; occupiedIds.has(footerId); suffix += 1) {
+            footerId = `sec_footer_${suffix}`;
+          }
+          footer = {
+            id: footerId,
+            type: 'footer',
+            title: 'Pie de Ticket',
+            enabled: true,
+            order: sections.reduce((max, section) => Math.max(max, section.order ?? 0), -1) + 1,
+            fields: [],
+          };
+          sections.push(footer);
+        }
+
+        footer.enabled = true;
+        const fields = [...(footer.fields ?? [])];
+        const disclaimer = fields.find((field) => field.id === 'f_disclaimer')
+          ?? fields.find((field) => field.key === disclaimerKey);
+        if (disclaimer) {
+          disclaimer.id = 'f_disclaimer';
+          disclaimer.key = disclaimerKey;
+          disclaimer.label = 'Leyenda No Fiscal';
+          disclaimer.format = 'text';
+          disclaimer.enabled = true;
+          disclaimer.position = 'center';
+        } else {
+          fields.push({
+            id: 'f_disclaimer',
+            key: disclaimerKey,
+            label: 'Leyenda No Fiscal',
+            format: 'text',
+            position: 'center',
+            enabled: true,
+          });
+        }
+        footer.fields = fields;
+        next.sections = sections;
+      }
+
+      this.facade.draftDefinition.set(next);
+      void this.facade.refreshPreview();
+      return;
+    }
+
     if (rule.fixAction?.sectionId) {
       const cleanSecId = rule.fixAction.sectionId.replace('sec_', '');
       const sec = next.sections?.find((s) => s.id === cleanSecId || s.id === rule.fixAction!.sectionId);
@@ -812,7 +893,7 @@ export class PrintFormatEditorComponent {
   async printTest(): Promise<void> {
     const html = this.facade.previewHtml();
     if (html) {
-      await this.printService.printGatewayHtml(html);
+      await this.printService.printGatewayHtml(html, this.facade.draftDefinition()?.paper.copies ?? 1);
     }
   }
 }

@@ -96,10 +96,6 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
 import { KitchenTicketPrintService } from '../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../dispatch-ticket/models/dispatch-ticket-data.model';
-import {
-  shouldAutoPrintDispatchTicket,
-  type ShouldAutoPrintDispatchTicketContext,
-} from '../../../../shared/services/print/dispatch-ticket-autoprint';
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
 import type { Order } from '../orders/interfaces/order.interface';
@@ -2980,12 +2976,10 @@ export class PosComponent {
       this.readyToPayOrder.set(null);
       this.mode.set('create-draft');
       this.initialEntrega.set(this.resolveDefaultEntrega());
+      if (paymentData.order) {
+        void this.printDispatchTicketIfNeededForOrder(paymentData.order);
+      }
     }
-
-    // CP-DTLP — la activación y auto-impresión se resuelven en la configuración
-    // moderna del documento dispatch_ticket (is_active / paper.auto_print).
-    // Este helper solo añade la elegibilidad de mostrador/para llevar.
-    void this.printDispatchTicketIfNeededForOrder(paymentData.order);
 
     // CP-pos-checkout-enter-focus (step A.2) — venta terminada: el foco
     // vuelve al buscador (la confirmación, si abrió, re-enfoca al cerrarse).
@@ -3923,12 +3917,10 @@ export class PosComponent {
       this.selectedCustomer.set(null);
       this.paymentFulfillment.set(null);
       this.paymentTableId.set(null);
+      if (shippingData.order) {
+        void this.printDispatchTicketIfNeededForOrder(shippingData.order);
+      }
     }
-
-    // CP-DTLP — la activación y auto-impresión del documento dispatch_ticket
-    // se resuelven en Formatos de impresión; el contexto solo aplica la
-    // elegibilidad de mostrador/para llevar.
-    void this.printDispatchTicketIfNeededForOrder(shippingData.order);
 
     // CP-pos-checkout-enter-focus (step A.2) — envío terminado: el foco
     // vuelve al buscador (la confirmación, si abrió, re-enfoca al cerrarse).
@@ -4912,31 +4904,14 @@ export class PosComponent {
   }
 
   /**
-   * Encadena el tiquete de despacho al cerrar un pago POS o un envío de
-   * postventa. El documento central dispatch_ticket determina activación y
-   * auto-impresión; este contexto añade la elegibilidad de mostrador.
-   *
-   * La deduplicación de la impresión (entre esta cadena y la del modal de
-   * confirmación `pos-order-confirmation.maybeAutoPrint`) vive en
-   * `DispatchTicketPrintService.printDispatchTicket` (singleton) para que
-   * ambos callsites la compartan.
+   * Encadena el tiquete al resultado POS exitoso. La política fresca de
+   * formato y la validación del snapshot de pago viven en el servicio.
    */
   private async printDispatchTicketIfNeededForOrder(order: any): Promise<void> {
     if (!order) return;
     const receipts = this.settingsFacade.receipts();
     const counterEnabled =
       receipts?.print_dispatch_ticket_on_counter ?? false;
-
-    const context: ShouldAutoPrintDispatchTicketContext = {
-      // The central document-print service owns these two gates.
-      printDispatchTicketEnabled: true,
-      printDispatchTicketAuto: true,
-      counterEnabled,
-      deliveryType: order.delivery_type,
-      isShippingSale: (order as any)?.isShippingSale,
-    };
-
-    if (!shouldAutoPrintDispatchTicket('automatic', context)) return;
 
     const items = (order.items || order.order_items || []).map(
       (item: any) => ({
@@ -4984,7 +4959,11 @@ export class PosComponent {
     };
 
     try {
-      await this.dispatchTicketPrint.printDispatchTicket(data, 'automatic');
+      await this.dispatchTicketPrint.printFromPos(data, {
+        origin: 'sale_completed',
+        order,
+        counterEnabled,
+      });
     } catch (err) {
       console.error('[QUI-764] Error al imprimir tiquete de despacho:', err);
     }

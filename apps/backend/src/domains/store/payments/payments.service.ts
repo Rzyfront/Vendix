@@ -2384,11 +2384,34 @@ export class PaymentsService {
         // had moved it to `processing`.
         const refreshed = await tx.orders.findUnique({
           where: { id: order.id },
-          select: { id: true, order_number: true, state: true },
+          select: {
+            id: true,
+            order_number: true,
+            state: true,
+            grand_total: true,
+            total_paid: true,
+            remaining_balance: true,
+          },
         });
         if (refreshed) {
           order.state = refreshed.state;
         }
+        const settlementSnapshot = refreshed
+          ? {
+              ...(refreshed.grand_total?.isFinite()
+                ? { grand_total: refreshed.grand_total.toString() }
+                : {}),
+              ...(refreshed.total_paid?.isFinite()
+                ? { total_paid: refreshed.total_paid.toString() }
+                : {}),
+              ...(refreshed.remaining_balance?.isFinite()
+                ? {
+                    remaining_balance:
+                      refreshed.remaining_balance.toString(),
+                  }
+                : {}),
+            }
+          : {};
 
         return {
           success: true,
@@ -2414,6 +2437,7 @@ export class PaymentsService {
                 ? 'pending'
                 : 'pending',
             total_amount: order.grand_total,
+            ...settlementSnapshot,
             subtotal: order.subtotal_amount,
             tax_amount: order.tax_amount,
             discount_amount: order.discount_amount,

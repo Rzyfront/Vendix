@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, InternalServerErrorException, NotFound
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
+import { assertVariantsAllowed } from './services/tiers-variants-exclusive.util';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
@@ -17,6 +18,8 @@ import {
   BulkUploadTemplateDto,
   BulkProductAnalysisResultDto,
   BulkProductAnalysisItemDto,
+  BulkVariantAnalysisItemDto,
+  BulkValidationMessage,
   ProductState,
 } from './dto';
 import { generateSlug } from '@common/utils/slug.util';
@@ -95,6 +98,14 @@ export class ProductsBulkService {
   // `analyzeProducts` la convierte en error de fila; nunca se persiste.
   private readonly CELL_ERRORS_KEY = '__cell_errors';
 
+  // Claves internas que `parseFile` adjunta a cada producto/variante parseado.
+  // Nunca llegan a los DTO de persistencia (los mappers construyen el DTO campo
+  // por campo y el helper de variantes las descarta).
+  private readonly ROW_NUMBER_KEY = '__row_number';
+  private readonly ORPHAN_VARIANT_KEY = '__orphan_variant';
+  private readonly IGNORED_FIELDS_KEY = '__ignored_fields';
+  private readonly VARIANT_ATTR_SLOTS = [1, 2, 3];
+
   private readonly CATALOG_ONLY_IGNORED_FIELD_LABELS: Record<string, string> = {
     stock_quantity: 'Cantidad inicial',
     stock_by_location: 'Stock por ubicación',
@@ -148,6 +159,14 @@ export class ProductsBulkService {
     'Unidad de compra': 'purchase_uom_code',
     'Precio por N unidades': 'price_unit_quantity',
     'Código de barras': 'barcode',
+    // Variantes (filas hijas de un producto del mismo archivo).
+    'SKU Padre': 'parent_sku',
+    'Atributo 1': 'attr_name_1',
+    'Valor 1': 'attr_value_1',
+    'Atributo 2': 'attr_name_2',
+    'Valor 2': 'attr_value_2',
+    'Atributo 3': 'attr_name_3',
+    'Valor 3': 'attr_value_3',
   };
 
   private readonly HEADER_TRANSLATIONS: Record<string, string> = {
@@ -168,6 +187,36 @@ export class ProductsBulkService {
     barcode: 'barcode',
     ean: 'barcode',
     gtin: 'barcode',
+    // Variantes: parseFile quita tildes y pasa a minúsculas antes de buscar.
+    'sku padre': 'parent_sku',
+    'sku del padre': 'parent_sku',
+    'sku producto padre': 'parent_sku',
+    'parent sku': 'parent_sku',
+    'parent_sku': 'parent_sku',
+    'atributo 1': 'attr_name_1',
+    'atributo1': 'attr_name_1',
+    'nombre atributo 1': 'attr_name_1',
+    'attribute 1': 'attr_name_1',
+    'valor 1': 'attr_value_1',
+    'valor1': 'attr_value_1',
+    'valor atributo 1': 'attr_value_1',
+    'value 1': 'attr_value_1',
+    'atributo 2': 'attr_name_2',
+    'atributo2': 'attr_name_2',
+    'nombre atributo 2': 'attr_name_2',
+    'attribute 2': 'attr_name_2',
+    'valor 2': 'attr_value_2',
+    'valor2': 'attr_value_2',
+    'valor atributo 2': 'attr_value_2',
+    'value 2': 'attr_value_2',
+    'atributo 3': 'attr_name_3',
+    'atributo3': 'attr_name_3',
+    'nombre atributo 3': 'attr_name_3',
+    'attribute 3': 'attr_name_3',
+    'valor 3': 'attr_value_3',
+    'valor3': 'attr_value_3',
+    'valor atributo 3': 'attr_value_3',
+    'value 3': 'attr_value_3',
     nombre: 'name',
     sku: 'sku',
     'precio base': 'base_price',
@@ -478,18 +527,161 @@ export class ProductsBulkService {
           }
         });
 
-        if (hasData && (product['name'] || product['sku'])) {
+        if (
+          hasData &&
+          (product['name'] || product['sku'] || product['parent_sku'])
+        ) {
+          // Fila real de la hoja (1 = encabezado): el análisis y el commit la
+          // usan para reportar errores aunque la agrupación reordene filas.
+          product[this.ROW_NUMBER_KEY] = i + 1;
           products.push(product);
         }
       }
 
-      return products;
+      return this.groupVariantRows(products);
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
       throw new BadRequestException(
         'Error al procesar el archivo: ' + error.message,
       );
     }
+  }
+
+  /** Texto de una celda ya parseada: vacío si no hay dato o es el marcador NULL. */
+  private cleanCellText(value: unknown): string {
+    if (value === undefined || value === null || value === this.NULL_MARKER) {
+      return '';
+    }
+    return String(value).trim();
+  }
+
+  /** Etiqueta de columna (encabezado de la plantilla) de una clave de DTO. */
+  private columnLabelForKey(key: string): string {
+    for (const [label, mapped] of Object.entries(this.HEADER_MAP)) {
+      if (mapped === key) return label;
+    }
+    return this.CATALOG_ONLY_IGNORED_FIELD_LABELS[key] ?? key;
+  }
+
+  private stripVariantColumns(row: Record<string, any>): void {
+    delete row['parent_sku'];
+    for (const n of this.VARIANT_ATTR_SLOTS) {
+      delete row[`attr_name_${n}`];
+      delete row[`attr_value_${n}`];
+    }
+  }
+
+  /**
+   * Agrupa las filas con `SKU Padre` bajo el producto del archivo cuyo SKU
+   * coincide (sin distinguir mayúsculas; el padre puede venir antes o después).
+   * Una fila-variante sin padre en el archivo (o cuyo padre es a su vez
+   * variante) sale como producto independiente marcado `__orphan_variant` con
+   * un error de celda: el análisis la rechaza y el commit la salta.
+   * Un archivo sin la columna sale igual que antes (más `__row_number`).
+   */
+  private groupVariantRows(rows: any[]): any[] {
+    const parentBySku = new Map<string, any>();
+    for (const row of rows) {
+      if (this.cleanCellText(row['parent_sku'])) continue;
+      const sku = this.cleanCellText(row['sku']).toLowerCase();
+      if (sku && !parentBySku.has(sku)) parentBySku.set(sku, row);
+    }
+
+    const out: any[] = [];
+    for (const row of rows) {
+      const parentSku = this.cleanCellText(row['parent_sku']);
+      if (!parentSku) {
+        this.stripVariantColumns(row);
+        out.push(row);
+        continue;
+      }
+
+      const parent = parentBySku.get(parentSku.toLowerCase());
+      if (!parent) {
+        const orphan: Record<string, any> = { ...row };
+        this.stripVariantColumns(orphan);
+        orphan[this.ORPHAN_VARIANT_KEY] = true;
+        orphan[this.CELL_ERRORS_KEY] = [
+          ...(Array.isArray(row[this.CELL_ERRORS_KEY])
+            ? row[this.CELL_ERRORS_KEY]
+            : []),
+          {
+            code: 'VARIANT_PARENT_NOT_FOUND',
+            message: `El SKU Padre "${parentSku}" no corresponde a un producto de este archivo. El producto padre debe estar en otra fila, sin SKU Padre.`,
+            field: 'parent_sku',
+          },
+        ];
+        out.push(orphan);
+        continue;
+      }
+
+      if (!Array.isArray(parent.variants)) parent.variants = [];
+      parent.variants.push(this.buildVariantFromRow(row, parent));
+    }
+    return out;
+  }
+
+  private buildVariantFromRow(
+    row: Record<string, any>,
+    parent: Record<string, any>,
+  ): Record<string, any> {
+    const attributes: Record<string, string> = {};
+    const values: string[] = [];
+    for (const n of this.VARIANT_ATTR_SLOTS) {
+      const name = this.cleanCellText(row[`attr_name_${n}`]);
+      const value = this.cleanCellText(row[`attr_value_${n}`]);
+      if (name && value) {
+        attributes[name] = value;
+        values.push(value);
+      }
+    }
+
+    // Convención del editor: `<nombre padre> <valor1> <valor2>...`.
+    const name =
+      this.cleanCellText(row['name']) ||
+      `${this.cleanCellText(parent['name'])} ${values.join(' ')}`.trim();
+
+    const variant: Record<string, any> = {
+      sku: this.cleanCellText(row['sku']),
+      name,
+      attributes,
+      [this.ROW_NUMBER_KEY]: row[this.ROW_NUMBER_KEY],
+    };
+    if (row['base_price'] !== undefined && row['base_price'] !== this.NULL_MARKER) {
+      variant['price'] = row['base_price'];
+    }
+    if (typeof row['barcode'] === 'string' && row['barcode'] !== this.NULL_MARKER) {
+      variant['barcode'] = row['barcode'];
+    }
+    if (row['is_on_sale'] !== undefined && row['is_on_sale'] !== this.NULL_MARKER) {
+      variant['is_on_sale'] = this.normalizeBooleanValue(row['is_on_sale']);
+    }
+    if (row['sale_price'] !== undefined && row['sale_price'] !== this.NULL_MARKER) {
+      variant['sale_price'] = row['sale_price'];
+    }
+    if (Array.isArray(row[this.CELL_ERRORS_KEY])) {
+      variant[this.CELL_ERRORS_KEY] = row[this.CELL_ERRORS_KEY];
+    }
+
+    // Columnas de producto con dato que una fila-variante no usa.
+    const applicable = new Set([
+      'name',
+      'sku',
+      'parent_sku',
+      'base_price',
+      'barcode',
+      'is_on_sale',
+      'sale_price',
+    ]);
+    const ignored: string[] = [];
+    for (const key of Object.keys(row)) {
+      if (key.startsWith('__') || applicable.has(key)) continue;
+      if (key.startsWith('attr_name_') || key.startsWith('attr_value_')) continue;
+      ignored.push(this.columnLabelForKey(key));
+    }
+    if (ignored.length > 0) variant[this.IGNORED_FIELDS_KEY] = ignored;
+
+    return variant;
   }
 
   /**
@@ -713,6 +905,26 @@ export class ProductsBulkService {
     );
     const seenBarcodes = new Map<string, { row: number; sku: string }>();
 
+    // 5c. Variantes: una sola consulta con los SKU de variante del archivo.
+    const fileVariantSkus = new Set<string>();
+    for (const p of products) {
+      for (const v of p.variants ?? []) {
+        const sku = this.cleanCellText(v.sku);
+        if (sku) fileVariantSkus.add(sku);
+      }
+    }
+    const variantOwners = await this.loadVariantSkuOwners(
+      Array.from(fileVariantSkus),
+      storeId,
+    );
+    const fileProductSkus = new Set<string>();
+    for (const p of products) {
+      const sku = this.cleanCellText(p.sku).toLowerCase();
+      if (sku) fileProductSkus.add(sku);
+    }
+    const seenVariantSkus = new Map<string, number>(); // sku -> primera fila
+    let totalVariants = 0;
+
     // 6. Analyze each product
     const analysisItems: BulkProductAnalysisItemDto[] = [];
     let ready = 0;
@@ -728,7 +940,9 @@ export class ProductsBulkService {
           : [];
       const parsedBasePrice = parseMoneyCell(product.base_price);
       const item: BulkProductAnalysisItemDto = {
-        row_number: i + 2, // +2 because row 1 is header, data starts at row 2
+        // Fila real de la hoja (la agrupación de variantes ya no la preserva
+        // por posición); `i + 2` solo para filas que no pasaron por parseFile.
+        row_number: products[i][this.ROW_NUMBER_KEY] ?? i + 2,
         name: product.name || '',
         sku: product.sku || '',
         barcode:
@@ -1081,11 +1295,58 @@ export class ProductsBulkService {
       item.modified_fields = modifiedFields;
       item.nulled_fields = nulledFields;
 
+      // Variantes colgadas de este producto (filas con SKU Padre).
+      let variantsHaveErrors = false;
+      let variantsHaveWarnings = false;
+      if (Array.isArray(product.variants) && product.variants.length > 0) {
+        const analyzed = this.analyzeVariants(product.variants, {
+          parentExistingId: item.existing_product_id,
+          parentBasePrice: parsedBasePrice,
+          fileProductSkus,
+          seenVariantSkus,
+          existingProductSkus: skuMap,
+          variantOwners,
+        });
+        item.variants = analyzed;
+        totalVariants += analyzed.length;
+        variantsHaveErrors = analyzed.some((v) => v.status === 'error');
+        variantsHaveWarnings = analyzed.some((v) => v.status === 'warning');
+
+        // `createVariant` exige producto activo: variantes nuevas sobre un
+        // producto existente cuyo Estado del archivo es inactivo fallarían.
+        if (
+          item.existing_product_id !== undefined &&
+          this.isInactiveStateCell(product.state) &&
+          analyzed.some((v) => v.action === 'create')
+        ) {
+          item.errors.push({
+            code: 'VARIANTS_ON_INACTIVE_PRODUCT',
+            message:
+              'No se pueden agregar variantes a un producto inactivo. Activa el producto o quita las variantes nuevas.',
+            field: 'state',
+          });
+        }
+
+        // Multitarifa ⊕ variantes: excluyentes (misma regla que `create`).
+        if (
+          product.has_multiple_price_tiers !== undefined &&
+          product.has_multiple_price_tiers !== this.NULL_MARKER &&
+          this.normalizeBooleanValue(product.has_multiple_price_tiers)
+        ) {
+          item.errors.push({
+            code: 'VARIANTS_WITH_PRICE_TIERS',
+            message:
+              'Un producto no puede usar listas de precio y tener variantes a la vez. Quita las variantes o desactiva "Usa Listas de Precio".',
+            field: 'has_multiple_price_tiers',
+          });
+        }
+      }
+
       // Determine final status
-      if (item.errors.length > 0) {
+      if (item.errors.length > 0 || variantsHaveErrors) {
         item.status = 'error';
         withErrors++;
-      } else if (item.warnings.length > 0) {
+      } else if (item.warnings.length > 0 || variantsHaveWarnings) {
         item.status = 'warning';
         withWarnings++;
       } else {
@@ -1109,11 +1370,295 @@ export class ProductsBulkService {
     return {
       session_id: sessionId,
       total_products: products.length,
+      total_variants: totalVariants,
       ready,
       with_warnings: withWarnings,
       with_errors: withErrors,
       products: analysisItems,
     };
+  }
+
+  /**
+   * Resuelve a qué producto activo de la tienda pertenece cada SKU de variante
+   * del archivo: UNA consulta sobre el set completo. Un producto archivado no
+   * ocupa el SKU (misma regla que el código de barras).
+   */
+  private async loadVariantSkuOwners(
+    skus: string[],
+    storeId: number,
+  ): Promise<Map<string, { product_id: number; product_name?: string }>> {
+    const owners = new Map<string, { product_id: number; product_name?: string }>();
+    if (skus.length === 0) return owners;
+    const rows = await this.prisma.product_variants.findMany({
+      where: {
+        sku: { in: skus },
+        products: { store_id: storeId, state: { not: 'archived' } },
+      },
+      select: {
+        sku: true,
+        product_id: true,
+        products: { select: { name: true } },
+      },
+    });
+    for (const r of rows || []) {
+      owners.set(String(r.sku).toLowerCase(), {
+        product_id: r.product_id,
+        product_name: r.products?.name,
+      });
+    }
+    return owners;
+  }
+
+  /** Clave normalizada (sin tildes, minúsculas) de una combinación de atributos. */
+  private variantAttributesKey(attributes: Record<string, string>): string {
+    const norm = (t: string) =>
+      t
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    return JSON.stringify(
+      Object.entries(attributes)
+        .map(([k, v]) => [norm(k), norm(String(v))])
+        .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    );
+  }
+
+  /**
+   * Validación de variantes que NO depende de la base de datos: atributos,
+   * combinación repetida, SKU (vacío / repetido en el archivo o igual al de un
+   * producto del archivo), precio, oferta y errores de celda de la fila.
+   * La comparten el análisis y el commit, para que un archivo que el análisis
+   * rechaza no se pueda crear igual. `onSku` deja al llamador insertar sus
+   * chequeos contra la BD justo después de los de SKU (orden de errores estable).
+   */
+  private validateVariantRows(
+    variants: any[],
+    ctx: {
+      parentBasePrice: number | null;
+      fileProductSkus: Set<string>;
+      seenVariantSkus: Map<string, number>;
+      onSku?: (
+        skuLower: string,
+        errors: (string | BulkValidationMessage)[],
+      ) => void;
+    },
+  ): {
+    sku: string;
+    attributes: Record<string, string>;
+    price: number | null;
+    rowNumber: number;
+    errors: (string | BulkValidationMessage)[];
+    warnings: (string | BulkValidationMessage)[];
+  }[] {
+    const seenCombos = new Set<string>();
+    const out: ReturnType<ProductsBulkService['validateVariantRows']> = [];
+
+    for (const v of variants) {
+      const errors: (string | BulkValidationMessage)[] = [];
+      const warnings: (string | BulkValidationMessage)[] = [];
+      const sku = this.cleanCellText(v.sku);
+      const attributes: Record<string, string> =
+        v.attributes && typeof v.attributes === 'object' ? v.attributes : {};
+      const rowNumber: number = v[this.ROW_NUMBER_KEY] ?? 0;
+
+      if (Object.keys(attributes).length === 0) {
+        errors.push({
+          code: 'VARIANT_NO_ATTRIBUTES',
+          message:
+            'La variante necesita al menos un par Atributo/Valor (por ejemplo Color = Negro).',
+          field: 'attributes',
+        });
+      } else {
+        const combo = this.variantAttributesKey(attributes);
+        if (seenCombos.has(combo)) {
+          errors.push({
+            code: 'VARIANT_DUPLICATE_ATTRIBUTES',
+            message:
+              'Otra variante de este producto tiene la misma combinación de atributos.',
+            field: 'attributes',
+          });
+        } else {
+          seenCombos.add(combo);
+        }
+      }
+
+      if (!sku) {
+        errors.push({
+          code: 'VARIANT_SKU_REQUIRED',
+          message: 'El SKU de la variante es obligatorio.',
+          field: 'sku',
+        });
+      } else {
+        const skuLower = sku.toLowerCase();
+        const firstRow = ctx.seenVariantSkus.get(skuLower);
+        if (firstRow !== undefined) {
+          errors.push({
+            code: 'VARIANT_DUPLICATE_SKU',
+            message: `SKU de variante repetido en el archivo (primera aparición en fila ${firstRow}).`,
+            field: 'sku',
+          });
+        } else {
+          ctx.seenVariantSkus.set(skuLower, rowNumber);
+          if (ctx.fileProductSkus.has(skuLower)) {
+            errors.push({
+              code: 'VARIANT_DUPLICATE_SKU',
+              message:
+                'El SKU de la variante coincide con el SKU de un producto del archivo.',
+              field: 'sku',
+            });
+          }
+        }
+        ctx.onSku?.(skuLower, errors);
+      }
+
+      // Precio: vacío = hereda del padre; si viene debe ser un número > 0.
+      const cellErrors: { code: string; message: string; field?: string }[] =
+        Array.isArray(v[this.CELL_ERRORS_KEY]) ? v[this.CELL_ERRORS_KEY] : [];
+      for (const cellError of cellErrors) errors.push(cellError);
+      let price: number | null = null;
+      if (v.price !== undefined) {
+        const parsed = parseMoneyCell(v.price);
+        if (parsed === null || parsed <= 0) {
+          if (!cellErrors.some((e) => e.field === 'base_price')) {
+            errors.push({
+              code: 'INVALID_PRICE',
+              message:
+                'El precio de la variante debe ser un número mayor que 0, o dejarse vacío para heredar el del producto.',
+              field: 'price',
+            });
+          }
+        } else {
+          price = parsed;
+        }
+      }
+      if (v.is_on_sale === true) {
+        const sale =
+          v.sale_price === undefined ? null : parseMoneyCell(v.sale_price);
+        const reference = price ?? ctx.parentBasePrice;
+        if (
+          sale === null ||
+          sale <= 0 ||
+          (reference !== null && sale >= reference)
+        ) {
+          errors.push({
+            code: 'VARIANT_SALE_PRICE_INVALID',
+            message:
+              'Una variante en oferta necesita un precio de oferta mayor que 0 y menor que su precio.',
+            field: 'sale_price',
+          });
+        }
+      }
+
+      const ignored: string[] = Array.isArray(v[this.IGNORED_FIELDS_KEY])
+        ? v[this.IGNORED_FIELDS_KEY]
+        : [];
+      if (ignored.length > 0) {
+        warnings.push({
+          code: 'VARIANT_IGNORED_FIELDS',
+          message: `Se ignoraron columnas de producto en una fila-variante (${ignored.join(', ')}). Se definen en la fila del producto padre.`,
+          field: ignored[0],
+        });
+      }
+
+      out.push({ sku, attributes, price, rowNumber, errors, warnings });
+    }
+    return out;
+  }
+
+  /**
+   * Regla ÚNICA de colisión de SKU de variante contra la BD (análisis y
+   * commit): el SKU no puede pertenecer a un producto activo de la tienda ni a
+   * una variante de OTRO producto. Una variante del MISMO producto (padre
+   * existente) con ese SKU no es colisión: es el upsert por SKU.
+   */
+  private buildVariantSkuDbChecks(ctx: {
+    parentExistingId?: number;
+    existingProductSkus: Map<string, { id: number; archived: boolean }>;
+    variantOwners: Map<string, { product_id: number; product_name?: string }>;
+  }) {
+    const isTakenByProduct = (skuLower: string) => {
+      const owner = ctx.existingProductSkus.get(skuLower);
+      return !!owner && !owner.archived;
+    };
+    const isOwnVariant = (skuLower: string) => {
+      const owner = ctx.variantOwners.get(skuLower);
+      return (
+        !!owner &&
+        ctx.parentExistingId !== undefined &&
+        owner.product_id === ctx.parentExistingId
+      );
+    };
+    const onSku = (
+      skuLower: string,
+      errors: (string | BulkValidationMessage)[],
+    ) => {
+      if (isTakenByProduct(skuLower)) {
+        errors.push({
+          code: 'VARIANT_SKU_TAKEN',
+          message: 'El SKU de la variante ya lo usa un producto de la tienda.',
+          field: 'sku',
+        });
+        return;
+      }
+      const variantOwner = ctx.variantOwners.get(skuLower);
+      if (variantOwner && !isOwnVariant(skuLower)) {
+        const ownerName = variantOwner.product_name
+          ? ` del producto "${variantOwner.product_name}"`
+          : ' de otro producto';
+        errors.push({
+          code: 'VARIANT_SKU_TAKEN',
+          message: `El SKU de la variante ya lo usa una variante${ownerName} de la tienda.`,
+          field: 'sku',
+        });
+      }
+    };
+    return { isTakenByProduct, isOwnVariant, onSku };
+  }
+
+  private analyzeVariants(
+    variants: any[],
+    ctx: {
+      parentExistingId?: number;
+      parentBasePrice: number | null;
+      fileProductSkus: Set<string>;
+      seenVariantSkus: Map<string, number>;
+      existingProductSkus: Map<string, { id: number; archived: boolean }>;
+      variantOwners: Map<string, { product_id: number; product_name?: string }>;
+    },
+  ): BulkVariantAnalysisItemDto[] {
+    const { isTakenByProduct, isOwnVariant, onSku } =
+      this.buildVariantSkuDbChecks(ctx);
+
+    const validated = this.validateVariantRows(variants, {
+      parentBasePrice: ctx.parentBasePrice,
+      fileProductSkus: ctx.fileProductSkus,
+      seenVariantSkus: ctx.seenVariantSkus,
+      onSku,
+    });
+
+    return validated.map((r, i) => {
+      const skuLower = r.sku.toLowerCase();
+      return {
+        row_number: r.rowNumber,
+        sku: r.sku,
+        name: variants[i].name || '',
+        attributes: r.attributes,
+        price: r.price,
+        action:
+          r.sku && !isTakenByProduct(skuLower) && isOwnVariant(skuLower)
+            ? 'update'
+            : 'create',
+        status:
+          r.errors.length > 0
+            ? 'error'
+            : r.warnings.length > 0
+              ? 'warning'
+              : 'ready',
+        warnings: r.warnings,
+        errors: r.errors,
+      };
+    });
   }
 
   /**
@@ -1303,6 +1848,15 @@ export class ProductsBulkService {
       'Unidad de stock',
       'Unidad de compra',
       'Precio por N unidades',
+      // Variantes: una fila con `SKU Padre` cuelga del producto de ese SKU.
+      // Van al final, así que una plantilla vieja sigue sirviendo igual.
+      'SKU Padre',
+      'Atributo 1',
+      'Valor 1',
+      'Atributo 2',
+      'Valor 2',
+      'Atributo 3',
+      'Valor 3',
     ];
   }
 
@@ -1509,6 +2063,37 @@ export class ProductsBulkService {
               'En Oferta': 'sí',
               'Precio Oferta': 19000,
             },
+            // Familia con variantes: el padre define el producto; cada fila con
+            // `SKU Padre` es una variante (SKU y precio propios; sin precio
+            // hereda el del padre).
+            {
+              Nombre: 'Camiseta Básica',
+              SKU: 'CAM-BAS',
+              Tipo: 'físico',
+              Estado: 'activo',
+              'Controla Inventario': 'sí',
+              'Precio Venta': 45000,
+              Descripción: 'Camiseta de algodón en varios colores y tallas.',
+              Categorías: 'Ropa',
+              'Disponible Ecommerce': 'sí',
+            },
+            {
+              'SKU Padre': 'CAM-BAS',
+              SKU: 'CAM-BAS-NEG-M',
+              'Atributo 1': 'Color',
+              'Valor 1': 'Negro',
+              'Atributo 2': 'Talla',
+              'Valor 2': 'M',
+            },
+            {
+              'SKU Padre': 'CAM-BAS',
+              SKU: 'CAM-BAS-BLA-L',
+              'Precio Venta': 49000,
+              'Atributo 1': 'Color',
+              'Valor 1': 'Blanco',
+              'Atributo 2': 'Talla',
+              'Valor 2': 'L',
+            },
           ];
 
     // Cada columna es texto. `key === header` preserva EXACTAMENTE los
@@ -1645,7 +2230,17 @@ export class ProductsBulkService {
               },
               product_tax_assignments: { select: { tax_category_id: true } },
               product_images: { where: { is_main: true }, take: 1 },
-              product_variants: { select: { id: true } },
+              product_variants: {
+                select: {
+                  id: true,
+                  sku: true,
+                  name: true,
+                  barcode: true,
+                  price_override: true,
+                  attributes: true,
+                },
+                orderBy: { id: 'asc' },
+              },
               stock_levels: {
                 select: {
                   product_variant_id: true,
@@ -1729,7 +2324,21 @@ export class ProductsBulkService {
           'Cantidad Actual': totalStock,
           'Tiene Imagen': hasImage ? 'sí' : 'no',
         });
-      }
+
+          // Una fila por variante justo después de su padre: round-trip con la
+          // carga masiva (SKU Padre + hasta 3 pares Atributo/Valor).
+          if (hasVariants && Array.isArray(p.product_variants)) {
+            if (!p.sku) {
+              this.logger.warn(
+                `[exportCurrentProductsAsTemplate] product ${p.id} has variants but no SKU: variant rows omitted (SKU Padre would be empty)`,
+              );
+            } else {
+              for (const v of p.product_variants) {
+                rows.push(this.buildVariantExportRow(p, v));
+              }
+            }
+          }
+        }
 
       if (products.length < CHUNK_SIZE) break;
       cursor = products[products.length - 1].id;
@@ -1862,6 +2471,246 @@ export class ProductsBulkService {
     }
   }
 
+  /** Producto del archivo con `Usa Listas de Precio` = sí (ignora NULL). */
+  private fileEnablesPriceTiers(product: any): boolean {
+    const v = product?.has_multiple_price_tiers;
+    return (
+      v !== undefined &&
+      v !== null &&
+      v !== this.NULL_MARKER &&
+      this.normalizeBooleanValue(v)
+    );
+  }
+
+  private isInactiveStateCell(state: unknown): boolean {
+    if (typeof state !== 'string') return false;
+    return ['inactivo', 'inactive', 'deshabilitado'].includes(
+      state.trim().toLowerCase(),
+    );
+  }
+
+  /**
+   * Datos de BD para validar variantes en el commit con la MISMA regla que el
+   * análisis: dueños de SKU de variante (1 consulta) y productos de la tienda
+   * por SKU (1 consulta: SKUs de variante para VARIANT_SKU_TAKEN + SKUs de los
+   * padres para saber el id existente). Sin variantes parseadas en la página no
+   * consulta nada.
+   */
+  private async loadVariantCommitContext(
+    products: any[],
+    storeId: number,
+  ): Promise<{
+    existingProductSkus: Map<string, { id: number; archived: boolean }>;
+    variantOwners: Map<string, { product_id: number; product_name?: string }>;
+  } | null> {
+    const variantSkus = new Set<string>();
+    const parentSkus = new Set<string>();
+    for (const p of products) {
+      const vs = (Array.isArray(p?.variants) ? p.variants : []).filter(
+        (v: any) => v?.[this.ROW_NUMBER_KEY] !== undefined,
+      );
+      if (vs.length === 0) continue;
+      const parentSku = this.cleanCellText(p.sku);
+      if (parentSku) parentSkus.add(parentSku);
+      for (const v of vs) {
+        const sku = this.cleanCellText(v.sku);
+        if (sku) variantSkus.add(sku);
+      }
+    }
+    if (variantSkus.size === 0) return null;
+
+    const variantOwners = await this.loadVariantSkuOwners(
+      Array.from(variantSkus),
+      storeId,
+    );
+    const rows = await this.prisma.products.findMany({
+      where: {
+        store_id: storeId,
+        sku: { in: Array.from(new Set([...variantSkus, ...parentSkus])) },
+      },
+      select: { id: true, sku: true, state: true },
+    });
+    const existingProductSkus = new Map<
+      string,
+      { id: number; archived: boolean }
+    >();
+    for (const r of rows || []) {
+      if (!r.sku) continue;
+      const key = String(r.sku).toLowerCase();
+      const archived = r.state === 'archived';
+      const prev = existingProductSkus.get(key);
+      // Gana el no archivado (el commit actualiza ese).
+      if (!prev || (prev.archived && !archived)) {
+        existingProductSkus.set(key, { id: r.id, archived });
+      }
+    }
+    return { existingProductSkus, variantOwners };
+  }
+
+  /**
+   * Rechaza (BadRequestException con el primer error, prefijado con la fila de
+   * la variante) un producto cuyas variantes del archivo no pasan la validación
+   * pura. Solo valida variantes parseadas (llevan `__row_number`); las que
+   * llegan por el API legacy las valida `ProductsService`. Incluye multitarifa
+   * del archivo ⊕ variantes.
+   */
+  private assertFileVariantsValid(
+    product: any,
+    fileProductSkus: Set<string>,
+    seenVariantSkus: Map<string, number>,
+    dbCtx?: {
+      existingProductSkus: Map<string, { id: number; archived: boolean }>;
+      variantOwners: Map<
+        string,
+        { product_id: number; product_name?: string }
+      >;
+    } | null,
+  ): void {
+    const variants = (
+      Array.isArray(product?.variants) ? product.variants : []
+    ).filter((v: any) => v?.[this.ROW_NUMBER_KEY] !== undefined);
+    if (variants.length === 0) return;
+
+    if (this.fileEnablesPriceTiers(product)) {
+      throw new BadRequestException(
+        'Un producto no puede usar listas de precio y tener variantes a la vez.',
+      );
+    }
+
+    // Mismo chequeo contra la BD que el análisis. El padre existente (activo)
+    // permite que sus propias variantes se upserteen por SKU sin colisión.
+    const parentOwner = dbCtx?.existingProductSkus.get(
+      this.cleanCellText(product.sku).toLowerCase(),
+    );
+    const onSku = dbCtx
+      ? this.buildVariantSkuDbChecks({
+          parentExistingId:
+            parentOwner && !parentOwner.archived ? parentOwner.id : undefined,
+          existingProductSkus: dbCtx.existingProductSkus,
+          variantOwners: dbCtx.variantOwners,
+        }).onSku
+      : undefined;
+
+    const validated = this.validateVariantRows(variants, {
+      parentBasePrice: parseMoneyCell(product.base_price),
+      fileProductSkus,
+      seenVariantSkus,
+      onSku,
+    });
+    for (const r of validated) {
+      const first = r.errors[0];
+      if (first) {
+        throw new BadRequestException(
+          `Variante fila ${r.rowNumber}: ${typeof first === 'string' ? first : first.message}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * `createVariant` exige producto ACTIVE y el update + upsert no son atómicos:
+   * si el estado resultante (Estado del archivo, o el actual si no lo trae) no
+   * es activo y la fila trae variantes NUEVAS, falla la fila ANTES del update.
+   * (No replica el bloqueo por insumo de receta/reserva de `createVariant`.)
+   */
+  private async assertNoNewVariantsOnInactive(
+    existingProduct: { id: number; state: any },
+    productData: any,
+  ): Promise<void> {
+    const variants = Array.isArray(productData?.variants)
+      ? productData.variants
+      : [];
+    if (variants.length === 0) return;
+    const resulting =
+      typeof productData.state === 'string' && productData.state
+        ? productData.state
+        : existingProduct.state;
+    if (resulting === 'active') return;
+
+    const current = await this.prisma.product_variants.findMany({
+      where: { product_id: existingProduct.id },
+      select: { sku: true },
+    });
+    const have = new Set(
+      (current || []).map((v: any) => String(v.sku).toLowerCase()),
+    );
+    const hasNew = variants.some(
+      (v: any) => !have.has(this.cleanCellText(v.sku).toLowerCase()),
+    );
+    if (hasNew) {
+      throw new BadRequestException(
+        'No se pueden agregar variantes a un producto inactivo.',
+      );
+    }
+  }
+
+  /**
+   * Guarda multitarifa ⊕ variantes para un producto EXISTENTE al que el
+   * archivo le agrega/actualiza variantes. `create` ya la aplica en su flujo;
+   * `update` no ve las variantes, y `createVariant` no la aplica.
+   */
+  private async assertVariantsAllowedOnExisting(
+    productId: number,
+    productData: any,
+  ): Promise<void> {
+    if (!Array.isArray(productData?.variants) || productData.variants.length === 0) {
+      return;
+    }
+    // El archivo apaga multitarifa explícitamente: el update lo hará antes.
+    const v = productData.has_multiple_price_tiers;
+    if (
+      v !== undefined &&
+      v !== this.NULL_MARKER &&
+      !this.normalizeBooleanValue(v)
+    ) {
+      return;
+    }
+    await assertVariantsAllowed(this.prisma as any, productId, {
+      action: 'bulk_upsert_variants',
+    });
+  }
+
+  /** Fila de export de una variante (columnas de plantilla; el resto vacío). */
+  private buildVariantExportRow(
+    parent: { id: number; sku: string },
+    variant: {
+      sku: string;
+      name?: string | null;
+      barcode?: string | null;
+      price_override?: unknown;
+      attributes?: unknown;
+    },
+  ): Record<string, any> {
+    const attrs =
+      variant.attributes &&
+      typeof variant.attributes === 'object' &&
+      !Array.isArray(variant.attributes)
+        ? Object.entries(variant.attributes as Record<string, unknown>)
+        : [];
+    if (attrs.length > this.VARIANT_ATTR_SLOTS.length) {
+      this.logger.warn(
+        `[exportCurrentProductsAsTemplate] variant ${variant.sku} of product ${parent.id} has ${attrs.length} attributes: only the first ${this.VARIANT_ATTR_SLOTS.length} are exported`,
+      );
+    }
+    const row: Record<string, any> = {
+      'SKU Padre': parent.sku,
+      SKU: variant.sku,
+      Nombre: variant.name ?? '',
+      'Precio Venta':
+        variant.price_override !== null && variant.price_override !== undefined
+          ? Number(variant.price_override)
+          : '',
+      'Código de barras': variant.barcode ?? '',
+    };
+    this.VARIANT_ATTR_SLOTS.forEach((n, idx) => {
+      const pair = attrs[idx];
+      if (!pair) return;
+      row[`Atributo ${n}`] = pair[0];
+      row[`Valor ${n}`] = String(pair[1] ?? '');
+    });
+    return row;
+  }
+
   /**
    * Procesa la carga masiva de productos
    */
@@ -1894,11 +2743,49 @@ export class ProductsBulkService {
     const results: BulkUploadItemResultDto[] = [];
     let successful = 0;
     let failed = 0;
+    let skipped = 0;
+
+    // Alcance de la validación de variantes en commit: el lote recibido (la
+    // página) para duplicados dentro del archivo. Entre páginas, y contra el
+    // resto de la tienda, el SKU se verifica contra la BD con la misma regla
+    // del análisis (la BD solo tiene @@unique([product_id, sku])).
+    const fileProductSkus = new Set<string>();
+    for (const p of products) {
+      const sku = this.cleanCellText((p as any).sku).toLowerCase();
+      if (sku) fileProductSkus.add(sku);
+    }
+    const seenVariantSkus = new Map<string, number>();
+    const variantDbCtx = await this.loadVariantCommitContext(
+      products as any[],
+      storeId,
+    );
 
     for (let rowIndex = 0; rowIndex < products.length; rowIndex++) {
       const productData = products[rowIndex];
-      const rowNumber = rowOffset + rowIndex + 2; // header = fila 1; rowOffset = página de la sesión
+      // Fila real de la hoja si el producto viene de parseFile (la agrupación
+      // de variantes rompe la posición); si no, posición + rowOffset de la
+      // página de la sesión (header = fila 1).
+      const rowNumber =
+        (productData as any)[this.ROW_NUMBER_KEY] ??
+        rowOffset + rowIndex + 2;
       try {
+        // Variante huérfana (su SKU Padre no está en el archivo): el análisis
+        // ya la marcó como error; el commit no crea un producto con ella.
+        if ((productData as any)[this.ORPHAN_VARIANT_KEY]) {
+          results.push({
+            row_number: rowNumber,
+            product_name: productData.name || undefined,
+            sku: productData.sku || undefined,
+            product: null,
+            status: 'skipped',
+            message:
+              'Fila omitida: su SKU Padre no corresponde a un producto del archivo.',
+            error_code: 'VARIANT_PARENT_NOT_FOUND',
+          });
+          skipped++;
+          continue;
+        }
+
         // Celda de código de barras inválida (notación científica / >64):
         // se rechaza la fila en vez de crearla sin el código.
         const barcodeCellError = (
@@ -1909,6 +2796,16 @@ export class ProductsBulkService {
         if (barcodeCellError) {
           throw new BadRequestException(barcodeCellError.message);
         }
+
+        // Variantes del archivo: misma validación pura que el análisis. El
+        // commit procesa todo el archivo de la sesión (no solo filas 'ready'),
+        // así que sin esto se crearían variantes sin atributos o repetidas.
+        this.assertFileVariantsValid(
+          productData as any,
+          fileProductSkus,
+          seenVariantSkus,
+          variantDbCtx,
+        );
 
         const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(
           productData as any,
@@ -1968,10 +2865,27 @@ export class ProductsBulkService {
           });
         } else if (existingProduct) {
           // Actualizar producto existente (sparse update: solo campos presentes)
+          // Multi-tarifa ⊕ variantes: `update` no ve las variantes (se upsertan
+          // aparte), así que la guarda se aplica aquí, antes de tocar nada.
+          await this.assertVariantsAllowedOnExisting(
+            existingProduct.id,
+            productData,
+          );
+          await this.assertNoNewVariantsOnInactive(
+            existingProduct,
+            productData,
+          );
           const updateProductDto = this.mapToUpdateProductDto(productData);
           resultProduct = await this.productsService.update(
             existingProduct.id,
             updateProductDto,
+          );
+
+          // Variantes del archivo: upsert por SKU, sin borrar las ausentes.
+          await this.upsertVariantsBySku(
+            existingProduct.id,
+            productData.variants,
+            productData.base_price,
           );
 
           results.push({
@@ -1981,43 +2895,21 @@ export class ProductsBulkService {
             message: `Producto con SKU ${productData.sku} actualizado exitosamente`,
           });
         } else {
-          // Crear nuevo producto
+          // Crear nuevo producto. Las variantes viajan DENTRO del DTO de
+          // create: `ProductsService.create` las persiste en su misma
+          // transacción (padre + variantes son una unidad).
           const createProductDto = this.mapToCreateProductDto(
             productData,
             storeId,
           );
-          let createdId: number | null = null;
-          try {
-            resultProduct = await this.productsService.create(createProductDto);
-            createdId = resultProduct.id;
+          resultProduct = await this.productsService.create(createProductDto);
 
-            // Variantes
-            if (productData.variants && productData.variants.length > 0) {
-              await this.processProductVariants(
-                createdId as unknown as number,
-                productData.variants,
-              );
-            }
-
-            results.push({
-              product: resultProduct,
-              status: 'success',
-              action: 'create',
-              message: 'Producto creado exitosamente',
-            });
-          } catch (createErr) {
-            if (createdId) {
-              await this.prisma.products
-                .delete({ where: { id: createdId } })
-                .catch((e) =>
-                  this.logger.error(
-                    `Cleanup failed for product ${createdId}`,
-                    e?.stack || e,
-                  ),
-                );
-            }
-            throw createErr;
-          }
+          results.push({
+            product: resultProduct,
+            status: 'success',
+            action: 'create',
+            message: 'Producto creado exitosamente',
+          });
         }
 
         successful++;
@@ -2111,7 +3003,7 @@ export class ProductsBulkService {
       total_processed: products.length,
       successful,
       failed,
-      skipped: 0,
+      skipped,
       results,
     };
   }
@@ -2618,7 +3510,97 @@ export class ProductsBulkService {
           : product.tax_category_ids;
     }
 
+    const variantDtos = this.buildVariantDtos(
+      (product as any).variants,
+      product.base_price,
+    );
+    if (variantDtos.length > 0) dto.variants = variantDtos;
+
     return dto;
+  }
+
+  /**
+   * Convierte las variantes parseadas (o las del API legacy) en DTOs de
+   * variante: descarta las claves internas `__*`, y traduce el `price` del
+   * archivo a `price_override` solo si difiere del precio del padre (sin
+   * precio, o igual al del padre, la variante hereda y no manda override).
+   * Una celda de variante inválida (p. ej. código de barras) rechaza el
+   * producto completo.
+   */
+  private buildVariantDtos(
+    variants: any[] | undefined,
+    parentBasePrice: unknown,
+  ): any[] {
+    if (!Array.isArray(variants) || variants.length === 0) return [];
+    const parentPrice = parseMoneyCell(parentBasePrice);
+
+    return variants.map((variant) => {
+      const cellError = (
+        Array.isArray(variant?.[this.CELL_ERRORS_KEY])
+          ? variant[this.CELL_ERRORS_KEY]
+          : []
+      )[0];
+      if (cellError) {
+        throw new BadRequestException(
+          `Variante ${variant.sku || ''} (fila ${variant[this.ROW_NUMBER_KEY] ?? '?'}): ${cellError.message}`,
+        );
+      }
+
+      const { price, ...rest } = variant;
+      const dto: Record<string, any> = { ...rest };
+      for (const key of Object.keys(dto)) {
+        if (key.startsWith('__')) delete dto[key];
+      }
+      if (
+        dto.price_override === undefined &&
+        price !== undefined &&
+        price !== null
+      ) {
+        const parsed = parseMoneyCell(price);
+        if (parsed !== null && parsed !== parentPrice) {
+          dto.price_override = parsed;
+        }
+      }
+      return dto;
+    });
+  }
+
+  /**
+   * Upsert de variantes por SKU sobre un producto existente (activo o
+   * reactivado): actualiza las que ya existen y crea las nuevas. Las variantes
+   * que el archivo no trae NO se tocan (`ProductsService.update` con
+   * `variants` las borraría, por eso no se usa).
+   */
+  private async upsertVariantsBySku(
+    productId: number,
+    variants: any[] | undefined,
+    parentBasePrice: unknown,
+  ): Promise<void> {
+    const dtos = this.buildVariantDtos(variants, parentBasePrice);
+    if (dtos.length === 0) return;
+
+    const currentVariants = await this.prisma.product_variants.findMany({
+      where: { product_id: productId },
+      select: { id: true, sku: true },
+    });
+    const bySku = new Map<string, number>();
+    for (const v of currentVariants || []) {
+      bySku.set(String(v.sku).toLowerCase(), v.id);
+    }
+    for (const dto of dtos) {
+      const variantId = dto.sku
+        ? bySku.get(String(dto.sku).toLowerCase())
+        : undefined;
+      if (variantId) {
+        const { sku: _sku, ...fields } = dto;
+        // Sin override (precio vacío o igual al del padre) la variante hereda:
+        // se limpia un override previo. En creación no hace falta.
+        if (fields.price_override === undefined) fields.price_override = null;
+        await this.productsService.updateVariant(variantId, fields as any);
+      } else {
+        await this.productsService.createVariant(productId, dto as any);
+      }
+    }
   }
 
   /**
@@ -2632,10 +3614,13 @@ export class ProductsBulkService {
    * El stock no se toca (al archivar quedó en 0).
    */
   private mapToReactivateProductDto(product: BulkProductItemDto): any {
-    const { store_id: _omit, ...fromFile } = this.mapToCreateProductDto(
-      product,
-      0,
-    );
+    // `variants` se queda fuera: el update no las acepta (borraría las
+    // ausentes); se emparejan por SKU aparte en `reactivateArchivedProduct`.
+    const {
+      store_id: _omit,
+      variants: _variants,
+      ...fromFile
+    } = this.mapToCreateProductDto(product, 0);
     const defaults: Record<string, any> = {
       barcode: null,
       description: null,
@@ -2742,26 +3727,11 @@ export class ProductsBulkService {
 
       // Variantes del archivo: emparejar por SKU con las del producto (cualquier
       // estado). Las que el archivo no trae no se tocan.
-      if (productData.variants && productData.variants.length > 0) {
-        const currentVariants = await this.prisma.product_variants.findMany({
-          where: { product_id: existing.id },
-          select: { id: true, sku: true },
-        });
-        const bySku = new Map<string, number>();
-        for (const v of currentVariants || []) {
-          bySku.set(String(v.sku).toLowerCase(), v.id);
-        }
-        for (const variantData of productData.variants as any[]) {
-          const variantId = variantData?.sku
-            ? bySku.get(String(variantData.sku).toLowerCase())
-            : undefined;
-          if (variantId) {
-            await this.productsService.updateVariant(variantId, variantData);
-          } else {
-            await this.productsService.createVariant(existing.id, variantData);
-          }
-        }
-      }
+      await this.upsertVariantsBySku(
+        existing.id,
+        productData.variants,
+        productData.base_price,
+      );
     } catch (err) {
       await this.prisma.products
         .updateMany({
@@ -2918,14 +3888,5 @@ export class ProductsBulkService {
     }
 
     return dto;
-  }
-
-  private async processProductVariants(
-    productId: number,
-    variants: any[],
-  ): Promise<void> {
-    for (const variantData of variants) {
-      await this.productsService.createVariant(productId, variantData);
-    }
   }
 }

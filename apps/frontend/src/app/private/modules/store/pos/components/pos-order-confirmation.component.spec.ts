@@ -113,6 +113,10 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
   });
 
   beforeEach(async () => {
+    storeSettingsSignal.set({
+      invoicing: { pos: { auto_emit: true } },
+      receipts: { print_pos_ticket: true },
+    });
     mockAuthFacade = {
       getCurrentUser: jasmine.createSpy('getCurrentUser').and.returnValue({ first_name: 'Cajero', last_name: 'Test' }),
       printsVatBreakdown: signal(true),
@@ -156,6 +160,7 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     };
 
     mockDispatchTicketPrint = {
+      printFromPos: jasmine.createSpy('printFromPos').and.returnValue(Promise.resolve(null)),
       printDispatchTicket: jasmine.createSpy('printDispatchTicket').and.returnValue(Promise.resolve(true)),
     };
 
@@ -276,7 +281,9 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
   });
 
   it('2. Venta con FE encola auto-impresion esperando a la DIAN', async () => {
-    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
+    // El ticket provisional puede tener auto-print OFF aunque la FE final sí
+    // lo tenga; la espera fiscal no debe depender de ese preflight.
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(false));
     activeFiscalAreasSignal.set(['invoicing']);
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', sampleOrder);
@@ -284,7 +291,10 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(true);
+    await (component as any).maybeAutoPrint();
+    expect(component.awaitingFiscalPrint()).toBe(true);
     expect(mockTicketService.printTicket).not.toHaveBeenCalled();
+    expect(mockTicketService.shouldAutoPrint).not.toHaveBeenCalled();
   });
 
   it('3. Venta con FE que recibe "issued" imprime Factura Electronica y notifica exito', async () => {
@@ -313,10 +323,11 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     };
 
     component.onFiscalStatus(fiscalIssued);
+    component.onFiscalStatus(fiscalIssued); // polling/callback duplicado
     await fixture.whenStable();
 
     expect(component.awaitingFiscalPrint()).toBe(false);
-    expect(mockTicketService.printTicket).toHaveBeenCalled();
+    expect(mockTicketService.printTicket).toHaveBeenCalledTimes(1);
     expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('automatic');
     expect(mockToastService.success).toHaveBeenCalledWith('Factura FE-101 aceptada por la DIAN');
   });
@@ -435,6 +446,21 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
 
     expect(mockTicketService.shouldAutoPrint).toHaveBeenCalledWith(1001);
     expect(mockTicketService.printTicket).not.toHaveBeenCalled();
+  });
+
+  it('FE auto-emit OFF vuelve al gate del ticket y no produce éxito falso', async () => {
+    activeFiscalAreasSignal.set(['invoicing']);
+    storeSettingsSignal.set({ invoicing: { pos: { auto_emit: false } }, receipts: { print_pos_ticket: true } });
+    mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(false));
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.awaitingFiscalPrint()).toBe(false);
+    expect(mockTicketService.shouldAutoPrint).toHaveBeenCalledWith(1001);
+    expect(mockTicketService.printTicket).not.toHaveBeenCalled();
+    expect(mockToastService.success).not.toHaveBeenCalledWith('Ticket enviado a impresión');
   });
 
   it('si el gate se apaga mientras espera FE, manda trigger automatic y no muestra falso éxito/error', async () => {
@@ -738,5 +764,47 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     component.onDispatchAddressSubmit({ address_line1: 'Calle 9' } as any);
     expect(component.showShippingAddressModal()).toBeFalse();
     expect(component.fullDispatchOrder()?.id).toBe(1001);
+  });
+
+  it('delegates automatic dispatch-ticket printing to the confirmation-origin policy', async () => {
+    const order = {
+      ...sampleOrder,
+      delivery_type: 'dine_in',
+      grand_total: '119.25',
+      total_paid: '119.25',
+      remaining_balance: '0',
+    };
+    fixture.componentRef.setInput('orderData', order);
+    fixture.detectChanges();
+
+    await (component as any).printDispatchTicketIfNeeded('automatic');
+
+    expect(mockDispatchTicketPrint.printFromPos).toHaveBeenCalledWith(
+      jasmine.objectContaining({ orderId: order.id }),
+      jasmine.objectContaining({
+        origin: 'confirmation',
+        order,
+        counterEnabled: false,
+      }),
+    );
+    expect(mockDispatchTicketPrint.printDispatchTicket).not.toHaveBeenCalled();
+  });
+
+  it('keeps explicit dispatch-ticket reprints on the existing manual method', async () => {
+    const order = {
+      ...sampleOrder,
+      delivery_type: 'home_delivery',
+      isShippingSale: true,
+    };
+    fixture.componentRef.setInput('orderData', order);
+    fixture.detectChanges();
+
+    await (component as any).printDispatchTicketIfNeeded('explicit');
+
+    expect(mockDispatchTicketPrint.printDispatchTicket).toHaveBeenCalledWith(
+      jasmine.objectContaining({ orderId: order.id }),
+      'explicit',
+    );
+    expect(mockDispatchTicketPrint.printFromPos).not.toHaveBeenCalled();
   });
 });

@@ -226,4 +226,115 @@ describe('DocumentPrintService Print Formats gates', () => {
 
     expect(localPrint).toHaveBeenCalledWith({ ...fallbackRequest, trigger: 'automatic' });
   });
+
+  it('normalizes gateway copy counts to an integer in the range 1..10', () => {
+    expect(service.normalizeGatewayCopies(0)).toBe(1);
+    expect(service.normalizeGatewayCopies(1)).toBe(1);
+    expect(service.normalizeGatewayCopies(3)).toBe(3);
+    expect(service.normalizeGatewayCopies(10)).toBe(10);
+    expect(service.normalizeGatewayCopies(12)).toBe(10);
+    expect(service.normalizeGatewayCopies(3.9)).toBe(3);
+    expect(service.normalizeGatewayCopies(Number.NaN)).toBe(1);
+    expect(service.normalizeGatewayCopies(undefined)).toBe(1);
+  });
+
+  it('materializes gateway copies in body order while preserving one document head and its assets', async () => {
+    const html = '<html lang="es"><head><style>.logo{color:red}</style></head>' +
+      '<body class="ticket"><article>A<img src="logo.png"></article>' +
+      '<article>B</article></body></html>';
+    gateway.renderDocument.and.returnValue(of({ html, copies: 3 } as any));
+
+    const result = await service.printViaGateway({
+      formatType: 'pos_sale_ticket',
+      documentId: 81,
+      trigger: 'explicit',
+    });
+
+    const sentHtml = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+    expect(result).toEqual({ documents: 1, pages: 3, copies: 3, format: 'pos_sale_ticket' as any });
+    expect((service as any).sendToPrinter).toHaveBeenCalledTimes(1);
+    expect(sentHtml.match(/<head>/gi)?.length).toBe(1);
+    expect(sentHtml).toContain('<html lang="es">');
+    expect(sentHtml).toContain('<style>.logo{color:red}</style>');
+    expect(sentHtml).toContain('<body class="ticket">');
+    expect(sentHtml).toContain('<img src="logo.png">');
+    expect(sentHtml.indexOf('<article>A')).toBeLessThan(sentHtml.indexOf('<article>B'));
+    expect(sentHtml.match(/<article>A/g)?.length).toBe(3);
+    expect(sentHtml.match(/<article>B/g)?.length).toBe(3);
+  });
+
+  it('sends one body for zero/one copies and exactly ten for the maximum gateway count', async () => {
+    for (const copies of [0, 1, 10]) {
+      (service as any).sendToPrinter.calls.reset();
+      gateway.renderDocument.and.returnValue(of({
+        html: '<html><head><title>one head</title></head><body><p>Copy</p></body></html>',
+        copies,
+      } as any));
+
+      const result = await service.printViaGateway({
+        formatType: 'pos_sale_ticket',
+        documentId: 81,
+        trigger: 'explicit',
+      });
+
+      const sentHtml = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+      const expected = copies === 10 ? 10 : 1;
+      expect(result?.copies).toBe(expected);
+      expect(sentHtml.match(/<p>Copy<\/p>/g)?.length).toBe(expected);
+      expect(sentHtml.match(/<head>/gi)?.length).toBe(1);
+      expect((service as any).sendToPrinter).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('uses the same body-only expansion when resolving a fiscal document', async () => {
+    gateway.resolveDocument.and.returnValue(of(resolved('pos_electronic_invoice')) as any);
+    gateway.renderDocument.and.returnValue(of({
+      html: '<html><head><style>p{color:blue}</style></head><body><p>Invoice</p></body></html>',
+      copies: 3,
+    } as any));
+
+    const result = await service.resolveAndPrint({
+      documentType: 'pos_order',
+      documentId: 81,
+      trigger: 'explicit',
+    });
+
+    const sentHtml = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+    expect(result).toEqual({ documents: 1, pages: 3, copies: 3, format: 'pos_electronic_invoice' as any });
+    expect(sentHtml.match(/<head>/gi)?.length).toBe(1);
+    expect(sentHtml.match(/<p>Invoice<\/p>/g)?.length).toBe(3);
+    expect(sentHtml).toContain('<style>p{color:blue}</style>');
+    expect((service as any).sendToPrinter).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies requested copies to a full gateway HTML document, and leaves no-body HTML alone for one copy', async () => {
+    const html = '<html data-format="draft"><head><title>draft</title></head><body><p>Draft</p></body></html>';
+    await service.printGatewayHtml(html, 3);
+    const sentHtml = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+    expect(sentHtml.match(/<p>Draft<\/p>/g)?.length).toBe(3);
+    expect(sentHtml.match(/<head>/gi)?.length).toBe(1);
+
+    (service as any).sendToPrinter.calls.reset();
+    await service.printGatewayHtml('<html><head><title>legacy</title></head></html>', 0);
+    expect((service as any).sendToPrinter).toHaveBeenCalledOnceWith(
+      '<html><head><title>legacy</title></head></html>',
+    );
+  });
+
+  it('rejects multi-copy gateway HTML without a body instead of cloning full documents', async () => {
+    await expectAsync(service.printGatewayHtml('<html><head></head></html>', 2))
+      .toBeRejectedWithError(/no <body>/i);
+    expect((service as any).sendToPrinter).not.toHaveBeenCalled();
+  });
+
+  it('preserves replacement-token sequences literally when expanding body content', async () => {
+    const literal = "$& $` $' $$";
+    const html = `<html><head><title>tokens</title></head><body><p>${literal}</p></body></html>`;
+
+    await service.printGatewayHtml(html, 3);
+
+    const sentHtml = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+    expect(sentHtml.match(/\$& \$` \$' \$\$/g)?.length).toBe(3);
+    expect(sentHtml.match(/<head>/gi)?.length).toBe(1);
+  });
 });

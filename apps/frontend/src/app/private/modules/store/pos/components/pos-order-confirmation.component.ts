@@ -1325,12 +1325,19 @@ private authFacade = inject(AuthFacade);
       !Number.isInteger(documentId) ||
       documentId <= 0 ||
       this.autoPrintedOrderId === orderId ||
-      this.autoPrintPreflightOrderId === orderId
+      this.autoPrintPreflightOrderId === orderId ||
+      this.awaitingFiscalPrint()
     ) return;
 
     this.autoPrintPreflightOrderId = orderId;
     try {
-      if (!(await this.ticketService.shouldAutoPrint(documentId))) return;
+      // The provisional POS ticket and the eventual FE are separate print
+      // formats with separate policies. Do not let the provisional ticket's
+      // auto-print setting suppress waiting for an automatically emitted FE;
+      // printReceipt('automatic') performs the fresh gate on the final format.
+      const waitForFiscalEmission = this.shouldWaitForFiscalEmission();
+
+      if (!waitForFiscalEmission && !(await this.ticketService.shouldAutoPrint(documentId))) return;
 
       // The shared server gate is async. Do not act on a stale response if the
       // cashier closed the modal, opened another order, or the order ceased to
@@ -1344,7 +1351,7 @@ private authFacade = inject(AuthFacade);
 
       // CP-POS-FE-AUTOPRINT — If the store emits FE automatically, wait for its
       // final status so the ticket does not precede the official document.
-      if (this.shouldWaitForFiscalEmission()) {
+      if (waitForFiscalEmission) {
         const currentFiscalState = this.fiscalStatus()?.state;
         if (currentFiscalState === 'issued') {
           this.autoPrintedOrderId = orderId;
@@ -2169,27 +2176,28 @@ private authFacade = inject(AuthFacade);
   ): Promise<void> {
     const order = this.orderData();
     if (!order) return;
-    // El helper compartido todavía protege elegibilidad de mostrador/envío.
-    // La configuración se pasa abierta: el gateway central autoriza el
-    // auto-print según el formato y los settings frescos.
-    const context: ShouldAutoPrintDispatchTicketContext = {
-      // The shared print service is now authoritative for fresh settings;
-      // these context fields only pass eligibility through the legacy helper.
-      printDispatchTicketEnabled: true,
-      printDispatchTicketAuto: trigger === 'automatic' ? true : undefined,
-      // Decisión del usuario 2026-08-31: tiquete de reclamo para mostrador
-      // (incluido Para llevar) y pickup real. Mismo flag que el detalle.
-      counterEnabled: this.printDispatchTicketOnCounter(),
-      deliveryType: order.delivery_type,
-      isShippingSale: order.isShippingSale,
-    };
-    if (!shouldAutoPrintDispatchTicket(trigger, context)) return;
-
     try {
-      await this.dispatchTicketPrint.printDispatchTicket(
-        this.buildDispatchTicketData(order),
-        trigger,
-      );
+      const data = this.buildDispatchTicketData(order);
+      const counterEnabled = this.printDispatchTicketOnCounter();
+
+      if (trigger === 'automatic') {
+        await this.dispatchTicketPrint.printFromPos(data, {
+          origin: 'confirmation',
+          order,
+          counterEnabled,
+        });
+        return;
+      }
+
+      const context: ShouldAutoPrintDispatchTicketContext = {
+        printDispatchTicketEnabled: true,
+        counterEnabled,
+        deliveryType: order.delivery_type,
+        isShippingSale: order.isShippingSale,
+      };
+      if (!shouldAutoPrintDispatchTicket(trigger, context)) return;
+
+      await this.dispatchTicketPrint.printDispatchTicket(data, trigger);
     } catch (err) {
       console.error('[CP-DTLP] Error al imprimir tiquete de despacho:', err);
     }

@@ -1,4 +1,5 @@
 import { Injectable, inject, signal, computed } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { firstValueFrom } from 'rxjs';
 import {
   PrintFormatType,
@@ -15,6 +16,7 @@ import {
 import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { PrintAnnexValidatorService } from './print-annex-validator.service';
+import { preparePosSaleTicketDraft } from './section-field-catalog';
 
 @Injectable({
   providedIn: 'root',
@@ -23,12 +25,22 @@ export class PrintFormatsFacade {
   private readonly client = inject(PrintGatewayClientService);
   private readonly toast = inject(ToastService);
   private readonly annexValidator = inject(PrintAnnexValidatorService);
+  private readonly sanitizer = inject(DomSanitizer);
 
   // State Signals
   readonly formats = signal<StorePrintFormatSummary[]>([]);
   readonly selectedFormatDetail = signal<StorePrintFormatDetail | null>(null);
   readonly draftDefinition = signal<PrintFormatDefinition | null>(null);
   readonly previewHtml = signal<string>('');
+  /** Trusted only because previewHtml is populated exclusively by the backend render response. */
+  readonly safePreviewHtml = computed<SafeHtml | null>(() => {
+    const html = this.previewHtml();
+    if (!html) return null;
+    // Preserve backend-authored CSS/head markup, but discard its legacy click bridge;
+    // sandboxed previews never execute scripts or inline event handlers.
+    const previewMarkup = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    return this.sanitizer.bypassSecurityTrustHtml(previewMarkup);
+  });
   readonly previewWidthMm = signal<number>(80);
   readonly previewIsRoll = signal<boolean>(true);
   readonly isLoading = signal<boolean>(false);
@@ -156,7 +168,13 @@ export class PrintFormatsFacade {
       const detail = await firstValueFrom(this.client.getFormatDetail(formatType));
       this.selectedFormatDetail.set(detail);
       // Clonar profundamente la definición para edición
-      this.draftDefinition.set(JSON.parse(JSON.stringify(detail.definition)));
+      const prepared = detail.format_type === 'pos_sale_ticket'
+        ? preparePosSaleTicketDraft(detail.definition)
+        : { definition: JSON.parse(JSON.stringify(detail.definition)), repaired: false };
+      this.draftDefinition.set(prepared.definition);
+      if (prepared.repaired) {
+        this.toast.info('Se agregó la Leyenda No Fiscal al pie del borrador POS; revisa el cambio antes de guardar.');
+      }
       // Reset sample picker state on every format switch.
       this.previewDocumentId.set(null);
       this.recentDocuments.set([]);
@@ -453,7 +471,13 @@ export class PrintFormatsFacade {
     try {
       const updated = await firstValueFrom(this.client.cloneLibraryTemplate(templateId));
       this.selectedFormatDetail.set(updated);
-      this.draftDefinition.set(JSON.parse(JSON.stringify(updated.definition)));
+      const prepared = updated.format_type === 'pos_sale_ticket'
+        ? preparePosSaleTicketDraft(updated.definition)
+        : { definition: JSON.parse(JSON.stringify(updated.definition)), repaired: false };
+      this.draftDefinition.set(prepared.definition);
+      if (prepared.repaired) {
+        this.toast.info('Se agregó la Leyenda No Fiscal al pie del borrador POS; revisa el cambio antes de guardar.');
+      }
       this.previewDocumentId.set(null);
       this.toast.success('Plantilla aplicada correctamente a la tienda.');
       await this.loadFormats();

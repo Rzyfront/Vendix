@@ -8,6 +8,7 @@ import { CommonModule } from '@angular/common';
 import {
   CanvasRegion,
   PrintFormatDefinition,
+  PrintFormatType,
 } from '../../../../../../../core/models/print-formats.model';
 import { PrintPaperPanelComponent } from './paper-panel.component';
 import { PrintSectionPanelComponent } from './section-panel.component';
@@ -117,6 +118,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
           @default {
             <app-print-paper-panel
               [definition]="definition()"
+              [formatType]="formatType()"
               (definitionChanged)="definitionChanged.emit($event)"
             ></app-print-paper-panel>
             <app-print-styles-panel
@@ -170,6 +172,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 export class PrintPropertiesPanelComponent {
   /** Live print-format definition being edited. */
   readonly definition = input.required<PrintFormatDefinition>();
+  readonly formatType = input<PrintFormatType | null>(null);
 
   /** Currently selected canvas region, or `null` for the global view. */
   readonly selectedRegion = input<CanvasRegion | null>(null);

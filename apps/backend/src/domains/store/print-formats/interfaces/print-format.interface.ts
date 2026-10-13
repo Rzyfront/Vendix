@@ -39,6 +39,8 @@ export interface PrintPaperConfig {
   margin_left_mm?: number;
   copies: number;
   auto_print?: boolean;
+  /** Opt-in exclusivo de `dispatch_ticket`: imprimir tras todas las ventas POS pagadas, incluidas las de mesa. */
+  auto_print_after_pos_sale?: boolean;
   /** [print-editor-dsk P1.2] — v2 NEW. Orientación de hoja. */
   orientation?: 'portrait' | 'landscape';
 }

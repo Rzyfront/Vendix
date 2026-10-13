@@ -8,15 +8,16 @@ description: >
   adding a dedicated bulk controller, bulk-printing respecting store
   receipt settings, reusing the QUI-567 / QUI-599 bulk pattern, or
   building XLSX/CSV file imports (header maps, code-as-text cells, paged
-  session commit).
+  session commit, parent/child rows such as product variants).
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Adding a column to an XLSX/CSV bulk import template or its header map"
     - "Paging a bulk upload session commit (offset/limit) with a progress bar"
+    - "Importing parent/child rows (product variants via SKU Padre) from an XLSX bulk file"
     - "Adding bulk operations to a module (orders, purchases, products)"
     - "Creating a dedicated bulk controller separate from the CRUD controller"
     - "Bulk-printing documents respecting store_settings.receipts format"
@@ -185,12 +186,38 @@ Reference: `products-bulk.service.ts` (analyze → S3 session → paged commit),
   hold data. In the reader, drop rows whose cells are all empty strings.
 - **Paged session commit:** `POST .../upload-session {session_id, offset?, limit≤100}`
   re-parses the S3 file on each page (parsing is deterministic) and processes
-  `slice(offset, offset+limit)`. `row_number = offset + rowIndex + 2`. Delete
+  `slice(offset, offset+limit)`. `row_number` is the source sheet row stored
+  by `parseFile` (`__row_number`); fall back to `offset + rowIndex + 2` only
+  for payloads that did not come from a file. Delete
   the S3 file only on `done`. Without offset/limit the request keeps the
   legacy full commit. The client walks the pages with `expand` so the
   server's `total` wins, with `catchError` per page. On close it cancels the
   session and unsubscribes in `destroyRef.onDestroy`, never through
   `complete`.
+- **The commit re-reads the WHOLE file:** the session commit parses every row
+  again, including the ones the analysis marked `error`. A check that lives only
+  in `analyzeProducts` is cosmetic. Put the pure checks in one helper
+  (`validateVariantRows`) and call it from both analyze and `uploadProducts`
+  (`assertFileVariantsValid`), throwing per row before any write.
+- **Parent/child rows (product variants):** a row with `SKU Padre` is a variant
+  of the product in the SAME file with that SKU (case-insensitive, parent before
+  or after). `Atributo N`/`Valor N` (1–3) become `attributes`
+  (`Record<string,string>`, same shape as the product editor). Group in
+  `parseFile` (`groupVariantRows`) so analysis, commit and paging see the same
+  tree and a page never splits a family. An orphan becomes its own item with
+  `VARIANT_PARENT_NOT_FOUND` and is `skipped` at commit. A variant with no price
+  inherits (no `price_override`). Product-only columns on a variant row raise a
+  warning; they are not silently ignored.
+- **Persist children through the owner service, atomically:** new parent →
+  `variants` inside the `ProductsService.create` DTO (same transaction).
+  `product_variants` has no cascade, so create-then-add-children leaves a parent
+  that cleanup cannot delete. Existing parent → upsert by SKU
+  (`upsertVariantsBySku`). NEVER pass `variants` to `ProductsService.update`:
+  it deletes every variant missing from the array. `createVariant` does not
+  check tiers ⊕ variants, so the bulk path asserts it
+  (`assertVariantsAllowedOnExisting`).
+- **Export mirrors import:** `exportCurrentProductsAsTemplate` writes one row
+  per variant after its parent, so export → edit → re-upload round-trips.
 - **Batch only where there is real cost:** parsing ≤1000 rows in memory
   (POP) takes milliseconds, and a progress bar there is cosmetic. Page the
   server round-trips, not local maps.
@@ -201,4 +228,5 @@ Reference: `products-bulk.service.ts` (analyze → S3 session → paged commit),
 - `vendix-permissions` — dedicated bulk permissions + `assertNamedPermission`.
 - `vendix-report-xlsx` — the `GEOMETRY`/`PrintFormat` reuse pattern.
 - `vendix-naming-conventions` — `{Module}BulkController` / `{Module}BulkService`.
+- `vendix-product-variants` — variant semantics (stock, price override, availability).
 - `how-to-plan` — bulk work is multi-file; plan it.

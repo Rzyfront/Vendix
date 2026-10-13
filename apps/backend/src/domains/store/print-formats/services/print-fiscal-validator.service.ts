@@ -137,17 +137,20 @@ export class PrintFiscalValidatorService {
     // habilitado en el footer; custom: substring del token. Cualquier otro
     // formato no fiscal sigue pasando sin chequeos (B.6 intacto).
     if ((formatType as string) === 'pos_sale_ticket') {
-      const hasField = (definition?.sections ?? []).some(
-        (s: any) =>
-          s?.type === 'footer' &&
-          (s.fields ?? []).some(
-            (f: any) => f?.id === 'f_disclaimer' && f?.enabled === true,
-          ),
-      );
-      const hasToken = (
-        (definition as any)?.custom_template ?? ''
-      ).includes('document.non_fiscal_disclaimer');
-      if (!hasField && !hasToken) {
+      const customTemplate = definition?.custom_template;
+      const usesCustomTemplate = typeof customTemplate === 'string' && customTemplate.trim().length > 0;
+      const hasToken = usesCustomTemplate && /\{\{document\.non_fiscal_disclaimer\}\}/.test(customTemplate);
+      const hasStructuredDisclaimer =
+        !usesCustomTemplate &&
+        (definition?.sections ?? []).some(
+          (section) =>
+            section?.type === 'footer' &&
+            section.enabled === true &&
+            (section.fields ?? []).some(
+              (field) => field?.id === 'f_disclaimer' && field?.enabled === true,
+            ),
+        );
+      if (!hasToken && !hasStructuredDisclaimer) {
         throw new VendixHttpException(
           // Código propio (no el 001 fiscal): el invariante B.6 reserva
           // PRINT_FISCAL_STRUCTURE_VIOLATION_001 a formatos fiscales.

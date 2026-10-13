@@ -11,7 +11,7 @@
  * Árabe, restaurante responsable únicamente de INC, imprimía una obligación
  * tributaria que no tiene.
  */
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, of } from 'rxjs';
 import { PosTicketService, resolveFiscalQualitiesLine } from './pos-ticket.service';
 import type { TicketData } from '../models/ticket.model';
 
@@ -140,5 +140,122 @@ describe('PosTicketService — automatic print trigger', () => {
       documentType: 'pos_order', documentId: 42, trigger: 'explicit',
     });
     expect(print.canAutoPrintDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe('PosTicketService — gateway batch copies', () => {
+  const html = (head: string, body: string) =>
+    `<!doctype html><html><head>${head}</head><body>${body}</body></html>`;
+
+  const createBatchService = (configs: Record<number, {
+    html?: string;
+    copies?: number;
+    width_mm?: number;
+    is_roll?: boolean;
+    fail?: boolean;
+  }>) => {
+    const documentPrint = {
+      normalizeGatewayCopies: (copies: unknown) =>
+        typeof copies === 'number' && Number.isFinite(copies)
+          ? Math.min(10, Math.max(1, Math.trunc(copies)))
+          : 1,
+      printGatewayHtml: jasmine.createSpy('printGatewayHtml').and.returnValue(Promise.resolve()),
+      print: jasmine.createSpy('print').and.returnValue(Promise.resolve({ copies: 1 })),
+      resolveAndPrint: jasmine.createSpy('resolveAndPrint'),
+    };
+    const gatewayClient = {
+      resolveDocument: jasmine.createSpy('resolveDocument').and.callFake(
+        (_type: string, id: number) => of({
+          format_type: 'pos_sale_ticket', document_id: id, engine: 'html',
+        }),
+      ),
+      renderDocument: jasmine.createSpy('renderDocument').and.callFake(
+        (_type: string, id: number, _engine: string, bodyOnly: boolean) => {
+          expect(bodyOnly).toBe(false);
+          const config = configs[id];
+          if (config?.fail) throw new Error('falló el render');
+          return of({
+            format_type: 'pos_sale_ticket',
+            html: config?.html ?? html('<style>p{color:red}</style>', `<p>doc-${id}</p>`),
+            copies: config?.copies,
+            width_mm: config?.width_mm ?? 80,
+            is_roll: config?.is_roll ?? true,
+          });
+        },
+      ),
+    };
+    const service = Object.assign(Object.create(PosTicketService.prototype), {
+      documentPrint,
+      gatewayClient,
+    }) as PosTicketService;
+    return { service, documentPrint, gatewayClient };
+  };
+
+  it('expands each document copies contiguously under one compatible head and sends once', async () => {
+    const { service, documentPrint, gatewayClient } = createBatchService({
+      11: { copies: 2, html: html('<style>p{color:red}</style>', '<p>A</p>') },
+      22: { copies: 3, html: html('<style>p{color:red}</style>', '<p>B</p>') },
+    });
+    const result = await service.printTicketsBatch([
+      { id: '11', orderId: 11 } as TicketData,
+      { id: '22', orderId: 22 } as TicketData,
+    ]);
+
+    expect(result).toEqual({ rendered: 2, pages: 5 });
+    expect(gatewayClient.renderDocument).toHaveBeenCalledTimes(2);
+    expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(1);
+    const assembled = documentPrint.printGatewayHtml.calls.argsFor(0)[0] as string;
+    expect(assembled.match(/<head>/g)?.length).toBe(1);
+    expect(assembled.match(/<p>A<\/p>/g)?.length).toBe(2);
+    expect(assembled.match(/<p>B<\/p>/g)?.length).toBe(3);
+    expect(Array.from(assembled.matchAll(/<p>([AB])<\/p>/g), (match) => match[1]))
+      .toEqual(['A', 'A', 'B', 'B', 'B']);
+    expect(documentPrint.print).not.toHaveBeenCalled();
+  });
+
+  it('normalizes missing/zero copy metadata to one copy', async () => {
+    const { service, documentPrint } = createBatchService({
+      11: { copies: 0 },
+      22: {},
+    });
+    const result = await service.printTicketsBatch([
+      { id: '11', orderId: 11 } as TicketData,
+      { id: '22', orderId: 22 } as TicketData,
+    ]);
+
+    expect(result.pages).toBe(2);
+    const assembled = documentPrint.printGatewayHtml.calls.argsFor(0)[0] as string;
+    expect(assembled.match(/<p>doc-11<\/p>/g)?.length).toBe(1);
+    expect(assembled.match(/<p>doc-22<\/p>/g)?.length).toBe(1);
+  });
+
+  it('rejects incompatible head or paper before printing anything', async () => {
+    const { service, documentPrint } = createBatchService({
+      11: { html: html('<style>.a{}</style>', '<p>A</p>') },
+      22: { html: html('<style>.b{}</style>', '<p>B</p>'), width_mm: 58, is_roll: true },
+    });
+
+    await expectAsync(service.printTicketsBatch([
+      { id: '11', orderId: 11 } as TicketData,
+      { id: '22', orderId: 22 } as TicketData,
+    ])).toBeRejectedWithError(/diseños o papeles incompatibles; imprima por separado/);
+    expect(documentPrint.printGatewayHtml).not.toHaveBeenCalled();
+    expect(documentPrint.print).not.toHaveBeenCalled();
+  });
+
+  it('prints successful documents and retains failed ids as a partial result', async () => {
+    const warn = spyOn(console, 'warn');
+    const { service, documentPrint } = createBatchService({
+      11: { copies: 2 },
+      22: { fail: true },
+    });
+    const result = await service.printTicketsBatch([
+      { id: '11', orderId: 11 } as TicketData,
+      { id: '22', orderId: 22 } as TicketData,
+    ]);
+
+    expect(result).toEqual({ rendered: 1, pages: 2 });
+    expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalled();
   });
 });
