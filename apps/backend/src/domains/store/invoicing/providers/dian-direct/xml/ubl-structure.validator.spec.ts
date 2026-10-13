@@ -601,4 +601,78 @@ ${ids}
       ).toBe(false);
     });
   });
+
+  describe('overrides del perfil DIAN — AllowanceCharge (FBE01/FAQ)', () => {
+    function invoiceWithAllowance(line_allowance: string, doc_allowance = ''): string {
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>FV1</cbc:ID>
+  <cbc:IssueDate>2026-08-14</cbc:IssueDate>
+  <cac:AccountingSupplierParty/>
+  <cac:AccountingCustomerParty/>
+  ${doc_allowance}
+  <cac:LegalMonetaryTotal/>
+  <cac:InvoiceLine>
+    ${line_allowance}
+  </cac:InvoiceLine>
+</Invoice>`;
+    }
+
+    const complete_line = `<cac:AllowanceCharge>
+      <cbc:ID>1</cbc:ID>
+      <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+      <cbc:MultiplierFactorNumeric>26.47</cbc:MultiplierFactorNumeric>
+      <cbc:Amount currencyID="COP">75630.25</cbc:Amount>
+      <cbc:BaseAmount currencyID="COP">285714.29</cbc:BaseAmount>
+    </cac:AllowanceCharge>`;
+
+    const allowanceViolations = (xml: string) =>
+      UblStructureValidator.validate(xml).violations.filter((v) =>
+        v.path.includes('cac:AllowanceCharge'),
+      );
+
+    it('línea como VNDS3 (sin ID ni factor) — violaciones por ID y MultiplierFactorNumeric', () => {
+      const xml = invoiceWithAllowance(`<cac:AllowanceCharge>
+      <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+      <cbc:Amount currencyID="COP">75630.25</cbc:Amount>
+      <cbc:BaseAmount currencyID="COP">285714.29</cbc:BaseAmount>
+    </cac:AllowanceCharge>`);
+      const v = allowanceViolations(xml);
+      expect(v.every((x) => x.kind === 'missing')).toBe(true);
+      expect(v.map((x) => x.path)).toEqual(
+        expect.arrayContaining([
+          'Invoice/cac:InvoiceLine[1]/cac:AllowanceCharge[1]/cbc:ID',
+          'Invoice/cac:InvoiceLine[1]/cac:AllowanceCharge[1]/cbc:MultiplierFactorNumeric',
+        ]),
+      );
+      expect(v.some((x) => x.message.includes('FBE01'))).toBe(true);
+    });
+
+    it('línea completa — sin violación de AllowanceCharge', () => {
+      expect(allowanceViolations(invoiceWithAllowance(complete_line))).toEqual([]);
+    });
+
+    it('documento sin AllowanceChargeReasonCode — violación', () => {
+      const xml = invoiceWithAllowance(
+        complete_line,
+        complete_line.replace(/\n\s*<cbc:MultiplierFactorNumeric.*\n/, '\n'),
+      );
+      const doc = UblStructureValidator.validate(xml).violations.filter(
+        (x) => x.path === 'Invoice/cac:AllowanceCharge[1]/cbc:AllowanceChargeReasonCode',
+      );
+      expect(doc).toHaveLength(1);
+      expect(doc[0].message).toContain('FAQ04');
+    });
+
+    it('documento con ReasonCode y campos completos — sin violación', () => {
+      const doc_ok = complete_line.replace(
+        '</cbc:ChargeIndicator>',
+        '</cbc:ChargeIndicator>\n      <cbc:AllowanceChargeReasonCode>00</cbc:AllowanceChargeReasonCode>',
+      );
+      const xml = invoiceWithAllowance(complete_line, doc_ok);
+      expect(allowanceViolations(xml)).toEqual([]);
+    });
+  });
 });

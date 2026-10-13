@@ -168,7 +168,7 @@ export class UblStructureValidator {
     }
 
     const violations: UblStructureViolation[] = [];
-    this.walk(root, root_type, root_name, violations);
+    this.walk(root, root_type, root_name, violations, true, false);
 
     return { valid: violations.length === 0, violations, root: root_name };
   }
@@ -187,6 +187,8 @@ export class UblStructureValidator {
     type_name: string,
     path: string,
     violations: UblStructureViolation[],
+    is_root = false,
+    document_level = false,
   ): void {
     const model = UBL_CONTENT_MODEL[type_name];
     if (!model) return; // tipo simple u opaco (`xsd:any`): sin secuencia que revisar
@@ -242,7 +244,11 @@ export class UblStructureValidator {
       // un tipo simple: no está en `UBL_ELEMENT_TYPES`, así que nunca se
       // recorre y su `textContent` sólo es legible desde el padre que sí se
       // recorre.
-      const restriction = getProfileRestriction(type_name, qname);
+      const restriction = getProfileRestriction(
+        type_name,
+        qname,
+        document_level,
+      );
       if (restriction?.allowedValues) {
         const value = String(node.textContent ?? '').trim();
         if (!restriction.allowedValues.includes(value)) {
@@ -258,16 +264,34 @@ export class UblStructureValidator {
 
       const child_type = UBL_ELEMENT_TYPES[qname];
       if (child_type) {
-        this.walk(node, child_type, child_path, violations);
+        this.walk(node, child_type, child_path, violations, false, is_root);
       }
     }
 
     for (const child of model) {
       const seen = counts.get(child.ref) ?? 0;
-      const restriction = getProfileRestriction(type_name, child.ref);
+      const restriction = getProfileRestriction(
+        type_name,
+        child.ref,
+        document_level,
+      );
       const effective_max = this.effectiveMax(child.max, restriction?.max);
+      const effective_min = Math.max(child.min, restriction?.min ?? 0);
 
-      if (seen < child.min) {
+      if (seen < effective_min && effective_min > child.min) {
+        const scope = document_level ? 'del documento' : 'de línea';
+        violations.push({
+          path: `${path}/${child.ref}`,
+          kind: 'missing',
+          message:
+            `Falta «${child.ref}» en «${type_name}» (${scope}): el perfil DIAN ` +
+            `lo exige` +
+            (restriction?.dian_rule
+              ? ` (regla ${restriction.dian_rule})`
+              : '') +
+            ` y no se emitió. La DIAN rechazaría el documento.`,
+        });
+      } else if (seen < child.min) {
         violations.push({
           path: `${path}/${child.ref}`,
           kind: 'missing',
