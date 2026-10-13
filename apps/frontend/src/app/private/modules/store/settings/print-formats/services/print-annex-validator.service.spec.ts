@@ -124,3 +124,49 @@ describe('PrintAnnexValidatorService — emisor_regime no exige una leyenda inex
     expect(rule?.severity).toBe('info');
   });
 });
+
+describe('PrintAnnexValidatorService — leyenda obligatoria solo en ticket POS', () => {
+  const service = new PrintAnnexValidatorService();
+  const base: PrintFormatDefinition = {
+    paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
+    sections: [], columns: [],
+  };
+
+  it('reports a structured POS footer/field issue with a fix action without requiring CUFE or QR', () => {
+    const summary = service.validate(base, 'pos_sale_ticket');
+    const rule = summary.rules.find((item) => item.id === 'pos_non_fiscal_disclaimer');
+    expect(rule?.passed).toBe(false);
+    expect(rule?.description).toContain('pie de página');
+    expect(rule?.fixAction).toEqual(jasmine.objectContaining({ sectionId: 'sec_footer', fieldKey: 'f_disclaimer' }));
+    expect(summary.rules.some((item) => item.id === 'dian_cufe' || item.id === 'dian_qr')).toBe(false);
+  });
+
+  it('accepts an enabled structured disclaimer only under an enabled footer', () => {
+    const section = (enabled: boolean, fieldEnabled: boolean) => ({
+      id: 'sec_footer', type: 'footer', title: 'Pie', enabled, order: 7,
+      fields: [{ id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda', enabled: fieldEnabled, position: 'center' as const }],
+    });
+    expect(service.validate({ ...base, sections: [section(true, true)] }, 'pos_sale_ticket')
+      .rules.find((item) => item.id === 'pos_non_fiscal_disclaimer')?.passed).toBe(true);
+    expect(service.validate({ ...base, sections: [section(false, true)] }, 'pos_sale_ticket')
+      .rules.find((item) => item.id === 'pos_non_fiscal_disclaimer')?.passed).toBe(false);
+    expect(service.validate({ ...base, sections: [section(true, false)] }, 'pos_sale_ticket')
+      .rules.find((item) => item.id === 'pos_non_fiscal_disclaimer')?.passed).toBe(false);
+  });
+
+  it('requires the token in an active custom template, regardless of structured fields', () => {
+    const invalid = service.validate({ ...base, custom_template: '  <div>document.non_fiscal_disclaimer</div>  ', sections: [{
+      id: 'sec_footer', type: 'footer', title: 'Pie', enabled: true, order: 7,
+      fields: [{ id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda', enabled: true }],
+    }] }, 'pos_sale_ticket');
+    expect(invalid.rules.find((item) => item.id === 'pos_non_fiscal_disclaimer')?.passed).toBe(false);
+    const whitespace = service.validate({ ...base, custom_template: '<div>{{  document.non_fiscal_disclaimer  }}</div>' }, 'pos_sale_ticket');
+    expect(whitespace.rules.find((item) => item.id === 'pos_non_fiscal_disclaimer')?.passed).toBe(false);
+    const valid = service.validate({ ...base, custom_template: '<div>{{document.non_fiscal_disclaimer}}</div>' }, 'pos_sale_ticket');
+    expect(valid.rules.find((item) => item.id === 'pos_non_fiscal_disclaimer')?.passed).toBe(true);
+  });
+
+  it('does not add the POS disclaimer rule to another format', () => {
+    expect(service.validate(base, 'quotation').rules.some((item) => item.id === 'pos_non_fiscal_disclaimer')).toBe(false);
+  });
+});

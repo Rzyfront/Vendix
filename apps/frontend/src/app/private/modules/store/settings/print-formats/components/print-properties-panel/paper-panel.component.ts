@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import {
   PrintFormatDefinition,
   PrintPaperFormat,
+  PrintFormatType,
 } from '../../../../../../../core/models/print-formats.model';
 import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
 
@@ -186,6 +187,10 @@ function lookupGeometry(format: PrintPaperFormat) {
               type="number"
               min="0"
               max="10"
+              step="1"
+              id="print-format-copies"
+              name="copies"
+              aria-label="Copias por impresión"
               [ngModel]="paper().copies"
               (ngModelChange)="setCopies($event)"
               class="w-20 px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
@@ -202,16 +207,52 @@ function lookupGeometry(format: PrintPaperFormat) {
                 Auto-impresión
               </label>
               <p class="text-[10px] text-text-tertiary">
-                Disparar impresión al finalizar la acción (ej. venta POS)
+                {{ autoPrintDescription() }}
               </p>
             </div>
             <input
+              id="print-format-auto-print"
               type="checkbox"
+              [disabled]="!supportsAutoPrint()"
+              [attr.aria-label]="autoPrintDescription()"
               [ngModel]="paper().auto_print !== false"
               (ngModelChange)="setAutoPrint($event)"
               class="w-4 h-4 rounded text-primary-600 bg-surface-secondary border-border focus:ring-primary-500 cursor-pointer"
             />
           </div>
+          @if (formatType() === 'dispatch_ticket') {
+            <div class="mt-3 space-y-1">
+              <div class="flex items-start gap-2">
+                <input
+                  id="print-format-auto-print-after-pos-sale"
+                  type="checkbox"
+                  [disabled]="paper().auto_print === false"
+                  [ngModel]="paper().auto_print_after_pos_sale === true"
+                  (ngModelChange)="setAutoPrintAfterPosSale($event)"
+                  aria-describedby="print-format-auto-print-after-pos-sale-description print-format-auto-print-after-pos-sale-note"
+                  class="mt-0.5 w-4 h-4 rounded text-primary-600 bg-surface-secondary border-border focus:ring-primary-500 cursor-pointer"
+                />
+                <label
+                  for="print-format-auto-print-after-pos-sale"
+                  class="text-[11px] font-medium text-text-primary"
+                >
+                  Imprimir después de cada venta POS pagada
+                </label>
+              </div>
+              <p
+                id="print-format-auto-print-after-pos-sale-description"
+                class="pl-6 text-[10px] text-text-tertiary"
+              >
+                Incluye mostrador, recogida, domicilios y mesas. Requiere pago completo; no imprime abonos ni pagos pendientes.
+              </p>
+              <p
+                id="print-format-auto-print-after-pos-sale-note"
+                class="pl-6 text-[10px] text-text-tertiary"
+              >
+                Desactivarla conserva el flujo habitual de despacho y no cambia la impresión postventa.
+              </p>
+            </div>
+          }
         </div>
       </div>
     </section>
@@ -232,7 +273,28 @@ function lookupGeometry(format: PrintPaperFormat) {
 })
 export class PrintPaperPanelComponent {
   readonly definition = input.required<PrintFormatDefinition>();
+  readonly formatType = input<PrintFormatType | null>(null);
   readonly definitionChanged = output<PrintFormatDefinition>();
+
+  supportsAutoPrint(): boolean {
+    return ['pos_sale_ticket', 'pos_electronic_invoice', 'dispatch_ticket', 'kitchen_ticket']
+      .includes(this.formatType() ?? '');
+  }
+
+  autoPrintDescription(): string {
+    switch (this.formatType()) {
+      case 'pos_sale_ticket':
+        return 'Se imprime tras una venta POS pagada.';
+      case 'pos_electronic_invoice':
+        return 'Se imprime tras una venta POS pagada cuando la factura electrónica se emite.';
+      case 'dispatch_ticket':
+        return 'Se imprime al completar un despacho elegible; imprimir tras ventas POS pagadas es opcional para este formato.';
+      case 'kitchen_ticket':
+        return 'Se imprime en cocina física después de enviar el pedido.';
+      default:
+        return 'Solo impresión manual: este formato no tiene un disparador automático.';
+    }
+  }
 
   paper(): PrintFormatDefinition['paper'] {
     return this.definition().paper;
@@ -335,7 +397,7 @@ export class PrintPaperPanelComponent {
   }
 
   setCopies(value: number): void {
-    const copies = Math.max(0, Math.min(10, Number(value) || 0));
+    const copies = Math.trunc(Math.max(0, Math.min(10, Number(value) || 0)));
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
       copies,
@@ -344,9 +406,19 @@ export class PrintPaperPanelComponent {
   }
 
   setAutoPrint(auto_print: boolean): void {
+    if (!this.supportsAutoPrint()) return;
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
       auto_print,
+    };
+    this.emit({ ...this.definition(), paper });
+  }
+
+  setAutoPrintAfterPosSale(auto_print_after_pos_sale: boolean): void {
+    if (this.formatType() !== 'dispatch_ticket') return;
+    const paper: PrintFormatDefinition['paper'] = {
+      ...this.paper(),
+      auto_print_after_pos_sale,
     };
     this.emit({ ...this.definition(), paper });
   }

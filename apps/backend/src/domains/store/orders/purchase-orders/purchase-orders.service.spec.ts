@@ -2418,7 +2418,11 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
   function mockCreateTx() {
     return {
       // assertNoBaseLineOnVariantProduct: sin variantes ⇒ no corta.
-      product_variants: { findMany: jest.fn().mockResolvedValue([]) },
+      product_variants: {
+        findMany: jest.fn().mockResolvedValue([]),
+        // Resolución de líneas nuevas por SKU/código de una variante.
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       products: { findMany: jest.fn().mockResolvedValue([]) },
       inventory_locations: {
         findFirst: jest.fn().mockResolvedValue({ id: LOCATION_ID }),
@@ -2745,6 +2749,152 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       );
       expect(barcodeLookups).toHaveLength(0);
       expect(tx.products.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('QUI-486 (bulk): líneas nuevas que resuelven a una variante', () => {
+    const VARIANT_ID = 321;
+    const lineDto = (extra: Record<string, unknown>) => ({
+      ...baseDto(),
+      items: [
+        {
+          product_name: 'Camisa Roja M',
+          sku: 'CAM-R-M',
+          quantity: 2,
+          unit_price: 1000,
+          ...extra,
+        },
+      ],
+    });
+
+    /** `tx` sin producto con ese código; la variante la define cada test. */
+    const txWithVariant = (variant: any) => {
+      const tx: any = mockCreateTx();
+      tx.products.findFirst = jest.fn().mockResolvedValue(null);
+      tx.products.create = jest.fn();
+      tx.product_variants.findFirst = jest
+        .fn()
+        .mockImplementation(async ({ where }: any) =>
+          where.sku === variant.sku || where.barcode === variant.barcode
+            ? { id: variant.id, product_id: variant.product_id }
+            : null,
+        );
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      return tx;
+    };
+
+    it('SKU de una variante: enlaza product_id + product_variant_id y no crea producto', async () => {
+      const tx = txWithVariant({
+        id: VARIANT_ID,
+        product_id: 900,
+        sku: 'CAM-R-M',
+        barcode: null,
+      });
+
+      await service.create(lineDto({}) as any);
+
+      expect(tx.products.create).not.toHaveBeenCalled();
+      const line =
+        tx.purchase_orders.create.mock.calls[0][0].data.purchase_order_items
+          .create[0];
+      expect(line.product_id).toBe(900);
+      expect(line.product_variant_id).toBe(VARIANT_ID);
+      // La búsqueda quedó acotada a la tienda y a no archivados.
+      expect(tx.product_variants.findFirst.mock.calls[0][0].where).toEqual({
+        sku: 'CAM-R-M',
+        products: { store_id: STORE_ID, state: { not: 'archived' } },
+      });
+    });
+
+    it('línea a variante con marca y categorías: no crea marca ni categorías', async () => {
+      const tx = txWithVariant({
+        id: VARIANT_ID,
+        product_id: 900,
+        sku: 'CAM-R-M',
+        barcode: null,
+      });
+      tx.brands = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+      };
+      tx.categories = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+      };
+
+      await service.create(
+        lineDto({ brand_name: 'Marca Nueva', category_names: 'Ropa, Camisas' }) as any,
+      );
+
+      expect(tx.brands.create).not.toHaveBeenCalled();
+      expect(tx.categories.create).not.toHaveBeenCalled();
+      const line =
+        tx.purchase_orders.create.mock.calls[0][0].data.purchase_order_items
+          .create[0];
+      expect(line.product_variant_id).toBe(VARIANT_ID);
+    });
+
+    it('código de barras de una variante: enlaza la variante', async () => {
+      const tx = txWithVariant({
+        id: VARIANT_ID,
+        product_id: 900,
+        sku: 'OTRO',
+        barcode: '7709999',
+      });
+
+      await service.create(lineDto({ barcode: '7709999' }) as any);
+
+      expect(tx.products.create).not.toHaveBeenCalled();
+      const line =
+        tx.purchase_orders.create.mock.calls[0][0].data.purchase_order_items
+          .create[0];
+      expect(line.product_id).toBe(900);
+      expect(line.product_variant_id).toBe(VARIANT_ID);
+    });
+
+    it('SKU de un padre CON variantes sin variante: PO_VARIANT_001 y no persiste la OC', async () => {
+      const tx: any = mockCreateTx();
+      // El producto lo reclama por SKU (no hay variante con ese código).
+      tx.products.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: 900, name: 'Camisa Roja', weight: 0 });
+      tx.products.update = jest.fn().mockResolvedValue({ id: 900 });
+      tx.products.create = jest.fn();
+      // El guard temprano (product_id 0) no ve nada; el posterior sí ve variantes.
+      tx.product_variants.findMany = jest
+        .fn()
+        .mockResolvedValue([{ product_id: 900 }]);
+      tx.products.findMany = jest
+        .fn()
+        .mockResolvedValue([{ id: 900, name: 'Camisa Roja' }]);
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await expect(
+        service.create(lineDto({ sku: 'CAM-R' }) as any),
+      ).rejects.toMatchObject({ errorCode: 'PO_VARIANT_001' });
+
+      expect(tx.purchase_orders.create).not.toHaveBeenCalled();
+      expect(tx.products.create).not.toHaveBeenCalled();
+    });
+
+    it('producto simple: sigue resolviéndose por SKU sin variante', async () => {
+      const tx: any = mockCreateTx();
+      tx.products.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: 5, name: 'Ron', weight: 0 });
+      tx.products.update = jest.fn().mockResolvedValue({ id: 5 });
+      tx.products.create = jest.fn();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(lineDto({ sku: 'RON-1' }) as any);
+
+      // El producto gana: ni siquiera se consultan variantes por código.
+      expect(tx.product_variants.findFirst).not.toHaveBeenCalled();
+      const line =
+        tx.purchase_orders.create.mock.calls[0][0].data.purchase_order_items
+          .create[0];
+      expect(line.product_id).toBe(5);
+      expect(line.product_variant_id ?? null).toBeNull();
     });
   });
 
@@ -3277,7 +3427,10 @@ describe('PurchaseOrdersService.findNewItemConflicts()', () => {
   const STORE_ID = 10;
 
   beforeEach(async () => {
-    prismaService = { products: { findMany: jest.fn().mockResolvedValue([]) } };
+    prismaService = {
+      products: { findMany: jest.fn().mockResolvedValue([]) },
+      product_variants: { findMany: jest.fn().mockResolvedValue([]) },
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -3307,6 +3460,45 @@ describe('PurchaseOrdersService.findNewItemConflicts()', () => {
   afterEach(() => {
     jest.clearAllMocks();
     jest.restoreAllMocks();
+  });
+
+  it('SKU de una variante: conflicto con is_variant y el producto padre', async () => {
+    prismaService.product_variants.findMany.mockResolvedValue([
+      {
+        id: 321,
+        sku: 'CAM-R-M',
+        barcode: null,
+        product_id: 900,
+        products: { name: 'Camisa Roja', sku: 'CAM-R', state: 'active' },
+      },
+    ]);
+
+    const res = await service.findNewItemConflicts({
+      items: [{ line_index: 3, sku: 'CAM-R-M', barcode: '' }],
+    } as any);
+
+    expect(res.conflicts).toEqual([
+      {
+        line_index: 3,
+        kind: 'sku',
+        sku: 'CAM-R-M',
+        barcode: null,
+        product_id: 900,
+        product_name: 'Camisa Roja',
+        product_sku: 'CAM-R',
+        product_state: 'active',
+        is_variant: true,
+        product_variant_id: 321,
+        variant_sku: 'CAM-R-M',
+      },
+    ]);
+    expect(prismaService.product_variants.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          products: { store_id: STORE_ID, state: { not: 'archived' } },
+        }),
+      }),
+    );
   });
 
   it('SKU que ya existe: conflicto kind=sku con el producto', async () => {

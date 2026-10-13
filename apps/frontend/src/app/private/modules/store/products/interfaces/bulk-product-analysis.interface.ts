@@ -4,6 +4,20 @@ export interface BulkValidationMessage {
   field?: string;
 }
 
+export interface BulkVariantAnalysisItem {
+  row_number: number;
+  sku: string;
+  name: string;
+  /** Ej. { Color: 'Negro', Talla: 'L' } */
+  attributes: Record<string, string>;
+  /** null = hereda el precio del producto padre. */
+  price: number | null;
+  action: 'create' | 'update';
+  status: 'ready' | 'warning' | 'error';
+  warnings: BulkValidationMessage[];
+  errors: BulkValidationMessage[];
+}
+
 export interface BulkProductAnalysisItem {
   row_number: number;
   name: string;
@@ -38,11 +52,13 @@ export interface BulkProductAnalysisItem {
   errors: (string | BulkValidationMessage)[];
   modified_fields?: string[];
   nulled_fields?: string[];
+  variants?: BulkVariantAnalysisItem[];
 }
 
 export interface BulkProductAnalysisResult {
   session_id: string;
   total_products: number;
+  total_variants?: number;
   ready: number;
   with_warnings: number;
   with_errors: number;

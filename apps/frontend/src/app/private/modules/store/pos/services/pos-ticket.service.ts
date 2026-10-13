@@ -130,9 +130,8 @@ export class PosTicketService {
   private currencyService = inject(CurrencyFormatService);
   private authFacade = inject(AuthFacade);
   private documentPrint = inject(DocumentPrintService);
-  // [print-fiscal-gate P7.2] — Necesario para `body_only=true` en el batch
-  // multi-ticket; `DocumentPrintService.printViaGateway` (y por tanto
-  // `resolveAndPrint`) no expone esa flag.
+  // Batch gateway rendering needs full HTML so each document's effective
+  // template shell and paper metadata can be checked before assembling it.
   private gatewayClient = inject(PrintGatewayClientService);
 
   private defaultPrinterConfig: PrinterConfig = {
@@ -847,9 +846,9 @@ export class PosTicketService {
    * whole batch repeated C times, so the operator splits the stack by order
    * instead of collating 600 sheets by hand.
    *
-   * A single `@page size` governs the document: a batch cannot mix stores —
-   * `orders` is a store-scoped Prisma model, so an id from another store never
-   * comes back — and therefore cannot mix paper formats.
+   * Each resolved gateway document contributes its own configured copies.
+   * The output can have one shell only, so incompatible template heads or
+   * paper geometry are rejected before anything is sent to the printer.
    *
    * @returns `rendered` tickets and `pages` sheets (`rendered × copies`).
    */
@@ -892,18 +891,17 @@ export class PosTicketService {
       }
     }
 
-    // [print-fiscal-gate P7.2] — Batch >1: el motor nuevo imprime SIEMPRE.
-    // Resolvemos y renderizamos por gateway CADA ticket con `body_only=true`,
-    // concatenamos los `<body>` resultantes con `break-after: page` entre
-    // ellos y abrimos UNA sola diálogo de impresión. Sin fallback al emisor
-    // local: si un ticket del lote falla, NO se tumba el lote — se imprime
-    // lo que sí resolvió y se reportan los ids fallidos. Un lote de 20 que
-    // imprime 19 y reporta 1 es preferible a uno que imprime 0.
-    const printer = this.currentPrinterConfig(options?.formatOverride);
+    // Batch >1 uses only the current gateway contract. Legacy receipt
+    // overrides remain in the public options signature for old callers, but
+    // do not override gateway paper or copy metadata.
 
     const results: Array<{
       orderId: number | null;
-      body: string | null;
+      html: string | null;
+      copies: number;
+      widthMm?: number;
+      isRoll?: boolean;
+      head?: string;
       error?: string;
     }> = [];
 
@@ -918,7 +916,8 @@ export class PosTicketService {
       if (!candidateDocId) {
         results.push({
           orderId: null,
-          body: null,
+          html: null,
+          copies: 1,
           error: 'sin orderId ni id numérico',
         });
         done++;
@@ -935,7 +934,7 @@ export class PosTicketService {
             resolved.format_type,
             resolved.document_id,
             resolved.engine,
-            /* bodyOnly */ true,
+            /* bodyOnly */ false,
           ),
         );
         if (!rendered?.html) {
@@ -943,11 +942,23 @@ export class PosTicketService {
             `Gateway devolvió respuesta sin HTML para ${resolved.format_type} doc ${resolved.document_id}`,
           );
         }
-        results.push({ orderId: candidateDocId, body: rendered.html });
+        const shell = this.readGatewayDocumentShell(rendered.html);
+        if (!Number.isFinite(rendered.width_mm) || typeof rendered.is_roll !== 'boolean') {
+          throw new Error(`Gateway devolvió geometría incompleta para doc ${resolved.document_id}`);
+        }
+        results.push({
+          orderId: candidateDocId,
+          html: rendered.html,
+          copies: this.documentPrint.normalizeGatewayCopies(rendered.copies),
+          widthMm: rendered.width_mm,
+          isRoll: rendered.is_roll,
+          head: shell.head,
+        });
       } catch (err) {
         results.push({
           orderId: candidateDocId,
-          body: null,
+          html: null,
+          copies: 1,
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -961,13 +972,20 @@ export class PosTicketService {
       }
     }
 
-    // Type guard explícito: tras el filtro, `r.body` es `string` (no `string | null`).
-    // Sin él, TS mantiene el tipo ancho y `r.body!` se necesitaría más abajo.
-    type ResultWithBody = { orderId: number | null; body: string; error?: string };
+    // Type guard explícito para conservar un HTML completo y metadatos válidos.
+    type ResultWithHtml = {
+      orderId: number | null;
+      html: string;
+      copies: number;
+      widthMm?: number;
+      isRoll?: boolean;
+      head?: string;
+      error?: string;
+    };
     const succeeded = results.filter(
-      (r): r is ResultWithBody => r.body !== null,
+      (r): r is ResultWithHtml => r.html !== null,
     );
-    const failed = results.filter((r) => r.body === null);
+    const failed = results.filter((r) => r.html === null);
 
     if (succeeded.length === 0) {
       // Ninguno resolvió: nada que imprimir. Reportamos y salimos.
@@ -977,116 +995,32 @@ export class PosTicketService {
       throw new Error(`Lote sin tiquetes imprimibles: ${detail}`);
     }
 
-    const separator = '<div style="break-after: page; page-break-after: always;"></div>';
-
-    // [print-fiscal-gate P7.2 — fix b052e30fc] — El primer tiquete del lote
-    // se vuelve a renderizar con `body_only=false` para conservar su `<head>`
-    // y su `<style>` (el aspecto real del composer vive ahí). Los demás
-    // cuerpos, ya extraídos con `body_only=true`, se inyectan antes del
-    // `</body>` del primero. NO copiamos CSS al frontend: una copia se
-    // desincroniza apenas alguien toca el composer. El envoltorio del
-    // primero es la fuente de verdad.
-    //
-    // Si sólo UN ticket resolvió, ese va por el camino unitario
-    // (`body_only=false` completo, sin re-ensamblado) — un "lote de un
-    // solo elemento sin envoltorio" sería peor que el bug original.
-    if (succeeded.length === 1) {
-      const only = succeeded[0];
-      try {
-        const result = await this.documentPrint.resolveAndPrint({
-          documentType: 'pos_order',
-          documentId: only.orderId ?? 0,
-        });
-        if (failed.length > 0) {
-          const detail = failed
-            .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
-            .join('; ');
-          console.warn(
-            `printTicketsBatch: ${failed.length} tiquete(s) no se imprimieron — ${detail}`,
-          );
-        }
-        return { rendered: 1, pages: result.pages };
-      } catch (err) {
-        // Re-render del único también falló: mismo error que tendríamos si
-        // forzáramos el path de lote, lo dejamos subir.
-        throw err;
-      }
-    }
-
-    // Re-render del primer tiquete con `body_only=false` para traer su
-    // `<head>` y `<style>` al envoltorio. El resto ya están en `body`.
     const first = succeeded[0];
-    let firstFullDoc: string;
-    try {
-      const firstResolved = await firstValueFrom(
-        this.gatewayClient.resolveDocument(
-          'pos_order',
-          first.orderId ?? 0,
-          'html',
-        ),
-      );
-      const firstRendered = await firstValueFrom(
-        this.gatewayClient.renderDocument(
-          firstResolved.format_type,
-          firstResolved.document_id,
-          firstResolved.engine,
-          /* bodyOnly */ false,
-        ),
-      );
-      if (!firstRendered?.html) {
-        throw new Error(
-          `Gateway devolvió respuesta sin HTML para el envoltorio (${firstResolved.format_type} doc ${firstResolved.document_id})`,
-        );
-      }
-      firstFullDoc = firstRendered.html;
-    } catch (err) {
-      // Si el re-render del envoltorio falla, también lo subimos — el lote
-      // no es viable sin un wrapper con CSS real.
-      throw err;
-    }
-
-    // Inyectar los cuerpos 2..N antes del `</body>` del primero. El composer
-    // emite exactamente un `</body>` de cierre; `lastIndexOf` lo localiza
-    // sin regex, y `slice` preserva el orden de inserción del lote.
-    //
-    // Estructura del insertion: `${separator}${body2}${separator}${body3}`.
-    // El slice `[:bodyCloseIdx]` del primer doc termina exactamente donde
-    // arranca `</body>`, así que el primer separator queda pegado al final
-    // del contenido del ticket 1 — un page-break antes del ticket 2, sin
-    // separadores duplicados ni huecos.
-    const restBodies = succeeded.slice(1).map((r) => r.body);
-    // Estructura del insertion: `${separator}${body2}${separator}${body3}`.
-    // El slice `[:bodyCloseIdx]` del primer doc termina justo después del
-    // contenido del ticket 1, así que el primer `separator` queda pegado
-    // a ese cierre — un page-break antes del ticket 2 sin separadores
-    // duplicados ni huecos. Reduce explícito (no `[...].join`): un join
-    // metería el separador ENTRE elementos, no antes de cada uno.
-    let insertion = '';
-    for (const body of restBodies) {
-      insertion += separator + body;
-    }
-    const bodyCloseIdx = firstFullDoc.lastIndexOf('</body>');
-    if (bodyCloseIdx < 0) {
-      // El composer debería emitir siempre un </body>; si falta, lanzamos
-      // en vez de imprimir un documento malformado.
+    const incompatible = succeeded.some((result) =>
+      result.head !== first.head ||
+      result.widthMm !== first.widthMm ||
+      result.isRoll !== first.isRoll,
+    );
+    if (incompatible) {
       throw new Error(
-        'printTicketsBatch: el envoltorio del primer tiquete no contiene </body>; imposible ensamblar el lote sin él.',
+        'El lote contiene diseños o papeles incompatibles; imprima por separado.',
       );
     }
-    const assembled = firstFullDoc.slice(0, bodyCloseIdx) +
-      insertion +
-      firstFullDoc.slice(bodyCloseIdx);
 
-    const job = await this.documentPrint.print({
-      document: 'pos_ticket',
-      body: assembled,
-      title: total === 1 ? 'Ticket' : `Tiquetes (${total})`,
-      styles: TICKET_PRINT_STYLES,
-      overrides: {
-        format: printer.format,
-        copies: options?.copiesOverride,
-      },
-    });
+    const separator = '<div style="break-after: page; page-break-after: always;"></div>';
+    let bodies = '';
+    for (const result of succeeded) {
+      const shell = this.readGatewayDocumentShell(result.html);
+      for (let copy = 0; copy < result.copies; copy++) {
+        if (bodies) bodies += separator;
+        bodies += shell.body;
+      }
+    }
+    const assembled = first.html.replace(
+      /(<body\b[^>]*>)[\s\S]*?(<\/body\s*>)/i,
+      (_match, opening: string, closing: string) => `${opening}${bodies}${closing}`,
+    );
+    await this.documentPrint.printGatewayHtml(assembled, 1);
 
     if (failed.length > 0) {
       // No tiramos el lote (ya se imprimió lo bueno); sólo informamos.
@@ -1096,7 +1030,20 @@ export class PosTicketService {
       console.warn(`printTicketsBatch: ${failed.length} tiquete(s) no se imprimieron — ${detail}`);
     }
 
-    return { rendered: succeeded.length, pages: succeeded.length * job.copies };
+    return {
+      rendered: succeeded.length,
+      pages: succeeded.reduce((pages, result) => pages + result.copies, 0),
+    };
+  }
+
+  /** Extract the shell parts needed to assemble a compatible gateway batch. */
+  private readGatewayDocumentShell(html: string): { head: string; body: string } {
+    const head = html.match(/<head\b[^>]*>[\s\S]*?<\/head\s*>/i)?.[0];
+    const body = html.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1];
+    if (!head || body === undefined) {
+      throw new Error('El HTML del gateway no contiene un head y body completos.');
+    }
+    return { head, body };
   }
 
   private async printHTML(html: string, copies?: number): Promise<void> {

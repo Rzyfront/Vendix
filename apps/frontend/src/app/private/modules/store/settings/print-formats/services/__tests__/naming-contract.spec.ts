@@ -4,6 +4,7 @@ import { PrintFormatDefinition } from '../../../../../../../core/models/print-fo
 import { PrintPaperPanelComponent } from '../../components/print-properties-panel/paper-panel.component';
 import { PrintLogoPanelComponent } from '../../components/print-properties-panel/logo-panel.component';
 import { PrintCompanyPanelComponent } from '../../components/print-properties-panel/company-panel.component';
+import { PrintStylesPanelComponent } from '../../components/print-properties-panel/styles-panel.component';
 
 /**
  * The 8 fields that used to travel in camelCase while the backend composer
@@ -73,7 +74,12 @@ function findLegacyCamelCaseKeys(value: unknown, path = '$'): string[] {
 describe('print-formats naming contract — snake_case only [print-editor-dsk defect-fix]', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [PrintPaperPanelComponent, PrintLogoPanelComponent, PrintCompanyPanelComponent],
+      imports: [
+        PrintPaperPanelComponent,
+        PrintLogoPanelComponent,
+        PrintCompanyPanelComponent,
+        PrintStylesPanelComponent,
+      ],
     });
   });
 
@@ -97,6 +103,17 @@ describe('print-formats naming contract — snake_case only [print-editor-dsk de
     paperFixture.componentInstance.setCustomWidth(120);
     paperFixture.componentRef.setInput('definition', definition);
     paperFixture.componentInstance.setCustomHeight(180);
+    paperFixture.componentRef.setInput('definition', definition);
+    paperFixture.componentInstance.setCopies(3.9);
+    paperFixture.componentRef.setInput('definition', definition);
+    expect(definition.paper.copies).toBe(3);
+    paperFixture.componentInstance.setCopies(-2);
+    paperFixture.componentRef.setInput('definition', definition);
+    expect(definition.paper.copies).toBe(0);
+    paperFixture.componentInstance.setCopies(12);
+    paperFixture.componentRef.setInput('definition', definition);
+    expect(definition.paper.copies).toBe(10);
+    paperFixture.componentInstance.setCopies(1);
     paperFixture.componentRef.setInput('definition', definition);
     paperFixture.componentInstance.setMargin('top', 12);
     paperFixture.componentRef.setInput('definition', definition);
@@ -150,5 +167,146 @@ describe('print-formats naming contract — snake_case only [print-editor-dsk de
     // ── Deep scan: none of the 8 legacy camelCase keys anywhere in the
     //     final object graph. ───────────────────────────────────────────
     expect(findLegacyCamelCaseKeys(definition)).toEqual([]);
+  });
+
+  it('auto-print changes only when the format has a real automatic trigger', () => {
+    const definition: PrintFormatDefinition = {
+      paper: { format: 'letter', width_mm: 216, is_roll: false, copies: 1, auto_print: false },
+      sections: [],
+    };
+    const fixture = TestBed.createComponent(PrintPaperPanelComponent);
+    fixture.componentRef.setInput('definition', definition);
+    let emissions = 0;
+    fixture.componentInstance.definitionChanged.subscribe(() => emissions++);
+    fixture.detectChanges();
+
+    fixture.componentInstance.setAutoPrint(true);
+    expect(emissions).toBe(0);
+    fixture.componentRef.setInput('formatType', 'quotation');
+    fixture.componentInstance.setAutoPrint(true);
+    expect(emissions).toBe(0);
+    fixture.componentRef.setInput('formatType', 'pos_sale_ticket');
+    fixture.componentInstance.setAutoPrint(true);
+    expect(emissions).toBe(1);
+  });
+
+  it('shows the POS paid-sale option only for the dispatch ticket', () => {
+    const fixture = TestBed.createComponent(PrintPaperPanelComponent);
+    fixture.componentRef.setInput('definition', {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, copies: 1 },
+      sections: [],
+    } satisfies PrintFormatDefinition);
+    fixture.componentRef.setInput('formatType', 'pos_sale_ticket');
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(
+      host.querySelector('#print-format-auto-print-after-pos-sale'),
+    ).toBeNull();
+
+    fixture.componentRef.setInput('formatType', 'dispatch_ticket');
+    fixture.detectChanges();
+
+    const checkbox = host.querySelector<HTMLInputElement>(
+      '#print-format-auto-print-after-pos-sale',
+    );
+    expect(checkbox).not.toBeNull();
+    expect(
+      host.querySelector(
+        'label[for="print-format-auto-print-after-pos-sale"]',
+      )?.textContent,
+    ).toContain('Imprimir después de cada venta POS pagada');
+  });
+
+  it('sets the POS option immutably and ignores formats other than dispatch tickets', () => {
+    const definition: PrintFormatDefinition = {
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        copies: 2,
+        auto_print: true,
+        auto_print_after_pos_sale: false,
+      },
+      sections: [],
+    };
+    const fixture = TestBed.createComponent(PrintPaperPanelComponent);
+    fixture.componentRef.setInput('definition', definition);
+    fixture.componentRef.setInput('formatType', 'dispatch_ticket');
+    let emitted: PrintFormatDefinition | undefined;
+    fixture.componentInstance.definitionChanged.subscribe((next) => (emitted = next));
+    fixture.detectChanges();
+
+    fixture.componentInstance.setAutoPrintAfterPosSale(true);
+
+    expect(definition.paper.auto_print_after_pos_sale).toBe(false);
+    expect(emitted).not.toBe(definition);
+    expect(emitted?.paper).not.toBe(definition.paper);
+    expect(emitted?.paper).toEqual(jasmine.objectContaining({
+      auto_print: true,
+      auto_print_after_pos_sale: true,
+      copies: 2,
+    }));
+
+    emitted = undefined;
+    fixture.componentRef.setInput('formatType', 'pos_sale_ticket');
+    fixture.componentInstance.setAutoPrintAfterPosSale(false);
+    expect(emitted).toBeUndefined();
+  });
+
+  it('disables the POS option when auto-print is off without clearing its saved value', async () => {
+    let definition: PrintFormatDefinition = {
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        copies: 1,
+        auto_print: true,
+        auto_print_after_pos_sale: true,
+      },
+      sections: [],
+    };
+    const fixture = TestBed.createComponent(PrintPaperPanelComponent);
+    fixture.componentRef.setInput('definition', definition);
+    fixture.componentRef.setInput('formatType', 'dispatch_ticket');
+    fixture.componentInstance.definitionChanged.subscribe((next) => (definition = next));
+    fixture.detectChanges();
+
+    fixture.componentInstance.setAutoPrint(false);
+    fixture.componentRef.setInput('definition', definition);
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const checkbox = host.querySelector<HTMLInputElement>(
+      '#print-format-auto-print-after-pos-sale',
+    );
+    expect(checkbox?.disabled).toBe(true);
+    expect(checkbox?.checked).toBe(true);
+    expect(definition.paper.auto_print).toBe(false);
+    expect(definition.paper.auto_print_after_pos_sale).toBe(true);
+  });
+
+  it('disables thermal font and color controls without mutating saved style values', async () => {
+    const definition: PrintFormatDefinition = {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, copies: 1 },
+      sections: [],
+      styles: { font_family: 'Georgia, serif', primary_color: '#123456' },
+    };
+    const fixture = TestBed.createComponent(PrintStylesPanelComponent);
+    fixture.componentRef.setInput('definition', definition);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const disabledControls = Array.from(
+      fixture.nativeElement.querySelectorAll('select, input[type="color"], input[type="text"]'),
+    ) as HTMLInputElement[];
+    expect(disabledControls.length).toBeGreaterThanOrEqual(3);
+    expect(disabledControls.every((control) => control.disabled)).toBe(true);
+    fixture.componentInstance.updateFontFamily('Inter, sans-serif');
+    fixture.componentInstance.updatePrimaryColor('#ffffff');
+    expect(definition.styles?.font_family).toBe('Georgia, serif');
+    expect(definition.styles?.primary_color).toBe('#123456');
   });
 });

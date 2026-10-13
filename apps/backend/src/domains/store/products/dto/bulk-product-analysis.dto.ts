@@ -4,6 +4,22 @@ export interface BulkValidationMessage {
   field?: string;
 }
 
+/**
+ * Variante parseada de una fila con `SKU Padre`, colgada de su producto padre.
+ * `price` null = hereda el precio del padre.
+ */
+export class BulkVariantAnalysisItemDto {
+  row_number: number;
+  sku: string;
+  name: string;
+  attributes: Record<string, string>;
+  price: number | null;
+  action: 'create' | 'update';
+  status: 'ready' | 'warning' | 'error';
+  warnings: (string | BulkValidationMessage)[];
+  errors: (string | BulkValidationMessage)[];
+}
+
 export class BulkProductAnalysisItemDto {
   row_number: number;
   name: string;
@@ -49,11 +65,13 @@ export class BulkProductAnalysisItemDto {
   pricing_type?: string;
   modified_fields?: string[];
   nulled_fields?: string[];
+  variants?: BulkVariantAnalysisItemDto[];
 }
 
 export class BulkProductAnalysisResultDto {
   session_id: string;
   total_products: number;
+  total_variants: number;
   ready: number;
   with_warnings: number;
   with_errors: number;

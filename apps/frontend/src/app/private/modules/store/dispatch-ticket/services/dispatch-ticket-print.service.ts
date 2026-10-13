@@ -1,11 +1,32 @@
 import { Injectable, inject } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
+import Decimal from 'decimal.js';
 import {
   DocumentPrintService,
   type PrintResult,
   type PrintTrigger,
 } from '../../../../../shared/services/print/document-print.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { PrintGatewayClientService } from '../../../../../shared/services/print/print-gateway-client.service';
+import { shouldAutoPrintDispatchTicket } from '../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { DispatchTicketData } from '../models/dispatch-ticket-data.model';
+import type { StorePrintFormatDetail } from '../../../../../core/models/print-formats.model';
+
+export interface PosDispatchPrintContext {
+  origin: 'sale_completed' | 'confirmation';
+  counterEnabled?: boolean;
+  order: {
+    id?: number | string | null;
+    state?: unknown;
+    status?: unknown;
+    payment_status?: unknown;
+    delivery_type?: string | null;
+    isShippingSale?: boolean;
+    grand_total?: unknown;
+    total_paid?: unknown;
+    remaining_balance?: unknown;
+  };
+}
 
 /**
  * Servicio canónico para imprimir el tiquete de despacho (dispatch_ticket).
@@ -36,6 +57,7 @@ import { DispatchTicketData } from '../models/dispatch-ticket-data.model';
 export class DispatchTicketPrintService {
   private readonly documentPrint = inject(DocumentPrintService);
   private readonly toast = inject(ToastService);
+  private readonly printGateway = inject(PrintGatewayClientService);
 
   /**
    * Cola FIFO (concurrencia 1) para los tiquetes de despacho.
@@ -74,6 +96,117 @@ export class DispatchTicketPrintService {
    */
   private static readonly AUTO_DEDUP_WINDOW_MS = 30_000;
   private recentAutoPrints = new Map<string | number, number>();
+
+  /** Fresh, store-owned print policy and payment settlement gate for POS. */
+  async printFromPos(
+    data: DispatchTicketData,
+    context: PosDispatchPrintContext,
+  ): Promise<PrintResult | null> {
+    let detail: StorePrintFormatDetail;
+    try {
+      detail = await firstValueFrom(
+        this.printGateway.getFormatDetail('dispatch_ticket'),
+      );
+    } catch {
+      return null;
+    }
+
+    if (
+      !detail?.is_active ||
+      detail.definition?.paper?.auto_print === false
+    ) {
+      return null;
+    }
+
+    if (!context?.order) return null;
+    const order = context.order;
+    if (detail.definition?.paper?.auto_print_after_pos_sale === true) {
+      if (context.origin !== 'sale_completed') return null;
+      if (
+        !this.hasCanonicalDocumentId(order.id) ||
+        !this.hasCanonicalDocumentId(data.orderId) ||
+        String(order.id) !== String(data.orderId)
+      ) {
+        return null;
+      }
+      if (this.hasRejectedOrderStatus(order.state) || this.hasRejectedOrderStatus(order.status)) {
+        return null;
+      }
+      if (this.hasRejectedPaymentStatus(order.payment_status)) return null;
+
+      const grandTotal = this.parseSettlementAmount(order.grand_total);
+      const totalPaid = this.parseSettlementAmount(order.total_paid);
+      const remainingBalance = this.parseSettlementAmount(order.remaining_balance);
+      if (
+        !grandTotal ||
+        !totalPaid ||
+        !remainingBalance ||
+        !remainingBalance.isZero() ||
+        !totalPaid.greaterThanOrEqualTo(grandTotal)
+      ) {
+        return null;
+      }
+    } else if (
+      !shouldAutoPrintDispatchTicket('automatic', {
+        printDispatchTicketEnabled: true,
+        printDispatchTicketAuto: true,
+        counterEnabled: context.counterEnabled,
+        deliveryType: order.delivery_type,
+        isShippingSale: order.isShippingSale,
+      })
+    ) {
+      return null;
+    }
+
+    return this.printDispatchTicket(data, 'automatic');
+  }
+
+  private hasCanonicalDocumentId(value: unknown): boolean {
+    if (typeof value === 'number') {
+      return Number.isSafeInteger(value) && value > 0;
+    }
+    return typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value));
+  }
+
+  private hasRejectedOrderStatus(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    return [
+      'draft',
+      'created',
+      'pending_payment',
+      'cancelled',
+      'canceled',
+      'refunded',
+    ].includes(value.toLowerCase());
+  }
+
+  private hasRejectedPaymentStatus(value: unknown): boolean {
+    if (value == null) return false;
+    if (typeof value !== 'string') return true;
+    return ![
+      'succeeded',
+      'captured',
+      'paid',
+      'overpaid',
+      'completed',
+    ].includes(value.trim().toLowerCase());
+  }
+
+  private parseSettlementAmount(value: unknown): Decimal | null {
+    if (
+      (typeof value !== 'number' && typeof value !== 'string') ||
+      (typeof value === 'number' && !Number.isFinite(value)) ||
+      (typeof value === 'string' && !/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value))
+    ) {
+      return null;
+    }
+    try {
+      const amount = new Decimal(value);
+      return amount.isFinite() && !amount.isNegative() ? amount : null;
+    } catch {
+      return null;
+    }
+  }
 
   private enqueuePrint<T>(job: () => Promise<T>): Promise<T> {
     const result = this.printChain.then(() => job());

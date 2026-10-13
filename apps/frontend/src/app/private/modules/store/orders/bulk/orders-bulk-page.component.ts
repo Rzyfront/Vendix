@@ -221,7 +221,7 @@ const BULK_ACTIONS: BulkActionDef[] = [
     group: 'documents',
     label: 'Imprimir tiquetes POS',
     description:
-      'Imprime el tiquete POS de cada orden seleccionada en una sola tanda, con el mismo formato de papel y número de copias configurados en Ajustes → Recibos.',
+      'Imprime los tiquetes POS en una sola tanda, con el diseño y las copias configurados para cada formato.',
     cta: 'Imprimir',
     icon: 'printer',
     variant: 'primary',
@@ -521,42 +521,12 @@ export class OrdersBulkPageComponent {
    */
   readonly renderProgress = this.bulkPrintService.renderProgress;
 
-  /**
-   * Aviso de gasto de papel ANTES de pulsar.
-   *
-   * Con 300 órdenes y `pos_ticket_copies: 2` salen 600 hojas, y hasta ahora no
-   * había ninguna señal previa: el operador lo descubría en el diálogo de
-   * impresión, o en la bandeja. El conteo se pinta inline en la sección
-   * Documentos — no hay modal nuevo, porque el dato debe estar visible mientras
-   * se construye la selección, no solo al confirmar.
-   *
-   * Las copias vienen del snapshot local (`configuredCopies`), que es lo único
-   * disponible antes de pedir nada. Al imprimir manda el valor canónico de la DB
-   * (`payload.pos_ticket_copies`), así que si el comerciante cambió las copias
-   * sin re-loguear el aviso puede quedarse corto: es el snapshot rancio de
-   * `vendix_auth_state`, no un error de cuenta. Reactivo porque
-   * `StoreSettingsFacade.receipts` es un `computed`.
-   */
+  /** Aviso previo: cada formato puede configurar copias y el papel depende del contenido. */
   readonly printVolumeNotice = computed<string>(() => {
     const tickets = this.selectedCount();
     if (tickets === 0) return '';
-
-    const copies = this.bulkPrintService.configuredCopies();
-    const pages = tickets * copies;
-
     const ticketLabel = tickets === 1 ? 'tiquete' : 'tiquetes';
-    const pageLabel = pages === 1 ? 'página' : 'páginas';
-    // En carta y media carta la hoja tiene alto FIJO, así que un tiquete largo
-    // se fragmenta en dos y `tiquetes × copias` queda por debajo del papel real
-    // (medido: una orden de 16 líneas mide 209 mm contra los 140 mm de la media
-    // carta). Prometer un número exacto ahí sería justo la sorpresa que este
-    // aviso existe para evitar.
-    const exact = this.bulkPrintService.pageCountIsExact();
-    const base = `${tickets} ${ticketLabel} · ${exact ? '' : 'al menos '}${pages} ${pageLabel}`;
-
-    // La coletilla solo aparece cuando multiplica: con 1 copia, "300 tiquetes ·
-    // 300 páginas (1 copia por tiquete)" es ruido.
-    return copies > 1 ? `${base} (${copies} copias por tiquete)` : base;
+    return `${tickets} ${ticketLabel} · se aplican las copias configuradas por formato; el total de páginas depende del diseño y contenido.`;
   });
 
   readonly blockedReason = computed<string>(() => {

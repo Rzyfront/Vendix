@@ -12,17 +12,20 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Subject, debounceTime } from 'rxjs';
 import {
   CanvasRegion,
   PrintColumnDefinition,
   PrintFormatDefinition,
+  PrintFormatType,
   PrintPreviewMode,
   PrintSectionDefinition,
   PrintSelectedElement,
 } from '../../../../../../../core/models/print-formats.model';
 import { definitionToRegions, regionsToDelta } from './canvas-region';
 import { MmToPxService } from '../../../../../../../shared/services/print/mm-to-px.service';
+import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
 import { PrintCanvasHistoryService } from '../../services/print-canvas-history.service';
 import { PrintCanvasToolbarComponent } from './print-canvas-toolbar.component';
 import { PrintPropertiesPanelComponent } from '../print-properties-panel/print-properties-panel.component';
@@ -69,13 +72,14 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
             (dragover)="onDragOver($event)"
             (drop)="onDrop($event)"
           >
-            @if (previewHtml()) {
+            @if (safePreviewHtml()) {
               <iframe
                 #previewIframe
                 id="vendix-canvas-iframe"
-                [srcdoc]="previewHtml()"
+                [srcdoc]="safePreviewHtml()"
                 class="vendix-preview-iframe"
-                sandbox="allow-same-origin allow-scripts"
+                (load)="onPreviewIframeLoad($event)"
+                sandbox="allow-same-origin"
               ></iframe>
             } @else {
               <div class="p-8 text-center text-xs text-text-tertiary">
@@ -89,6 +93,7 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
         <app-print-properties-panel
           class="vendix-canvas-properties"
           [definition]="definition()"
+          [formatType]="formatType()"
           [selectedRegion]="selectedRegion()"
           (unselectRequested)="onUnselect()"
           (definitionChanged)="onPropertiesPanelChanged($event)"
@@ -150,6 +155,7 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
       }
       .vendix-paper {
         position: relative;
+        flex-shrink: 0;
         transform-origin: top center;
         background: #ffffff;
         border: 1px solid #d4d4d4;
@@ -178,6 +184,7 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
 export class PrintCanvasComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly mm = inject(MmToPxService);
+  private readonly sanitizer = inject(DomSanitizer);
   protected readonly history = inject(PrintCanvasHistoryService);
 
   /** Paper-shaped DOM node used by fit-to-screen. */
@@ -185,9 +192,17 @@ export class PrintCanvasComponent {
 
   /** Current print format definition; drives the region layout. */
   readonly definition = input.required<PrintFormatDefinition>();
+  readonly formatType = input<PrintFormatType | null>(null);
 
   /** Compiled preview HTML string rendered inside the paper iframe. */
   readonly previewHtml = input<string>('');
+  /** Preserve backend preview CSS, drop its legacy script bridge, and keep scripts sandboxed. */
+  readonly safePreviewHtml = computed<SafeHtml | null>(() => {
+    const html = this.previewHtml();
+    if (!html) return null;
+    const markupWithoutScripts = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    return this.sanitizer.bypassSecurityTrustHtml(markupWithoutScripts);
+  });
 
   /** Two-way bound preview mode: 'dummy' (data simulada) vs 'tokenized' (variables). */
   readonly previewMode = model<PrintPreviewMode>('dummy');
@@ -235,23 +250,30 @@ export class PrintCanvasComponent {
 
   readonly paperWidthMm = computed<number>(() => {
     const d = this.definition();
-    return d?.paper?.width_mm ?? 80;
+    if (!d?.paper) return 80;
+    const geometry = PAPER_GEOMETRY[d.paper.format as keyof typeof PAPER_GEOMETRY];
+    const width = geometry?.width_mm ?? d.paper.width_mm ?? 80;
+    const height = geometry?.height_mm ?? d.paper.height_mm;
+    return !d.paper.is_roll && d.paper.orientation === 'landscape' && height != null
+      ? height
+      : width;
   });
 
   readonly paperHeightMm = computed<number>(() => {
     const d = this.definition();
     if (!d?.paper) return 100;
-    if (d.paper.is_roll) {
-      return 100;
-    }
-    return d.paper.height_mm ?? 297;
+    if (d.paper.is_roll) return 100;
+    const geometry = PAPER_GEOMETRY[d.paper.format as keyof typeof PAPER_GEOMETRY];
+    const width = geometry?.width_mm ?? d.paper.width_mm ?? 80;
+    const height = geometry?.height_mm ?? d.paper.height_mm ?? width;
+    return d.paper.orientation === 'landscape' ? width : height;
   });
 
   readonly paperLabel = computed<string | null>(() => {
     const d = this.definition();
     if (!d?.paper) return null;
-    const w = d.paper.width_mm;
-    const h = d.paper.is_roll ? 'roll' : `${d.paper.height_mm ?? '?'}mm`;
+    const w = this.paperWidthMm();
+    const h = d.paper.is_roll ? 'roll' : `${this.paperHeightMm()}mm`;
     return `${d.paper.format} — ${w}×${h}`;
   });
 
@@ -307,31 +329,6 @@ export class PrintCanvasComponent {
       document.addEventListener('keydown', handler);
       this.destroyRef.onDestroy(() => {
         document.removeEventListener('keydown', handler);
-      });
-    }
-
-    // Listen to click messages from inside the preview iframe
-    if (typeof window !== 'undefined') {
-      const messageHandler = (event: MessageEvent): void => {
-        if (event.data?.type === 'VENDIX_PRINT_ELEMENT_CLICKED') {
-          const { elementId, sectionId, token, columnId } = event.data;
-          this.elementSelected.emit({ elementId, sectionId, token, columnId });
-          if (columnId) {
-            this.regionSelected.emit(`col-${columnId}`);
-          } else if (elementId?.startsWith('comp_')) {
-            this.regionSelected.emit(`comp-${elementId.replace('comp_', '')}`);
-          } else if (elementId === 'f_logo') {
-            this.regionSelected.emit('logo');
-          } else if (elementId) {
-            this.regionSelected.emit(`field-${elementId}`);
-          } else if (sectionId) {
-            this.regionSelected.emit(`sec-${sectionId}`);
-          }
-        }
-      };
-      window.addEventListener('message', messageHandler);
-      this.destroyRef.onDestroy(() => {
-        window.removeEventListener('message', messageHandler);
       });
     }
 
@@ -492,6 +489,45 @@ export class PrintCanvasComponent {
     if ((event.target as HTMLElement).classList.contains('vendix-paper')) {
       this.regionSelected.emit(null);
     }
+  }
+
+  onPreviewIframeLoad(event: Event): void {
+    const iframe = event.target as HTMLIFrameElement;
+    const body = iframe.contentDocument?.body;
+    if (!body) return;
+
+    body.addEventListener('click', (clickEvent: MouseEvent) => {
+      let target = clickEvent.target as Node | null;
+      if (target?.nodeType !== Node.ELEMENT_NODE) target = target?.parentElement ?? null;
+      const targetElement = target as Element | null;
+      const elementTarget = targetElement?.closest<HTMLElement>('[data-element-id]');
+      const sectionTarget = targetElement?.closest<HTMLElement>('[data-section-id]');
+      const tokenTarget = targetElement?.closest<HTMLElement>('[data-token]');
+      const elementId = elementTarget?.getAttribute('data-element-id') ?? null;
+      const sectionId = sectionTarget?.getAttribute('data-section-id') ?? null;
+      const token = tokenTarget?.getAttribute('data-token') ?? null;
+      const columnId = elementTarget?.getAttribute('data-column-id') ?? null;
+
+      if (!elementId && !sectionId && !token) {
+        this.regionSelected.emit(null);
+        return;
+      }
+
+      this.elementSelected.emit({ elementId, sectionId, token, columnId });
+      if (columnId) {
+        this.regionSelected.emit(`col-${columnId}`);
+      } else if (elementId?.startsWith('comp_')) {
+        this.regionSelected.emit(`comp-${elementId.replace('comp_', '')}`);
+      } else if (elementId === 'f_logo') {
+        this.regionSelected.emit('logo');
+      } else if (elementId) {
+        this.regionSelected.emit(`field-${elementId}`);
+      } else if (sectionId) {
+        this.regionSelected.emit(`sec-${sectionId}`);
+      } else {
+        this.regionSelected.emit(null);
+      }
+    });
   }
 
   onRegionClick(event: MouseEvent, regionId: string): void {

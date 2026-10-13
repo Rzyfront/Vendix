@@ -93,30 +93,6 @@ export class OrdersBulkPrintService {
   readonly renderProgress = this.renderProgressState.asReadonly();
 
   /**
-   * Copias por tiquete configuradas en la tienda, según el snapshot local.
-   *
-   * Sirve para el aviso PREVIO ("N tiquetes · P páginas"): antes de pulsar no
-   * hay respuesta del backend de la que leer el valor canónico. Al imprimir sí
-   * manda `payload.pos_ticket_copies` (DB), así que el aviso puede quedarse
-   * corto si el comerciante cambió las copias sin re-loguear — es el snapshot
-   * rancio de `vendix_auth_state`, no un error de cuenta.
-   */
-  configuredCopies(): number {
-    return Math.max(1, this.posTicket.configuredCopies());
-  }
-
-  /**
-   * Whether `tiquetes × copias` cuenta las hojas exactas, o solo el mínimo.
-   *
-   * En `thermal_*` el alto del papel es `auto` y un tiquete siempre ocupa una
-   * hoja. En `letter` / `half_letter` la hoja tiene alto fijo y un tiquete largo
-   * se fragmenta en dos, así que el aviso debe decir "al menos".
-   */
-  pageCountIsExact(): boolean {
-    return this.posTicket.pageCountIsExact();
-  }
-
-  /**
    * Trae, mapea e imprime los tiquetes POS de las órdenes seleccionadas.
    *
    * Nunca emite error: todo fallo (HTTP o render) se traduce a un
@@ -171,8 +147,6 @@ export class OrdersBulkPrintService {
 
     return from(
       this.posTicket.printTicketsBatch(tickets, {
-        formatOverride: payload.pos_ticket_format,
-        copiesOverride: payload.pos_ticket_copies,
         onProgress: (done, total) =>
           this.renderProgressState.set({ done, total }),
       }),

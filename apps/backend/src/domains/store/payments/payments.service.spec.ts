@@ -2206,6 +2206,176 @@ describe('PaymentsService', () => {
   // `$transaction` is stubbed to resolve the canned post-commit result
   // directly: the in-transaction sale is not what these cases assert, and
   // running it would need hundreds of lines of unrelated mocks.
+  describe('POS print settlement snapshot', () => {
+    const STORE_ID = 1;
+    const staleOrder = {
+      id: 55,
+      order_number: 'ORD-POS-55',
+      state: 'created',
+      grand_total: new Prisma.Decimal('100'),
+      total_paid: new Prisma.Decimal('0'),
+      remaining_balance: new Prisma.Decimal('100'),
+      subtotal_amount: new Prisma.Decimal('100'),
+      tax_amount: new Prisma.Decimal('19'),
+      shipping_cost: new Prisma.Decimal('0'),
+      tip_amount: new Prisma.Decimal('0'),
+      order_items: [],
+      store_id: STORE_ID,
+      stores: { id: STORE_ID, organization_id: 1, industries: [] },
+    };
+
+    const runCreditSale = async (refreshedOrder: any) => {
+      const contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: STORE_ID, organization_id: 1 } as any);
+      const orderFindUnique = jest.fn().mockResolvedValue(refreshedOrder);
+      const models = new Map<string, any>();
+      const tx = new Proxy(
+        {},
+        {
+          get: (_target, modelName: string) => {
+            if (!models.has(modelName)) {
+              models.set(
+                modelName,
+                new Proxy(
+                  {},
+                  {
+                    get: (_model, method: string) => {
+                      if (modelName === 'orders' && method === 'findUnique') {
+                        return orderFindUnique;
+                      }
+                      return jest
+                        .fn()
+                        .mockResolvedValue(method === 'findMany' ? [] : null);
+                    },
+                  },
+                ),
+              );
+            }
+            return models.get(modelName);
+          },
+        },
+      );
+
+      (prisma as any).$transaction = jest.fn(async (callback: any) =>
+        callback(tx),
+      );
+      jest.spyOn(service as any, 'createOrUpdateOrderFromPos').mockResolvedValue({
+        order: staleOrder,
+        hasSerialized: false,
+        promotionsSnapshot: [],
+        appliedPromotions: [],
+        couponInfo: { coupon_id: null, coupon_code: null, discount_amount: 0 },
+        kitchenFire: null,
+        closedSessionId: null,
+      });
+
+      const result = await service.processPosPayment(
+        {
+          store_id: STORE_ID,
+          currency: 'COP',
+          items: [],
+          payments: [],
+          customer_id: null,
+          requires_payment: false,
+          is_draft: false,
+        } as any,
+        { id: 1, roles: ['super_admin'] },
+      );
+
+      contextSpy.mockRestore();
+      return { result, orderFindUnique };
+    };
+
+    it('returns the fresh fully settled snapshot (including tip) and selects its fields', async () => {
+      const refreshedOrder = {
+        id: 55,
+        order_number: 'ORD-POS-55',
+        state: 'finished',
+        grand_total: new Prisma.Decimal('119.25'),
+        total_paid: new Prisma.Decimal('119.25'),
+        remaining_balance: new Prisma.Decimal('0'),
+      };
+
+      const { result, orderFindUnique } = await runCreditSale(refreshedOrder);
+
+      expect(orderFindUnique).toHaveBeenCalledWith({
+        where: { id: staleOrder.id },
+        select: {
+          id: true,
+          order_number: true,
+          state: true,
+          grand_total: true,
+          total_paid: true,
+          remaining_balance: true,
+        },
+      });
+      expect(result.order).toMatchObject({
+        grand_total: '119.25',
+        total_paid: '119.25',
+        remaining_balance: '0',
+      });
+      expect(result.order?.total_amount).toEqual(staleOrder.grand_total);
+    });
+
+    it('preserves exact decimal values larger than JavaScript safe integers', async () => {
+      const exactAmount = '9007199254740993.25';
+      const { result } = await runCreditSale({
+        id: 55,
+        order_number: 'ORD-POS-55',
+        state: 'finished',
+        grand_total: new Prisma.Decimal(exactAmount),
+        total_paid: new Prisma.Decimal(exactAmount),
+        remaining_balance: new Prisma.Decimal('0'),
+      });
+
+      expect(result.order).toMatchObject({
+        grand_total: exactAmount,
+        total_paid: exactAmount,
+        remaining_balance: '0',
+      });
+    });
+
+    it('omits non-finite decimal values from the settlement snapshot', async () => {
+      const { result } = await runCreditSale({
+        id: 55,
+        order_number: 'ORD-POS-55',
+        state: 'created',
+        grand_total: new Prisma.Decimal('NaN'),
+        total_paid: new Prisma.Decimal('Infinity'),
+        remaining_balance: new Prisma.Decimal('0'),
+      });
+
+      expect(result.order).not.toHaveProperty('grand_total');
+      expect(result.order).not.toHaveProperty('total_paid');
+      expect(result.order).toHaveProperty('remaining_balance', '0');
+    });
+
+    it('returns a fresh partial balance rather than the stale fully unpaid snapshot', async () => {
+      const { result } = await runCreditSale({
+        id: 55,
+        order_number: 'ORD-POS-55',
+        state: 'created',
+        grand_total: new Prisma.Decimal('119.25'),
+        total_paid: new Prisma.Decimal('50'),
+        remaining_balance: new Prisma.Decimal('69.25'),
+      });
+
+      expect(result.order).toMatchObject({
+        total_paid: '50',
+        remaining_balance: '69.25',
+      });
+    });
+
+    it('omits settlement values when the refresh row is missing', async () => {
+      const { result } = await runCreditSale(null);
+
+      expect(result.order).not.toHaveProperty('grand_total');
+      expect(result.order).not.toHaveProperty('total_paid');
+      expect(result.order).not.toHaveProperty('remaining_balance');
+    });
+  });
+
   describe('processPosPayment post-commit grand_total (QUI-783)', () => {
     const CONTEXT_STORE_ID = 1;
     let contextSpy: jest.SpyInstance;

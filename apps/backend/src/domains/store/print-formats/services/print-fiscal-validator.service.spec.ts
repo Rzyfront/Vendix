@@ -192,6 +192,21 @@ describe('PrintFiscalValidatorService', () => {
     ).not.toThrow();
   });
 
+  it('should reject a disabled footer or disabled disclaimer field when saving a structured POS ticket', () => {
+    const disabledFooter: PrintFormatDefinition = {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
+      sections: [{ id: 'sec_footer', type: 'footer', title: 'Pie', enabled: false, order: 6,
+        fields: [{ id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda', enabled: true }] }],
+    };
+    const disabledField: PrintFormatDefinition = {
+      ...disabledFooter,
+      sections: [{ ...disabledFooter.sections![0], enabled: true,
+        fields: [{ id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda', enabled: false }] }],
+    };
+    expect(() => service.assertSaveCompliance('pos_sale_ticket', disabledFooter)).toThrow(VendixHttpException);
+    expect(() => service.assertSaveCompliance('pos_sale_ticket', disabledField)).toThrow(VendixHttpException);
+  });
+
   it('should accept pos_sale_ticket custom containing the disclaimer token when saving (assertSaveCompliance)', () => {
     const def: PrintFormatDefinition = {
       paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
@@ -202,6 +217,32 @@ describe('PrintFiscalValidatorService', () => {
     expect(() =>
       service.assertSaveCompliance('pos_sale_ticket', def),
     ).not.toThrow();
+  });
+
+  it('should reject whitespace around the token path and a bare path, while accepting the exact token', () => {
+    const base: PrintFormatDefinition = {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
+      sections: [],
+    };
+    expect(() => service.assertSaveCompliance('pos_sale_ticket', {
+      ...base, custom_template: '<p>{{  document.non_fiscal_disclaimer  }}</p>',
+    })).toThrow(VendixHttpException);
+    expect(() => service.assertSaveCompliance('pos_sale_ticket', {
+      ...base, custom_template: '<p>document.non_fiscal_disclaimer</p>',
+    })).toThrow(VendixHttpException);
+    expect(() => service.assertSaveCompliance('pos_sale_ticket', {
+      ...base, custom_template: '<p>{{document.non_fiscal_disclaimer}}</p>',
+    })).not.toThrow();
+  });
+
+  it('should require the disclaimer token when custom_template is active, not a structured field', () => {
+    const def: PrintFormatDefinition = {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
+      sections: [{ id: 'sec_footer', type: 'footer', title: 'Pie', enabled: true, order: 6,
+        fields: [{ id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda', enabled: true }] }],
+      custom_template: '  <p>Diseño propio sin token</p>  ',
+    };
+    expect(() => service.assertSaveCompliance('pos_sale_ticket', def)).toThrow(VendixHttpException);
   });
 
   it('should still enforce fiscal DIAN rules inside assertSaveCompliance', () => {
