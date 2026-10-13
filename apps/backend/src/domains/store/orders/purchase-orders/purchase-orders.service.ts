@@ -1471,7 +1471,8 @@ export class PurchaseOrdersService {
           // @@unique([store_id, name]); searching and creating by slug+store_id
           // keeps a PO-created brand indistinguishable from a UI-created one.
           let brandId: number | undefined;
-          if (item.brand_name?.trim()) {
+          // Línea a variante: no se toca catálogo (ni marca ni categorías).
+          if (!matchedVariant && item.brand_name?.trim()) {
             const brandName = item.brand_name.trim();
             const brandSlug = generateSlug(brandName);
             if (brandSlug) {
@@ -1501,7 +1502,8 @@ export class PurchaseOrdersService {
 	            typeof item.category_names === 'string'
 	              ? item.category_names
 	              : '';
-	          const hasCategoryNames = categoryNames.trim().length > 0;
+	          const hasCategoryNames =
+            !matchedVariant && categoryNames.trim().length > 0;
 	          if (hasCategoryNames) {
 	            const names = categoryNames
               .split(',')

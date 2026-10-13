@@ -2014,10 +2014,19 @@ describe('ProductsBulkService', () => {
           sku: 'CAM',
           state: 'active',
         });
-        mockPrismaService.product_variants.findMany.mockResolvedValue([
-          { id: 70, sku: 'cam-n' },
-          { id: 71, sku: 'CAM-AUSENTE' }, // no viene en el archivo: no se toca
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 7, sku: 'CAM', state: 'active' },
         ]);
+        mockPrismaService.product_variants.findMany.mockImplementation(
+          async (args: any) =>
+            // Dueños de SKU de variante (commit): la variante es del MISMO producto.
+            args?.where?.sku?.in
+              ? [{ sku: 'cam-n', product_id: 7, products: { name: 'Camiseta' } }]
+              : [
+                  { id: 70, sku: 'cam-n' },
+                  { id: 71, sku: 'CAM-AUSENTE' }, // no viene en el archivo: no se toca
+                ],
+        );
         const products = service.parseFile(
           file([
             'Camiseta,CAM,45000,,,,,,,',
@@ -2116,6 +2125,117 @@ describe('ProductsBulkService', () => {
           ]);
           expect(result.results[0].status).toBe('error');
           expect(createdSkus()).toEqual(['SANO']);
+        });
+
+        it('SKU de variante que ya usa otra variante/producto en BD: rechaza el producto con error de fila; el sano sí', async () => {
+          mockPrismaService.product_variants.findMany.mockImplementation(
+            async (args: any) =>
+              args?.where?.sku?.in
+                ? [
+                    {
+                      sku: 'CAM-1',
+                      product_id: 99,
+                      products: { name: 'Otro' },
+                    },
+                  ]
+                : [],
+          );
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-1,,CAM,Color,Negro,,,,',
+          ]);
+          expect(result.results[0].status).toBe('error');
+          expect(result.results[0].message).toMatch(/^Variante fila 3: .*ya lo usa/);
+          expect(createdSkus()).toEqual(['SANO']);
+        });
+
+        it('SKU de variante que es SKU de un producto de la tienda: rechaza', async () => {
+          mockPrismaService.products.findMany.mockResolvedValue([
+            { id: 50, sku: 'CAM-1', state: 'active' },
+          ]);
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-1,,CAM,Color,Negro,,,,',
+          ]);
+          expect(result.results[0].status).toBe('error');
+          expect(result.results[0].message).toMatch(/producto de la tienda/);
+          expect(createdSkus()).toEqual(['SANO']);
+        });
+
+        it('variante del MISMO producto existente con ese SKU: no es colisión (upsert)', async () => {
+          mockPrismaService.products.findMany.mockResolvedValue([
+            { id: 7, sku: 'CAM', state: 'active' },
+          ]);
+          mockPrismaService.products.findFirst.mockImplementation(
+            async (args: any) =>
+              args?.where?.sku === 'CAM'
+                ? { id: 7, sku: 'CAM', state: 'active' }
+                : null,
+          );
+          mockPrismaService.product_variants.findMany.mockImplementation(
+            async (args: any) =>
+              args?.where?.sku?.in
+                ? [{ sku: 'CAM-1', product_id: 7, products: { name: 'Camiseta' } }]
+                : [{ id: 70, sku: 'CAM-1' }],
+          );
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-1,,CAM,Color,Negro,,,,',
+          ]);
+          expect(result.results[0]).toMatchObject({ status: 'success', action: 'update' });
+          expect(mockProductsService.updateVariant).toHaveBeenCalledTimes(1);
+        });
+
+        it('update con variantes nuevas y Estado inactivo: error de fila sin llamar update', async () => {
+          mockPrismaService.products.findFirst.mockImplementation(
+            async (args: any) =>
+              args?.where?.sku === 'CAM'
+                ? { id: 7, sku: 'CAM', state: 'active' }
+                : null,
+          );
+          const products = service.parseFile(
+            file(
+              [
+                'Camiseta,CAM,45000,,,,,,,,inactivo',
+                ',CAM-NEW,,CAM,Color,Negro,,,,,',
+              ],
+              HEADER + ',Estado',
+            ),
+          );
+          const result = await service.uploadProducts({ products }, mockUser);
+          expect(result.results[0].status).toBe('error');
+          expect(result.results[0].message).toMatch(/producto inactivo/);
+          expect(mockProductsService.update).not.toHaveBeenCalled();
+          expect(mockProductsService.createVariant).not.toHaveBeenCalled();
+        });
+
+        it('update de variante existente con precio igual al padre: manda price_override null (limpia el override)', async () => {
+          mockPrismaService.products.findFirst.mockImplementation(
+            async (args: any) =>
+              args?.where?.sku === 'CAM'
+                ? { id: 7, sku: 'CAM', state: 'active' }
+                : null,
+          );
+          mockPrismaService.products.findMany.mockResolvedValue([
+            { id: 7, sku: 'CAM', state: 'active' },
+          ]);
+          mockPrismaService.product_variants.findMany.mockImplementation(
+            async (args: any) =>
+              args?.where?.sku?.in
+                ? [{ sku: 'CAM-N', product_id: 7, products: { name: 'Camiseta' } }]
+                : [{ id: 70, sku: 'CAM-N' }],
+          );
+          const products = service.parseFile(
+            file([
+              'Camiseta,CAM,45000,,,,,,,',
+              ',CAM-N,45000,CAM,Color,Negro,,,,',
+            ]),
+          );
+          await service.uploadProducts({ products }, mockUser);
+          expect(mockProductsService.updateVariant).toHaveBeenCalledWith(
+            70,
+            expect.objectContaining({ price_override: null }),
+          );
         });
 
         it('producto existente con multitarifa activa en BD: no actualiza ni agrega variantes', async () => {

@@ -2806,6 +2806,34 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       });
     });
 
+    it('línea a variante con marca y categorías: no crea marca ni categorías', async () => {
+      const tx = txWithVariant({
+        id: VARIANT_ID,
+        product_id: 900,
+        sku: 'CAM-R-M',
+        barcode: null,
+      });
+      tx.brands = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+      };
+      tx.categories = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+      };
+
+      await service.create(
+        lineDto({ brand_name: 'Marca Nueva', category_names: 'Ropa, Camisas' }) as any,
+      );
+
+      expect(tx.brands.create).not.toHaveBeenCalled();
+      expect(tx.categories.create).not.toHaveBeenCalled();
+      const line =
+        tx.purchase_orders.create.mock.calls[0][0].data.purchase_order_items
+          .create[0];
+      expect(line.product_variant_id).toBe(VARIANT_ID);
+    });
+
     it('código de barras de una variante: enlaza la variante', async () => {
       const tx = txWithVariant({
         id: VARIANT_ID,

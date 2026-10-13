@@ -1312,6 +1312,21 @@ export class ProductsBulkService {
         variantsHaveErrors = analyzed.some((v) => v.status === 'error');
         variantsHaveWarnings = analyzed.some((v) => v.status === 'warning');
 
+        // `createVariant` exige producto activo: variantes nuevas sobre un
+        // producto existente cuyo Estado del archivo es inactivo fallarían.
+        if (
+          item.existing_product_id !== undefined &&
+          this.isInactiveStateCell(product.state) &&
+          analyzed.some((v) => v.action === 'create')
+        ) {
+          item.errors.push({
+            code: 'VARIANTS_ON_INACTIVE_PRODUCT',
+            message:
+              'No se pueden agregar variantes a un producto inactivo. Activa el producto o quita las variantes nuevas.',
+            field: 'state',
+          });
+        }
+
         // Multitarifa ⊕ variantes: excluyentes (misma regla que `create`).
         if (
           product.has_multiple_price_tiers !== undefined &&
@@ -1551,17 +1566,17 @@ export class ProductsBulkService {
     return out;
   }
 
-  private analyzeVariants(
-    variants: any[],
-    ctx: {
-      parentExistingId?: number;
-      parentBasePrice: number | null;
-      fileProductSkus: Set<string>;
-      seenVariantSkus: Map<string, number>;
-      existingProductSkus: Map<string, { id: number; archived: boolean }>;
-      variantOwners: Map<string, { product_id: number; product_name?: string }>;
-    },
-  ): BulkVariantAnalysisItemDto[] {
+  /**
+   * Regla ÚNICA de colisión de SKU de variante contra la BD (análisis y
+   * commit): el SKU no puede pertenecer a un producto activo de la tienda ni a
+   * una variante de OTRO producto. Una variante del MISMO producto (padre
+   * existente) con ese SKU no es colisión: es el upsert por SKU.
+   */
+  private buildVariantSkuDbChecks(ctx: {
+    parentExistingId?: number;
+    existingProductSkus: Map<string, { id: number; archived: boolean }>;
+    variantOwners: Map<string, { product_id: number; product_name?: string }>;
+  }) {
     const isTakenByProduct = (skuLower: string) => {
       const owner = ctx.existingProductSkus.get(skuLower);
       return !!owner && !owner.archived;
@@ -1574,32 +1589,52 @@ export class ProductsBulkService {
         owner.product_id === ctx.parentExistingId
       );
     };
+    const onSku = (
+      skuLower: string,
+      errors: (string | BulkValidationMessage)[],
+    ) => {
+      if (isTakenByProduct(skuLower)) {
+        errors.push({
+          code: 'VARIANT_SKU_TAKEN',
+          message: 'El SKU de la variante ya lo usa un producto de la tienda.',
+          field: 'sku',
+        });
+        return;
+      }
+      const variantOwner = ctx.variantOwners.get(skuLower);
+      if (variantOwner && !isOwnVariant(skuLower)) {
+        const ownerName = variantOwner.product_name
+          ? ` del producto "${variantOwner.product_name}"`
+          : ' de otro producto';
+        errors.push({
+          code: 'VARIANT_SKU_TAKEN',
+          message: `El SKU de la variante ya lo usa una variante${ownerName} de la tienda.`,
+          field: 'sku',
+        });
+      }
+    };
+    return { isTakenByProduct, isOwnVariant, onSku };
+  }
+
+  private analyzeVariants(
+    variants: any[],
+    ctx: {
+      parentExistingId?: number;
+      parentBasePrice: number | null;
+      fileProductSkus: Set<string>;
+      seenVariantSkus: Map<string, number>;
+      existingProductSkus: Map<string, { id: number; archived: boolean }>;
+      variantOwners: Map<string, { product_id: number; product_name?: string }>;
+    },
+  ): BulkVariantAnalysisItemDto[] {
+    const { isTakenByProduct, isOwnVariant, onSku } =
+      this.buildVariantSkuDbChecks(ctx);
 
     const validated = this.validateVariantRows(variants, {
       parentBasePrice: ctx.parentBasePrice,
       fileProductSkus: ctx.fileProductSkus,
       seenVariantSkus: ctx.seenVariantSkus,
-      onSku: (skuLower, errors) => {
-        if (isTakenByProduct(skuLower)) {
-          errors.push({
-            code: 'VARIANT_SKU_TAKEN',
-            message: 'El SKU de la variante ya lo usa un producto de la tienda.',
-            field: 'sku',
-          });
-          return;
-        }
-        const variantOwner = ctx.variantOwners.get(skuLower);
-        if (variantOwner && !isOwnVariant(skuLower)) {
-          const ownerName = variantOwner.product_name
-            ? ` del producto "${variantOwner.product_name}"`
-            : ' de otro producto';
-          errors.push({
-            code: 'VARIANT_SKU_TAKEN',
-            message: `El SKU de la variante ya lo usa una variante${ownerName} de la tienda.`,
-            field: 'sku',
-          });
-        }
-      },
+      onSku,
     });
 
     return validated.map((r, i) => {
@@ -2447,6 +2482,71 @@ export class ProductsBulkService {
     );
   }
 
+  private isInactiveStateCell(state: unknown): boolean {
+    if (typeof state !== 'string') return false;
+    return ['inactivo', 'inactive', 'deshabilitado'].includes(
+      state.trim().toLowerCase(),
+    );
+  }
+
+  /**
+   * Datos de BD para validar variantes en el commit con la MISMA regla que el
+   * análisis: dueños de SKU de variante (1 consulta) y productos de la tienda
+   * por SKU (1 consulta: SKUs de variante para VARIANT_SKU_TAKEN + SKUs de los
+   * padres para saber el id existente). Sin variantes parseadas en la página no
+   * consulta nada.
+   */
+  private async loadVariantCommitContext(
+    products: any[],
+    storeId: number,
+  ): Promise<{
+    existingProductSkus: Map<string, { id: number; archived: boolean }>;
+    variantOwners: Map<string, { product_id: number; product_name?: string }>;
+  } | null> {
+    const variantSkus = new Set<string>();
+    const parentSkus = new Set<string>();
+    for (const p of products) {
+      const vs = (Array.isArray(p?.variants) ? p.variants : []).filter(
+        (v: any) => v?.[this.ROW_NUMBER_KEY] !== undefined,
+      );
+      if (vs.length === 0) continue;
+      const parentSku = this.cleanCellText(p.sku);
+      if (parentSku) parentSkus.add(parentSku);
+      for (const v of vs) {
+        const sku = this.cleanCellText(v.sku);
+        if (sku) variantSkus.add(sku);
+      }
+    }
+    if (variantSkus.size === 0) return null;
+
+    const variantOwners = await this.loadVariantSkuOwners(
+      Array.from(variantSkus),
+      storeId,
+    );
+    const rows = await this.prisma.products.findMany({
+      where: {
+        store_id: storeId,
+        sku: { in: Array.from(new Set([...variantSkus, ...parentSkus])) },
+      },
+      select: { id: true, sku: true, state: true },
+    });
+    const existingProductSkus = new Map<
+      string,
+      { id: number; archived: boolean }
+    >();
+    for (const r of rows || []) {
+      if (!r.sku) continue;
+      const key = String(r.sku).toLowerCase();
+      const archived = r.state === 'archived';
+      const prev = existingProductSkus.get(key);
+      // Gana el no archivado (el commit actualiza ese).
+      if (!prev || (prev.archived && !archived)) {
+        existingProductSkus.set(key, { id: r.id, archived });
+      }
+    }
+    return { existingProductSkus, variantOwners };
+  }
+
   /**
    * Rechaza (BadRequestException con el primer error, prefijado con la fila de
    * la variante) un producto cuyas variantes del archivo no pasan la validación
@@ -2458,6 +2558,13 @@ export class ProductsBulkService {
     product: any,
     fileProductSkus: Set<string>,
     seenVariantSkus: Map<string, number>,
+    dbCtx?: {
+      existingProductSkus: Map<string, { id: number; archived: boolean }>;
+      variantOwners: Map<
+        string,
+        { product_id: number; product_name?: string }
+      >;
+    } | null,
   ): void {
     const variants = (
       Array.isArray(product?.variants) ? product.variants : []
@@ -2470,10 +2577,25 @@ export class ProductsBulkService {
       );
     }
 
+    // Mismo chequeo contra la BD que el análisis. El padre existente (activo)
+    // permite que sus propias variantes se upserteen por SKU sin colisión.
+    const parentOwner = dbCtx?.existingProductSkus.get(
+      this.cleanCellText(product.sku).toLowerCase(),
+    );
+    const onSku = dbCtx
+      ? this.buildVariantSkuDbChecks({
+          parentExistingId:
+            parentOwner && !parentOwner.archived ? parentOwner.id : undefined,
+          existingProductSkus: dbCtx.existingProductSkus,
+          variantOwners: dbCtx.variantOwners,
+        }).onSku
+      : undefined;
+
     const validated = this.validateVariantRows(variants, {
       parentBasePrice: parseMoneyCell(product.base_price),
       fileProductSkus,
       seenVariantSkus,
+      onSku,
     });
     for (const r of validated) {
       const first = r.errors[0];
@@ -2482,6 +2604,43 @@ export class ProductsBulkService {
           `Variante fila ${r.rowNumber}: ${typeof first === 'string' ? first : first.message}`,
         );
       }
+    }
+  }
+
+  /**
+   * `createVariant` exige producto ACTIVE y el update + upsert no son atómicos:
+   * si el estado resultante (Estado del archivo, o el actual si no lo trae) no
+   * es activo y la fila trae variantes NUEVAS, falla la fila ANTES del update.
+   * (No replica el bloqueo por insumo de receta/reserva de `createVariant`.)
+   */
+  private async assertNoNewVariantsOnInactive(
+    existingProduct: { id: number; state: any },
+    productData: any,
+  ): Promise<void> {
+    const variants = Array.isArray(productData?.variants)
+      ? productData.variants
+      : [];
+    if (variants.length === 0) return;
+    const resulting =
+      typeof productData.state === 'string' && productData.state
+        ? productData.state
+        : existingProduct.state;
+    if (resulting === 'active') return;
+
+    const current = await this.prisma.product_variants.findMany({
+      where: { product_id: existingProduct.id },
+      select: { sku: true },
+    });
+    const have = new Set(
+      (current || []).map((v: any) => String(v.sku).toLowerCase()),
+    );
+    const hasNew = variants.some(
+      (v: any) => !have.has(this.cleanCellText(v.sku).toLowerCase()),
+    );
+    if (hasNew) {
+      throw new BadRequestException(
+        'No se pueden agregar variantes a un producto inactivo.',
+      );
     }
   }
 
@@ -2587,13 +2746,19 @@ export class ProductsBulkService {
     let skipped = 0;
 
     // Alcance de la validación de variantes en commit: el lote recibido (la
-    // página). El SKU repetido entre páginas lo detiene la unicidad en BD.
+    // página) para duplicados dentro del archivo. Entre páginas, y contra el
+    // resto de la tienda, el SKU se verifica contra la BD con la misma regla
+    // del análisis (la BD solo tiene @@unique([product_id, sku])).
     const fileProductSkus = new Set<string>();
     for (const p of products) {
       const sku = this.cleanCellText((p as any).sku).toLowerCase();
       if (sku) fileProductSkus.add(sku);
     }
     const seenVariantSkus = new Map<string, number>();
+    const variantDbCtx = await this.loadVariantCommitContext(
+      products as any[],
+      storeId,
+    );
 
     for (let rowIndex = 0; rowIndex < products.length; rowIndex++) {
       const productData = products[rowIndex];
@@ -2639,6 +2804,7 @@ export class ProductsBulkService {
           productData as any,
           fileProductSkus,
           seenVariantSkus,
+          variantDbCtx,
         );
 
         const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(
@@ -2703,6 +2869,10 @@ export class ProductsBulkService {
           // aparte), así que la guarda se aplica aquí, antes de tocar nada.
           await this.assertVariantsAllowedOnExisting(
             existingProduct.id,
+            productData,
+          );
+          await this.assertNoNewVariantsOnInactive(
+            existingProduct,
             productData,
           );
           const updateProductDto = this.mapToUpdateProductDto(productData);
@@ -3423,6 +3593,9 @@ export class ProductsBulkService {
         : undefined;
       if (variantId) {
         const { sku: _sku, ...fields } = dto;
+        // Sin override (precio vacío o igual al del padre) la variante hereda:
+        // se limpia un override previo. En creación no hace falta.
+        if (fields.price_override === undefined) fields.price_override = null;
         await this.productsService.updateVariant(variantId, fields as any);
       } else {
         await this.productsService.createVariant(productId, dto as any);
