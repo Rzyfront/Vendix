@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { CreditNotesService } from './credit-notes.service';
 import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
 import { deriveRefundNoteSelection, type RefundNoteSourceInvoice } from './refund-note-source.util';
+import { recalculateNote } from './recalculate-note.util';
 
 const decimal = (value: number | string) => new Prisma.Decimal(value);
 
@@ -291,6 +292,90 @@ describe('CreditNotesService — refund provenance/lifecycle and source-backed s
     expect(decimal(shippingQuantities[0] ?? 0).plus(decimal(shippingQuantities[1] ?? 0))).toEqual(decimal('0.4'));
     expect(selected.map((result) => result.bridge_rows[0]?.covered_amount)).toEqual([decimal(10), decimal(10)]);
     expect(selected.map((result) => result.items.find((item) => item.source_invoice_item_id === 72)?.discount_amount)).toEqual([0, 0]);
+  });
+
+  it('recalculates a mixed IVA-product and INC-shipping refund to the exact frozen 115000 total', () => {
+    const product = sourceLine(71, {
+      quantity: decimal(1),
+      unit_price: decimal('84033.62'),
+      tax_amount: decimal('15966.38'),
+      total_amount: decimal(100000),
+      is_inclusive: false,
+      financial_source_line_id: 90,
+      financial_source_line: { source_order_item_id: 11, kind: 'order_item' },
+    });
+    const shipping = sourceLine(72, {
+      product_id: null,
+      description: 'Envío del pedido',
+      quantity: decimal(1),
+      unit_price: decimal(15000),
+      tax_amount: decimal('1111.11'),
+      total_amount: decimal(15000),
+      is_inclusive: true,
+      financial_source_line_id: 91,
+      financial_source_line: { source_order_item_id: null, kind: 'shipping' },
+    });
+    const source = sourceInvoice([product, shipping], [
+      {
+        invoice_item_id: 71,
+        tax_rate_id: 8,
+        tax_name: 'IVA 19%',
+        tax_type: 'iva',
+        tax_rate: decimal(19),
+        taxable_amount: decimal('84033.62'),
+        tax_amount: decimal('15966.38'),
+        is_inclusive: false,
+      },
+      {
+        invoice_item_id: 72,
+        tax_rate_id: 9,
+        tax_name: 'INC 8%',
+        tax_type: 'inc',
+        tax_rate: decimal(8),
+        taxable_amount: decimal('13888.89'),
+        tax_amount: decimal('1111.11'),
+        is_inclusive: true,
+      },
+    ]);
+    const calculator = new InvoiceCalculatorService();
+    const selected = deriveRefundNoteSelection(
+      calculator,
+      source,
+      {
+        id: 55,
+        order_id: 1,
+        shipping_refund: decimal(15000),
+        refund_items: [refundItem({ quantity: decimal(1), refund_amount: decimal(100000), tax_amount: decimal('15966.38') })],
+      },
+      [orderLine({ quantity: decimal(1) })],
+    );
+    const result = recalculateNote(calculator, source, selected.items);
+
+    expect(result.total_amount).toEqual(decimal(115000));
+    expect(result.tax_amount).toEqual(decimal('17077.49'));
+    expect(result.items.map((item) => item.source_invoice_item_id)).toEqual([71, 72]);
+    expect(result.calculated.header_taxes.map((tax) => [tax.tax_type, tax.tax_amount])).toEqual([
+      ['iva', '15966.38'],
+      ['inc', '1111.11'],
+    ]);
+    expect(selected.bridge_rows).toEqual([expect.objectContaining({
+      refund_item_id: 201,
+      covered_qty: 1,
+      covered_amount: decimal(100000),
+    })]);
+  });
+
+  it('fails closed when a refund order item has no source-invoice mapping', () => {
+    const source = sourceInvoice([sourceLine(71, {
+      financial_source_line_id: 90,
+      financial_source_line: { source_order_item_id: 999, kind: 'order_item' },
+    })]);
+    expect(() => deriveRefundNoteSelection(
+      new InvoiceCalculatorService(),
+      source,
+      { id: 55, order_id: 1, shipping_refund: 0, refund_items: [refundItem()] },
+      [orderLine()],
+    )).toThrow(expect.objectContaining({ errorCode: 'INVOICING_NOTE_SOURCE_001' }));
   });
 
   it('no refund id returns null and does not query refunds', async () => {

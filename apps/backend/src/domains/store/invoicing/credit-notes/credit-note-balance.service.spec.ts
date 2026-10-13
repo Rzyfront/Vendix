@@ -559,6 +559,66 @@ describe('CreditNoteBalanceService', () => {
     expect(late.updates[0]).toMatchObject({ status: 'accepted', credit_limit_reserved_at: expect.any(Date) });
   });
 
+  it('protects sent debit notes from reject/cancel/void when the ledger proves acceptance', async () => {
+    const transitions = [
+      { status: 'rejected', release: 'definitive_rejection' as const },
+      { status: 'cancelled', release: 'pretransmission_cancel' as const },
+      { status: 'voided', release: 'pretransmission_cancel' as const },
+    ] as const;
+
+    for (const transition of transitions) {
+      const debitNote = note({
+        invoice_type: 'debit_note',
+        status: 'sent',
+        transmission_status: 'submitted',
+        dian_status: 'pending',
+        sent_at: NOW,
+        accepted_at: null,
+      });
+      const harness = createHarness({
+        notes: [debitNote],
+        ledgers: [{
+          document_type: 'debit_note',
+          source_id: debitNote.id,
+          transmission_status: 'accepted',
+          dian_status: 'accepted',
+          sent_at: NOW,
+          accepted_at: NOW,
+          rejected_at: null,
+        }],
+      });
+      harness.tx.fiscal_transmissions.findMany.mockImplementation(async ({ where }: any) =>
+        where.document_type?.in?.includes('debit_note')
+          ? harness.ledgers.filter((row) => where.source_id.in.includes(row.source_id as number))
+          : [],
+      );
+
+      await expect(runInStoreContext(() =>
+        harness.service.transition(
+          debitNote.id,
+          { status: transition.status },
+          { invoice_items: true },
+          transition.release,
+          'sent',
+        ),
+      )).rejects.toBeInstanceOf(VendixHttpException);
+
+      expect(harness.tx.invoices.updateMany).not.toHaveBeenCalled();
+      expect(harness.tx.fiscal_transmissions.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            organization_id: ORG_ID,
+            store_id: STORE_ID,
+            accounting_entity_id: ENTITY_ID,
+            document_type: { in: ['credit_note', 'debit_note'] },
+            source_type: 'invoice',
+            source_id: { in: [debitNote.id] },
+          }),
+        }),
+      );
+    }
+  });
+
   it('records a real late DIAN acceptance even while the scoped parent projection is rejected', async () => {
     const lateNote = note({
       status: 'sent',

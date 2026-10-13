@@ -611,7 +611,7 @@ export class CreditNoteBalanceService {
         organization_id: source.organization_id,
         store_id: source.store_id,
         accounting_entity_id: source.accounting_entity_id,
-        document_type: 'credit_note',
+        document_type: { in: ['credit_note', 'debit_note'] },
         source_type: 'invoice',
         source_id: { in: noteIds },
       },
