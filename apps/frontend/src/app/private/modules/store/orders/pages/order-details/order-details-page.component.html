@@ -2186,6 +2186,54 @@
                             <p class="text-xs font-semibold text-text-primary">
                               Creando nota crédito con el detalle del reembolso…
                             </p>
+                          } @else if (refundNoteState()?.stage === 'mapping') {
+                            <div class="space-y-3" role="group" aria-label="Seleccionar origen de líneas de la nota crédito">
+                              <p class="text-xs font-semibold text-text-primary">
+                                Seleccione la línea de la factura aceptada que corresponde a cada elemento del reembolso.
+                                No se enviarán precios ni impuestos desde esta pantalla.
+                              </p>
+                              @for (item of refundNoteState()?.mapping?.refund_item_candidates ?? []; track item.refund_item_id) {
+                                <div>
+                                  <label class="mb-1 block text-xs font-medium text-text-secondary" [for]="'refund-source-' + item.refund_item_id">
+                                    {{ item.description }} — origen de factura requerido
+                                  </label>
+                                  <app-selector
+                                    [id]="'refund-source-' + item.refund_item_id"
+                                    [options]="refundMappingOptions(item.source_candidates)"
+                                    [value]="refundSourceChoices()[item.refund_item_id]"
+                                    (valueChange)="setRefundSourceChoice(item.refund_item_id, $event)"
+                                    [required]="true"
+                                    [label]="'Origen para ' + item.description"
+                                    placeholder="Seleccione una línea de la factura"
+                                  />
+                                </div>
+                              }
+                              @if ((refundNoteState()?.mapping?.shipping_source_candidates?.length ?? 0) > 1) {
+                                <div>
+                                  <label class="mb-1 block text-xs font-medium text-text-secondary" for="refund-shipping-source">
+                                    Envío — origen de factura requerido
+                                  </label>
+                                  <app-selector
+                                    id="refund-shipping-source"
+                                    [options]="refundMappingOptions(refundNoteState()!.mapping!.shipping_source_candidates)"
+                                    [value]="refundShippingChoice()"
+                                    (valueChange)="setRefundShippingChoice($event)"
+                                    [required]="true"
+                                    label="Origen de factura para el envío"
+                                    placeholder="Seleccione una línea de envío"
+                                  />
+                                </div>
+                              }
+                              <p class="text-[11px] text-text-secondary" role="status">
+                                La nota conservará los valores fiscales de la factura original; la selección solo identifica sus líneas.
+                              </p>
+                              <div class="flex flex-wrap gap-2">
+                                <app-button variant="ghost" size="sm" (clicked)="dismissRefundNote()">Cancelar</app-button>
+                                <app-button variant="primary" size="sm" [disabled]="!refundMappingReady()" (clicked)="retryRefundNoteWithSources()">
+                                  Crear nota con estas fuentes
+                                </app-button>
+                              </div>
+                            </div>
                           } @else if (refundNoteState()?.stage === 'issuing') {
                             <p class="text-xs font-semibold text-text-primary">
                               Emitiendo {{ refundNoteState()?.noteNumber }} a la DIAN…

@@ -86,6 +86,14 @@ import { AlertBannerComponent, DialogService, ModalComponent, ToastService, Time
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { SelectorComponent, type SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import {
+  buildRefundNoteSourceMapping,
+  isForeignRefundNoteMappingChallenge,
+  parseRefundNoteMappingChallenge,
+  type RefundItemSourceCandidate,
+  type RefundNoteMappingChallenge,
+} from './refund-note-mapping.util';
 
 /** The finish guard returns its current KDS snapshot, which may be newer than this page's order. */
 export function pendingKitchenLabelsFromError(error: unknown): string[] {
@@ -786,6 +794,7 @@ export interface InvoiceCardView {
     ShippingAddressModalComponent,
     ResendDishModalComponent,
     NgClass,
+    SelectorComponent,
   ],
   templateUrl: './order-details-page.component.html',
   styleUrls: ['./order-details-page.component.css'],
@@ -2462,13 +2471,13 @@ export class OrderDetailsPageComponent {
         ofType(InvoicingActions.createCreditNoteFailure),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe((failure) => this.onRefundNoteCreateFailed(failure.error));
+      .subscribe((failure) => this.onRefundNoteCreateFailed(failure));
     this.invoicingActions$
       .pipe(
         ofType(InvoicingActions.issueNoteSuccess),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(() => this.onRefundNoteIssued());
+      .subscribe(({ invoice }) => this.onRefundNoteIssued(invoice));
     this.invoicingActions$
       .pipe(
         ofType(InvoicingActions.issueNoteFailure),
@@ -2477,6 +2486,9 @@ export class OrderDetailsPageComponent {
       .subscribe((failure) => this.onRefundNoteIssueFailed(failure.error));
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      this.refundNoteState.set(null);
+      this.refundSourceChoices.set({});
+      this.refundShippingChoice.set(null);
       this.orderId = params.get('id');
       // QUI-885: al cambiar de orden se cierra la configuración de reparto.
       this.showSplitConfig.set(false);
@@ -6627,12 +6639,16 @@ export class OrderDetailsPageComponent {
    */
   readonly refundNoteState = signal<{
     refundId: number;
-    stage: 'creating' | 'ask' | 'issuing';
+    invoiceId: number;
+    stage: 'creating' | 'mapping' | 'ask' | 'issuing';
+    mapping?: RefundNoteMappingChallenge;
     noteId?: number;
     noteNumber?: string | null;
     noteTotal?: number;
     error?: string | null;
   } | null>(null);
+  readonly refundSourceChoices = signal<Record<number, number | null>>({});
+  readonly refundShippingChoice = signal<number | null>(null);
 
   readonly refundNoteCandidateIds = computed<Set<number>>(() => {
     const ids = new Set<number>();
@@ -6672,10 +6688,12 @@ export class OrderDetailsPageComponent {
 
   /** 1 clic: crea la NC con el detalle del reembolso y pregunta si emitirla. */
   startRefundNote(refund: RefundRecord): void {
-    if (this.refundNoteState() || !this.acceptedInvoice()) return;
-    const invoiceId = this.order()?.invoices?.[0]?.id;
+    if (this.refundNoteState()) return;
+    const invoiceId = this.acceptedInvoice()?.id;
     if (!invoiceId) return;
-    this.refundNoteState.set({ refundId: refund.id, stage: 'creating', error: null });
+    this.refundSourceChoices.set({});
+    this.refundShippingChoice.set(null);
+    this.refundNoteState.set({ refundId: refund.id, invoiceId, stage: 'creating', error: null });
     this.store.dispatch(
       InvoicingActions.createCreditNote({
         dto: this.buildRefundNoteDto(refund, invoiceId),
@@ -6687,6 +6705,7 @@ export class OrderDetailsPageComponent {
   onRefundNoteCreated(invoice: Invoice): void {
     const state = this.refundNoteState();
     if (!state || state.stage !== 'creating') return;
+    if (invoice.related_invoice_id !== state.invoiceId || invoice.refund_id !== state.refundId) return;
     // El modal de detalle pudo crear su propia nota a la vez: la suya la
     // atiende su panel (B.1); esta card solo reclama el éxito que pidió.
     if (this.showInvoiceDetailModal()) {
@@ -6703,10 +6722,58 @@ export class OrderDetailsPageComponent {
     });
   }
 
-  onRefundNoteCreateFailed(error: string): void {
+  onRefundNoteCreateFailed(failure: { error: string; errorCode?: string | null; details?: unknown }): void {
     const state = this.refundNoteState();
     if (!state || state.stage !== 'creating') return;
-    this.refundNoteState.set({ ...state, stage: 'ask', error });
+    if (failure.errorCode === 'INVOICING_NOTE_SOURCE_001' &&
+        isForeignRefundNoteMappingChallenge(failure.details, state.refundId, state.invoiceId)) return;
+    const challenge = failure.errorCode === 'INVOICING_NOTE_SOURCE_001'
+      ? parseRefundNoteMappingChallenge(failure.details, state.refundId, state.invoiceId)
+      : null;
+    if (challenge) {
+      this.refundSourceChoices.set({});
+      this.refundShippingChoice.set(null);
+      this.refundNoteState.set({ ...state, stage: 'mapping', mapping: challenge, error: failure.error });
+      return;
+    }
+    this.refundNoteState.set({ ...state, stage: 'ask', error: failure.error });
+  }
+
+  refundMappingOptions(candidates: RefundItemSourceCandidate['source_candidates']): SelectorOption[] {
+    return candidates.map((candidate) => ({
+      value: candidate.source_invoice_item_id,
+      label: `Línea #${candidate.source_invoice_item_id} · ${candidate.description}`,
+    }));
+  }
+
+  setRefundSourceChoice(refundItemId: number, value: string | number | null): void {
+    const selected = Number(value);
+    this.refundSourceChoices.update((choices) => ({ ...choices, [refundItemId]: Number.isSafeInteger(selected) && selected > 0 ? selected : null }));
+  }
+
+  setRefundShippingChoice(value: string | number | null): void {
+    const selected = Number(value);
+    this.refundShippingChoice.set(Number.isSafeInteger(selected) && selected > 0 ? selected : null);
+  }
+
+  refundMappingReady(): boolean {
+    const state = this.refundNoteState();
+    return !!state?.mapping && buildRefundNoteSourceMapping(
+      state.mapping, this.refundSourceChoices(), this.refundShippingChoice(),
+    ) !== null;
+  }
+
+  retryRefundNoteWithSources(): void {
+    const state = this.refundNoteState();
+    if (!state || state.stage !== 'mapping' || !state.mapping) return;
+    const mapping = buildRefundNoteSourceMapping(state.mapping, this.refundSourceChoices(), this.refundShippingChoice());
+    if (!mapping) return;
+    const refund = this.orderRefunds().find((candidate) => candidate.id === state.refundId);
+    if (!refund || this.acceptedInvoice()?.id !== state.invoiceId) return;
+    this.refundNoteState.set({ ...state, stage: 'creating', error: null });
+    this.store.dispatch(InvoicingActions.createCreditNote({
+      dto: { ...this.buildRefundNoteDto(refund, state.invoiceId), ...mapping },
+    }));
   }
 
   /** Emitirla de una vía `POST :id/issue`; "Después" la deja en borrador. */
@@ -6719,10 +6786,13 @@ export class OrderDetailsPageComponent {
 
   dismissRefundNote(): void {
     this.refundNoteState.set(null);
+    this.refundSourceChoices.set({});
+    this.refundShippingChoice.set(null);
   }
 
-  onRefundNoteIssued(): void {
-    if (!this.refundNoteState()) return;
+  onRefundNoteIssued(invoice: Invoice): void {
+    const state = this.refundNoteState();
+    if (!state || state.stage !== 'issuing' || invoice.id !== state.noteId) return;
     // Mismo cruce que en onRefundNoteCreated: con el modal abierto, el éxito
     // puede ser suyo; la card suelta el flujo y refresca en vez de afirmar.
     this.refundNoteState.set(null);
@@ -6732,7 +6802,7 @@ export class OrderDetailsPageComponent {
 
   onRefundNoteIssueFailed(error: string): void {
     const state = this.refundNoteState();
-    if (!state) return;
+    if (!state || state.stage !== 'issuing') return;
     this.refundNoteState.set({ ...state, stage: 'ask', error });
   }
 
