@@ -99,24 +99,24 @@ export const DIAN_PROFILE_RESTRICTIONS: DianProfileRestrictions = {
    * de línea salió sin `cbc:ID` ni `cbc:MultiplierFactorNumeric`.
    */
   AllowanceChargeType: {
-    'cbc:ID': { min: 1, dian_rule: 'FBE01' },
-    'cbc:ChargeIndicator': { min: 1, dian_rule: 'FBE02' },
-    'cbc:MultiplierFactorNumeric': { min: 1, dian_rule: 'FBE05' },
-    'cbc:Amount': { min: 1, dian_rule: 'FBE05' },
-    'cbc:BaseAmount': { min: 1, dian_rule: 'FBE05' },
+    'cbc:ID': { min: 1, dian_rule: 'FBE01/FBE02' },
+    'cbc:ChargeIndicator': { min: 1, dian_rule: 'FBE01/FBE03' },
+    'cbc:MultiplierFactorNumeric': { min: 1, dian_rule: 'FBE01/FBE05' },
+    'cbc:Amount': { min: 1, dian_rule: 'FBE01/FBE06' },
+    'cbc:BaseAmount': { min: 1, dian_rule: 'FBE01/FBE08' },
   },
   /**
    * `cac:AllowanceCharge` hijo directo de la raíz del documento
    * (Invoice/CreditNote/DebitNote/documento soporte). Se suma a
-   * `AllowanceChargeType` y reemplaza la regla citada (FAQ01/FAQ04/FAQ06).
+   * `AllowanceChargeType` y reemplaza la regla citada (FAQ0x).
    */
   [`AllowanceChargeType${DOCUMENT_LEVEL_SUFFIX}`]: {
-    'cbc:ID': { min: 1, dian_rule: 'FAQ01' },
-    'cbc:ChargeIndicator': { min: 1, dian_rule: 'FAQ01' },
+    'cbc:ID': { min: 1, dian_rule: 'FAQ01/FAQ02' },
+    'cbc:ChargeIndicator': { min: 1, dian_rule: 'FAQ01/FAQ03' },
     'cbc:AllowanceChargeReasonCode': { min: 1, dian_rule: 'FAQ04' },
-    'cbc:MultiplierFactorNumeric': { min: 1, dian_rule: 'FAQ06' },
-    'cbc:Amount': { min: 1, dian_rule: 'FAQ06' },
-    'cbc:BaseAmount': { min: 1, dian_rule: 'FAQ06' },
+    'cbc:MultiplierFactorNumeric': { min: 1, dian_rule: 'FAQ01/FAQ06' },
+    'cbc:Amount': { min: 1, dian_rule: 'FAQ01/FAQ07' },
+    'cbc:BaseAmount': { min: 1, dian_rule: 'FAQ01/FAQ09' },
   },
 };
 

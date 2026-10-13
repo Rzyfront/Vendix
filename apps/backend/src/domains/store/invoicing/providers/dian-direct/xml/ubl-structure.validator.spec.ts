@@ -647,7 +647,10 @@ ${ids}
           'Invoice/cac:InvoiceLine[1]/cac:AllowanceCharge[1]/cbc:MultiplierFactorNumeric',
         ]),
       );
-      expect(v.some((x) => x.message.includes('FBE01'))).toBe(true);
+      const msg = (suffix: string) =>
+        v.find((x) => x.path.endsWith(suffix))?.message ?? '';
+      expect(msg('/cbc:ID')).toContain('FBE02');
+      expect(msg('/cbc:MultiplierFactorNumeric')).toContain('FBE05');
     });
 
     it('línea completa — sin violación de AllowanceCharge', () => {
