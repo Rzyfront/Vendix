@@ -164,7 +164,7 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
     const updated = await this.prisma.document_reception_email_messages.updateMany({ where: {
       ...this.rowWhere(row), version: expectedVersion, status: { in: ['failed', 'partial'] }, retryable: true, processed_at: null, processing_token: null,
     }, data: { version: { increment: 1 }, parts: this.partsJson(row.parts, { ...facts, retry_requested_version: epoch }) } });
-    if (updated.count !== 1) throw new ConsumerInterrupted();
+    if (updated.count !== 1) throw new VendixHttpException(ErrorCodes.EMAIL_RECEPTION_VERSION_CONFLICT);
     await (suppliedTransport ?? this.awsTransport()).sendRetry({ type: 'internal_retry', message_id: row.id, version: epoch }, this.stop.signal);
   }
 
