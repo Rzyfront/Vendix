@@ -117,7 +117,7 @@ const tax = (overrides: Partial<CalculatedTax> = {}): CalculatedTax => ({
 
 describe('recalculateNote', () => {
   it('sends explicit selected commercial values through computed mode and persists calculator output', () => {
-    const result = calcResult({ base: '20000.00', tax: '3800.00', total: '23800.00', headerTaxes: [tax()] });
+    const result = calcResult({ discount: '2500.00', base: '20000.00', tax: '3800.00', total: '23800.00', headerTaxes: [tax()] });
     const calculator = calculatorWith(result);
     const output = recalculateNote(calculator, sourceInvoice(), [{
       source_invoice_item_id: 501,

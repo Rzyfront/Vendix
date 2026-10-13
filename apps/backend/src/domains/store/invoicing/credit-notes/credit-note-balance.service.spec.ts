@@ -635,6 +635,9 @@ describe('CreditNoteBalanceService', () => {
         source_invoice_item_id: null,
         unit_code: 'NIU',
         price_unit_quantity: 1,
+        quantity: decimal(0.5),
+        unit_price: decimal(20000),
+        total_amount: decimal(10000),
       })],
     });
     const harness = createHarness({ parent, notes: [historical] });
@@ -720,6 +723,7 @@ describe('CreditNoteBalanceService', () => {
 
   it('checks both note types before numbering, caps only credits, and rejects non-correctable parents or DB overflow', async () => {
     const overCredit = note({
+      status: 'draft',
       total_amount: decimal(50000),
       subtotal_amount: decimal(50000),
       invoice_items: [item({
@@ -737,6 +741,7 @@ describe('CreditNoteBalanceService', () => {
     ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_LIMIT_001.code });
 
     const overDebit = note({
+      status: 'draft',
       invoice_type: 'debit_note',
       total_amount: decimal(50000),
       subtotal_amount: decimal(50000),
@@ -756,7 +761,7 @@ describe('CreditNoteBalanceService', () => {
 
     const unsupported = createHarness({
       parent: invoice({ invoice_type: 'support_document' }),
-      notes: [note()],
+      notes: [note({ status: 'draft' })],
     });
     await expect(
       runInStoreContext(() => unsupported.service.assertNoteBeforeNumbering(91)),
@@ -766,6 +771,7 @@ describe('CreditNoteBalanceService', () => {
     ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICING_NOTE_SOURCE_001.code });
 
     const overflow = note({
+      status: 'draft',
       invoice_items: [item({
         id: 171,
         invoice_id: 91,

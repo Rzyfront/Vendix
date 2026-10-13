@@ -81,7 +81,7 @@ function safeTestDatabaseUrl(): string {
 
 describePostgres('CreditNoteBalanceService PostgreSQL integration', () => {
   jest.setTimeout(45000);
-  const runId = randomUUID().replace(/-/g, '');
+  const runId = randomUUID().replace(/-/g, '').slice(0, 16);
   const prefix = `qui702_${runId}`;
   let prisma: StorePrismaService | undefined;
   let service: CreditNoteBalanceService;

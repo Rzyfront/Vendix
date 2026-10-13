@@ -30,6 +30,12 @@ describe('InvoiceFlowService · procedencia del régimen AIU en emisión', () =>
       {} as any,
       {} as any,
       {} as any,
+      {
+        assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+        reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+        ensureForSend: jest.fn().mockResolvedValue(undefined),
+        transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+      } as any,
     );
     return (service as any).resolveAiuRegimeForEmission(invoice, settings);
   }

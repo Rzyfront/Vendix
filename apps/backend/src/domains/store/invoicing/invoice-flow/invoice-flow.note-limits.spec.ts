@@ -9,6 +9,7 @@ const source = {
   accounting_entity_id: 3,
   invoice_type: 'sales_invoice',
   status: 'accepted',
+  cufe: 'accepted-source-cufe',
   invoice_items: [],
   invoice_taxes: [],
   total_amount: '119.00',
@@ -146,36 +147,40 @@ describe('InvoiceFlowService note source limits and durable reservation', () => 
   });
 
   it('keeps a manual rejection unreserved and releases only on safe cancel/void transitions', async () => {
-    const { service, balance } = createFlow({ ...creditNote, status: 'validated', invoice_number: 'NC-1' });
-    jest.spyOn(service as any, 'assertFiscalPeriodOpen').mockResolvedValue(undefined);
+    const rejectedHarness = createFlow({ ...creditNote, status: 'sent', invoice_number: 'NC-1' });
+    jest.spyOn(rejectedHarness.service as any, 'assertFiscalPeriodOpen').mockResolvedValue(undefined);
 
-    await service.reject(creditNote.id);
-    expect(balance.transition).toHaveBeenCalledWith(
+    await rejectedHarness.service.reject(creditNote.id);
+    expect(rejectedHarness.balance.transition).toHaveBeenCalledWith(
       creditNote.id,
       expect.objectContaining({ status: 'rejected' }),
       expect.any(Object),
       'none',
-      'validated',
+      'sent',
     );
 
-    balance.transition.mockClear();
-    await service.cancel(creditNote.id);
-    expect(balance.transition).toHaveBeenCalledWith(creditNote.id, { status: 'cancelled' }, expect.any(Object), 'pretransmission_cancel', 'validated');
+    const cancelledHarness = createFlow({ ...creditNote, status: 'validated', invoice_number: 'NC-1' });
+    jest.spyOn(cancelledHarness.service as any, 'assertFiscalPeriodOpen').mockResolvedValue(undefined);
+    await cancelledHarness.service.cancel(creditNote.id);
+    expect(cancelledHarness.balance.transition).toHaveBeenCalledWith(creditNote.id, { status: 'cancelled' }, expect.any(Object), 'pretransmission_cancel', 'validated');
   });
 
   it('checks source balance before fiscal-ledger submission and provider I/O', async () => {
-    const { service, balance, fiscalLedger, resolver, prisma } = createFlow({
+    const sendInvoice = {
       ...creditNote,
       status: 'validated',
       invoice_number: 'NC-1',
-      resolution: { id: 9, resolution_number: 'R1', prefix: 'NC', range_from: 1, range_to: 100, valid_from: new Date('2026-01-01'), valid_to: new Date('2027-01-01') },
+      related_invoice_id: source.id,
+      related_invoice: { ...source, cufe: 'f'.repeat(96) },
+      resolution: { id: 9, is_active: true, resolution_number: 'R1', prefix: 'NC', range_from: 1, range_to: 100, valid_from: new Date('2026-01-01'), valid_to: new Date('2027-01-01') },
       issue_date: new Date('2026-10-01T12:00:00Z'),
       customer_name: 'Cliente',
       customer_tax_id: '123456789',
       customer_document_type: '31',
       customer_person_type: 'JURIDICA',
       invoice_items: [{ ...creditNote.invoice_items[0], unit_code: 'NIU', product_id: null }],
-    }, {
+    };
+    const { service, balance, fiscalLedger, resolver, prisma } = createFlow(sendInvoice, {
       fiscalLedger: { ensureInvoiceTransmission: jest.fn().mockRejectedValue(new Error('ledger reached')) },
     });
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ user_id: 9, organization_id: 1, store_id: 2 } as any);
@@ -196,7 +201,7 @@ describe('InvoiceFlowService note source limits and durable reservation', () => 
     jest.spyOn(service as any, 'configurationType').mockReturnValue('sales_invoice');
     jest.spyOn(service as any, 'assertProviderSupports').mockReturnValue(undefined);
     resolver.resolve.mockResolvedValue({ sendCreditNote: jest.fn(), sendDebitNote: jest.fn() } as any);
-    prisma.invoices.findFirst.mockResolvedValueOnce({ ...creditNote, status: 'validated', invoice_number: 'NC-1' }).mockResolvedValue({ id: source.id });
+    prisma.invoices.findFirst.mockResolvedValueOnce(sendInvoice).mockResolvedValue(source);
 
     await expect(service.send(creditNote.id)).rejects.toThrow('ledger reached');
     expect(balance.ensureForSend).toHaveBeenCalledWith(creditNote.id);
