@@ -315,7 +315,8 @@ export class OrgDianConfigComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         const storeId = this.requiresStoreSelector() ? params.get('store_id') : null;
-        this.selectedStoreId.set(storeId ? Number(storeId) : null);
+        const parsedStoreId = storeId === null ? null : Number(storeId);
+        this.selectedStoreId.set(parsedStoreId !== null && Number.isSafeInteger(parsedStoreId) && parsedStoreId > 0 ? parsedStoreId : null);
         this.loadData();
       });
   }
