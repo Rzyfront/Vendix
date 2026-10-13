@@ -523,14 +523,20 @@ describe('ProductsBulkService', () => {
       ];
 
       mockProductsService.create.mockResolvedValue(createdProduct);
-      mockProductsService.createVariant
-        .mockResolvedValueOnce(createdVariants[0])
-        .mockResolvedValueOnce(createdVariants[1]);
 
       const result = await service.uploadProducts(bulkUploadDto, mockUser);
 
       expect(result.results[0].status).toBe('success');
-      expect(mockProductsService.createVariant).toHaveBeenCalledTimes(2);
+      // Las variantes viajan dentro del DTO de create (una sola transacción en
+      // ProductsService.create); el bulk ya no las crea una por una después.
+      expect(mockProductsService.createVariant).not.toHaveBeenCalled();
+      const [createDto] = mockProductsService.create.mock.calls[0];
+      expect(createDto.variants).toHaveLength(2);
+      expect(createDto.variants[0]).toMatchObject({
+        sku: 'VAR-001',
+        price_override: 109.99,
+      });
+      void createdVariants;
     });
 
     it('should handle stock by location in bulk upload', async () => {
@@ -1625,6 +1631,572 @@ describe('ProductsBulkService', () => {
           action: 'update',
           message: 'Producto con SKU S-1 actualizado exitosamente',
         });
+      });
+    });
+  });
+
+  describe('variantes en carga masiva (SKU Padre)', () => {
+    const HEADER =
+      'Nombre,SKU,Precio Venta,SKU Padre,Atributo 1,Valor 1,Atributo 2,Valor 2,Marca,Usa Listas de Precio';
+    const file = (rows: string[], header = HEADER) =>
+      Buffer.from([header, ...rows].join('\n'));
+    const codes = (list: any[]) => list.map((e) => e.code ?? e);
+
+    // padre + 2 variantes (una sin precio, una con otro precio)
+    const family = [
+      'Camiseta,CAM,45000,,,,,,,',
+      ',CAM-N-M,,CAM,Color,Negro,Talla,M,,',
+      'Camiseta Blanca L,CAM-B-L,49000,CAM,Color,Blanco,Talla,L,,',
+    ];
+
+    beforeEach(() => {
+      mockPrismaService.products.findMany.mockReset();
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.product_variants.findMany.mockReset();
+      mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+      mockPrismaService.product_price_tier_assignments.findMany.mockReset();
+      mockPrismaService.product_price_tier_assignments.findMany.mockResolvedValue(
+        [],
+      );
+    });
+
+    describe('parseFile', () => {
+      it('agrupa padre + 2 variantes y conserva la fila de origen', () => {
+        const rows = service.parseFile(file(family));
+        expect(rows).toHaveLength(1);
+        const parent: any = rows[0];
+        expect(parent.__row_number).toBe(2);
+        expect(parent.variants).toHaveLength(2);
+        expect(parent.variants[0]).toMatchObject({
+          sku: 'CAM-N-M',
+          // Sin Nombre en la fila: `<padre> <valores>`.
+          name: 'Camiseta Negro M',
+          attributes: { Color: 'Negro', Talla: 'M' },
+          __row_number: 3,
+        });
+        expect(parent.variants[0].price).toBeUndefined();
+        expect(parent.variants[1]).toMatchObject({
+          name: 'Camiseta Blanca L',
+          price: 49000,
+          __row_number: 4,
+        });
+        // Columnas de variante no se filtran al producto.
+        expect(parent).not.toHaveProperty('parent_sku');
+        expect(parent).not.toHaveProperty('attr_name_1');
+      });
+
+      it('agrupa aunque las variantes vengan antes que el padre (sin distinguir mayúsculas)', () => {
+        const rows = service.parseFile(
+          file([
+            ',CAM-N-M,,cam,Color,Negro,,,,',
+            'Camiseta,CAM,45000,,,,,,,',
+          ]),
+        );
+        expect(rows).toHaveLength(1);
+        expect((rows[0] as any).variants).toHaveLength(1);
+        expect((rows[0] as any).variants[0].__row_number).toBe(2);
+        expect((rows[0] as any).__row_number).toBe(3);
+      });
+
+      it('variante huérfana sale como producto independiente marcado con error de celda', () => {
+        const rows: any[] = service.parseFile(
+          file(['Camiseta,CAM,45000,,,,,,,', ',X-1,,NO-EXISTE,Color,Rojo,,,,']),
+        );
+        expect(rows).toHaveLength(2);
+        expect(rows[1].__orphan_variant).toBe(true);
+        expect(rows[1].__cell_errors).toEqual([
+          expect.objectContaining({ code: 'VARIANT_PARENT_NOT_FOUND' }),
+        ]);
+        expect(rows[0].variants).toBeUndefined();
+      });
+
+      it('un padre que a su vez es variante deja huérfana a la fila hija', () => {
+        const rows: any[] = service.parseFile(
+          file([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-N,,CAM,Color,Negro,,,,',
+            ',CAM-N-XL,,CAM-N,Talla,XL,,,,',
+          ]),
+        );
+        expect(rows).toHaveLength(2);
+        expect(rows[0].variants).toHaveLength(1);
+        expect(rows[1].__orphan_variant).toBe(true);
+      });
+
+      it('lista las columnas de producto con dato que la fila-variante ignora', () => {
+        const [parent]: any[] = service.parseFile(
+          file([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-N,,CAM,Color,Negro,,,Nike,sí',
+          ]),
+        );
+        expect(parent.variants[0].__ignored_fields).toEqual(
+          expect.arrayContaining(['Marca', 'Usa Listas de Precio']),
+        );
+      });
+
+      it('archivo viejo sin columnas de variante: misma salida (más __row_number)', () => {
+        const rows: any[] = service.parseFile(
+          Buffer.from('Nombre,SKU,Precio Venta\nP1,S1,1000\nP2,S2,2000'),
+        );
+        expect(rows).toEqual([
+          { name: 'P1', sku: 'S1', base_price: 1000, __row_number: 2 },
+          { name: 'P2', sku: 'S2', base_price: 2000, __row_number: 3 },
+        ]);
+      });
+    });
+
+    describe('analyzeProducts', () => {
+      const analyze = (rows: string[], header = HEADER) =>
+        service.analyzeProducts(file(rows, header), 1);
+
+      it('padre + 2 variantes: total_products cuenta productos, total_variants variantes', async () => {
+        const result = await analyze(family);
+        expect(result.total_products).toBe(1);
+        expect(result.total_variants).toBe(2);
+        const item: any = result.products[0];
+        expect(item.status).toBe('ready');
+        expect(item.variants).toHaveLength(2);
+        // Hereda precio = null; con precio propio = ese precio.
+        expect(item.variants[0]).toMatchObject({
+          row_number: 3,
+          sku: 'CAM-N-M',
+          price: null,
+          action: 'create',
+          status: 'ready',
+          attributes: { Color: 'Negro', Talla: 'M' },
+        });
+        expect(item.variants[1].price).toBe(49000);
+      });
+
+      it('row_number es la fila real aunque haya variantes de por medio', async () => {
+        const result = await analyze([...family, 'Otro,OTR,1000,,,,,,,']);
+        expect(result.products.map((p) => p.row_number)).toEqual([2, 5]);
+      });
+
+      it('variante huérfana: error VARIANT_PARENT_NOT_FOUND en su item', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',X-1,,NO-EXISTE,Color,Rojo,,,,',
+        ]);
+        expect(result.total_products).toBe(2);
+        expect(codes(result.products[1].errors)).toContain(
+          'VARIANT_PARENT_NOT_FOUND',
+        );
+        expect(result.products[1].status).toBe('error');
+      });
+
+      it('variante sin pares atributo/valor => VARIANT_NO_ATTRIBUTES y el padre queda en error', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',CAM-1,,CAM,Color,,,,,',
+        ]);
+        const item: any = result.products[0];
+        expect(codes(item.variants[0].errors)).toContain('VARIANT_NO_ATTRIBUTES');
+        expect(item.status).toBe('error');
+        expect(result.with_errors).toBe(1);
+      });
+
+      it('misma combinación de atributos (normalizada) => VARIANT_DUPLICATE_ATTRIBUTES', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',CAM-1,,CAM,Color,Negro,Talla,M,,',
+          ',CAM-2,,CAM,talla,m,COLOR,negro,,',
+        ]);
+        const item: any = result.products[0];
+        expect(item.variants[0].status).toBe('ready');
+        expect(codes(item.variants[1].errors)).toEqual([
+          'VARIANT_DUPLICATE_ATTRIBUTES',
+        ]);
+        expect(item.status).toBe('error');
+      });
+
+      it('SKU de variante repetido, o igual al de un producto del archivo => VARIANT_DUPLICATE_SKU', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',CAM-1,,CAM,Color,Negro,,,,',
+          ',cam-1,,CAM,Color,Rojo,,,,',
+          ',CAM,,CAM,Color,Azul,,,,',
+        ]);
+        const item: any = result.products[0];
+        expect(codes(item.variants[1].errors)).toContain('VARIANT_DUPLICATE_SKU');
+        expect(codes(item.variants[2].errors)).toContain('VARIANT_DUPLICATE_SKU');
+      });
+
+      it('SKU de variante vacío => VARIANT_SKU_REQUIRED', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          'Camiseta Negra,,,CAM,Color,Negro,,,,',
+        ]);
+        expect(codes((result.products[0] as any).variants[0].errors)).toContain(
+          'VARIANT_SKU_REQUIRED',
+        );
+      });
+
+      it('SKU de variante que ya usa otro producto o variante de la tienda => VARIANT_SKU_TAKEN', async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 50, sku: 'YA-PROD', name: 'Otro', slug: 'otro', state: 'active' },
+        ]);
+        mockPrismaService.product_variants.findMany.mockResolvedValue([
+          { sku: 'YA-VAR', product_id: 51, products: { name: 'Ajeno' } },
+        ]);
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',YA-PROD,,CAM,Color,Negro,,,,',
+          ',YA-VAR,,CAM,Color,Rojo,,,,',
+        ]);
+        const item: any = result.products[0];
+        expect(codes(item.variants[0].errors)).toContain('VARIANT_SKU_TAKEN');
+        expect(codes(item.variants[1].errors)).toContain('VARIANT_SKU_TAKEN');
+        // Una sola consulta batch de variantes por análisis.
+        expect(mockPrismaService.product_variants.findMany).toHaveBeenCalledTimes(
+          1,
+        );
+      });
+
+      it("SKU que ya es variante del MISMO producto existente => action 'update'", async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 7, sku: 'CAM', name: 'Camiseta', slug: 'camiseta', state: 'active' },
+        ]);
+        mockPrismaService.product_variants.findMany.mockResolvedValue([
+          { sku: 'CAM-1', product_id: 7, products: { name: 'Camiseta' } },
+        ]);
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',CAM-1,,CAM,Color,Negro,,,,',
+          ',CAM-2,,CAM,Color,Rojo,,,,',
+        ]);
+        const item: any = result.products[0];
+        expect(item.action).toBe('update');
+        expect(item.variants.map((v: any) => v.action)).toEqual([
+          'update',
+          'create',
+        ]);
+        expect(item.status).toBe('ready');
+      });
+
+      it('padre con Usa Listas de Precio y variantes => VARIANTS_WITH_PRICE_TIERS', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,sí',
+          ',CAM-1,,CAM,Color,Negro,,,,',
+        ]);
+        expect(codes(result.products[0].errors)).toContain(
+          'VARIANTS_WITH_PRICE_TIERS',
+        );
+        expect(result.products[0].status).toBe('error');
+      });
+
+      it('precio de variante inválido => error; columnas de producto ignoradas => warning', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',CAM-1,abc,CAM,Color,Negro,,,,',
+          ',CAM-2,,CAM,Color,Rojo,,,Nike,',
+        ]);
+        const item: any = result.products[0];
+        expect(codes(item.variants[0].errors)).toContain('INVALID_PRICE');
+        expect(item.variants[1].status).toBe('warning');
+        expect(codes(item.variants[1].warnings)).toContain(
+          'VARIANT_IGNORED_FIELDS',
+        );
+      });
+
+      it('una variante con warning deja al padre en warning', async () => {
+        const result = await analyze([
+          'Camiseta,CAM,45000,,,,,,,',
+          ',CAM-2,,CAM,Color,Rojo,,,Nike,',
+        ]);
+        expect(result.products[0].status).toBe('warning');
+        expect(result.with_warnings).toBe(1);
+      });
+
+      it('archivo viejo sin columnas: sin variants y total_variants 0', async () => {
+        const result = await service.analyzeProducts(
+          Buffer.from('Nombre,SKU,Precio Venta\nP1,S1,1000'),
+          1,
+        );
+        expect(result.total_variants).toBe(0);
+        expect(result.products[0].variants).toBeUndefined();
+        expect(result.products[0].status).toBe('ready');
+        expect(result.products[0].row_number).toBe(2);
+      });
+    });
+
+    describe('commit (uploadProducts)', () => {
+      beforeEach(() => {
+        mockPrismaService.products.findFirst.mockReset();
+        mockPrismaService.products.findFirst.mockResolvedValue(null);
+        mockPrismaService.product_variants.findMany.mockReset();
+        mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+        mockProductsService.create.mockReset();
+        mockProductsService.create.mockImplementation(async (dto: any) => ({
+          id: 1,
+          name: dto.name,
+          sku: dto.sku,
+        }));
+        mockProductsService.update.mockReset();
+        mockProductsService.update.mockResolvedValue({ id: 7 });
+        mockProductsService.createVariant.mockReset();
+        mockProductsService.updateVariant.mockReset();
+      });
+
+      it('create recibe las variantes en su DTO: hereda sin precio, sin override si iguala al padre, claves internas fuera', async () => {
+        const products = service.parseFile(
+          file([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-N,,CAM,Color,Negro,,,,',
+            ',CAM-B,45000,CAM,Color,Blanco,,,,',
+            ',CAM-R,49000,CAM,Color,Rojo,,,,',
+          ]),
+        );
+        const result = await service.uploadProducts({ products }, mockUser);
+
+        expect(result.results[0]).toMatchObject({
+          status: 'success',
+          action: 'create',
+        });
+        expect(mockProductsService.createVariant).not.toHaveBeenCalled();
+        const [dto] = mockProductsService.create.mock.calls[0];
+        expect(dto.variants).toEqual([
+          { sku: 'CAM-N', name: 'Camiseta Negro', attributes: { Color: 'Negro' } },
+          { sku: 'CAM-B', name: 'Camiseta Blanco', attributes: { Color: 'Blanco' } },
+          {
+            sku: 'CAM-R',
+            name: 'Camiseta Rojo',
+            attributes: { Color: 'Rojo' },
+            price_override: 49000,
+          },
+        ]);
+        expect(JSON.stringify(dto)).not.toContain('__');
+      });
+
+      it('producto sin variantes: el DTO de create no trae la clave variants', async () => {
+        const products = service.parseFile(file(['Camiseta,CAM,45000,,,,,,,']));
+        await service.uploadProducts({ products }, mockUser);
+        expect(mockProductsService.create.mock.calls[0][0]).not.toHaveProperty(
+          'variants',
+        );
+      });
+
+      it('variante huérfana: se salta (skipped) y no crea producto', async () => {
+        const products = service.parseFile(
+          file([',X-1,,NO-EXISTE,Color,Rojo,,,,']),
+        );
+        const result = await service.uploadProducts({ products }, mockUser);
+        expect(mockProductsService.create).not.toHaveBeenCalled();
+        expect(result.skipped).toBe(1);
+        expect(result.results[0]).toMatchObject({
+          status: 'skipped',
+          row_number: 2,
+          error_code: 'VARIANT_PARENT_NOT_FOUND',
+        });
+      });
+
+      it('error de producto usa la fila real del archivo, no la posición agrupada', async () => {
+        mockProductsService.create.mockRejectedValueOnce(
+          new BadRequestException('boom'),
+        );
+        const products = service.parseFile(
+          file([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-N,,CAM,Color,Negro,,,,',
+            'Otro,OTR,1000,,,,,,,',
+          ]),
+        );
+        const result = await service.uploadProducts({ products }, mockUser);
+        expect(result.results[0]).toMatchObject({ status: 'error', row_number: 2 });
+        expect(result.results[1].status).toBe('success');
+      });
+
+      it('update de producto activo: upsert por SKU (update las existentes, create las nuevas) sin borrar', async () => {
+        mockPrismaService.products.findFirst.mockResolvedValue({
+          id: 7,
+          sku: 'CAM',
+          state: 'active',
+        });
+        mockPrismaService.product_variants.findMany.mockResolvedValue([
+          { id: 70, sku: 'cam-n' },
+          { id: 71, sku: 'CAM-AUSENTE' }, // no viene en el archivo: no se toca
+        ]);
+        const products = service.parseFile(
+          file([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-N,49000,CAM,Color,Negro,,,,',
+            ',CAM-NEW,,CAM,Color,Rojo,,,,',
+          ]),
+        );
+        const result = await service.uploadProducts({ products }, mockUser);
+
+        expect(result.results[0]).toMatchObject({ status: 'success', action: 'update' });
+        expect(mockProductsService.create).not.toHaveBeenCalled();
+        // El update del producto no lleva `variants` (borraría las ausentes).
+        expect(mockProductsService.update.mock.calls[0][1]).not.toHaveProperty(
+          'variants',
+        );
+        expect(mockProductsService.updateVariant).toHaveBeenCalledTimes(1);
+        expect(mockProductsService.updateVariant).toHaveBeenCalledWith(70, {
+          name: 'Camiseta Negro',
+          attributes: { Color: 'Negro' },
+          price_override: 49000,
+        });
+        expect(mockProductsService.createVariant).toHaveBeenCalledTimes(1);
+        expect(mockProductsService.createVariant).toHaveBeenCalledWith(7, {
+          sku: 'CAM-NEW',
+          name: 'Camiseta Rojo',
+          attributes: { Color: 'Rojo' },
+        });
+        expect(mockVariantService.removeVariant).not.toHaveBeenCalled();
+      });
+
+      it('celda de variante inválida (barcode en notación científica) rechaza el producto completo', async () => {
+        const products = service.parseFile(
+          Buffer.from(
+            [
+              'Nombre,SKU,Precio Venta,SKU Padre,Atributo 1,Valor 1,Barcode',
+              'Camiseta,CAM,45000,,,,',
+              ',CAM-N,,CAM,Color,Negro,1.23E+12',
+            ].join('\n'),
+          ),
+        );
+        const result = await service.uploadProducts({ products }, mockUser);
+        expect(mockProductsService.create).not.toHaveBeenCalled();
+        expect(result.results[0].status).toBe('error');
+      });
+    });
+
+    describe('paginación del commit', () => {
+      it('las páginas cortan productos ya agrupados: nunca parten una familia', async () => {
+        const rows = [
+          'A,A1,1000,,,,,,,',
+          ',A1-1,,A1,Color,Negro,,,,',
+          ',A1-2,,A1,Color,Rojo,,,,',
+          'B,B1,1000,,,,,,,',
+          ',B1-1,,B1,Color,Negro,,,,',
+          'C,C1,1000,,,,,,,',
+        ];
+        const s3 = (service as any).s3Service;
+        s3.downloadImage.mockResolvedValue(file(rows));
+        s3.deleteFile.mockClear();
+        mockPrismaService.products.findFirst.mockReset();
+        mockPrismaService.products.findFirst.mockResolvedValue(null);
+        mockProductsService.create.mockReset();
+        mockProductsService.create.mockImplementation(async (dto: any) => ({
+          id: 1,
+          name: dto.name,
+          sku: dto.sku,
+        }));
+
+        const p1: any = await service.uploadProductsFromSession('sid', 1, mockUser, {
+          offset: 0,
+          limit: 2,
+        });
+        // 3 productos (no 6 filas): total y paginación operan sobre el árbol.
+        expect(p1).toMatchObject({ total: 3, done: false, successful: 2 });
+        expect(mockProductsService.create.mock.calls[0][0].variants).toHaveLength(2);
+        expect(mockProductsService.create.mock.calls[1][0].variants).toHaveLength(1);
+
+        const p2: any = await service.uploadProductsFromSession('sid', 1, mockUser, {
+          offset: 2,
+          limit: 2,
+        });
+        expect(p2).toMatchObject({ total: 3, done: true, successful: 1 });
+        expect(mockProductsService.create.mock.calls[2][0]).not.toHaveProperty(
+          'variants',
+        );
+      });
+    });
+
+    describe('plantilla y exportación', () => {
+      const sheet = (buf: Buffer) => {
+        const wb = XLSX.read(buf, { type: 'buffer' });
+        return XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+      };
+      const headerRow = (buf: Buffer) => {
+        const wb = XLSX.read(buf, { type: 'buffer' });
+        return XLSX.utils.sheet_to_json<string[]>(wb.Sheets[wb.SheetNames[0]], {
+          header: 1,
+        })[0];
+      };
+
+      it('la plantilla de productos termina con las 7 columnas nuevas; la de servicios no las trae', async () => {
+        expect(headerRow(await service.generateExcelTemplate('products')).slice(-7)).toEqual([
+          'SKU Padre',
+          'Atributo 1',
+          'Valor 1',
+          'Atributo 2',
+          'Valor 2',
+          'Atributo 3',
+          'Valor 3',
+        ]);
+        expect(headerRow(await service.generateExcelTemplate('services'))).not.toContain(
+          'SKU Padre',
+        );
+      });
+
+      it('el ejemplo de la plantilla incluye la familia Camiseta Básica y se importa como 1 padre + 2 variantes', async () => {
+        const buf = await service.generateExcelTemplate('products');
+        const rows = service.parseFile(buf) as any[];
+        const camiseta = rows.find((r) => r.sku === 'CAM-BAS');
+        expect(camiseta.variants).toHaveLength(2);
+        expect(camiseta.variants[0].attributes).toEqual({
+          Color: 'Negro',
+          Talla: 'M',
+        });
+      });
+
+      it('el export emite una fila por variante justo después de su padre y re-importa igual', async () => {
+        mockPrismaService.products.count.mockResolvedValue(1);
+        mockPrismaService.products.findMany.mockReset();
+        mockPrismaService.products.findMany.mockResolvedValueOnce([
+          {
+            id: 1,
+            name: 'Camiseta',
+            sku: 'CAM',
+            state: 'active',
+            product_type: 'physical',
+            base_price: 45000,
+            product_variants: [
+              {
+                id: 10,
+                sku: 'CAM-N-M',
+                name: 'Camiseta Negro M',
+                barcode: '7701',
+                price_override: null,
+                attributes: { Color: 'Negro', Talla: 'M' },
+              },
+              {
+                id: 11,
+                sku: 'CAM-B-L',
+                name: 'Camiseta Blanco L',
+                barcode: null,
+                price_override: 49000,
+                attributes: { Color: 'Blanco', Talla: 'L', Material: 'Algodón', Extra: 'x' },
+              },
+            ],
+          },
+        ]);
+        const buf = await service.exportCurrentProductsAsTemplate();
+        const rows = sheet(buf);
+        expect(rows).toHaveLength(3);
+        expect(rows[0].SKU).toBe('CAM');
+        expect(rows[1]).toMatchObject({
+          'SKU Padre': 'CAM',
+          SKU: 'CAM-N-M',
+          Nombre: 'Camiseta Negro M',
+          'Atributo 1': 'Color',
+          'Valor 1': 'Negro',
+          'Atributo 2': 'Talla',
+          'Valor 2': 'M',
+          'Código de barras': '7701',
+        });
+        expect(rows[1]['Precio Venta']).toBe('');
+        expect(rows[2]).toMatchObject({ SKU: 'CAM-B-L', 'Precio Venta': 49000 });
+        // Más de 3 atributos: solo salen los 3 primeros.
+        expect(rows[2]['Atributo 3']).toBe('Material');
+        expect(rows[2]).not.toHaveProperty('Atributo 4');
+
+        const parsed: any[] = service.parseFile(buf);
+        expect(parsed).toHaveLength(1);
+        expect(parsed[0].variants).toHaveLength(2);
       });
     });
   });
