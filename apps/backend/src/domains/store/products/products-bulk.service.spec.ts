@@ -50,6 +50,7 @@ describe('ProductsBulkService', () => {
     },
     product_price_tier_assignments: {
       findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
     },
     product_categories: {
       createMany: jest.fn(),
@@ -2045,6 +2046,96 @@ describe('ProductsBulkService', () => {
           attributes: { Color: 'Rojo' },
         });
         expect(mockVariantService.removeVariant).not.toHaveBeenCalled();
+      });
+
+      describe('re-validación de variantes en commit', () => {
+        const run = async (rows: string[]) => {
+          const products = service.parseFile(
+            file([...rows, 'Sano,SANO,1000,,,,,,,']),
+          );
+          return service.uploadProducts({ products }, mockUser);
+        };
+        const createdSkus = () =>
+          mockProductsService.create.mock.calls.map((c) => c[0].sku);
+
+        it('variante sin atributos: fila en error con "Variante fila N:" y create NO llamado; el producto sano sí', async () => {
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-1,,CAM,Color,,,,,',
+          ]);
+          expect(result.results[0]).toMatchObject({
+            status: 'error',
+            row_number: 2,
+            sku: 'CAM',
+          });
+          expect(result.results[0].message).toMatch(/^Variante fila 3: /);
+          expect(createdSkus()).toEqual(['SANO']);
+          expect(result.successful).toBe(1);
+          expect(result.failed).toBe(1);
+        });
+
+        it('combinación de atributos duplicada: rechaza el producto completo', async () => {
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-1,,CAM,Color,Negro,,,,',
+            ',CAM-2,,CAM,color,NEGRO,,,,',
+          ]);
+          expect(result.results[0].status).toBe('error');
+          expect(result.results[0].message).toMatch(/^Variante fila 4: /);
+          expect(createdSkus()).toEqual(['SANO']);
+        });
+
+        it('precio de variante inválido: rechaza y no crea', async () => {
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-1,abc,CAM,Color,Negro,,,,',
+          ]);
+          expect(result.results[0].status).toBe('error');
+          expect(createdSkus()).toEqual(['SANO']);
+        });
+
+        it('SKU de variante repetido en el lote: rechaza al segundo producto', async () => {
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',X-1,,CAM,Color,Negro,,,,',
+            'Pantalon,PAN,45000,,,,,,,',
+            ',x-1,,PAN,Color,Negro,,,,',
+          ]);
+          expect(result.results.map((r) => r.status)).toEqual([
+            'success',
+            'error',
+            'success',
+          ]);
+          expect(createdSkus()).toEqual(['CAM', 'SANO']);
+        });
+
+        it('multitarifa en el archivo + variantes: rechaza en commit', async () => {
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,sí',
+            ',CAM-1,,CAM,Color,Negro,,,,',
+          ]);
+          expect(result.results[0].status).toBe('error');
+          expect(createdSkus()).toEqual(['SANO']);
+        });
+
+        it('producto existente con multitarifa activa en BD: no actualiza ni agrega variantes', async () => {
+          mockPrismaService.products.findFirst.mockImplementation(
+            async (args: any) =>
+              args?.where?.sku === 'CAM'
+                ? { id: 7, sku: 'CAM', state: 'active', has_multiple_price_tiers: true }
+                : args?.where?.id === 7
+                  ? { has_multiple_price_tiers: true }
+                  : null,
+          );
+          const result = await run([
+            'Camiseta,CAM,45000,,,,,,,',
+            ',CAM-1,,CAM,Color,Negro,,,,',
+          ]);
+          expect(result.results[0].status).toBe('error');
+          expect(mockProductsService.update).not.toHaveBeenCalled();
+          expect(mockProductsService.createVariant).not.toHaveBeenCalled();
+          expect(createdSkus()).toEqual(['SANO']);
+        });
       });
 
       it('celda de variante inválida (barcode en notación científica) rechaza el producto completo', async () => {

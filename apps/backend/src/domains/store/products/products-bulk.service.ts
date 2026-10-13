@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, InternalServerErrorException, NotFound
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
+import { assertVariantsAllowed } from './services/tiers-variants-exclusive.util';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
@@ -1408,19 +1409,35 @@ export class ProductsBulkService {
     );
   }
 
-  private analyzeVariants(
+  /**
+   * Validación de variantes que NO depende de la base de datos: atributos,
+   * combinación repetida, SKU (vacío / repetido en el archivo o igual al de un
+   * producto del archivo), precio, oferta y errores de celda de la fila.
+   * La comparten el análisis y el commit, para que un archivo que el análisis
+   * rechaza no se pueda crear igual. `onSku` deja al llamador insertar sus
+   * chequeos contra la BD justo después de los de SKU (orden de errores estable).
+   */
+  private validateVariantRows(
     variants: any[],
     ctx: {
-      parentExistingId?: number;
       parentBasePrice: number | null;
       fileProductSkus: Set<string>;
       seenVariantSkus: Map<string, number>;
-      existingProductSkus: Map<string, { id: number; archived: boolean }>;
-      variantOwners: Map<string, { product_id: number; product_name?: string }>;
+      onSku?: (
+        skuLower: string,
+        errors: (string | BulkValidationMessage)[],
+      ) => void;
     },
-  ): BulkVariantAnalysisItemDto[] {
+  ): {
+    sku: string;
+    attributes: Record<string, string>;
+    price: number | null;
+    rowNumber: number;
+    errors: (string | BulkValidationMessage)[];
+    warnings: (string | BulkValidationMessage)[];
+  }[] {
     const seenCombos = new Set<string>();
-    const items: BulkVariantAnalysisItemDto[] = [];
+    const out: ReturnType<ProductsBulkService['validateVariantRows']> = [];
 
     for (const v of variants) {
       const errors: (string | BulkValidationMessage)[] = [];
@@ -1451,7 +1468,6 @@ export class ProductsBulkService {
         }
       }
 
-      let action: 'create' | 'update' = 'create';
       if (!sku) {
         errors.push({
           code: 'VARIANT_SKU_REQUIRED',
@@ -1478,32 +1494,7 @@ export class ProductsBulkService {
             });
           }
         }
-
-        const productOwner = ctx.existingProductSkus.get(skuLower);
-        const variantOwner = ctx.variantOwners.get(skuLower);
-        if (productOwner && !productOwner.archived) {
-          errors.push({
-            code: 'VARIANT_SKU_TAKEN',
-            message: 'El SKU de la variante ya lo usa un producto de la tienda.',
-            field: 'sku',
-          });
-        } else if (variantOwner) {
-          if (
-            ctx.parentExistingId !== undefined &&
-            variantOwner.product_id === ctx.parentExistingId
-          ) {
-            action = 'update';
-          } else {
-            const ownerName = variantOwner.product_name
-              ? ` del producto "${variantOwner.product_name}"`
-              : ' de otro producto';
-            errors.push({
-              code: 'VARIANT_SKU_TAKEN',
-              message: `El SKU de la variante ya lo usa una variante${ownerName} de la tienda.`,
-              field: 'sku',
-            });
-          }
-        }
+        ctx.onSku?.(skuLower, errors);
       }
 
       // Precio: vacío = hereda del padre; si viene debe ser un número > 0.
@@ -1527,9 +1518,14 @@ export class ProductsBulkService {
         }
       }
       if (v.is_on_sale === true) {
-        const sale = v.sale_price === undefined ? null : parseMoneyCell(v.sale_price);
+        const sale =
+          v.sale_price === undefined ? null : parseMoneyCell(v.sale_price);
         const reference = price ?? ctx.parentBasePrice;
-        if (sale === null || sale <= 0 || (reference !== null && sale >= reference)) {
+        if (
+          sale === null ||
+          sale <= 0 ||
+          (reference !== null && sale >= reference)
+        ) {
           errors.push({
             code: 'VARIANT_SALE_PRICE_INVALID',
             message:
@@ -1550,20 +1546,84 @@ export class ProductsBulkService {
         });
       }
 
-      items.push({
-        row_number: rowNumber,
-        sku,
-        name: v.name || '',
-        attributes,
-        price,
-        action,
-        status:
-          errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'ready',
-        warnings,
-        errors,
-      });
+      out.push({ sku, attributes, price, rowNumber, errors, warnings });
     }
-    return items;
+    return out;
+  }
+
+  private analyzeVariants(
+    variants: any[],
+    ctx: {
+      parentExistingId?: number;
+      parentBasePrice: number | null;
+      fileProductSkus: Set<string>;
+      seenVariantSkus: Map<string, number>;
+      existingProductSkus: Map<string, { id: number; archived: boolean }>;
+      variantOwners: Map<string, { product_id: number; product_name?: string }>;
+    },
+  ): BulkVariantAnalysisItemDto[] {
+    const isTakenByProduct = (skuLower: string) => {
+      const owner = ctx.existingProductSkus.get(skuLower);
+      return !!owner && !owner.archived;
+    };
+    const isOwnVariant = (skuLower: string) => {
+      const owner = ctx.variantOwners.get(skuLower);
+      return (
+        !!owner &&
+        ctx.parentExistingId !== undefined &&
+        owner.product_id === ctx.parentExistingId
+      );
+    };
+
+    const validated = this.validateVariantRows(variants, {
+      parentBasePrice: ctx.parentBasePrice,
+      fileProductSkus: ctx.fileProductSkus,
+      seenVariantSkus: ctx.seenVariantSkus,
+      onSku: (skuLower, errors) => {
+        if (isTakenByProduct(skuLower)) {
+          errors.push({
+            code: 'VARIANT_SKU_TAKEN',
+            message: 'El SKU de la variante ya lo usa un producto de la tienda.',
+            field: 'sku',
+          });
+          return;
+        }
+        const variantOwner = ctx.variantOwners.get(skuLower);
+        if (variantOwner && !isOwnVariant(skuLower)) {
+          const ownerName = variantOwner.product_name
+            ? ` del producto "${variantOwner.product_name}"`
+            : ' de otro producto';
+          errors.push({
+            code: 'VARIANT_SKU_TAKEN',
+            message: `El SKU de la variante ya lo usa una variante${ownerName} de la tienda.`,
+            field: 'sku',
+          });
+        }
+      },
+    });
+
+    return validated.map((r, i) => {
+      const skuLower = r.sku.toLowerCase();
+      return {
+        row_number: r.rowNumber,
+        sku: r.sku,
+        name: variants[i].name || '',
+        attributes: r.attributes,
+        price: r.price,
+        action:
+          r.sku && !isTakenByProduct(skuLower) && isOwnVariant(skuLower)
+            ? 'update'
+            : 'create',
+        status:
+          r.errors.length > 0
+            ? 'error'
+            : r.warnings.length > 0
+              ? 'warning'
+              : 'ready',
+        warnings: r.warnings,
+        errors: r.errors,
+      };
+    });
   }
 
   /**
@@ -2376,6 +2436,81 @@ export class ProductsBulkService {
     }
   }
 
+  /** Producto del archivo con `Usa Listas de Precio` = sí (ignora NULL). */
+  private fileEnablesPriceTiers(product: any): boolean {
+    const v = product?.has_multiple_price_tiers;
+    return (
+      v !== undefined &&
+      v !== null &&
+      v !== this.NULL_MARKER &&
+      this.normalizeBooleanValue(v)
+    );
+  }
+
+  /**
+   * Rechaza (BadRequestException con el primer error, prefijado con la fila de
+   * la variante) un producto cuyas variantes del archivo no pasan la validación
+   * pura. Solo valida variantes parseadas (llevan `__row_number`); las que
+   * llegan por el API legacy las valida `ProductsService`. Incluye multitarifa
+   * del archivo ⊕ variantes.
+   */
+  private assertFileVariantsValid(
+    product: any,
+    fileProductSkus: Set<string>,
+    seenVariantSkus: Map<string, number>,
+  ): void {
+    const variants = (
+      Array.isArray(product?.variants) ? product.variants : []
+    ).filter((v: any) => v?.[this.ROW_NUMBER_KEY] !== undefined);
+    if (variants.length === 0) return;
+
+    if (this.fileEnablesPriceTiers(product)) {
+      throw new BadRequestException(
+        'Un producto no puede usar listas de precio y tener variantes a la vez.',
+      );
+    }
+
+    const validated = this.validateVariantRows(variants, {
+      parentBasePrice: parseMoneyCell(product.base_price),
+      fileProductSkus,
+      seenVariantSkus,
+    });
+    for (const r of validated) {
+      const first = r.errors[0];
+      if (first) {
+        throw new BadRequestException(
+          `Variante fila ${r.rowNumber}: ${typeof first === 'string' ? first : first.message}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Guarda multitarifa ⊕ variantes para un producto EXISTENTE al que el
+   * archivo le agrega/actualiza variantes. `create` ya la aplica en su flujo;
+   * `update` no ve las variantes, y `createVariant` no la aplica.
+   */
+  private async assertVariantsAllowedOnExisting(
+    productId: number,
+    productData: any,
+  ): Promise<void> {
+    if (!Array.isArray(productData?.variants) || productData.variants.length === 0) {
+      return;
+    }
+    // El archivo apaga multitarifa explícitamente: el update lo hará antes.
+    const v = productData.has_multiple_price_tiers;
+    if (
+      v !== undefined &&
+      v !== this.NULL_MARKER &&
+      !this.normalizeBooleanValue(v)
+    ) {
+      return;
+    }
+    await assertVariantsAllowed(this.prisma as any, productId, {
+      action: 'bulk_upsert_variants',
+    });
+  }
+
   /** Fila de export de una variante (columnas de plantilla; el resto vacío). */
   private buildVariantExportRow(
     parent: { id: number; sku: string },
@@ -2451,6 +2586,15 @@ export class ProductsBulkService {
     let failed = 0;
     let skipped = 0;
 
+    // Alcance de la validación de variantes en commit: el lote recibido (la
+    // página). El SKU repetido entre páginas lo detiene la unicidad en BD.
+    const fileProductSkus = new Set<string>();
+    for (const p of products) {
+      const sku = this.cleanCellText((p as any).sku).toLowerCase();
+      if (sku) fileProductSkus.add(sku);
+    }
+    const seenVariantSkus = new Map<string, number>();
+
     for (let rowIndex = 0; rowIndex < products.length; rowIndex++) {
       const productData = products[rowIndex];
       // Fila real de la hoja si el producto viene de parseFile (la agrupación
@@ -2487,6 +2631,15 @@ export class ProductsBulkService {
         if (barcodeCellError) {
           throw new BadRequestException(barcodeCellError.message);
         }
+
+        // Variantes del archivo: misma validación pura que el análisis. El
+        // commit procesa todo el archivo de la sesión (no solo filas 'ready'),
+        // así que sin esto se crearían variantes sin atributos o repetidas.
+        this.assertFileVariantsValid(
+          productData as any,
+          fileProductSkus,
+          seenVariantSkus,
+        );
 
         const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(
           productData as any,
@@ -2546,6 +2699,12 @@ export class ProductsBulkService {
           });
         } else if (existingProduct) {
           // Actualizar producto existente (sparse update: solo campos presentes)
+          // Multi-tarifa ⊕ variantes: `update` no ve las variantes (se upsertan
+          // aparte), así que la guarda se aplica aquí, antes de tocar nada.
+          await this.assertVariantsAllowedOnExisting(
+            existingProduct.id,
+            productData,
+          );
           const updateProductDto = this.mapToUpdateProductDto(productData);
           resultProduct = await this.productsService.update(
             existingProduct.id,
