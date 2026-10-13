@@ -377,6 +377,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Purging or deleting old plan files | `purge-plans` |
 | Querying analytics by date range or bucketing a time series | `vendix-analytics-metrics` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
+| Raising bulk caps or chunking high-volume uploads (10k) | `vendix-bulk-operations` |
 | Ranking search results by relevance | `vendix-smart-search` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
