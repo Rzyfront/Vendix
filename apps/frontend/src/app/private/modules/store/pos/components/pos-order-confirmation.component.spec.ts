@@ -240,6 +240,33 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     ],
   };
 
+  it('muestra Despachar para domicilio cobrado aunque no venga isShippingSale', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', {
+      ...sampleOrder,
+      state: 'processing',
+      delivery_type: 'home_delivery',
+    });
+    fixture.detectChanges();
+
+    expect(component.derivedIsShippingSale()).toBe(true);
+    expect(component.derivedModalTitle()).toBe('¡Pedido con Envío!');
+    expect(fixture.nativeElement.textContent).toContain('Despachar');
+  });
+
+  it('no muestra Despachar para un borrador de domicilio', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', {
+      ...sampleOrder,
+      state: 'draft',
+      delivery_type: 'home_delivery',
+    });
+    fixture.detectChanges();
+
+    expect(component.derivedIsShippingSale()).toBe(false);
+    expect(fixture.nativeElement.textContent).not.toContain('Despachar');
+  });
+
   it('1. Venta sin FE dispara auto-impresion inmediata', async () => {
     mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));
     activeFiscalAreasSignal.set([]); // Tienda sin invoicing

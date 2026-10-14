@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { Interval } from '@nestjs/schedule';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 /**
  * CP-REFUND-FLOW-REDESIGN paso 4 — outbox semántico para el movimiento de
@@ -30,6 +31,8 @@ import { RequestContextService } from '@common/context/request-context.service';
  */
 export const REFUND_CASH_MOVEMENT_KEY = 'refund_cash_movement_v1';
 export const REFUND_CASH_MOVEMENT_SOURCE = 'refund.cash_movement';
+export const DEFERRED_SALE_CASH_MOVEMENT_KEY = 'deferred_sale_cash_movement_v1';
+export const DEFERRED_SALE_CASH_MOVEMENT_SOURCE = 'order.deferred_cash_movement';
 
 /**
  * Referencia del movimiento de compensación que registra la cancelación de una
@@ -78,6 +81,17 @@ export interface RefundCashMovementPayload {
   delivery_scope?: string;
 }
 
+export interface DeferredSaleCashMovementInput {
+  failure_id: number;
+  session_id: number;
+  store_id: number;
+  order_id: number;
+  user_id: number;
+  payment_ids: number[];
+  ready_state: 'finished' | 'delivered';
+  compensation_state: string;
+}
+
 /** `source_type` de las filas del outbox de compensaciones (≠ refund). */
 export const COMPENSATION_CASH_MOVEMENT_SOURCE = 'cash.compensation_movement';
 
@@ -115,6 +129,26 @@ export class MovementsService {
     private readonly event_emitter: EventEmitter2,
   ) {}
 
+  private async assertOpenSessionLocked(
+    db: Prisma.TransactionClient,
+    session_id: number,
+    store_id: number,
+  ): Promise<void> {
+    const locked = await db.$queryRaw<{ id: number }[]>`
+      SELECT id FROM cash_register_sessions
+      WHERE id = ${session_id} AND store_id = ${store_id} AND status = 'open'
+      FOR UPDATE
+    `;
+    if (locked.length === 1) return;
+
+    const session = await db.cash_register_sessions.findFirst({
+      where: { id: session_id, store_id },
+      select: { id: true, status: true },
+    });
+    if (!session) throw new NotFoundException('Sesión de caja no encontrada');
+    throw new BadRequestException('La sesión de caja ya no está abierta');
+  }
+
   async findBySession(session_id: number) {
     return this.prisma.cash_register_movements.findMany({
       where: { session_id },
@@ -147,29 +181,26 @@ export class MovementsService {
       notes?: string;
     },
   ) {
-    const context = RequestContextService.getContext()!;
-
-    const session = await this.prisma.cash_register_sessions.findFirst({
-      where: { id: session_id },
-    });
-    if (!session) {
-      throw new NotFoundException('Sesión de caja no encontrada');
-    }
-    if (session.status !== 'open') {
-      throw new BadRequestException('La sesión de caja ya no está abierta');
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    const movement = await this.prisma.cash_register_movements.create({
-      data: {
-        session_id,
-        store_id: context.store_id,
-        user_id: context.user_id,
-        type: data.type,
-        amount: data.amount,
-        payment_method: 'cash',
-        reference: data.reference,
-        notes: data.notes,
-      },
+    const movement = await this.prisma.$transaction(async (tx) => {
+      await this.assertOpenSessionLocked(tx, session_id, store_id);
+      return tx.cash_register_movements.create({
+        data: {
+          session_id,
+          store_id,
+          user_id: context.user_id,
+          type: data.type,
+          amount: data.amount,
+          payment_method: 'cash',
+          reference: data.reference,
+          notes: data.notes,
+        },
+      });
     });
 
     // Emit accounting event for manual cash movement
@@ -208,19 +239,25 @@ export class MovementsService {
       order_id: number;
       payment_id?: number;
     },
+    tx?: Prisma.TransactionClient,
   ) {
-    return this.prisma.withoutScope().cash_register_movements.create({
-      data: {
-        session_id,
-        store_id: data.store_id,
-        user_id: data.user_id,
-        type: 'sale',
-        amount: data.amount,
-        payment_method: data.payment_method,
-        order_id: data.order_id,
-        payment_id: data.payment_id ?? null,
-      },
-    });
+    const create = async (db: Prisma.TransactionClient) => {
+      await this.assertOpenSessionLocked(db, session_id, data.store_id);
+      return db.cash_register_movements.create({
+        data: {
+          session_id,
+          store_id: data.store_id,
+          user_id: data.user_id,
+          type: 'sale',
+          amount: data.amount,
+          payment_method: data.payment_method,
+          order_id: data.order_id,
+          payment_id: data.payment_id ?? null,
+        },
+      });
+    };
+    if (tx) return create(tx);
+    return this.prisma.$transaction((db) => create(db));
   }
 
   /**
@@ -240,20 +277,326 @@ export class MovementsService {
     },
     tx?: Prisma.TransactionClient,
   ) {
-    const db = (tx ?? this.prisma.withoutScope()) as unknown as Prisma.TransactionClient;
-    return db.cash_register_movements.create({
+    const create = async (db: Prisma.TransactionClient) => {
+      await this.assertOpenSessionLocked(db, session_id, data.store_id);
+      return db.cash_register_movements.create({
+        data: {
+          session_id,
+          store_id: data.store_id,
+          user_id: data.user_id,
+          type: 'refund',
+          amount: data.amount,
+          payment_method: data.payment_method,
+          order_id: data.order_id,
+          payment_id: data.payment_id,
+          reference: data.reference,
+          notes: data.notes,
+        },
+      });
+    };
+    if (tx) return create(tx);
+    return this.prisma.$transaction((db) => create(db));
+  }
+
+  /**
+   * Reserve a durable close guard before an in-place payment confirmation whose
+   * cash movement must wait for the order finish. The caller owns the payment
+   * transaction so the signal and payment state commit or roll back together.
+   */
+  async createDeferredSaleCashMovementSignal(
+    tx: Prisma.TransactionClient,
+    input: Omit<DeferredSaleCashMovementInput, 'failure_id' | 'payment_ids'> & {
+      organization_id: number;
+    },
+  ): Promise<number> {
+    await this.assertOpenSessionLocked(tx, input.session_id, input.store_id);
+    if (!input.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const row = await tx.accounting_entry_failures.create({
       data: {
-        session_id,
-        store_id: data.store_id,
-        user_id: data.user_id,
-        type: 'refund',
-        amount: data.amount,
-        payment_method: data.payment_method,
-        order_id: data.order_id,
-        payment_id: data.payment_id,
-        reference: data.reference,
-        notes: data.notes,
+        organization_id: input.organization_id,
+        store_id: input.store_id,
+        handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY,
+        source_type: DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
+        source_id: input.order_id,
+        event_payload: {
+          version: 1,
+          session_id: input.session_id,
+          store_id: input.store_id,
+          order_id: input.order_id,
+          user_id: input.user_id,
+          payment_ids: [],
+          ready_state: input.ready_state,
+          compensation_state: input.compensation_state,
+        },
+        error_message: 'PENDING_FINISH: sale movement waits for order finish',
       },
+    });
+    return row.id;
+  }
+
+  /** Store the final payment ids in the same transaction that confirmed them. */
+  async attachDeferredSaleCashMovementPayments(
+    tx: Prisma.TransactionClient,
+    input: Pick<DeferredSaleCashMovementInput,
+      'failure_id' | 'session_id' | 'store_id' | 'order_id' | 'payment_ids'>,
+  ): Promise<void> {
+    const row = await tx.accounting_entry_failures.findFirst({
+      where: {
+        id: input.failure_id,
+        store_id: input.store_id,
+        handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY,
+        source_type: DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
+        source_id: input.order_id,
+        resolved_at: null,
+      },
+      select: { id: true, event_payload: true },
+    });
+    const payload = row?.event_payload as Record<string, unknown> | undefined;
+    if (!row || Number(payload?.session_id) !== input.session_id) {
+      throw new Error(`Deferred cash movement signal #${input.failure_id} is missing or stale`);
+    }
+    await tx.accounting_entry_failures.update({
+      where: { id: input.failure_id },
+      data: {
+        event_payload: { ...payload, payment_ids: input.payment_ids },
+      },
+    });
+  }
+
+  /** Persist sale movements and resolve the close guard atomically. */
+  async completeDeferredSaleCashMovement(
+    tx: Prisma.TransactionClient,
+    input: DeferredSaleCashMovementInput & {
+      movements: Array<{ amount: number; payment_method: string; payment_id: number }>;
+    },
+  ): Promise<void> {
+    await this.assertOpenSessionLocked(tx, input.session_id, input.store_id);
+    await tx.$queryRaw`
+      SELECT id FROM orders
+      WHERE id = ${input.order_id} AND store_id = ${input.store_id}
+      FOR UPDATE
+    `;
+    const order = await tx.orders.findFirst({
+      where: { id: input.order_id, store_id: input.store_id },
+      select: { id: true, state: true },
+    });
+    if (!order || !['finished', 'delivered'].includes(order.state)) {
+      throw new Error(`Deferred cash movement order #${input.order_id} has not completed its delivery transition`);
+    }
+    await tx.$queryRaw`
+      SELECT id FROM accounting_entry_failures
+      WHERE id = ${input.failure_id} AND store_id = ${input.store_id}
+      FOR UPDATE
+    `;
+    const row = await tx.accounting_entry_failures.findFirst({
+      where: {
+        id: input.failure_id,
+        store_id: input.store_id,
+        handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY,
+        source_type: DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
+        source_id: input.order_id,
+        resolved_at: null,
+      },
+      select: { id: true, event_payload: true },
+    });
+    const payload = row?.event_payload as Record<string, unknown> | undefined;
+    const expectedIds = Array.isArray(payload?.payment_ids)
+      ? (payload.payment_ids as number[]).sort((a, b) => a - b)
+      : [];
+    const actualIds = input.movements.map((item) => item.payment_id).sort((a, b) => a - b);
+    if (
+      !row || Number(payload?.session_id) !== input.session_id ||
+      payload?.ready_state !== order.state ||
+      input.ready_state !== order.state ||
+      JSON.stringify(expectedIds) !== JSON.stringify(actualIds)
+    ) {
+      throw new Error(`Deferred cash movement signal #${input.failure_id} is missing or mismatched`);
+    }
+    for (const movement of input.movements) {
+      const existing = await tx.cash_register_movements.findFirst({
+        where: {
+          store_id: input.store_id,
+          type: 'sale',
+          payment_id: movement.payment_id,
+        },
+        select: { id: true, session_id: true },
+      });
+      if (existing) {
+        if (existing.session_id !== input.session_id) {
+          throw new Error(
+            `Deferred payment #${movement.payment_id} already belongs to cash session #${existing.session_id}`,
+          );
+        }
+        continue;
+      }
+      await tx.cash_register_movements.create({
+        data: {
+          session_id: input.session_id,
+          store_id: input.store_id,
+          user_id: input.user_id,
+          type: 'sale',
+          amount: movement.amount,
+          payment_method: movement.payment_method,
+          order_id: input.order_id,
+          payment_id: movement.payment_id,
+        },
+      });
+    }
+    await tx.accounting_entry_failures.update({
+      where: { id: input.failure_id },
+      data: {
+        resolved_at: new Date(),
+        error_message: 'DELIVERED: deferred sale movements recorded after order finish',
+      },
+    });
+  }
+
+  /** Resolve a deferred signal only after payment compensation and state restore. */
+  async cancelDeferredSaleCashMovementSignal(
+    tx: Prisma.TransactionClient,
+    input: DeferredSaleCashMovementInput & { restored_state: string },
+  ): Promise<boolean> {
+    await this.assertOpenSessionLocked(tx, input.session_id, input.store_id);
+    await tx.$queryRaw`
+      SELECT id FROM orders
+      WHERE id = ${input.order_id} AND store_id = ${input.store_id}
+      FOR UPDATE
+    `;
+    await tx.$queryRaw`
+      SELECT id FROM accounting_entry_failures
+      WHERE id = ${input.failure_id} AND store_id = ${input.store_id}
+      FOR UPDATE
+    `;
+    const row = await tx.accounting_entry_failures.findFirst({
+      where: {
+        id: input.failure_id,
+        store_id: input.store_id,
+        handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY,
+        source_type: DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
+        source_id: input.order_id,
+        resolved_at: null,
+      },
+      select: { id: true, event_payload: true },
+    });
+    if (!row) return false;
+    const payload = row.event_payload as Record<string, unknown> | undefined;
+    if (!payload || Number(payload.session_id) !== input.session_id) {
+      return false;
+    }
+    const paymentIds = Array.isArray(payload.payment_ids) ? payload.payment_ids as number[] : [];
+    const [payments, order] = await Promise.all([
+      tx.payments.findMany({
+        where: { id: { in: paymentIds }, order_id: input.order_id },
+        select: { id: true, state: true },
+      }),
+      tx.orders.findFirst({
+        where: { id: input.order_id, store_id: input.store_id },
+        select: { id: true, state: true },
+      }),
+    ]);
+    if (
+      payments.length !== paymentIds.length ||
+      payments.some((payment) => !['pending', 'cancelled'].includes(payment.state)) ||
+      order?.state !== input.restored_state
+    ) {
+      return false;
+    }
+    await tx.accounting_entry_failures.update({
+      where: { id: input.failure_id },
+      data: {
+        resolved_at: new Date(),
+        error_message: 'CANCELLED: payment compensation and order restore completed',
+      },
+    });
+    return true;
+  }
+
+  /** Retry committed deferred signals after a process restart. */
+  async deliverDeferredSaleCashMovement(failureId: number): Promise<void> {
+    const db = this.prisma.withoutScope();
+    const candidate = await db.accounting_entry_failures.findFirst({
+      where: { id: failureId, handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY },
+    });
+    if (!candidate || candidate.resolved_at) return;
+    const payload = candidate.event_payload as unknown as DeferredSaleCashMovementInput & {
+      version: number;
+      compensation_state: string;
+    };
+    if (
+      payload.version !== 1 || !Number.isInteger(payload.session_id) ||
+      !Number.isInteger(payload.order_id) || !Array.isArray(payload.payment_ids)
+    ) {
+      throw new Error(`Deferred cash movement signal #${failureId} has an invalid payload`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.assertOpenSessionLocked(tx, payload.session_id, payload.store_id);
+      await tx.$queryRaw`
+        SELECT id FROM orders
+        WHERE id = ${payload.order_id} AND store_id = ${payload.store_id}
+        FOR UPDATE
+      `;
+      const order = await tx.orders.findFirst({
+        where: { id: payload.order_id, store_id: payload.store_id },
+        select: { id: true, state: true },
+      });
+      if (!order) return;
+      await tx.$queryRaw`
+        SELECT id FROM accounting_entry_failures
+        WHERE id = ${failureId} AND store_id = ${payload.store_id}
+        FOR UPDATE
+      `;
+      const signal = await tx.accounting_entry_failures.findFirst({
+        where: {
+          id: failureId,
+          store_id: payload.store_id,
+          handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY,
+          source_type: DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
+          resolved_at: null,
+        },
+        select: { id: true },
+      });
+      if (!signal) return;
+
+      const payments = await tx.payments.findMany({
+        where: { id: { in: payload.payment_ids }, order_id: payload.order_id },
+        select: {
+          id: true,
+          amount: true,
+          state: true,
+          store_payment_method: {
+            select: { system_payment_method: { select: { type: true } } },
+          },
+        },
+      });
+      if (payments.length !== payload.payment_ids.length) return;
+      if (
+        payments.every((payment) => ['pending', 'cancelled'].includes(payment.state)) &&
+        order.state === payload.compensation_state
+      ) {
+        await this.cancelDeferredSaleCashMovementSignal(tx, {
+          ...payload,
+          failure_id: failureId,
+          restored_state: payload.compensation_state,
+        });
+        return;
+      }
+      if (
+        order.state !== payload.ready_state ||
+        payments.some((payment) => payment.state !== 'succeeded')
+      ) return;
+
+      await this.completeDeferredSaleCashMovement(tx, {
+        ...payload,
+        failure_id: failureId,
+        movements: payments.map((payment) => ({
+          amount: Number(payment.amount),
+          payment_method: payment.store_payment_method?.system_payment_method?.type ?? 'cash',
+          payment_id: payment.id,
+        })),
+      });
     });
   }
 
@@ -695,9 +1038,47 @@ export class MovementsService {
    */
   async deliverRefundCashMovement(failureId: number): Promise<void> {
     try {
-      await this.prisma.withoutScope().$transaction(async (tx) => {
-        // Mismo lock de fila que `ManualRefundDeliveryService.deliver`: el
-        // sweeper y un reintento manual nunca entregan dos veces.
+      const db = this.prisma.withoutScope();
+      // Leer sin lock para descubrir la sesión y la orden. Nunca retener el
+      // outbox mientras se espera la sesión: closeSession toma sesión→órdenes→outbox.
+      const candidate = await db.accounting_entry_failures.findFirst({
+        where: { id: failureId, handler_key: REFUND_CASH_MOVEMENT_KEY },
+      });
+      if (!candidate || candidate.resolved_at) return;
+      const candidate_payload = candidate.event_payload as unknown as RefundCashMovementPayload;
+
+      await db.$transaction(async (tx) => {
+        const is_candidate_delivery =
+          candidate_payload.delivery_scope === CASH_MOVEMENT_DELIVERY_SCOPE;
+        let session_id: number | null = null;
+        if (is_candidate_delivery) {
+          session_id = await this.resolveCompensationSessionId(
+            {
+              store_id: candidate_payload.store_id,
+              user_id: candidate_payload.user_id,
+              payment_id: candidate_payload.payment_id,
+              order_id: candidate_payload.order_id,
+            },
+            tx,
+          );
+          if (session_id == null) {
+            throw new Error(
+              `NO_OPEN_SESSION: no open cash session owned by user #${candidate_payload.user_id} in store #${candidate_payload.store_id} for refund #${candidate_payload.refund_id} (nor in the original sale's register)`,
+            );
+          }
+          await this.assertOpenSessionLocked(tx, session_id, candidate_payload.store_id);
+          const locked_order = await tx.$queryRaw<{ id: number }[]>`
+            SELECT id FROM orders
+            WHERE id = ${candidate_payload.order_id}
+              AND store_id = ${candidate_payload.store_id}
+            FOR UPDATE`;
+          if (locked_order.length !== 1) {
+            throw new Error(`Refund cash movement order #${candidate_payload.order_id} not found`);
+          }
+        }
+
+        // Sesión/orden primero; outbox al final. El reread bajo lock evita
+        // entregar una fila alterada después de la lectura inicial.
         const locked = await tx.$queryRaw<{ id: number }[]>`
           SELECT id FROM accounting_entry_failures WHERE id = ${failureId} FOR UPDATE`;
         if (locked.length !== 1) return;
@@ -706,6 +1087,9 @@ export class MovementsService {
         });
         if (!row || row.resolved_at) return;
         const payload = row.event_payload as unknown as RefundCashMovementPayload;
+        if (JSON.stringify(payload) !== JSON.stringify(candidate_payload)) {
+          throw new Error(`Refund cash movement payload changed during delivery #${failureId}`);
+        }
         if (
           payload.version !== 1 ||
           (typeof payload.dedupe_key !== 'string' &&
@@ -765,21 +1149,8 @@ export class MovementsService {
         // cualquier sesión abierta del mismo registro que la original — así
         // un reembolso encolado no queda varado cuando otro cajero tiene la
         // caja. Si nadie puede recibirlo, la fila sigue pendiente.
-        const session_id = await this.resolveCompensationSessionId(
-          {
-            store_id: payload.store_id,
-            user_id: payload.user_id,
-            payment_id: payload.payment_id,
-            order_id: payload.order_id,
-          },
-          tx,
-        );
-        if (session_id == null) {
-          throw new Error(
-            `NO_OPEN_SESSION: no open cash session owned by user #${payload.user_id} in store #${payload.store_id} for refund #${payload.refund_id} (nor in the original sale's register)`,
-          );
-        }
-        const session = { id: session_id };
+        // El session_id ya se resolvió y quedó bloqueado antes de la fila outbox.
+        const session = { id: session_id! };
         const movement = await tx.cash_register_movements.create({
           data: {
             session_id: session.id,
@@ -843,6 +1214,36 @@ export class MovementsService {
         this.logger.warn(
           `Refund cash movement delivery #${row.id} still pending: ${error instanceof Error ? error.message : String(error)}`,
         );
+      }
+    }
+  }
+
+  @Interval(60_000)
+  async sweepDeferredSaleCashMovements(): Promise<void> {
+    const rows = await this.prisma.withoutScope().accounting_entry_failures.findMany({
+      where: {
+        handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY,
+        source_type: DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
+        resolved_at: null,
+      },
+      select: { id: true },
+      take: 50,
+      orderBy: { created_at: 'asc' },
+    });
+    for (const row of rows) {
+      try {
+        await this.deliverDeferredSaleCashMovement(row.id);
+      } catch (error) {
+        this.logger.warn(
+          `Deferred sale cash movement #${row.id} still pending: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        await this.prisma.withoutScope().accounting_entry_failures.update({
+          where: { id: row.id },
+          data: {
+            attempt_count: { increment: 1 },
+            error_message: error instanceof Error ? error.message : String(error),
+          },
+        });
       }
     }
   }

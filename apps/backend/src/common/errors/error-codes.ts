@@ -5094,6 +5094,11 @@ export const ErrorCodes = {
     devMessage:
       'Se requiere informacion de pago para procesar la orden completa.',
   },
+  ORD_CASH_SESSION_ORDER_STALE_001: {
+    code: 'ORD_CASH_SESSION_ORDER_STALE_001',
+    httpStatus: 409,
+    devMessage: 'La orden cambió mientras se procesaba desde el cierre de caja.',
+  },
 
   // ===== SaaS Subscriptions =====
   SUBSCRIPTION_001: {
@@ -6214,6 +6219,38 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
+
+  // QUI-920 — guardia transaccional al cerrar caja con órdenes pendientes.
+  CASH_SESSION_PENDING_001: {
+    code: 'CASH_SESSION_PENDING_001',
+    httpStatus: 409,
+    devMessage: 'An explicit decision is required while pending orders remain',
+  },
+  CASH_SESSION_PENDING_002: {
+    code: 'CASH_SESSION_PENDING_002',
+    httpStatus: 409,
+    devMessage: 'Pending orders changed or remain after the resolved decision',
+  },
+  CASH_SESSION_PENDING_003: {
+    code: 'CASH_SESSION_PENDING_003',
+    httpStatus: 400,
+    devMessage: 'A non-empty reason is required to override pending orders',
+  },
+  CASH_SESSION_PENDING_004: {
+    code: 'CASH_SESSION_PENDING_004',
+    httpStatus: 409,
+    devMessage: 'Legacy session tracking is unavailable; an audited override is required',
+  },
+  CASH_SESSION_PENDING_005: {
+    code: 'CASH_SESSION_PENDING_005',
+    httpStatus: 409,
+    devMessage: 'Unresolved sale or refund cash movements remain for this session',
+  },
+  CASH_SESSION_PENDING_006: {
+    code: 'CASH_SESSION_PENDING_006',
+    httpStatus: 409,
+    devMessage: 'The cash session is already closed',
   },
 
   // Caja registradora — cobro sin sesión del operador

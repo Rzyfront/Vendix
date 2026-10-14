@@ -103,6 +103,8 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     eventEmitterMock = { emit: jest.fn() };
 
     cashSettlementMock = {
+      recordCashMovement: jest.fn().mockResolvedValue(null),
+      emitCashMovementRecorded: jest.fn(),
       emitPaymentReceived: jest.fn(),
       emitCreditSale: jest.fn(),
       emitRefundCompleted: jest.fn(),
@@ -156,7 +158,10 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         amount: 200, // collected + anticipo
         payment_method: 'cash',
       }),
+      { cashMovementHandled: true },
     );
+    expect(cashSettlementMock.recordCashMovement).toHaveBeenCalledTimes(1);
+    expect(cashSettlementMock.emitCashMovementRecorded).toHaveBeenCalledWith(null);
     expect(cashSettlementMock.emitCreditSale).not.toHaveBeenCalled();
     expect(cashSettlementMock.emitWithholding).not.toHaveBeenCalled();
 

@@ -684,8 +684,16 @@ export class CashRegistersComponent {
           : '-',
     },
     {
+      key: 'expected_closing_amount',
+      label: 'Debe haber',
+      sortable: true,
+      priority: 3,
+      transform: (value: number) =>
+        value != null ? this.currencyService.format(value) : '-',
+    },
+    {
       key: 'actual_closing_amount',
-      label: 'Cierre',
+      label: 'Contado',
       sortable: true,
       priority: 3,
       transform: (value: number) =>
@@ -701,7 +709,7 @@ export class CashRegistersComponent {
       transform: (value: number) => {
         if (value == null) return '-';
         const sign = value >= 0 ? '+' : '';
-        return `${sign}${this.currencyService.format(Math.abs(value))}`;
+        return `${sign}${this.currencyService.format(value)}`;
       },
     },
     {
@@ -746,12 +754,24 @@ export class CashRegistersComponent {
             : '-',
       },
       {
+        key: 'expected_closing_amount',
+        label: 'Debe haber',
+        transform: (val: number) =>
+          val != null ? this.currencyService.format(val) : '-',
+      },
+      {
+        key: 'actual_closing_amount',
+        label: 'Contado',
+        transform: (val: number) =>
+          val != null ? this.currencyService.format(val) : '-',
+      },
+      {
         key: 'difference',
         label: 'Diferencia',
         transform: (val: number) => {
           if (val == null) return '-';
           const sign = val >= 0 ? '+' : '';
-          return `${sign}${this.currencyService.format(Math.abs(val))}`;
+          return `${sign}${this.currencyService.format(val)}`;
         },
       },
     ],

@@ -69,6 +69,7 @@ describe('MovementsService.deliverRefundCashMovement', () => {
     const unscoped = {
       $transaction: jest.fn((cb: any) => cb(tx)),
       accounting_entry_failures: {
+        findFirst: jest.fn().mockResolvedValue({ ...outboxRow }),
         update: jest.fn().mockResolvedValue({}),
       },
     };
@@ -135,6 +136,16 @@ describe('MovementsService.deliverRefundCashMovement', () => {
         reference: `refund:${REFUND_ID}`,
       },
     });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[1],
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[2],
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
+      tx.cash_register_movements.create.mock.invocationCallOrder[0],
+    );
 
     expect(tx.accounting_entry_failures.update).toHaveBeenCalledWith({
       where: { id: FAILURE_ID },
@@ -156,11 +167,13 @@ describe('MovementsService.deliverRefundCashMovement', () => {
 
     it('con sesión abierta disponible NO crea movimiento: marca LEGACY_MANUAL_REVIEW, sin resolver', async () => {
       const { service, tx, unscoped } = createService();
-      tx.accounting_entry_failures.findFirst.mockResolvedValue({
+      const legacyRow = {
         ...outboxRow,
         error_message: 'PENDING_DELIVERY: x',
         event_payload: legacyPayload,
-      });
+      };
+      unscoped.accounting_entry_failures.findFirst.mockResolvedValue(legacyRow);
+      tx.accounting_entry_failures.findFirst.mockResolvedValue(legacyRow);
       tx.cash_register_sessions.findFirst.mockResolvedValue({ id: SESSION_ID });
 
       await expect(
@@ -180,11 +193,13 @@ describe('MovementsService.deliverRefundCashMovement', () => {
 
     it('si ya está marcada no vuelve a tocar nada', async () => {
       const { service, tx, unscoped } = createService();
-      tx.accounting_entry_failures.findFirst.mockResolvedValue({
+      const legacyRow = {
         ...outboxRow,
         error_message: `${LEGACY_MANUAL_REVIEW_PREFIX}: ya marcada`,
         event_payload: legacyPayload,
-      });
+      };
+      unscoped.accounting_entry_failures.findFirst.mockResolvedValue(legacyRow);
+      tx.accounting_entry_failures.findFirst.mockResolvedValue(legacyRow);
 
       await service.deliverRefundCashMovement(FAILURE_ID);
 

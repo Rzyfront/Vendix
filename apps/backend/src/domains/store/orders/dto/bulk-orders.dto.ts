@@ -4,14 +4,19 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_state_enum } from '@prisma/client';
 import { PrintFormat } from '../../settings/interfaces/store-settings.interface';
+import { FastTrackOrderDto } from '../order-flow/dto/fast-track-order.dto';
+import { AssignShippingMethodDto } from './assign-shipping-method.dto';
 
 /**
  * Tope duro de órdenes por lote, común a las tres operaciones masivas
@@ -163,6 +168,101 @@ export class BulkPrintOrdersDto {
   @Min(1)
   @Type(() => Number)
   copies?: number;
+}
+
+/** Huella de una fila de GET sessions/:id/pending-orders. */
+export class CashSessionPendingOrderVersionDto {
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  id: number;
+
+  @IsString()
+  version: string;
+
+  @IsString()
+  @Matches(/^[a-f0-9]{64}$/)
+  fingerprint: string;
+}
+
+/**
+ * Preview de finalizar órdenes pendientes de caja. Tope propio de 100 aunque
+ * las operaciones generales soporten 300: el preview valida requisitos de
+ * dominio por orden y debe permanecer acotado.
+ */
+export class CashSessionFinishPreviewDto {
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  session_id: number;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => CashSessionPendingOrderVersionDto)
+  orders: CashSessionPendingOrderVersionDto[];
+}
+
+/** Procesa una orden atribuida a la sesión usando el mismo flujo del detalle. */
+export class CashSessionProcessOrderDto {
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  session_id: number;
+
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  order_id: number;
+
+  @IsString()
+  @IsNotEmpty()
+  expected_version: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AssignShippingMethodDto)
+  shipping?: AssignShippingMethodDto;
+
+  @ValidateNested()
+  @Type(() => FastTrackOrderDto)
+  flow: FastTrackOrderDto;
+}
+
+/** Cuerpo de POST /store/orders/bulk/cash-session-finish. */
+export class CashSessionFinishDto extends CashSessionFinishPreviewDto {
+  @IsString()
+  @MaxLength(64)
+  fingerprint: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/\S/, { message: 'reason no puede estar vacío' })
+  @MaxLength(500)
+  reason: string;
+}
+
+export class CashSessionFinishPreviewItemDto {
+  id: number;
+  order_number: string;
+  current_state: string;
+  target_state: 'finished';
+  eligible: boolean;
+  reasons: string[];
+  effects: string[];
+  version: string | null;
+  fingerprint: string;
+}
+
+export class CashSessionFinishPreviewResultDto {
+  session_id: number;
+  total: number;
+  eligible: number;
+  ineligible: number;
+  fingerprint: string;
+  eligible_fingerprint: string;
+  items: CashSessionFinishPreviewItemDto[];
 }
 
 /**

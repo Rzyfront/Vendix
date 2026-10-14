@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { FinancialSplitErrors } from 'src/common/errors/financial-split-error-codes';
 import { ErrorCodes } from 'src/common/errors/error-codes';
@@ -862,3 +863,48 @@ export function computeOrderActions(
     { code: 'confirm_delivery', ...canConfirmDelivery(order) },
   ];
 }
+
+/**
+ * QUI-920: Canonical fingerprint for a single pending order row.
+ * Consistent across SessionsService, OrdersBulkService, and OrderFlowService.
+ */
+export function computePendingOrderFingerprint(
+  order: {
+    id: number;
+    state: string;
+    remaining_balance?: Prisma.Decimal | number | string | null;
+  },
+  version: string | null,
+): string {
+  const balance = Number(order.remaining_balance ?? 0);
+  return createHash('sha256')
+    .update(`${order.id}:${order.state}:${balance.toFixed(2)}:${version ?? ''}`)
+    .digest('hex');
+}
+
+/**
+ * QUI-920: Canonical global session fingerprint across all pending orders in a cash session.
+ * Consistent across SessionsService.getPendingOrders and SessionsService.closeSession.
+ */
+export function computePendingSessionFingerprint(
+  orders: Array<{
+    id: number;
+    state: string;
+    remaining_balance?: Prisma.Decimal | number | string | null;
+    updated_at?: Date | string | null;
+  }>,
+): string {
+  const hash = createHash('sha256');
+  for (const order of orders) {
+    const balance = Number(order.remaining_balance ?? 0);
+    const version =
+      order.updated_at instanceof Date
+        ? order.updated_at.toISOString()
+        : typeof order.updated_at === 'string'
+          ? order.updated_at
+          : '';
+    hash.update(`${order.id}:${order.state}:${balance.toFixed(2)}:${version}\n`);
+  }
+  return hash.digest('hex');
+}
+

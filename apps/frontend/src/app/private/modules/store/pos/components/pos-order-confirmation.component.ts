@@ -378,7 +378,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
           <!-- Separador visual entre categorías -->
           <div class="confirm-footer-sep"></div>
     
-          @if (orderData()?.isShippingSale && orderId) {
+          @if (derivedIsShippingSale() && orderId) {
             <app-button variant="ghost" size="md" (clicked)="dispatchOrder()" [loading]="dispatching()" title="Enviar la orden a despacho">
               <app-icon name="send" [size]="16" slot="icon" ></app-icon>
               <span class="hidden sm:inline">Despachar</span>
@@ -836,9 +836,20 @@ export class PosOrderConfirmationComponent {
   // the confirmation modal copy so the cashier doesn't read a draft save
   // as a fiscal sale. Draft = state in ['draft', 'created'] with no
   // payment row; anything else with a payment row is a sale.
-  readonly derivedIsShippingSale = computed(
-    () => !!this.orderData()?.isShippingSale,
-  );
+  readonly derivedIsShippingSale = computed(() => {
+    const order = this.orderData();
+    if (!order) return false;
+    if (order.isShippingSale) return true;
+
+    // El flujo estándar de cobro devuelve delivery_type desde la orden, pero
+    // no siempre agrega la marca temporal `isShippingSale` que usa el flujo
+    // del wizard. El tipo persistido es la fuente fiable para habilitar el
+    // despacho. Un borrador todavía no se puede despachar.
+    const state = (order.state || order.status || '').toString().toLowerCase();
+    return order.delivery_type === 'home_delivery' &&
+      state !== 'draft' &&
+      state !== 'created';
+  });
   readonly derivedIsPaid = computed(() => {
     const d = this.orderData();
     if (!d) return false;

@@ -18,6 +18,9 @@ import {
   BulkAssignRouteDto,
   BulkPrintOrdersDto,
   BulkTransitionOrdersDto,
+  CashSessionFinishPreviewDto,
+  CashSessionFinishDto,
+  CashSessionProcessOrderDto,
 } from './dto/bulk-orders.dto';
 
 /**
@@ -161,6 +164,55 @@ export class OrdersBulkController {
         error.status || 400,
       );
     }
+  }
+
+  /** Read-only cash-close preview with an explicit permission-name check. */
+  @Post('cash-session-preview')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:cash_registers:close_session')
+  async previewCashSessionFinish(
+    @Body() dto: CashSessionFinishPreviewDto,
+    @Req() request: any,
+  ) {
+    this.assertNamedPermission(request, 'store:cash_registers:close_session');
+    const result = await this.ordersBulkService.previewCashSessionFinish(dto);
+    return this.responseService.success(
+      result,
+      'Vista previa para finalizar órdenes pendientes de caja',
+    );
+  }
+
+  /** Procesa una orden de la sesión mediante el flujo canónico del detalle. */
+  @Post('cash-session-process')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:cash_registers:close_session')
+  async processCashSessionOrder(
+    @Body() dto: CashSessionProcessOrderDto,
+    @Req() request: any,
+  ) {
+    this.assertNamedPermission(request, 'store:cash_registers:close_session');
+    this.assertNamedPermission(request, 'store:orders:update');
+    this.assertNamedPermission(request, 'store:orders:order_flow:create');
+    const result = await this.ordersBulkService.processCashSessionOrder(dto);
+    return this.responseService.updated(result, 'Orden procesada');
+  }
+
+  /** Completa todo el lote confirmado dentro de una única transacción. */
+  @Post('cash-session-finish')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:cash_registers:close_session')
+  async finishCashSessionOrders(
+    @Body() dto: CashSessionFinishDto,
+    @Req() request: any,
+  ) {
+    this.assertNamedPermission(request, 'store:cash_registers:close_session');
+    const result = await this.ordersBulkService.finishCashSessionOrders(dto);
+    return this.responseService.updated(
+      result,
+      result.idempotent
+        ? 'Las órdenes ya estaban finalizadas'
+        : 'Órdenes finalizadas exitosamente',
+    );
   }
 
   /**

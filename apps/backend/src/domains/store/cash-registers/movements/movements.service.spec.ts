@@ -1,10 +1,13 @@
 import {
   CASH_MOVEMENT_DELIVERY_SCOPE,
+  DEFERRED_SALE_CASH_MOVEMENT_KEY,
+  DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
   MovementsService,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
   REFUND_CASH_MOVEMENT_KEY,
   RefundCashMovementPayload,
 } from './movements.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 /**
  * T2 — compensación de caja robusta: cascada de `resolveCompensationSessionId`,
@@ -18,8 +21,10 @@ describe('MovementsService — compensación de caja', () => {
   const REGISTER_ID = 5;
 
   type Db = {
+    $queryRaw: jest.Mock;
     cash_register_movements: { findFirst: jest.Mock; create: jest.Mock };
     cash_register_sessions: { findFirst: jest.Mock };
+    accounting_entry_failures: { findFirst: jest.Mock; update: jest.Mock };
   };
 
   /** Fake de sesiones: devuelve la primera que cumple el `where`. */
@@ -32,6 +37,7 @@ describe('MovementsService — compensación de caja', () => {
     }>,
     sales: Array<{ session_id: number; payment_id: number | null; order_id: number }>,
   ): Db => ({
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 200 }]),
     cash_register_movements: {
       findFirst: jest.fn(async ({ where }: any) => {
         if (where.type === 'sale') {
@@ -61,14 +67,176 @@ describe('MovementsService — compensación de caja', () => {
         return hit ?? null;
       }),
     },
+    accounting_entry_failures: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue({}),
+    },
   });
 
-  const makeService = (db: Db, extra: Record<string, any> = {}) => {
+  const makeService = (
+    db: Db,
+    extra: Record<string, any> = {},
+    eventEmitter: { emit: jest.Mock } = { emit: jest.fn() },
+  ) => {
     const unscoped = { ...db, ...extra };
-    const prisma = { withoutScope: jest.fn().mockReturnValue(unscoped) };
-    const service = new MovementsService(prisma as any, { emit: jest.fn() } as any);
-    return { service, unscoped };
+    const prisma = {
+      withoutScope: jest.fn().mockReturnValue(unscoped),
+      $transaction: jest.fn((cb: any) => cb(unscoped)),
+      stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 3 }) },
+    };
+    const service = new MovementsService(prisma as any, eventEmitter as any);
+    return { service, unscoped, prisma, eventEmitter };
   };
+
+  describe('shared cash-session close lock', () => {
+    const input = {
+      store_id: STORE_ID,
+      user_id: OPERATOR,
+      amount: 1250,
+      payment_method: 'cash',
+      order_id: 91,
+      payment_id: 92,
+    };
+    const saleInput = {
+      store_id: STORE_ID,
+      user_id: OPERATOR,
+      amount: 18000,
+      payment_method: 'cash',
+      order_id: 91,
+      payment_id: 92,
+    };
+
+    it('manual movement locks the open store session before insert and emits after commit', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const emit = jest.fn();
+      const { service, unscoped } = makeService(db, {}, { emit });
+      const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: STORE_ID,
+        user_id: OPERATOR,
+      } as any);
+
+      await service.createManualMovement(200, { type: 'cash_in', amount: 1250 });
+
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.cash_register_movements.create.mock.invocationCallOrder[0],
+      );
+      expect(unscoped.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ session_id: 200, store_id: STORE_ID, type: 'cash_in' }),
+      });
+      expect(emit).toHaveBeenCalledWith('cash_register.movement', expect.any(Object));
+      contextSpy.mockRestore();
+    });
+
+    it('manual movement aborts if the session is no longer open', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'closed', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      db.$queryRaw.mockResolvedValue([]);
+      const { service } = makeService(db);
+      const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: STORE_ID,
+        user_id: OPERATOR,
+      } as any);
+
+      await expect(
+        service.createManualMovement(200, { type: 'cash_in', amount: 1250 }),
+      ).rejects.toThrow('La sesión de caja ya no está abierta');
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+      contextSpy.mockRestore();
+    });
+
+    it('recordRefundMovement opens its own transaction when no tx is supplied', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const { service, unscoped } = makeService(db);
+
+      await service.recordRefundMovement(200, input);
+
+      expect((service as any).prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.cash_register_movements.create.mock.invocationCallOrder[0],
+      );
+      expect(unscoped.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ session_id: 200, store_id: STORE_ID, type: 'refund' }),
+      });
+    });
+
+    it('recordSaleMovement opens its own transaction and locks before insert', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const { service, prisma } = makeService(db);
+
+      await service.recordSaleMovement(200, saleInput);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.cash_register_movements.create.mock.invocationCallOrder[0],
+      );
+      expect(db.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          session_id: 200,
+          store_id: STORE_ID,
+          type: 'sale',
+          payment_id: 92,
+        }),
+      });
+    });
+
+    it('recordSaleMovement reuses the caller transaction', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const { service, prisma } = makeService(db);
+
+      await service.recordSaleMovement(200, saleInput, db as any);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.cash_register_movements.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('recordRefundMovement reuses the caller transaction and locks within it', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const { service } = makeService(db);
+
+      await service.recordRefundMovement(200, input, db as any);
+
+      expect((service as any).prisma.$transaction).not.toHaveBeenCalled();
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.cash_register_movements.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('recordRefundMovement with caller tx aborts if the session is no longer open', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'closed', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      db.$queryRaw.mockResolvedValue([]);
+      const { service } = makeService(db);
+
+      await expect(service.recordRefundMovement(200, input, db as any)).rejects.toThrow(
+        'La sesión de caja ya no está abierta',
+      );
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+  });
 
   it('exporta la constante de referencia de cancelación de orden', () => {
     expect(ORDER_CANCELLED_MOVEMENT_REFERENCE).toBe('order_cancelled');
@@ -228,7 +396,18 @@ describe('MovementsService — compensación de caja', () => {
       };
       const { service } = makeService(db, {
         $transaction: jest.fn((cb: any) => cb(tx)),
-        accounting_entry_failures: { update: jest.fn() },
+        accounting_entry_failures: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: FAILURE_ID,
+            handler_key: REFUND_CASH_MOVEMENT_KEY,
+            source_id: payload.refund_id,
+            organization_id: payload.organization_id,
+            store_id: STORE_ID,
+            resolved_at: null,
+            event_payload: payload,
+          }),
+          update: jest.fn(),
+        },
       });
 
       await expect(
@@ -267,7 +446,10 @@ describe('MovementsService — compensación de caja', () => {
     it('registra un refund con el método real, payment_id y reference refund:<id>, sin emitir evento contable', async () => {
       const db = makeDb(openSessions, []);
       const emit = jest.fn();
-      const prisma = { withoutScope: jest.fn().mockReturnValue(db) };
+      const prisma = {
+        withoutScope: jest.fn().mockReturnValue(db),
+        $transaction: jest.fn((cb: any) => cb(db)),
+      };
       const service = new MovementsService(prisma as any, { emit } as any);
 
       const out = await service.recordNonCashRefundMovement(input);
@@ -329,7 +511,11 @@ describe('MovementsService — compensación de caja', () => {
         [],
       );
       const emit = jest.fn();
-      const prisma = { withoutScope: jest.fn().mockReturnValue({ ...db, stores }) };
+      const unscoped = { ...db, stores };
+      const prisma = {
+        withoutScope: jest.fn().mockReturnValue(unscoped),
+        $transaction: jest.fn((cb: any) => cb(unscoped)),
+      };
       const service = new MovementsService(prisma as any, { emit } as any);
 
       const out = await service.recordCompensationCashMovementDurable(input);
@@ -492,7 +678,18 @@ describe('MovementsService — compensación de caja', () => {
       };
       const { service } = makeService(db, {
         $transaction: jest.fn((cb: any) => cb(tx)),
-        accounting_entry_failures: { update: jest.fn() },
+        accounting_entry_failures: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 5,
+            handler_key: REFUND_CASH_MOVEMENT_KEY,
+            source_id: 55,
+            organization_id: 3,
+            store_id: STORE_ID,
+            resolved_at: null,
+            event_payload: payload,
+          }),
+          update: jest.fn(),
+        },
       });
 
       await service.deliverRefundCashMovement(5);
@@ -506,6 +703,205 @@ describe('MovementsService — compensación de caja', () => {
           notes: 'nota',
         }),
       });
+    });
+  });
+});
+
+describe('MovementsService — señal durable de venta diferida F-006', () => {
+  const input = {
+    failure_id: 44,
+    session_id: 20,
+    store_id: 10,
+    order_id: 91,
+    user_id: 7,
+    payment_ids: [301],
+    ready_state: 'finished' as const,
+    compensation_state: 'created',
+  };
+
+  const makeTx = (overrides: Record<string, any> = {}) => ({
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 20 }]),
+    cash_register_movements: {
+      create: jest.fn().mockResolvedValue({ id: 88 }),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    accounting_entry_failures: {
+      create: jest.fn().mockResolvedValue({ id: input.failure_id }),
+      findFirst: jest.fn().mockResolvedValue({
+        id: input.failure_id,
+        event_payload: {
+          session_id: input.session_id,
+          payment_ids: input.payment_ids,
+          ready_state: input.ready_state,
+          compensation_state: input.compensation_state,
+        },
+      }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    orders: { findFirst: jest.fn().mockResolvedValue({ id: 91, state: 'finished' }) },
+    payments: { findMany: jest.fn().mockResolvedValue([{ id: 301, state: 'cancelled' }]) },
+    ...overrides,
+  });
+
+  const makeService = () => new MovementsService({ withoutScope: jest.fn() } as any, { emit: jest.fn() } as any);
+
+  it('crea la señal después del lock y antes de confirmar la transacción de pago', async () => {
+    const tx = makeTx();
+    const service = makeService();
+    const id = await service.createDeferredSaleCashMovementSignal(tx as any, {
+      session_id: input.session_id,
+      store_id: input.store_id,
+      order_id: input.order_id,
+      user_id: input.user_id,
+      organization_id: 3,
+      ready_state: input.ready_state,
+      compensation_state: input.compensation_state,
+    });
+
+    expect(id).toBe(input.failure_id);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.accounting_entry_failures.create.mock.invocationCallOrder[0],
+    );
+    expect(tx.accounting_entry_failures.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        handler_key: DEFERRED_SALE_CASH_MOVEMENT_KEY,
+        source_type: DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
+        source_id: input.order_id,
+        event_payload: expect.objectContaining({
+          session_id: input.session_id,
+          order_id: input.order_id,
+          payment_ids: [],
+        }),
+      }),
+    });
+  });
+
+  it('escribe movimientos y resuelve la señal en la misma transacción tras finish', async () => {
+    const tx = makeTx();
+    await makeService().completeDeferredSaleCashMovement(tx as any, {
+      ...input,
+      movements: [{ payment_id: 301, amount: 1250, payment_method: 'cash' }],
+    });
+
+    expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        session_id: input.session_id,
+        order_id: input.order_id,
+        payment_id: 301,
+        type: 'sale',
+      }),
+    });
+    expect(tx.accounting_entry_failures.update).toHaveBeenCalledWith({
+      where: { id: input.failure_id },
+      data: expect.objectContaining({ resolved_at: expect.any(Date) }),
+    });
+  });
+
+  it('no duplica el movimiento si una señal repetida ya se entregó en esa sesión', async () => {
+    const tx = makeTx({
+      cash_register_movements: {
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({ id: 88, session_id: input.session_id }),
+      },
+    });
+    await makeService().completeDeferredSaleCashMovement(tx as any, {
+      ...input,
+      movements: [{ payment_id: 301, amount: 1250, payment_method: 'cash' }],
+    });
+
+    expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    expect(tx.accounting_entry_failures.update).toHaveBeenCalledWith({
+      where: { id: input.failure_id },
+      data: expect.objectContaining({ resolved_at: expect.any(Date) }),
+    });
+  });
+
+  it('resuelve sin movimiento solo con pagos compensados y orden restaurada', async () => {
+    const tx = makeTx({
+      orders: { findFirst: jest.fn().mockResolvedValue({ id: 91, state: 'created' }) },
+      payments: { findMany: jest.fn().mockResolvedValue([{ id: 301, state: 'pending' }]) },
+    });
+    const resolved = await makeService().cancelDeferredSaleCashMovementSignal(tx as any, {
+      ...input,
+      restored_state: 'created',
+    });
+
+    expect(resolved).toBe(true);
+    expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    expect(tx.accounting_entry_failures.update).toHaveBeenCalledWith({
+      where: { id: input.failure_id },
+      data: expect.objectContaining({
+        resolved_at: expect.any(Date),
+        error_message: expect.stringContaining('CANCELLED'),
+      }),
+    });
+  });
+
+  it('deja la señal abierta si pago u orden aún no están compensados/restaurados', async () => {
+    const tx = makeTx({
+      orders: { findFirst: jest.fn().mockResolvedValue({ id: 91, state: 'processing' }) },
+    });
+    const resolved = await makeService().cancelDeferredSaleCashMovementSignal(tx as any, {
+      ...input,
+      restored_state: 'created',
+    });
+
+    expect(resolved).toBe(false);
+    expect(tx.accounting_entry_failures.update).not.toHaveBeenCalled();
+  });
+
+  it('recupera una señal tras reinicio cuando pago y orden ya están listos', async () => {
+    const payload = {
+      version: 1,
+      session_id: input.session_id,
+      store_id: input.store_id,
+      order_id: input.order_id,
+      user_id: input.user_id,
+      payment_ids: input.payment_ids,
+      ready_state: input.ready_state,
+      compensation_state: input.compensation_state,
+    };
+    const signal = {
+      id: input.failure_id,
+      resolved_at: null,
+      event_payload: payload,
+    };
+    const tx = makeTx({
+      orders: { findFirst: jest.fn().mockResolvedValue({ id: 91, state: 'finished' }) },
+      payments: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 301,
+          amount: 1250,
+          state: 'succeeded',
+          store_payment_method: { system_payment_method: { type: 'cash' } },
+        }]),
+      },
+      accounting_entry_failures: {
+        findFirst: jest.fn().mockResolvedValue(signal),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    });
+    const db = { accounting_entry_failures: { findFirst: jest.fn().mockResolvedValue(signal) } };
+    const prisma = {
+      withoutScope: jest.fn().mockReturnValue(db),
+      $transaction: jest.fn((callback: any) => callback(tx)),
+    };
+    const service = new MovementsService(prisma as any, { emit: jest.fn() } as any);
+
+    await service.deliverDeferredSaleCashMovement(input.failure_id);
+
+    expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        session_id: input.session_id,
+        order_id: input.order_id,
+        payment_id: 301,
+        amount: 1250,
+        type: 'sale',
+      }),
+    });
+    expect(tx.accounting_entry_failures.update).toHaveBeenCalledWith({
+      where: { id: input.failure_id },
+      data: expect.objectContaining({ resolved_at: expect.any(Date) }),
     });
   });
 });
