@@ -71,7 +71,7 @@ Aun con GetStatus positivo, copy limita alcance: **“La consulta confirma el es
 
 ## Infra y operación — preparación, NO aplicada
 
-P0.4 añadirá artefactos con parámetros por entorno, IAM mínimo, receipt rules y simulador local. Hasta que Rafael ejecute y valide infraestructura, no afirmar que un dominio recibe correo ni que SES está conectado.
+P0.4 entregó los artefactos paramétricos, IAM mínimo y receipt rules enumerados abajo. El simulador local también está implementado y tiene evidencia de integración local descrita en este runbook; no representa transporte cloud aplicado. Hasta que Rafael ejecute y valide infraestructura, no afirmar que un dominio recibe correo ni que SES está conectado.
 
 Contrato para esos artefactos:
 
@@ -153,11 +153,11 @@ aws sqs start-message-move-task --source-arn "$DLQ_ARN" --destination-arn "$QUEU
 
 Alarmas nativas SQS: DLQ visible≥1; edad por defecto300s; backlog100 (umbrales paramétricos). Alarmas custom preparadas, namespace `Vendix/EmailReception`, dimensión **Environment** con valor production/staging: `ConsumerErrors`, `StorageErrors` (Sum≥1), `ConsumerHeartbeat` (Sum<1 durante3min, missing=breaching), `ConsumerMemoryPercent` (Maximum≥80 durante3min). Responsable es `OperationsEmail`; verificar confirmación SNS y dueño de respuesta a incidentes. Un consumer pausado intencionalmente puede disparar heartbeat: reconocer alarma/ventana de pausa, no afirmar que Gmail desconectó.
 
-**Gap operativo a resolver en P0.5/P0.11:** el YAML no instala/emite sensores custom. El consumidor deberá publicar esos cuatro métricos con la dimensión exacta (y medir memoria contra presupuesto real), o el operador aportar un sensor autorizado equivalente. BackendPolicy sólo permite `cloudwatch:PutMetricData` en ese namespace. Hasta observar datapoints/alarma real y presupuesto vigente no dar monitoreo por validado. Budget notifica80% actual/100% forecast directamente al responsable; no auto-apaga recursos ni evita costo previo al backend.
+**Gate operativo todavía pendiente:** el YAML por sí solo no demuestra emisión ni recepción de sensores custom. En la puesta en marcha autorizada, comprobar esos cuatro métricos con la dimensión exacta (y memoria contra presupuesto real), o un sensor autorizado equivalente. BackendPolicy sólo permite `cloudwatch:PutMetricData` en ese namespace. Hasta observar datapoints/alarma real y presupuesto vigente no dar monitoreo por validado. Budget notifica80% actual/100% forecast directamente al responsable; no auto-apaga recursos ni evita costo previo al backend.
 
 Lifecycle7d depende del tag `email-reception-classification=non-invoice|spam`, aplicado **después** del commit final seguro. No taggear failed/processing/partial con factura ni deducir clasificación desde headers. Para raw compartido por varios aliases esperar resultados durables de todos y no marcar no-factura si alguno conserva una factura. SSE-S3+TLS no son cifrado cliente SES; jamás añadir `KmsKeyArn` a la acción sin nueva integración de descifrado.
 
-Cron de purga **no se instala desde workflow**. P0.11 debe entregar comando verificado, ejecutar dry-run supervisado, luego Rafael autoriza programación diaria por lotes; no inventar ruta ejecutable que aún no existe ni abrir servicio nuevo. Hora sugerida03:15UTC con exclusión mutua (flock), logs sólo counts/códigos técnicos y alertar errores; validar90d estados terminales/raw expirado y cero borrado fiscal antes de habilitar writes. No purgar cola ni raw para recuperar un fallo del parser.
+Cron de purga **no se instala desde workflow y sigue desactivado**. P0.11 entregó `apps/backend/scripts/email-reception-purge.ts`; `--help` y dry-run local scoped ya se ejecutaron con cero mutaciones. El modo execute/delete no está probado. Rafael debe autorizar por separado la prueba de escritura controlada y cualquier programación diaria por lotes; no abrir un servicio nuevo. Hora sugerida03:15UTC con exclusión mutua (flock), logs sólo counts/códigos técnicos y alertar errores; validar90d estados terminales/raw expirado y cero borrado fiscal antes de habilitar writes. No purgar cola ni raw para recuperar un fallo del parser.
 
 Verificación offline preparada, coordinar procesos y ejecutar uno por vez:
 
@@ -175,6 +175,26 @@ Referencias P0.4: [Reglas SES CloudFormation](https://docs.aws.amazon.com/AWSClo
 
 `ApplicationResponse` incluido sólo permite mostrar **“Constancia DIAN incluida (no verificada)”** y un código de respuesta saneado; se compara la referencia real del documento, no un UUID arbitrario de la raíz AR. Referencia incompatible produce advertencia, no autenticidad. Todos los documentos conservan **“Sin verificar ante la DIAN”**. Los badges de transporte “Funcionando” y `source_channel=email` no son aceptación DIAN, verificación criptográfica, procedencia legal ni permiso para emitir eventos. Una etiqueta histórica de origen por sí sola no prueba que pasó por el transporte nuevo.
 
+## Simulador local — implementado y ejercitado, sin transporte externo
+
+Artefacto real: `apps/backend/scripts/email-reception-simulate.ts`. Ejecuta el pipeline local con **DB `vendix_db:5432`, Redis real, `fiscal_data` canónico scoped y almacenamiento local**. No usa `AppModule`, boot completo Nest, Cron, envíos AWS, DIAN, OCR ni un transporte Gmail/Outlook real. No habilita bypass de gates productivos. La opción `--activate` exige actor autorizado y auditoría; la ejecución normal usa contexto system sin actor, no suplanta al usuario HTTP.
+
+Evidencia comunicada y comprobada por raíz con fixtures **sintéticos**, no inferida del manifest:
+
+| Caso local | Resultado observado |
+| --- | --- |
+| Factura AttachedDocument | Documento local **10** en estado `ready`; cinco archivos conservados, descargados por HTTP autorizado y sus SHA verificados. Comercial/AR extraídos mantienen la distinción DERIVADA DOM anterior, no promesa de bytes firmados |
+| Repetición de SES ID | Reenvío de la misma recepción idempotente |
+| Outlook y Gmail histórico | RFC822 de Outlook y reenvío histórico Gmail con NC/ND procesados por el pipeline local |
+| Codificación | Latin1 y BOM ejercitados, conservando originales |
+| POS electrónico | Código20 conservado; no se convierte en factura electrónica de venta |
+| Ambiente de habilitación | Rechazo `TEST_DOCUMENT` |
+| Receptor diferente | Mismatch rechazado, sin importación al receptor equivocado |
+| Challenge Gmail | Código sólo bajo hechos de autenticación SES **SINTÉTICOS**; spoof rechazado. No prueba autenticación Google/SES real ni confirma reenvío automáticamente |
+| Duplicado de otra tienda | Resultado sin IDs de documento ajeno; acceso cruzado HTTP devuelve404 |
+
+Esta evidencia demuestra integración **local** de los controles ejercitados, no XSD DIAN, criptografía/firma, GetStatus, correo externo, IAM/S3/SQS cloud, redrive ni piloto productivo. No hubo originales reales: la carpeta autorizada de muestras estaba vacía. La verificación visual/UI del comerciante por raíz sigue **en curso** y se remite a un reporte posterior; no se declara resultado de navegador ni runner frontend aquí.
+
 ## P0.11 — Purga técnica limitada y apagada por defecto
 
 Artefacto: `apps/backend/scripts/email-reception-purge.ts`. No está instalado como cron ni se ejecutó borrado en esta entrega. **Dry-run es el modo predeterminado**; `--execute` debe ser explícito. `--help` no construye/importa Prisma ni conecta DB.
@@ -184,7 +204,7 @@ Desde `apps/backend`, con un turno de proceso y heap≤1536MiB:
 ```bash
 TS_NODE_TRANSPILE_ONLY=1 NODE_OPTIONS=--max-old-space-size=1536 \
   node -r ts-node/register -r tsconfig-paths/register scripts/email-reception-purge.ts --help
-# Futuro dry-run local supervisado; los IDs son autorizados, no valores inventados:
+# Repetir dry-run local supervisado; el checkpoint org1/store1 ya pasó sin mutaciones:
 TS_NODE_TRANSPILE_ONLY=1 NODE_OPTIONS=--max-old-space-size=1536 \
   node -r ts-node/register -r tsconfig-paths/register scripts/email-reception-purge.ts \
   --dry-run --environment production --organization-id "$ORG_ID" --store-id "$STORE_ID" \
@@ -218,7 +238,7 @@ Política aprobada se mantiene separada: **raw factura30d; no-factura/spam7d tra
 
 ### Evidencia disponible y gates todavía manuales
 
-Resultados de specs puntuales observados antes de esta sección (heap1536, aislados, una invocación por archivo):
+Checkpoint comunicado y comprobado por raíz: **11 specs backend puntuales, 462 PASS**, ejecutados secuencialmente (heap1536, aislados, una invocación por archivo), **antes de la corrección final core todavía en curso**. No se presenta ese checkpoint como verificación del árbol posterior ni como runner frontend. Los conteos por superficie siguientes son checkpoints previos conservados para trazabilidad:
 
 | Superficie | Evidencia observada | No demuestra |
 | --- | --- | --- |
@@ -229,9 +249,10 @@ Resultados de specs puntuales observados antes de esta sección (heap1536, aisla
 | Adapter/preflight |70/70 casos PASS |GetStatus, firma o estado legal |
 | Parser fiscal |51/51 casos PASS |XSD/criptografía DIAN real |
 | Core recibido |105/105 casos PASS |Facturas productivas o piloto externo |
-| Purga técnica |`--help` y dry-run DB local PASS exit0; cero candidatos/cambios, originales intactos |Borrado probado o cron instalado |
+| Simulador/pipeline local + HTTP |Factura doc10 `ready`, cinco archivos/SHA; SES repetido, reenvíos, codificaciones, POS y negativos de ambiente/receptor/Gmail/cross-store observados por raíz |Transporte externo, autenticación SES real, DIAN o navegador |
+| Purga técnica |`--help` y dry-run DB local scoped org1/store1 PASS exit0; cero candidatos/mutaciones, originales intactos |Execute/delete probado o cron instalado |
 
-El corpus es sintético y el discovery DIAN sigue pendiente. **No afirmar simulador E2E, navegador, ejecución de purga con borrado, AWS redrive, alarmas/budget observados ni piloto externo verificados hasta anexar evidencia real de esas ejecuciones.** Runner `.ui.spec.ts` no se instala/inventa; UI se verifica con navegador/Playwright si el entorno permite, o gap explícito.
+El corpus es sintético y el discovery DIAN sigue pendiente. El simulador local y las descargas HTTP anteriores sí tienen evidencia real; **no extrapolarla a transporte externo o E2E de comerciante**. QA visual/UI por raíz está en curso y su resultado corresponde a un reporte posterior. **Navegador, execute/delete de purga, AWS redrive, alarmas/budget observados y piloto externo no se declaran verificados aquí.** No se ejecutó runner frontend `.ui.spec.ts`, validación XSD, criptografía o DIAN real.
 
 ### Gmail: código-only y plantilla todavía no validada con muestra real
 
