@@ -4,14 +4,12 @@ on:
   pull_request:
     branches: [develop]
     paths:
-      - 'package.json'
-      - 'package-lock.json'
-      - 'apps/backend/package.json'
-      - 'apps/backend/package-lock.json'
-      - 'apps/frontend/package.json'
-      - 'apps/frontend/package-lock.json'
+      - 'package*.json'
+      - 'apps/backend/**'
+      - 'apps/frontend/**'
       - 'scripts/security-*'
       - 'docs/security/**'
+      - '.github/workflows/security-deps-validation.yml'
   workflow_dispatch:
     inputs:
       baseline_ref:
