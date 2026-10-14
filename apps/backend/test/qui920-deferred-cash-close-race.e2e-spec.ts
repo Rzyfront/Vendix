@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
-import { MovementsService } from '../movements/movements.service';
+import { MovementsService } from '../src/domains/store/cash-registers/movements/movements.service';
 
 /**
  * PostgreSQL integration for the F-006 close lock + durable signal contract.
@@ -8,15 +8,16 @@ import { MovementsService } from '../movements/movements.service';
  * unit tests cover the service branch. Only generated qa_qui920_* objects are
  * created, and this suite refuses any database URL outside loopback.
  *
- * Opt in with VENDIX_LOCAL_RACE_TEST=1 and
- * VENDIX_LOCAL_RACE_DATABASE_URL pointing to local development PostgreSQL.
+ * This manual PostgreSQL integration suite is not part of CI unit tests. Run it
+ * explicitly from apps/backend with:
+ * VENDIX_LOCAL_RACE_TEST=1 VENDIX_LOCAL_RACE_DATABASE_URL=... npx jest --config test/jest-qui920-race.json --runInBand
+ * It was not executed as part of this change.
  */
-const describeLocalRace = process.env.VENDIX_LOCAL_RACE_TEST === '1'
-  ? describe
-  : describe.skip;
-
 function localDatabaseUrl(): string {
-  const value = process.env.VENDIX_LOCAL_RACE_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (process.env.VENDIX_LOCAL_RACE_TEST !== '1') {
+    throw new Error('Set VENDIX_LOCAL_RACE_TEST=1 to opt in to the manual local race test.');
+  }
+  const value = process.env.VENDIX_LOCAL_RACE_DATABASE_URL;
   if (!value) throw new Error('Local race test requires an explicit local database URL.');
   const url = new URL(value);
   if (
@@ -65,7 +66,7 @@ function rawTransaction(client: Client): any {
   };
 }
 
-describeLocalRace('QUI-920 deferred cash movement vs close (PostgreSQL, fixture-driver)', () => {
+describe('QUI-920 deferred cash movement vs close (PostgreSQL, fixture-driver)', () => {
   jest.setTimeout(20000);
   const schema = `qa_qui920_${process.pid}_${randomBytes(6).toString('hex')}`;
   let first: Client;
