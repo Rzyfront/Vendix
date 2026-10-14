@@ -5,6 +5,7 @@ import {
 } from '../interfaces/tool.interface';
 import { SessionsService } from '../../../domains/store/cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../domains/store/cash-registers/movements/movements.service';
+import { CloseSessionDto } from '../../../domains/store/cash-registers/dto/close-session.dto';
 
 /**
  * Familia cash-register de Vex (paso 8 del plan vex-agent).
@@ -106,6 +107,73 @@ export function createCashRegisterTools(
     } catch {
       return null;
     }
+  }
+
+  async function loadPendingOrdersBlock(sessionId: number) {
+    const pending = await deps.sessionsService.getPendingOrders(sessionId, {
+      limit: 100,
+      page: 1,
+    });
+    const count = Number(pending.count ?? 0);
+    if (count <= 0) return null;
+    return {
+      data: pending.data ?? [],
+      count,
+      fingerprint: pending.fingerprint,
+      ...(count > 100
+        ? {
+            pagination: {
+              page: Number(pending.page ?? 1),
+              limit: Number(pending.limit ?? 100),
+              total_pages: Math.ceil(count / 100),
+            },
+          }
+        : {}),
+    };
+  }
+
+  function pendingOrdersNextStep(): string {
+    return 'Gestiona las órdenes pendientes para usar pending_decision="resolved", o elige explícitamente pending_decision="override" con un motivo y el fingerprint actual.';
+  }
+
+  function pendingOrdersMessage(
+    pending: NonNullable<Awaited<ReturnType<typeof loadPendingOrdersBlock>>>,
+  ): string {
+    const orders = pending.data
+      .map((order: Record<string, any>) =>
+        order.order_number
+          ? `${order.order_number} (#${order.id})`
+          : `#${order.id}`,
+      )
+      .join(', ');
+    return `No se puede cerrar la caja: hay ${pending.count} orden(es) pendiente(s)${orders ? ` (${orders})` : ''}. Fingerprint: ${pending.fingerprint}. ${pendingOrdersNextStep()}`;
+  }
+
+  function validatePendingDecision(args: Record<string, any>): string | null {
+    const decision = args.pending_decision;
+    if (decision === undefined) return null;
+    if (decision !== 'resolved' && decision !== 'override') {
+      return 'pending_decision inválida: elige "resolved" o "override".';
+    }
+    if (
+      typeof args.pending_fingerprint !== 'string' ||
+      !args.pending_fingerprint.trim()
+    ) {
+      return 'pending_fingerprint es obligatorio para una decisión explícita.';
+    }
+    if (
+      decision === 'override' &&
+      (typeof args.override_reason !== 'string' || !args.override_reason.trim())
+    ) {
+      return 'override_reason es obligatorio para elegir override.';
+    }
+    if (
+      args.override_reason !== undefined &&
+      typeof args.override_reason !== 'string'
+    ) {
+      return 'override_reason debe ser texto.';
+    }
+    return null;
   }
 
   return [
@@ -318,6 +386,22 @@ export function createCashRegisterTools(
             type: 'string',
             description: 'Notas del cierre (opcional).',
           },
+          pending_decision: {
+            type: 'string',
+            enum: ['resolved', 'override'],
+            description:
+              'Decisión explícita del usuario sobre órdenes pendientes: resolved solo después de gestionarlas, u override para cerrar con excepción. No inventes ni elijas esta decisión por el usuario.',
+          },
+          pending_fingerprint: {
+            type: 'string',
+            description:
+              'Fingerprint actual de las órdenes pendientes, requerido junto con una decisión explícita. No lo inventes; obténlo del resultado de pendientes.',
+          },
+          override_reason: {
+            type: 'string',
+            description:
+              'Motivo escrito o confirmado por el usuario, requerido para pending_decision="override". No inventes el motivo.',
+          },
         },
         required: ['session_id', 'actual_closing_amount'],
       },
@@ -339,6 +423,8 @@ export function createCashRegisterTools(
             'actual_closing_amount debe ser un número mayor o igual que cero.',
           );
         }
+        const decisionError = validatePendingDecision(args ?? {});
+        if (decisionError) return previewError('Cerrar caja', decisionError);
         const session = await loadSession(id);
         if (!session) {
           return previewError(
@@ -352,6 +438,40 @@ export function createCashRegisterTools(
             `Solo se puede cerrar desde open; está en "${session.status}".`,
           );
         }
+        if (
+          session.pending_orders_tracking_enabled === true &&
+          args?.pending_decision === undefined
+        ) {
+          const pending = await loadPendingOrdersBlock(id);
+          if (pending) {
+            return previewError(
+              sessionLabel(session),
+              pendingOrdersMessage(pending),
+            );
+          }
+        }
+        const decisionChanges = [
+          ...(args?.pending_decision !== undefined
+            ? [
+                {
+                  field: 'pending_decision',
+                  label: 'Decisión sobre órdenes pendientes',
+                  from: null,
+                  to: args.pending_decision,
+                },
+              ]
+            : []),
+          ...(args?.override_reason !== undefined
+            ? [
+                {
+                  field: 'override_reason',
+                  label: 'Motivo de excepción',
+                  from: null,
+                  to: args.override_reason,
+                },
+              ]
+            : []),
+        ];
         return {
           status: 'warning',
           target: `Cerrar ${sessionLabel(session)} con arqueo $${actual}`,
@@ -363,6 +483,7 @@ export function createCashRegisterTools(
               from: null,
               to: actual,
             },
+            ...decisionChanges,
           ],
           message:
             'Irreversible: la sesión cerrada no se reabre y el descuadre queda registrado.',
@@ -384,6 +505,14 @@ export function createCashRegisterTools(
             next_step: 'Pasa el efectivo contado en el arqueo.',
           };
         }
+        const decisionError = validatePendingDecision(args ?? {});
+        if (decisionError) {
+          return {
+            error: decisionError,
+            next_step:
+              'Usa resolved u override con el fingerprint actual; override además requiere un motivo escrito por el usuario.',
+          };
+        }
         const session = await loadSession(id);
         if (!session) {
           return {
@@ -397,16 +526,41 @@ export function createCashRegisterTools(
             next_step: 'Lee la sesión activa con get_active_cash_session.',
           };
         }
-        const dto: Record<string, any> = { actual_closing_amount: actual };
+        if (
+          session.pending_orders_tracking_enabled === true &&
+          args?.pending_decision === undefined
+        ) {
+          const pending = await loadPendingOrdersBlock(id);
+          if (pending) {
+            return {
+              error: pendingOrdersMessage(pending),
+              next_step: pendingOrdersNextStep(),
+              pending_orders: pending.data,
+              count: pending.count,
+              fingerprint: pending.fingerprint,
+              ...(pending.pagination
+                ? { pagination: pending.pagination }
+                : {}),
+            };
+          }
+        }
+        const dto: CloseSessionDto = { actual_closing_amount: actual };
         if (
           typeof args?.closing_notes === 'string' &&
           args.closing_notes.trim()
         ) {
           dto.closing_notes = args.closing_notes.trim();
         }
+        if (args.pending_decision !== undefined) {
+          dto.pending_decision = args.pending_decision;
+          dto.pending_fingerprint = args.pending_fingerprint.trim();
+        }
+        if (args.override_reason !== undefined) {
+          dto.override_reason = args.override_reason.trim();
+        }
         const closed = await deps.sessionsService.closeSession(
           id,
-          dto as any,
+          dto,
         );
         const row = closed as unknown as Record<string, any>;
         return {

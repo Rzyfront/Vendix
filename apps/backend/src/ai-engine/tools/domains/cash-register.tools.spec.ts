@@ -34,6 +34,13 @@ describe('cash-register.tools · caja', () => {
           meta: { total: 1, page: 1, limit: 10, total_pages: 1 },
         }),
         findOne: jest.fn().mockResolvedValue(OPEN),
+        getPendingOrders: jest.fn().mockResolvedValue({
+          count: 0,
+          fingerprint: 'empty-fingerprint',
+          data: [],
+          page: 1,
+          limit: 100,
+        }),
         openSession: jest.fn().mockResolvedValue({ ...OPEN, id: 6 }),
         closeSession: jest
           .fn()
@@ -140,6 +147,200 @@ describe('cash-register.tools · caja', () => {
       5,
       expect.objectContaining({ actual_closing_amount: 350000 }),
     );
+  });
+
+  it('close_cash_session expone los campos de decisión pendientes y su explicación', () => {
+    const { byName } = buildTools();
+    const properties = byName.close_cash_session.parameters.properties;
+    expect(properties.pending_decision.enum).toEqual(['resolved', 'override']);
+    expect(properties.pending_fingerprint.type).toBe('string');
+    expect(properties.override_reason.type).toBe('string');
+    expect(properties.pending_decision.description).toContain('No inventes');
+    expect(properties.override_reason.description).toContain('No inventes');
+  });
+
+  it('close_cash_session bloquea cierre y preview con órdenes pendientes sin decisión explícita', async () => {
+    const pending = {
+      count: 2,
+      fingerprint: 'snapshot-abc',
+      page: 1,
+      limit: 100,
+      data: [
+        { id: 81, order_number: 'V-81' },
+        { id: 82, order_number: 'V-82' },
+      ],
+    };
+    const { deps, byName } = buildTools({
+      sessionsService: {
+        findOne: jest.fn().mockResolvedValue({
+          ...OPEN,
+          pending_orders_tracking_enabled: true,
+        }),
+        getPendingOrders: jest.fn().mockResolvedValue(pending),
+        closeSession: jest.fn(),
+      },
+    });
+    const args = { session_id: 5, actual_closing_amount: 350000 };
+    const prev = await preview(byName.close_cash_session, args);
+    expect(prev.status).toBe('error');
+    expect(prev.message).toContain('V-81');
+    expect(prev.message).toContain('snapshot-abc');
+
+    const out = await run(byName.close_cash_session, args);
+    expect(out).toEqual({
+      error: expect.stringContaining('snapshot-abc'),
+      next_step: expect.stringContaining('pending_decision="override"'),
+      pending_orders: pending.data,
+      count: 2,
+      fingerprint: 'snapshot-abc',
+    });
+    expect(deps.sessionsService.getPendingOrders).toHaveBeenCalledWith(5, {
+      limit: 100,
+      page: 1,
+    });
+    expect(deps.sessionsService.closeSession).not.toHaveBeenCalled();
+  });
+
+  it('close_cash_session incluye metadatos de paginación cuando hay más de 100 pendientes', async () => {
+    const { byName } = buildTools({
+      sessionsService: {
+        findOne: jest.fn().mockResolvedValue({
+          ...OPEN,
+          pending_orders_tracking_enabled: true,
+        }),
+        getPendingOrders: jest.fn().mockResolvedValue({
+          count: 101,
+          fingerprint: 'snapshot-101',
+          page: 1,
+          limit: 100,
+          data: [{ id: 81, order_number: 'V-81' }],
+        }),
+        closeSession: jest.fn(),
+      },
+    });
+    const out = await run(byName.close_cash_session, {
+      session_id: 5,
+      actual_closing_amount: 350000,
+    });
+    expect(out).toEqual(
+      expect.objectContaining({
+        count: 101,
+        fingerprint: 'snapshot-101',
+        pagination: { page: 1, limit: 100, total_pages: 2 },
+      }),
+    );
+  });
+
+  it('close_cash_session muestra la decisión y el motivo override en el preview y los reenvía', async () => {
+    for (const args of [
+      {
+        session_id: 5,
+        actual_closing_amount: 350000,
+        pending_decision: 'resolved',
+        pending_fingerprint: 'snapshot-resolved',
+      },
+      {
+        session_id: 5,
+        actual_closing_amount: 350000,
+        pending_decision: 'override',
+        pending_fingerprint: 'snapshot-override',
+        override_reason: 'Autorizado por la administradora',
+      },
+    ]) {
+      const { deps, byName } = buildTools({
+        sessionsService: {
+          findOne: jest.fn().mockResolvedValue({
+            ...OPEN,
+            pending_orders_tracking_enabled: true,
+          }),
+          getPendingOrders: jest.fn(),
+          closeSession: jest.fn().mockResolvedValue(CLOSED),
+        },
+      });
+      const prev = await preview(byName.close_cash_session, args);
+      expect(prev.changes).toContainEqual(
+        expect.objectContaining({
+          field: 'pending_decision',
+          to: args.pending_decision,
+        }),
+      );
+      if (args.pending_decision === 'override') {
+        expect(prev.changes).toContainEqual(
+          expect.objectContaining({
+            field: 'override_reason',
+            to: args.override_reason,
+          }),
+        );
+      }
+      await run(byName.close_cash_session, args);
+      expect(deps.sessionsService.getPendingOrders).not.toHaveBeenCalled();
+      expect(deps.sessionsService.closeSession).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          actual_closing_amount: 350000,
+          pending_decision: args.pending_decision,
+          pending_fingerprint: args.pending_fingerprint,
+          ...(args.pending_decision === 'override'
+            ? { override_reason: args.override_reason }
+            : {}),
+        }),
+      );
+    }
+  });
+
+  it('close_cash_session exige motivo y fingerprint para override, y deniega decisiones inválidas', async () => {
+    const { deps, byName } = buildTools();
+    const base = { session_id: 5, actual_closing_amount: 350000 };
+    for (const invalid of [
+      { ...base, pending_decision: 'override', pending_fingerprint: 'fp' },
+      { ...base, pending_decision: 'override', override_reason: 'motivo' },
+      {
+        ...base,
+        pending_decision: 'ignore',
+        pending_fingerprint: 'fp',
+      },
+    ]) {
+      const out = await run(byName.close_cash_session, invalid);
+      expect(out.error).toBeDefined();
+      expect(out.next_step).toBeDefined();
+    }
+    expect(deps.sessionsService.closeSession).not.toHaveBeenCalled();
+    expect(deps.sessionsService.getPendingOrders).not.toHaveBeenCalled();
+  });
+
+  it('close_cash_session cierra una sesión tracked sin pendientes y conserva legacy sin consultar órdenes', async () => {
+    const { deps, byName } = buildTools({
+      sessionsService: {
+        findOne: jest.fn().mockResolvedValue({
+          ...OPEN,
+          pending_orders_tracking_enabled: true,
+        }),
+        getPendingOrders: jest.fn().mockResolvedValue({
+          count: 0,
+          fingerprint: 'empty-fingerprint',
+          data: [],
+        }),
+        closeSession: jest.fn().mockResolvedValue(CLOSED),
+      },
+    });
+    const out = await run(byName.close_cash_session, {
+      session_id: 5,
+      actual_closing_amount: 350000,
+    });
+    expect(out.session_id).toBe(5);
+    expect(deps.sessionsService.getPendingOrders).toHaveBeenCalledWith(5, {
+      limit: 100,
+      page: 1,
+    });
+    expect(deps.sessionsService.closeSession).toHaveBeenCalled();
+
+    const legacy = buildTools();
+    await run(legacy.byName.close_cash_session, {
+      session_id: 5,
+      actual_closing_amount: 350000,
+    });
+    expect(legacy.deps.sessionsService.getPendingOrders).not.toHaveBeenCalled();
+    expect(legacy.deps.sessionsService.closeSession).toHaveBeenCalled();
   });
 
   it('close_cash_session rechaza sesión no abierta sin tocar close', async () => {
