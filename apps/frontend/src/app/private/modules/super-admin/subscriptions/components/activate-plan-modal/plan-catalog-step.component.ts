@@ -92,7 +92,7 @@ function normalizeText(value: string): string {
               ></app-icon>
               <input
                 type="search"
-                class="w-full min-h-[44px] rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                class="w-full min-h-[44px] rounded-lg border border-border bg-surface pl-11 pr-3 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 placeholder="Buscar plan por nombre o código"
                 aria-label="Buscar plan"
                 [value]="search()"
