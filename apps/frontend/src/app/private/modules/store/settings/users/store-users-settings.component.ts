@@ -17,6 +17,7 @@ import {
   FilterValues,
 } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CardComponent } from '../../../../../shared/components/card/card.component';
+import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
 import {
   StoreUserCreateModalComponent,
   StoreUserEditModalComponent,
@@ -26,6 +27,7 @@ import {
   selectUsers,
   selectUsersLoading,
   selectStats,
+  selectMeta,
 } from './state/selectors/store-users.selectors';
 import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
 
@@ -38,6 +40,7 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
     CardComponent,
+    PaginationComponent,
     StoreUserCreateModalComponent,
     StoreUserEditModalComponent,
   ],
@@ -95,7 +98,7 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
               class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
-              Usuarios ({{ users().length }})
+              Usuarios ({{ meta()?.total ?? users().length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
@@ -137,6 +140,20 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
               emptyMessage="No hay usuarios registrados"
               emptyIcon="users"
             />
+
+            <!-- Pagination -->
+            @if (meta(); as metaData) {
+              <div class="flex justify-center pt-3 mt-3 border-t border-border">
+                <app-pagination
+                  [currentPage]="metaData.page"
+                  [totalPages]="metaData.totalPages || metaData.total_pages || 0"
+                  [total]="metaData.total"
+                  [limit]="metaData.limit"
+                  infoStyle="range"
+                  (pageChange)="onPageChange($event)"
+                />
+              </div>
+            }
           </div>
         }
       </app-card>
@@ -173,6 +190,7 @@ export class StoreUsersSettingsComponent implements OnInit {
   users = this.store.selectSignal(selectUsers);
   loading = this.store.selectSignal(selectUsersLoading);
   stats = this.store.selectSignal(selectStats);
+  meta = this.store.selectSignal(selectMeta);
 
   showCreateModal = false;
   showEditModal = false;
@@ -311,6 +329,10 @@ export class StoreUsersSettingsComponent implements OnInit {
     this.filterValues = values;
     const state_filter = (values['state'] as string) || '';
     this.store.dispatch(StoreUsersActions.setStateFilter({ state_filter }));
+  }
+
+  onPageChange(page: number) {
+    this.store.dispatch(StoreUsersActions.setPage({ page }));
   }
 
   onActionClick(action: string) {
