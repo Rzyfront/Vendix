@@ -95,10 +95,9 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
             class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
             <h2
-              class="text-[13px] font-bold text-gray-600 tracking-wide
-                     md:text-lg md:font-semibold md:text-text-primary"
+              class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal"
             >
-              Usuarios ({{ meta()?.total ?? users().length }})
+              Usuarios <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ meta()?.total || users().length }})</span>
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
@@ -142,18 +141,16 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
             />
 
             <!-- Pagination -->
-            @if (meta(); as metaData) {
-              <div class="flex justify-center pt-3 mt-3 border-t border-border">
-                <app-pagination
-                  [currentPage]="metaData.page"
-                  [totalPages]="metaData.totalPages || metaData.total_pages || 0"
-                  [total]="metaData.total"
-                  [limit]="metaData.limit"
-                  infoStyle="range"
-                  (pageChange)="onPageChange($event)"
-                />
-              </div>
-            }
+            <div class="mt-4 flex justify-center">
+              <app-pagination
+                [currentPage]="meta()?.page ?? 1"
+                [totalPages]="meta()?.totalPages || meta()?.total_pages || 0"
+                [total]="meta()?.total ?? users().length"
+                [limit]="meta()?.limit ?? 10"
+                infoStyle="none"
+                (pageChange)="onPageChange($event)"
+              />
+            </div>
           </div>
         }
       </app-card>
