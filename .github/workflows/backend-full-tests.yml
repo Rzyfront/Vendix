@@ -1,0 +1,153 @@
+# Rafael, 2026-10-14: sacar las suites backend lentas de PR/push.
+# Cobertura completa de los siete carriles POS + products; no del backend global
+# (su baseline sigue pendiente). Este workflow NO es requerido para merge.
+# Los techos históricos sólo viven aquí, fuera del presupuesto de merge ~5 min.
+name: Backend Full Tests
+
+on:
+  schedule:
+    # GitHub descubre el workflow en la rama default; los jobs validan develop.
+    # workflow_dispatch valida la rama seleccionada manualmente.
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-full-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  backend-test-pos-lanes:
+    name: Backend Tests (POS — ${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [payments, orders, tables, taxes, print-formats, invoicing, money-kernel]
+    # Medido: invoicing >25 min, orders 19, print-formats 13, payments 9.
+    # Moverlos al nocturno evita que su coste bloquee PR/push.
+    timeout-minutes: ${{ matrix.lane == 'invoicing' && 75 || 30 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'develop' || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client (para tipos en specs)
+        working-directory: apps/backend
+        run: npx prisma generate
+      # F1 (QUI-832): un run por directorio. Los posicionales Jest son regex
+      # OR: combinar una ruta válida y un typo daría verde sin correr ambas.
+      # G5: pipefail propaga el exit de Jest al usar tee; logs por carril.
+      - name: jest — payments
+        if: matrix.lane == 'payments'
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/payments 2>&1 | tee jest-logs/payments.log
+      - name: jest — orders
+        if: matrix.lane == 'orders'
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/orders 2>&1 | tee jest-logs/orders.log
+      - name: jest — tables
+        if: matrix.lane == 'tables'
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/tables 2>&1 | tee jest-logs/tables.log
+      - name: jest — taxes
+        if: matrix.lane == 'taxes'
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/taxes 2>&1 | tee jest-logs/taxes.log
+      # F-211 (QUI-832): impresión y facturación mantienen cobertura propia.
+      - name: jest — print-formats
+        if: matrix.lane == 'print-formats'
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/print-formats 2>&1 | tee jest-logs/print-formats.log
+      - name: jest — invoicing
+        if: matrix.lane == 'invoicing'
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/invoicing 2>&1 | tee jest-logs/invoicing.log
+      # QUI-855: el kernel de dinero (`purchase-line-taxes` y sus hermanos) lo
+      # consumen compras y el frontend; sus 4 specs (59 tests) pasan en verde.
+      - name: jest — money-kernel
+        if: matrix.lane == 'money-kernel'
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/common/money-kernel 2>&1 | tee jest-logs/money-kernel.log
+      - name: Subir logs de jest (artefacto)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-full-tests-pos-jest-logs-${{ matrix.lane }}
+          path: apps/backend/jest-logs/
+          retention-days: 14
+      - name: Resumen en Checks
+        if: always()
+        working-directory: apps/backend
+        env:
+          POS_LANE: ${{ matrix.lane }}
+        run: |
+          case "$POS_LANE" in
+            money-kernel) spec_path=src/common/money-kernel ;;
+            *) spec_path="src/domains/store/$POS_LANE" ;;
+          esac
+          echo "### Backend Tests — POS: $POS_LANE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Ruta: \`$spec_path\` (una invocación Jest independiente)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Specs del carril: $(find "$spec_path" -name '*.spec.ts' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "Nocturno/manual; no requerido para merge. Products corre aparte; no es la suite global del backend." >> "$GITHUB_STEP_SUMMARY"
+
+  backend-test-products:
+    name: Backend Tests (products)
+    runs-on: ubuntu-latest
+    # Última corrida ~6 min; fuera del presupuesto del CI de PR/push.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'develop' || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client (para tipos en specs)
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: jest — products
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/products 2>&1 | tee jest-logs/products.log
+      - name: Subir logs de jest (artefacto)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-full-tests-products-jest-logs
+          path: apps/backend/jest-logs/
+          retention-days: 14
