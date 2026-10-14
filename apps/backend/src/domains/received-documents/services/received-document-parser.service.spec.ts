@@ -1,8 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { ReceivedDocumentParserService } from './received-document-parser.service';
 import { operationalValidationStatus, summarizeReceivedDocumentValidation } from './received-document-validation';
 

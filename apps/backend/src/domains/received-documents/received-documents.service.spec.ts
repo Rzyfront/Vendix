@@ -1476,7 +1476,7 @@ describe('ReceivedDocumentsService prepared email evidence', () => {
     expect(JSON.stringify(list)).not.toContain('private_checkpoint');
     expect(JSON.stringify(list)).not.toContain('originals_checkpoint');
     const detail = await h.service.findOne(context, row.id);
-    expect(detail.metadata.private_checkpoint).toBe('must not appear in list');
+    expect(detail.metadata).toMatchObject({ private_checkpoint: 'must not appear in list' });
     expect(detail.email_transport_received).toBe(true);
   });
 
