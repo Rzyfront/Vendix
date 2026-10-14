@@ -36,7 +36,7 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  it('sitemap lists only the verified published marketing homepage', async () => {
+  it('sitemap lists the real public pages and no hash-fragment URLs', async () => {
     const xml = await service.generateSitemap('vendix.online');
     const locs = [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1]);
 

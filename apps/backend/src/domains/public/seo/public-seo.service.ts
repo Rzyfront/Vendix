@@ -130,8 +130,8 @@ Disallow: /
         ? `https://${baseDomain}`
         : base_url;
 
-    // Only published, indexable marketing pages belong here. Other public
-    // routes currently return 404; add them after publication is verified.
+    // /ayuda, /pqr and /legal/* exist in the SPA, but the CDN currently serves
+    // them with HTTP 404; restore them to the sitemap when the CDN is fixed.
     const urls = [
       { path: '/', priority: '1.0', changefreq: 'weekly' },
     ];
