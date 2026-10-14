@@ -157,7 +157,9 @@ describe('DocumentPrintService Print Formats gates', () => {
 
     expect(result?.documents).toBe(1);
     expect(gateway.getFormatDetail).not.toHaveBeenCalled();
-    expect((service as any).sendToPrinter).toHaveBeenCalledWith('<html>ticket</html>');
+    expect((service as any).sendToPrinter).toHaveBeenCalledWith(
+      service.withGatewayPrintGuard('<html>ticket</html>'),
+    );
   });
 
   it('does not bypass an inactive format with the local dispatch fallback after HTTP 403', async () => {
