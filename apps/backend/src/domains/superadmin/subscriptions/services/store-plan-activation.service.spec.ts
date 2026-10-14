@@ -152,7 +152,13 @@ describe('StorePlanActivationService', () => {
     });
     await h.svc.activatePlan(
       1,
-      { plan_id: 7, amount: '50000', payment_method: 'consignacion' },
+      {
+        plan_id: 7,
+        amount: '50000',
+        payment_method: 'consignacion',
+        accept_partial_payment: true,
+        notes: 'Acuerdo de pago parcial',
+      },
       99,
     );
 
@@ -286,5 +292,144 @@ describe('StorePlanActivationService', () => {
     const res = err.getResponse();
     expect(res.error_code).toBe('SUBSCRIPTION_INTERNAL_ERROR');
     expect(res.message).toContain('Reintenta');
+  });
+
+  describe('start date and partial payment', () => {
+    const daysAgo = (n: number) =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Bogota',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(Date.now() - n * 24 * 60 * 60 * 1000));
+
+    it('starts_at anchors current_period_start at noon UTC and end = +cycle', async () => {
+      const h = build({
+        existingSub: {
+          id: 12,
+          plan_id: 3,
+          state: 'cancelled',
+          partner_override: null,
+        },
+      });
+      const day = daysAgo(5);
+      await h.svc.activatePlan(1, { plan_id: 7, starts_at: day }, 99);
+      const upd = h.tx.store_subscriptions.update.mock.calls[0][0];
+      const start = new Date(`${day}T12:00:00Z`);
+      expect(upd.data.current_period_start.toISOString()).toBe(
+        start.toISOString(),
+      );
+      expect(upd.data.current_period_end.getTime()).toBe(
+        start.getTime() + 30 * 24 * 60 * 60 * 1000,
+      );
+      expect(upd.data.next_billing_at.getTime()).toBe(
+        upd.data.current_period_end.getTime(),
+      );
+    });
+
+    it('starts_at out of range: rejects and never opens the transaction', async () => {
+      const h = build({});
+      let err: any;
+      try {
+        await h.svc.activatePlan(
+          1,
+          { plan_id: 7, starts_at: daysAgo(60) },
+          99,
+        );
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.getResponse()).toMatchObject({
+        error_code: 'SUBSCRIPTION_ACTIVATION_START_RANGE',
+      });
+      expect(h.prisma.$transaction).not.toHaveBeenCalled();
+      expect(h.tx.store_subscriptions.update).not.toHaveBeenCalled();
+    });
+
+    it('underpayment without flag: rejects and writes nothing', async () => {
+      const h = build({
+        existingSub: {
+          id: 12,
+          plan_id: 3,
+          state: 'cancelled',
+          partner_override: null,
+        },
+      });
+      let err: any;
+      try {
+        await h.svc.activatePlan(1, { plan_id: 7, amount: '50000' }, 99);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.getResponse()).toMatchObject({
+        error_code: 'SUBSCRIPTION_ACTIVATION_UNDERPAYMENT',
+      });
+      expect(h.tx.store_subscriptions.update).not.toHaveBeenCalled();
+      expect(h.tx.store_subscriptions.create).not.toHaveBeenCalled();
+      expect(h.tx.subscription_invoices.update).not.toHaveBeenCalled();
+      expect(h.billing.issueInvoice).not.toHaveBeenCalled();
+      expect(h.manual.recordManualPayment).not.toHaveBeenCalled();
+    });
+
+    it('underpayment without subscription row: rejects before create', async () => {
+      const h = build({});
+      await expect(
+        h.svc.activatePlan(1, { plan_id: 7, amount: '1' }, 99),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      expect(h.tx.store_subscriptions.create).not.toHaveBeenCalled();
+    });
+
+    it('underpayment with flag and notes: records partial_payment metadata', async () => {
+      const h = build({});
+      const res = await h.svc.activatePlan(
+        1,
+        {
+          plan_id: 7,
+          amount: '60000',
+          accept_partial_payment: true,
+          notes: 'Pagará el resto el viernes',
+        },
+        99,
+      );
+      const arg = h.manual.recordManualPayment.mock.calls[0][1];
+      expect(arg.extraMetadata.partial_payment).toBe(true);
+      expect(arg.extraMetadata.shortfall).toBe('40000.00');
+      expect(arg.extraMetadata.invoice_total_expected).toBe('100000.00');
+      expect(res.invoice_total).toBe('100000.00');
+    });
+
+    it('underpayment with flag but no notes: rejects', async () => {
+      const h = build({});
+      let err: any;
+      try {
+        await h.svc.activatePlan(
+          1,
+          {
+            plan_id: 7,
+            amount: '60000',
+            accept_partial_payment: true,
+            notes: '   ',
+          },
+          99,
+        );
+      } catch (e) {
+        err = e;
+      }
+      expect(err.getResponse()).toMatchObject({
+        error_code: 'SUBSCRIPTION_ACTIVATION_UNDERPAYMENT',
+      });
+      expect(h.manual.recordManualPayment).not.toHaveBeenCalled();
+    });
+
+    it('body {plan_id} only: no partial metadata, response carries period fields', async () => {
+      const h = build({});
+      const res = await h.svc.activatePlan(1, { plan_id: 7 }, 99);
+      const arg = h.manual.recordManualPayment.mock.calls[0][1];
+      expect(arg.extraMetadata.partial_payment).toBeUndefined();
+      expect(res).toHaveProperty('period_start');
+      expect(res).toHaveProperty('period_end');
+    });
   });
 });

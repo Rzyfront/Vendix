@@ -8,8 +8,11 @@ import { SubscriptionManualPaymentService } from '../../../store/subscriptions/s
 import { SubscriptionStateService } from '../../../store/subscriptions/services/subscription-state.service';
 import { SubscriptionResolverService } from '../../../store/subscriptions/services/subscription-resolver.service';
 import { ActivateStorePlanDto } from '../dto/activate-store-plan.dto';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import {
+  computeActivationQuote,
+  computeActivationWindow,
+  isActivationStartInRange,
+} from './store-plan-activation.helpers';
 
 export interface ActivateStorePlanResult {
   store_id: number;
@@ -21,6 +24,9 @@ export interface ActivateStorePlanResult {
   invoice_number: string | null;
   payment_id: number | null;
   amount_paid: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  invoice_total: string | null;
 }
 
 type ChangeKind = 'initial' | 'trial_conversion' | 'resubscribe';
@@ -69,9 +75,18 @@ export class StorePlanActivationService {
       );
     }
 
+    if (dto.starts_at && !isActivationStartInRange(dto.starts_at)) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_ACTIVATION_START_RANGE,
+      );
+    }
+
     const now = new Date();
-    const cycleMs = this.billingCycleMs(plan.billing_cycle);
-    const periodEnd = new Date(now.getTime() + cycleMs);
+    const { periodStart, periodEnd } = computeActivationWindow(
+      plan.billing_cycle,
+      dto.starts_at,
+      now,
+    );
     const round2 = (d: Prisma.Decimal) => d.toDecimalPlaces(2, 6);
 
     // ---- Tx 1: prepare the subscription row -------------------------------
@@ -88,6 +103,7 @@ export class StorePlanActivationService {
             max_partner_margin_pct: plan.max_partner_margin_pct,
           },
         });
+        const quote = this.assertPaymentAllowed(pricing, undefined, dto);
         const created = await tx.store_subscriptions.create({
           data: {
             store_id: storeId,
@@ -101,7 +117,7 @@ export class StorePlanActivationService {
             resolved_features:
               (plan.ai_feature_flags as Prisma.InputJsonValue) ??
               Prisma.JsonNull,
-            current_period_start: now,
+            current_period_start: periodStart,
             current_period_end: periodEnd,
             next_billing_at: periodEnd,
           },
@@ -114,6 +130,7 @@ export class StorePlanActivationService {
           subscriptionId: created.id as number,
           oldPlanId: null as number | null,
           oldState: null as string | null,
+          quote,
         };
       }
 
@@ -121,6 +138,17 @@ export class StorePlanActivationService {
         where: { id: locked[0].id },
         include: { partner_override: { include: { base_plan: true } } },
       });
+
+      const pricing = this.billing.computePricing({
+        plan: {
+          id: plan.id,
+          base_price: plan.base_price,
+          max_partner_margin_pct: plan.max_partner_margin_pct,
+        },
+        partner_override: sub.partner_override as any,
+      });
+
+      const quote = this.assertPaymentAllowed(pricing, sub.metadata, dto);
 
       // Void open invoices (and their pending payments) of this subscription.
       const openInvoices = await tx.subscription_invoices.findMany({
@@ -171,15 +199,6 @@ export class StorePlanActivationService {
         });
       }
 
-      const pricing = this.billing.computePricing({
-        plan: {
-          id: plan.id,
-          base_price: plan.base_price,
-          max_partner_margin_pct: plan.max_partner_margin_pct,
-        },
-        partner_override: sub.partner_override as any,
-      });
-
       const updateData: Prisma.store_subscriptionsUncheckedUpdateInput = {
         plan_id: plan.id,
         paid_plan_id: plan.id,
@@ -197,7 +216,7 @@ export class StorePlanActivationService {
         pending_revert_state: null,
         scheduled_plan_id: null,
         scheduled_plan_change_at: null,
-        current_period_start: now,
+        current_period_start: periodStart,
         current_period_end: periodEnd,
         next_billing_at: periodEnd,
         updated_at: now,
@@ -229,10 +248,15 @@ export class StorePlanActivationService {
         subscriptionId: sub.id as number,
         oldPlanId: (sub.plan_id ?? null) as number | null,
         oldState: sub.state as string,
+        quote,
       };
     });
 
-    const { subscriptionId, oldPlanId, oldState } = prepared;
+    const { subscriptionId, oldPlanId, oldState, quote } = prepared;
+    const partialAccepted =
+      dto.accept_partial_payment === true &&
+      !quote.is_free &&
+      new Prisma.Decimal(quote.shortfall).greaterThan(0);
     const changeKind: ChangeKind =
       oldPlanId == null
         ? 'initial'
@@ -250,11 +274,16 @@ export class StorePlanActivationService {
         changeKind,
       });
 
-      const extraMetadata = {
+      const extraMetadata: Record<string, unknown> = {
         source: 'superadmin_activation',
         payment_method: dto.payment_method ?? null,
         notes: dto.notes ?? null,
       };
+      if (partialAccepted) {
+        extraMetadata.partial_payment = true;
+        extraMetadata.shortfall = quote.shortfall;
+        extraMetadata.invoice_total_expected = quote.invoice_total;
+      }
 
       if (invoice) {
         await this.manualPaymentService.recordManualPayment(invoice.id, {
@@ -349,6 +378,15 @@ export class StorePlanActivationService {
       amount_paid: payment
         ? new Prisma.Decimal(payment.amount).toFixed(2)
         : null,
+      period_start: finalSub.current_period_start
+        ? new Date(finalSub.current_period_start).toISOString()
+        : null,
+      period_end: finalSub.current_period_end
+        ? new Date(finalSub.current_period_end).toISOString()
+        : null,
+      invoice_total: invoice
+        ? new Prisma.Decimal(invoice.total).toFixed(2)
+        : null,
     };
   }
 
@@ -388,20 +426,34 @@ export class StorePlanActivationService {
     });
   }
 
-  /** Mirrors `SubscriptionBillingService.billingCycleMs` (private there). */
-  private billingCycleMs(cycle: string): number {
-    switch (cycle) {
-      case 'quarterly':
-        return 90 * DAY_MS;
-      case 'semiannual':
-        return 180 * DAY_MS;
-      case 'annual':
-        return 365 * DAY_MS;
-      case 'lifetime':
-        return 100 * 365 * DAY_MS;
-      case 'monthly':
-      default:
-        return 30 * DAY_MS;
+  /**
+   * Valida el monto contra el total a cobrar (antes de cualquier escritura).
+   * Un faltante solo pasa con `accept_partial_payment` y una nota.
+   */
+  private assertPaymentAllowed(
+    pricing: { effective_price: Prisma.Decimal; margin_amount: Prisma.Decimal },
+    subscriptionMetadata: unknown,
+    dto: ActivateStorePlanDto,
+  ) {
+    const quote = computeActivationQuote({
+      pricing,
+      subscriptionMetadata,
+      amount: dto.amount,
+    });
+    if (!quote.is_free && new Prisma.Decimal(quote.shortfall).greaterThan(0)) {
+      if (dto.accept_partial_payment !== true) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_ACTIVATION_UNDERPAYMENT,
+          `El monto recibido (${quote.amount_received}) es menor que el total a cobrar (${quote.invoice_total}); faltan ${quote.shortfall}. Marca "Aceptar pago parcial" e indica una nota.`,
+        );
+      }
+      if (!dto.notes?.trim()) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_ACTIVATION_UNDERPAYMENT,
+          'Indica en las notas por qué se acepta un pago parcial',
+        );
+      }
     }
+    return quote;
   }
 }
