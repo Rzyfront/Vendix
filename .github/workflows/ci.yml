@@ -45,15 +45,22 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       mobile: ${{ steps.filter.outputs.mobile }}
       backend: ${{ steps.filter.outputs.backend }}
+      # F-172 sigue vigente: cada push a develop valida POS. El filtro acota
+      # PRs; un push no pierde la compuerta si before/base no es resoluble.
+      # No se altera la resolución de base ni los otros tres outputs.
+      pos: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.pos }}
     steps:
       # OBLIGATORIO desde que existe el disparador `push` (F-193, ronda 3).
       # `dorny/paths-filter` resuelve los cambios de un `pull_request` contra la
       # API de GitHub, sin necesitar el arbol -- por eso este job funcionó dos
-      # años sin checkout. En un evento `push` NO usa la API: compara
-      # `github.event.before..after` con git LOCAL, y sin checkout muere en la
-      # primera orden con `fatal: not a git repository` (exit 128), tumbando el
+      # años sin checkout. En un evento `push` NO usa la API: compara con git
+      # LOCAL, y sin checkout muere en la primera orden con
+      # `fatal: not a git repository` (exit 128), tumbando el
       # job y saltándose los doce restantes. Medido en la corrida 34792807926,
       # el primer `push` a `develop` de este workflow.
+      # Precisión 2026-10-14: sin `base` explícito, paths-filter usa la rama
+      # default (main), es decir merge-base para develop; before..after sólo
+      # aplica si base es la misma rama. Se conserva ese comportamiento.
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
@@ -92,6 +99,42 @@ jobs:
               - 'scripts/prisma-singleton-audit.sh'
               - 'scripts/industry-parity-audit.sh'
               - 'scripts/check-tools-no-prisma.sh'
+            # 2026-10-14: superficie de las siete invocaciones POS, no todo
+            # apps/backend. Los grupos adicionales son dominios importados
+            # por esos carriles (caja/stock/cocina, fiscal, cobro e impresión).
+            # tables/** incluye table-sessions; invoicing/**, credit-notes.
+            pos:
+              - *shared
+              - '**/package*.json'
+              - 'apps/backend/src/domains/store/payments/**'
+              - 'apps/backend/src/domains/store/orders/**'
+              - 'apps/backend/src/domains/store/tables/**'
+              - 'apps/backend/src/domains/store/taxes/**'
+              - 'apps/backend/src/domains/store/print-formats/**'
+              - 'apps/backend/src/domains/store/invoicing/**'
+              - 'apps/backend/src/domains/store/{cash-registers,inventory,kitchen-fire,products}/**'
+              - 'apps/backend/src/domains/store/{accounting,accounts-payable,contracts,quotations,withholding-tax}/**'
+              - 'apps/backend/src/domains/store/{coupons,customers,payment-links,promotions,settings,shipping,wallet}/**'
+              - 'apps/backend/src/domains/store/{analytics,dispatch-notes,dispatch-routes,notifications}/**'
+              - 'apps/backend/src/domains/received-documents/**'
+              # Kernel de dinero + infraestructura/mocks que importan los specs.
+              - 'apps/backend/src/common/**'
+              - 'apps/backend/src/prisma/**'
+              - 'apps/backend/src/testing/**'
+              - 'apps/backend/src/domains/auth/{decorators,guards,enums}/**'
+              - 'apps/backend/src/email/**'
+              - 'apps/backend/src/ai-engine/ai-engine.service.ts'
+              - 'apps/backend/src/ai-engine/{interfaces,utils}/**'
+              - 'apps/backend/src/ai-engine/tools/ai-tool-registry.ts'
+              - 'apps/backend/src/ai-engine/tools/domains/{invoicing,orders,payments,purchasing,returns,sales,tables,writes}.tools.ts'
+              - 'apps/backend/prisma/schema.prisma'
+              - 'apps/backend/prisma/migrations/**'
+              - 'apps/backend/prisma/seeds/print-templates.seed.ts'
+              - 'apps/backend/prisma.config.ts'
+              - 'apps/backend/tsconfig*.json'
+              - 'apps/backend/jest*'
+              - 'apps/backend/.npmrc'
+              - 'apps/backend/scripts/test-path.sh'
 
   zoneless-audit:
     name: Zoneless Audit
@@ -520,7 +563,7 @@ jobs:
             (cd apps/backend && npm run test:path -- "${spec#apps/backend/}")
           done < "$list"
 
-  backend-test-scoped:
+  backend-test-pos-lanes:
     # F-123 y F-113 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832).
     # Ambos hallazgos dicen lo mismo: el plan promete tests de regresión y hoy
     # NINGÚN spec del backend se ejecuta en CI, así que esos tests pasarían en
@@ -536,8 +579,8 @@ jobs:
     # SÓLO la superficie del plan, y su línea base está VERDE -- medida, no
     # supuesta.
     #
-    # Alcance, y por qué es ése: `payments` (12 specs, donde vive el doble
-    # cobro), `orders` (17, el carril que persiste), `tables` (3, el carril de
+    # Alcance original, y por qué era ése: `payments` (12 specs, donde vive el
+    # doble cobro), `orders` (17, el carril que persiste), `tables` (3, el carril de
     # mesa de ADR-08) y `taxes` (4, el kernel). 36 suites, 706 tests.
     #
     # F-211 (D.13, plan CP-pos-exclusive-tax-double-charge, QUI-832,
@@ -583,17 +626,10 @@ jobs:
     # idéntico al de `backend-test`, y la salida NO es subir el heap: es volver
     # a un pool con `--maxWorkers=2` y `workerIdleMemoryLimit`, pagando el
     # arranque a cambio del reciclado.
-    # OJO: este `name:` es el IDENTIFICADOR que el ruleset de ramas fija como
-    # required status check. Si se renombra, el check obligatorio deja de
-    # reportar y TODOS los PRs quedan bloqueados esperando un nombre que ya no
-    # existe. Por eso no lleva cifras dentro: el alcance concreto (cuántas specs
-    # de cuántas) va al `$GITHUB_STEP_SUMMARY` del último paso, que se puede
-    # actualizar sin tocar nada. Decía «sólo payments/orders/tables/taxes (36 de
-    # 401 specs)» y ese 401 caduca cada vez que alguien añade una spec.
-    name: Backend Tests (carril POS)
+    name: Backend Tests (POS — ${{ matrix.lane }})
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.pos == 'true'
     # F-220: 30 minutos era el techo, no el margen. Medido en dos corridas
     # consecutivas del mismo job: `a2777f21a` cerro en VERDE a los 29m19s --41
     # segundos por debajo del limite-- y `427b7b076` se corto a los 30m18s
@@ -606,10 +642,23 @@ jobs:
     # de ese carril y los otros cinco carriles verdes. Faltaban ~25 specs a
     # ~12s cada una, mas cierre/subida de artefactos: 75 min deja margen real
     # sobre los ~51 min proyectados sin cambiar el nombre del check requerido.
-    # El arreglo de fondo es partir los seis carriles en jobs
-    # paralelos (hoy corren en serie en un solo runner), pero eso cambia los
-    # required status checks del ruleset y no se toca sin acuerdo.
-    timeout-minutes: 75
+    # El arreglo de fondo propuesto era partir los seis carriles en jobs
+    # paralelos (entonces corrían en serie), sin cambiar los required status
+    # checks del ruleset ni hacerlo sin acuerdo.
+    #
+    # Autorizado por Rafael 2026-10-14 00:34: PR #906 superó incluso 75 min
+    # con 268 specs PASS, 0 FAIL. Se cumple aquella propuesta con siete
+    # shards: los seis dominios + money-kernel (QUI-855), sin quitar cobertura
+    # ni juntar run (F1). fail-fast:false deja acabar los demás si uno falla.
+    # El nombre requerido se conserva en backend-test-scoped, agregador abajo.
+    # 30 min por shard salvo invoicing: en run 38509190940 ese paso ya llevaba
+    # 32m58s cuando se canceló, aún incompleto. Conserva 75 min de techo; NO
+    # se promete que ese dominio cabe en 30 ni se vuelve a apagar por reloj.
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [payments, orders, tables, taxes, print-formats, invoicing, money-kernel]
+    timeout-minutes: ${{ matrix.lane == 'invoicing' && 75 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -659,24 +708,28 @@ jobs:
       # (que a su vez propaga el de jest, ver F1 arriba), con `tee` fallando
       # sólo si no puede escribir el archivo.
       - name: jest — payments
+        if: matrix.lane == 'payments'
         working-directory: apps/backend
         run: |
           mkdir -p jest-logs
           set -o pipefail
           npm run test:path -- src/domains/store/payments 2>&1 | tee jest-logs/payments.log
       - name: jest — orders
+        if: matrix.lane == 'orders'
         working-directory: apps/backend
         run: |
           mkdir -p jest-logs
           set -o pipefail
           npm run test:path -- src/domains/store/orders 2>&1 | tee jest-logs/orders.log
       - name: jest — tables
+        if: matrix.lane == 'tables'
         working-directory: apps/backend
         run: |
           mkdir -p jest-logs
           set -o pipefail
           npm run test:path -- src/domains/store/tables 2>&1 | tee jest-logs/tables.log
       - name: jest — taxes
+        if: matrix.lane == 'taxes'
         working-directory: apps/backend
         run: |
           mkdir -p jest-logs
@@ -687,6 +740,7 @@ jobs:
       # de ticket) no tenía puerta en CI. Mismo patrón que los cuatro pasos
       # de arriba.
       - name: jest — print-formats
+        if: matrix.lane == 'print-formats'
         working-directory: apps/backend
         run: |
           mkdir -p jest-logs
@@ -698,6 +752,7 @@ jobs:
       # añade este paso -- nunca se encendió una compuerta sobre un rojo
       # permanente.
       - name: jest — invoicing
+        if: matrix.lane == 'invoicing'
         working-directory: apps/backend
         run: |
           mkdir -p jest-logs
@@ -706,43 +761,100 @@ jobs:
       # QUI-855: el kernel de dinero (`purchase-line-taxes` y sus hermanos) lo
       # consumen compras y el frontend; sus 4 specs (59 tests) pasan en verde.
       - name: jest — money-kernel
+        if: matrix.lane == 'money-kernel'
         working-directory: apps/backend
         run: |
           mkdir -p jest-logs
           set -o pipefail
           npm run test:path -- src/common/money-kernel 2>&1 | tee jest-logs/money-kernel.log
-      # G5: artefacto de los logs de arriba. `if: always()` para que
+      # G5: artefacto del log de cada carril. `if: always()` para que
       # quede subido incluso si un paso de jest falló. Acción fijada por
       # etiqueta (`@v4`), igual que `actions/checkout` y `actions/setup-node`
       # en este mismo archivo — no se introduce una convención nueva aquí.
+      # Sufijo por shard: upload-artifact@v4 no admite varios jobs escribiendo
+      # al mismo artefacto. Se conservan jest-logs y los 14 días de retención.
       - name: Subir logs de jest (artefacto)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-scoped-jest-logs
+          name: backend-test-scoped-jest-logs-${{ matrix.lane }}
           path: apps/backend/jest-logs/
           retention-days: 14
       # Sin esto el job no deja ningún rastro legible en la pestaña Checks sin
       # abrir el log crudo paso por paso. `if: always()` para que el resumen
       # aparezca también cuando uno de los pasos de arriba falló. F-211
       # (D.13, QUI-832, 2026-09-14): la lista y el `find` de abajo se
-      # ensanchan a los seis subdominios reales del job, no sólo los cuatro
-      # originales.
+      # ensancharon a los seis subdominios reales, no sólo los cuatro
+      # originales. Ahora cada shard cuenta SU ruta; el agregador da el estado
+      # conjunto. No atribuir a un shard los specs que corrieron en otro.
       - name: Resumen en Checks
         if: always()
         working-directory: apps/backend
+        env:
+          POS_LANE: ${{ matrix.lane }}
         run: |
-          echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Corre 6 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\` + \`src/common/money-kernel\`." >> "$GITHUB_STEP_SUMMARY"
+          case "$POS_LANE" in
+            money-kernel) spec_path=src/common/money-kernel ;;
+            *) spec_path="src/domains/store/$POS_LANE" ;;
+          esac
+          echo "### Backend Tests — POS: $POS_LANE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Ruta: \`$spec_path\` (una invocación Jest independiente)." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | specs |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing src/common/money-kernel -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en este carril | $(find "$spec_path" -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "El resto del backend **no se ejecuta en ningun job** salvo \`products\` (job aparte, ver \`Backend Tests (products)\`); \`backend-test\` sigue en \`if: false\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "No es cobertura completa: otros gates ejecutan \`products\` y specs cambiados por PR; \`backend-test\` sigue en \`if: false\`." >> "$GITHUB_STEP_SUMMARY"
+
+  backend-test-scoped:
+    # OJO: este `name:` es el IDENTIFICADOR que el ruleset de ramas fija como
+    # required status check. Si se renombra, el check obligatorio deja de
+    # reportar y TODOS los PRs quedan bloqueados esperando un nombre que ya no
+    # existe. Por eso no lleva cifras dentro: el alcance concreto (cuántas specs
+    # de cuántas) va al `$GITHUB_STEP_SUMMARY`, que se puede actualizar sin tocar
+    # el nombre. Decía «sólo payments/orders/tables/taxes (36 de 401 specs)» y
+    # ese 401 caduca cada vez que alguien añade una spec.
+    # 2026-10-14: agregador de la matrix, no una segunda corrida de Jest.
+    # always() permite reportar aunque un shard falle/se cancele o todos se
+    # salten por rutas. Sólo se acepta skipped con filtro false y changes verde;
+    # fallo/cancelación del detector o salto inesperado nunca es un falso verde.
+    name: Backend Tests (carril POS)
+    runs-on: ubuntu-latest
+    needs: [changes, backend-test-pos-lanes]
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - name: Comprobar resultado conjunto de los carriles POS
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          POS_CHANGED: ${{ needs.changes.outputs.pos }}
+          POS_RESULT: ${{ needs.backend-test-pos-lanes.result }}
+        run: |
+          set -euo pipefail
+          echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Filtro POS: $POS_CHANGED; detector: $CHANGES_RESULT; carriles: $POS_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$CHANGES_RESULT" != 'success' ]]; then
+            echo "::error::El detector de cambios terminó en $CHANGES_RESULT."
+            exit 1
+          fi
+          case "$POS_RESULT" in
+            success)
+              echo "Todos los carriles POS pasaron."
+              ;;
+            skipped)
+              if [[ "$POS_CHANGED" != 'false' ]]; then
+                echo "::error::Carriles POS omitidos sin exclusión válida por rutas."
+                exit 1
+              fi
+              echo "Sin cambios POS en esta PR; carriles omitidos por el filtro."
+              ;;
+            *)
+              echo "::error::Al menos un carril POS falló o fue cancelado: $POS_RESULT."
+              exit 1
+              ;;
+          esac
 
   backend-test-products:
     # F-219 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832): el
