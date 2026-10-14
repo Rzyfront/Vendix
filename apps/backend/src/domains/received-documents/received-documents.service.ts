@@ -341,6 +341,7 @@ export class ReceivedDocumentsService {
       rawPayload: { source_format: 'email', normalized },
       metadata: { source_format: 'email', email_reception: emailMetadata, originals_checkpoint: [] },
       processingStatus: 'processing',
+      requireReadyForHiddenDuplicate: true,
       validationSummary: this.json({ ...this.validationSnapshot(normalized), receipt_evidence: receipt }),
       beforeWrite,
     });
@@ -890,6 +891,7 @@ export class ReceivedDocumentsService {
     metadata: unknown;
     processingStatus: string;
     validationSummary?: Prisma.InputJsonValue;
+    requireReadyForHiddenDuplicate?: boolean;
     beforeWrite?: () => Promise<void>;
   }): Promise<NormalizedReceivedDocumentImportResult> {
     const normalized = this.withPendingWarnings(input.normalized);
@@ -906,7 +908,7 @@ export class ReceivedDocumentsService {
         if (existing) {
           this.assertSameNormalizedFacts(existing, normalized);
           if (input.source === 'email' || receivedFiscalDocumentTypeCode(input.metadata) != null) this.assertSameEmailFiscalMetadata(existing.metadata, input.metadata);
-          return this.normalizedDuplicateOutcome(input.scope, existing);
+          return this.normalizedDuplicateOutcome(input.scope, existing, input.requireReadyForHiddenDuplicate);
         }
 
         if (input.beforeWrite) await input.beforeWrite();
@@ -970,7 +972,7 @@ export class ReceivedDocumentsService {
         if (winner) {
           this.assertSameNormalizedFacts(winner, normalized);
           if (input.source === 'email' || receivedFiscalDocumentTypeCode(input.metadata) != null) this.assertSameEmailFiscalMetadata(winner.metadata, input.metadata);
-          return this.normalizedDuplicateOutcome(input.scope, winner);
+          return this.normalizedDuplicateOutcome(input.scope, winner, input.requireReadyForHiddenDuplicate);
         }
         throw new ConflictException('La clave de documento ya está registrada en esta entidad fiscal.');
       }
@@ -1759,8 +1761,13 @@ export class ReceivedDocumentsService {
   private normalizedDuplicateOutcome(
     scope: Scope,
     document: Prisma.received_documentsGetPayload<{}>,
+    requireReadyForHiddenDuplicate = false,
   ): NormalizedReceivedDocumentImportResult {
     if (scope.store_filter != null && document.store_id !== scope.store_filter) {
+      // Email intake must not credit valid reception before another store's original evidence is durable.
+      if (requireReadyForHiddenDuplicate && document.processing_status !== 'ready') {
+        throw new ServiceUnavailableException('La recepción no está disponible temporalmente. Intenta nuevamente más tarde.');
+      }
       return {
         outcome: 'duplicate_other_store',
         created: false,

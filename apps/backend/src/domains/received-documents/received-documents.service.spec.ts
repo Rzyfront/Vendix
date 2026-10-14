@@ -392,10 +392,11 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it('returns only the safe notice for manual/XML wrappers encountering another store duplicate', async () => {
+  it.each(['processing', 'error'])('preserves the safe manual/XML notice for a hidden legacy duplicate in %s', async (processingStatus) => {
     const h = makeHarness();
     await h.service.importXml(context, xmlFile());
     const dto = manualDto({ invoice_number: 'FV-1', document_key: 'a'.repeat(96), due_date: '2026-10-30' });
+    [...h.createdDocs.values()][0].processing_status = processingStatus;
     h.storage.upload.mockClear();
     h.prisma.received_documents.findFirst.mockClear();
     const read = jest.spyOn(h.service, 'findOne');
@@ -403,6 +404,7 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     await expect(h.service.importXml({ ...context, store_id: 4 }, xmlFile())).resolves.toEqual(expected);
     const manual = makeHarness();
     await manual.service.createManual(context, dto);
+    [...manual.createdDocs.values()][0].processing_status = processingStatus;
     manual.prisma.received_documents.findFirst.mockClear();
     const manualRead = jest.spyOn(manual.service, 'findOne');
     await expect(manual.service.createManual({ ...context, store_id: 4 }, dto)).resolves.toEqual(expected);
@@ -1333,10 +1335,68 @@ describe('ReceivedDocumentsService prepared email evidence', () => {
     expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
   });
 
+  it.each(['processing', 'error'])('rejects email intake of a hidden %s canonical document before storage or detail', async (processingStatus) => {
+    const h = makeEmailHarness();
+    const hidden = { id: 77, organization_id: 2, accounting_entity_id: 8, store_id: 3,
+      processing_status: processingStatus, idempotency_key: `key:${'a'.repeat(96)}`, raw_payload: { normalized: normalized() },
+      metadata: { source_format: 'email', originals_checkpoint: [{ stored: false }] },
+      files: [{ id: 123, file_key: 'private-original-key', file_name: 'private-original-name' }] };
+    h.createdDocs.set(`key:${'a'.repeat(96)}`, hidden);
+    const guard = jest.fn();
+    const read = jest.spyOn(h.service, 'findOne');
+    const before = JSON.stringify(hidden);
+    const failure = await h.service.ingestPreparedEmail({ ...context, store_id: 4 }, preparedEmail(), guard).catch((error) => error);
+    expect(failure).toBeInstanceOf(ServiceUnavailableException);
+    expect(failure.getResponse()).toEqual({ statusCode: 503, error: 'Service Unavailable',
+      message: 'La recepción no está disponible temporalmente. Intenta nuevamente más tarde.' });
+    expect(JSON.stringify(hidden)).toBe(before);
+    expect(guard).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.create).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.tx.received_document_files.findMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(['processing', 'error', 'ready'])('applies email hidden-ready policy to the P2002 winner in %s', async (processingStatus) => {
+    const h = makeEmailHarness();
+    h.tx.received_documents.create.mockRejectedValueOnce({ code: 'P2002', meta: { target: ['accounting_entity_id', 'idempotency_key'] } });
+    const winner = { id: 77, organization_id: 2, accounting_entity_id: 8, store_id: 3,
+      processing_status: processingStatus, idempotency_key: `key:${'a'.repeat(96)}`, raw_payload: { normalized: normalized() },
+      metadata: { source_format: 'email' }, files: [{ id: 123, file_key: 'private-original-key' }] };
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce(winner);
+    const read = jest.spyOn(h.service, 'findOne');
+    const outcome = h.service.ingestPreparedEmail({ ...context, store_id: 4 }, preparedEmail());
+    if (processingStatus === 'ready') await expect(outcome).resolves.toEqual({
+      outcome: 'duplicate_other_store', created: false, message: 'Esta factura ya fue recibida en otra tienda de tu empresa.',
+    });
+    else {
+      const failure = await outcome.catch((error) => error);
+      expect(failure).toBeInstanceOf(ServiceUnavailableException);
+      expect(failure.getResponse()).toEqual({ statusCode: 503, error: 'Service Unavailable',
+        message: 'La recepción no está disponible temporalmente. Intenta nuevamente más tarde.' });
+    }
+    expect(h.prisma.received_documents.findFirst).toHaveBeenCalledWith({ where: {
+      organization_id: 2, accounting_entity_id: 8, idempotency_key: `key:${'a'.repeat(96)}`,
+    } });
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.tx.received_document_files.findMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it('returns a hidden cross-store duplicate before storage, document detail, guard mutation or IDs', async () => {
     const h = makeEmailHarness();
     const prepared = preparedEmail();
     await h.service.ingestPreparedEmail(context, prepared);
+    expect([...h.createdDocs.values()][0].processing_status).toBe('ready');
     h.uploadEvidence.mockClear(); h.prisma.received_documents.findFirst.mockClear();
     const guard = jest.fn();
     const scanQueue = { enqueue: jest.fn() };
