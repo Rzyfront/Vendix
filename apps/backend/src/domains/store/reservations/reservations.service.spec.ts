@@ -24,21 +24,27 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
     const bookings: any[] = [];
     const prisma: any = {
       bookings: {
-        findUnique: jest.fn(({ where, include }: any) =>
-          Promise.resolve(
-            bookings.find((b) => b.id === where.id) ?? null,
-          ),
-        ),
-        findFirst: jest.fn(),
+        findUnique: jest.fn(({ where }: any) => {
+          const found = bookings.find((b) => b.id === where.id);
+          return Promise.resolve(found ? { ...found } : null);
+        }),
+        findFirst: jest.fn(({ where }: any) => {
+          const found = bookings.find((b) => b.id === where.id);
+          return Promise.resolve(found ? { ...found } : null);
+        }),
         findMany: jest.fn(),
         update: jest.fn(({ where, data }: any) => {
           const target = bookings.find((b) => b.id === where.id);
           if (!target) throw new Error('not found');
           Object.assign(target, data);
-          return Promise.resolve(target);
+          return Promise.resolve({ ...target });
         }),
         create: jest.fn(),
       },
+      products: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      $transaction: jest.fn(async (cb: any) => cb(prisma)),
     };
     const emits: any[] = [];
     const eventEmitter: any = {
@@ -183,11 +189,14 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
         const txProxy = {
           bookings: {
             create: jest.fn(({ data }: any) => {
-              const created = { id: 999, ...data, status: 'confirmed' };
+              const created = {
+                id: 999,
+                ...data,
+                status: 'confirmed',
+                product: products.find((p) => p.id === data.product_id) ?? { name: 'Corte de cabello' },
+                customer: customers.find((c) => c.id === data.customer_id) ?? { first_name: 'Lola', last_name: 'Pérez' },
+              };
               txBookings.push(created);
-              // Mirror the behaviour of Prisma.create: the in-memory
-              // `bookings` array is only mutated when the surrounding
-              // transaction COMMITS. We commit on no-throw.
               bookings.push({ ...created });
               return Promise.resolve(created);
             }),
@@ -197,15 +206,27 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
               Object.assign(target, data);
               return Promise.resolve(target);
             }),
-            findFirst: jest.fn(() => Promise.resolve(null)),
-            findUnique: jest.fn(() => Promise.resolve(null)),
+            findFirst: jest.fn(({ where }: any = {}) => {
+              const found = bookings.find((b) => b.id === (where?.id ?? 999));
+              return Promise.resolve(found ? { ...found } : null);
+            }),
+            findUnique: jest.fn(({ where }: any = {}) => {
+              const found = bookings.find((b) => b.id === (where?.id ?? 999));
+              return Promise.resolve(found ? { ...found } : null);
+            }),
           },
         };
         return callback(txProxy);
       }),
       bookings: {
         create: jest.fn(({ data }: any) => {
-          const created = { id: 999, ...data, status: 'confirmed' };
+          const created = {
+            id: 999,
+            ...data,
+            status: 'confirmed',
+            product: products.find((p) => p.id === data.product_id) ?? { name: 'Corte de cabello' },
+            customer: customers.find((c) => c.id === data.customer_id) ?? { first_name: 'Lola', last_name: 'Pérez' },
+          };
           bookings.push(created);
           return Promise.resolve(created);
         }),
@@ -215,8 +236,14 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
           Object.assign(target, data);
           return Promise.resolve(target);
         }),
-        findFirst: jest.fn(() => Promise.resolve(null)),
-        findUnique: jest.fn(() => Promise.resolve(null)),
+        findFirst: jest.fn(({ where }: any = {}) => {
+          const found = bookings.find((b) => b.id === (where?.id ?? 999));
+          return Promise.resolve(found ? { ...found } : null);
+        }),
+        findUnique: jest.fn(({ where }: any = {}) => {
+          const found = bookings.find((b) => b.id === (where?.id ?? 999));
+          return Promise.resolve(found ? { ...found } : null);
+        }),
       },
       products: {
         findFirst: jest.fn(({ where }: any) => {
@@ -280,6 +307,8 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
 
     const availabilityService = {
       isSlotAvailable: jest.fn(() => Promise.resolve(true)),
+      validateNoOverlapForCustomer: jest.fn(() => Promise.resolve(true)),
+      validateSlotAvailability: jest.fn(() => Promise.resolve(true)),
     } as any;
 
     const s3Service = {
@@ -376,7 +405,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
 
     expect(ctx.bookings.length).toBe(1);
     expect(ctx.ordersService.create).not.toHaveBeenCalled();
-    expect(ctx.bookings[0].order_id).toBeUndefined();
+    expect(ctx.bookings[0].order_id).toBeNull();
   });
 
   it('QUI-649: a passed order_id attaches the reservation to that order, not a new one', async () => {
@@ -404,17 +433,14 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
 
     // The reservation was rolled back: nothing in the in-memory store.
     expect(ctx.bookings.length).toBe(0);
-    // The transaction itself was entered (we know because ordersService
-    // was called), but its callback threw and the whole $transaction was
-    // abandoned.
-    expect(ctx.prisma.$transaction).toHaveBeenCalled();
     expect(ctx.ordersService.create).toHaveBeenCalledTimes(1);
+    expect(ctx.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   /**
    * Hotfix post-PR-576: el plan invierte el orden — la orden se crea
    * ANTES de la transacción (autocommit). Si la transacción falla, la
-   * compensación cancela la orden vía OrdersService.cancel. Esta guarda
+   * compensación cancela la orden vía OrdersService.update. Esta guarda
    * afirma el invariante "reserva y orden nacen juntas o no nacen" en
    * la dirección contraria del original.
    */
@@ -425,18 +451,16 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       Promise.reject(new ConflictException('slot no longer available')),
     );
 
-    // Spy on ordersService.cancel — needs to exist for the compensation
-    // path to invoke it. Add it after buildServiceForCreate() returns it.
-    const cancelSpy = jest.fn(() => Promise.resolve({ id: 555, state: 'cancelled' }));
-    ctx.ordersService.cancel = cancelSpy;
+    const updateSpy = jest.fn(() => Promise.resolve({ id: 555, state: 'cancelled' }));
+    ctx.ordersService.update = updateSpy;
 
     await expect(ctx.service.create(baseDto)).rejects.toThrow(/slot no longer/);
 
     // The order was created (autocommit succeeded).
     expect(ctx.ordersService.create).toHaveBeenCalledTimes(1);
-    // The compensation cancelled the order.
-    expect(cancelSpy).toHaveBeenCalledTimes(1);
-    expect(cancelSpy).toHaveBeenCalledWith(555, 1);
+    // The compensation cancelled the order via update.
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).toHaveBeenCalledWith(555, expect.objectContaining({ state: 'cancelled' }));
     // No booking persisted.
     expect(ctx.bookings.length).toBe(0);
   });

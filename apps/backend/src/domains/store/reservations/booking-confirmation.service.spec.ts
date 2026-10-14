@@ -27,22 +27,30 @@ describe('BookingConfirmationService.processToken (double-validation)', () => {
     });
 
     const updateCalls: any[] = [];
+    const rawClient: any = {
+      booking_confirmation_tokens: {
+        findUnique: jest.fn().mockImplementation(() => Promise.resolve(tokenRecord())),
+        update: jest.fn().mockImplementation(({ data }: any) => {
+          updateCalls.push({ kind: 'token', data });
+          return Promise.resolve({});
+        }),
+        updateMany: jest.fn().mockImplementation(() => Promise.resolve({ count: 1 })),
+      },
+      bookings: {
+        update: jest.fn().mockImplementation(({ data }: any) => {
+          updateCalls.push({ kind: 'booking', data });
+          return Promise.resolve({ id: 42 });
+        }),
+      },
+      service_allocations: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      $transaction: jest.fn(async (cb: (tx: any) => Promise<any>) => cb(rawClient)),
+    };
     const prisma: any = {
-      withoutScope: () => ({
-        booking_confirmation_tokens: {
-          findUnique: jest.fn().mockResolvedValue(tokenRecord()),
-          update: jest.fn().mockImplementation(({ data }: any) => {
-            updateCalls.push({ kind: 'token', data });
-            return Promise.resolve({});
-          }),
-        },
-        bookings: {
-          update: jest.fn().mockImplementation(({ data }: any) => {
-            updateCalls.push({ kind: 'booking', data });
-            return Promise.resolve({ id: 42 });
-          }),
-        },
-      }),
+      withoutScope: () => rawClient,
     };
 
     const isSlotAvailable = jest.fn().mockResolvedValue(opts.slotAvailable);
