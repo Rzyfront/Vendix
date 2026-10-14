@@ -12,6 +12,7 @@ import {
   buildAiuSummaryRows,
   deriveAiuTotals,
   isAiuOperation,
+  isDocumentLikeTerm,
   isLocalRequirement,
   localRequirement,
   mergeRequirementsByTarget,
@@ -965,5 +966,19 @@ describe('invoice-create-page · requisitos locales con destino', () => {
     const focus = localRequirement('a', 'A', 'r', 'x');
     const nav = localRequirement('b', 'B', 'r', 'x', { kind: 'navigate' });
     expect(mergeRequirementsByTarget([focus], [nav]).length).toBe(2);
+  });
+});
+
+describe('invoice-create-page · isDocumentLikeTerm (consulta RUES del adquiriente)', () => {
+  it('reconoce documentos con o sin puntos, guion de DV o espacios', () => {
+    expect(isDocumentLikeTerm('900123456')).toBe(true);
+    expect(isDocumentLikeTerm('900.123.456-8')).toBe(true);
+    expect(isDocumentLikeTerm(' 1020 304 050 ')).toBe(true);
+  });
+
+  it('no consulta RUES por nombres, correos ni documentos de menos de 5 dígitos', () => {
+    expect(isDocumentLikeTerm('Tecnicell')).toBe(false);
+    expect(isDocumentLikeTerm('compras@tecnicell.co')).toBe(false);
+    expect(isDocumentLikeTerm('1234')).toBe(false);
   });
 });

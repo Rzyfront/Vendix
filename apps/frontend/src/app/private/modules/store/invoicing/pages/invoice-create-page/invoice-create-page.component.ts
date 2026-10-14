@@ -167,9 +167,15 @@ import {
 import { getDianSchemeIdForDocumentType } from '../../../../../../shared/constants/dian-document-types.constants';
 
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
+import {
+  RuesIdentityCardComponent,
+  ruesIdentityToPrefill,
+} from '../../../customers/components/rues-identity-card/rues-identity-card.component';
 import { CustomersService } from '../../../customers/services/customers.service';
 import {
+  CreateCustomerRequest as CustomerModalPrefill,
   Customer,
+  ExternalCustomerLookupResult,
   UpdateCustomerRequest,
 } from '../../../customers/models/customer.model';
 
@@ -1498,6 +1504,16 @@ export function mergeRequirementsByTarget(
 }
 
 /**
+ * El término del buscador de clientes parece un documento (≥5 dígitos; sólo
+ * dígitos, puntos, guiones o espacios) — mismo patrón que valida
+ * `GET /store/customers/lookup/external`, para no gastar consultas a RUES en
+ * búsquedas por nombre o correo.
+ */
+export function isDocumentLikeTerm(term: string): boolean {
+  return /^(?=(?:\D*\d){5})[\d.\-\s]+$/.test(term.trim());
+}
+
+/**
  * VISTA DE FACTURA AVANZADA (superficie fiscal).
  *
  * ─── POR QUÉ ES UNA RUTA Y NO UN MODAL ──────────────────────────────────────
@@ -1591,6 +1607,7 @@ export function mergeRequirementsByTarget(
     IconComponent,
     AccountCodeSelectComponent,
     CustomerModalComponent,
+    RuesIdentityCardComponent,
     DianMunicipalitySelectComponent,
     ConfirmationModalComponent,
     SaveRequirementsModalComponent,
@@ -2032,6 +2049,32 @@ export function mergeRequirementsByTarget(
                       </button>
                     }
                   </div>
+                }
+
+                <!-- Documento sin cliente en la organización: consulta RUES y
+                     fuentes públicas (misma tarjeta que POS / Cambiar titular).
+                     «Crear con estos datos» abre el modal de clientes
+                     prellenado; el alta sigue viajando como inline_customer. -->
+                @if (externalLoading()) {
+                  <div
+                    class="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"
+                  >
+                    <app-icon name="loader-2" [size]="14" class="animate-spin" />
+                    Consultando RUES y fuentes públicas…
+                  </div>
+                } @else if (
+                  externalResult()?.found && externalResult()?.identity
+                ) {
+                  <app-rues-identity-card
+                    [identity]="externalResult()!.identity!"
+                    (createWithData)="onCreateFromExternal()"
+                    (createManual)="onCreateFromDocument()"
+                  />
+                } @else if (externalResult()?.unavailable) {
+                  <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
+                    Fuentes públicas no disponibles en este momento. Puedes
+                    crear el cliente manualmente.
+                  </p>
                 }
               </div>
 
@@ -3257,6 +3300,7 @@ export function mergeRequirementsByTarget(
     <app-customer-modal
       [isOpen]="customerModalOpen()"
       [customer]="customerModalTarget()"
+      [initialValues]="customerModalPrefill()"
       (isOpenChange)="customerModalOpen.set($event)"
       (save)="onCustomerCreated($event)"
     />
@@ -4928,6 +4972,16 @@ export class InvoiceCreatePageComponent implements OnInit {
    * misma señal para decidir POST vs PATCH.
    */
   readonly customerModalTarget = signal<Customer | null>(null);
+  /**
+   * Prellenado del alta (`[initialValues]` de `app-customer-modal`): la
+   * identidad RUES elegida o el documento digitado. `null` en "Crear" a secas.
+   */
+  readonly customerModalPrefill = signal<Partial<CustomerModalPrefill> | null>(
+    null,
+  );
+  /** Consulta RUES/fuentes públicas del documento buscado sin coincidencias. */
+  readonly externalResult = signal<ExternalCustomerLookupResult | null>(null);
+  readonly externalLoading = signal(false);
   /**
    * `true` cuando el adquiriente es una ficha real ya persistida
    * (`customer_id` truthy) — NO un `inline_customer` recién tecleado que
@@ -7209,7 +7263,14 @@ export class InvoiceCreatePageComponent implements OnInit {
         ),
         takeUntilDestroyed(),
       )
-      .subscribe((results) => this.customerResults.set(results));
+      .subscribe((results) => {
+        this.customerResults.set(results);
+        // Sin cliente local y el término parece un documento → RUES.
+        const term = this.customerQuery().trim();
+        if (results.length === 0 && isDocumentLikeTerm(term)) {
+          this.lookupExternal(term);
+        }
+      });
   }
 
   get itemsArray(): FormArray {
@@ -8398,7 +8459,51 @@ export class InvoiceCreatePageComponent implements OnInit {
   onCustomerQuery(event: Event): void {
     const term = (event.target as HTMLInputElement).value;
     this.customerQuery.set(term);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
     this.customerSearch$.next(term);
+  }
+
+  /**
+   * Una consulta a fuentes públicas por documento buscado; el service nunca
+   * lanza (error → `{ found:false, unavailable:true }`).
+   */
+  private lookupExternal(doc: string): void {
+    this.externalLoading.set(true);
+    this.customersService
+      .lookupExternalByDocument(doc)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        // Descarta respuesta rancia si el operador cambió el texto.
+        if (this.customerQuery().trim() !== doc) return;
+        this.externalResult.set(res);
+        this.externalLoading.set(false);
+      });
+  }
+
+  /** «Crear con estos datos»: alta prellenada desde la identidad pública. */
+  onCreateFromExternal(): void {
+    const identity = this.externalResult()?.identity;
+    if (!identity) return;
+    this.openCustomerCreateWith(ruesIdentityToPrefill(identity));
+  }
+
+  /** «Crear manualmente»: alta con el documento digitado. */
+  onCreateFromDocument(): void {
+    const doc = this.customerQuery().trim();
+    this.openCustomerCreateWith(doc ? { document_number: doc } : null);
+  }
+
+  private openCustomerCreateWith(
+    prefill: Partial<CustomerModalPrefill> | null,
+  ): void {
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
+    this.customerQuery.set('');
+    this.customerResults.set([]);
+    this.customerModalTarget.set(null);
+    this.customerModalPrefill.set(prefill);
+    this.customerModalOpen.set(true);
   }
 
   /**
@@ -8446,6 +8551,8 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.linkedCustomerLabel.set(this.customerDisplayName(customer));
     this.customerResults.set([]);
     this.customerQuery.set('');
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
   }
 
   /**
@@ -8468,8 +8575,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   openCustomerCreate(): void {
-    this.customerModalTarget.set(null);
-    this.customerModalOpen.set(true);
+    this.openCustomerCreateWith(null);
   }
 
   /**
@@ -10108,6 +10214,8 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.linkedCustomerLabel.set(null);
     this.customerQuery.set('');
     this.customerResults.set([]);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
     this.openSections.set(
       new Set<SectionId>(['documento', 'adquiriente', 'lineas']),
     );
