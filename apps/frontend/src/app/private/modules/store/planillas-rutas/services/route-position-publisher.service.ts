@@ -172,7 +172,7 @@ export class RoutePositionPublisherService {
           this.buffer.splice(0, batch.length);
         } catch (e: any) {
           const status = e?.status;
-          if (status === 403 || status === 409) {
+          if (status === 403 || status === 404 || status === 409) {
             this.stop();
           }
           // other errors (network/5xx): keep buffer, retry on next tick
