@@ -5204,6 +5204,18 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Subscription checkout validation failed',
   },
+  SUBSCRIPTION_ACTIVATION_START_RANGE: {
+    code: 'SUBSCRIPTION_ACTIVATION_START_RANGE',
+    httpStatus: 400,
+    devMessage:
+      'La fecha de inicio del período debe estar entre hoy menos 31 días y hoy',
+  },
+  SUBSCRIPTION_ACTIVATION_UNDERPAYMENT: {
+    code: 'SUBSCRIPTION_ACTIVATION_UNDERPAYMENT',
+    httpStatus: 400,
+    devMessage:
+      'El monto recibido es menor que el total a cobrar; marca "Aceptar pago parcial" e indica una nota',
+  },
   SUBSCRIPTION_PAY_001: {
     code: 'SUBSCRIPTION_PAY_001',
     httpStatus: 400,
