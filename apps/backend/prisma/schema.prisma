@@ -10454,6 +10454,7 @@ enum print_format_type_enum {
   withholding_practiced
   withholding_suffered
   withholding_employee_certificate
+  cash_session_close
 }
 
 model print_templates {
