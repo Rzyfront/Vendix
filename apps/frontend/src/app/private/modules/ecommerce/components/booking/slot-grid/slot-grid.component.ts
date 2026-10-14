@@ -21,6 +21,8 @@ export interface BookingSlot {
   total_available: number;
   total_capacity?: number;
   booked_count?: number;
+  station_id?: number;
+  station_name?: string;
 }
 
 /**
@@ -118,7 +120,7 @@ export class SlotGridComponent {
 
   selectSlot(slot: BookingSlot): void {
     if (slot.total_available <= 0) return;
-    this.selectedKey.set(`${slot.date}|${slot.start_time}`);
+    this.selectedKey.set(`${slot.date}|${slot.start_time}|${slot.station_id ?? ''}`);
     this.slotSelected.emit(slot);
   }
 
@@ -138,7 +140,7 @@ export class SlotGridComponent {
   }
 
   trackByStartTime(_idx: number, slot: BookingSlot): string {
-    return `${slot.date}|${slot.start_time}`;
+    return `${slot.date}|${slot.start_time}|${slot.station_id ?? ''}`;
   }
 
   private fetchSlots(): void {

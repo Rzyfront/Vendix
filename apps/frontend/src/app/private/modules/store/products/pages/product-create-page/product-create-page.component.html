@@ -1731,6 +1731,13 @@
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-setting-toggle
+                formControlName="requires_station"
+                label="Requiere estación de servicio"
+                description="Solo permite reservar o iniciar este servicio en una estación compatible de la tienda."
+              >
+              </app-setting-toggle>
+
+              <app-setting-toggle
                 formControlName="requires_booking"
                 label="Requiere reserva previa"
                 description="Los clientes deben agendar antes de adquirir"

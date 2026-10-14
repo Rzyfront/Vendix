@@ -1,0 +1,34 @@
+<section class="sessions-panel" aria-labelledby="active-sessions-title">
+  <header class="sessions-panel__header">
+    <div><h2 id="active-sessions-title">Atenciones activas</h2><p>Sesiones abiertas o pausadas en estaciones de servicio</p></div>
+    <button type="button" (click)="load()">Actualizar</button>
+  </header>
+  @if (error()) { <p class="sessions-panel__error" role="alert">{{ error() }}</p> }
+  @if (sessions().length) {
+    <div class="sessions-panel__list">
+      @for (session of sessions(); track session.id) {
+        <button type="button" class="session-row" [class.session-row--selected]="selected()?.id === session.id" (click)="open(session)">
+          <span><strong>{{ session.subject?.label || 'Cliente' }}</strong><small>{{ session.product_name }} Â· {{ session.station_name }}</small></span>
+          <span class="session-row__status">{{ session.status === 'paused' ? 'Pausada' : 'En atenciÃ³n' }}</span>
+        </button>
+      }
+    </div>
+  } @else { <p class="sessions-panel__empty">No hay atenciones activas.</p> }
+  @if (selected(); as session) {
+    <article class="session-detail">
+      <header><div><h3>{{ session.subject?.label || 'AtenciÃ³n' }}</h3><p>{{ session.product_name }} Â· {{ session.station_name }}</p></div><button type="button" (click)="selected.set(null)" aria-label="Cerrar detalle">Ã</button></header>
+      <label>Tope del presupuesto
+        <input type="number" min="0" step="100" [ngModel]="amount()" (ngModelChange)="amount.set($event)" />
+      </label>
+      <button type="button" [disabled]="saving() || amount() == null" (click)="saveBudget()">{{ saving() ? 'Guardandoâ¦' : 'Guardar tope' }}</button>
+      <h4>Propuestas de cambio</h4>
+      @if (proposals().length) {
+        @for (proposal of proposals(); track proposal.id) { <p class="proposal-row">Propuesta v{{ proposal.version }} Â· {{ proposal.status }} Â· {{ proposal.currency }} {{ proposal.total }}</p> }
+      } @else { <p class="sessions-panel__empty">Sin propuestas registradas.</p> }
+      <footer>
+        @if (session.status === 'paused') { <button type="button" (click)="transition('resume')">Reanudar</button> } @else { <button type="button" (click)="transition('pause')">Pausar</button> }
+        <button type="button" class="session-detail__close" (click)="transition('close')">Cerrar atenciÃ³n</button>
+      </footer>
+    </article>
+  }
+</section>

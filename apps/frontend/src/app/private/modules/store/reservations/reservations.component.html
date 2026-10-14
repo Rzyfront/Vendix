@@ -63,6 +63,22 @@
           </a>
         </app-tooltip>
 
+        <app-tooltip
+          content="Configurar estaciones y horarios de servicio"
+          position="bottom"
+          size="sm"
+        >
+          <a
+            routerLink="/admin/services/stations"
+            aria-label="Estaciones de servicio"
+            class="flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px] border border-[var(--color-border)] bg-surface hover:bg-[var(--color-background)]"
+            style="color: var(--color-text-primary);"
+          >
+            <app-icon name="scan-line" [size]="14"></app-icon>
+            <span class="hidden sm:inline">Estaciones</span>
+          </a>
+        </app-tooltip>
+
         <!-- Appointment redesign phase 2 — solicitudes de reagenda.
              Badge con el count de pending. Click → navega a la página
              dedicada /admin/reservations/reschedule-requests. -->
@@ -124,6 +140,9 @@
        gestionan en una vista aparte en /admin/reservations/reschedule-requests
        (botón "Solicitudes de reagenda" en la header de arriba). Este módulo
        ya no muestra el panel inline para evitar duplicación. -->
+
+  <!-- Stats Grid -->
+  <app-service-sessions-panel></app-service-sessions-panel>
 
   <!-- Stats Grid -->
   <div class="stats-container">

@@ -1,0 +1,179 @@
+<main class="stations-page">
+  <header class="page-header">
+    <div>
+      <button type="button" class="back-link" (click)="goBack()">Reservas</button>
+      <h1>Estaciones de servicio</h1>
+      <p>Administra los espacios de atención, sus servicios, proveedores y horarios.</p>
+    </div>
+    <app-button variant="primary" (clicked)="showCreateForm.set(!showCreateForm())">
+      <app-icon name="plus" /> Nueva estación
+    </app-button>
+  </header>
+
+  @if (errorMessage()) {
+    <div class="notice notice--error" role="alert">{{ errorMessage() }}</div>
+  }
+  @if (successMessage()) {
+    <div class="notice notice--success" role="status">{{ successMessage() }}</div>
+  }
+
+  @if (showCreateForm()) {
+    <app-card>
+      <form class="create-form" (ngSubmit)="createStation()">
+        <label>
+          Nombre de la estación
+          <input name="newStationName" [ngModel]="newName()" (ngModelChange)="newName.set($event)" maxlength="120" required placeholder="Ej. Bahía 1" />
+        </label>
+        <p class="field-hint">La capacidad actual por estación es 1.</p>
+        <div class="form-actions">
+          <app-button variant="secondary" type="button" (clicked)="showCreateForm.set(false)">Cancelar</app-button>
+          <app-button variant="primary" type="submit" [loading]="saving()">Crear estación</app-button>
+        </div>
+      </form>
+    </app-card>
+  }
+
+  <section class="summary" aria-label="Resumen de estaciones">
+    <div class="summary-card"><span class="summary-card__value">{{ totalItems() }}</span><span>Estaciones</span></div>
+    <div class="summary-card"><span class="summary-card__value">{{ activeCount() }}</span><span>Activas en esta página</span></div>
+  </section>
+
+  @if (loading()) {
+    <div class="loading" role="status" aria-live="polite">Cargando estaciones…</div>
+  } @else if (stations().length === 0) {
+    <app-card>
+      <div class="empty-state">
+        <app-icon name="map-pin" [size]="28" />
+        <h2>Aún no hay estaciones</h2>
+        <p>Crea una estación para asignarle servicios y configurar cuándo está disponible.</p>
+        <app-button variant="primary" (clicked)="showCreateForm.set(true)">Crear primera estación</app-button>
+      </div>
+    </app-card>
+  } @else {
+    <div class="workspace">
+      <section class="station-list-panel" aria-label="Lista de estaciones">
+        <h2>Estaciones ({{ totalItems() }})</h2>
+        <app-responsive-data-view
+          [data]="stations()"
+          [columns]="stationColumns"
+          [cardConfig]="stationCardConfig"
+          [loading]="loading()"
+          [sortable]="false"
+          [rowClass]="stationRowClass"
+          emptyMessage="No hay estaciones registradas"
+          emptyIcon="map-pin"
+          (rowClick)="onStationRowClick($event)"
+        />
+        <div class="pagination-wrap">
+          <app-pagination
+            [currentPage]="filters().page"
+            [totalPages]="totalPages()"
+            [total]="totalItems()"
+            [limit]="filters().limit"
+            infoStyle="range"
+            (pageChange)="onPageChange($event)"
+          />
+        </div>
+      </section>
+
+      @if (selectedStation(); as station) {
+        <section class="station-detail" aria-label="Configuración de estación">
+          <app-card>
+            <div class="section-heading">
+              <div><span class="eyebrow">ESTACIÓN</span><h2>{{ station.name }}</h2></div>
+              <span class="status-pill" [class.status-pill--inactive]="station.status !== 'active'">{{ station.status === 'active' ? 'Disponible' : 'Inactiva' }}</span>
+            </div>
+            <div class="identity-grid">
+              <label>Nombre
+                <input [ngModel]="editName()" (ngModelChange)="editName.set($event)" [ngModelOptions]="{standalone:true}" maxlength="120" />
+              </label>
+              <div class="readonly-field"><span>Capacidad</span><strong>{{ station.capacity }} vehículo</strong></div>
+            </div>
+            <div class="qr-summary">
+              <app-icon name="scan-line" [size]="20" />
+              <div><strong>Identificador QR físico</strong><span>{{ station.public_id || 'Aún no disponible' }}</span></div>
+              <span class="qr-state">{{ station.qr_status === 'ready' ? 'Identificado' : 'Pendiente' }}</span>
+            </div>
+            <div class="form-actions">
+              <app-button variant="secondary" (clicked)="toggleStatus()" [disabled]="saving()">{{ station.status === 'active' ? 'Desactivar' : 'Activar' }}</app-button>
+              <app-button variant="primary" (clicked)="saveDetails()" [loading]="saving()">Guardar datos</app-button>
+            </div>
+          </app-card>
+
+          <app-card>
+            <div class="section-heading"><div><span class="eyebrow">COMPATIBILIDAD</span><h2>Servicios</h2></div></div>
+            <p class="section-copy">Elige los servicios que pueden atenderse en esta estación.</p>
+            @if (services().length === 0) {
+              <p class="empty-inline">No encontramos productos de tipo servicio.</p>
+            } @else {
+              <div class="check-grid">
+                @for (service of services(); track service.id) {
+                  <label class="check-option"><input type="checkbox" [checked]="serviceIds().includes(service.id)" (change)="toggleService(service.id)" /><span><strong>{{ service.name }}</strong><small>{{ service.service_duration_minutes ? service.service_duration_minutes + ' min' : 'Duración por definir' }}</small></span></label>
+                }
+              </div>
+            }
+            <div class="form-actions"><app-button variant="primary" (clicked)="saveServices()" [loading]="saving()">Guardar servicios</app-button></div>
+          </app-card>
+
+          <app-card>
+            <div class="section-heading"><div><span class="eyebrow">COMPATIBILIDAD</span><h2>Proveedores</h2></div></div>
+            <p class="section-copy">Solo se pueden guardar proveedores activos que ofrezcan al menos uno de los servicios seleccionados.</p>
+            @if (!serviceIds().length) { <p class="empty-inline">Selecciona y guarda al menos un servicio antes de asignar proveedores.</p> }
+            @if (providers().length === 0) { <p class="empty-inline">No hay proveedores activos disponibles.</p> }
+            <div class="check-grid">
+              @for (provider of providers(); track provider.id) {
+                <label class="check-option" [class.check-option--disabled]="!providerSupportsSelectedServices(provider)">
+                  <input type="checkbox" [checked]="providerIds().includes(provider.id)" [disabled]="!providerSupportsSelectedServices(provider)" (change)="toggleProvider(provider.id)" />
+                  <span><strong>{{ provider.display_name }}</strong><small>{{ providerSupportsSelectedServices(provider) ? 'Compatible' : 'No ofrece los servicios seleccionados' }}</small></span>
+                </label>
+              }
+            </div>
+            <div class="form-actions"><app-button variant="primary" (clicked)="saveProviders()" [loading]="saving()" [disabled]="!serviceIds().length">Guardar proveedores</app-button></div>
+          </app-card>
+
+          <app-card>
+            <div class="section-heading"><div><span class="eyebrow">DISPONIBILIDAD</span><h2>Horario semanal</h2></div></div>
+            <p class="section-copy">Los bloques deben quedar dentro del horario de atención de la tienda.</p>
+            <div class="schedule-list">
+              @for (day of weekdays; track day.value) {
+                <div class="schedule-day">
+                  <div class="schedule-day__heading">
+                    <strong>{{ day.label }}</strong>
+                    <button type="button" class="add-block-button" (click)="addScheduleBlock(day.value)">Agregar bloque</button>
+                  </div>
+                  @for (row of schedulesFor(day.value); track row.block_order) {
+                  <div class="schedule-row">
+                    <label class="day-toggle"><input type="checkbox" [checked]="row.is_active" (change)="updateSchedule(day.value, row.block_order ?? 0, 'is_active', $any($event.target).checked)" />{{ row.is_active ? 'Abierto' : 'Cerrado' }}</label>
+                    <input [attr.aria-label]="'Hora inicial ' + day.label" type="time" [disabled]="!row.is_active" [value]="row.start_time" (input)="updateSchedule(day.value, row.block_order ?? 0, 'start_time', $any($event.target).value)" />
+                    <span>a</span>
+                    <input [attr.aria-label]="'Hora final ' + day.label" type="time" [disabled]="!row.is_active" [value]="row.end_time" (input)="updateSchedule(day.value, row.block_order ?? 0, 'end_time', $any($event.target).value)" />
+                    <button type="button" class="remove-button" (click)="removeScheduleBlock(day.value, row.block_order ?? 0)" [attr.aria-label]="'Eliminar bloque de ' + day.label">Quitar</button>
+                  </div>
+                  }
+                </div>
+              }
+            </div>
+            <div class="form-actions"><app-button variant="primary" (clicked)="saveSchedule()" [loading]="saving()">Guardar horario</app-button></div>
+          </app-card>
+
+          <app-card>
+            <div class="section-heading"><div><span class="eyebrow">EXCEPCIONES</span><h2>Cierres especiales</h2></div></div>
+            <div class="exception-form">
+              <label>Desde · hora local ({{ timezone() }}) <input type="datetime-local" [ngModel]="exceptionStart()" (ngModelChange)="exceptionStart.set($event)" [ngModelOptions]="{standalone:true}" /></label>
+              <label>Hasta · hora local ({{ timezone() }}) <input type="datetime-local" [ngModel]="exceptionEnd()" (ngModelChange)="exceptionEnd.set($event)" [ngModelOptions]="{standalone:true}" /></label>
+              <label class="exception-reason">Motivo (opcional) <input [ngModel]="exceptionReason()" (ngModelChange)="exceptionReason.set($event)" [ngModelOptions]="{standalone:true}" maxlength="255" /></label>
+              <app-button variant="secondary" (clicked)="addException()" [loading]="saving()">Agregar cierre</app-button>
+            </div>
+            @if (exceptions().length) {
+              <ul class="exception-list">
+                @for (exception of exceptions(); track exception.id) {
+                  <li><span><strong>{{ formatExceptionTime(exception.start_at) }} – {{ formatExceptionTime(exception.end_at) }}</strong><small>{{ exception.reason || 'Sin motivo indicado' }}</small></span><button type="button" class="remove-button" (click)="deleteException(exception.id)" [attr.aria-label]="'Eliminar cierre ' + (exception.reason || exception.id)">Eliminar</button></li>
+                }
+              </ul>
+            } @else { <p class="empty-inline">No hay cierres especiales registrados.</p> }
+          </app-card>
+        </section>
+      }
+    </div>
+  }
+</main>

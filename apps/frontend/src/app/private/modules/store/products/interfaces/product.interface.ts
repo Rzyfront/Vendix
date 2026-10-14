@@ -69,6 +69,7 @@ export interface Product {
     | 'package'
     | 'subscription';
   requires_booking?: boolean;
+  requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
@@ -385,6 +386,7 @@ export interface CreateProductDto {
     | 'package'
     | 'subscription';
   requires_booking?: boolean;
+  requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;

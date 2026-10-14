@@ -159,6 +159,27 @@
 
       <!-- Date + Channel (always visible when service is selected) -->
       @if (selectedService()) {
+        @if (requiresStation()) {
+          <div class="form-section mt-4">
+            <div class="section-header">
+              <div class="section-icon-badge schedule-badge"><app-icon name="map-pin" [size]="14"></app-icon></div>
+              <span class="section-title"><span class="title-text">Estación</span><span class="title-required">*</span></span>
+            </div>
+            @if (loadingStations()) {
+              <div class="loading-state"><app-spinner size="sm" color="primary"></app-spinner><span class="loading-text">Cargando estaciones compatibles…</span></div>
+            } @else if (stationOptions().length === 0) {
+              <p class="services-hint">No hay estaciones activas compatibles con este servicio.</p>
+            } @else {
+              <app-selector
+                [ngModel]="selectedStation()?.id ?? null"
+                (ngModelChange)="selectStation($event)"
+                [options]="stationOptions()"
+                placeholder="Seleccionar estación"
+              ></app-selector>
+            }
+          </div>
+        }
+
         <div class="date-channel-row">
           <div class="form-section">
             <div class="section-header">
@@ -626,6 +647,25 @@
               Notas
             </div>
             <div class="confirm-notes">{{ notes() }}</div>
+          </div>
+        }
+
+        @if (requiresStation()) {
+          <div class="form-section mt-4">
+            <div class="section-header">
+              <div class="section-icon-badge schedule-badge"><app-icon name="map-pin" [size]="14"></app-icon></div>
+              <span class="section-title"><span class="title-text">Estación</span><span class="title-required">*</span></span>
+            </div>
+            @if (stationOptions().length === 0) {
+              <p class="services-hint">No hay estaciones compatibles con el proveedor seleccionado.</p>
+            } @else {
+              <app-selector
+                [ngModel]="selectedStation()?.id ?? null"
+                (ngModelChange)="selectStation($event)"
+                [options]="stationOptions()"
+                placeholder="Seleccionar estación"
+              ></app-selector>
+            }
           </div>
         }
       </div>

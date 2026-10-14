@@ -378,7 +378,7 @@
               {{ consultationButtonLabel() }}
             </button>
           } @else {
-            <button class="btn-footer primary" (click)="started.emit(f)">
+            <button class="btn-footer primary" [disabled]="checkingIn()" (click)="startBooking()">
               <app-icon name="play" [size]="15"></app-icon>
               Iniciar
             </button>

@@ -52,6 +52,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
           [attr.role]="dialog() ? 'dialog' : null"
           [attr.aria-modal]="dialog() ? 'true' : null"
           [attr.aria-labelledby]="dialog() && titleId() ? titleId() : null"
+          [attr.aria-describedby]="dialog() && describedBy() ? describedBy() : null"
         >
           <!-- Modal content con diseño mejorado -->
           <div [class]="contentClasses()">
@@ -167,6 +168,7 @@ export class ModalComponent {
 
   readonly title = input<string>();
   readonly subtitle = input<string>();
+  readonly describedBy = input<string>();
   readonly size = input<ModalSize>('md');
   readonly centered = input<boolean>(true);
   // QUI-438: default `false` para no cerrar al hacer click fuera del modal

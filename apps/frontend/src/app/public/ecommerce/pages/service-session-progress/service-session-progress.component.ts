@@ -1,0 +1,150 @@
+import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { Component, DestroyRef, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { Meta } from '@angular/platform-browser';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { environment } from '../../../../../environments/environment';
+
+interface ServiceProposal {
+  version: number;
+  snapshot_hash: string;
+  lines: { items?: Array<{ name?: string; description?: string; quantity?: number; total?: number; unit_price?: number }> } | unknown;
+  subtotal: number | string;
+  tax: number | string;
+  discount: number | string;
+  total: number | string;
+  currency: string;
+  expires_at: string;
+  status: string;
+}
+
+interface PublicProgress {
+  status: string;
+  events: Array<{ type: string; text: string; created_at: string }>;
+  proposal?: ServiceProposal | null;
+}
+
+@Component({
+  selector: 'app-service-session-progress',
+  standalone: true,
+  imports: [CommonModule, DatePipe, DecimalPipe],
+  templateUrl: './service-session-progress.component.html',
+  styleUrl: './service-session-progress.component.scss',
+})
+export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
+  private readonly route = inject(ActivatedRoute);
+  private readonly http = inject(HttpClient);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly meta = inject(Meta);
+  private stream?: EventSource;
+  private readonly apiUrl = `${environment.apiUrl}/ecommerce`;
+
+  readonly state = signal<'loading' | 'loaded' | 'unavailable' | 'error'>('loading');
+  readonly progress = signal<PublicProgress | null>(null);
+  readonly busy = signal(false);
+  readonly decisionPrompt = signal<'approved' | 'rejected' | null>(null);
+  readonly decisionMessage = signal<string | null>(null);
+  readonly connected = signal(false);
+  readonly proposalLines = computed(() => {
+    const lines = this.progress()?.proposal?.lines as { items?: unknown[] } | null | undefined;
+    return Array.isArray(lines?.items) ? lines.items as Array<Record<string, unknown>> : [];
+  });
+
+  private token = '';
+
+  ngOnInit(): void {
+    this.token = this.route.snapshot.paramMap.get('token') ?? '';
+    if (!/^[A-Za-z0-9_-]{43}$/.test(this.token)) {
+      this.state.set('unavailable');
+      return;
+    }
+    this.meta.updateTag({ name: 'referrer', content: 'no-referrer' });
+    this.refresh();
+    this.openStream();
+  }
+
+  ngOnDestroy(): void {
+    this.stream?.close();
+    this.connected.set(false);
+  }
+
+  refresh(): void {
+    this.http.get<PublicProgress>(`${this.apiUrl}/service-sessions/${this.token}`, { headers: { 'Cache-Control': 'no-cache' } })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (value) => { this.progress.set(value); this.state.set('loaded'); },
+        error: (error) => this.state.set(error?.status === 410 || error?.status === 404 ? 'unavailable' : 'error'),
+      });
+  }
+
+  askDecision(decision: 'approved' | 'rejected'): void {
+    this.decisionMessage.set(null);
+    this.decisionPrompt.set(decision);
+  }
+
+  cancelDecision(): void { this.decisionPrompt.set(null); }
+
+  decide(): void {
+    const proposal = this.progress()?.proposal;
+    const decision = this.decisionPrompt();
+    if (!proposal || !decision || this.busy()) return;
+    this.busy.set(true);
+    this.http.post(`${this.apiUrl}/service-proposals/${this.token}/decision`, {
+      decision,
+      proposal_version: proposal.version,
+      snapshot_hash: proposal.snapshot_hash,
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.busy.set(false);
+        this.decisionPrompt.set(null);
+        this.decisionMessage.set(decision === 'approved' ? 'Tu aprobaciÃ³n quedÃ³ registrada.' : 'Tu rechazo quedÃ³ registrado.');
+        this.refresh();
+      },
+      error: (error) => {
+        this.busy.set(false);
+        if (error?.status === 410 || error?.status === 404) {
+          this.state.set('unavailable');
+          return;
+        }
+        this.decisionPrompt.set(null);
+        this.decisionMessage.set(error?.status === 409
+          ? 'La propuesta cambiÃ³ o venciÃ³. Actualiza la informaciÃ³n antes de decidir.'
+          : 'No pudimos registrar tu decisiÃ³n. Actualiza e intÃ©ntalo de nuevo.');
+        this.refresh();
+      },
+    });
+  }
+
+  money(value: unknown, currency?: string): string {
+    const amount = Number(value ?? 0);
+    if (!Number.isFinite(amount)) return 'â';
+    try { return new Intl.NumberFormat('es-CO', { style: 'currency', currency: currency || 'COP' }).format(amount); }
+    catch { return `${currency || ''} ${amount.toLocaleString('es-CO')}`.trim(); }
+  }
+
+  proposalStatusLabel(status: string): string {
+    return ({ pending: 'Pendiente de tu decisiÃ³n', approved: 'Aprobada', rejected: 'Rechazada', expired: 'Vencida', stale: 'Actualizada' } as Record<string, string>)[status] ?? status;
+  }
+
+  private openStream(): void {
+    this.stream?.close();
+    this.stream = new EventSource(`${this.apiUrl}/service-sessions/${this.token}/stream`, { withCredentials: true });
+    this.stream.onopen = () => this.connected.set(true);
+    this.stream.onerror = () => this.connected.set(false);
+    for (const eventName of ['snapshot', 'progress']) {
+      this.stream.addEventListener(eventName, (event: MessageEvent) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (eventName === 'snapshot') this.progress.set(payload);
+          else if (payload?.text) {
+            const current = this.progress();
+            if (current) this.progress.set({ ...current, status: payload.status ?? current.status, events: [...current.events, { type: payload.type, text: payload.text, created_at: new Date().toISOString() }].slice(-100) });
+          }
+          this.state.set('loaded');
+        } catch { /* Ignore malformed frames and keep the last safe snapshot. */ }
+      });
+    }
+    this.stream.addEventListener('link_expired', () => { this.state.set('unavailable'); this.stream?.close(); });
+  }
+}

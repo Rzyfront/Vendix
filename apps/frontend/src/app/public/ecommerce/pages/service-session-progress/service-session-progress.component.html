@@ -1,0 +1,86 @@
+<main class="progress-page" aria-labelledby="page-title">
+  <header class="page-header">
+    <p class="eyebrow">Seguimiento de tu servicio</p>
+    <h1 id="page-title">Estado de atenciÃ³n</h1>
+    <p class="connection" aria-live="polite">
+      <span class="connection-dot" [class.online]="connected()"></span>
+      {{ connected() ? 'ActualizaciÃ³n en vivo' : 'Ãltima informaciÃ³n recibida' }}
+      <button type="button" class="link-button" (click)="refresh()">Actualizar</button>
+    </p>
+  </header>
+
+  @if (state() === 'loading') {
+    <section class="notice" role="status">Cargando el estado de tu servicioâ¦</section>
+  } @else if (state() === 'unavailable') {
+    <section class="notice notice-error" role="alert">
+      <h2>Este enlace ya no estÃ¡ disponible</h2>
+      <p>Puede haber vencido o haber sido desactivado. Solicita al establecimiento un enlace actualizado.</p>
+    </section>
+  } @else if (state() === 'error') {
+    <section class="notice notice-error" role="alert">
+      <h2>No pudimos cargar el seguimiento</h2>
+      <p>Revisa tu conexiÃ³n e intenta actualizar la informaciÃ³n.</p>
+      <button type="button" class="button button-secondary" (click)="refresh()">Intentar de nuevo</button>
+    </section>
+  } @else {
+    <section class="status-card" aria-labelledby="service-status-title">
+      <div class="status-mark" aria-hidden="true">â</div>
+      <div><h2 id="service-status-title">{{ progress()?.status === 'paused' ? 'AtenciÃ³n en pausa' : progress()?.status === 'closed' ? 'Servicio finalizado' : 'AtenciÃ³n en curso' }}</h2>
+        <p>El establecimiento actualizarÃ¡ este seguimiento durante el servicio.</p></div>
+    </section>
+
+    @if (progress()?.proposal; as proposal) {
+      <section class="proposal-card" aria-labelledby="proposal-title">
+        <div class="proposal-heading">
+          <div><p class="eyebrow">AutorizaciÃ³n</p><h2 id="proposal-title">Propuesta de trabajo adicional</h2></div>
+          <span class="proposal-state">{{ proposalStatusLabel(proposal.status) }}</span>
+        </div>
+        <p class="proposal-intro">Revisa el detalle y el total antes de responder. Tu respuesta se registra para esta versiÃ³n de la propuesta.</p>
+        @if (proposalLines().length) {
+          <ul class="line-list">
+            @for (line of proposalLines(); track $index) {
+              <li><span>{{ line['name'] || line['description'] || 'Servicio adicional' }} <small>Ã {{ line['quantity'] || 1 }}</small></span>
+                <strong>{{ money(line['total'] ?? line['unit_price'], proposal.currency) }}</strong></li>
+            }
+          </ul>
+        }
+        <dl class="totals">
+          <div><dt>Subtotal</dt><dd>{{ money(proposal.subtotal, proposal.currency) }}</dd></div>
+          <div><dt>Impuestos</dt><dd>{{ money(proposal.tax, proposal.currency) }}</dd></div>
+          <div><dt>Descuentos</dt><dd>â{{ money(proposal.discount, proposal.currency) }}</dd></div>
+          <div class="grand-total"><dt>Total propuesto</dt><dd>{{ money(proposal.total, proposal.currency) }}</dd></div>
+        </dl>
+        <p class="expires">VÃ¡lida hasta {{ proposal.expires_at | date:'medium' }}</p>
+        @if (proposal.status === 'pending') {
+          <div class="decision-actions">
+            <button type="button" class="button button-primary" (click)="askDecision('approved')">Aprobar {{ money(proposal.total, proposal.currency) }}</button>
+            <button type="button" class="button button-secondary" (click)="askDecision('rejected')">Rechazar propuesta</button>
+          </div>
+        }
+      </section>
+    }
+
+    @if (decisionMessage()) { <p class="notice notice-success" role="status">{{ decisionMessage() }}</p> }
+    @if (decisionPrompt(); as decision) {
+      <section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 id="confirm-title">{{ decision === 'approved' ? 'Â¿Confirmas esta aprobaciÃ³n?' : 'Â¿Confirmas que rechazas esta propuesta?' }}</h2>
+        @if (decision === 'approved' && progress()?.proposal; as proposal) { <p>Autorizas el total adicional de <strong>{{ money(proposal.total, proposal.currency) }}</strong>.</p> }
+        <div class="decision-actions">
+          <button type="button" class="button button-primary" [disabled]="busy()" (click)="decide()">{{ busy() ? 'Registrandoâ¦' : 'Confirmar decisiÃ³n' }}</button>
+          <button type="button" class="button button-secondary" [disabled]="busy()" (click)="cancelDecision()">Volver</button>
+        </div>
+      </section>
+    }
+
+    <section class="timeline" aria-labelledby="timeline-title">
+      <h2 id="timeline-title">Actualizaciones</h2>
+      @if (progress()?.events?.length) {
+        <ol>
+          @for (event of progress()?.events; track event.created_at + event.type) {
+            <li><span class="timeline-dot" aria-hidden="true"></span><div><p>{{ event.text }}</p><time>{{ event.created_at | date:'medium' }}</time></div></li>
+          }
+        </ol>
+      } @else { <p>AÃºn no hay actualizaciones.</p> }
+    </section>
+  }
+</main>
