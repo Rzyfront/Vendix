@@ -193,7 +193,25 @@ Evidencia comunicada y comprobada por raíz con fixtures **sintéticos**, no inf
 | Challenge Gmail | Código sólo bajo hechos de autenticación SES **SINTÉTICOS**; spoof rechazado. No prueba autenticación Google/SES real ni confirma reenvío automáticamente |
 | Duplicado de otra tienda | Resultado sin IDs de documento ajeno; acceso cruzado HTTP devuelve404 |
 
-Esta evidencia demuestra integración **local** de los controles ejercitados, no XSD DIAN, criptografía/firma, GetStatus, correo externo, IAM/S3/SQS cloud, redrive ni piloto productivo. No hubo originales reales: la carpeta autorizada de muestras estaba vacía. La verificación visual/UI del comerciante por raíz sigue **en curso** y se remite a un reporte posterior; no se declara resultado de navegador ni runner frontend aquí.
+Esta evidencia demuestra integración **local** de los controles ejercitados, no XSD DIAN, criptografía/firma, GetStatus, correo externo, IAM/S3/SQS cloud, redrive ni piloto productivo. No hubo originales reales: la carpeta autorizada de muestras estaba vacía. La QA visual local de Buzón/asistente/detalle sí se ejecutó en Chrome/Playwright existente y se detalla en el [informe de verificación](email-reception-verification.md). No se ejecutó runner frontend; recorridos org→store/sólo lectura/retry y piloto humano conservan gaps explícitos.
+
+### Repetir el simulador con límites locales
+
+Desde `apps/backend`, usando el contenedor dev ya listo y un corpus privado ajustado al NIT canónico local (el corpus del repo no coincide automáticamente con el seed):
+
+```bash
+# Copiar solamente fixture sintético/anonimizado autorizado al contenedor; nunca originals de cliente al repo.
+docker cp "$PRIVATE_FIXTURE_DIR" vendix_backend:/tmp/email-fixtures
+# El core, DB, Redis y filesystem son reales; sólo SES/S3/SQS transport se simula.
+docker exec -e TS_NODE_TRANSPILE_ONLY=1 -e NODE_OPTIONS=--max-old-space-size=1536 \
+  -e RECEIVED_DOCUMENT_STORAGE_DRIVER=local vendix_backend \
+  node -r ts-node/register -r tsconfig-paths/register scripts/email-reception-simulate.ts \
+  --store-id "$STORE_ID" --eml /tmp/email-fixtures/invoice.eml --ses-id "$UNIQUE_SYNTHETIC_ID" --repeat 2
+```
+
+Para primera activación local añadir explícitamente `--activate --actor-id "$AUTHORIZED_ACTOR_ID"`; no crea entidad fiscal ni configuración DIAN, y requiere los gates/consentimiento auditado. `--ses-metadata` sólo admite metadata fixture explícita y acotada: **no prueba autenticación Google/SES real**. No importa el AppModule ni inicia cron/worker remotos.
+
+El driver local usa `/tmp/vendix-received-documents` por defecto: **recrear el contenedor elimina ese filesystem efímero**. Para QA prolongada definir `RECEIVED_DOCUMENT_LOCAL_ROOT` en un volumen local persistente autorizado y fuera de Git, o conservar snapshot privado antes de recrear. Esta sesión repuso sólo los14 archivos sintéticos propios por SHA exacto y volvió a descargarlos por HTTP; no implica recuperar archivos ajenos ni sustituye retención S3 productiva. Defaults recepción/DIAN permanecen false tras la QA visual.
 
 ## P0.11 — Purga técnica limitada y apagada por defecto
 
@@ -238,7 +256,7 @@ Política aprobada se mantiene separada: **raw factura30d; no-factura/spam7d tra
 
 ### Evidencia disponible y gates todavía manuales
 
-Checkpoint comunicado y comprobado por raíz: **11 specs backend puntuales, 462 PASS**, ejecutados secuencialmente (heap1536, aislados, una invocación por archivo), **antes de la corrección final core todavía en curso**. No se presenta ese checkpoint como verificación del árbol posterior ni como runner frontend. Los conteos por superficie siguientes son checkpoints previos conservados para trazabilidad:
+Checkpoint comunicado y comprobado por raíz: **11 specs backend puntuales, 462 PASS**, ejecutados secuencialmente (heap1536, aislados, una invocación por archivo), **antes de la corrección final core (véase el informe de verificación para el corte posterior)**. No se presenta ese checkpoint como verificación del árbol posterior ni como runner frontend. Los conteos por superficie siguientes son checkpoints previos conservados para trazabilidad:
 
 | Superficie | Evidencia observada | No demuestra |
 | --- | --- | --- |
@@ -252,7 +270,7 @@ Checkpoint comunicado y comprobado por raíz: **11 specs backend puntuales, 462 
 | Simulador/pipeline local + HTTP |Factura doc10 `ready`, cinco archivos/SHA; SES repetido, reenvíos, codificaciones, POS y negativos de ambiente/receptor/Gmail/cross-store observados por raíz |Transporte externo, autenticación SES real, DIAN o navegador |
 | Purga técnica |`--help` y dry-run DB local scoped org1/store1 PASS exit0; cero candidatos/mutaciones, originales intactos |Execute/delete probado o cron instalado |
 
-El corpus es sintético y el discovery DIAN sigue pendiente. El simulador local y las descargas HTTP anteriores sí tienen evidencia real; **no extrapolarla a transporte externo o E2E de comerciante**. QA visual/UI por raíz está en curso y su resultado corresponde a un reporte posterior. **Navegador, execute/delete de purga, AWS redrive, alarmas/budget observados y piloto externo no se declaran verificados aquí.** No se ejecutó runner frontend `.ui.spec.ts`, validación XSD, criptografía o DIAN real.
+El corpus es sintético y el discovery DIAN sigue pendiente. El simulador local y las descargas HTTP anteriores sí tienen evidencia real; **no extrapolarla a transporte externo o E2E de comerciante**. QA visual/UI local y sus gaps constan en el [informe de verificación](email-reception-verification.md): 15 controles observados, cero pageerrors. **Org→store/sólo lectura/retry visual, execute/delete de purga, AWS redrive, alarmas/budget observados y piloto externo no se declaran verificados.** No se ejecutó runner frontend `.ui.spec.ts`, validación XSD, criptografía o DIAN real.
 
 ### Gmail: código-only y plantilla todavía no validada con muestra real
 
