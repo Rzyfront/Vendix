@@ -56,7 +56,7 @@ import {
         <div class="sticky z-10 bg-background px-2 py-2 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border" [style.top.px]="statsOffset()">
           <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
             <h2 class="text-sm font-semibold text-text-primary md:text-lg">Buzón de facturas</h2>
-              <input #xmlInput class="sr-only" type="file" aria-label="Importar XML" accept=".xml,text/xml,application/xml" [disabled]="uploading() || !canImportInCurrentScope()" (change)="onFileSelected($event)" />
+              <input #xmlInput class="sr-only" type="file" aria-label="Importar XML" accept=".xml,text/xml,application/xml" [disabled]="uploading() || !canImportInCurrentScope()" (click)="onXmlInputClick($event)" (change)="onFileSelected($event)" />
             @if (areaView() === 'invoices') {
             <div class="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto">
               <app-inputsearch class="min-w-0 flex-1 basis-40 md:w-64" placeholder="Buscar proveedor, NIT o número" ariaLabel="Buscar facturas recibidas" [debounceTime]="300" [ngModel]="searchValue()" (ngModelChange)="searchValue.set($event)" (searchChange)="onSearch($event)" (clear)="onSearch('')" />
@@ -515,9 +515,20 @@ export class ReceivedDocumentsPageComponent {
     if (!this.canConfigure() && !this.canConfigureEmail()) return;
     void this.router.navigate(['/admin/invoicing/dian-config'], { queryParams: this.storeId() ? { store_id: this.storeId() } : undefined });
   }
+  onXmlInputClick(event: Event): void {
+    if (!this.canImportInCurrentScope() || this.uploading()) {
+      this.xmlSelectionContext = '';
+      event.preventDefault();
+      return;
+    }
+    // Includes direct keyboard/click activation of the accessible file input.
+    this.xmlSelectionContext = this.writeContext();
+  }
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
-    if (!this.canImportInCurrentScope() || (this.xmlSelectionContext && this.xmlSelectionContext !== this.writeContext())) { input.value = ''; this.xmlSelectionContext = ''; return; }
+    if (!this.canImportInCurrentScope() || !this.xmlSelectionContext || this.xmlSelectionContext !== this.writeContext()) {
+      input.value = ''; this.xmlSelectionContext = ''; return;
+    }
     this.xmlSelectionContext = '';
     const file = input.files?.[0];
     if (!file) return;

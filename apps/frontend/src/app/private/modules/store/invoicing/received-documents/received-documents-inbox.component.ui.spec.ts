@@ -183,3 +183,21 @@ describe('email manual-import fallback selector (source contract, not browser QA
     expect(page).toContain('(cancel)="closeManualImportOptions()" (closed)="closeManualImportOptions()"');
   });
 });
+
+
+describe('XML operating-system picker tenant fence (static source contract)', () => {
+  it('requires a nonempty current marker and captures direct accessible input activation', () => {
+    expect(page).toContain('(click)="onXmlInputClick($event)" (change)="onFileSelected($event)"');
+    const click = page.match(/onXmlInputClick\(event: Event\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(click).toContain('if (!this.canImportInCurrentScope() || this.uploading())');
+    expect(click).toContain('event.preventDefault()');
+    expect(click).toContain('this.xmlSelectionContext = this.writeContext()');
+    const selected = page.match(/onFileSelected\(event: Event\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    const fence = 'if (!this.canImportInCurrentScope() || !this.xmlSelectionContext || this.xmlSelectionContext !== this.writeContext())';
+    expect(selected).toContain(fence);
+    expect(selected.indexOf(fence)).toBeLessThan(selected.indexOf('this.service.importXml(scope, file, storeId)'));
+    expect(selected).toContain("input.value = ''; this.xmlSelectionContext = ''; return;");
+    expect(selected).not.toContain('this.xmlSelectionContext &&');
+    expect(page).toContain("this.xmlSelectionContext = '';\n          const input = this.xmlInput()?.nativeElement;");
+  });
+});
