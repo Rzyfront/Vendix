@@ -45,6 +45,7 @@ describe('OrdersBulkController — HTTP destination validation', () => {
     bulkTransition: jest.fn(),
     previewTransition: jest.fn(),
     previewCashSessionFinish: jest.fn(),
+    processCashSessionOrder: jest.fn(),
     finishCashSessionOrders: jest.fn(),
   };
   const transitionResult = {
@@ -84,6 +85,102 @@ describe('OrdersBulkController — HTTP destination validation', () => {
       // Test-only identities, not a replacement for the production JWT guard.
       const fixture = req.header('x-test-permission');
       if (fixture) {
+        const cashProcessFixtures: Record<
+          string,
+          { roles: string[]; permissions: string[]; inactive?: string }
+        > = {
+          'cash-carrier': {
+            roles: ['carrier'],
+            permissions: [
+              'store:cash_registers:close_session',
+              'store:orders:read',
+              'store:orders:read:one',
+              'store:dispatch_notes:create',
+            ],
+          },
+          'cash-missing-close': {
+            roles: [],
+            permissions: [
+              'store:orders:update',
+              'store:orders:order_flow:create',
+            ],
+          },
+          'cash-missing-update': {
+            roles: [],
+            permissions: [
+              'store:cash_registers:close_session',
+              'store:orders:order_flow:create',
+            ],
+          },
+          'cash-missing-flow': {
+            roles: [],
+            permissions: [
+              'store:cash_registers:close_session',
+              'store:orders:update',
+            ],
+          },
+          'cash-inactive-close': {
+            roles: [],
+            permissions: [
+              'store:cash_registers:close_session',
+              'store:orders:update',
+              'store:orders:order_flow:create',
+            ],
+            inactive: 'store:cash_registers:close_session',
+          },
+          'cash-inactive-update': {
+            roles: [],
+            permissions: [
+              'store:cash_registers:close_session',
+              'store:orders:update',
+              'store:orders:order_flow:create',
+            ],
+            inactive: 'store:orders:update',
+          },
+          'cash-inactive-flow': {
+            roles: [],
+            permissions: [
+              'store:cash_registers:close_session',
+              'store:orders:update',
+              'store:orders:order_flow:create',
+            ],
+            inactive: 'store:orders:order_flow:create',
+          },
+          'cash-all': {
+            roles: [],
+            permissions: [
+              'store:cash_registers:close_session',
+              'store:orders:update',
+              'store:orders:order_flow:create',
+            ],
+          },
+          'cash-super-admin': { roles: ['super_admin'], permissions: [] },
+          'cash-route-only': {
+            roles: [],
+            permissions: ['store:orders:create'],
+          },
+        };
+        const cashProcessFixture = cashProcessFixtures[fixture];
+        if (cashProcessFixture) {
+          Object.assign(req, {
+            user: {
+              id: 7,
+              roles: cashProcessFixture.roles,
+              permissions: cashProcessFixture.permissions.map((name) => ({
+                name,
+                path:
+                  fixture === 'cash-route-only'
+                    ? '/api/store/orders/bulk/cash-session-process'
+                    : '/api/seeded/permission',
+                method: 'POST',
+                status:
+                  name === cashProcessFixture.inactive ? 'inactive' : 'active',
+              })),
+            },
+          });
+          next();
+          return;
+        }
         const pathOnly = fixture === 'route-only';
         Object.assign(req, {
           user: {
@@ -150,6 +247,7 @@ describe('OrdersBulkController — HTTP destination validation', () => {
       fingerprint: 'a'.repeat(64),
       items: [],
     });
+    bulkService.processCashSessionOrder.mockResolvedValue({ processed: true });
   });
 
   afterAll(async () => {
@@ -345,6 +443,61 @@ describe('OrdersBulkController — HTTP destination validation', () => {
       .send(body);
     expect(createOnly.status).toBe(403);
     expect(bulkService.previewCashSessionFinish).not.toHaveBeenCalled();
+  });
+
+  it('requires all named permissions before processing a cash-session order', async () => {
+    const body = {
+      session_id: 8,
+      order_id: 41,
+      expected_version: '2026-10-07T10:00:00.000Z',
+      flow: {},
+    };
+    const path = '/api/store/orders/bulk/cash-session-process';
+
+    const carrier = await request(app.getHttpServer())
+      .post(path)
+      .set('x-test-permission', 'cash-carrier')
+      .send(body);
+    expect(carrier.status).toBe(403);
+    expect(carrier.body.error_code).toBe('AUTH_PERM_001');
+    expect(bulkService.processCashSessionOrder).not.toHaveBeenCalled();
+
+    for (const fixture of [
+      'cash-missing-close',
+      'cash-missing-update',
+      'cash-missing-flow',
+      'cash-inactive-close',
+      'cash-inactive-update',
+      'cash-inactive-flow',
+      'cash-route-only',
+    ]) {
+      const response = await request(app.getHttpServer())
+        .post(path)
+        .set('x-test-permission', fixture)
+        .send(body);
+
+      expect(response.status).toBe(403);
+      expect(response.body.error_code).toBe('AUTH_PERM_001');
+      expect(bulkService.processCashSessionOrder).not.toHaveBeenCalled();
+    }
+
+    const permitted = await request(app.getHttpServer())
+      .post(path)
+      .set('x-test-permission', 'cash-all')
+      .send(body);
+    expect(permitted.status).toBe(200);
+    expect(bulkService.processCashSessionOrder).toHaveBeenCalledTimes(1);
+    expect(bulkService.processCashSessionOrder).toHaveBeenCalledWith(
+      expect.objectContaining(body),
+    );
+
+    bulkService.processCashSessionOrder.mockClear();
+    const superAdmin = await request(app.getHttpServer())
+      .post(path)
+      .set('x-test-permission', 'cash-super-admin')
+      .send(body);
+    expect(superAdmin.status).toBe(200);
+    expect(bulkService.processCashSessionOrder).toHaveBeenCalledTimes(1);
   });
 
   it('finalizes cash-session orders only with close-session permission and the dedicated seam', async () => {

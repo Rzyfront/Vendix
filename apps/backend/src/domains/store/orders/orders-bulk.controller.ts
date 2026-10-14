@@ -191,6 +191,8 @@ export class OrdersBulkController {
     @Req() request: any,
   ) {
     this.assertNamedPermission(request, 'store:cash_registers:close_session');
+    this.assertNamedPermission(request, 'store:orders:update');
+    this.assertNamedPermission(request, 'store:orders:order_flow:create');
     const result = await this.ordersBulkService.processCashSessionOrder(dto);
     return this.responseService.updated(result, 'Orden procesada');
   }
