@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  Prisma,
+  dian_document_status_enum,
+  fiscal_document_type_enum,
+  fiscal_transmission_status_enum,
+  invoice_type_enum,
+} from '@prisma/client';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -587,13 +593,13 @@ export class CreditNoteBalanceService {
     const args = {
       where: {
         related_invoice_id: source.id,
-        invoice_type: 'credit_note',
+        invoice_type: invoice_type_enum.credit_note,
         organization_id: context.organization_id,
         store_id: context.store_id,
         accounting_entity_id: source.accounting_entity_id,
       },
       select: BALANCE_INVOICE_SELECT,
-    };
+    } satisfies Prisma.invoicesFindManyArgs;
     if (tx) return tx.invoices.findMany(args);
     return this.prisma.invoices.findMany(args);
   }
@@ -611,12 +617,14 @@ export class CreditNoteBalanceService {
         organization_id: source.organization_id,
         store_id: source.store_id,
         accounting_entity_id: source.accounting_entity_id,
-        document_type: { in: ['credit_note', 'debit_note'] },
+        document_type: {
+          in: [fiscal_document_type_enum.credit_note, fiscal_document_type_enum.debit_note],
+        },
         source_type: 'invoice',
         source_id: { in: noteIds },
       },
       select: TRANSMISSION_SELECT,
-    };
+    } satisfies Prisma.fiscal_transmissionsFindManyArgs;
     if (tx) return tx.fiscal_transmissions.findMany(args);
     return this.prisma.withoutScope().fiscal_transmissions.findMany(args);
   }
@@ -1064,7 +1072,6 @@ export class CreditNoteBalanceService {
       note.sent_at !== null ||
       note.accepted_at !== null ||
       note.status === 'sent' ||
-      note.status === 'accepted' ||
       EVER_SUBMITTED_STATUSES.has(note.transmission_status);
     const ledgerWasSubmitted = ledgerRows.some(
       (row) =>
@@ -1111,11 +1118,11 @@ export class CreditNoteBalanceService {
         accounting_entity_id: source.accounting_entity_id,
         source_type: 'invoice',
         source_id: source.id,
-        transmission_status: 'accepted',
-        dian_status: 'accepted',
+        transmission_status: fiscal_transmission_status_enum.accepted,
+        dian_status: dian_document_status_enum.accepted,
       },
       select: { id: true },
-    };
+    } satisfies Prisma.fiscal_transmissionsFindFirstArgs;
     const ledger = tx
       ? await tx.fiscal_transmissions.findFirst(args)
       : await this.prisma.withoutScope().fiscal_transmissions.findFirst(args);

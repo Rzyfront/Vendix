@@ -137,16 +137,20 @@ function parseXmlInvoiceLine(line: Element): XmlInvoiceLine | null {
   };
 }
 
+function isXmlElement(node: ChildNode | null): node is Element {
+  return node?.nodeType === 1;
+}
+
 function directChildren(parent: Element, namespace: string, localName: string): Element[] {
   const result: Element[] = [];
   for (let index = 0; index < parent.childNodes.length; index += 1) {
     const child = parent.childNodes.item(index);
     if (
-      child?.nodeType === 1 &&
+      isXmlElement(child) &&
       child.namespaceURI === namespace &&
       child.localName === localName
     ) {
-      result.push(child as Element);
+      result.push(child);
     }
   }
   return result;
