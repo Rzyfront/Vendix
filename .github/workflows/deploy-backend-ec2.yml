@@ -575,3 +575,16 @@ jobs:
 
         echo "🎉 Backend deployment to EC2 completed successfully!"
         echo "🌐 Backend URL: https://api.vendix.online (API bound to 127.0.0.1 on the active blue/green slot)"
+
+    # CloudFront (E1I27OYFJX7VYJ) enruta sitemap/robots/manifest/pwa de vendix.online
+    # al backend y los guarda hasta 1 h. El deploy del frontend invalida /* en
+    # paralelo, sin orden respecto al cambio de slot: puede volver a guardar el
+    # XML viejo. Se invalida aqui, despues del switch. Corre aunque el worker
+    # falle (la API ya quedo en el slot nuevo); si el switch se revirtio,
+    # invalidar es inocuo.
+    - name: Invalidate CloudFront backend-served paths
+      if: ${{ !cancelled() }}
+      run: |
+        aws cloudfront create-invalidation \
+          --distribution-id E1I27OYFJX7VYJ \
+          --paths "/sitemap.xml" "/robots.txt" "/manifest.webmanifest" "/pwa/*"
