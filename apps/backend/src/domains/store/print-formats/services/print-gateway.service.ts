@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { isAlwaysActiveFormat } from '../lib/always-active-formats';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -209,7 +210,7 @@ export class PrintGatewayService {
       return {
         configId: storeConfig?.id,
         definition: baseDefinition,
-        is_active: storeConfig?.is_active ?? true,
+        is_active: isAlwaysActiveFormat(formatType) || (storeConfig?.is_active ?? true),
         gateway_enabled: storeConfig?.gateway_enabled ?? false,
         is_customized: true,
       };
@@ -246,7 +247,7 @@ export class PrintGatewayService {
     return {
       configId: storeConfig?.id,
       definition: effectiveDefinition,
-      is_active: storeConfig?.is_active ?? true,
+      is_active: isAlwaysActiveFormat(formatType) || (storeConfig?.is_active ?? true),
       gateway_enabled: storeConfig?.gateway_enabled ?? false,
       is_customized: Boolean(storeConfig?.overrides || templateFound),
     };
@@ -327,7 +328,11 @@ export class PrintGatewayService {
     // cambios, el render HTML de `dispatch_note` (riel A) y los dos formatos
     // fiscales en cualquier motor.
     const isActiveGateAppliesHere = !(engine === 'pdf' && formatType === 'dispatch_note');
-    if (isActiveGateAppliesHere && !effective.is_active) {
+    if (
+      isActiveGateAppliesHere &&
+      !isAlwaysActiveFormat(formatType) &&
+      !effective.is_active
+    ) {
       throw new VendixHttpException(
         ErrorCodes.SYS_FORBIDDEN_001,
         'El formato de impresión se encuentra desactivado para esta tienda.',
@@ -432,7 +437,11 @@ export class PrintGatewayService {
       body_only: bodyOnly,
       copies: effective.definition.paper.copies || 1,
       is_roll: effective.definition.paper.is_roll,
-      width_mm: effective.definition.paper.width_mm,
+      // Papel conocido: el ancho sale del formato, no de un width_mm rancio del merge.
+      width_mm:
+        effective.definition.paper.format === 'custom'
+          ? effective.definition.paper.width_mm
+          : geometry.paper_width_mm,
       printable_width_mm: geometry.printable_width_mm,
       content_width_mm: geometry.content_width_mm,
     };
@@ -680,7 +689,10 @@ export class PrintGatewayService {
     const previewGeometry = resolvePrintGeometry(previewDef.paper);
     return {
       html,
-      width_mm: previewDef.paper.width_mm,
+      width_mm:
+        previewDef.paper.format === 'custom'
+          ? previewDef.paper.width_mm
+          : previewGeometry.paper_width_mm,
       printable_width_mm: previewGeometry.printable_width_mm,
       content_width_mm: previewGeometry.content_width_mm,
       is_roll: previewDef.paper.is_roll,

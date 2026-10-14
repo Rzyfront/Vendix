@@ -198,6 +198,8 @@ export interface StorePrintFormatSummary {
   engine: 'html' | 'pdf';
   is_configured: boolean;
   is_active: boolean;
+  /** true = el formato no se puede desactivar (p. ej. Cierre de Caja). */
+  always_active?: boolean;
   gateway_enabled: boolean;
   template_name: string;
   updated_at: string | null;
@@ -208,6 +210,7 @@ export interface StorePrintFormatDetail {
   name: string;
   category: string;
   is_active: boolean;
+  always_active?: boolean;
   gateway_enabled: boolean;
   is_customized: boolean;
   template_id: number | null;

@@ -191,22 +191,31 @@ interface CategoryGroup {
                             </div>
                           </div>
 
-                          <!-- Gateway Pill -->
-                          <button
-                            type="button"
-                            (click)="toggleGateway(fmt.format_type, fmt.gateway_enabled, $event)"
-                            class="text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-flex items-center gap-1"
-                            [class.bg-emerald-500/10]="fmt.gateway_enabled"
-                            [class.text-emerald-400]="fmt.gateway_enabled"
-                            [class.border-emerald-500/20]="fmt.gateway_enabled"
-                            [class.bg-amber-500/10]="!fmt.gateway_enabled"
-                            [class.text-amber-400]="!fmt.gateway_enabled"
-                            [class.border-amber-500/20]="!fmt.gateway_enabled"
-                            title="Alternar emisión por Print Gateway o emisor estándar"
-                          >
-                            <span class="w-1.5 h-1.5 rounded-full" [class.bg-emerald-400]="fmt.gateway_enabled" [class.bg-amber-400]="!fmt.gateway_enabled"></span>
-                            {{ fmt.gateway_enabled ? 'Gateway' : 'Estándar' }}
-                          </button>
+                          @if (fmt.always_active) {
+                            <span
+                              class="text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 bg-surface-secondary text-text-secondary border-border"
+                              title="Este formato no se puede desactivar"
+                            >
+                              Siempre activo
+                            </span>
+                          } else {
+                            <!-- Gateway Pill -->
+                            <button
+                              type="button"
+                              (click)="toggleGateway(fmt.format_type, fmt.gateway_enabled, $event)"
+                              class="text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-flex items-center gap-1"
+                              [class.bg-emerald-500/10]="fmt.gateway_enabled"
+                              [class.text-emerald-400]="fmt.gateway_enabled"
+                              [class.border-emerald-500/20]="fmt.gateway_enabled"
+                              [class.bg-amber-500/10]="!fmt.gateway_enabled"
+                              [class.text-amber-400]="!fmt.gateway_enabled"
+                              [class.border-amber-500/20]="!fmt.gateway_enabled"
+                              title="Alternar emisión por Print Gateway o emisor estándar"
+                            >
+                              <span class="w-1.5 h-1.5 rounded-full" [class.bg-emerald-400]="fmt.gateway_enabled" [class.bg-amber-400]="!fmt.gateway_enabled"></span>
+                              {{ fmt.gateway_enabled ? 'Gateway' : 'Estándar' }}
+                            </button>
+                          }
                         </div>
 
                         <!-- Footer -->
@@ -286,11 +295,11 @@ export class PrintFormatsHubComponent implements OnInit {
   }
 
   hasInactiveIn(formats: StorePrintFormatSummary[]): boolean {
-    return formats.some((f) => !f.gateway_enabled);
+    return formats.some((f) => !f.always_active && !f.gateway_enabled);
   }
 
   hasActiveIn(formats: StorePrintFormatSummary[]): boolean {
-    return formats.some((f) => f.gateway_enabled);
+    return formats.some((f) => !f.always_active && f.gateway_enabled);
   }
 
   thumbnailFor(formatType: PrintFormatType): string {

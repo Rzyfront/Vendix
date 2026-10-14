@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { isAlwaysActiveFormat } from '../lib/always-active-formats';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
@@ -225,7 +226,8 @@ export class PrintFormatsService {
         icon: meta.icon,
         engine: meta.engine,
         is_configured: Boolean(cfg),
-        is_active: cfg?.is_active ?? true,
+        is_active: isAlwaysActiveFormat(type) || (cfg?.is_active ?? true),
+        always_active: isAlwaysActiveFormat(type),
         gateway_enabled: cfg?.gateway_enabled ?? false,
         template_name: cfg?.template?.name || (cfg?.overrides ? 'Personalizado (Overrides)' : 'Por defecto del sistema'),
         updated_at: cfg?.updated_at || null,
@@ -251,6 +253,7 @@ export class PrintFormatsService {
       name: meta.name,
       category: meta.category,
       is_active: effective.is_active,
+      always_active: isAlwaysActiveFormat(formatType),
       gateway_enabled: effective.gateway_enabled,
       is_customized: effective.is_customized,
       template_id: storeConfig?.template_id || null,
@@ -270,6 +273,16 @@ export class PrintFormatsService {
     formatType: print_format_type_enum,
     dto: UpdatePrintFormatConfigDto,
   ) {
+    // Formato siempre activo (p. ej. `cash_session_close`): desactivarlo se
+    // rechaza de forma explícita; cualquier otro payload persiste `true`.
+    if (isAlwaysActiveFormat(formatType) && dto.is_active === false) {
+      throw new VendixHttpException(
+        ErrorCodes.PRINT_CONFIG_VALIDATION_001,
+        'El formato Cierre de Caja no se puede desactivar',
+      );
+    }
+    const alwaysActive = isAlwaysActiveFormat(formatType);
+
     // [print-editor-dsk] — Normalización + validación INCONDICIONAL (ver
     // `shouldValidateV2Payload` arriba para el porqué del cambio). `null` o
     // `{}` siguen siendo el no-op legítimo de "limpiar personalización":
@@ -325,7 +338,7 @@ export class PrintFormatsService {
       result = await this.storePrisma.store_print_format_configs.update({
         where: { id: existing.id },
         data: {
-          is_active: dto.is_active !== undefined ? dto.is_active : existing.is_active,
+          is_active: alwaysActive ? true : dto.is_active !== undefined ? dto.is_active : existing.is_active,
           gateway_enabled: dto.gateway_enabled !== undefined ? dto.gateway_enabled : existing.gateway_enabled,
           template_id: dto.template_id !== undefined ? dto.template_id : existing.template_id,
           overrides: rawOverrides !== undefined ? (normalizedOverrides as any) : existing.overrides,
@@ -339,7 +352,7 @@ export class PrintFormatsService {
           store_id: storeId,
           organization_id: organizationId,
           format_type: formatType,
-          is_active: dto.is_active ?? true,
+          is_active: alwaysActive ? true : dto.is_active ?? true,
           gateway_enabled: dto.gateway_enabled ?? true,
           template_id: dto.template_id || null,
           overrides: (normalizedOverrides as any) || null,

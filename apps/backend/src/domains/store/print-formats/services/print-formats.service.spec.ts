@@ -83,6 +83,46 @@ describe('PrintFormatsService — contrato de lectura y persistencia del selecto
     return module.get(PrintFormatsService);
   }
 
+  describe('cash_session_close — formato siempre activo', () => {
+    it('el listado lo reporta activo y always_active aunque la fila guardada diga false', async () => {
+      const prisma = buildStorePrismaStub({
+        configs: [
+          {
+            format_type: 'cash_session_close',
+            is_active: false,
+            gateway_enabled: true,
+            template: null,
+            overrides: null,
+            updated_at: new Date('2026-08-20'),
+          },
+        ],
+      });
+      const service = await build(prisma);
+
+      const formats = await service.listStoreFormats(10, 3);
+
+      expect(formats.find((f) => f.format_type === 'cash_session_close')).toMatchObject({
+        is_active: true,
+        always_active: true,
+      });
+      expect(formats.find((f) => f.format_type === 'quotation')).toMatchObject({
+        always_active: false,
+      });
+    });
+
+    it('updateStoreFormat con is_active:false se rechaza con PRINT_CONFIG_VALIDATION_001', async () => {
+      const prisma = buildStorePrismaStub({
+        configs: [],
+        findFirstConfig: { id: 1, is_active: true, gateway_enabled: false, template_id: null, overrides: null },
+      });
+      const service = await build(prisma);
+
+      await expect(
+        service.updateStoreFormat(10, 3, 'cash_session_close', { is_active: false }),
+      ).rejects.toMatchObject({ errorCode: 'PRINT_CONFIG_VALIDATION_001' });
+    });
+  });
+
   describe('listStoreFormats — catálogo de 10 formatos con el estado real de la tienda', () => {
     it('sin configuración guardada, cada formato cae al default: activo, sin gateway, plantilla del sistema', async () => {
       const prisma = buildStorePrismaStub({ configs: [] });

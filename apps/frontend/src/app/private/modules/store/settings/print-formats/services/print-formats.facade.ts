@@ -386,6 +386,9 @@ export class PrintFormatsFacade {
   }
 
   async toggleGateway(formatType: PrintFormatType, currentStatus: boolean): Promise<void> {
+    if (this.formats().find((f) => f.format_type === formatType)?.always_active) {
+      return;
+    }
     try {
       if (currentStatus) {
         await firstValueFrom(this.client.deactivateGateway(formatType));
@@ -415,7 +418,10 @@ export class PrintFormatsFacade {
     targetStatus: boolean,
   ): Promise<void> {
     const targets = this.formats().filter(
-      (f) => f.category === category && f.gateway_enabled !== targetStatus,
+      (f) =>
+        f.category === category &&
+        !f.always_active &&
+        f.gateway_enabled !== targetStatus,
     );
     if (targets.length === 0) {
       this.toast.info(
