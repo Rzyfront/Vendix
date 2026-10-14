@@ -55,7 +55,8 @@ export type PrintFormatType =
   | 'dispatch_route'
   | 'withholding_practiced'
   | 'withholding_suffered'
-  | 'withholding_employee_certificate';
+  | 'withholding_employee_certificate'
+  | 'cash_session_close';
 
 // Compile-time drift guard — if a value is added/removed in the enum
 // without updating the union above, this assignment fails.
@@ -77,6 +78,7 @@ const _DRIFT_CHECK: Record<PrintFormatTypeEnum, true> = {
   withholding_practiced: true,
   withholding_suffered: true,
   withholding_employee_certificate: true,
+  cash_session_close: true,
 };
 void _DRIFT_CHECK;
 

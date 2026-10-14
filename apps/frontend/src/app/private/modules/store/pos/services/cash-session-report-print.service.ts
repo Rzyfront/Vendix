@@ -20,14 +20,14 @@ const CURRENCY_WAIT_TIMEOUT_MS = 1_000;
 const CURRENCY_WAIT_STEP_MS = 50;
 
 const REPORT_PRINT_STYLES = `
-  .csr { font-family: monospace; max-width: 72mm; margin: 0 auto; padding: 10px; background: #fff; color: #000; font-size: 12px; line-height: 1.45; }
+  .csr { font-family: monospace; width: 100%; margin: 0; padding: 0; box-sizing: border-box; overflow-wrap: anywhere; background: #fff; color: #000; font-size: 12px; line-height: 1.45; }
   .csr h1 { font-size: 15px; text-align: center; margin: 0 0 2px; letter-spacing: 1px; }
   .csr .store { text-align: center; font-weight: bold; font-size: 13px; }
   .csr .meta { text-align: center; font-size: 11px; margin: 2px 0; }
   .csr h2 { font-size: 12px; margin: 8px 0 2px; padding-top: 4px; border-top: 1px dashed #000; text-transform: uppercase; }
-  .csr table { width: 100%; border-collapse: collapse; }
-  .csr td { vertical-align: top; padding: 1px 0; }
-  .csr .amount { text-align: right; white-space: nowrap; padding-left: 6px; }
+  .csr table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+  .csr td { vertical-align: top; padding: 1px 0; overflow-wrap: anywhere; }
+  .csr .amount { width: 40%; text-align: right; white-space: nowrap; padding-left: 6px; }
   .csr .note { font-size: 11px; border: 1px solid #000; padding: 2px 4px; margin-top: 4px; }
   .csr .sub td:first-child { padding-left: 8px; }
   .csr .strong td { font-weight: bold; }
@@ -35,7 +35,6 @@ const REPORT_PRINT_STYLES = `
   .csr .notes { font-size: 11px; font-style: italic; margin-top: 4px; }
   .csr .sign { margin-top: 26px; }
   .csr .sign div { border-top: 1px solid #000; text-align: center; font-size: 11px; margin-top: 26px; padding-top: 2px; }
-  @media print { .csr { max-width: none; } }
 `;
 
 /**
@@ -50,7 +49,16 @@ export class CashSessionReportPrintService {
   private readonly authFacade = inject(AuthFacade);
   private readonly settings = inject(StoreSettingsFacade);
 
+  /**
+   * Imprime por el Print Gateway (formato configurable `cash_session_close`).
+   * Si el gateway no está disponible o falla (resuelve null), cae al render
+   * local. Si ambos fallan, el error del render local se propaga y el caller
+   * muestra el toast.
+   */
   async print(report: CashSessionCloseReport): Promise<void> {
+    const viaGateway = await this.tryGateway(report.session.id);
+    if (viaGateway) return;
+
     await this.ensureCurrencyLoaded();
     await this.documentPrint.print({
       document: 'pos_ticket',
@@ -59,6 +67,20 @@ export class CashSessionReportPrintService {
       styles: REPORT_PRINT_STYLES,
       trigger: 'explicit',
     });
+  }
+
+  private async tryGateway(sessionId: number): Promise<boolean> {
+    try {
+      const result = await this.documentPrint.printViaGateway({
+        formatType: 'cash_session_close',
+        documentId: sessionId,
+        title: `Cierre de caja #${sessionId}`,
+        trigger: 'explicit',
+      });
+      return result !== null;
+    } catch {
+      return false;
+    }
   }
 
   buildBody(r: CashSessionCloseReport): string {

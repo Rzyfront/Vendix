@@ -135,6 +135,10 @@ const validateDefinitionV2: ValidateFunction = ajv.compile(definitionV2Schema);
  */
 function checkColumnsWidthSum100(definition: any): unknown | null {
   if (!Array.isArray(definition?.columns)) return null;
+  // Sin columnas (`[]`) no hay nada que sumar: formatos sin tabla de ítems
+  // (`cash_session_close`) las declaran vacías. Una tabla con TODAS sus
+  // columnas deshabilitadas sigue fallando abajo (hay columnas, suman 0).
+  if (definition.columns.length === 0) return null;
   const enabled = definition.columns.filter(
     (c: any) => c && c.enabled !== false,
   );
@@ -149,6 +153,34 @@ function checkColumnsWidthSum100(definition: any): unknown | null {
     schemaPath: '#/columnsWidthSum100',
     params: { total, enabledCount: enabled.length },
     message: `enabled columns width_percent must sum to 100 (got ${total})`,
+  };
+}
+
+/**
+ * Custom invariant #3 — roll `printable_width_mm` must lie within
+ * [width - 16, width - 4] (thermal_80: 64..76; thermal_58: 42..54).
+ * Skips when absent, or when the paper is not a roll with known width.
+ */
+function checkPrintableWidthRange(definition: any): unknown | null {
+  const paper = definition?.paper;
+  if (!paper || paper.printable_width_mm === undefined) return null;
+  let width: number | null = null;
+  if (paper.format === 'thermal_80') width = 80;
+  else if (paper.format === 'thermal_58') width = 58;
+  else if (paper.is_roll === true && Number(paper.width_mm) > 0) {
+    width = Number(paper.width_mm);
+  }
+  if (width === null) return null;
+  const printable = Number(paper.printable_width_mm);
+  const min = width - 16;
+  const max = width - 4;
+  if (printable >= min && printable <= max) return null;
+  return {
+    keyword: 'printableWidthRange',
+    instancePath: '/paper/printable_width_mm',
+    schemaPath: '#/printableWidthRange',
+    params: { printable, min, max, width },
+    message: `paper.printable_width_mm must be within [${min}, ${max}] for a ${width} mm roll (got ${printable})`,
   };
 }
 
@@ -205,6 +237,8 @@ export function validatePrintFormatDefinition(definition: unknown): {
   if (e1) customErrors.push(e1);
   const e2 = checkCustomTemplateBalanced(def);
   if (e2) customErrors.push(e2);
+  const e3 = checkPrintableWidthRange(def);
+  if (e3) customErrors.push(e3);
 
   return {
     valid: schemaValid && customErrors.length === 0,

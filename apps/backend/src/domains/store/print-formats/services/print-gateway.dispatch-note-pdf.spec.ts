@@ -173,6 +173,29 @@ describe('PrintGatewayService — dispatch_note por el motor pdf (unificación r
     expect(dispatchRenderBuffer).not.toHaveBeenCalled();
   });
 
+  it('cash_session_close es siempre activo: is_active:false guardado NUNCA devuelve 403', async () => {
+    const disabledRow = {
+      id: 30,
+      is_active: false,
+      gateway_enabled: false,
+      overrides: null,
+      template: { definition: dispatchDefinition },
+    };
+    const prisma = {
+      store_print_format_configs: { findFirst: jest.fn().mockResolvedValue(disabledRow) },
+      stores: { findFirst: jest.fn().mockResolvedValue({ organization_id: 7 }) },
+      print_templates: { findFirst: jest.fn().mockResolvedValue(null) },
+      invoices: { findFirst: jest.fn() },
+    };
+    const { service } = await build(prisma, jest.fn());
+
+    const effective = await service.resolveEffectiveConfig(1, 'cash_session_close');
+    expect(effective.is_active).toBe(true);
+
+    const result = await service.renderDocument(1, 'cash_session_close', 5, 'html');
+    expect(result.html).toBe('<html>remision</html>');
+  });
+
   it('el bypass NO se filtra a los formatos fiscales (is_active:false sigue bloqueando su PDF)', async () => {
     const dispatchRenderBuffer = jest.fn();
     const disabledFiscalRow = {

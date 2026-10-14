@@ -37,6 +37,12 @@ export interface PrintPaperConfig {
   margin_bottom_mm?: number;
   /** [print-editor-dsk P1.2] — v2 NEW. Margen izquierdo en mm. */
   margin_left_mm?: number;
+  /**
+   * Ancho que el cabezal térmico imprime de verdad (sólo rollo). Opcional:
+   * sin dato manda la definición de papel (80 → 72, 58 → 48). Acotado a
+   * [ancho − 16, ancho − 4] por el esquema y por `resolvePrintGeometry`.
+   */
+  printable_width_mm?: number;
   copies: number;
   auto_print?: boolean;
   /** Opt-in exclusivo de `dispatch_ticket`: imprimir tras todas las ventas POS pagadas, incluidas las de mesa. */

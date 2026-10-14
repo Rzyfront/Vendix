@@ -1,0 +1,12 @@
+-- DATA IMPACT:
+-- Tables affected: pg_type (print_format_type_enum)
+-- Expected row changes: 0 rows migrated; pg_enum values +1 (cash_session_close).
+-- Destructive operations: none
+-- FK/cascade risk: none
+-- Idempotency: guarded by ADD VALUE IF NOT EXISTS (safe on re-run).
+-- Approval: documented in plan 2026-10-14-thermal-printable-width (step B1).
+--
+-- Nuevo formato configurable: reporte de cierre de caja. Va solo en su
+-- migración (el valor nuevo no se puede usar en la misma transacción); la
+-- plantilla de sistema se siembra en la migración siguiente.
+ALTER TYPE "print_format_type_enum" ADD VALUE IF NOT EXISTS 'cash_session_close';

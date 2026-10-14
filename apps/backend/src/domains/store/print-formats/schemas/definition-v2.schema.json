@@ -34,6 +34,12 @@
           "maximum": 2000,
           "description": "Alto en mm. REQUERIDO si format=custom. Opcional para rollos (alto continuo) y hojas (puede omitirse y resolverse por format)."
         },
+        "printable_width_mm": {
+          "type": "number",
+          "minimum": 42,
+          "maximum": 76,
+          "description": "Ancho imprimible del cabezal en mm; solo rollo. Rango [ancho-16, ancho-4] (80 mm: 64..76; 58 mm: 42..54). Si falta se usa el de la definición del papel (80→72, 58→48)."
+        },
         "margin_mm": {
           "type": "number",
           "minimum": 0,
@@ -44,25 +50,25 @@
           "type": "number",
           "minimum": 0,
           "maximum": 50,
-          "description": "Margen superior en mm. Rango [0..50]. Default 0 para rollos, 10 para hojas."
+          "description": "Margen superior en mm. Rango [0..50]. Default 1.5 para rollos, 10 para hojas. En rollo el margen lateral efectivo es max(guardado, (ancho papel − ancho imprimible)/2); en hojas el margen efectivo es al menos 5 mm."
         },
         "margin_right_mm": {
           "type": "number",
           "minimum": 0,
           "maximum": 50,
-          "description": "Margen derecho en mm. Rango [0..50]."
+          "description": "Margen derecho en mm. Rango [0..50]. En rollo el margen lateral efectivo es max(guardado, (ancho papel − ancho imprimible)/2)."
         },
         "margin_bottom_mm": {
           "type": "number",
           "minimum": 0,
           "maximum": 50,
-          "description": "Margen inferior en mm. Rango [0..50]. Default 0 para rollos, 10 para hojas."
+          "description": "Margen inferior en mm. Rango [0..50]. Default 1.5 para rollos, 10 para hojas. En rollo el margen lateral efectivo es max(guardado, (ancho papel − ancho imprimible)/2); en hojas el margen efectivo es al menos 5 mm."
         },
         "margin_left_mm": {
           "type": "number",
           "minimum": 0,
           "maximum": 50,
-          "description": "Margen izquierdo en mm. Rango [0..50]."
+          "description": "Margen izquierdo en mm. Rango [0..50]. En rollo el margen lateral efectivo es max(guardado, (ancho papel − ancho imprimible)/2)."
         },
         "copies": {
           "type": "integer",
@@ -365,10 +371,11 @@
         "format": "thermal_80",
         "width_mm": 80,
         "is_roll": true,
-        "margin_top_mm": 0,
-        "margin_right_mm": 0,
-        "margin_bottom_mm": 0,
-        "margin_left_mm": 0,
+        "printable_width_mm": 72,
+        "margin_top_mm": 1.5,
+        "margin_right_mm": 4,
+        "margin_bottom_mm": 1.5,
+        "margin_left_mm": 4,
         "copies": 1
       },
       "logo": {

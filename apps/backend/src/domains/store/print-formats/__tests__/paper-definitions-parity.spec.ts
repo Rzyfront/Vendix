@@ -26,6 +26,7 @@
  */
 import { GEOMETRY } from '../../invoicing/services/invoice-pdf.builder';
 import { PAPER_DEFINITIONS } from '../print-templates/paper-definitions';
+import geometryData from '../lib/geometry-data';
 import { PrintFormat } from '../../settings/interfaces/store-settings.interface';
 
 /**
@@ -84,6 +85,19 @@ describe('E.11 slice 2 — paridad geométrica builder ↔ PAPER_DEFINITIONS', (
         );
 
         expect(diff).toBeLessThanOrEqual(MM_TOLERANCE);
+      });
+
+      it('printable_width_mm coincide con geometry-data (tolerancia 0.5 mm)', () => {
+        const canonical = (geometryData as Record<string, any>)[format];
+        expect(registry.printable_width_mm).toBeGreaterThan(0);
+        expect(
+          Math.abs(registry.printable_width_mm - canonical.printable_width_mm),
+        ).toBeLessThanOrEqual(MM_TOLERANCE);
+        if (registry.is_roll) {
+          expect(registry.printable_width_mm).toBeLessThanOrEqual(
+            registry.width_mm - 4,
+          );
+        }
       });
 
       it('modo rollo coincide exactamente (cero tolerancia)', () => {

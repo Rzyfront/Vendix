@@ -23,6 +23,8 @@ export enum PrintFormatTypeEnum {
   withholding_practiced = 'withholding_practiced',
   withholding_suffered = 'withholding_suffered',
   withholding_employee_certificate = 'withholding_employee_certificate',
+  // Reporte de cierre de caja (térmico 80mm) — migración 20261014040000.
+  cash_session_close = 'cash_session_close',
 }
 
 export const PRINT_FORMAT_TYPES = Object.values(PrintFormatTypeEnum);
@@ -83,6 +85,8 @@ export enum PrintSectionTypeEnum {
   locations_info = 'locations_info',
   shipping_info = 'shipping_info',
   validity_banner = 'validity_banner',
+  // Reporte de cierre de caja (formato cash_session_close).
+  cash_session_report = 'cash_session_report',
 }
 
 export const PRINT_SECTION_TYPES = Object.values(PrintSectionTypeEnum);

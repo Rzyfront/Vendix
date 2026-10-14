@@ -33,19 +33,18 @@ export interface PreCuentaDoc {
  * plantilla propia porque la pre-cuenta no es un comprobante de venta.
  */
 const PRE_CUENTA_PRINT_STYLES = `
-  .precuenta { font-family: monospace; max-width: 72mm; margin: 0 auto; padding: 10px; background: #fff; color: #000; font-size: 12px; line-height: 1.45; }
+  .precuenta { font-family: monospace; width: 100%; margin: 0; padding: 0; box-sizing: border-box; overflow-wrap: anywhere; background: #fff; color: #000; font-size: 12px; line-height: 1.45; }
   .precuenta h1 { font-size: 16px; text-align: center; margin: 0 0 2px; letter-spacing: 1px; }
   .precuenta .store { text-align: center; font-weight: bold; font-size: 13px; }
   .precuenta .meta { text-align: center; font-size: 11px; margin: 2px 0 6px; }
   .precuenta .legend { text-align: center; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 4px 0; margin: 6px 0; font-size: 12px; }
-  .precuenta table { width: 100%; border-collapse: collapse; }
-  .precuenta td { vertical-align: top; padding: 1px 0; }
-  .precuenta .qty { white-space: nowrap; padding-right: 6px; }
-  .precuenta .amount { text-align: right; white-space: nowrap; }
+  .precuenta table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+  .precuenta td { vertical-align: top; padding: 1px 0; overflow-wrap: anywhere; }
+  .precuenta .qty { width: 14%; white-space: nowrap; padding-right: 6px; }
+  .precuenta .amount { width: 36%; text-align: right; white-space: nowrap; }
   .precuenta .totals { margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px; }
   .precuenta .total-row td { font-weight: bold; font-size: 14px; }
   .precuenta .foot { text-align: center; font-size: 11px; margin-top: 8px; }
-  @media print { .precuenta { max-width: none; } }
 `;
 
 @Injectable({ providedIn: 'root' })

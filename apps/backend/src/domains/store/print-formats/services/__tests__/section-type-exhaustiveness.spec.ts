@@ -111,8 +111,8 @@ describe('print-layout-composer — exhaustividad de section.type', () => {
     });
   });
 
-  it('el universo cerrado tiene 21 tipos (16 con case propio + 5 genéricos explícitos)', () => {
-    expect(extractedCases.length).toBe(21);
-    expect(PRINT_SECTION_TYPES.length).toBe(21);
+  it('el universo cerrado tiene 22 tipos (17 con case propio + 5 genéricos explícitos)', () => {
+    expect(extractedCases.length).toBe(22);
+    expect(PRINT_SECTION_TYPES.length).toBe(22);
   });
 });

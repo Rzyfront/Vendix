@@ -127,11 +127,17 @@ Resolve the target host from AWS before connecting. Use SSH for local runtime fa
 
 ```bash
 sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
-sudo docker logs vendix-backend --tail 100
+# Prod es blue/green: resolver el slot API activo (cae al legado `vendix-backend`)
+API=$(sudo docker ps --filter 'name=^/vendix-backend-(blue|green)$' --filter status=running --format '{{.Names}}' | head -1); API=${API:-vendix-backend}
+sudo docker logs $API --tail 100
 sudo systemctl is-active nginx
-sudo ss -tulpn | grep -E ':(80|443|3000|6379)'
-curl -fsS http://localhost:3000/api/health
+sudo ss -tulpn | grep -E ':(80|443|3001|3002|6379)'   # 3000 ya no se publica
+# Puerto del slot activo = el del upstream de nginx
+PORT=$(grep -oE '127\.0\.0\.1:[0-9]+' /etc/nginx/conf.d/vendix-upstream.conf | cut -d: -f2)
+curl -fsS http://127.0.0.1:$PORT/api/health
 ```
+
+Prod corre dos slots fijos `vendix-backend-blue` (`127.0.0.1:3001`) y `vendix-backend-green` (`127.0.0.1:3002`), solo uno activo, mas `vendix-backend-worker`. Nginx usa `proxy_pass http://vendix_api;`. Detalle en `vendix-ec2-maintenance` (Deploy blue/green). Los ejemplos con `localhost:3000` solo valen en DEV (docker-compose).
 
 Do not make SSH the first discovery step when AWS CLI can identify the resource directly.
 

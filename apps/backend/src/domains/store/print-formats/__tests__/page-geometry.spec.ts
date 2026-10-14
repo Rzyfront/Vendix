@@ -35,31 +35,27 @@ const FRONTEND_COPY = path.join(
   REPO_ROOT,
   'apps/frontend/src/app/core/lib/geometry-data.ts',
 );
-const MOBILE_COPY = path.join(
-  REPO_ROOT,
-  'apps/mobile/src/shared/print/lib/geometry-data.ts',
-);
+// La copia de apps/mobile (app Expo deprecada) quedó congelada: ya no se
+// sincroniza ni se compara.
 
 function readUtf8(p: string): string {
   return fs.readFileSync(p, 'utf8');
 }
 
 describe('paper-geometry sync (P1.6)', () => {
-  it('all 4 TS data files exist on disk', () => {
-    for (const p of [CANONICAL_PATH, BACKEND_COPY, FRONTEND_COPY, MOBILE_COPY]) {
+  it('all 3 TS data files exist on disk', () => {
+    for (const p of [CANONICAL_PATH, BACKEND_COPY, FRONTEND_COPY]) {
       expect(fs.existsSync(p)).toBe(true);
     }
   });
 
-  it('all 4 copies are byte-identical (canonical == backend == frontend == mobile)', () => {
+  it('all 3 copies are byte-identical (canonical == backend == frontend)', () => {
     const canonical = readUtf8(CANONICAL_PATH);
     const backend = readUtf8(BACKEND_COPY);
     const frontend = readUtf8(FRONTEND_COPY);
-    const mobile = readUtf8(MOBILE_COPY);
 
     expect(backend).toBe(canonical);
     expect(frontend).toBe(canonical);
-    expect(mobile).toBe(canonical);
   });
 
   it('contains exactly the 5 closed paper formats', () => {
@@ -115,5 +111,19 @@ describe('paper-geometry sync (P1.6)', () => {
     expect(() => getPaperGeometry('banana' as unknown as PaperFormat)).toThrow(
       /Unknown paper format/,
     );
+  });
+});
+
+describe('printable_width_mm in geometry-data', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const data = require('../lib/geometry-data').default as Record<string, any>;
+  it('rollos: 80 => 72, 58 => 48', () => {
+    expect(data.thermal_80.printable_width_mm).toBe(72);
+    expect(data.thermal_58.printable_width_mm).toBe(48);
+  });
+  it('hojas: width - 10', () => {
+    for (const k of ['a4', 'letter', 'half_letter']) {
+      expect(data[k].printable_width_mm).toBe(data[k].width_mm - 10);
+    }
   });
 });

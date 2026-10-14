@@ -37,7 +37,7 @@ const CANONICAL = path.join(ROOT, 'libs/print-formats/schemas/geometry-data.ts')
 const TARGETS = [
   path.join(ROOT, 'apps/backend/src/domains/store/print-formats/lib/geometry-data.ts'),
   path.join(ROOT, 'apps/frontend/src/app/core/lib/geometry-data.ts'),
-  path.join(ROOT, 'apps/mobile/src/shared/print/lib/geometry-data.ts'),
+  // apps/mobile (app Expo deprecada) ya no se sincroniza: su copia quedó congelada.
 ];
 
 function readCanonical(): string {

@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { isAlwaysActiveFormat } from '../lib/always-active-formats';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -23,6 +24,9 @@ import { PrintDocumentRendererService } from './print-document-renderer.service'
 // and the existing logger line stay co-located.
 import { PrintGatewayMetricsService } from './print-gateway.metrics';
 import { S3Service } from '../../../../common/services/s3.service';
+import { resolvePrintGeometry } from '../lib/print-geometry';
+import { validatePrintFormatDefinition } from '../schemas/ajv-instance';
+import { normalizeDefinition } from '../schemas/definition-normalizer';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
 import {
   PrintColumnDefinition,
@@ -63,7 +67,21 @@ export interface RenderResult {
   pdf_buffer?: Buffer;
   copies: number;
   is_roll: boolean;
+  /** Ancho del papel (mm). Sin cambios: aditivo respecto de los nuevos campos. */
   width_mm: number;
+  /** Ancho imprimible del cabezal/hoja (mm), del kernel `resolvePrintGeometry`. */
+  printable_width_mm: number;
+  /** Ancho de contenido efectivo (mm) = el `.print-container` del composer. */
+  content_width_mm: number;
+}
+
+export interface PreviewResult {
+  html: string;
+  width_mm: number;
+  printable_width_mm: number;
+  content_width_mm: number;
+  is_roll: boolean;
+  definition: PrintFormatDefinition;
 }
 
 @Injectable()
@@ -192,7 +210,7 @@ export class PrintGatewayService {
       return {
         configId: storeConfig?.id,
         definition: baseDefinition,
-        is_active: storeConfig?.is_active ?? true,
+        is_active: isAlwaysActiveFormat(formatType) || (storeConfig?.is_active ?? true),
         gateway_enabled: storeConfig?.gateway_enabled ?? false,
         is_customized: true,
       };
@@ -229,7 +247,7 @@ export class PrintGatewayService {
     return {
       configId: storeConfig?.id,
       definition: effectiveDefinition,
-      is_active: storeConfig?.is_active ?? true,
+      is_active: isAlwaysActiveFormat(formatType) || (storeConfig?.is_active ?? true),
       gateway_enabled: storeConfig?.gateway_enabled ?? false,
       is_customized: Boolean(storeConfig?.overrides || templateFound),
     };
@@ -310,7 +328,11 @@ export class PrintGatewayService {
     // cambios, el render HTML de `dispatch_note` (riel A) y los dos formatos
     // fiscales en cualquier motor.
     const isActiveGateAppliesHere = !(engine === 'pdf' && formatType === 'dispatch_note');
-    if (isActiveGateAppliesHere && !effective.is_active) {
+    if (
+      isActiveGateAppliesHere &&
+      !isAlwaysActiveFormat(formatType) &&
+      !effective.is_active
+    ) {
       throw new VendixHttpException(
         ErrorCodes.SYS_FORBIDDEN_001,
         'El formato de impresión se encuentra desactivado para esta tienda.',
@@ -407,6 +429,7 @@ export class PrintGatewayService {
       duration_seconds: elapsed / 1000,
     });
 
+    const geometry = resolvePrintGeometry(effective.definition.paper);
     return {
       format_type: formatType,
       html: bodyOnly ? this.extractBodyContent(html) : html,
@@ -414,7 +437,13 @@ export class PrintGatewayService {
       body_only: bodyOnly,
       copies: effective.definition.paper.copies || 1,
       is_roll: effective.definition.paper.is_roll,
-      width_mm: effective.definition.paper.width_mm,
+      // Papel conocido: el ancho sale del formato, no de un width_mm rancio del merge.
+      width_mm:
+        effective.definition.paper.format === 'custom'
+          ? effective.definition.paper.width_mm
+          : geometry.paper_width_mm,
+      printable_width_mm: geometry.printable_width_mm,
+      content_width_mm: geometry.content_width_mm,
     };
   }
 
@@ -609,9 +638,28 @@ export class PrintGatewayService {
     overrides?: Record<string, any>,
     sampleDocId?: number,
     renderMode?: 'dummy' | 'tokenized' | 'real',
-  ): Promise<{ html: string; width_mm: number; is_roll: boolean; definition: PrintFormatDefinition }> {
+  ): Promise<PreviewResult> {
     const effective = await this.resolveEffectiveConfig(storeId, formatType);
     const previewDef = overrides ? this.mergeDefinition(effective.definition, overrides) : effective.definition;
+
+    // El borrador fusionado pasa por el mismo normalize + AJV que el guardado,
+    // pero sólo bloquea errores del papel (geometría): un borrador a medio
+    // editar (columnas que aún no suman 100, token incompleto) debe seguir
+    // previsualizándose; el guardado aplica la validación completa.
+    if (overrides && Object.keys(overrides).length > 0) {
+      const normalized = normalizeDefinition(previewDef) as Record<string, any>;
+      const validation = validatePrintFormatDefinition(normalized);
+      const paperErrors = (validation.errors ?? []).filter((e: any) =>
+        String(e?.instancePath ?? '').startsWith('/paper'),
+      );
+      if (paperErrors.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PRINT_CONFIG_VALIDATION_001,
+          'schema validation failed for print preview draft',
+          { errors: validation.errors },
+        );
+      }
+    }
 
     const provider = this.registry.getProvider(formatType);
     let data: StandardPrintDataModel;
@@ -638,9 +686,15 @@ export class PrintGatewayService {
       preview_tz,
     );
 
+    const previewGeometry = resolvePrintGeometry(previewDef.paper);
     return {
       html,
-      width_mm: previewDef.paper.width_mm,
+      width_mm:
+        previewDef.paper.format === 'custom'
+          ? previewDef.paper.width_mm
+          : previewGeometry.paper_width_mm,
+      printable_width_mm: previewGeometry.printable_width_mm,
+      content_width_mm: previewGeometry.content_width_mm,
       is_roll: previewDef.paper.is_roll,
       definition: previewDef,
     };
@@ -720,6 +774,36 @@ export class PrintGatewayService {
    *   clave aparece EXPLÍCITAMENTE en el override (no se pisan con `null`/
    *   `undefined` accidentales del Hub).
    */
+  /**
+   * Fusiona `paper`: los márgenes del override ganan sobre los de la base.
+   * - Override con per-side: los lados no enviados heredan el lado de la base
+   *   (o su `margin_mm` uniforme) y el uniforme se descarta.
+   * - Override sólo con `margin_mm`: se descartan los per-side de la base,
+   *   porque si no el composer seguiría prefiriéndolos y el override se perdería.
+   */
+  private mergePaper(
+    base: PrintFormatDefinition['paper'],
+    override: Record<string, any>,
+  ): PrintFormatDefinition['paper'] {
+    const sides = [
+      'margin_top_mm',
+      'margin_right_mm',
+      'margin_bottom_mm',
+      'margin_left_mm',
+    ] as const;
+    const hasSide = sides.some((k) => override[k] !== undefined);
+    const paper: Record<string, any> = { ...base, ...override };
+    if (hasSide) {
+      for (const k of sides) {
+        paper[k] = override[k] ?? (base as any)[k] ?? base.margin_mm;
+      }
+      paper.margin_mm = base.margin_mm;
+    } else if (override.margin_mm !== undefined) {
+      for (const k of sides) delete paper[k];
+    }
+    return paper as PrintFormatDefinition['paper'];
+  }
+
   private mergeDefinition(
     base: PrintFormatDefinition,
     overrides: Record<string, any>,
@@ -734,20 +818,7 @@ export class PrintGatewayService {
       ...base,
       v,
       paper: overrides.paper
-        ? {
-            ...base.paper,
-            ...overrides.paper,
-            // Si llegan márgenes v2 per-side, el legado `margin_mm` ya no debe
-            // ganar: el composer prefiere los per-side y el legado caería a
-            // piso uniforme, anulando la asimetría del override.
-            margin_mm:
-              overrides.paper.margin_top_mm !== undefined ||
-              overrides.paper.margin_right_mm !== undefined ||
-              overrides.paper.margin_bottom_mm !== undefined ||
-              overrides.paper.margin_left_mm !== undefined
-                ? undefined
-                : overrides.paper.margin_mm ?? base.paper.margin_mm,
-          }
+        ? this.mergePaper(base.paper, overrides.paper)
         : base.paper,
       styles: overrides.styles
         ? { ...(base.styles ?? {}), ...overrides.styles }

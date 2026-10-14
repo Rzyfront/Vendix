@@ -50,7 +50,7 @@ import {
         <div class="hidden lg:flex justify-between items-center gap-4">
           <div class="flex-1 min-w-0">
             <h2 class="text-lg font-semibold text-text-primary">
-              Productos Disponibles ({{ filteredProducts().length }})
+              Productos Disponibles ({{ totalProducts() }})
             </h2>
           </div>
 
@@ -285,6 +285,7 @@ export class PopProductSelectionComponent {
   loading = signal(false);
   searchQuery = '';
   filteredProducts = signal<any[]>([]);
+  totalProducts = signal(0);
   categories = signal<any[]>([]);
   addingToCart = new Set<string>();
 
@@ -376,6 +377,9 @@ export class PopProductSelectionComponent {
       .subscribe({
         next: (response) => {
           this.filteredProducts.set(response.data || []);
+          this.totalProducts.set(
+            response.pagination?.total ?? response.data?.length ?? 0,
+          );
           this.loading.set(false);
         },
         error: (error: any) => {

@@ -180,13 +180,16 @@ Consecuencias en código:
 
 ## Cash Settlement (`cash-settlement.service.ts`)
 
+> **Desde 2026-10-14 el recaudo en ruta NO exige caja.** `settleStop` ya no
+> escribe `cash_register_movements` (ni llama `assertSessionForSales`). Los
+> movimientos se asientan al **cerrar** la planilla contra la sesión que elige
+> el usuario — ver "Cierre contra caja" abajo. `recordCashMovement` queda
+> `@deprecated` sin callers de producción.
+
 When `settleStop` is called, it dispatches (in this exact order):
 
 1. **`emitPaymentReceived`** — only if `collected_amount + anticipo_amount > 0`
    and not `is_prepaid`:
-   - If `payment_method='cash'`, looks up the open `cash_register_sessions`
-     for the current user/store (uses `opened_by`, not `user_id`!) and inserts
-     a `cash_register_movements` row with `type='sale'`.
    - Emits `payment.received` event with `source_type='dispatch_route'`,
      `source_id=route_id`, `stop_id`, `order_id=sales_order_id` (may be null),
      `withholding_breakdown` array for accounting listener.
@@ -202,6 +205,41 @@ When the route is **closed** (`:id/close`), it computes totals and updates
 emits `dispatch_route.closed` for downstream listeners. El cierre exige que
 **todas** las paradas estén en estado terminal, pero acepta cualquier mezcla de
 `delivered` / `rejected` / `released`.
+
+### Cierre contra caja (recaudo de la planilla)
+
+- `GET /store/dispatch-routes/:id/close-options` (permiso `close`) →
+  `{ cash_required, sessions[] }`. `cash_required` = misma lectura que
+  `assertSessionForSales` (`pos.cash_register.enabled`).
+- `POST /:id/close` acepta `cash_register_session_id?`. Caja obligatoria sin
+  sesión → 400 `DISPATCH_ROUTE_CASH_SESSION_REQUIRED`; sesión no `open` o de otra
+  tienda → 409 `DISPATCH_ROUTE_CASH_SESSION_INVALID`; ruta ya cerrada (chequeo
+  bajo `FOR UPDATE`) → 409 `DISPATCH_ROUTE_ALREADY_CLOSED`.
+- `CashSettlementService.recordRouteCloseMovements` crea UN movimiento `sale`
+  por método de pago (`reference = dispatch_route:{id}:close:{method}`,
+  `user_id = session.opened_by` = responsable), excluyendo paradas con
+  movimiento legado `dispatch_route:{id}:stop:{stopId}`. Persiste
+  `settlement_cash_session_id`, `settlement_cash_user_id`, `cash_settled_at`.
+- **No** emite `cash_register.movement`: el listener contable solo entiende
+  `cash_in`/`cash_out` y trataría un `sale` como retiro. El asiento del recaudo
+  sale de `payment.received` (igual que POS).
+
+### Encargado y tracking en vivo
+
+- Encargado = `driver_user_id` cuando `!is_primary_driver_external`. Si existe,
+  solo él despacha (403 `DISPATCH_ROUTE_NOT_RESPONSIBLE`); externo ⇒ cualquiera
+  con `dispatch`.
+- `dispatch_route_positions` (telemetría append-only, scope manual por
+  `store_id`, sin getter scoped → `withoutScope()` + filtro explícito).
+  Publica solo el encargado interno de una ruta `dispatched|in_transit`:
+  `POST /store/dispatch-routes/:id/tracking/positions` (admin) o el espejo
+  `POST /store/carrier/route/tracking/positions` (app Repartos). Lectura:
+  `GET /:id/tracking` (snapshot, trail ≤500) y SSE `GET /:id/tracking/stream?token=`.
+- Frontend: `RoutePositionPublisherService` (solo el encargado; sobrevive al
+  cambio de página; para con 403/404/409) y `RouteTrackingService` (SSE +
+  polling 15 s). El espectador NUNCA usa geolocalización. Vista completa en
+  `/admin/orders/planillas/:id/recorrido` (mapa 8/12 izq, paradas 4/12 der,
+  pantalla completa con panel flotante / bottom-sheet).
 
 ## Capture Progressive Mobile
 

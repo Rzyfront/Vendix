@@ -20,11 +20,38 @@ const RESERVATION_PRINT_STYLES = `
       background: #fff;
     }
     .container {
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 24px;
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
-    table { border-collapse: collapse; }
+    .container, .container * { box-sizing: border-box; min-width: 0; }
+    .container img { max-width: 100%; height: auto; }
+    .container table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+    .container td, .container th, .container p, .container h1, .container h2, .container h3, .container span {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+    .container .vx-flex-row { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+    .container .vx-flex-row > * { flex: 1 1 auto; min-width: 0; }
+    .container .vx-cards { display: flex; flex-wrap: wrap; gap: 16px; }
+    .container .vx-cards > * { flex: 1 1 140px; min-width: 0; }
+    .container .vx-totals { width: 100%; max-width: 260px; margin-left: auto; }
+    @media (max-width: 80mm), print and (max-width: 90mm) {
+      .container { font-size: 11px; }
+      .container h1 { font-size: 15px !important; }
+      .container h2 { font-size: 13px !important; }
+      .container [style*="padding: 16px"], .container [style*="padding: 14px"] { padding: 6px !important; }
+      .container [style*="margin-bottom: 24px"] { margin-bottom: 10px !important; }
+      .container th, .container td { padding: 3px 2px !important; font-size: 10px !important; }
+      .container [style*="Courier"] { font-size: 10px !important; }
+      .container .vx-flex-row { gap: 2px 6px; }
+      .container .vx-flex-row > * { flex-basis: 100%; text-align: left !important; }
+      .container .vx-cards { gap: 6px; }
+      .container .vx-cards > * { flex-basis: 100%; }
+      .container .vx-totals { max-width: 100%; }
+    }
 `;
 
 @Injectable({
@@ -112,7 +139,7 @@ export class ReservationPrintService {
     return `
   <div class="container">
     <!-- Header -->
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
+    <div class="vx-flex-row" style="justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #111827; padding-bottom: 20px; margin-bottom: 24px;">
       <div>
         ${storeLogo ? `<img src="${storeLogo}" style="max-height: 50px; margin-bottom: 8px;" alt="Logo" />` : ''}
         <h1 style="margin: 0; font-size: 22px; font-weight: 700;">${storeName}</h1>
@@ -133,16 +160,16 @@ export class ReservationPrintService {
     </div>
 
     <!-- Info principal de la reserva -->
-    <div style="display: flex; gap: 16px; margin-bottom: 24px;">
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center;">
+    <div class="vx-cards" style="margin-bottom: 24px;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center;">
         <p style="margin: 0 0 4px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Fecha</p>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${bookingDate}</p>
       </div>
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center;">
         <p style="margin: 0 0 4px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Hora</p>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${startTime} - ${endTime}</p>
       </div>
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center;">
         <p style="margin: 0 0 4px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Canal</p>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${channelLabel}</p>
       </div>

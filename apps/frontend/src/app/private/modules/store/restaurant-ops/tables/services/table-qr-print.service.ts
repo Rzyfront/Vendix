@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { DocumentPrintService } from '../../../../../../shared/services/print';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { resolvePrintGeometry } from '../../../../../../core/lib/print-geometry';
 import { Table, TableQrResponse } from '../interfaces';
 
 /**
@@ -10,6 +11,15 @@ import { Table, TableQrResponse } from '../interfaces';
  * para que cambiarlo sea una edición de una línea y no una arqueología dentro
  * de 200 líneas de HTML.
  */
+/**
+ * El cartel es un documento de HOJA (A4): nunca se imprime en rollo. La
+ * geometría sale del kernel (márgenes por lado >= 5 mm; 10 mm por defecto) para
+ * que ni el @page ni la hoja toquen la banda no imprimible. Alto del A4 en mm.
+ */
+const A4_HEIGHT_MM = 297;
+/** Holgura contra redondeos del motor: evita una hoja en blanco extra. */
+const PAGE_SLACK_MM = 0.5;
+
 const QR_HEADLINE = 'ESCANEA NUESTRO MENÚ';
 
 /**
@@ -123,6 +133,9 @@ export class TableQrPrintService {
   private buildStyles(brand: TableQrBrand): string {
     const primary = brand.primary;
     const onPrimary = this.onPrimaryText(primary);
+    const { margins } = resolvePrintGeometry({ format: 'a4' });
+    const pageHeightMm =
+      A4_HEIGHT_MM - margins.top - margins.bottom - PAGE_SLACK_MM;
     // Tinta de marca para lo que va SOBRE el panel blanco. No es lo mismo que
     // el color primario: una marca amarilla o lima imprime un titular invisible
     // sobre blanco, así que ahí se usa el mismo matiz oscurecido hasta ser
@@ -132,9 +145,10 @@ export class TableQrPrintService {
 
     return `
       /* Sin un @page explícito el driver elige su propio papel y descentra
-         el cartel. El margen 0 es deliberado: el sangrado de color lo da la
-         propia tarjeta, no el margen de la hoja. */
-      @page { size: A4 portrait; margin: 0; }
+         el cartel. El margen viene del kernel de geometría (>= 5 mm): con
+         margen 0 la tarjeta tocaría el borde físico, que la impresora no
+         puede imprimir. La tarjeta llena el área imprimible. */
+      @page { size: A4 portrait; margin: ${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm; }
 
       /* print-color-adjust: exact NO es cosmético. Sin él Chrome descarta los
          fondos de color al imprimir "para ahorrar tinta" y la tarjeta sale
@@ -148,10 +162,11 @@ export class TableQrPrintService {
       }
 
       .qr-page {
-        width: 210mm;
-        height: 297mm;
+        width: 100%;
+        max-width: 100%;
+        height: ${pageHeightMm}mm;
         box-sizing: border-box;
-        padding: 10mm;
+        padding: 0;
         overflow: hidden;
         break-after: page;
         page-break-after: always;
