@@ -14,19 +14,7 @@ import {
   MovementType,
   SourceOrderType,
 } from '../../interfaces';
-
-/**
- * Tipos que sólo existen como salida. Misma lista que en
- * movement-list: sirve para desempatar las filas históricas, que se
- * escribieron con `to_location_id` relleno en los dos sentidos.
- */
-const OUTBOUND_ONLY_TYPES = new Set<string>([
-  'stock_out',
-  'sale',
-  'damage',
-  'expiration',
-  'consumption',
-]);
+import { isInboundMovement } from '../utils/movement-direction.util';
 
 @Component({
   selector: 'app-movement-detail-modal',
@@ -341,29 +329,10 @@ export class MovementDetailModalComponent {
     return: 'Devolución',
   };
 
-  /**
-   * Dirección real del movimiento. Misma regla que en movement-list: la
-   * dicen las dos patas de ubicación, no el tipo. Adivinarla por tipo era
-   * el bug QUI-441: un `adjustment` positivo se pintaba "−N" aquí en el
-   * detalle aunque la lista ya lo mostrara bien.
-   */
   isInbound(): boolean {
     const movement = this.movement();
     if (!movement) return false;
-
-    const from = movement.from_location_id ?? null;
-    const to = movement.to_location_id ?? null;
-
-    // Sólo pata de origen → salió. Es la forma de TODA fila nueva de salida.
-    if (from != null && to == null) return false;
-
-    // Las dos patas → traslado; se muestra desde la pata de destino.
-    if (from != null && to != null) return true;
-
-    // Sólo pata de destino: entrada nueva o fila histórica. Los tipos de
-    // salida zanjan el caso; `adjustment` se resuelve como entrada porque
-    // toda salida nueva ya cayó por la primera regla.
-    return !OUTBOUND_ONLY_TYPES.has(movement.movement_type);
+    return isInboundMovement(movement);
   }
 
   getTypeLabel(): string {
