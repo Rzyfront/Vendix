@@ -14,7 +14,7 @@ import { ReceivedDocumentFormComponent } from './received-document-form.componen
 import { ReceivedDocumentMatchingComponent } from './received-document-matching.component';
 import { ReceivedDocumentAccountingEvidenceComponent } from './received-document-accounting-evidence.component';
 import { ReceivedBuyerEventCommandComponent } from './received-buyer-event-command.component';
-import { receivedInboxLabel, receivedLegalLabel, receivedTypeLabel, receivedChannelLabel } from './received-documents-inbox-projection.util';
+import { receivedInboxLabel, receivedLegalLabel, receivedTypeLabel, receivedChannelLabel, receivedIsElectronicPos, receivedDianLabel, receivedReceiptEvidence, receivedDocumentSourceLabel } from './received-documents-inbox-projection.util';
 
 @Component({
   selector: 'app-received-document-detail',
@@ -26,14 +26,15 @@ import { receivedInboxLabel, receivedLegalLabel, receivedTypeLabel, receivedChan
       @if (loading()) { <div class="p-10 text-center text-sm text-text-secondary" role="status">Cargando documento…</div> }
       @if (error()) { <div role="alert" class="rounded-lg border border-error/30 bg-error-light p-4 text-error">{{ error() }} <button class="ml-3 underline" type="button" (click)="load()">Reintentar</button></div> }
       @if (document(); as doc) {
+        <p role="note" class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm">Esta factura no ha sido verificada ante la DIAN. Confirma los datos con tu proveedor antes de pagar</p>
 
         <app-card [responsive]="true">
           <section aria-labelledby="summary-title">
-            <h2 id="summary-title" class="mb-4 text-lg font-semibold text-text-primary">Resumen de la factura recibida</h2>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 id="summary-title" class="text-lg font-semibold text-text-primary">Resumen de la factura recibida</h2><span class="rounded-full border border-border px-3 py-1 text-xs">{{ dianLabel(doc) }}</span></div>
             <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div><dt class="text-xs text-text-secondary">Proveedor</dt><dd class="font-medium">{{ doc.issuer_name || 'No identificado' }}</dd><dd class="text-sm text-text-secondary">NIT {{ doc.issuer_tax_id || '—' }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Número</dt><dd class="font-medium">{{ doc.invoice_number || 'Sin número' }}</dd></div>
-              <div><dt class="text-xs text-text-secondary">Tipo</dt><dd class="font-medium">{{ typeLabel(doc.document_type) }}</dd></div>
+              <div><dt class="text-xs text-text-secondary">Tipo</dt><dd class="font-medium">{{ isElectronicPos(doc) ? 'Documento POS electrónico' : typeLabel(doc.document_type) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Llegada al buzón</dt><dd class="font-medium">{{ dateTime(doc.arrived_at || doc.created_at) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Fecha de emisión</dt><dd class="font-medium">{{ dateOnly(doc.issue_date) }}</dd></div>
               <div><dt class="text-xs text-text-secondary">Vencimiento</dt><dd class="font-medium">{{ dateOnly(doc.due_date) }}</dd></div>
@@ -84,11 +85,12 @@ import { receivedInboxLabel, receivedLegalLabel, receivedTypeLabel, receivedChan
         <app-card [responsive]="true">
           <section aria-labelledby="evidence-title">
             <h2 id="evidence-title" class="mb-3 text-lg font-semibold">Originales del proveedor</h2>
+            @if (hasArchivedComplement(doc)) { <p role="note" class="mb-3 rounded-lg border border-warning/30 bg-warning-light p-3 text-sm">Complemento archivado dentro del ZIP original, sin expandir ni abrir. No se procesó como otra factura.</p> }
             @if (!doc.files?.length) { <p class="text-sm text-text-secondary">No hay archivos adjuntos.</p> }
             @for (file of doc.files ?? []; track file.id) {
               <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border py-3 first:border-0">
-                <div class="min-w-0"><p class="truncate font-medium">{{ file.file_name }}</p><p class="text-xs text-text-secondary">{{ fileRoleLabel(file.role) }} · {{ file.mime_type }} · {{ file.file_size }} bytes</p><p class="break-all font-mono text-xs text-text-secondary">SHA-256: {{ file.sha256 }}</p></div>
-                <button type="button" class="rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface" [disabled]="downloadingFileId() === file.id" (click)="download(doc, file)">{{ downloadingFileId() === file.id ? 'Descargando…' : 'Descargar original' }}</button>
+                <div class="min-w-0"><p class="truncate font-medium">{{ displayFilename(file) }}</p><p class="text-xs text-text-secondary">{{ fileRoleLabel(file.role) }} · {{ file.mime_type }} · {{ file.file_size }} bytes</p><p class="break-all font-mono text-xs text-text-secondary">SHA-256 del archivo almacenado: {{ file.sha256 }}</p>@if (isDerivedXml(doc, file)) { <p role="note" class="mt-1 text-xs text-text-secondary">XML comercial extraído: evidencia derivada del DOM. La normalización XML puede cambiar CRLF a LF; no representa los bytes ni una firma original del remitente. El AttachedDocument conserva el original autoritativo.</p> }</div>
+                <button type="button" class="min-h-11 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface" [disabled]="downloadingFileId() === file.id" (click)="download(doc, file)">{{ downloadingFileId() === file.id ? 'Descargando…' : isDerivedXml(doc, file) ? 'Descargar evidencia derivada' : 'Descargar original' }}</button>
               </div>
             }
           </section>
@@ -127,6 +129,14 @@ import { receivedInboxLabel, receivedLegalLabel, receivedTypeLabel, receivedChan
               <div class="rounded-lg border border-border p-3"><dt class="text-xs text-text-secondary">Firma</dt><dd class="mt-1 font-medium">{{ signatureStatusLabel(doc) }}</dd></div>
               <div class="rounded-lg border border-border p-3"><dt class="text-xs text-text-secondary">Verificación DIAN</dt><dd class="mt-1 font-medium">{{ dianStatusLabel(doc) }}</dd></div>
             </dl>
+            @if (receiptEvidence(doc); as receipt) {
+              <div class="mb-3 rounded-lg border border-border p-3 space-y-1" aria-label="Constancia incluida en el envío">
+                <h3 class="font-medium">{{ receipt.included ? 'Constancia incluida' : 'No incluye constancia' }}</h3>
+                @if (receipt.included && !receipt.reference_matches) { <p role="note" class="text-sm text-warning">La referencia de la constancia no coincide con esta factura.</p> }
+                @if (receipt.response_code) { <p class="text-sm text-text-secondary">ResponseCode incluido: {{ receipt.response_code }}</p> }
+                <p class="text-xs text-text-secondary">Es evidencia incluida en el envío, sin autenticar. No verifica la firma, no valida la factura ante la DIAN ni registra una aceptación legal.</p>
+              </div>
+            }
             <p class="mb-3 text-xs text-text-secondary">La firma criptográfica no se autentica y la DIAN no se consulta desde esta revisión. La validación estructural no acredita autenticidad ni aceptación.</p>
             @if (doc.validation_summary?.errors?.length) { <div class="mb-3 rounded-lg border border-error/30 bg-error-light p-3" role="alert"><h3 class="font-medium text-error">Inconsistencias</h3><ul class="list-inside list-disc text-sm text-error">@for (issue of doc.validation_summary?.errors ?? []; track $index) { <li>{{ issue.message }}</li> }</ul></div> }
             @if (doc.validation_summary?.warnings?.length) { <div class="rounded-lg border border-warning/30 bg-warning-light p-3" role="note"><h3 class="font-medium">Advertencias</h3><ul class="list-inside list-disc text-sm">@for (issue of doc.validation_summary?.warnings ?? []; track $index) { <li>{{ issue.message }}</li> }</ul></div> }
@@ -148,14 +158,18 @@ import { receivedInboxLabel, receivedLegalLabel, receivedTypeLabel, receivedChan
         <app-card [responsive]="true">
           <section aria-labelledby="timeline-title">
             <h2 id="timeline-title" class="mb-3 text-lg font-semibold">Actividad y procedencia</h2>
-            <p class="mb-3 text-sm text-text-secondary">Origen: {{ channelLabel(doc.source_channel) }} · Registrado: {{ dateTime(doc.created_at) }} · Versión {{ doc.version }}</p>
+            <p class="mb-3 text-sm text-text-secondary">Origen: {{ sourceLabel(doc) }} · Registrado: {{ dateTime(doc.created_at) }} · Versión {{ doc.version }}</p>
             @if (!doc.events?.length) { <p class="text-sm text-text-secondary">Sin eventos adicionales.</p> }
             <ol class="space-y-2">@for (event of doc.events ?? []; track event.id) { <li class="border-l-2 border-border pl-3"><p class="font-medium">{{ label(event.event_type) }} · {{ label(event.status) }}</p>@if (event.event_type === 'BUYER_DIAN_EVENT') { <p class="break-all text-xs text-text-secondary">Código {{ event.event_code || '—' }} · Número {{ event.event_number || '—' }} · CUDE {{ event.cude || '—' }}</p> }@if (event.event_type === 'BUYER_DIAN_EVENT' && event.event_code === '034' && event.status === 'accepted') { <p class="text-xs text-text-secondary" role="note">Consulta 034 aceptada y registrada; esta evidencia solo se consulta y no se ofrece para emisión desde esta pantalla.</p> }<time class="text-xs text-text-secondary">{{ dateTime(event.confirmed_at || event.event_date || event.created_at) }}</time></li> }</ol>
             <details class="mt-4"><summary class="cursor-pointer text-sm font-medium">Ver metadatos de procedencia</summary><pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-3 text-xs">{{ provenance(doc) }}</pre></details>
           </section>
         </app-card>
         <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary">El estado validado no equivale a aceptación por la DIAN. Los eventos del adquirente requieren una acción expresa y una respuesta de la DIAN; reconocimiento fiscal, coincidencia con recepción/compra y contabilización son procesos separados.</p>
-        <app-received-buyer-event-command [document]="doc" [scope]="scope" [storeId]="storeId() ?? null" (changed)="load()" />
+        @if (!isElectronicPos(doc)) {
+          <app-received-buyer-event-command [document]="doc" [scope]="scope" [storeId]="storeId() ?? null" (changed)="load()" />
+        } @else {
+          <p role="note" class="rounded-lg border border-border p-3 text-sm text-text-secondary">Las acciones RADIAN de factura electrónica de venta (FEV) no están disponibles para un documento POS electrónico. Su historial legal y sus evidencias siguen disponibles para consulta.</p>
+        }
         <app-received-document-form [isOpen]="reviewFormOpen()" (isOpenChange)="reviewFormOpen.set($event)" [scope]="scope" [selectedStoreId]="storeId() ?? null" [document]="doc" (saved)="onReviewSaved()" (reloadRequested)="load()" />
       }
     </div>
@@ -216,6 +230,10 @@ export class ReceivedDocumentDetailComponent {
   readonly legalLabel = receivedLegalLabel;
   readonly typeLabel = receivedTypeLabel;
   readonly channelLabel = receivedChannelLabel;
+  readonly isElectronicPos = receivedIsElectronicPos;
+  readonly dianLabel = receivedDianLabel;
+  readonly receiptEvidence = receivedReceiptEvidence;
+  readonly sourceLabel = receivedDocumentSourceLabel;
 
   constructor() {
     effect(() => {
@@ -354,6 +372,7 @@ export class ReceivedDocumentDetailComponent {
     if (doc.inbox_state === 'requires_review') return 'Revisa las discrepancias y los datos recibidos; cada acción conserva su validación independiente.';
     if (doc.legal_status === 'accepted' || doc.legal_status === 'reclaimed') return 'Consulta la evidencia legal registrada y los vínculos contables; no repitas una aceptación ni un reclamo incompatible.';
     if (!doc.inbox_state || !doc.legal_status) return 'Consulta el documento y su actividad. El estado legal no está disponible en esta respuesta.';
+    if (this.isElectronicPos(doc)) return 'Revisa los datos y concilia compras o gastos existentes. Las acciones RADIAN de FEV no están disponibles para este POS electrónico; consulta su historial y evidencia.';
     return 'Revisa el original y los datos; después concilia compras o gastos existentes y consulta las acciones legales disponibles.';
   }
   blockingReasonLabel(reason: string): string {
@@ -372,7 +391,8 @@ export class ReceivedDocumentDetailComponent {
     const labels: Record<string, string> = {
       original: 'Original', source: 'Archivo de origen', source_xml: 'XML original', xml: 'XML',
       attachment: 'Adjunto', supporting: 'Respaldo', application_response: 'Respuesta electrónica',
-      pdf: 'PDF', image: 'Imagen',
+      pdf: 'PDF', image: 'Imagen', container: 'AttachedDocument original', commercial: 'XML comercial',
+      dian_receipt: 'Constancia incluida sin autenticar', representation: 'Representación PDF', archive: 'Archivo original', zip: 'ZIP original', complement: 'Complemento archivado',
     };
     return labels[value] || 'Archivo adjunto';
   }
@@ -388,9 +408,19 @@ export class ReceivedDocumentDetailComponent {
     const value = doc.signature_validation_status ?? summary?.status ?? (typeof summary?.has_signature === 'boolean' ? summary.has_signature ? 'not_verified' : 'unsigned' : 'not_verified');
     return value === 'unsigned' ? 'No se detectó firma' : 'Firma no verificada';
   }
-  dianStatusLabel(doc: ReceivedDocument): string {
-    const value = doc.dian_validation_status ?? doc.validation_summary?.dian?.status ?? 'not_checked';
-    return value === 'not_checked' ? 'No consultada' : 'Estado DIAN no reconocido';
+  dianStatusLabel(doc: ReceivedDocument): string { return this.dianLabel(doc); }
+  hasArchivedComplement(doc: ReceivedDocument): boolean {
+    if (doc.email_transport_received !== true) return false;
+    const email = this.metadataObject(this.metadataObject(doc.metadata)['email_reception']);
+    const warnings = email['warnings'];
+    const technicalWarnings = Array.isArray(warnings) ? warnings.slice(0, 4) : [];
+    const validationWarnings = doc.validation_summary?.warnings?.slice(0, 4) ?? [];
+    return technicalWarnings.includes('COMPLEMENT_ARCHIVE_NOT_EXPANDED')
+      || validationWarnings.some((warning) => warning.code === 'COMPLEMENT_ARCHIVE_NOT_EXPANDED');
+  }
+  displayFilename(file: ReceivedDocumentFile): string { return this.safeFilename(file.file_name); }
+  isDerivedXml(doc: ReceivedDocument, file: ReceivedDocumentFile): boolean {
+    return doc.email_transport_received === true && file.role === 'commercial' && !!doc.files?.some((entry) => entry.role === 'container');
   }
   dateTime(value: string): string {
     return formatStoreDateTime(value, this.storeSettings.timezone(), { dateStyle: 'medium', timeStyle: 'short' });

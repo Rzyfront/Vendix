@@ -200,6 +200,11 @@ export interface EnsureOperationalContext {
    */
   periodEnd?: Date;
   /**
+   * Ancla explícita del inicio del período; solo se usa junto con `periodEnd`
+   * al reconstruir la ventana. Sin ella el inicio es "ahora".
+   */
+  periodStart?: Date;
+  /**
    * Plan whose `billing_cycle` governs the derived period length. Purely a
    * READ: `ensureOperational` never mutates `plan_id` / `paid_plan_id` —
    * that stays owned by the payment-confirmation path (ADR-7).
@@ -1184,7 +1189,8 @@ export class SubscriptionStateService {
         requestedPeriodEnd: ctx.periodEnd,
       });
 
-      data.current_period_start = now;
+      data.current_period_start =
+        ctx.periodEnd && ctx.periodStart ? ctx.periodStart : now;
       data.current_period_end = window.periodEnd;
       data.next_billing_at = window.periodEnd;
 

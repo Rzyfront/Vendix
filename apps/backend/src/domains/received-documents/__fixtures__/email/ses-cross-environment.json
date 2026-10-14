@@ -1,0 +1,11 @@
+{
+  "Type": "Notification",
+  "MessageId": "11111111-2222-4333-8444-555555555555",
+  "TopicArn": "arn:aws:sns:us-east-1:123456789012:email-reception-fixture-stg",
+  "Timestamp": "2026-10-13T17:34:00.000Z",
+  "Message": "{\"notificationType\": \"Received\", \"mail\": {\"timestamp\": \"2026-10-13T17:34:00.000Z\", \"source\": \"proveedor@example.invalid\", \"messageId\": \"synthetic-ses-invoice\", \"destination\": [\"untrusted-to@example.invalid\"], \"headersTruncated\": false, \"headers\": [{\"name\": \"From\", \"value\": \"proveedor@example.invalid\"}, {\"name\": \"To\", \"value\": \"untrusted-to@example.invalid\"}], \"commonHeaders\": {\"from\": [\"proveedor@example.invalid\"], \"to\": [\"untrusted-to@example.invalid\"], \"messageId\": \"<synthetic-invoice@example.invalid>\", \"subject\": \"Synthetic fixture\"}}, \"receipt\": {\"timestamp\": \"2026-10-13T17:34:00.000Z\", \"processingTimeMillis\": 10, \"recipients\": [\"facturas-00112233445566778899aabbccddeeff@recepcion.vendix.online\"], \"spamVerdict\": {\"status\": \"PASS\"}, \"virusVerdict\": {\"status\": \"PASS\"}, \"spfVerdict\": {\"status\": \"PASS\"}, \"dkimVerdict\": {\"status\": \"PASS\"}, \"dmarcVerdict\": {\"status\": \"PASS\"}, \"action\": {\"type\": \"S3\", \"topicArn\": \"arn:aws:sns:us-east-1:123456789012:email-reception-fixture-stg\", \"bucketName\": \"vendix-email-fixture-stg\", \"objectKey\": \"raw/../../foreign-key\"}}}",
+  "SignatureVersion": "1",
+  "Signature": "SYNTHETIC_NOT_A_VALID_SIGNATURE",
+  "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-SYNTHETIC.pem",
+  "UnsubscribeURL": "https://example.invalid/disabled"
+}

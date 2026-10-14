@@ -7,6 +7,7 @@ import type {
   ApiEnvelope, ReceivedDocument, ReceivedDocumentInboxSummary, ReceivedDocumentQuery,
   ReceivedDocumentReceptionStatus, ReceivedDocumentsPage, ReceivedDocumentsScope,
 } from './received-documents.interface';
+import { isValidReceivedReceptionHealth } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 import {
   receivedInboxCanPoll, receivedInboxContextKey, receivedInboxMembershipChanged, receivedInboxNewRowCount,
@@ -130,7 +131,10 @@ export class ReceivedDocumentsInboxFacade {
     this.activeRequest = forkJoin({
       list: this.read(this.service.list(scope, query)),
       summary: this.read(this.service.getSummary(scope, query).pipe(map(checkedEnvelope))),
-      health: this.read(this.service.getReceptionStatus(scope, query.store_id).pipe(map(checkedEnvelope))),
+      health: this.read(this.service.getReceptionStatus(scope, query.store_id).pipe(map(checkedEnvelope), map((value) => {
+        if (!isValidReceivedReceptionHealth(value)) throw new Error('La respuesta de salud de recepción no tiene un formato válido.');
+        return value;
+      }))),
     }).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => {
       if (generation !== this.generation || this.destroyed) return;
       this.inFlight = false;
@@ -150,7 +154,7 @@ export class ReceivedDocumentsInboxFacade {
         this.lastUpdatedAt.set(new Date().toISOString());
       }
       if (summary.value) this.summary.set(summary.value);
-      if (health.value) this.health.set(health.value);
+      this.health.set(health.value);
       this.failures = list.error || summary.error || health.error ? this.failures + 1 : 0;
     });
   }

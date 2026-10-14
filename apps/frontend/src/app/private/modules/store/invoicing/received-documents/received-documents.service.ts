@@ -7,6 +7,7 @@ import type {
   ConfirmReceivedDocumentMatchInput,
   ManualReceivedDocumentInput,
   ReceivedDocument,
+  ReceivedDocumentCreateResult,
   ReceivedDocumentAccountingEvidence,
   ReceivedDocumentMatchAllocationsResponse,
   ReceivedDocumentMatchCandidatesResponse,
@@ -141,10 +142,10 @@ export class ReceivedDocumentsService {
     );
   }
 
-  importXml(scope: ReceivedDocumentsScope, file: File, storeId?: number): Observable<ApiEnvelope<ReceivedDocument>> {
+  importXml(scope: ReceivedDocumentsScope, file: File, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentCreateResult>> {
     const body = new FormData();
     body.append('file', file, file.name);
-    return this.http.post<ApiEnvelope<ReceivedDocument>>(`${this.base(scope)}/import/xml`, body, {
+    return this.http.post<ApiEnvelope<ReceivedDocumentCreateResult>>(`${this.base(scope)}/import/xml`, body, {
       params: this.scopeParams(scope, storeId),
     });
   }
@@ -163,8 +164,8 @@ export class ReceivedDocumentsService {
     });
   }
 
-  createManual(scope: ReceivedDocumentsScope, dto: ManualReceivedDocumentInput, storeId?: number): Observable<ApiEnvelope<ReceivedDocument>> {
-    return this.http.post<ApiEnvelope<ReceivedDocument>>(`${this.base(scope)}/manual`, dto, {
+  createManual(scope: ReceivedDocumentsScope, dto: ManualReceivedDocumentInput, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentCreateResult>> {
+    return this.http.post<ApiEnvelope<ReceivedDocumentCreateResult>>(`${this.base(scope)}/manual`, dto, {
       params: this.scopeParams(scope, storeId),
     });
   }

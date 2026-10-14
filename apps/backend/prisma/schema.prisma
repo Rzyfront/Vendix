@@ -59,6 +59,9 @@ model users {
   received_document_match_allocations_created received_document_match_allocations[] @relation("received_document_match_allocations_created_by")
   received_document_match_allocations_revoked received_document_match_allocations[] @relation("received_document_match_allocations_revoked_by")
   received_document_events_acted received_document_events[] @relation("received_document_events_actor")
+  document_reception_email_inboxes_created document_reception_email_inboxes[] @relation("email_inboxes_created_by")
+  document_reception_email_inboxes_updated document_reception_email_inboxes[] @relation("email_inboxes_updated_by")
+  document_reception_email_messages_archived document_reception_email_messages[] @relation("email_messages_archived_by")
   document_reception_connections_created document_reception_connections[] @relation("document_reception_connections_created_by")
   fiscal_tax_credits_created fiscal_tax_credits[]           @relation("fiscal_tax_credits_created_by")
   fiscal_tax_payments_created fiscal_tax_payments[]         @relation("fiscal_tax_payments_created_by")
@@ -674,6 +677,8 @@ model organizations {
   received_tax_qualifications   received_tax_qualifications[]
   received_tax_effects          received_tax_effects[] @relation("received_tax_effects_organization")
   received_document_match_allocations received_document_match_allocations[]
+  document_reception_email_inboxes document_reception_email_inboxes[]
+  document_reception_email_messages document_reception_email_messages[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
   fiscal_tax_payments            fiscal_tax_payments[]
@@ -950,6 +955,8 @@ model stores {
   received_tax_qualifications received_tax_qualifications[]
   received_tax_effects        received_tax_effects[]
   received_document_match_allocations received_document_match_allocations[]
+  document_reception_email_inboxes document_reception_email_inboxes[]
+  document_reception_email_messages document_reception_email_messages[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits           fiscal_tax_credits[]
   fiscal_tax_payments          fiscal_tax_payments[]
@@ -6739,6 +6746,8 @@ model accounting_entities {
   received_tax_qualifications   received_tax_qualifications[]
   received_tax_effects          received_tax_effects[]
   received_document_match_allocations received_document_match_allocations[]
+  document_reception_email_inboxes document_reception_email_inboxes[]
+  document_reception_email_messages document_reception_email_messages[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
   fiscal_tax_payments            fiscal_tax_payments[]
@@ -12417,6 +12426,96 @@ model received_tax_effects {
   @@unique([organization_id, accounting_entity_id, effect_key], map: "received_tax_effects_scope_effect_key")
   @@index([organization_id, accounting_entity_id, tax_type, jurisdiction_key, effective_date], map: "received_tax_effects_period_idx")
   @@index([qualification_id], map: "received_tax_effects_qualification_idx")
+}
+
+/// One operational inbox per store; fiscal authority may belong to the organization.
+model document_reception_email_inboxes {
+  id                      Int       @id @default(autoincrement())
+  organization_id         Int
+  store_id                Int       @unique(map: "doc_email_inboxes_store_key")
+  accounting_entity_id    Int
+  local_part              String    @unique(map: "doc_email_inboxes_local_part_key") @db.VarChar(64)
+  domain                  String    @db.VarChar(255)
+  environment             String    @db.VarChar(20)
+  enabled                 Boolean   @default(false)
+  version                 Int       @default(1)
+  created_by              Int
+  updated_by              Int
+  policy_version          String    @db.VarChar(100)
+  policy_accepted_at      DateTime  @db.Timestamp(6)
+  first_valid_received_at DateTime? @db.Timestamp(6)
+  last_email_at           DateTime? @db.Timestamp(6)
+  last_valid_received_at  DateTime? @db.Timestamp(6)
+  last_error_code         String?   @db.VarChar(100)
+  created_at              DateTime  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_org_fkey")
+  store             stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_store_fkey")
+  accounting_entity accounting_entities  @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_entity_fkey")
+  creator           users                @relation("email_inboxes_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_creator_fkey")
+  updater           users                @relation("email_inboxes_updated_by", fields: [updated_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_updater_fkey")
+  messages          document_reception_email_messages[]
+
+  @@index([organization_id, enabled], map: "doc_email_inboxes_org_enabled_idx")
+  @@index([accounting_entity_id], map: "doc_email_inboxes_entity_idx")
+  @@index([created_by], map: "doc_email_inboxes_creator_idx")
+  @@index([updated_by], map: "doc_email_inboxes_updater_idx")
+}
+
+/// Durable transport ledger. Tenant/address snapshots survive address rotation.
+model document_reception_email_messages {
+  id                    Int       @id @default(autoincrement())
+  inbox_id              Int
+  organization_id       Int
+  store_id              Int
+  accounting_entity_id  Int
+  local_part            String    @db.VarChar(64)
+  domain                String    @db.VarChar(255)
+  environment           String    @db.VarChar(20)
+  recipient_alias       String    @db.VarChar(320)
+  ses_message_id        String    @db.VarChar(255)
+  sns_message_id        String?   @db.VarChar(255)
+  /// Untrusted RFC Message-ID is only a signal, never an idempotency key.
+  rfc_message_id_hash   String?   @db.VarChar(64)
+  raw_bucket            String    @db.VarChar(255)
+  raw_key               String    @db.VarChar(1024)
+  raw_sha256            String?   @db.VarChar(64)
+  raw_bytes             Int?
+  received_at           DateTime  @db.Timestamp(6)
+  processed_at          DateTime? @db.Timestamp(6)
+  status                String    @default("received") @db.VarChar(30)
+  reason_code           String?   @db.VarChar(100)
+  retryable             Boolean   @default(false)
+  attempt_count         Int       @default(0)
+  processing_token      String?   @db.VarChar(64)
+  processing_started_at DateTime? @db.Timestamp(6)
+  version               Int       @default(1)
+  sender                String?   @db.VarChar(255)
+  subject               String?   @db.VarChar(255)
+  /// At most 40 metadata-only results and 128 KiB; no bytes/body/hidden document IDs.
+  parts                 Json      @default("[]")
+  gmail_code_encrypted   String?   @db.Text
+  gmail_code_expires_at  DateTime? @db.Timestamp(6)
+  gmail_challenge_alias  String?   @db.VarChar(320)
+  archived_at           DateTime? @db.Timestamp(6)
+  archived_by           Int?
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  inbox             document_reception_email_inboxes @relation(fields: [inbox_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_inbox_fkey")
+  organization      organizations                   @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_org_fkey")
+  store             stores                          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_store_fkey")
+  accounting_entity accounting_entities             @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_entity_fkey")
+  archiver          users?                          @relation("email_messages_archived_by", fields: [archived_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_archiver_fkey")
+
+  @@unique([environment, ses_message_id, recipient_alias], map: "doc_email_messages_transport_key")
+  @@index([store_id, received_at, id], map: "doc_email_messages_store_received_idx")
+  @@index([store_id, status, archived_at, received_at], map: "doc_email_messages_store_status_idx")
+  @@index([organization_id, store_id], map: "doc_email_messages_org_store_idx")
+  @@index([accounting_entity_id], map: "doc_email_messages_entity_idx")
+  @@index([inbox_id, received_at], map: "doc_email_messages_inbox_received_idx")
+  @@index([archived_by], map: "doc_email_messages_archiver_idx")
 }
 
 model document_reception_connections {

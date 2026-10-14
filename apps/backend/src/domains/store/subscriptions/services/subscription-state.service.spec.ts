@@ -1080,6 +1080,40 @@ describe('SubscriptionStateService', () => {
       expect(prismaMock.subscription_plans.findUnique).not.toHaveBeenCalled();
     });
 
+    it('writes current_period_start = ctx.periodStart when periodEnd + periodStart are given; otherwise now', async () => {
+      const requested = new Date(Date.now() + 26 * DAY_MS);
+      const anchor = new Date(Date.now() - 5 * DAY_MS);
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 4 * DAY_MS),
+      });
+      await service.ensureOperational(STORE_ID, {
+        reason: 'manual_payment',
+        periodEnd: requested,
+        periodStart: anchor,
+      });
+      expect(lastUpdateData().current_period_start.getTime()).toBe(
+        anchor.getTime(),
+      );
+
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 4 * DAY_MS),
+      });
+      const before = Date.now();
+      await service.ensureOperational(STORE_ID, {
+        reason: 'manual_payment',
+        periodEnd: requested,
+      });
+      const start = lastUpdateData().current_period_start.getTime();
+      expect(start).toBeGreaterThanOrEqual(before);
+      expect(start).not.toBe(anchor.getTime());
+    });
+
     it('writes NOTHING when already active with an unexpired period (duplicate webhook)', async () => {
       primeRoute({
         from: 'active',

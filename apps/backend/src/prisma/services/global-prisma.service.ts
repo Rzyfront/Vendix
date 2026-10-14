@@ -799,6 +799,15 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.received_document_event_attempts;
   }
 
+  // Email reception delegates: system callers must provide explicit tenant predicates.
+  get document_reception_email_inboxes() {
+    return this.baseClient.document_reception_email_inboxes;
+  }
+
+  get document_reception_email_messages() {
+    return this.baseClient.document_reception_email_messages;
+  }
+
   get document_reception_connections() {
     return this.baseClient.document_reception_connections;
   }

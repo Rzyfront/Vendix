@@ -28,7 +28,9 @@ describe('Received document detail semantic source guards (static, not E2E)', ()
     expect(detail).toContain('no acredita autenticidad ni significa aceptación ante la DIAN');
     expect(detail).toContain('<app-received-document-matching [document]="doc"');
     expect(detail).toContain('<app-received-document-accounting-evidence');
-    expect(detail).toContain('<app-received-buyer-event-command [document]="doc"');
+    expect(detail).toMatch(/@if \(!isElectronicPos\(doc\)\) \{\s*<app-received-buyer-event-command/);
+    expect((detail.match(/<app-received-buyer-event-command\b/g) ?? []).length).toBe(1);
+    expect((detail.match(/<app-card\b/g) ?? []).length).toBe(7);
     expect(detail).not.toContain('confirmMatch(');
     expect(detail).not.toContain('.emit(this.scope');
   });
@@ -92,5 +94,64 @@ describe('Received document detail semantic source guards (static, not E2E)', ()
     expect(commandTemplate).toContain('Reintentar con la misma clave');
     expect(command).toContain('getReadiness(this.scope(), code');
     expect(command).toContain('this.hasPriorAcceptance()');
+  });
+});
+
+
+describe('Received detail honest reception evidence and POS source guards (static, not E2E)', () => {
+  it('keeps a persistent warning and one responsive unverified badge without deriving verification from AR', () => {
+    const banner = 'Esta factura no ha sido verificada ante la DIAN. Confirma los datos con tu proveedor antes de pagar';
+    expect(detail).toContain(banner);
+    expect(detail.indexOf(banner)).toBeLessThan(detail.indexOf('Resumen de la factura recibida'));
+    expect(detail).toContain('readonly dianLabel = receivedDianLabel');
+    expect(detail).toContain('{{ dianLabel(doc) }}');
+    expect(detail).toContain('dianStatusLabel(doc: ReceivedDocument): string { return this.dianLabel(doc); }');
+    expect(detail).not.toContain("value === 'not_checked' ? 'No consultada'");
+    expect(detail).toContain('readonly receiptEvidence = receivedReceiptEvidence');
+    expect(detail).toContain("receipt.included ? 'Constancia incluida' : 'No incluye constancia'");
+    expect(detail).toContain('receipt.included && !receipt.reference_matches');
+    expect(detail).toContain('ResponseCode incluido: {{ receipt.response_code }}');
+    expect(detail).toContain('no valida la factura ante la DIAN ni registra una aceptación legal');
+    expect(detail).not.toContain('[innerHTML]');
+    expect(detail).not.toContain('receipt.response_code ===');
+    expect(detail).not.toContain('doc.accepted_at =');
+  });
+
+  it('hides only buyer commands for explicit POS classification, preserving legal events and FEV fallback', () => {
+    expect(detail).toContain('readonly isElectronicPos = receivedIsElectronicPos');
+    expect(detail).toContain("isElectronicPos(doc) ? 'Documento POS electrónico' : typeLabel(doc.document_type)");
+    expect(detail).toMatch(/@if \(!isElectronicPos\(doc\)\) \{\s*<app-received-buyer-event-command/);
+    expect(detail).toContain('Las acciones RADIAN de factura electrónica de venta (FEV) no están disponibles');
+    expect(detail).toContain('Su historial legal y sus evidencias siguen disponibles');
+    expect(detail).toContain('doc.events ?? []');
+    expect(detail).toContain('doc.confirmed_goods_at || doc.accepted_at');
+    expect(detail).toContain("event.event_code === '034' && event.status === 'accepted'");
+    expect(detail).not.toContain("doc.document_type !== 'invoice'");
+    expect(detail).not.toContain('getReadiness(');
+  });
+
+  it('uses authoritative transport/source helpers, safe filenames and explicit derived XML evidence', () => {
+    expect(detail).toContain('readonly sourceLabel = receivedDocumentSourceLabel');
+    expect(detail).toContain('Origen: {{ sourceLabel(doc) }}');
+    expect(detail).not.toContain('Origen: {{ channelLabel(doc.source_channel) }}');
+    expect(detail).toContain('{{ displayFilename(file) }}');
+    expect(detail).toContain('return this.safeFilename(file.file_name)');
+    expect(detail).toContain("file.role === 'commercial' && !!doc.files?.some((entry) => entry.role === 'container')");
+    expect(detail).toContain('evidencia derivada del DOM');
+    expect(detail).toContain('CRLF a LF');
+    expect(detail).toContain('AttachedDocument conserva el original autoritativo');
+    expect(detail).toContain('SHA-256 del archivo almacenado');
+    expect(detail).toContain('this.service.downloadFile(this.scope, doc.id, file.id, this.storeId())');
+    expect(detail).toContain("if (contextKey !== this.contextKey) return;");
+  });
+
+  it('shows only a fixed complement warning for authoritative email trace with bounded code arrays', () => {
+    expect(detail).toContain('if (doc.email_transport_received !== true) return false');
+    expect(detail).toContain("this.metadataObject(this.metadataObject(doc.metadata)['email_reception'])");
+    expect(detail).toContain('warnings.slice(0, 4)');
+    expect(detail).toContain("technicalWarnings.includes('COMPLEMENT_ARCHIVE_NOT_EXPANDED')");
+    expect(detail).toContain("warning.code === 'COMPLEMENT_ARCHIVE_NOT_EXPANDED'");
+    expect(detail).toContain('Complemento archivado dentro del ZIP original, sin expandir ni abrir');
+    expect(detail).not.toContain('{{ technicalWarnings');
   });
 });

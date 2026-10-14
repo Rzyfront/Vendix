@@ -1,9 +1,11 @@
-import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import { Subscription, timeout } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   AlertBannerComponent,
+  ButtonComponent,
   CardComponent,
   FilterConfig,
   FilterValues,
@@ -16,6 +18,9 @@ import {
   TableColumn,
 } from '../../../../../../shared/components/index';
 import { ApiErrorService } from '../../../../../../core/services/api-error.service';
+import { EnvironmentSwitchService } from '../../../../../../core/services/environment-switch.service';
+import { OrganizationStoresService } from '../../../stores/services/organization-stores.service';
+import { describeApiFailure } from '../../../../store/invoicing/utils/invoicing-errors.util';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import { OrgFiscalScopeSelectorComponent } from '../../../shared/components/org-fiscal-scope-selector.component';
@@ -30,6 +35,7 @@ import {
   standalone: true,
   imports: [
     AlertBannerComponent,
+    ButtonComponent,
     CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -144,6 +150,36 @@ import {
         </div>
       </app-card>
 
+      @if (receptionEmailPilotAvailable()) {
+      <app-card [responsive]="true">
+        <section class="space-y-3" aria-label="Recepción por correo en una tienda">
+          <h2 class="text-base font-semibold text-text-primary">Recepción por correo</h2>
+          <p class="text-sm text-text-secondary">El correo se administra en el Buzón de una tienda. Esta vista de organización es sólo de consulta y no muestra direcciones ni códigos privados.</p>
+          @if (selectedReceptionSlug()) {
+            <app-button customClasses="min-h-11" [disabled]="switchingReceptionStore()" (clicked)="switchReceptionStore(selectedReceptionSlug()!)">Administrar en esta tienda</app-button>
+          } @else if (canReadOperationalStores()) {
+            <app-button customClasses="min-h-11" variant="outline" [disabled]="receptionStoresLoading() || switchingReceptionStore()" (clicked)="loadReceptionStores()">Elegir tienda operativa</app-button>
+          } @else {
+            <p class="text-sm text-text-secondary">Entra al panel de esta tienda para activar. Usa Tiendas en el menú lateral o solicita acceso a una persona autorizada.</p>
+          }
+          @if (receptionStoresLoaded()) {
+            @if (receptionStoresForContext().length) {
+              <label class="flex flex-col gap-2 text-sm text-text-primary" for="email-operational-store">Tienda para administrar el correo
+                <select id="email-operational-store" class="min-h-11 rounded-lg border border-border bg-background px-3 text-text-primary" [disabled]="switchingReceptionStore()" [value]="chosenReceptionSlug()" (change)="chooseReceptionStore($event)">
+                  <option value="">Selecciona una tienda</option>
+                  @for (store of receptionStoresForContext(); track store.id) { <option [value]="store.slug">{{ store.name }}</option> }
+                </select>
+              </label>
+              <app-button customClasses="min-h-11" [disabled]="!chosenReceptionSlug() || switchingReceptionStore()" (clicked)="switchReceptionStore(chosenReceptionSlug())">Entrar al Buzón de la tienda</app-button>
+              <p class="text-xs text-text-secondary">Se muestran hasta 200 tiendas. Si falta una, usa Tiendas en el menú lateral.</p>
+            } @else {
+              <p class="text-sm text-text-secondary">No encontramos una tienda disponible. Entra al panel desde Tiendas en el menú lateral o solicita acceso.</p>
+            }
+          }
+          @if (receptionStoreError()) { <p role="alert" class="text-sm text-error">{{ receptionStoreError() }}</p> }
+        </section>
+      </app-card>
+      }
       <app-received-documents-configuration
         scope="organization"
         [selectedStoreId]="requiresStoreSelector() ? selectedStoreId() : null"
@@ -156,6 +192,8 @@ import {
 export class OrgDianConfigComponent {
   private readonly service = inject(OrgInvoicingService);
   private readonly auth = inject(AuthFacade);
+  private readonly operationalStores = inject(OrganizationStoresService);
+  private readonly environmentSwitch = inject(EnvironmentSwitchService);
   private readonly errors = inject(ApiErrorService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -169,6 +207,73 @@ export class OrgDianConfigComponent {
   readonly filterValues = signal<FilterValues>({});
   readonly rows = signal<OrgDianConfigRow[]>([]);
 
+  private readonly receptionConfiguration = viewChild(ReceivedDocumentsConfigurationComponent);
+  readonly receptionEmailPilotAvailable = computed(() => this.receptionConfiguration()?.health()?.email?.pilot_available === true);
+  readonly switchingReceptionStore = signal(false);
+  readonly receptionStoresLoading = signal(false);
+  readonly receptionStoresLoaded = signal(false);
+  readonly receptionStores = signal<Array<{ id: number; name: string; slug: string }>>([]);
+  readonly chosenReceptionSlug = signal('');
+  private readonly receptionStoresSnapshotKey = signal('');
+  private readonly fiscalRowsReceptionKey = signal('');
+  readonly receptionStoreError = signal<string | null>(null);
+  readonly canReadOperationalStores = computed(() => this.auth.hasPermission('organization:stores:read'));
+  readonly selectedReceptionSlug = computed(() => {
+    const selected = this.selectedStoreId();
+    if (!selected || this.fiscalRowsReceptionKey() !== this.receptionFiscalContextKey()) return null;
+    const store = this.rows().find((row) => row.store?.id === selected)?.store;
+    return store?.slug && /^[a-zA-Z0-9-]{1,200}$/.test(store.slug) ? store.slug : null;
+  });
+  private receptionStoresRequest?: Subscription;
+  private receptionStoresGeneration = 0;
+  private readonly receptionFiscalContextKey = computed(() => JSON.stringify([this.auth.userId(), this.auth.userOrganization()?.id, this.selectedStoreId()]));
+  private readonly receptionStoreContext = computed(() => JSON.stringify([this.auth.userId(), this.auth.userOrganization()?.id,
+    this.selectedStoreId(), this.canReadOperationalStores()]));
+  readonly receptionStoresForContext = computed(() => this.canReadOperationalStores()
+    && this.receptionStoresSnapshotKey() === this.receptionStoreContext() ? this.receptionStores() : []);
+  loadReceptionStores(): void {
+    if (!this.receptionEmailPilotAvailable() || !this.canReadOperationalStores() || this.receptionStoresLoading() || this.switchingReceptionStore()) return;
+    this.receptionStoresGeneration++; this.receptionStoresRequest?.unsubscribe();
+    const generation = this.receptionStoresGeneration; const key = this.receptionStoreContext();
+    const organizationId = this.auth.userOrganization()?.id;
+    this.receptionStoresLoading.set(true); this.receptionStoreError.set(null);
+    this.receptionStoresRequest = this.operationalStores.getStores({ limit: 200 }).pipe(timeout(20_000), takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
+        if (generation !== this.receptionStoresGeneration || key !== this.receptionStoreContext()) return;
+        // Service's historical generic is nested; validate the actual paginated flat HTTP array without trusting that annotation.
+        const rows: unknown = response.data;
+        const choices: Array<{ id: number; name: string; slug: string }> = [];
+        if (Array.isArray(rows)) for (const row of rows.slice(0, 200)) {
+          if (typeof row !== 'object' || row === null) continue;
+          if (Number.isSafeInteger(row.id) && row.id > 0 && row.organization_id === organizationId && row.is_active === true
+            && typeof row.name === 'string' && typeof row.slug === 'string' && /^[a-zA-Z0-9-]{1,200}$/.test(row.slug))
+            choices.push({ id: row.id, name: row.name.slice(0, 120), slug: row.slug });
+        }
+        this.receptionStores.set(choices); this.receptionStoresSnapshotKey.set(key); this.receptionStoresLoaded.set(true); this.receptionStoresLoading.set(false);
+      },
+      error: (error: unknown) => {
+        if (generation !== this.receptionStoresGeneration || key !== this.receptionStoreContext()) return;
+        this.receptionStoresLoading.set(false); this.receptionStoreError.set(describeApiFailure(error).message || 'No se pudieron consultar las tiendas. Usa Tiendas en el menú lateral.');
+      },
+    });
+  }
+  chooseReceptionStore(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.chosenReceptionSlug.set(this.receptionStoresForContext().some((store) => store.slug === value) ? value : '');
+  }
+  async switchReceptionStore(slug: string): Promise<void> {
+    if (!this.receptionEmailPilotAvailable() || this.switchingReceptionStore() || !slug || (slug !== this.selectedReceptionSlug()
+      && (!this.canReadOperationalStores() || !this.receptionStoresForContext().some((store) => store.slug === slug)))) return;
+    this.switchingReceptionStore.set(true); this.receptionStoreError.set(null);
+    try {
+      const success = await this.environmentSwitch.performEnvironmentSwitch('STORE_ADMIN', slug);
+      if (!success) { this.receptionStoreError.set('No se pudo entrar a la tienda. Solicita acceso a una persona autorizada.'); return; }
+      // Only the successful authenticated switch replaces tokens/permissions/routes; no organization JWT is reused by this link.
+      await this.router.navigate(['/admin/invoicing/received-documents'], { queryParams: { setup: 'email' } });
+    } catch (error: unknown) {
+      this.receptionStoreError.set(describeApiFailure(error).message || 'No se pudo entrar a la tienda. Usa Tiendas en el menú lateral o solicita acceso.');
+    } finally { this.switchingReceptionStore.set(false); }
+  }
   readonly requiresStoreSelector = computed(() => this.auth.fiscalScope() === 'STORE');
   readonly receptionScopeReady = computed(() => !this.requiresStoreSelector() || this.selectedStoreId() !== null);
   readonly enabledCount = computed(() =>
@@ -311,6 +416,16 @@ export class OrgDianConfigComponent {
   };
 
   constructor() {
+    effect(() => {
+      this.receptionStoreContext();
+      untracked(() => {
+        this.receptionStoresGeneration++; this.receptionStoresRequest?.unsubscribe();
+        this.receptionStores.set([]); this.receptionStoresSnapshotKey.set(''); this.receptionStoresLoaded.set(false); this.receptionStoresLoading.set(false);
+        this.chosenReceptionSlug.set(''); this.receptionStoreError.set(null);
+      });
+    });
+    this.destroyRef.onDestroy(() => { this.receptionStoresGeneration++; this.receptionStoresRequest?.unsubscribe(); });
+
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
@@ -382,12 +497,15 @@ export class OrgDianConfigComponent {
     this.loading.set(true);
     this.errorMessage.set(null);
 
+    const receptionKey = this.receptionFiscalContextKey();
+    this.fiscalRowsReceptionKey.set('');
     this.service
       .getDianConfigs(this.selectedStoreId() ? { store_id: this.selectedStoreId() } : undefined)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.rows.set(res.data ?? []);
+          if (receptionKey === this.receptionFiscalContextKey()) this.fiscalRowsReceptionKey.set(receptionKey);
           this.loading.set(false);
         },
         error: (err) => {

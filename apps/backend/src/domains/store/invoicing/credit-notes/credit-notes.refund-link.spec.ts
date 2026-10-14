@@ -4,8 +4,7 @@ import { InvoiceCalculatorService } from '../services/invoice-calculator.service
 import { deriveRefundNoteSelection, type RefundNoteSourceInvoice } from './refund-note-source.util';
 import { recalculateNote } from './recalculate-note.util';
 
-const decimal = (value: Prisma.Decimal | number | string) =>
-  new Prisma.Decimal(value.toString());
+const decimal = (value: Prisma.Decimal.Value) => new Prisma.Decimal(value);
 
 function sourceLine(
   id: number,
