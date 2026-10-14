@@ -58,7 +58,12 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     RouteTrackingService,
     RouteTrackingSseService,
   ],
-  exports: [DispatchRoutesService, VehiclesService, RouteFlowService],
+  exports: [
+    DispatchRoutesService,
+    VehiclesService,
+    RouteFlowService,
+    RouteTrackingService,
+  ],
 })
 export class DispatchRoutesModule implements OnModuleInit {
   constructor(

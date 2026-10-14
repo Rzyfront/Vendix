@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { Observable } from 'rxjs';
 import { RouteTrackingService } from './route-tracking.service';
 import {
   PositionPublisherState,
@@ -26,6 +27,8 @@ export class RoutePositionPublisherService {
   readonly lastLocal = signal<{ lat: number; lng: number } | null>(null);
 
   private routeId: number | null = null;
+  private publishFn: ((batch: PublishPositionPoint[]) => Observable<unknown>) | null =
+    null;
 
   /** Route currently being published (null when idle). */
   get currentRouteId(): number | null {
@@ -52,9 +55,13 @@ export class RoutePositionPublisherService {
     if (this.routeId != null) this.resumeSending();
   };
 
-  start(routeId: number): void {
+  start(
+    routeId: number,
+    publishFn?: (batch: PublishPositionPoint[]) => Observable<unknown>,
+  ): void {
     if (this.routeId === routeId && this.state() !== 'idle') return;
     this.stop();
+    this.publishFn = publishFn ?? null;
     if (
       typeof navigator === 'undefined' ||
       !navigator.geolocation ||
@@ -84,6 +91,7 @@ export class RoutePositionPublisherService {
     this.flushTimer = null;
     this.removeListeners();
     this.routeId = null;
+    this.publishFn = null;
     this.buffer = [];
     this.flushing = false;
     this.lastLocal.set(null);
@@ -153,7 +161,10 @@ export class RoutePositionPublisherService {
         const batch = this.buffer.slice(0, BATCH_SIZE);
         try {
           await new Promise<void>((resolve, reject) => {
-            this.tracking.publishPositions(routeId, batch).subscribe({
+            (this.publishFn
+              ? this.publishFn(batch)
+              : this.tracking.publishPositions(routeId, batch)
+            ).subscribe({
               next: () => resolve(),
               error: (e) => reject(e),
             });
