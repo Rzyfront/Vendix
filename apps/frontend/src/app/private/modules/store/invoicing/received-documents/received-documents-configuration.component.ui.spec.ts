@@ -1,19 +1,16 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { RECEIVED_EMAIL_REASON_CODES } from './received-email-reception.interface';
+import component from './received-documents-configuration.component.ts?source' with { loader: 'text' };
+import wizard from './received-documents-configuration-wizard.component.ts?source' with { loader: 'text' };
+import activation from './received-buyer-event-activation.component.ts?source' with { loader: 'text' };
+import activationTemplate from './received-buyer-event-activation.component.html?source' with { loader: 'text' };
+import connections from './document-reception-connections.component.ts?source' with { loader: 'text' };
+import emailWizard from './received-email-reception-wizard.component.ts?source' with { loader: 'text' };
+import page from './received-documents-page.component.ts?source' with { loader: 'text' };
+import facade from './received-documents-inbox.facade.ts?source' with { loader: 'text' };
+import form from './received-document-form.component.ts?source' with { loader: 'text' };
+import backendEmail from '../../../../../../../../backend/src/domains/received-documents/interfaces/document-email-reception.interface.ts?source' with { loader: 'text' };
+import orgConfig from '../../../organization/invoicing/pages/dian-config/org-dian-config.component.ts?source' with { loader: 'text' };
+import { RECEIVED_EMAIL_REASON_CODES, type ReceivedEmailReasonCode } from './received-email-reception.interface';
 import { isReceivedDocumentSafeNotice, isValidReceivedReceptionHealth } from './received-documents.interface';
-
-const component = readFileSync(join(__dirname, 'received-documents-configuration.component.ts'), 'utf8');
-const wizard = readFileSync(join(__dirname, 'received-documents-configuration-wizard.component.ts'), 'utf8');
-const activation = readFileSync(join(__dirname, 'received-buyer-event-activation.component.ts'), 'utf8');
-const activationTemplate = readFileSync(join(__dirname, 'received-buyer-event-activation.component.html'), 'utf8');
-const connections = readFileSync(join(__dirname, 'document-reception-connections.component.ts'), 'utf8');
-const emailWizard = readFileSync(join(__dirname, 'received-email-reception-wizard.component.ts'), 'utf8');
-const page = readFileSync(join(__dirname, 'received-documents-page.component.ts'), 'utf8');
-const facade = readFileSync(join(__dirname, 'received-documents-inbox.facade.ts'), 'utf8');
-const form = readFileSync(join(__dirname, 'received-document-form.component.ts'), 'utf8');
-const backendEmail = readFileSync(join(__dirname, '../../../../../../../../backend/src/domains/received-documents/interfaces/document-email-reception.interface.ts'), 'utf8');
-const orgConfig = readFileSync(join(__dirname, '../../../organization/invoicing/pages/dian-config/org-dian-config.component.ts'), 'utf8');
 
 describe('received documents configuration UI source guards (static, not E2E)', () => {
   it('preserves the organization configuration surface for its existing consumer', () => {
@@ -214,8 +211,12 @@ describe('received documents configuration UI source guards (static, not E2E)', 
 describe('email reception P0.9 integration source/contract guards (not browser QA)', () => {
   it('matches all 32 backend reasons without importing backend runtime into frontend', () => {
     const body = backendEmail.match(/DOCUMENT_EMAIL_REASON_CODES = \[([\s\S]*?)\] as const/)?.[1] ?? '';
-    const codes = [...body.matchAll(/'([A-Z_]+)'/g)].map((match) => match[1]);
-    expect(codes).toHaveLength(32);
+    const codes: ReceivedEmailReasonCode[] = [...body.matchAll(/'([A-Z_]+)'/g)].map((match) => {
+      const code = RECEIVED_EMAIL_REASON_CODES.find((allowed) => allowed === match[1]);
+      if (code === undefined) throw new Error(`Unknown backend email reason: ${match[1]}`);
+      return code;
+    });
+    expect(codes.length).toBe(32);
     expect([...RECEIVED_EMAIL_REASON_CODES]).toEqual(codes);
   });
   it('opens only a store pilot with operational configuration permission, independent of fiscal editing', () => {

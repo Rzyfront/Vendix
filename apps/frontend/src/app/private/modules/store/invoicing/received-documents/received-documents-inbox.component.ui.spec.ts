@@ -1,12 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-const page = readFileSync(join(__dirname, 'received-documents-page.component.ts'), 'utf8');
-const facade = readFileSync(join(__dirname, 'received-documents-inbox.facade.ts'), 'utf8');
-const emailChild = readFileSync(join(__dirname, 'received-email-messages.component.ts'), 'utf8');
-const emailTypes = readFileSync(join(__dirname, 'received-email-reception.interface.ts'), 'utf8');
-const backendEmailTypes = readFileSync(join(__dirname, '../../../../../../../../backend/src/domains/received-documents/interfaces/document-email-reception.interface.ts'), 'utf8');
-const service = readFileSync(join(__dirname, 'received-documents.service.ts'), 'utf8');
+import page from './received-documents-page.component.ts?source' with { loader: 'text' };
+import facade from './received-documents-inbox.facade.ts?source' with { loader: 'text' };
+import emailChild from './received-email-messages.component.ts?source' with { loader: 'text' };
+import emailTypes from './received-email-reception.interface.ts?source' with { loader: 'text' };
+import backendEmailTypes from '../../../../../../../../backend/src/domains/received-documents/interfaces/document-email-reception.interface.ts?source' with { loader: 'text' };
+import service from './received-documents.service.ts?source' with { loader: 'text' };
 
 describe('received inbox wiring source guards (static, not runtime E2E)', () => {
   it('uses four shared stats, a responsive card, shared filters and server pagination', () => {
@@ -155,7 +152,7 @@ describe('email inbox area integration contracts (source guards, no runtime clai
   it('keeps the exhaustive 32 reason-code mirror aligned with the backend closed catalog', () => {
     const codes = (source: string, name: string) => [...(source.match(new RegExp(name + ' = \\[([\\s\\S]*?)\\] as const'))?.[1] ?? '').matchAll(/'([A-Z_]+)'/g)].map((match) => match[1]);
     const backend = codes(backendEmailTypes, 'DOCUMENT_EMAIL_REASON_CODES');
-    expect(backend).toHaveLength(32);
+    expect(backend.length).toBe(32);
     expect(codes(emailTypes, 'RECEIVED_EMAIL_REASON_CODES')).toEqual(backend);
   });
 });
