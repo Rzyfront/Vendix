@@ -36,6 +36,10 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 # Copy the compiled application
 COPY --from=builder /app/dist ./dist
+# Keep the runtime schema beside its compiled loader, independently of Nest asset copying.
+COPY --from=builder /app/src/domains/store/print-formats/schemas/definition-v2.schema.json ./dist/src/domains/store/print-formats/schemas/definition-v2.schema.json
+# Fail the image build before deployment if the production validator cannot load.
+RUN node -e "require('./dist/src/domains/store/print-formats/schemas/ajv-instance.js')"
 # Copy Prisma schema and generated client
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
