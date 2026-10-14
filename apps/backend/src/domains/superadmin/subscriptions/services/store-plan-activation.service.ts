@@ -314,6 +314,15 @@ export class StorePlanActivationService {
         `Plan activation failed after plan assignment: store=${storeId} subscription=${subscriptionId} plan=${plan.id}: ${e?.message ?? e}`,
         e?.stack,
       );
+      if (
+        e instanceof VendixHttpException &&
+        e.errorCode === ErrorCodes.SUBSCRIPTION_010.code
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_010,
+          'Esta activación ya se registró (solicitud duplicada). No la repitas: revisa la factura y el pago de la tienda.',
+        );
+      }
       throw new VendixHttpException(
         ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
         'El plan quedó asignado pero el pago no se registró. Reintenta la activación: es seguro, anula la factura pendiente y vuelve a emitir.',

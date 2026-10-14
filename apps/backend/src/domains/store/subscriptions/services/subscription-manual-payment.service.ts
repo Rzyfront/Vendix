@@ -39,6 +39,11 @@ export class SubscriptionManualPaymentService {
     },
   ): Promise<void> {
     const result = await this.prisma.$transaction(async (tx: any) => {
+      // Serialize concurrent payments on the same invoice: the second tx waits
+      // here and then sees state='paid' (SUBSCRIPTION_010) instead of racing.
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM subscription_invoices WHERE id = ${invoiceId} FOR UPDATE`,
+      );
       const invoice = await tx.subscription_invoices.findUnique({
         where: { id: invoiceId },
         include: { store_subscription: true },

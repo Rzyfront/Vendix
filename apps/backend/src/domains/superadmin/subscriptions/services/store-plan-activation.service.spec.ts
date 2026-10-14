@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { StorePlanActivationService } from './store-plan-activation.service';
-import { VendixHttpException } from '../../../../common/errors';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 
@@ -292,6 +292,24 @@ describe('StorePlanActivationService', () => {
     const res = err.getResponse();
     expect(res.error_code).toBe('SUBSCRIPTION_INTERNAL_ERROR');
     expect(res.message).toContain('Reintenta');
+  });
+
+  it('recordManualPayment rejecting with SUBSCRIPTION_010: duplicate-request message, not retry advice', async () => {
+    const h = build({});
+    h.manual.recordManualPayment.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.SUBSCRIPTION_010, 'Invoice already paid'),
+    );
+    let err: any;
+    try {
+      await h.svc.activatePlan(1, { plan_id: 7 }, 99);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(VendixHttpException);
+    const res = err.getResponse();
+    expect(res.error_code).toBe('SUBSCRIPTION_010');
+    expect(res.message).toContain('solicitud duplicada');
+    expect(res.message).not.toContain('Reintenta');
   });
 
   describe('start date and partial payment', () => {
