@@ -45,10 +45,13 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
               @if (configurationForContext()?.address) {
                 <app-input label="Tu correo de facturas" [formControl]="addressControl" [readonly]="true" size="lg" />
                 <app-button customClasses="min-h-11" variant="outline" (clicked)="copyAddress()"><app-icon name="copy" slot="icon" />Copiar dirección</app-button>
-                @if (!configurationForContext()?.enabled) {
+                @if (configurationForContext()?.enabled) {
+                  <app-button customClasses="min-h-11" variant="outline" [disabled]="!mayManageAddress() || rotateConfirmationOpen()" [loading]="busy()" (clicked)="pause()">Pausar recepción</app-button>
+                } @else {
                   <p class="text-sm text-text-secondary">Pausado. Las facturas guardadas siguen en tu Buzón.</p>
-                  <app-button customClasses="min-h-11" [disabled]="busy() || !mayConfigure()" [loading]="busy()" (clicked)="resume()">Reanudar recepción</app-button>
+                  <app-button customClasses="min-h-11" [disabled]="!mayManageAddress() || rotateConfirmationOpen()" [loading]="busy()" (clicked)="resume()">Reanudar recepción</app-button>
                 }
+                <app-button customClasses="min-h-11" variant="outline" [disabled]="!mayManageAddress() || rotateConfirmationOpen()" (clicked)="openRotateConfirmation()">Cambiar tu correo de facturas</app-button>
               } @else {
                 <label class="email-consent text-sm text-text-primary">
                   <input type="checkbox" [formControl]="consentControl" />
@@ -130,6 +133,15 @@ const EMPTY_CODE: ReceivedEmailGmailCode = { available: false, code: null, expir
         @if (step() < 2 && scope() === 'store' && canConfigure()) { <app-button customClasses="min-h-11" [disabled]="!mayContinue()" (clicked)="next()">{{ step() === 0 ? 'Continuar' : 'Continuar a la prueba' }}</app-button> }
       </div>
     </app-modal>
+    <app-modal [(isOpen)]="rotateConfirmationOpen" title="Cambiar tu correo de facturas" size="md" [dialog]="true"
+      [fullScreenOnMobile]="true" [closeOnBackdrop]="false" [canClose]="canCloseModal" (cancel)="closeRotateConfirmation()">
+      <p class="text-sm text-text-secondary">La dirección anterior dejará de recibir nuevos correos. Actualiza Gmail, Outlook y tus proveedores. Los documentos ya recibidos se conservan</p>
+      @if (mutationError()) { <p role="alert" class="mt-3 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error">{{ mutationError() }}</p> }
+      <div slot="footer" class="email-footer">
+        <app-button customClasses="min-h-11" variant="outline" [disabled]="busy()" (clicked)="closeRotateConfirmation()">Cancelar</app-button>
+        <app-button customClasses="min-h-11" [disabled]="!mayManageAddress() || !rotateConfirmationOpen()" [loading]="busy()" (clicked)="confirmRotate()">Cambiar dirección</app-button>
+      </div>
+    </app-modal>
   `,
   styles: [`
     .email-wizard,.email-section{display:flex;flex-direction:column;gap:1rem;min-width:0}
@@ -149,6 +161,9 @@ export class ReceivedEmailReceptionWizardComponent {
   private readonly browser = isPlatformBrowser(inject(PLATFORM_ID));
   private readonly window = this.browser ? this.document.defaultView : null;
   readonly isOpen = model(false);
+  readonly rotateConfirmationOpen = signal(false);
+  private rotateVersion: number | null = null;
+  private rotateKey = '';
   readonly tenantKey = input.required<string>();
   readonly scope = input<ReceivedDocumentsScope>('store');
   readonly contextReady = input(false);
@@ -198,7 +213,12 @@ export class ReceivedEmailReceptionWizardComponent {
   });
   readonly mayConfigure = computed(() => this.isOpen() && this.scope() === 'store' && this.contextReady() && !!this.tenantKey() && this.canConfigure() && this.status()?.pilot_available === true && this.snapshotKey() === this.liveKey());
   readonly mayActivate = computed(() => this.mayConfigure() && !this.busy() && this.consent() && !this.configurationForContext()?.configured && !!this.configurationForContext()?.policy_version);
-  readonly mayContinue = computed(() => this.mayConfigure() && !this.busy() && !!this.configurationForContext()?.address && (this.step() === 0 || this.provider() !== null));
+  readonly mayManageAddress = computed(() => {
+    const configuration = this.configurationForContext();
+    return this.mayConfigure() && this.canRead() && !this.busy() && configuration?.configured === true && !!configuration.address
+      && Number.isSafeInteger(configuration.version) && (configuration.version ?? 0) > 0;
+  });
+  readonly mayContinue = computed(() => this.mayConfigure() && !this.busy() && !this.rotateConfirmationOpen() && !!this.configurationForContext()?.address && (this.step() === 0 || this.provider() !== null));
   readonly canCloseModal = (): boolean => !this.busy();
   private generation = 0;
   private activeRequest?: Subscription;
@@ -246,8 +266,8 @@ export class ReceivedEmailReceptionWizardComponent {
   }
 
   next(): void { if (this.mayContinue()) { this.step.update((value) => Math.min(2, value + 1)); this.refresh(); } }
-  previous(): void { if (!this.busy()) this.step.update((value) => Math.max(0, value - 1)); }
-  close(): void { if (this.canCloseModal()) this.isOpen.set(false); }
+  previous(): void { if (!this.busy() && !this.rotateConfirmationOpen()) this.step.update((value) => Math.max(0, value - 1)); }
+  close(): void { if (this.canCloseModal()) { this.closeRotateConfirmation(); this.isOpen.set(false); } }
   chooseProvider(provider: ReceivedEmailProvider): void { this.provider.set(provider); this.gmailCode.set(null); this.codeExpired.set(false); this.refresh(); }
   retryStatus(): void { this.mutationError.set(null); this.refresh(); }
 
@@ -257,8 +277,34 @@ export class ReceivedEmailReceptionWizardComponent {
   }
   resume(): void {
     const version = this.configurationForContext()?.version;
-    if (!this.mayConfigure() || !version || this.busy()) return;
+    if (!this.mayManageAddress() || this.rotateConfirmationOpen() || !version || this.configurationForContext()?.enabled) return;
     this.mutate(this.api.update({ expected_version: version, enabled: true }), 'No pudimos reanudar la recepción. Revisa el estado e inténtalo nuevamente.');
+  }
+
+  pause(): void {
+    const version = this.configurationForContext()?.version;
+    if (!this.mayManageAddress() || this.rotateConfirmationOpen() || !version || !this.configurationForContext()?.enabled) return;
+    this.mutate(this.api.update({ expected_version: version, enabled: false }), 'No pudimos pausar la recepción. Actualiza el estado antes de volver a intentarlo. Los documentos recibidos se conservan.');
+  }
+  openRotateConfirmation(): void {
+    if (!this.mayManageAddress() || this.rotateConfirmationOpen()) return;
+    this.rotateVersion = this.configurationForContext()!.version; this.rotateKey = this.liveKey();
+    this.mutationError.set(null); this.rotateConfirmationOpen.set(true);
+  }
+  closeRotateConfirmation(): void {
+    if (this.busy()) return;
+    this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = '';
+  }
+  confirmRotate(): void {
+    if (!this.mayManageAddress() || !this.rotateConfirmationOpen() || this.rotateKey !== this.liveKey() || !this.rotateVersion) return;
+    if (this.rotateVersion !== this.configurationForContext()?.version) {
+      this.mutationError.set('La configuración cambió en otra sesión. Cancela y actualiza antes de cambiar la dirección.'); return;
+    }
+    const expectedVersion = this.rotateVersion;
+    this.clearCodeTimer(); this.gmailCode.set(null); this.codeExpired.set(false); this.copied.set(null);
+    this.mutate(this.api.rotateAddress({ expected_version: expectedVersion, confirmed: true }),
+      'No pudimos confirmar el cambio. Conservamos la última dirección consultada. Cancela y actualiza el estado antes de volver a intentarlo.',
+      () => { this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = ''; this.step.set(0); this.provider.set(null); });
   }
 
   refresh(): void {
@@ -272,7 +318,7 @@ export class ReceivedEmailReceptionWizardComponent {
         return forkJoin({
         status: of(status),
         configuration: status.pilot_available && this.canConfigure() ? this.api.configuration() : of(null),
-        code: status.pilot_available && status.configured && this.canConfigure() && provider === 'gmail'
+        code: status.pilot_available && status.configured && this.canConfigure() && !this.rotateConfirmationOpen() && provider === 'gmail'
           ? this.api.gmailCode().pipe(catchError(() => of(EMPTY_CODE))) : of(null),
         problem: this.step() === 2 && status.not_processed_count > 0
           ? this.api.messages({ page: 1, limit: 1, view: 'not_processed' }).pipe(catchError(() => of(null))) : of(null),
@@ -304,7 +350,7 @@ export class ReceivedEmailReceptionWizardComponent {
   copyAddress(): void { if (this.mayConfigure()) this.copy(this.configurationForContext()?.address ?? null, 'Dirección copiada'); }
   copyCode(): void { if (this.mayConfigure()) this.copy(receivedEmailUsableCode(this.gmailCode()), 'Código copiado'); }
 
-  private mutate(request: Observable<ReceivedEmailConfiguration>, failure: string): void {
+  private mutate(request: Observable<ReceivedEmailConfiguration>, failure: string, onSuccess?: () => void): void {
     this.busy.set(true); this.followup = false;
     this.activeRequest?.unsubscribe(); this.clearPollTimer(); this.inFlight = false;
     this.error.set(null); this.mutationError.set(null);
@@ -315,6 +361,7 @@ export class ReceivedEmailReceptionWizardComponent {
       next: (configuration) => {
         if (!this.current(generation, key)) return;
         this.snapshotKey.set(key); this.configuration.set(configuration); this.addressControl.setValue(configuration.address ?? '');
+        onSuccess?.();
       },
       error: () => { if (this.current(generation, key)) this.mutationError.set(failure); },
     });
@@ -360,6 +407,7 @@ export class ReceivedEmailReceptionWizardComponent {
     this.inFlight = false; this.followup = false; this.failures = 0; this.announced = false;
     this.snapshotKey.set(''); this.loading.set(false); this.busy.set(false); this.status.set(null); this.configuration.set(null); this.gmailCode.set(null);
     this.latestProblem.set(null); this.error.set(null); this.mutationError.set(null); this.copied.set(null); this.codeExpired.set(false);
+    this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = '';
     this.addressControl.setValue(''); this.consentControl.setValue(false);
   }
 }

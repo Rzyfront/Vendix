@@ -279,3 +279,52 @@ describe('email reception P0.9 integration source/contract guards (not browser Q
     expect((page.match(/<app-stats /g) ?? []).length).toBe(4);
   });
 });
+
+
+describe('email reception pause and address rotation source guards (static, not browser QA)', () => {
+  it('offers configured pause/resume and address change only through the current pilot configure gate', () => {
+    expect(emailWizard).toContain('Pausar recepción');
+    expect(emailWizard).toContain('Reanudar recepción');
+    expect(emailWizard).toContain('Cambiar tu correo de facturas');
+    expect(emailWizard).toContain("this.status()?.pilot_available === true && this.snapshotKey() === this.liveKey()");
+    expect(emailWizard).toContain('this.mayConfigure() && this.canRead() && !this.busy()');
+    expect(emailWizard).toContain('configuration?.configured === true && !!configuration.address');
+    expect(emailWizard).toContain('Number.isSafeInteger(configuration.version)');
+    expect(emailWizard).toContain('this.api.update({ expected_version: version, enabled: false })');
+    expect(emailWizard).toContain('this.api.update({ expected_version: version, enabled: true })');
+    expect(emailWizard).toContain('if (!this.mayManageAddress() || this.rotateConfirmationOpen()');
+  });
+
+  it('requires local confirmation and the captured CAS version, clearing plaintext before the rotate request', () => {
+    expect(emailWizard).toContain('La dirección anterior dejará de recibir nuevos correos. Actualiza Gmail, Outlook y tus proveedores. Los documentos ya recibidos se conservan');
+    expect(emailWizard).toContain('readonly rotateConfirmationOpen = signal(false)');
+    expect(emailWizard).toContain('this.rotateVersion = this.configurationForContext()!.version; this.rotateKey = this.liveKey()');
+    expect(emailWizard).toContain('this.rotateKey !== this.liveKey()');
+    expect(emailWizard).toContain('this.rotateVersion !== this.configurationForContext()?.version');
+    expect(emailWizard).toContain('this.api.rotateAddress({ expected_version: expectedVersion, confirmed: true })');
+    const confirm = emailWizard.match(/confirmRotate\(\): void \{([\s\S]*?)\n  refresh\(\)/)?.[1] ?? '';
+    expect(confirm.indexOf('this.clearCodeTimer(); this.gmailCode.set(null)')).toBeGreaterThan(-1);
+    expect(confirm.indexOf('this.gmailCode.set(null)')).toBeLessThan(confirm.indexOf('this.api.rotateAddress('));
+    expect(confirm).toContain("() => { this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = ''; this.step.set(0); this.provider.set(null); }");
+    expect(emailWizard).toContain("!this.rotateConfirmationOpen() && provider === 'gmail'");
+  });
+
+  it('keeps nested confirmation protected, cancellable on context close and persistent on mutation failure', () => {
+    expect(emailWizard).toContain('<app-modal [(isOpen)]="rotateConfirmationOpen"');
+    expect(emailWizard).toContain('[canClose]="canCloseModal" (cancel)="closeRotateConfirmation()"');
+    expect(emailWizard).toContain('[disabled]="busy()" (clicked)="closeRotateConfirmation()">Cancelar');
+    expect(emailWizard).toContain('[loading]="busy()" (clicked)="confirmRotate()">Cambiar dirección');
+    expect(emailWizard).toContain('if (this.busy()) return;');
+    expect(emailWizard).toContain('this.closeRotateConfirmation(); this.isOpen.set(false)');
+    const invalidation = emailWizard.match(/private invalidate\(\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(invalidation).toContain("this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = '';");
+    const mutation = emailWizard.match(/private mutate\([\s\S]*?\n  private copy/)?.[0] ?? '';
+    expect(mutation).toContain('onSuccess?: () => void');
+    expect(mutation.indexOf('this.configuration.set(configuration)')).toBeLessThan(mutation.indexOf('onSuccess?.()'));
+    expect(mutation).toContain('this.mutationError.set(failure)');
+    const refresh = emailWizard.match(/refresh\(\): void \{([\s\S]*?)\n  copyAddress/)?.[1] ?? '';
+    expect(refresh).not.toContain('this.mutationError.set(null)');
+    expect(emailWizard).toContain('Conservamos la última dirección consultada');
+    expect(mutation).not.toContain('this.completed.emit()');
+  });
+});
