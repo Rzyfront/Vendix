@@ -297,7 +297,7 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
                   <app-icon name="chevron-up" [size]="18"></app-icon>
                 </button>
               } @else {
-                <div class="absolute inset-x-0 bottom-0 z-10 flex max-h-[55vh] flex-col gap-2 rounded-t-2xl bg-surface p-3 shadow-2xl lg:inset-x-auto lg:bottom-4 lg:right-4 lg:top-4 lg:max-h-none lg:w-[360px] lg:rounded-2xl">
+                <div class="absolute inset-x-0 bottom-0 z-10 flex max-h-[55vh] flex-col gap-2 rounded-t-2xl bg-surface p-3 shadow-2xl lg:inset-x-auto lg:bottom-4 lg:right-16 lg:top-4 lg:max-h-none lg:w-[360px] lg:rounded-2xl">
                   <button type="button" class="flex shrink-0 items-center justify-between text-sm font-semibold text-text-primary" (click)="panelCollapsed.set(true)" aria-label="Colapsar paradas">
                     <span>Paradas ({{ rows().length }})</span>
                     <app-icon name="chevron-down" [size]="18"></app-icon>
