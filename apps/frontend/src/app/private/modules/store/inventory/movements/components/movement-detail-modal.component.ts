@@ -14,6 +14,7 @@ import {
   MovementType,
   SourceOrderType,
 } from '../../interfaces';
+import { isInboundMovement } from '../utils/movement-direction.util';
 
 @Component({
   selector: 'app-movement-detail-modal',
@@ -329,11 +330,9 @@ export class MovementDetailModalComponent {
   };
 
   isInbound(): boolean {
-    if (!this.movement()) return false;
-    return (
-      this.movement()!.movement_type === 'stock_in' ||
-      this.movement()!.movement_type === 'return'
-    );
+    const movement = this.movement();
+    if (!movement) return false;
+    return isInboundMovement(movement);
   }
 
   getTypeLabel(): string {

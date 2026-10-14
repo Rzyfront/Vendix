@@ -3456,6 +3456,14 @@
       "sessions": 23,
       "memories": 597,
       "prompts": 0
+    },
+    {
+      "id": "b05ca1a8",
+      "created_by": "dmin",
+      "created_at": "2026-10-13T02:03:05Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }
