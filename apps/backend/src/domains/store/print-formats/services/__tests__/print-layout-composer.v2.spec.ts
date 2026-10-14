@@ -87,8 +87,10 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
     const html = composer.compose(def, baseData);
     // @page receives physical margins once; body padding is screen-preview only.
     expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*10mm\s+10mm\s+10mm\s+10mm/);
-    // Body padding per-side: todos 10mm
-    expect(html).toMatch(/padding:\s*10mm\s*10mm\s*10mm\s*10mm/);
+    // El margen vive sólo en @page; el body no tiene padding y el
+    // contenedor lleva ancho explícito (216 - 20 = 195.9mm en carta).
+    expect(html).toMatch(/body\s*\{[^}]*padding:\s*0;/);
+    expect(html).toMatch(/\.print-container\s*\{[^}]*width:\s*195\.9mm/);
     expect(html).toMatch(/@media print\s*\{\s*body\s*\{\s*padding:\s*0;\s*\}\s*\.print-container\s*\{\s*padding:\s*0;/);
   });
 
@@ -109,8 +111,8 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
     const html = composer.compose(def, baseData);
     // Asymmetric sides are retained; there is no max-margin expansion.
     expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*5mm\s+12mm\s+8mm\s+20mm/);
-    // Body padding per-side respeta los 4 lados en orden CSS (T R B L)
-    expect(html).toMatch(/padding:\s*5mm\s*12mm\s*8mm\s*20mm/);
+    // Contenedor = ancho de página - márgenes laterales (215.9 - 12 - 20)
+    expect(html).toMatch(/\.print-container\s*\{[^}]*width:\s*183\.9mm/);
   });
 
   it('3. custom paper format with width_mm/height_mm — @page size: 100mm 200mm', () => {
@@ -149,7 +151,8 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
     } as PrintFormatDefinition, baseData);
     expect(portrait).toContain(`size: ${width}mm ${height}mm;`);
     expect(landscape).toContain(`size: ${height}mm ${width}mm;`);
-    expect(portrait).toMatch(/@page\s*\{[\s\S]*margin:\s*0mm\s+0mm\s+0mm\s+0mm/);
+    // Hoja: el margen 0 guardado se eleva al mínimo de 5mm por lado.
+    expect(portrait).toMatch(/@page\s*\{[\s\S]*margin:\s*5mm\s+5mm\s+5mm\s+5mm/);
   });
 
   it('rotates custom sheets but ignores orientation for thermal rolls', () => {
@@ -624,11 +627,12 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
       ],
     };
     const html = composer.compose(def, richData);
-    expect(html).toMatch(/padding:\s*1\.5mm\s*1\.5mm\s*1\.5mm\s*1\.5mm/);
-    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*1\.5mm/);
+    // Vertical 1.5mm (default de rollo); lateral 4mm = (80 - 72) / 2.
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*1\.5mm\s+4mm\s+1\.5mm\s+4mm/);
+    expect(html).toMatch(/\.print-container\s*\{[^}]*width:\s*72mm/);
   });
 
-  it('4. rollo con margin_mm: 0 explícito — el default de 1.5mm NO pisa un valor configurado', () => {
+  it('4. rollo con margin_mm: 0 explícito — el lateral se eleva al piso del cabezal (4mm), el vertical respeta 0', () => {
     const def: PrintFormatDefinition = {
       v: 2,
       paper: rollPaper, // margin_mm: 0 explícito — dato que corrige la capa 2, no este código
@@ -638,8 +642,8 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
       ],
     };
     const html = composer.compose(def, richData);
-    expect(html).toMatch(/padding:\s*0mm\s*0mm\s*0mm\s*0mm/);
-    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*0mm\s+0mm\s+0mm\s+0mm/);
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*0mm\s+4mm\s+0mm\s+4mm/);
+    expect(html).toMatch(/\.print-container\s*\{[^}]*width:\s*72mm/);
   });
 
   it('5. hoja sin márgenes — sigue dando 10mm (sin regresión en el carril de hoja)', () => {
@@ -657,7 +661,6 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
       ],
     };
     const html = composer.compose(def, richData);
-    expect(html).toMatch(/padding:\s*10mm\s*10mm\s*10mm\s*10mm/);
     expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*10mm/);
   });
 
@@ -1309,5 +1312,80 @@ describe('PrintLayoutComposerService — leyenda no fiscal una sola vez', () => 
     const html = composer.compose(footerDef(undefined), ticketData());
     expect(countOf(html, LEGEND)).toBe(1);
     expect(countOf(html, '<div class="footer-disclaimer"')).toBe(1);
+  });
+});
+
+
+describe('PrintLayoutComposerService — printable geometry (QUI-950 A3)', () => {
+  let composer: PrintLayoutComposerService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [PrintLayoutComposerService, PrintTemplateCompilerService],
+    }).compile();
+    composer = module.get(PrintLayoutComposerService);
+  });
+
+  const data = {
+    store: { name: 'T', legal_name: 'T', tax_id: '1', address: 'a', city: 'c', phone: '1', email: 'a@b.co' },
+    document: { id: 1, number: '1', date: '2026-01-01', date_formatted: '2026-01-01', time: '10:00', state: 'paid', state_label: 'Pagado' },
+    items: [],
+    taxes: [],
+    totals: {
+      subtotal: 1, subtotal_formatted: '$1', discount_total: 0, discount_total_formatted: '$0',
+      shipping_total: 0, shipping_total_formatted: '$0', tax_total: 0, tax_total_formatted: '$0',
+      grand_total: 1, grand_total_formatted: '$1',
+    },
+  } as unknown as StandardPrintDataModel;
+
+  const build = (paper: Record<string, any>): string =>
+    composer.compose(
+      {
+        v: 2,
+        paper: { copies: 1, ...paper },
+        sections: [{ id: 'h', type: 'header', title: '', enabled: true, order: 1 }],
+      } as unknown as PrintFormatDefinition,
+      data,
+    );
+  const containerWidth = (html: string): number =>
+    Number(/\.print-container\s*\{[^}]*?width:\s*([\d.]+)mm/.exec(html)![1]);
+  const pageMargins = (html: string): number[] => {
+    const m = /@page\s*\{[^}]*margin:\s*([\d.]+)mm\s+([\d.]+)mm\s+([\d.]+)mm\s+([\d.]+)mm/.exec(html)!;
+    return m.slice(1).map(Number);
+  };
+
+  it('.print-container mide el ancho de contenido: 72 / 48 / 64 (printable override)', () => {
+    expect(containerWidth(build({ format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 1.5 }))).toBe(72);
+    expect(containerWidth(build({ format: 'thermal_58', width_mm: 58, is_roll: true, margin_mm: 1.5 }))).toBe(48);
+    expect(
+      containerWidth(build({ format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 1.5, printable_width_mm: 64 })),
+    ).toBe(72 - 8);
+  });
+
+  it.each([
+    ['margin 0', { margin_mm: 0 }],
+    ['margin 1.5', { margin_mm: 1.5 }],
+    ['sin margen', {}],
+    ['landscape', { margin_mm: 0, orientation: 'landscape' }],
+  ])('rollo 80/58 (%s) — márgenes laterales del @page >= 4mm / 5mm', (_n, extra) => {
+    const m80 = pageMargins(build({ format: 'thermal_80', width_mm: 80, is_roll: true, ...extra }));
+    const m58 = pageMargins(build({ format: 'thermal_58', width_mm: 58, is_roll: true, ...extra }));
+    expect(m80[1]).toBeGreaterThanOrEqual(4);
+    expect(m80[3]).toBeGreaterThanOrEqual(4);
+    expect(m58[1]).toBeGreaterThanOrEqual(5);
+    expect(m58[3]).toBeGreaterThanOrEqual(5);
+  });
+
+  it('hoja carta con margin 0 — márgenes >= 5mm', () => {
+    const m = pageMargins(build({ format: 'letter', width_mm: 216, is_roll: false, margin_mm: 0 }));
+    m.forEach((v) => expect(v).toBeGreaterThanOrEqual(5));
+  });
+
+  it('el CSS endurecido no deja ensanchar la caja y no hay QR de 210px fijos', () => {
+    const html = build({ format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 1.5 });
+    expect(html).toContain('table-layout: fixed');
+    expect(html).toContain('overflow-wrap: anywhere');
+    expect(html).not.toContain('width: 210px');
+    expect(html).not.toContain('max-width: 70mm');
   });
 });

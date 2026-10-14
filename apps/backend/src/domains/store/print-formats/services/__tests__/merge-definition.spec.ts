@@ -70,8 +70,8 @@ describe('PrintGatewayService — mergeDefinition (P1.4 deep merge)', () => {
     ],
     styles: { font_family: 'Arial', font_size_base_pt: 9 },
     tokens: [
-      { token: '{{nit}}', path: 'invoice.issuer.nit', description: 'NIT emisor', example: '900123456' },
-      { token: '{{total}}', path: 'invoice.totals.total', description: 'Total', example: '$0' },
+      { token: 'nit', path: 'invoice.issuer.nit', description: 'NIT emisor', example: '900123456' },
+      { token: 'total', path: 'invoice.totals.total', description: 'Total', example: '$0' },
     ],
   });
 
@@ -150,15 +150,16 @@ describe('PrintGatewayService — mergeDefinition (P1.4 deep merge)', () => {
       columns: [
         // Mismo id `qty` → reemplazo total del objeto (no merge campo a campo de columnas,
         // el contrato es replace-by-id). Las demás columnas siguen intactas.
-        { id: 'qty', key: 'qty', label: 'Cantidad', enabled: false, width_percent: 25, align: 'center' },
+        { id: 'qty', key: 'qty', label: 'Cantidad', enabled: true, width_percent: 15, align: 'center' },
       ],
     });
 
     expect(out.definition.columns).toHaveLength(4);
     const qty = out.definition.columns!.find((c) => c.id === 'qty')!;
-    expect(qty.width_percent).toBe(25);
+    // El borrador fusionado se valida como al guardar: las columnas activas suman 100.
+    expect(qty.width_percent).toBe(15);
     expect(qty.align).toBe('center');
-    expect(qty.enabled).toBe(false);
+    expect(qty.label).toBe('Cantidad');
 
     // sku / name / total siguen con sus widths originales.
     const sku = out.definition.columns!.find((c) => c.id === 'sku')!;
@@ -195,9 +196,9 @@ describe('PrintGatewayService — mergeDefinition (P1.4 deep merge)', () => {
     const out = await service.preview(10, 'fiscal_electronic_invoice', {
       tokens: [
         // Mismo path → reemplaza el token existente
-        { token: '{{nit}}', path: 'invoice.issuer.nit', description: 'NIT del emisor (sobrescrito)', example: '900123456-7' },
+        { token: 'nit', path: 'invoice.issuer.nit', description: 'NIT del emisor (sobrescrito)', example: '900123456-7' },
         // Path nuevo → append
-        { token: '{{cufe}}', path: 'invoice.fiscal.cufe', description: 'CUFE', example: 'cufe-de-ejemplo' },
+        { token: 'cufe', path: 'invoice.fiscal.cufe', description: 'CUFE', example: 'cufe-de-ejemplo' },
       ],
     });
 
@@ -229,5 +230,44 @@ describe('PrintGatewayService — mergeDefinition (P1.4 deep merge)', () => {
       size_mm: 30,
     });
     expect(out.definition.logo?.url).not.toBe(base.logo!.url);
+  });
+
+  it('override con margin_mm uniforme gana sobre los per-side de la base', async () => {
+    const service = await build(buildPrisma(baseDefinition()));
+    const out = await service.preview(10, 'fiscal_electronic_invoice', {
+      paper: { margin_mm: 7 },
+    });
+    expect(out.definition.paper.margin_mm).toBe(7);
+    expect(out.definition.paper.margin_left_mm).toBeUndefined();
+    expect(out.definition.paper.margin_top_mm).toBeUndefined();
+  });
+
+  it('override con un solo per-side conserva los demás lados de la base', async () => {
+    const service = await build(buildPrisma(baseDefinition()));
+    const out = await service.preview(10, 'fiscal_electronic_invoice', {
+      paper: { margin_left_mm: 20 },
+    });
+    expect(out.definition.paper.margin_left_mm).toBe(20);
+    expect(out.definition.paper.margin_right_mm).toBe(10);
+    expect(out.definition.paper.margin_top_mm).toBe(10);
+  });
+
+  it('preview devuelve width_mm, printable_width_mm y content_width_mm', async () => {
+    const service = await build(buildPrisma(baseDefinition()));
+    const out = await service.preview(10, 'fiscal_electronic_invoice', {
+      paper: { margin_mm: 10 },
+    });
+    expect(out.width_mm).toBe(216);
+    expect(out.printable_width_mm).toBeCloseTo(195.9, 1);
+    expect(out.content_width_mm).toBeCloseTo(195.9, 1);
+  });
+
+  it('preview con borrador inválido lanza 400 PRINT_CONFIG_VALIDATION_001, no un 500', async () => {
+    const service = await build(buildPrisma(baseDefinition()));
+    await expect(
+      service.preview(10, 'fiscal_electronic_invoice', {
+        paper: { format: 'no_such_paper' },
+      }),
+    ).rejects.toMatchObject({ errorCode: 'PRINT_CONFIG_VALIDATION_001' });
   });
 });

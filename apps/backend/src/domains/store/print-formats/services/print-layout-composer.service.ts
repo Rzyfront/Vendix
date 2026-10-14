@@ -5,8 +5,7 @@ import {
 } from '../interfaces/print-format.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTemplateCompilerService } from './print-template-compiler.service';
-import { getPaperGeometry, PaperFormat } from '../lib/page-geometry';
-import { resolvePaperDefinition } from '../print-templates/paper-defaults';
+import { PrintGeometry, resolvePrintGeometry } from '../lib/print-geometry';
 import { FISCAL_FORMATS } from './print-fiscal-validator.service';
 
 /**
@@ -1357,7 +1356,7 @@ export class PrintLayoutComposerService {
     if (mode !== 'tokenized' && !fiscal?.qr_code_png_base64 && !fiscal?.qr_code_content) return '';
 
     const qrImg = fiscal?.qr_code_png_base64
-      ? `<img src="data:image/png;base64,${fiscal.qr_code_png_base64}" alt="QR Fiscal" style="width: 210px; height: 210px; image-rendering: pixelated;" />`
+      ? `<img src="data:image/png;base64,${fiscal.qr_code_png_base64}" alt="QR Fiscal" style="width: min(210px, 100%); max-width: 100%; height: auto; aspect-ratio: 1 / 1; image-rendering: pixelated;" />`
       : `<div class="qr-placeholder"><span class="vendix-token-pill" data-token="fiscal.qr_code">&#123;&#123; QR Fiscal &#125;&#125;</span></div>`;
 
     return `
@@ -1747,6 +1746,53 @@ export class PrintLayoutComposerService {
     return `<div class="print-section section-generic" data-section-id="${section.id || section.type}">${fieldsHtml}</div>`;
   }
 
+  /**
+   * Geometría efectiva del documento. Delega en el kernel puro; sólo el
+   * formato legado 'custom' (que el registro canónico no conoce) se resuelve
+   * aquí con sus width/height propios y la misma regla de márgenes.
+   */
+  private resolveDocumentGeometry(
+    paper: PrintFormatDefinition['paper'],
+  ): PrintGeometry {
+    if (paper.format !== 'custom') return resolvePrintGeometry(paper);
+    const isRoll = !!paper.is_roll;
+    const w = Number(paper.width_mm) || 80;
+    const h = Number(paper.height_mm) || w;
+    const landscape = !isRoll && paper.orientation === 'landscape';
+    const pw = landscape ? h : w;
+    const ph = landscape ? w : h;
+    const def = isRoll ? 1.5 : 10;
+    // Rollo custom: misma regla que el kernel — imprimible acotado a
+    // [ancho - 16, ancho - 4] (por defecto ancho - 8) y lateral nunca menor
+    // que (ancho - imprimible) / 2. Hoja: mínimo 5 mm por lado.
+    const printable = isRoll
+      ? Math.min(
+          Math.max(Number(paper.printable_width_mm) || w - 8, w - 16),
+          w - 4,
+        )
+      : 0;
+    const lateralFloor = isRoll ? Math.ceil(((w - printable) / 2) * 100) / 100 : 5;
+    const verticalFloor = isRoll ? 0 : 5;
+    const side = (v: number | undefined, floor: number) =>
+      Math.max(v ?? paper.margin_mm ?? def, floor);
+    const margins = {
+      top: side(paper.margin_top_mm, verticalFloor),
+      right: side(paper.margin_right_mm, lateralFloor),
+      bottom: side(paper.margin_bottom_mm, verticalFloor),
+      left: side(paper.margin_left_mm, lateralFloor),
+    };
+    const content = Math.round((pw - margins.left - margins.right) * 100) / 100;
+    return {
+      is_roll: isRoll,
+      format: 'custom',
+      page_size: isRoll ? `${w}mm auto` : `${pw}mm ${ph}mm`,
+      margins,
+      paper_width_mm: pw,
+      printable_width_mm: isRoll ? printable : content,
+      content_width_mm: content,
+    };
+  }
+
   private wrapInHtmlDocument(
     definition: PrintFormatDefinition,
     bodyContent: string,
@@ -1761,7 +1807,7 @@ export class PrintLayoutComposerService {
     // hoja de estilos (ver más abajo) es la garantía real; esto es defensa en
     // profundidad para cuando ese bloque no alcanza a una regla (p. ej. si
     // alguien lo retira sin querer).
-    const isRoll = !!paper.is_roll;
+    const isRoll = this.resolveDocumentGeometry(paper).is_roll;
     const primaryColor = isRoll ? '#000000' : (styles.primary_color || '#111827');
     const bodyTextColor = isRoll ? '#000000' : '#111827';
     // En rollo se ignora styles.font_family aunque la plantilla lo traiga
@@ -1773,39 +1819,14 @@ export class PrintLayoutComposerService {
     const font = isRoll
       ? 'Arial, Helvetica, sans-serif'
       : (styles.font_family || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
-    const fontSize = styles.font_size_base_pt || (paper.is_roll ? 9 : 10);
+    const fontSize = styles.font_size_base_pt || (isRoll ? 9 : 10);
 
-    // A 0mm el cabezal recorta el primer y último carácter de cada línea en
-    // la mayoría de las térmicas de 80mm: el margen mínimo seguro es 1.5mm.
-    // Este default sólo aplica cuando la plantilla NO trae margin_mm ni los
-    // per-side de abajo — una plantilla con margin_mm: 0 explícito sigue
-    // dando 0 (ese dato lo corrige la capa 2, no este código).
-    const defaultMm = paper.is_roll ? 1.5 : 10;
-    const mTop = paper.margin_top_mm ?? paper.margin_mm ?? defaultMm;
-    const mRight = paper.margin_right_mm ?? paper.margin_mm ?? defaultMm;
-    const mBottom = paper.margin_bottom_mm ?? paper.margin_mm ?? defaultMm;
-    const mLeft = paper.margin_left_mm ?? paper.margin_mm ?? defaultMm;
-    const knownPaper = paper.format === 'custom'
-      ? null
-      : (() => {
-          try {
-            return resolvePaperDefinition(paper.format);
-          } catch {
-            try {
-              return getPaperGeometry(paper.format as PaperFormat);
-            } catch {
-              return null;
-            }
-          }
-        })();
-    const paperWidth = (knownPaper?.width_mm ?? Number(paper.width_mm)) || 80;
-    const paperHeight = (knownPaper?.height_mm ?? Number(paper.height_mm)) || paperWidth;
-    const isLandscape = !paper.is_roll && paper.orientation === 'landscape';
-    const pageWidth = isLandscape ? paperHeight : paperWidth;
-    const pageHeight = isLandscape ? paperWidth : paperHeight;
-    const pageSize = paper.is_roll
-      ? `${paperWidth}mm auto`
-      : `${pageWidth}mm ${pageHeight}mm`;
+    // Geometría única (kernel puro): márgenes efectivos, @page size y ancho de
+    // contenido explícito. Nada aquí depende del driver de impresión.
+    const geometry = this.resolveDocumentGeometry(paper);
+    const { margins } = geometry;
+    const contentWidth = geometry.content_width_mm;
+    const pageSize = geometry.page_size;
 
     return `<!DOCTYPE html>
 <html lang="es">
@@ -1815,24 +1836,32 @@ export class PrintLayoutComposerService {
   <style>
     @page {
       size: ${pageSize};
-      margin: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
+      margin: ${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;
     }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff !important; }
     }
-    * { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
+    table { table-layout: fixed; width: 100%; max-width: 100%; border-collapse: collapse; }
+    td, th, p, div, span, h1, h2, h3, h4, h5, h6, .field-row, dd, dt {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+    img, svg, canvas { max-width: 100%; height: auto; }
+    pre { white-space: pre-wrap; }
     body {
       font-family: ${font};
       font-size: ${fontSize}pt;
       color: ${bodyTextColor};
       margin: 0;
-      padding: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
+      padding: 0;
       background: #fff;
       line-height: 1.35;
     }
     .print-container {
-      width: 100%;
-      max-width: ${paper.is_roll ? `${paperWidth}mm` : '100%'};
+      width: ${contentWidth}mm;
+      max-width: ${contentWidth}mm;
+      box-sizing: border-box;
       margin: 0 auto;
       padding: 0;
     }
@@ -1882,18 +1911,18 @@ export class PrintLayoutComposerService {
       color: ${bodyTextColor};
     }
     .section-header {
-      text-align: ${styles.header_alignment || (paper.is_roll ? 'center' : 'left')};
-      border-bottom: ${paper.is_roll ? '1px dashed #000' : `2px solid ${primaryColor}`};
+      text-align: ${styles.header_alignment || (isRoll ? 'center' : 'left')};
+      border-bottom: ${isRoll ? '1px dashed #000' : `2px solid ${primaryColor}`};
       padding-bottom: 8px;
     }
     .fiscal-header-container {
-      ${paper.is_roll ? '' : 'display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;'}
+      ${isRoll ? '' : 'display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;'}
     }
     .fiscal-header-emitter {
-      ${paper.is_roll ? 'text-align: center;' : 'flex: 1; text-align: left;'}
+      ${isRoll ? 'text-align: center;' : 'flex: 1 1 auto; min-width: 0; text-align: left;'}
     }
     .fiscal-doc-card {
-      ${paper.is_roll ? `
+      ${isRoll ? `
         border-top: 1px dashed #000;
         margin-top: 6px;
         padding-top: 4px;
@@ -1903,15 +1932,15 @@ export class PrintLayoutComposerService {
         border-radius: 4px;
         padding: 8px 12px;
         text-align: center;
-        min-width: 220px;
-        max-width: 280px;
+        min-width: 0;
+        max-width: min(280px, 100%);
         background: #fafafa;
       `}
     }
     .fiscal-doc-title {
       font-weight: bold;
       font-size: ${fontSize + 1}pt;
-      ${paper.is_roll ? 'color: #000;' : `color: ${primaryColor};`}
+      ${isRoll ? 'color: #000;' : `color: ${primaryColor};`}
       margin-bottom: 4px;
       text-transform: uppercase;
     }
@@ -1922,15 +1951,15 @@ export class PrintLayoutComposerService {
     }
     .fiscal-doc-date, .fiscal-doc-meta {
       font-size: ${fontSize - 1}pt;
-      color: ${paper.is_roll ? '#000' : '#374151'};
+      color: ${isRoll ? '#000' : '#374151'};
       margin-bottom: 2px;
     }
     .fiscal-resolution-text {
       font-size: 7.5pt;
-      color: ${paper.is_roll ? '#000' : '#4b5563'};
+      color: ${isRoll ? '#000' : '#4b5563'};
       margin-top: 4px;
       padding-top: 4px;
-      ${paper.is_roll ? 'border-top: 1px dashed #000;' : 'border-top: 1px dashed #d1d5db;'}
+      ${isRoll ? 'border-top: 1px dashed #000;' : 'border-top: 1px dashed #d1d5db;'}
       line-height: 1.3;
     }
     .store-name {
@@ -1953,20 +1982,23 @@ export class PrintLayoutComposerService {
       padding: 4px 2px;
       font-size: ${fontSize - 1}pt;
       text-transform: uppercase;
+      overflow-wrap: anywhere;
     }
     .print-table td, .tax-breakdown-table td {
       border-bottom: 1px solid #e5e7eb;
       padding: 4px 2px;
     }
     .totals-table {
-      width: ${paper.is_roll ? '100%' : '260px'};
+      width: ${isRoll ? '100%' : 'min(260px, 100%)'};
       margin-left: auto;
+      table-layout: auto;
       border-collapse: collapse;
     }
     .totals-table td {
       padding: 3px 0;
     }
-    .total-label { text-align: left; }
+    .total-label { text-align: left; min-width: 0; flex: 1 1 auto; }
+    .total-val { white-space: nowrap; }
     .total-val { text-align: right; font-weight: 500; }
     .grand-total { font-weight: bold; font-size: ${fontSize + 2}pt; color: ${primaryColor}; }
     .total-in-words {
@@ -2035,6 +2067,7 @@ export class PrintLayoutComposerService {
     }
     .section-parties-grid {
       display: flex;
+      ${isRoll ? 'flex-direction: column;' : 'flex-wrap: wrap;'}
       justify-content: space-between;
       gap: 12px;
       background: #f9fafb;
@@ -2042,7 +2075,7 @@ export class PrintLayoutComposerService {
       border-radius: 6px;
       font-size: ${fontSize - 0.5}pt;
     }
-    .party-col { flex: 1; }
+    .party-col { flex: 1 1 0; min-width: 0; }
     .party-title { font-weight: bold; color: ${primaryColor}; font-size: ${fontSize - 1}pt; margin-bottom: 3px; }
     .section-dispatch-ticket .dt-header {
       text-align: center;
@@ -2052,13 +2085,14 @@ export class PrintLayoutComposerService {
     }
     .section-dispatch-ticket .dt-logo img {
       max-height: 30mm;
-      max-width: 70mm;
+      max-width: 100%;
       display: block;
       margin: 0 auto 2px;
     }
     .section-dispatch-ticket .dt-store-name {
       font-size: 11pt;
       font-weight: bold;
+      overflow-wrap: anywhere;
     }
     .section-dispatch-ticket .dt-doc-number,
     .section-dispatch-ticket .dt-doc-date {
@@ -2085,6 +2119,7 @@ export class PrintLayoutComposerService {
     }
     .section-dispatch-ticket table.dt-items {
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       margin-top: 4px;
     }

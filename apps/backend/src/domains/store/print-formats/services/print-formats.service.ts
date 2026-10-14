@@ -87,6 +87,29 @@ function isEmptyDefinitionPayload(payload: unknown): boolean {
  * newer compositor may add a section kind the adapter hasn't been taught
  * about yet, and persisting it should not block.
  */
+/**
+ * Normaliza el papel de rollo/hoja antes de validar y guardar: un formato
+ * `thermal_*` es SIEMPRE rollo (sin orientación); una hoja conocida NUNCA es
+ * rollo. No toca filas existentes en BD: sólo lo que entra por guardado.
+ * Opera sobre el payload (parche parcial o definición completa).
+ */
+function normalizeRollPaper<T extends Record<string, any> | null | undefined>(
+  payload: T,
+): T {
+  const paper = payload?.paper;
+  if (!paper || typeof paper !== 'object') return payload;
+  const format = paper.format;
+  if (typeof format !== 'string') return payload;
+  if (format.startsWith('thermal_')) {
+    const { orientation: _orientation, ...rest } = paper;
+    return { ...payload, paper: { ...rest, is_roll: true } } as T;
+  }
+  if (format === 'letter' || format === 'a4' || format === 'half_letter') {
+    return { ...payload, paper: { ...paper, is_roll: false } } as T;
+  }
+  return payload;
+}
+
 function assertSectionsWithinAdapterRegions(
   formatType: print_format_type_enum,
   payload: Record<string, any> | null | undefined,
@@ -261,7 +284,9 @@ export class PrintFormatsService {
       | undefined;
 
     if (rawOverrides !== undefined && !overridesIsNoop) {
-      normalizedOverrides = normalizeDefinition(rawOverrides) as Record<string, any>;
+      normalizedOverrides = normalizeRollPaper(
+        normalizeDefinition(rawOverrides) as Record<string, any>,
+      );
 
       const result = validatePrintFormatDefinition(normalizedOverrides);
       if (!result.valid) {
@@ -416,7 +441,9 @@ export class PrintFormatsService {
     // parche parcial como `overrides`), así que no hay caso "no-op vacío"
     // equivalente al de `updateStoreFormat`: un `definition` sin `paper`
     // debe fallar, no pasarse en silencio.
-    const normalizedDefinition = normalizeDefinition(dto.definition) as Record<string, any>;
+    const normalizedDefinition = normalizeRollPaper(
+      normalizeDefinition(dto.definition) as Record<string, any>,
+    );
 
     const result = validatePrintFormatDefinition(normalizedDefinition);
     if (!result.valid) {
