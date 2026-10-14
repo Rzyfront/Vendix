@@ -11,11 +11,11 @@ describe('item-list custom badge style source guards', () => {
     expect(source).toContain('let borderColor = `1px solid ${color}40`;');
   });
 
-  it('uses color-mix for CSS-token backgrounds and borders with the theme foreground', () => {
+  it('uses valid color-mix backgrounds and borders while preserving the configured text color', () => {
     expect(source).toContain('bg = `color-mix(in srgb, ${color} 15%, transparent)`;');
     expect(source).toContain('borderColor = `1px solid color-mix(in srgb, ${color} 25%, transparent)`;');
-    expect(source).toContain("textColor = 'var(--color-text-primary)';");
-    expect(source).toContain('color: textColor,');
+    expect(source).toContain('color: color,');
+    expect(source).not.toContain("textColor = 'var(--color-text-primary)';");
     expect(source).not.toContain('border: `1px solid ${color}40`,');
   });
 
@@ -27,16 +27,19 @@ describe('item-list custom badge style source guards', () => {
   });
 });
 
-describe('item-list action touch target source guards', () => {
-  it('keeps direct actions, overflow trigger, and overflow menu items touch-sized', () => {
+describe('item-list original appearance and motion source guards', () => {
+  it('preserves compact direct actions and the original overflow placement', () => {
     const actionStyles = styles.match(/\.footer-action-btn\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
     const menuItemStyles = styles.match(/\.menu-item\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 
-    expect(actionStyles).toContain('width: 44px;');
-    expect(actionStyles).toContain('height: 44px;');
-    expect(actionStyles).toContain('min-width: 44px;');
-    expect(menuItemStyles).toContain('min-height: 44px;');
-    expect(styles).toContain(':focus-visible');
+    expect(actionStyles).toContain('width: 30px;');
+    expect(actionStyles).toContain('height: 30px;');
+    expect(actionStyles).not.toContain('min-width: 44px;');
+    expect(menuItemStyles).not.toContain('min-height: 44px;');
+    expect(styles).toContain('bottom: 40px;');
+    const mobileStyles = styles.split('@media (max-width: 767px)')[1] ?? '';
+    expect(mobileStyles).toContain('width: 32px;');
+    expect(mobileStyles).toContain('height: 32px;');
   });
 
   it('avoids animated transforms and transitions when reduced motion is preferred', () => {
@@ -45,48 +48,40 @@ describe('item-list action touch target source guards', () => {
     expect(styles).toContain('transform: none;');
   });
 
-  it('uses the primary theme foreground for card metadata and empty-state copy', () => {
-    for (const selector of ['.empty-message', '.card-note', '.card-subtitle', '.status-badge-default', '.detail-label', '.text-default', '.footer-label']) {
+  it('keeps secondary empty and subtitle copy and muted metadata', () => {
+    for (const selector of ['.empty-message', '.card-subtitle']) {
       const block = styles.match(new RegExp(`${selector.replace('.', '\\.')}\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
-      expect(block).toContain('color: var(--color-text-primary);');
+      expect(block).toContain('color: var(--color-text-secondary);');
     }
-    expect(styles).toContain('outline: 2px solid var(--color-text-primary);');
+    for (const selector of ['.card-note', '.status-badge-default', '.detail-label', '.text-default', '.footer-label']) {
+      const block = styles.match(new RegExp(`${selector.replace('.', '\\.')}\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
+      expect(block).toContain('color: var(--color-text-muted);');
+    }
   });
 
-  it('keeps all mobile card metadata readable and uses the theme shadow token', () => {
+  it('preserves the original mobile metadata hierarchy and subtle shadow', () => {
     const mobileStyles = styles.split('@media (max-width: 767px)')[1]?.split('// Nota:')[0] ?? '';
     const mobileSubtitle = mobileStyles.match(/\.card-subtitle\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
     const mobileDetailLabel = mobileStyles.match(/\.detail-label\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
     const mobileFooterLabel = mobileStyles.match(/\.footer-label\s*\{([\s\S]*?)\n    \}/)?.[1] ?? '';
     const mobileCard = mobileStyles.match(/\.item-card\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
 
-    for (const block of [mobileSubtitle, mobileDetailLabel, mobileFooterLabel]) {
-      expect(block).toContain('color: var(--color-text-primary);');
-      expect(block).not.toMatch(/color:\s*var\(--color-neutral-(?:400|500)\)/);
-    }
-    expect(mobileCard).toContain('box-shadow: var(--shadow-sm);');
-    expect(mobileCard).not.toContain('rgba(0, 0, 0, 0.05)');
+    expect(mobileSubtitle).toContain('color: var(--color-neutral-500);');
+    expect(mobileDetailLabel).toContain('color: var(--color-neutral-400);');
+    expect(mobileFooterLabel).toContain('color: var(--color-neutral-400);');
+    expect(mobileCard).toContain('box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);');
   });
 
-  it('allows long detail values to wrap inside three equal card columns', () => {
+  it('preserves the shared three-column detail layout', () => {
     const gridStyles = styles.match(/\.card-details-grid\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
     const detailItemStyles = styles.match(/\.detail-item\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
     const detailValueWrapStyles = styles.match(/\.detail-value-wrap\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
     const detailValueStyles = styles.match(/\.detail-value\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 
-    expect(gridStyles).toContain('grid-template-columns: repeat(3, minmax(0, 1fr));');
-    expect(detailItemStyles).toContain('min-width: 0;');
-    expect(detailValueWrapStyles).toContain('min-width: 0;');
-    expect(detailValueStyles).toContain('min-width: 0;');
-    expect(detailValueStyles).toContain('overflow-wrap: anywhere;');
-  });
-
-  it('uses two columns only for avatar cards on very narrow screens', () => {
-    const baseGridStyles = styles.match(/\.card-details-grid\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
-    const narrowStyles = styles.split('@media (max-width: 479px)')[1] ?? '';
-    const avatarGridStyles = narrowStyles.match(/\.card-avatar-wrapper\s*\+\s*\.card-main-content\s+\.card-details-grid\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
-
-    expect(baseGridStyles).toContain('grid-template-columns: repeat(3, minmax(0, 1fr));');
-    expect(avatarGridStyles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(gridStyles).toContain('grid-template-columns: repeat(3, 1fr);');
+    expect(detailItemStyles).not.toContain('min-width: 0;');
+    expect(detailValueWrapStyles).not.toContain('min-width: 0;');
+    expect(detailValueStyles).not.toContain('overflow-wrap: anywhere;');
+    expect(styles).not.toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
   });
 });

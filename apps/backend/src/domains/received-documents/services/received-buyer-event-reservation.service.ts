@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from '../received-documents.service';
 import { ReceivedBuyerEventEnablementService } from './received-buyer-event-enablement.service';
-import { evaluateBuyerEventReadiness } from './received-document-buyer-event-policy';
+import { evaluateBuyerEventReadiness, receivedFiscalDocumentTypeCode } from './received-document-buyer-event-policy';
 
 export type ReceivedBuyerDianEventCode = '030' | '031' | '032' | '033';
 
@@ -85,6 +85,7 @@ export class ReceivedBuyerEventReservationService {
             issue_date: true, issuer_tax_id: true, issuer_name: true,
             receiver_tax_id: true, receiver_name: true, validation_status: true,
             review_status: true, version: true, accepted_at: true, confirmed_goods_at: true,
+            metadata: true,
           },
         });
         if (!document) throw new ConflictException('Documento recibido no encontrado en el contexto fiscal actual.');
@@ -184,6 +185,7 @@ export class ReceivedBuyerEventReservationService {
         const policy = evaluateBuyerEventReadiness({
           event_code: input.event_code,
           document_type: document.document_type,
+          fiscal_document_type_code: receivedFiscalDocumentTypeCode(document.metadata),
           issuer_tax_id: document.issuer_tax_id,
           receiver_tax_id: document.receiver_tax_id,
           document_key: document.document_key,

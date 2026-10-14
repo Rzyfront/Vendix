@@ -1,4 +1,55 @@
-import { describeApiFailure } from './invoicing-errors.util';
+import { describeApiFailure, describeNoteIntegrityDetails } from './invoicing-errors.util';
+
+describe('describeNoteIntegrityDetails', () => {
+  it('shows source-line credit balances and ignores unrelated error codes', () => {
+    expect(describeNoteIntegrityDetails('INVOICING_NOTE_LIMIT_001', {
+      source_invoice_item_id: 82,
+      remaining_quantity: '1.5',
+      remaining_base: '12500',
+      remaining_total: '14875',
+    })).toEqual([
+      'Cantidad disponible en el origen: 1.5.',
+      'Base disponible: 12.500,00.',
+      'Total disponible: 14.875,00.',
+      'Línea fuente: 82.',
+    ]);
+    expect(describeNoteIntegrityDetails('INVOICING_STATUS_001', { remaining_total: '100' })).toEqual([]);
+  });
+
+  it('uses source diagnostics for ambiguous or missing origins', () => {
+    expect(describeNoteIntegrityDetails('INVOICING_NOTE_SOURCE_001', {
+      source_description: 'No se pudo resolver la línea de origen de forma inequívoca.',
+      source_invoice_item_id: 42,
+    })).toEqual([
+      'No se pudo resolver la línea de origen de forma inequívoca.',
+      'Línea fuente: 42.',
+    ]);
+  });
+});
+
+describe('describeApiFailure — integridad de origen y saldo de notas', () => {
+  it('curates SOURCE without leaking integration detail', () => {
+    const failure = describeApiFailure({ error: {
+      error_code: 'INVOICING_NOTE_SOURCE_001',
+      message: 'Invoice note source item is missing, ambiguous, or does not belong to the corrected invoice',
+      details: { source_description: 'Línea no vinculada.' },
+    } });
+    expect(failure.errorCode).toBe('INVOICING_NOTE_SOURCE_001');
+    expect(failure.message).toContain('origen de una línea');
+    expect(failure.message).not.toContain('Invoice note source item');
+  });
+
+  it('curates LIMIT around available source balances, not tax editing', () => {
+    const failure = describeApiFailure({ error: {
+      error_code: 'INVOICING_NOTE_LIMIT_001',
+      message: 'Credit note exceeds the remaining source-item or invoice credit limit',
+      details: { remaining_quantity: '1' },
+    } });
+    expect(failure.errorCode).toBe('INVOICING_NOTE_LIMIT_001');
+    expect(failure.message).toContain('saldo disponible');
+    expect(failure.message).not.toContain('impuesto');
+  });
+});
 
 /**
  * Copy curado de `INVOICING_CREDIT_NOTE_001` / `NOTE_TAX_TYPE_UNRESOLVABLE_001`.

@@ -99,14 +99,14 @@ import { Subscription } from 'rxjs';
         </div>
 
         @if (suppliersLoading()) {
-          <p class="text-sm text-text-primary" role="status">Consultando proveedores…</p>
+          <p class="text-sm text-text-secondary" role="status">Consultando proveedores…</p>
         } @else if (suppliersError(); as error) {
-          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary" role="alert">
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">
             <span>{{ error }}</span>
-            <app-button customClasses="min-h-11" variant="outline" size="sm" [disabled]="submitting()" (clicked)="retrySuppliers()">Reintentar</app-button>
+            <app-button variant="outline" size="sm" [disabled]="submitting()" (clicked)="retrySuppliers()">Reintentar</app-button>
           </div>
         } @else if (supplierOptions().length === 0) {
-          <p class="text-sm text-text-primary" role="note">No hay proveedores disponibles.</p>
+          <p class="text-sm text-text-secondary" role="note">No hay proveedores disponibles.</p>
         }
 
         @if (form.controls['invoice_type'].value === 'support_adjustment_note') {
@@ -156,7 +156,6 @@ import { Subscription } from 'rxjs';
           <div class="flex items-center justify-between">
             <h4 class="text-sm font-medium text-text-primary">Ítems</h4>
             <app-button
-              customClasses="min-h-11"
               variant="outline"
               size="sm"
               type="button"
@@ -193,7 +192,7 @@ import { Subscription } from 'rxjs';
                     (click)="removeItem(i)"
                     [disabled]="submitting()"
                     aria-label="Eliminar ítem"
-                    class="mt-1 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-text-primary transition-colors hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                    class="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <app-icon name="x" [size]="16"></app-icon>
                   </button>
@@ -236,7 +235,7 @@ import { Subscription } from 'rxjs';
           </div>
 
           @if (itemsArray.length === 0) {
-            <div class="text-center py-4 text-text-primary text-sm">
+            <div class="text-center py-4 text-text-secondary text-sm">
               Agregue al menos un ítem
             </div>
           }
@@ -252,7 +251,7 @@ import { Subscription } from 'rxjs';
 
         @if (submitError(); as errorMsg) {
           <div
-            class="text-sm text-text-primary bg-error-light border border-error/30 rounded-lg p-3 flex items-start gap-2"
+            class="text-sm text-error bg-error-light border border-error/30 rounded-lg p-3 flex items-start gap-2"
             role="alert"
           >
             <app-icon name="alert-circle" [size]="16"></app-icon>
@@ -263,11 +262,11 @@ import { Subscription } from 'rxjs';
 
       <div slot="footer">
         <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
-          <app-button customClasses="min-h-11 w-full sm:w-auto" variant="outline" [disabled]="submitting()" (clicked)="onClose()">
+          <app-button customClasses="w-full sm:w-auto" variant="outline" [disabled]="submitting()" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
-            customClasses="min-h-11 w-full sm:w-auto"
+            customClasses="w-full sm:w-auto"
             variant="primary"
             (clicked)="onSubmit()"
             [disabled]="form.invalid || submitting() || itemsArray.length === 0"

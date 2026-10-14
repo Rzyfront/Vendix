@@ -9,6 +9,9 @@ import { RequestContextService } from '@common/context/request-context.service';
 @Injectable()
 export class StorePrismaService extends BasePrismaService {
   private readonly store_scoped_models = [
+    // Operational store ownership is independent of fiscal entity scope.
+    'document_reception_email_inboxes',
+    'document_reception_email_messages',
     'store_users',
     'store_settings',
     'inventory_locations',
@@ -1878,6 +1881,15 @@ export class StorePrismaService extends BasePrismaService {
   // ===== CRM Landing (QUI-719) — scoped getter =====
   get crm_landing_pages() {
     return this.scoped_client.crm_landing_pages;
+  }
+
+  // Email reception remains scoped to the operational tenant, not a shared NIT.
+  get document_reception_email_inboxes() {
+    return this.scoped_client.document_reception_email_inboxes;
+  }
+
+  get document_reception_email_messages() {
+    return this.scoped_client.document_reception_email_messages;
   }
 
   /**

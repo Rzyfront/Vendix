@@ -7,6 +7,7 @@ import {
 } from '../../../../testing/prisma-mock';
 import { buildInvoice } from '../../../../testing/money-fixtures';
 import { FiscalDocumentValidator } from '../validators/fiscal-document.validator';
+import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
 
 /**
  * Agente E, Task 2 — integra `createNote` (nota crédito) con el prevalidador
@@ -47,6 +48,7 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
 
     const prisma = createPrismaMock({
       invoices: ['findFirst', 'findMany', 'create'],
+      invoice_items: ['createMany', 'findMany'],
       invoice_taxes: ['createMany'],
       dian_document_events: ['findFirst'],
       products: ['findMany'],
@@ -60,7 +62,7 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
     const created_taxes: Array<Record<string, any>> = [];
     let next_item_id = 1;
     let last_created_data: Record<string, any> | null = null;
-    let last_created_items: Array<Record<string, any>> = [];
+    const last_created_items: Array<Record<string, any>> = [];
 
     const noteSnapshot = () => ({
       id: NOTE_ID,
@@ -97,14 +99,19 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
     prisma.invoices.create.mockImplementation(
       async ({ data }: { data: Record<string, any> }) => {
         last_created_data = data;
-        last_created_items = (data.invoice_items?.create ?? []).map(
-          (item: Record<string, unknown>) => ({
-            id: next_item_id++,
-            ...item,
-          }),
-        );
         return noteSnapshot();
       },
+    );
+    prisma.invoice_items.createMany.mockImplementation(
+      async ({ data }: { data: Array<Record<string, any>> }) => {
+        last_created_items.push(...data.map((item) => ({ id: next_item_id++, ...item })));
+        return { count: data.length };
+      },
+    );
+    prisma.invoice_items.findMany.mockImplementation(async ({ where }: any) =>
+      last_created_items
+        .filter((item) => item.invoice_id === where?.invoice_id)
+        .map(({ id, source_invoice_item_id }) => ({ id, source_invoice_item_id })),
     );
     prisma.invoice_taxes.createMany.mockImplementation(
       async ({ data }: { data: Array<Record<string, any>> }) => {
@@ -125,19 +132,19 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
       invoice_number_generator as never,
       { emit: jest.fn() } as never,
       {
-        resolveAccountingEntityForFiscal: jest.fn(async () => ({
-          id: ENTITY_ID,
-        })),
+        findFiscalAccountingEntityId: jest.fn(async () => ENTITY_ID),
       } as never,
       { assertAreaActive: jest.fn(async () => undefined) } as never,
       {} as never,
+      new InvoiceCalculatorService(),
+      { assertCanCreate: jest.fn().mockResolvedValue(undefined), remaining: jest.fn().mockResolvedValue(null) } as never,
     );
 
     return { service };
   }
 
-  const baseParent = (overrides: Record<string, any> = {}) =>
-    buildInvoice({
+  const baseParent = (overrides: Record<string, any> = {}) => {
+    const invoice = buildInvoice({
       invoice_type: 'sales_invoice',
       invoice_number: 'FV-1',
       status: 'accepted',
@@ -145,6 +152,19 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
       currency: 'COP',
       ...overrides,
     });
+    return {
+      ...invoice,
+      invoice_items: (invoice.invoice_items ?? []).map((item: Record<string, any>, index: number) => ({
+        ...item,
+        id: item.id ?? 900000 + index,
+        invoice_id: invoice.id,
+        unit_code: 'NIU',
+        price_unit_quantity: item.price_unit_quantity ?? 1,
+      })),
+    };
+  };
+  const noteLine = (source_invoice_item_id: number, quantity: number, unit_price: number) =>
+    ({ source_invoice_item_id, quantity, unit_price });
 
   /** El mismo prevalidador REAL que emitiría/rechazaría el documento en `send()`. */
   const validateNote = (note: Record<string, any>) =>
@@ -342,9 +362,7 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
     const note = await service.createCreditNote({
       related_invoice_id: 8101,
       reason: 'Devolución del menú',
-      items: [
-        { product_id: 9, description: 'Menú ejecutivo', quantity: 1, unit_price: 22685.19 },
-      ],
+      items: [noteLine(602, 1, 22685.19)],
     } as unknown as CreateCreditNoteDto);
 
     const report = validateNote(note);
@@ -505,10 +523,7 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
     const note = await service.createCreditNote({
       related_invoice_id: 8104,
       reason: 'Devolución parcial del plato + envío completo',
-      items: [
-        { product_id: 11, description: 'Plato', quantity: 1, unit_price: 25000 },
-        { product_id: null, description: 'Envío', quantity: 1, unit_price: 12605.04 },
-      ],
+      items: [noteLine(701, 1, 25000), noteLine(702, 1, 12605.04)],
     } as unknown as CreateCreditNoteDto);
 
     expect(note.invoice_taxes).toHaveLength(2);

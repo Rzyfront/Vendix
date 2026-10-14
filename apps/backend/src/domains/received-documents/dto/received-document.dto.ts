@@ -16,6 +16,7 @@ import {
 import { tax_type_enum } from '@prisma/client';
 import { ReceivedDocumentType } from '../interfaces/received-document.interface';
 import { ReceivedDocumentPaymentCondition } from '../interfaces/received-document.interface';
+import { INBOX_STATES, LEGAL_STATUSES, ReceivedDocumentInboxState, ReceivedDocumentLegalStatus } from '../services/received-document-inbox-projection';
 
 const DOCUMENT_TYPES: ReceivedDocumentType[] = [
   'invoice',
@@ -79,6 +80,22 @@ export class ReceivedDocumentQueryDto {
   @IsOptional()
   @IsIn(SOURCE_CHANNELS)
   source_channel?: string;
+
+  @IsOptional()
+  @IsIn(DOCUMENT_TYPES)
+  document_type?: ReceivedDocumentType;
+
+  @IsOptional()
+  @IsIn(INBOX_STATES)
+  inbox_state?: ReceivedDocumentInboxState;
+
+  @IsOptional()
+  @IsIn(LEGAL_STATUSES)
+  legal_status?: ReceivedDocumentLegalStatus;
+
+  @IsOptional()
+  @IsIn(['inbox', 'legacy'])
+  sort?: 'inbox' | 'legacy';
 }
 
 export class ReceivedDocumentTaxDto {

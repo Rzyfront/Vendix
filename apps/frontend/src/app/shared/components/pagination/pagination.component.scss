@@ -1,7 +1,5 @@
 :host {
   display: block;
-  max-width: 100%;
-  box-sizing: border-box;
 }
 
 .pagination-container {
@@ -10,42 +8,26 @@
   justify-content: center;
   gap: 1rem;
   flex-wrap: wrap;
-  max-width: 100%;
-  box-sizing: border-box;
 }
 
 .pagination-controls {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 0.25rem;
-  flex-wrap: wrap;
-  max-width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
 }
 
 .pagination-arrow {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
-  flex-shrink: 0;
-  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
   border: none;
   background: transparent;
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-
-  &:focus-visible {
-    outline: 2px solid var(--color-text-primary);
-    outline-offset: 2px;
-  }
+  transition: all 0.15s ease;
 
   &:hover:not(:disabled) {
     background: var(--color-background);
@@ -59,25 +41,17 @@
 }
 
 .pagination-page {
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
-  flex-shrink: 0;
-  box-sizing: border-box;
+  min-width: 32px;
+  height: 32px;
   padding: 0 0.25rem;
   border: none;
   background: transparent;
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   border-radius: 8px;
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-
-  &:focus-visible {
-    outline: 2px solid var(--color-text-primary);
-    outline-offset: 2px;
-  }
+  transition: all 0.15s ease;
 
   &:hover:not(.active) {
     background: var(--color-background);
@@ -98,14 +72,14 @@
   justify-content: center;
   min-width: 32px;
   height: 32px;
-  color: var(--color-text-primary);
+  color: var(--color-text-muted);
   font-size: 0.875rem;
   user-select: none;
 }
 
 .pagination-info {
   font-size: 0.875rem;
-  color: var(--color-text-primary);
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 

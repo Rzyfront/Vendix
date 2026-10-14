@@ -25,6 +25,7 @@ import {
   RegisterDianEventRequest,
   RelatedNote,
   IssueNoteResult,
+  InvoiceNoteContext,
 } from '../interfaces/invoice.interface';
 
 /**
@@ -82,6 +83,16 @@ export class InvoicingService {
 
   getInvoice(id: number): Observable<ApiResponse<Invoice>> {
     return this.http.get<ApiResponse<Invoice>>(this.getApiUrl(`${id}`));
+  }
+
+  getInvoiceNoteContext(
+    id: number,
+    noteType: 'credit_note' | 'debit_note',
+  ): Observable<ApiResponse<InvoiceNoteContext>> {
+    return this.http.get<ApiResponse<InvoiceNoteContext>>(
+      this.getApiUrl(`${id}/note-context`),
+      { params: { note_type: noteType } },
+    );
   }
 
   createInvoice(dto: CreateInvoiceDto): Observable<ApiResponse<Invoice>> {

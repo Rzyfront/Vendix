@@ -22,3 +22,4 @@ export { PreviewTransitionDto } from './preview-transition.dto';
 export { AssignPromoPlanDto } from './assign-promo-plan.dto';
 export { ManualPaymentDto } from './manual-payment.dto';
 export { ActivateStorePlanDto } from './activate-store-plan.dto';
+export { ActivateStorePlanPreviewDto } from './activate-store-plan-preview.dto';

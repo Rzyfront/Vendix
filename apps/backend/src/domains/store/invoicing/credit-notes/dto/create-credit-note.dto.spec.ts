@@ -65,33 +65,54 @@ const baseNote = (): Record<string, unknown> => ({ related_invoice_id: 1 });
 describe.each([
   ['CreateCreditNoteDto', CreateCreditNoteDto],
   ['CreateDebitNoteDto', CreateDebitNoteDto],
-])('%s — items[].description: techo compartido (nota, no factura)', (_name, cls) => {
-  it('acepta 301 caracteres — por encima del tope de factura (FAZ02, 300)', async () => {
-    // Es exactamente la diferencia que F.6 introduce: 301 caracteres es
-    // ilegal en una LÍNEA DE FACTURA (rechazado por CreateFacturaInvoiceItemDto)
-    // pero perfectamente válido en una nota, cuyo legal (CAZ02/DAZ02) es mayor.
+])('%s — items: selección explícita de líneas fuente', (_name, cls) => {
+  it('acepta una línea con identity source y cuatro campos comerciales', async () => {
     const errors = await validateAsPipe(cls, {
       ...baseNote(),
-      items: [{ description: chars(301), quantity: 1, unit_price: 1000 }],
+      items: [{ source_invoice_item_id: 12, quantity: 1.25, unit_price: 1000, discount_amount: 10, unit_code: 'NIU' }],
     });
     expect(failedPaths(errors)).toEqual([]);
   });
 
-  it('acepta exactamente 500 caracteres — el ancho real de la columna', async () => {
-    const errors = await validateAsPipe(cls, {
-      ...baseNote(),
-      items: [{ description: chars(500), quantity: 1, unit_price: 1000 }],
-    });
-    expect(failedPaths(errors)).toEqual([]);
+  it('rechaza items explícitos vacíos', async () => {
+    const errors = await validateAsPipe(cls, { ...baseNote(), items: [] });
+    expect(failedPaths(errors)).toContain('items');
   });
 
-  it('rechaza 501 caracteres: la columna invoice_items.description no da para más', async () => {
+  it('prohíbe descripciones, precios base/taxes y snapshots controlados por cliente', async () => {
     const errors = await validateAsPipe(cls, {
       ...baseNote(),
-      items: [{ description: chars(501), quantity: 1, unit_price: 1000 }],
+      items: [{ source_invoice_item_id: 12, quantity: 1, unit_price: 1000, description: 'falso', tax_amount: 100, taxes: [] }],
     });
     expect(failedPaths(errors)).toContain('items.0.description');
+    expect(failedPaths(errors)).toContain('items.0.tax_amount');
+    expect(failedPaths(errors)).toContain('items.0.taxes');
   });
+
+  it('rechaza null explícito en campos opcionales comerciales', async () => {
+    const errors = await validateAsPipe(cls, {
+      ...baseNote(),
+      items: [{ source_invoice_item_id: 12, quantity: 1, unit_price: 1000, discount_amount: null, unit_code: null }],
+    });
+    expect(failedPaths(errors)).toContain('items.0.discount_amount');
+    expect(failedPaths(errors)).toContain('items.0.unit_code');
+  });
+});
+
+it('solo la nota crédito acepta provenance explícita de refund', async () => {
+  const credit = await validateAsPipe(CreateCreditNoteDto, {
+    ...baseNote(),
+    refund_id: 10,
+    refund_item_sources: [{ refund_item_id: 20, source_invoice_item_id: 30 }],
+    shipping_source_invoice_item_id: 31,
+  });
+  expect(failedPaths(credit)).toEqual([]);
+
+  const debit = await validateAsPipe(CreateDebitNoteDto, {
+    ...baseNote(),
+    refund_item_sources: [{ refund_item_id: 20, source_invoice_item_id: 30 }],
+  });
+  expect(failedPaths(debit)).toContain('refund_item_sources');
 });
 
 describe.each([

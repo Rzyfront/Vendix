@@ -7,6 +7,7 @@ import type {
   ConfirmReceivedDocumentMatchInput,
   ManualReceivedDocumentInput,
   ReceivedDocument,
+  ReceivedDocumentCreateResult,
   ReceivedDocumentAccountingEvidence,
   ReceivedDocumentMatchAllocationsResponse,
   ReceivedDocumentMatchCandidatesResponse,
@@ -17,6 +18,8 @@ import type {
   ReceivedDocumentScanStatus,
   ReceivedDocumentsPage,
   ReceivedDocumentQuery,
+  ReceivedDocumentInboxSummary,
+  ReceivedDocumentReceptionStatus,
   ReceivedDocumentsScope,
   RevokeReceivedDocumentMatchInput,
 } from './received-documents.interface';
@@ -39,6 +42,22 @@ export class ReceivedDocumentsService {
     // Never send a store override in the store route; organization selection is explicit.
     if (scope === 'store') params = params.delete('store_id');
     return this.http.get<ReceivedDocumentsPage>(this.base(scope), { params });
+  }
+
+  getSummary(scope: ReceivedDocumentsScope, query: ReceivedDocumentQuery): Observable<ApiEnvelope<ReceivedDocumentInboxSummary>> {
+    let params = this.scopeParams(scope, query.store_id);
+    // Counts cover the whole search/channel/type scope, not the selected attention/legal state or page.
+    for (const key of ['search', 'source_channel', 'document_type'] as const) {
+      const value = query[key];
+      if (value) params = params.set(key, value);
+    }
+    return this.http.get<ApiEnvelope<ReceivedDocumentInboxSummary>>(`${this.base(scope)}/summary`, { params });
+  }
+
+  getReceptionStatus(scope: ReceivedDocumentsScope, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentReceptionStatus>> {
+    return this.http.get<ApiEnvelope<ReceivedDocumentReceptionStatus>>(`${this.base(scope)}/reception-status`, {
+      params: this.scopeParams(scope, storeId),
+    });
   }
 
   getById(scope: ReceivedDocumentsScope, id: number, storeId?: number): Observable<ApiEnvelope<ReceivedDocument>> {
@@ -123,10 +142,10 @@ export class ReceivedDocumentsService {
     );
   }
 
-  importXml(scope: ReceivedDocumentsScope, file: File, storeId?: number): Observable<ApiEnvelope<ReceivedDocument>> {
+  importXml(scope: ReceivedDocumentsScope, file: File, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentCreateResult>> {
     const body = new FormData();
     body.append('file', file, file.name);
-    return this.http.post<ApiEnvelope<ReceivedDocument>>(`${this.base(scope)}/import/xml`, body, {
+    return this.http.post<ApiEnvelope<ReceivedDocumentCreateResult>>(`${this.base(scope)}/import/xml`, body, {
       params: this.scopeParams(scope, storeId),
     });
   }
@@ -145,8 +164,8 @@ export class ReceivedDocumentsService {
     });
   }
 
-  createManual(scope: ReceivedDocumentsScope, dto: ManualReceivedDocumentInput, storeId?: number): Observable<ApiEnvelope<ReceivedDocument>> {
-    return this.http.post<ApiEnvelope<ReceivedDocument>>(`${this.base(scope)}/manual`, dto, {
+  createManual(scope: ReceivedDocumentsScope, dto: ManualReceivedDocumentInput, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentCreateResult>> {
+    return this.http.post<ApiEnvelope<ReceivedDocumentCreateResult>>(`${this.base(scope)}/manual`, dto, {
       params: this.scopeParams(scope, storeId),
     });
   }

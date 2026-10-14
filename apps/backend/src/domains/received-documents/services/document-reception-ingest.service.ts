@@ -3,6 +3,7 @@ import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from '../received-documents.service';
 import { DocumentReceptionEnvelope, DocumentReceptionEnvelopeDocument } from '../interfaces/document-reception-envelope.interface';
 import { ReceivedDocumentScanQueueService } from './received-document-scan-queue.service';
+import type { PreparedEmailDocument } from '../interfaces/received-document.interface';
 
 export type DocumentReceptionIngestSource = 'api' | 'email' | 'automated';
 
@@ -22,6 +23,22 @@ export class DocumentReceptionIngestService {
     private readonly documents: ReceivedDocumentsService,
     private readonly scanQueue: ReceivedDocumentScanQueueService,
   ) {}
+
+  /** Internal email transport only. Failures propagate so its durable consumer never acknowledges early. */
+  async ingestPreparedEmail(
+    ctx: ReceivedDocumentsContext,
+    prepared: PreparedEmailDocument,
+    beforeWrite?: () => Promise<void>,
+  ): Promise<DocumentReceptionIngestResult> {
+    const outcome = await this.documents.ingestPreparedEmail(ctx, prepared, beforeWrite);
+    return {
+      received_count: outcome.created ? 1 : 0,
+      duplicate_count: outcome.created ? 0 : 1,
+      error_count: 0,
+      document_ids: outcome.outcome === 'duplicate_other_store' ? [] : [outcome.document.id],
+      error_codes: [], next_cursor: null,
+    };
+  }
 
   async ingest(
     ctx: ReceivedDocumentsContext,
@@ -46,6 +63,10 @@ export class DocumentReceptionIngestService {
         const outcome = this.isXml(document.mime_type)
           ? await this.documents.importXmlWithOutcome(ctx, file, source)
           : await this.scanQueue.enqueue(ctx, file, source);
+        if ('outcome' in outcome && outcome.outcome === 'duplicate_other_store') {
+          duplicateCount += 1;
+          continue;
+        }
         const documentId = 'document' in outcome ? outcome.document.id : outcome.document_id;
         const created = outcome.created;
         if (Number.isSafeInteger(documentId) && documentId > 0 && !seenDocumentIds.has(documentId)) {

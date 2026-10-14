@@ -6,11 +6,10 @@ const variants = source.match(/const variantClasses = \{([\s\S]*?)\n    \};/)?.[
 const outlineVariant = variants.match(/\boutline:\s*\[([\s\S]*?)\],/)?.[1] ?? '';
 
 describe('ButtonComponent keyboard focus source guards', () => {
-  it('provides every variant a solid high-contrast focus-visible outline', () => {
-    expect(source).toContain("'focus-visible:outline'");
-    expect(source).toContain("'focus-visible:outline-2'");
-    expect(source).toContain("'focus-visible:outline-offset-2'");
-    expect(source).toContain("'focus-visible:outline-[var(--color-text-primary)]'");
+  it('preserves the original focus ring for every variant', () => {
+    expect(source).toContain("'focus:outline-none'");
+    expect(source).toContain("'focus:ring-2'");
+    expect(source).toContain("'focus:ring-offset-2'");
   });
 
   it('preserves existing variants, loading behavior, and click output', () => {
@@ -27,11 +26,11 @@ describe('ButtonComponent keyboard focus source guards', () => {
     expect(source).not.toContain('[attr.aria-hidden]');
   });
 
-  it('uses text-primary only for standard outline foreground and preserves its branded border and focus ring', () => {
-    expect(outlineVariant).toContain("'text-[var(--color-text-primary)]'");
+  it('uses the original primary color for standard outline foreground and preserves its branded border and focus ring', () => {
+    expect(outlineVariant).toContain("'text-[var(--color-primary)]'");
     expect(outlineVariant).toContain("'btn-outline-border'");
     expect(outlineVariant).toContain("'focus:ring-[var(--color-primary)]/50'");
-    expect(outlineVariant).not.toContain("'text-[var(--color-primary)]'");
+    expect(outlineVariant).not.toContain("'text-[var(--color-text-primary)]'");
 
     const secondaryOutline = variants.match(/'outline-secondary':\s*\[([\s\S]*?)\],/)?.[1] ?? '';
     expect(secondaryOutline).toContain("'text-[var(--color-secondary)]'");

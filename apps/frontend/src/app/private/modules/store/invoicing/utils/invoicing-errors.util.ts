@@ -112,6 +112,39 @@ export function describeApiFailure(error: unknown): ApiFailure {
   };
 }
 
+/** Human-readable, non-sensitive details for note source and credit-limit failures. */
+export function describeNoteIntegrityDetails(
+  errorCode: string | null | undefined,
+  details: unknown,
+): string[] {
+  if (errorCode !== 'INVOICING_NOTE_SOURCE_001' && errorCode !== 'INVOICING_NOTE_LIMIT_001') {
+    return [];
+  }
+  const record = asRecord(details);
+  if (!record) return [];
+  const remaining = asRecord(record['remaining']);
+
+  const rows: string[] = [];
+  const source = readString(record['source_description']) ?? readString(record['description']);
+  if (source && errorCode === 'INVOICING_NOTE_SOURCE_001') rows.push(source);
+
+  const quantityValue = record['remaining_quantity'] ?? record['remainingQuantity'] ?? remaining?.['quantity'];
+  const remainingQuantity = typeof quantityValue === 'number' && Number.isFinite(quantityValue)
+    ? String(quantityValue)
+    : readString(quantityValue);
+  const remainingBase = formatMoneyDetail(record['remaining_base'] ?? record['remainingBase'] ?? remaining?.['base']);
+  const remainingTotal = formatMoneyDetail(record['remaining_total'] ?? record['remainingTotal'] ?? remaining?.['total']);
+  if (remainingQuantity) rows.push(`Cantidad disponible en el origen: ${remainingQuantity}.`);
+  if (remainingBase) rows.push(`Base disponible: ${remainingBase}.`);
+  if (remainingTotal) rows.push(`Total disponible: ${remainingTotal}.`);
+
+  const sourceId = record['source_invoice_item_id'];
+  if (typeof sourceId === 'number' && Number.isInteger(sourceId)) {
+    rows.push(`Línea fuente: ${sourceId}.`);
+  }
+  return rows;
+}
+
 // ─────────────────────────────────────────────────────────────
 // 0. Copy curado para codigos que ERROR_MESSAGES no cubre
 // ─────────────────────────────────────────────────────────────
@@ -158,6 +191,12 @@ function describeKnownInvoicingFailure(
   }
   if (errorCode === 'INVOICING_CREDIT_NOTE_001') {
     return describeCreditNoteBalanceExceeded(details);
+  }
+  if (errorCode === 'INVOICING_NOTE_SOURCE_001') {
+    return 'No se pudo identificar de forma inequívoca el origen de una línea de la nota. Revisa la factura y las líneas seleccionadas; no se continuará con un origen ambiguo.';
+  }
+  if (errorCode === 'INVOICING_NOTE_LIMIT_001') {
+    return 'La cantidad o el importe de la nota supera el saldo disponible de su origen. Revisa los saldos detallados y actualízalos antes de volver a intentar.';
   }
   if (errorCode === 'NOTE_TAX_TYPE_UNRESOLVABLE_001') {
     return describeNoteTaxTypeUnresolvable(details);

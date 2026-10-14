@@ -1,4 +1,5 @@
 import { CreditNotesService } from './credit-notes.service';
+import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
 
 /**
  * A.1 (`POST :id/issue`) y A.2 (`GET :id/notes`) del plan
@@ -35,6 +36,11 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
       {} as any,
       {} as any,
       invoice_flow as any,
+      new InvoiceCalculatorService(),
+      {
+        assertCanCreate: jest.fn().mockResolvedValue(undefined),
+        remaining: jest.fn().mockResolvedValue(null),
+      } as any,
     );
 
     return { service, prisma, invoice_flow };

@@ -3,6 +3,7 @@ import { normalizeNit } from '../../../common/utils/nit.util';
 export interface BuyerEventReadinessInput {
   event_code: string;
   document_type: string | null | undefined;
+  fiscal_document_type_code?: string | null;
   issuer_tax_id: string | null | undefined;
   receiver_tax_id: string | null | undefined;
   document_key: string | null | undefined;
@@ -23,6 +24,18 @@ export interface BuyerEventReadiness {
   blockers: readonly string[];
 }
 
+/** Any known POS marker is ineligible; missing legacy metadata is not reclassified. */
+export function receivedFiscalDocumentTypeCode(metadata: unknown): string | null {
+  const record = metadata != null && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown> : {};
+  const email = record.email_reception != null && typeof record.email_reception === 'object' && !Array.isArray(record.email_reception)
+    ? record.email_reception as Record<string, unknown> : {};
+  const emailCode = typeof email.document_type_code === 'string' ? email.document_type_code : null;
+  const code = typeof record.fiscal_document_type_code === 'string' ? record.fiscal_document_type_code : null;
+  if (code === '20' || emailCode === '20') return '20';
+  return emailCode ?? code;
+}
+
 /** Conservative local preflight only; it neither validates legal entitlement nor sends a DIAN event. */
 export function evaluateBuyerEventReadiness(input: BuyerEventReadinessInput): BuyerEventReadiness {
   const blockers: string[] = [];
@@ -30,6 +43,7 @@ export function evaluateBuyerEventReadiness(input: BuyerEventReadinessInput): Bu
 
   if (!supportedEvent) blockers.push('unsupported_event_code');
   if (input.document_type?.toLowerCase() !== 'invoice') blockers.push('invoice_document_required');
+  if (input.fiscal_document_type_code === '20') blockers.push('document_pos_not_eligible');
   if (!input.document_key?.trim()) blockers.push('document_key_required');
   const issuer = normalizeNit(input.issuer_tax_id);
   const receiver = normalizeNit(input.receiver_tax_id);

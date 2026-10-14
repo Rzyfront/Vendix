@@ -44,6 +44,8 @@ export function toDianConfigurationType(
 }
 
 export interface Invoice {
+  related_invoice_id?: number | null;
+  refund_id?: number | null;
   id: number;
   organization_id: number;
   store_id: number;
@@ -1015,6 +1017,46 @@ export interface CreateInvoiceItemDto {
   is_inclusive?: boolean;
 }
 
+/** Minimal writable line contract for credit/debit notes; fiscal data is server-derived. */
+export interface CreateInvoiceNoteItemDto {
+  source_invoice_item_id: number;
+  quantity: number;
+  unit_price: number;
+  discount_amount?: number;
+  unit_code?: string;
+}
+
+export interface InvoiceNoteContextTax {
+  tax_name: string;
+  tax_type: string;
+  tax_rate: number | string;
+  rate_basis: 'percent' | 'per_mil' | 'fraction';
+  is_inclusive: boolean;
+}
+
+export interface InvoiceNoteContextLine {
+  source_invoice_item_id: number;
+  description: string;
+  quantity: number | string;
+  unit_price: number | string;
+  /** Effective source allowance, including any allocated document allowance. */
+  discount_amount: number | string;
+  unit_code: string | null;
+  price_unit_quantity: number;
+  is_inclusive: boolean;
+  taxes: InvoiceNoteContextTax[];
+  remaining_quantity: number | string | null;
+  remaining_base: number | string | null;
+  remaining_total: number | string | null;
+}
+
+export interface InvoiceNoteContext {
+  invoice_id: number;
+  note_type: 'credit_note' | 'debit_note';
+  items: InvoiceNoteContextLine[];
+  warnings: string[];
+}
+
 export interface UpdateInvoiceDto {
   customer_name?: string;
   customer_tax_id?: string;
@@ -1063,8 +1105,9 @@ export interface CreateCreditNoteDto {
   issue_date?: string;
   currency?: string;
   notes?: string;
-  items?: CreateInvoiceItemDto[];
-  taxes?: CreateInvoiceTaxDto[];
+  items?: CreateInvoiceNoteItemDto[];
+  refund_item_sources?: { refund_item_id: number; source_invoice_item_id: number }[];
+  shipping_source_invoice_item_id?: number;
 }
 
 /** Nota débito. Mismo contrato que {@link CreateCreditNoteDto}. */
@@ -1076,8 +1119,7 @@ export interface CreateDebitNoteDto {
   issue_date?: string;
   currency?: string;
   notes?: string;
-  items?: CreateInvoiceItemDto[];
-  taxes?: CreateInvoiceTaxDto[];
+  items?: CreateInvoiceNoteItemDto[];
 }
 
 export interface CreateResolutionDto {

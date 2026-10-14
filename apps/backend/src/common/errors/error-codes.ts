@@ -5,6 +5,15 @@ export interface ErrorCodeEntry {
 }
 
 export const ErrorCodes = {
+  // Dedicated email intake; independent of API/webhook connection contracts.
+  EMAIL_RECEPTION_UNAVAILABLE: { code: 'EMAIL_RECEPTION_UNAVAILABLE', httpStatus: 503, devMessage: 'La recepción por correo no está disponible para esta tienda.' },
+  EMAIL_RECEPTION_CONSENT_REQUIRED: { code: 'EMAIL_RECEPTION_CONSENT_REQUIRED', httpStatus: 400, devMessage: 'Confirma la política vigente para activar o cambiar tu dirección.' },
+  EMAIL_RECEPTION_FISCAL_GATE: { code: 'EMAIL_RECEPTION_FISCAL_GATE', httpStatus: 403, devMessage: 'Completa la configuración fiscal de tu negocio para recibir facturas.' },
+  EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED: { code: 'EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED', httpStatus: 403, devMessage: 'La suscripción no permite agregar documentos ahora.' },
+  EMAIL_RECEPTION_PAUSED: { code: 'EMAIL_RECEPTION_PAUSED', httpStatus: 409, devMessage: 'La recepción por correo está pausada.' },
+  EMAIL_RECEPTION_NOT_FOUND: { code: 'EMAIL_RECEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la configuración de recepción por correo.' },
+  EMAIL_RECEPTION_VERSION_CONFLICT: { code: 'EMAIL_RECEPTION_VERSION_CONFLICT', httpStatus: 409, devMessage: 'La configuración cambió. Vuelve a cargarla antes de guardar.' },
+
   // System
   SYS_INTERNAL_001: {
     code: 'SYS_INTERNAL_001',
@@ -3344,6 +3353,18 @@ export const ErrorCodes = {
     devMessage:
       'Credit note exceeds the remaining creditable balance of its parent invoice',
   },
+  INVOICING_NOTE_SOURCE_001: {
+    code: 'INVOICING_NOTE_SOURCE_001',
+    httpStatus: 422,
+    devMessage:
+      'Invoice note source item is missing, ambiguous, or does not belong to the corrected invoice',
+  },
+  INVOICING_NOTE_LIMIT_001: {
+    code: 'INVOICING_NOTE_LIMIT_001',
+    httpStatus: 422,
+    devMessage:
+      'Credit note exceeds the remaining source-item or invoice credit limit',
+  },
   /**
    * VENTA COBRADA SIN DOCUMENTO FISCAL — el dinero entró pero la venta no
    * quedó respaldada por ningún documento fiscal emitido.
@@ -5182,6 +5203,18 @@ export const ErrorCodes = {
     code: 'SUBSCRIPTION_VALIDATION',
     httpStatus: 400,
     devMessage: 'Subscription checkout validation failed',
+  },
+  SUBSCRIPTION_ACTIVATION_START_RANGE: {
+    code: 'SUBSCRIPTION_ACTIVATION_START_RANGE',
+    httpStatus: 400,
+    devMessage:
+      'La fecha de inicio del período debe estar entre hoy menos 31 días y hoy',
+  },
+  SUBSCRIPTION_ACTIVATION_UNDERPAYMENT: {
+    code: 'SUBSCRIPTION_ACTIVATION_UNDERPAYMENT',
+    httpStatus: 400,
+    devMessage:
+      'El monto recibido es menor que el total a cobrar; marca "Aceptar pago parcial" e indica una nota',
   },
   SUBSCRIPTION_PAY_001: {
     code: 'SUBSCRIPTION_PAY_001',
