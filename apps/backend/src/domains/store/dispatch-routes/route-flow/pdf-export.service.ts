@@ -6,6 +6,7 @@
 // environments (ts-node-watch, swc, tsc, esbuild).
 import * as PDFKitNs from 'pdfkit';
 import type { ArticleExitSummary } from '../utils/route-stop-calc';
+import { resolvePrintGeometry } from '../../print-formats/lib/print-geometry';
 import {
   PRINT_DEFAULTS,
   PRINT_FORMATS,
@@ -108,6 +109,13 @@ const formatPdfAddress = (addr: any): string => {
 const MM = 2.834645669;
 
 /**
+ * Rollo: margen lateral del kernel de impresión, para que el contenido quede
+ * dentro del ancho que el cabezal imprime (80 → 72 mm, 58 → 48 mm).
+ */
+const rollMarginPt = (format: 'thermal_80' | 'thermal_58'): number =>
+  resolvePrintGeometry({ format }).margins.left * MM;
+
+/**
  * Resolved page box for one render pass. Nothing in this builder may read a
  * page dimension from anywhere else: the whole point of QUI-666 is that the
  * paper is configurable per store, so `PAGE_WIDTH`/`MARGIN` module constants
@@ -168,7 +176,7 @@ const GEOMETRY: Record<
     // the type is scaled down to leave room for actual stops.
     width: 612,
     height: 396,
-    margin: 14,
+    margin: Math.max(14, 5 * MM), // nunca menos de 5 mm por lado
     roll: false,
     font_scale: 0.78,
   },
@@ -176,14 +184,14 @@ const GEOMETRY: Record<
     width: 80 * MM,
     // Replaced by the measured content height; see `generate`.
     height: 0,
-    margin: 8,
+    margin: rollMarginPt('thermal_80'),
     roll: true,
     font_scale: 0.62,
   },
   thermal_58: {
     width: 58 * MM,
     height: 0,
-    margin: 6,
+    margin: rollMarginPt('thermal_58'),
     roll: true,
     font_scale: 0.5,
   },
