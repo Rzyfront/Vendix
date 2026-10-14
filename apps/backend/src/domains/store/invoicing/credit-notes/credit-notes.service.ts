@@ -5,7 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
 // sin un solo cast. El `TaxFiscalType` de la capa de dominio refleja los
 // mismos seis valores, pero es un enum NOMINAL de TS y no es asignable a la
 // unión de literales de Prisma — de ahí venía el `as any` de salida.
-import { Prisma, refunds_state_enum, tax_type_enum } from '@prisma/client';
+import { Prisma, fiscal_document_type_enum, refunds_state_enum, tax_type_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -13,6 +13,21 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { InvoiceEmissionGateService } from '../services/invoice-emission-gate.service';
 import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
+import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
+import { CreditNoteBalanceService } from './credit-note-balance.service';
+import { recalculateNote, type RecalculatedNote } from './recalculate-note.util';
+import {
+  type NoteSourceInvoiceSnapshot,
+  type ResolveNoteSourceOptions,
+} from './note-source-resolver.util';
+import { resolveEmittedNoteUnitCodes } from './note-source-xml.util';
+import { CreateInvoiceNoteItemDto } from './dto/create-invoice-note-item.dto';
+import { NoteContextQueryDto } from './dto/note-context-query.dto';
+import { isDianUnitCode } from '../providers/dian-direct/constants/dian-unit-codes';
+import {
+  deriveRefundNoteSelection,
+  type RefundNoteSourceInvoice,
+} from './refund-note-source.util';
 import {
   CreateCreditNoteDto,
   CreateDebitNoteDto,
@@ -56,6 +71,21 @@ const INVOICE_INCLUDE = {
   },
 };
 
+type CorrectableNoteSourceInvoiceType = 'sales_invoice' | 'export_invoice' | 'purchase_invoice';
+
+function isCorrectableNoteSourceInvoiceType(value: string): value is CorrectableNoteSourceInvoiceType {
+  return value === 'sales_invoice' || value === 'export_invoice' || value === 'purchase_invoice';
+}
+
+/** Fiscal ledger stores DIAN document types, not Vendix invoice aliases. */
+function fiscalTransmissionDocumentType(invoiceType: CorrectableNoteSourceInvoiceType): fiscal_document_type_enum {
+  switch (invoiceType) {
+    case 'export_invoice': return fiscal_document_type_enum.sales_invoice;
+    case 'purchase_invoice': return fiscal_document_type_enum.support_document;
+    case 'sales_invoice': return fiscal_document_type_enum.sales_invoice;
+  }
+}
+
 /**
  * QUI-INC — la fila de impuesto de una nota, TAL COMO LLEGA. `tax_type` es
  * opcional acá porque las tres procedencias posibles lo son en distinto
@@ -97,25 +127,37 @@ interface ResolvedNoteTaxRow extends IncomingNoteTaxRow {
 /**
  * CP-REFUND-FLOW-REDESIGN paso 7 — vínculo refund↔NC resuelto y validado.
  *
- * `derived_items` nunca llega vacío: un refund sin líneas derivables se
- * rechaza en `resolveRefundLink` (una NC vinculada que cayera al copiado
- * TOTAL acreditaría la factura entera por un reembolso que no devolvió
- * nada). `bridge_rows` en cambio SÍ puede llegar vacío — es el caso de la
- * línea libre de envío, que no tiene `refund_item` que cubrir.
+ * Contiene sólo los datos refund/order necesarios para que el mapper de
+ * provenance derive la selección. La derivación y el puente fiscal no se
+ * calculan acá.
  */
 interface ResolvedRefundLink {
   refund: {
     id: number;
     order_id: number;
   };
-  derived_items: CreateInvoiceItemDto[];
+  refund_snapshot: {
+    id: number;
+    order_id: number;
+    shipping_refund: Prisma.Decimal | number | string | null;
+    refund_items: Array<{
+      id: number;
+      order_item_id: number;
+      quantity: Prisma.Decimal | number | string | null;
+      discount_amount: Prisma.Decimal | number | string | null;
+      tax_amount: Prisma.Decimal | number | string | null;
+      refund_amount: Prisma.Decimal | number | string | null;
+    }>;
+  };
+  order_items: Array<{
+    id: number;
+    product_id: number | null;
+    product_variant_id: number | null;
+    product_name: string;
+    quantity: Prisma.Decimal | number | string;
+  }>;
   concept_code: '1' | '2';
   default_reason: string;
-  bridge_rows: Array<{
-    refund_item_id: number;
-    covered_qty: number;
-    covered_amount: Prisma.Decimal;
-  }>;
 }
 
 const TAX_TYPE_VALUES: readonly string[] = Object.values(tax_type_enum);
@@ -129,6 +171,23 @@ function isTaxTypeEnum(value: unknown): value is tax_type_enum {
   return typeof value === 'string' && TAX_TYPE_VALUES.includes(value);
 }
 
+function assertOnlyKeys(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+  reason: string,
+): void {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, { reason });
+  }
+  const extra = Object.keys(value).filter((key) => !allowed.has(key));
+  if (extra.length > 0) {
+    throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+      reason,
+      forbidden_fields: extra,
+    });
+  }
+}
+
 @Injectable()
 export class CreditNotesService {
   private readonly logger = new Logger(CreditNotesService.name);
@@ -140,6 +199,8 @@ export class CreditNotesService {
     private readonly fiscalScope: FiscalScopeService,
     private readonly emissionGate: InvoiceEmissionGateService,
     private readonly invoice_flow: InvoiceFlowService,
+    private readonly calculator: InvoiceCalculatorService,
+    private readonly credit_note_balance: CreditNoteBalanceService,
   ) {}
 
   private getContext() {
@@ -149,25 +210,6 @@ export class CreditNotesService {
       throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     return context;
-  }
-
-  private async resolveAccountingEntityIdForContext(context: {
-    organization_id?: number;
-    store_id?: number;
-  }): Promise<number> {
-    if (
-      typeof context.organization_id !== 'number' ||
-      typeof context.store_id !== 'number'
-    ) {
-      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
-    }
-
-    const entity = await this.fiscalScope.resolveAccountingEntityForFiscal({
-      organization_id: context.organization_id,
-      store_id: context.store_id,
-    });
-
-    return entity.id;
   }
 
   async createCreditNote(dto: CreateCreditNoteDto) {
@@ -276,694 +318,505 @@ export class CreditNotesService {
     });
   }
 
+  /** Read-only fiscal defaults for the note composer; it never reserves/creates. */
+  async getNoteContext(related_invoice_id: number, note_type: NoteContextQueryDto['note_type']) {
+    const context = this.getContext();
+    if (typeof context.organization_id !== 'number' || typeof context.store_id !== 'number') {
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
+    }
+    const accounting_entity_id = await this.fiscalScope.findFiscalAccountingEntityId({
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+    });
+    if (accounting_entity_id === null) {
+      throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID, undefined, {
+        reason: 'source_fiscal_entity_unavailable',
+      });
+    }
+    const sourceInvoice = await this.prisma.invoices.findFirst({
+      where: { id: related_invoice_id },
+      include: {
+        invoice_items: { include: { financial_source_line: { select: { source_order_item_id: true, kind: true } } } },
+        invoice_taxes: true,
+        profile_snapshot: { select: { config: true } },
+      },
+    });
+    if (!sourceInvoice) throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    if (
+      sourceInvoice.status !== 'accepted' ||
+      !isCorrectableNoteSourceInvoiceType(sourceInvoice.invoice_type)
+    ) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002, undefined, {
+        related_invoice_id,
+        invoice_type: sourceInvoice.invoice_type,
+        status: sourceInvoice.status,
+      });
+    }
+    if (
+      sourceInvoice.organization_id !== context.organization_id ||
+      sourceInvoice.store_id !== context.store_id ||
+      !sourceInvoice.accounting_entity_id ||
+      sourceInvoice.accounting_entity_id !== accounting_entity_id
+    ) {
+      throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID, undefined, {
+        reason: 'source_fiscal_scope_mismatch', related_invoice_id,
+      });
+    }
+    await assertNoteOriginalHasNoAcceptedRadianEvent(this.prisma, {
+      note_type,
+      related_invoice_id: sourceInvoice.id,
+      organization_id: sourceInvoice.organization_id,
+      store_id: sourceInvoice.store_id,
+      accounting_entity_id: sourceInvoice.accounting_entity_id,
+    });
+    const source: NoteSourceInvoiceSnapshot = {
+      id: sourceInvoice.id,
+      organization_id: sourceInvoice.organization_id,
+      store_id: sourceInvoice.store_id,
+      accounting_entity_id: sourceInvoice.accounting_entity_id,
+      invoice_items: sourceInvoice.invoice_items,
+      invoice_taxes: sourceInvoice.invoice_taxes,
+      subtotal_amount: sourceInvoice.subtotal_amount,
+      discount_amount: sourceInvoice.discount_amount,
+      tax_amount: sourceInvoice.tax_amount,
+      total_amount: sourceInvoice.total_amount,
+      operation_type: sourceInvoice.operation_type,
+      aiu_contract_object: sourceInvoice.aiu_contract_object,
+      aiu_regime: sourceInvoice.aiu_regime,
+      aiu_minimum_percent: sourceInvoice.aiu_minimum_percent,
+      aiu_taxable_matrix: sourceInvoice.aiu_taxable_matrix,
+      profile_snapshot: sourceInvoice.profile_snapshot ? { config: sourceInvoice.profile_snapshot.config } : null,
+    };
+    const options: ResolveNoteSourceOptions = {};
+    if (source.invoice_items.some((item) => !item.unit_code || !isDianUnitCode(item.unit_code.trim()))) {
+      let acceptedXml = sourceInvoice.xml_document;
+      if (!acceptedXml) {
+        const transmission = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+          where: {
+            organization_id: sourceInvoice.organization_id,
+            store_id: sourceInvoice.store_id,
+            accounting_entity_id: sourceInvoice.accounting_entity_id,
+            source_type: 'invoice',
+            source_id: sourceInvoice.id,
+            document_type: fiscalTransmissionDocumentType(sourceInvoice.invoice_type),
+            transmission_status: 'accepted',
+            dian_status: 'accepted',
+          },
+          select: { xml_document: true },
+          orderBy: { accepted_at: 'desc' },
+        });
+        acceptedXml = transmission?.xml_document ?? null;
+      }
+      if (acceptedXml) Object.assign(options, { emitted_unit_codes: resolveEmittedNoteUnitCodes(source, acceptedXml) });
+    }
+    const selection: CreateInvoiceNoteItemDto[] = source.invoice_items.map((item) => ({
+      source_invoice_item_id: item.id,
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unit_price),
+      ...(item.unit_code && isDianUnitCode(item.unit_code.trim()) ? { unit_code: item.unit_code.trim() } : {}),
+    }));
+    const recalculated = recalculateNote(this.calculator, source, selection, options);
+    const remaining = note_type === 'credit_note'
+      ? await this.credit_note_balance.remaining(source.id)
+      : null;
+    return {
+      invoice_id: source.id,
+      note_type,
+      items: recalculated.resolved_lines.map((line, index) => {
+        const calculatedLine = recalculated.calculated.lines[index];
+        const remainingLine = remaining?.lines.get(line.item.source_invoice_item_id);
+        return {
+          source_invoice_item_id: line.item.source_invoice_item_id,
+          description: line.item.description,
+          quantity: line.item.quantity.toString(),
+          unit_price: line.item.unit_price.toString(),
+          discount_amount: line.item.discount_amount.toString(),
+          unit_code: line.item.unit_code,
+          price_unit_quantity: line.item.price_unit_quantity,
+          is_inclusive: line.item.is_inclusive,
+          taxes: (calculatedLine?.taxes ?? []).map((tax) => ({
+            tax_name: tax.tax_name,
+            tax_type: tax.tax_type,
+            tax_rate: tax.tax_rate,
+            rate_basis: tax.rate_basis,
+            is_inclusive: tax.is_inclusive,
+          })),
+          remaining_quantity: remainingLine?.remaining_quantity.toString() ?? null,
+          remaining_base: remainingLine?.remaining_base.toString() ?? null,
+          remaining_total: remainingLine?.remaining_total.toString() ?? null,
+        };
+      }),
+      warnings: source.operation_type === '09'
+        ? ['La base gravable AIU parcial requiere resolución fiscal del servidor; la previsualización comercial no estima la cuota ni el total AIU.']
+        : [],
+    };
+  }
+
+  /** Calculator-backed production writer; no client tax fields are accepted. */
   private async createNote(
     dto: CreateCreditNoteDto | CreateDebitNoteDto,
     type: 'credit_note' | 'debit_note',
   ) {
     const context = this.getContext();
-    const accounting_entity_id =
-      await this.resolveAccountingEntityIdForContext(context);
+    if (typeof context.organization_id !== 'number' || typeof context.store_id !== 'number') {
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
+    }
+    const accounting_entity_id = await this.fiscalScope.findFiscalAccountingEntityId({
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+    });
+    if (accounting_entity_id === null) {
+      throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID, undefined, {
+        reason: 'source_fiscal_entity_unavailable',
+      });
+    }
+    const allowedFields = new Set([
+      'related_invoice_id', 'reason', 'notes', 'note_concept_code', 'issue_date',
+      'currency', 'items', ...(type === 'credit_note'
+        ? ['refund_id', 'refund_item_sources', 'shipping_source_invoice_item_id']
+        : []),
+    ]);
+    assertOnlyKeys(dto, allowedFields, 'note_request_contains_forbidden_fields');
+    const rawItems: unknown = dto.items;
+    if (rawItems !== undefined && (!Array.isArray(rawItems) || rawItems.length === 0)) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+        reason: 'explicit_empty_or_invalid_source_selection',
+      });
+    }
+    if (Array.isArray(rawItems)) {
+      const itemFields = new Set([
+        'source_invoice_item_id', 'quantity', 'unit_price', 'discount_amount', 'unit_code',
+      ]);
+      for (const item of rawItems) assertOnlyKeys(item, itemFields, 'note_item_contains_forbidden_fields');
+    }
+    const creditDto = dto as CreateCreditNoteDto;
+    const hasRefundFields =
+      creditDto.refund_id !== undefined ||
+      creditDto.refund_item_sources !== undefined ||
+      creditDto.shipping_source_invoice_item_id !== undefined;
+    if (type !== 'credit_note' && hasRefundFields) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, { reason: 'refund_fields_credit_note_only' });
+    }
+    const rawRefundMap: unknown = creditDto.refund_item_sources;
+    if (rawRefundMap !== undefined && (!Array.isArray(rawRefundMap) || rawRefundMap.length === 0)) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, { reason: 'refund_mapping_invalid' });
+    }
+    if (Array.isArray(rawRefundMap)) {
+      for (const mapping of rawRefundMap) {
+        assertOnlyKeys(mapping, new Set(['refund_item_id', 'source_invoice_item_id']), 'refund_mapping_contains_forbidden_fields');
+      }
+    }
 
-    // Validate the related invoice exists and is accepted.
-    // Las líneas y los impuestos se traen aquí porque una nota TOTAL (la que
-    // sólo lleva motivo) los copia del documento que corrige.
     const related_invoice = await this.prisma.invoices.findFirst({
       where: { id: dto.related_invoice_id },
-      include: { invoice_items: true, invoice_taxes: true },
+      include: {
+        invoice_items: { include: { financial_source_line: { select: { source_order_item_id: true, kind: true } } } },
+        invoice_taxes: true,
+        profile_snapshot: { select: { config: true } },
+      },
     });
+    if (!related_invoice) throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
 
-    if (!related_invoice) {
-      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    if (!isCorrectableNoteSourceInvoiceType(related_invoice.invoice_type)) {
+      throw new VendixHttpException(ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED, undefined, {
+        related_invoice_id: related_invoice.id,
+        related_invoice_type: related_invoice.invoice_type,
+      });
     }
-
-    // Una nota crédito/débito (tipos DIAN 91/92) sólo corrige una FACTURA. Cada
-    // familia de documento tiene la suya y no son intercambiables:
-    //   · documento equivalente POS  → nota de ajuste 93/94
-    //     (`equivalent_adjustment_note`, Res. 000165/2023)
-    //   · documento soporte          → nota de ajuste 95 (`support_adjustment_note`)
-    //   · una nota                   → no se corrige con otra nota
-    //
-    // Sin esta puerta el servicio aceptaba cualquiera de esos, tomaba consecutivo
-    // de la resolución de notas y recién la DIAN rechazaba el tipo — con el
-    // número ya gastado. La única barrera existente era `isCorrectableType()` en
-    // la UI, que no protege a ningún otro cliente de la API.
-    const CORRECTABLE_BY_NOTE = [
-      'sales_invoice',
-      'export_invoice',
-      'purchase_invoice',
-    ];
-    if (!CORRECTABLE_BY_NOTE.includes(related_invoice.invoice_type)) {
-      const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
-      const correct_instrument =
-        related_invoice.invoice_type === 'pos_equivalent_document'
-          ? 'Un documento equivalente POS se corrige con una nota de ajuste (tipo DIAN 93/94), no con una nota crédito o débito.'
-          : related_invoice.invoice_type === 'support_document'
-            ? 'Un documento soporte se corrige con una nota de ajuste al documento soporte (tipo DIAN 95).'
-            : 'Sólo una factura puede corregirse con una nota crédito o débito.';
-      throw new VendixHttpException(
-        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
-        `El documento ${related_invoice.invoice_number} es de tipo «${related_invoice.invoice_type}» y no admite ${label}. ${correct_instrument}`,
-        {
-          related_invoice_id: related_invoice.id,
-          related_invoice_type: related_invoice.invoice_type,
-        },
-      );
-    }
-
     if (related_invoice.status !== 'accepted') {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_STATUS_002,
-        `Cannot create ${type} for invoice in '${related_invoice.status}' status. Invoice must be accepted by DIAN first.`,
-      );
+      throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002,
+        `Cannot create ${type} for invoice in '${related_invoice.status}' status. Invoice must be accepted by DIAN first.`);
     }
-
-    const note_accounting_entity_id =
-      related_invoice.accounting_entity_id || accounting_entity_id;
-    if (note_accounting_entity_id !== accounting_entity_id) {
-      throw new VendixHttpException(
-        ErrorCodes.FISCAL_SCOPE_INVALID,
-        'The related invoice belongs to a different fiscal entity.',
-        {
-          related_invoice_id: related_invoice.id,
-          related_accounting_entity_id: related_invoice.accounting_entity_id,
-          current_accounting_entity_id: accounting_entity_id,
-        },
-      );
+    if (
+      related_invoice.organization_id !== context.organization_id ||
+      related_invoice.store_id !== context.store_id ||
+      !related_invoice.accounting_entity_id ||
+      related_invoice.accounting_entity_id !== accounting_entity_id
+    ) {
+      throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID, undefined, {
+        reason: 'source_fiscal_scope_mismatch',
+        related_invoice_id: related_invoice.id,
+      });
     }
-
     await assertNoteOriginalHasNoAcceptedRadianEvent(this.prisma, {
       note_type: type,
       related_invoice_id: related_invoice.id,
       organization_id: related_invoice.organization_id,
       store_id: related_invoice.store_id,
-      accounting_entity_id: note_accounting_entity_id,
+      accounting_entity_id: related_invoice.accounting_entity_id,
     });
-
-    // CP-REFUND-FLOW-REDESIGN paso 7 — NC guiada por reembolso. Se resuelve
-    // ANTES de numerar, como todas las guardas: un refund inexistente, de
-    // otra orden o ya vinculado no debe gastar un consecutivo. Devuelve null
-    // en la NC manual (100 % del histórico) y el flujo de abajo no cambia.
-    // La puerta de tipos corregibles de arriba NO se salta: la NC corrige la
-    // FACTURA, el refund sólo aporta las líneas.
-    const refund_link = await this.resolveRefundLink(dto, type, {
-      id: related_invoice.id,
-      order_id: related_invoice.order_id,
-    });
-
-    // ANTES de tomar el consecutivo, no después. Una línea que referencia un
-    // artículo ajeno al catálogo de esta tienda tiene dos finales y los dos son
-    // malos: el id inexistente revienta en la FK de `invoice_items` como un 500
-    // «Error interno» —con el consecutivo autorizado ya gastado y sin manera de
-    // devolverlo—, y el id de OTRA tienda satisface la FK y queda escrito en la
-    // nota, que es una fuga de tenant que responde 201.
-    //
-    // La guarda gemela vive en `InvoicingService.resolveLinePricingSnapshots`,
-    // que es el seam por el que pasan la creación y la edición de facturas. Las
-    // notas no lo cruzan —construyen sus líneas por su cuenta—, así que la
-    // protección hay que repetirla aquí; es el precio de tener dos carriles de
-    // escritura, y se prefiere duplicar catorce líneas antes que dejar el
-    // carril de notas sin puerta.
-    // Paso 7: la NC guiada valida sus líneas DERIVADAS por la misma puerta
-    // (el combo guiada+explícita se rechazó arriba, así que sólo una de las
-    // dos ramas trae líneas).
-    await this.assertNoteLinesResolvable(
-      dto.items ?? refund_link?.derived_items,
-    );
-
-    // ANTES de tomar el consecutivo, por la misma razón que la guarda de arriba:
-    // un consecutivo gastado no se devuelve.
-    //
-    // Este carril no cruzaba la compuerta de emisión porque los dos criterios
-    // vivían como métodos privados de `InvoicingService`. Medido el 2026-08-24
-    // sobre la tienda 10, misma sesión y mismo token: `POST /store/invoicing`
-    // respondía 403 `INVOICING_ENABLEMENT_001` y `POST .../credit-notes`
-    // respondía 201, nota 169, número NC6, con `invoice_resolutions.current_number`
-    // de la resolución 40 pasando de 5 a 6. La compuerta pertenece al acto de
-    // NUMERAR, no al tipo de documento: la nota llama al mismo generador, con el
-    // mismo `accounting_entity_id`, y la resolución se elige igual por
-    // `document_type` sin mirar ambiente.
-    //
-    // La compuerta transitiva del `status = 'accepted'` de la factura
-    // relacionada (arriba, `INVOICING_STATUS_002`) NO alcanza: basta una factura
-    // histórica aceptada para que este carril quede abierto para siempre,
-    // incluso si la habilitación de la tienda se cae después. Medido: 18
-    // facturas con `status='accepted'`, 5 de ellas en la tienda 10.
-    //
-    // Se invoca el predicado compartido, no una copia. Y conserva su indulgencia
-    // con quien no tiene configuración DIAN (`if (!config) return`), que cubre 20
-    // de las 21 tiendas de dev: sin eso, la compuerta sería una pérdida de
-    // función mayor que el hueco que cierra.
-    const gate_context = this.getContext();
-    await this.emissionGate.assertAreaActive({
-      organization_id: gate_context.organization_id,
-      store_id: gate_context.store_id,
-    });
-
-    // El armado de líneas, impuestos y totales va ANTES de numerar. No es
-    // cosmético: `derivePartialNoteLinesViaKernel` falla cerrada
-    // (`INVOICING_CALC_005`/`_006`) y su propio docblock dice «el llamador
-    // numera después» — pero el llamador numeraba ANTES, así que una línea
-    // inválida gastaba el consecutivo antes de rechazarse. Además el total
-    // derivado es el insumo de la guarda de saldo acreditable de más abajo,
-    // que por la misma razón tiene que correr antes del generador.
-
-    // Nota TOTAL: sin líneas propias se copian las de la factura corregida.
-    // Iterar `dto.items` sin este fallback lanzaba un `TypeError` crudo —un 500
-    // «Error interno»— sobre lo que en realidad es una nota de anulación
-    // perfectamente válida.
-    // Paso 7: la NC guiada deriva sus líneas del refund (mapeo ADR-03).
-    // Nunca cae al copiado TOTAL: `resolveRefundLink` rechaza el refund sin
-    // líneas derivables antes de llegar acá.
-    // F-INC6 — nota TOTAL genuina: ni líneas explícitas ni reembolso. Copia
-    // EXACTA de la factura que corrige (subtotal/descuento/impuesto/total de
-    // cabecera Y cada línea, incluidos `unit_code`/`price_unit_quantity`/
-    // `stock_units_consumed`/`serial_numbers_snapshot`/`is_inclusive`/
-    // `total_amount`), sin recalcular un solo centavo: es la forma más segura
-    // de anular o corregir un documento ya firmado, y evita que el propio
-    // recompute introduzca la deriva que este fix corrige en las otras ramas.
-    const is_total_copy = !dto.items?.length && !refund_link;
-
-    const items = dto.items?.length
-      ? dto.items
-      : refund_link
-        ? refund_link.derived_items
-        : related_invoice.invoice_items.map((item) => ({
-          product_id: item.product_id ?? undefined,
-          product_variant_id: item.product_variant_id ?? undefined,
-          description: item.description,
-          quantity: Number(item.quantity),
-          unit_price: Number(item.unit_price),
-          discount_amount: Number(item.discount_amount ?? 0),
-          tax_amount: Number(item.tax_amount ?? 0),
-        }));
-
-    if (!items.length) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_CALC_001,
-        `No hay líneas para la ${type === 'credit_note' ? 'nota crédito' : 'nota débito'}: ` +
-          'no se enviaron y la factura que corrige tampoco tiene ninguna.',
-        { related_invoice_id: related_invoice.id },
-      );
+    if (dto.currency !== undefined && dto.currency !== related_invoice.currency) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+        reason: 'note_currency_must_match_source', parent_invoice_id: related_invoice.id,
+      });
     }
 
-    // Los impuestos siguen a las líneas: si la nota es total y no trae los
-    // suyos, copia también los de la factura, o el documento quedaría con base
-    // gravable pero sin cuota.
-    //
-    // B.1 (F-020) — la rama PARCIAL ya no suma floats ni persiste el
-    // `tax_amount` del cliente: cada línea se deriva por el kernel único
-    // `absorbInclusiveLine`, el mismo loop del motor, y la cabecera suma lo
-    // derivado. La rama TOTAL sigue copia exacta (ver `derivePartialNote...`).
-    // Paso 7: las líneas derivadas del refund recorren el mismo carril
-    // PARCIAL por kernel que las explícitas — la cuota se deriva, nunca se
-    // confía (el `tax_amount` del `refund_item` viaja en la línea pero el
-    // kernel lo ignora, igual que ignora el reclamo de cualquier cliente).
-    const is_partial = !!dto.items?.length || !!refund_link;
-    const derived_partial = !dto.taxes?.length &&
-      is_partial
-        ? derivePartialNoteLinesViaKernel(
-            items,
-            related_invoice.invoice_items,
-            related_invoice.invoice_taxes,
-            related_invoice.id,
-            type,
-            this.logger,
-          )
-        : null;
-    // P2(a) — nota TOTAL: mapa id-de-línea-original → índice, para poder
-    // religar cada tributo copiado a SU línea de la nota (ver `line_index`
-    // abajo). `items` para el copiado TOTAL es literalmente
-    // `related_invoice.invoice_items.map(...)` EN EL MISMO ORDEN (arriba), así
-    // que el índice del item original es el mismo índice del item de la nota.
-    const total_copy_original_item_index = new Map<number, number>(
-      related_invoice.invoice_items.map((item, idx) => [item.id, idx]),
-    );
-    const incoming_taxes: IncomingNoteTaxRow[] = dto.taxes?.length
-      ? dto.taxes
-      : derived_partial
-        ? derived_partial.taxes
-        : related_invoice.invoice_taxes.map((t) => ({
-            tax_rate_id: t.tax_rate_id ?? undefined,
-            tax_name: t.tax_name,
-            tax_rate: Number(t.tax_rate),
-            taxable_amount: Number(t.taxable_amount),
-            tax_amount: Number(t.tax_amount),
-            tax_type: t.tax_type,
-            // P2(a) — la factura padre puede tener ≥2 tributos LIGADOS por
-            // línea (`invoice_taxes.invoice_item_id`: IVA+INC mixto, o
-            // líneas con impuesto inclusivo). Copiar sólo el importe sin este
-            // vínculo desataba cada tributo de su línea — la nota salía con
-            // TODOS los tributos como fila de cabecera
-            // (`invoice_item_id: null`), y el emisor UBL por línea heredaba
-            // el PRIMERO a toda línea del desglose. `undefined` (fila de
-            // cabecera) para la factura padre de un solo tributo — la forma
-            // histórica, sin cambio.
-            line_index:
-              t.invoice_item_id != null
-                ? total_copy_original_item_index.get(t.invoice_item_id)
-                : undefined,
-          }));
-
-    // QUI-INC — el tipo fiscal se resuelve ACÁ, contra la fila fuente, y ANTES
-    // de que `generateNextNumber` consuma un consecutivo: una nota que no
-    // puede clasificar su tributo no debe quemar un número de resolución.
-    const taxes = await this.resolveNoteTaxTypes(
-      incoming_taxes,
-      related_invoice.id,
-      type,
-      context.store_id ?? null,
-    );
-
-    // P1-C — misma razón que el comentario de arriba: esta comprobación vivía
-    // DESPUÉS de `invoices.create` (dentro del `.map()` que arma
-    // `invoice_taxes`), así que una fila sin `taxable_amount`/`tax_amount`
-    // fallaba con el consecutivo YA gastado y la nota (cabecera + líneas) YA
-    // persistida sin sus impuestos — un documento fiscal a medio escribir.
-    // Se mueve ANTES de `generateNextNumber` para que el rechazo no cueste
-    // nada: ni numeración, ni una fila huérfana que limpiar.
-    for (const [index, tax_item] of taxes.entries()) {
-      if (
-        tax_item.taxable_amount === undefined ||
-        tax_item.taxable_amount === null ||
-        tax_item.tax_amount === undefined ||
-        tax_item.tax_amount === null
-      ) {
-        throw new VendixHttpException(
-          ErrorCodes.INVOICING_CALC_001,
-          `El impuesto «${tax_item.tax_name}» de la nota llegó sin taxable_amount o sin tax_amount. ` +
-            'Una nota crédito o débito no recalcula: copia los importes del documento que corrige, ' +
-            'así que ambos deben venir ya calculados.',
-          { tax_index: index, tax_name: tax_item.tax_name },
-        );
+    const source: RefundNoteSourceInvoice = {
+      id: related_invoice.id,
+      organization_id: related_invoice.organization_id,
+      store_id: related_invoice.store_id,
+      accounting_entity_id: related_invoice.accounting_entity_id,
+      invoice_items: related_invoice.invoice_items,
+      invoice_taxes: related_invoice.invoice_taxes,
+      subtotal_amount: related_invoice.subtotal_amount,
+      discount_amount: related_invoice.discount_amount,
+      tax_amount: related_invoice.tax_amount,
+      total_amount: related_invoice.total_amount,
+      operation_type: related_invoice.operation_type,
+      aiu_contract_object: related_invoice.aiu_contract_object,
+      aiu_regime: related_invoice.aiu_regime,
+      aiu_minimum_percent: related_invoice.aiu_minimum_percent,
+      aiu_taxable_matrix: related_invoice.aiu_taxable_matrix,
+      profile_snapshot: related_invoice.profile_snapshot
+        ? { config: related_invoice.profile_snapshot.config }
+        : null,
+    };
+    const options: ResolveNoteSourceOptions = {};
+    if (source.invoice_items.some((item) => !item.unit_code || !isDianUnitCode(item.unit_code.trim()))) {
+      let acceptedXml = related_invoice.xml_document;
+      if (!acceptedXml) {
+        const transmission = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+          where: {
+            organization_id: related_invoice.organization_id,
+            store_id: related_invoice.store_id,
+            accounting_entity_id: related_invoice.accounting_entity_id,
+            source_type: 'invoice',
+            source_id: related_invoice.id,
+            document_type: fiscalTransmissionDocumentType(related_invoice.invoice_type),
+            transmission_status: 'accepted',
+            dian_status: 'accepted',
+          },
+          select: { xml_document: true },
+          orderBy: { accepted_at: 'desc' },
+        });
+        acceptedXml = transmission?.xml_document ?? null;
+      }
+      if (acceptedXml) {
+        Object.assign(options, { emitted_unit_codes: resolveEmittedNoteUnitCodes(source, acceptedXml) });
       }
     }
 
-    // Calculate amounts — SIEMPRE en `Prisma.Decimal`, nunca en `number`. Un
-    // `+=` de floats (la forma anterior) da 3900.0000000000005 sobre 3×1300
-    // INC-inclusivo: mayor que el saldo exacto de 3900 y rechaza con
-    // `INVOICING_CREDIT_NOTE_001` una nota que sí cabe. Todo el resto del
-    // método (guarda de saldo, columnas `Decimal`) ya operaba en `Decimal`;
-    // la única fuga de float era este cálculo.
-    let subtotal: Prisma.Decimal;
-    let discount: Prisma.Decimal;
-    let tax: Prisma.Decimal;
-    let total: Prisma.Decimal;
-    if (is_total_copy) {
-      // Nota TOTAL: copia VERBATIM de la cabecera del documento que corrige.
-      // Recomputar Σ(líneas) en vez de copiar reintroduce exactamente el
-      // defecto de FAU02 (`HEADER_LINE_EXTENSION_MISMATCH`) que este fix
-      // corrige — la factura padre pudo tener un descuento a nivel de orden
-      // que ninguna recomposición por línea reproduce con un centavo exacto.
-      subtotal = new Prisma.Decimal(related_invoice.subtotal_amount ?? 0);
-      discount = new Prisma.Decimal(related_invoice.discount_amount ?? 0);
-      tax = new Prisma.Decimal(related_invoice.tax_amount ?? 0);
-      total = new Prisma.Decimal(related_invoice.total_amount ?? 0);
-    } else if (derived_partial) {
-      // Parcial por kernel: la cabecera suma base/cuota DERIVADAS, no el
-      // reclamo del cliente. Todo en `Decimal`: ni un float en el camino.
-      subtotal = derived_partial.totals.subtotal;
-      discount = derived_partial.totals.discount;
-      tax = derived_partial.totals.tax;
-      total = derived_partial.totals.total;
-    } else {
-      subtotal = items.reduce(
-        (acc, item) =>
-          acc.plus(new Prisma.Decimal(item.quantity).times(item.unit_price)),
-        new Prisma.Decimal(0),
-      );
-      discount = items.reduce(
-        (acc, item) => acc.plus(new Prisma.Decimal(item.discount_amount || 0)),
-        new Prisma.Decimal(0),
-      );
-      tax = items.reduce(
-        (acc, item) => acc.plus(new Prisma.Decimal(item.tax_amount || 0)),
-        new Prisma.Decimal(0),
-      );
-      total = subtotal.minus(discount).plus(tax);
-    }
-
-    // ANTES de numerar, por la misma razón que las dos guardas de arriba: un
-    // consecutivo gastado no se devuelve. Se mide `total` (ya `Decimal`, sin
-    // pasar por `number` en ningún punto), que es EXACTAMENTE lo que más abajo
-    // aterriza en la columna `total_amount`: la guarda juzga lo que se va a
-    // escribir, no una aproximación paralela.
-    //
-    // Sólo nota CRÉDITO: la nota débito AUMENTA el valor de la factura, no lo
-    // acredita, así que no consume saldo ni tiene techo que agotar.
-    if (type === 'credit_note') {
-      await this.assertWithinCreditableBalance(
-        {
-          id: related_invoice.id,
-          invoice_number: related_invoice.invoice_number,
-          total_amount: related_invoice.total_amount,
-          accounting_entity_id: note_accounting_entity_id,
-        },
-        total,
-      );
-    }
-
-    const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber({
-        document_type: type,
-        accounting_entity_id: note_accounting_entity_id,
+    const hasRefundMapping = creditDto.refund_item_sources !== undefined ||
+      creditDto.shipping_source_invoice_item_id !== undefined;
+    const refundId = creditDto.refund_id;
+    if (hasRefundFields && refundId == null) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+        reason: 'refund_fields_require_refund_id', parent_invoice_id: related_invoice.id,
       });
-
-    // Fecha fiscal de la nota: HOY en el huso de la tienda. Derivarla en el
-    // navegador es de donde salen los desfases de un día.
+    }
+    if (hasRefundMapping && refundId === undefined) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+        reason: 'refund_mapping_requires_refund_id', parent_invoice_id: related_invoice.id,
+      });
+    }
+    if (refundId !== undefined && dto.items !== undefined) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+        reason: 'refund_and_manual_items_are_mutually_exclusive', parent_invoice_id: related_invoice.id,
+      });
+    }
+    let refund_link: ResolvedRefundLink | null = null;
+    let refund_selection: ReturnType<typeof deriveRefundNoteSelection> | undefined;
+    if (refundId !== undefined) {
+      refund_link = await this.resolveRefundLink(dto, type, {
+        id: related_invoice.id,
+        order_id: related_invoice.order_id,
+      });
+      if (!refund_link) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+          reason: 'refund_link_missing', parent_invoice_id: related_invoice.id,
+        });
+      }
+      refund_selection = deriveRefundNoteSelection(
+        this.calculator,
+        source,
+        refund_link.refund_snapshot,
+        refund_link.order_items,
+        {
+          ...(creditDto.refund_item_sources !== undefined
+            ? { refund_item_sources: creditDto.refund_item_sources }
+            : {}),
+          ...(creditDto.shipping_source_invoice_item_id !== undefined
+            ? { shipping_source_invoice_item_id: creditDto.shipping_source_invoice_item_id }
+            : {}),
+        },
+        options,
+      );
+    }
+    const recalculated: RecalculatedNote = recalculateNote(
+      this.calculator,
+      source,
+      refund_selection?.items ?? (dto.items as readonly CreateInvoiceNoteItemDto[] | undefined),
+      options,
+    );
+    let foreignTotalAmount = related_invoice.foreign_total_amount;
+    const isExactTotal = dto.items === undefined && !refund_link;
+    if (!isExactTotal && related_invoice.foreign_currency) {
+      let exchangeRate: Prisma.Decimal;
+      try {
+        exchangeRate = new Prisma.Decimal(related_invoice.exchange_rate ?? 'NaN');
+      } catch {
+        throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+          reason: 'source_foreign_exchange_rate_unavailable', parent_invoice_id: related_invoice.id,
+        });
+      }
+      if (!exchangeRate.isFinite() || exchangeRate.lte(0)) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+          reason: 'source_foreign_exchange_rate_unavailable', parent_invoice_id: related_invoice.id,
+        });
+      }
+      foreignTotalAmount = recalculated.total_amount
+        .dividedBy(exchangeRate)
+        .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN);
+      if (
+        !foreignTotalAmount.isFinite() ||
+        foreignTotalAmount.isNegative() ||
+        foreignTotalAmount.greaterThan(new Prisma.Decimal('999999999999.99'))
+      ) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_CALC_006, undefined, {
+          detail: 'foreign_total_amount_outside_database_precision',
+        });
+      }
+    }
+    for (const [index, taxRow] of recalculated.taxes.entries()) {
+      if (taxRow.taxable_amount == null || taxRow.tax_amount == null) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_CALC_006, undefined, {
+          detail: 'persisted_tax_amount_missing', tax_index: index,
+        });
+      }
+      if (taxRow.line_index !== undefined &&
+        (!Number.isInteger(taxRow.line_index) || taxRow.line_index < 0 || taxRow.line_index >= recalculated.resolved_lines.length)) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_CALC_006, undefined, {
+          detail: 'tax_line_index_out_of_range', tax_index: index, line_index: taxRow.line_index,
+        });
+      }
+    }
+    if (type === 'credit_note') {
+      await this.credit_note_balance.assertCanCreate(related_invoice.id, recalculated.candidate);
+    }
+    await this.emissionGate.assertAreaActive({ organization_id: context.organization_id, store_id: context.store_id });
     const issue_date = dto.issue_date
       ? new Date(dto.issue_date)
-      : new Date(
-          localDateString(
-            new Date(),
-            await resolveStoreTimezone(this.prisma, context.store_id!),
-          ),
-        );
+      : new Date(localDateString(new Date(), await resolveStoreTimezone(this.prisma, context.store_id!)));
+    const { invoice_number, resolution_id } = await this.invoice_number_generator.generateNextNumber({
+      document_type: type,
+      accounting_entity_id: related_invoice.accounting_entity_id,
+    });
 
-    // P1-C — ATOMICIDAD: create (cabecera + líneas) → createMany de impuestos
-    // → refetch, en UNA sola transacción de base de datos.
-    //
-    // Antes eran tres llamadas independientes: si `invoice_taxes.createMany`
-    // fallaba (o el proceso caía) DESPUÉS de que `invoices.create` ya
-    // persistiera la nota con sus líneas, el consecutivo recién asignado
-    // (`invoice_number`/`resolution_id`, ya COMMITEADO por
-    // `generateNextNumber` en su propia transacción — ver
-    // `invoice-number-generator.ts`) quedaba atado para siempre a un
-    // documento fiscal sin impuestos: ni borrable en caliente (violaría la
-    // regla anti-destructiva de migraciones — nunca `DELETE` manual sobre una
-    // tabla con datos), ni corregible sin dejar un hueco en la numeración. La
-    // validación de `taxable_amount`/`tax_amount` de más arriba YA corrió
-    // ANTES de `generateNextNumber`, así que lo único que puede fallar aquí
-    // dentro es infraestructura (la propia DB), nunca un dato de entrada
-    // previsible — el rollback de esta transacción nunca desperdicia el
-    // consecutivo por un error de negocio evitable.
-    //
-    // `tx` es el cliente RAW de la transacción: `StorePrismaService
-    // .$transaction` (heredado de `BasePrismaService`) delega directo al
-    // `baseClient` de Prisma, así que el callback NO recibe el wrapper con
-    // scoping — recibe el mismo tipo de cliente que ya usa `withoutScope()`
-    // más abajo para `invoice_taxes`/`credit_note_refund_items`. Es seguro
-    // exactamente por la misma razón que ya vale para esos dos: cada
-    // `data`/`where` de este bloque trae `store_id`/`organization_id`/`id`
-    // explícitos y ya verificados en scope antes de llegar aquí, nunca un
-    // filtro que dependa del scoping automático. Mezclar `tx` con
-    // `this.prisma.withoutScope()` (clientes DISTINTOS) en este bloque
-    // rompería la atomicidad, así que las tres operaciones usan `tx`.
-    let note = await this.prisma.$transaction(async (tx: any) => {
-      let created = await tx.invoices.create({
-      data: {
-        organization_id: context.organization_id,
-        store_id: context.store_id,
-        accounting_entity_id: note_accounting_entity_id,
-        fiscal_document_type: type,
-        invoice_number,
-        invoice_type: type,
-        status: 'draft',
-        customer_id: related_invoice.customer_id,
-        customer_name: related_invoice.customer_name,
-        customer_tax_id: related_invoice.customer_tax_id,
-        customer_address: related_invoice.customer_address,
-        // F-INC6 — identidad del adquiriente COMPLETA, no sólo nombre/NIT.
-        // Sin `customer_document_type`/`customer_verification_digit` una NC
-        // sobre una factura a persona JURÍDICA (NIT + DV) salía a la DIAN
-        // como CC + persona natural, sin DV ni email/teléfono (medido: FE
-        // manual de Pollo Arabe a Óptica Panorama SAS, NIT 800214345-7). El
-        // emisor lee ESTE snapshot, no el de la factura padre: si la nota no
-        // lo copia, la identidad se pierde en la transmisión aunque la
-        // factura original la tuviera completa.
-        customer_document_type: related_invoice.customer_document_type,
-        customer_verification_digit:
-          related_invoice.customer_verification_digit,
-        customer_email: related_invoice.customer_email,
-        customer_phone: related_invoice.customer_phone,
-        customer_tax_regime: related_invoice.customer_tax_regime,
-        customer_fiscal_responsibilities:
-          related_invoice.customer_fiscal_responsibilities,
-        // Task E#4 — mismo criterio que el resto de este bloque: sin copiar
-        // `customer_person_type`, una NC sobre una factura de persona natural
-        // con NIT queda sin el respaldo que `resolveAcquirerIdentity` necesita
-        // y puede transmitirse como JURIDICA (Task D) al perder la ficha
-        // vinculada de origen.
-        customer_person_type: related_invoice.customer_person_type,
-        related_invoice_id: related_invoice.id,
-        resolution_id,
-        subtotal_amount: subtotal,
-        discount_amount: discount,
-        tax_amount: tax,
-        total_amount: total,
-        currency: dto.currency || related_invoice.currency || 'COP',
-        issue_date,
-        created_by_user_id: context.user_id,
-        // Paso 7: la NC guiada se auto-describe (`Reembolso #N de la orden
-        // #M`) salvo que el operador escriba motivo/notas.
-        notes:
-          dto.notes ||
-          (dto as CreateCreditNoteDto).reason ||
-          refund_link?.default_reason,
-        // Paso 7: vínculo estructural refund↔NC (el detalle por línea va al
-        // puente, más abajo).
-        refund_id: refund_link?.refund.id ?? null,
-        // Concepto DIAN (`cac:DiscrepancyResponse/cbc:ResponseCode`). El DTO ya
-        // validó que el código pertenece al catálogo de ESTE tipo de nota —los
-        // dos catálogos son distintos—, así que aquí sólo se persiste.
-        //
-        // `?? null` explícito: ausente NO es '2'. La columna queda NULL y es el
-        // builder quien cae al literal histórico, en un solo lugar. Traducir el
-        // vacío a '2' acá dejaría indistinguibles «el usuario eligió anulación»
-        // y «esta nota nació sin concepto», que es justo lo que hay que poder
-        // separar para saber qué se declaró de verdad.
-        // Paso 7: la NC guiada defaultea el concepto ('2' anulación si el
-        // refund cubre la orden completa, '1' devolución parcial si no) salvo
-        // que el operador elija otro — el explícito siempre manda.
-        note_concept_code:
-          dto.note_concept_code ?? refund_link?.concept_code ?? null,
-        invoice_items: {
-          create: items.map((item, index) => {
-            // F-INC6 — nota TOTAL: copia VERBATIM de la línea gemela de la
-            // factura — `items` en este camino ES
-            // `related_invoice.invoice_items` en el mismo orden (ver arriba).
-            // `unit_price` se copia tal cual, y con él la inclusividad REAL de
-            // la gemela. Forzar `false` sólo es correcto cuando el precio ya
-            // está en forma base (`8f8427f4b` en adelante, o el legado con el
-            // flag mentiroso). Una factura manual anterior guardó el BRUTO
-            // con `is_inclusive=true` (PAVS36: $24.500 bruto, base $22.685,19):
-            // copiarla como no inclusiva emite LineExtension = bruto contra una
-            // cabecera en base y el prevalidador la frena
-            // (HEADER_LINE_EXTENSION_MISMATCH). `twinIsGenuinelyInclusive`
-            // separa los dos casos igual que en la rama parcial.
-            if (is_total_copy) {
-              const twin = related_invoice.invoice_items[index];
-              const twin_divisor = Number(twin.price_unit_quantity ?? 1);
-              return {
-                product_id: twin.product_id,
-                product_variant_id: twin.product_variant_id,
-                description: twin.description,
-                quantity: twin.quantity,
-                unit_price: twin.unit_price,
-                discount_amount: twin.discount_amount,
-                tax_amount: twin.tax_amount,
-                total_amount: twin.total_amount,
-                is_inclusive: twinIsGenuinelyInclusive(
-                  twin,
-                  Number.isFinite(twin_divisor) && twin_divisor >= 1
-                    ? Math.floor(twin_divisor)
-                    : 1,
-                ),
-                unit_code: twin.unit_code,
-                price_unit_quantity: twin.price_unit_quantity,
-                stock_units_consumed: twin.stock_units_consumed,
-                serial_numbers_snapshot: twin.serial_numbers_snapshot,
-              };
-            }
-            // B.1 (F-020) — parcial por kernel: la línea persiste base/cuota
-            // DERIVADAS (nunca el reclamo del cliente). F-INC6 añade
-            // `unit_price` a esa misma derivación: antes persistía el BRUTO
-            // del DTO con `is_inclusive` default falso, mientras la cabecera
-            // ya sumaba la BASE derivada — Σ líneas ≠ subtotal (FAU02) y la
-            // emisión se rechazaba con el consecutivo ya gastado.
-            const derived_line = derived_partial?.lines[index];
-            const line_tax =
-              derived_line?.tax_amount ??
-              new Prisma.Decimal(item.tax_amount || 0);
-            const item_total = derived_line
-              ? derived_line.total_amount
-              : new Prisma.Decimal(item.quantity)
-                  .times(item.unit_price)
-                  .minus(item.discount_amount || 0)
-                  .plus(item.tax_amount || 0);
-            const unit_price = derived_line
-              ? derived_line.unit_price
-              : new Prisma.Decimal(item.unit_price);
-            return {
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id,
-              description: item.description,
-              quantity: new Prisma.Decimal(item.quantity),
-              unit_price,
-              discount_amount: new Prisma.Decimal(item.discount_amount || 0),
-              tax_amount: line_tax,
-              total_amount: item_total,
-              is_inclusive: false,
-              unit_code: derived_line?.unit_code ?? null,
-              price_unit_quantity: derived_line?.price_unit_quantity ?? null,
-              stock_units_consumed: derived_line?.stock_units_consumed ?? null,
-            };
-          }),
-        },
-      },
-      include: INVOICE_INCLUDE,
-      }).catch((error: unknown) =>
-        this.throwIfDuplicateRefundLink(error, refund_link),
-      );
-
-      // F-INC6 — segunda fase: los tributos se crean DESPUÉS de las líneas.
-      // Prisma no permite que un `create` anidado lea el id que otro `create`
-      // anidado HERMANO va a generar en la MISMA llamada, y
-      // `invoice_taxes.invoice_item_id` exige justamente eso cuando la
-      // factura padre mezcla ≥2 tributos (`per_line_schemes`, ver
-      // `derivePartialNoteLinesViaKernel`): el modelo documenta que un
-      // documento con ≥2 tributos exige UNA fila por (línea × tributo)
-      // —nunca agregada— porque el emisor UBL arma el desglose POR LÍNEA
-      // leyendo ese vínculo; sin él hereda a toda línea el primer tributo
-      // del documento. Con un solo tributo (el 100% del histórico)
-      // `line_index` viene `undefined` en cada fila y el resultado es
-      // idéntico a antes: una fila de cabecera con `invoice_item_id` NULL.
-      if (taxes.length > 0) {
-        const created_items = [...created.invoice_items].sort(
-          (a: { id: number }, b: { id: number }) => a.id - b.id,
-        );
-        const tax_rows = taxes.map((tax_item) => {
-          // P1-C — `taxable_amount`/`tax_amount` YA se validaron arriba,
-          // ANTES de `generateNextNumber` (ver el comentario en ese punto):
-          // esta rama sólo construye la fila, ya no puede rechazar por dato
-          // faltante. Los `!` son deliberados: el guard que los garantiza
-          // corrió antes de que este bloque —y el consecutivo— existieran.
+    try {
+      const note = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const created = await tx.invoices.create({
+          data: {
+            organization_id: context.organization_id!,
+            store_id: context.store_id!,
+            accounting_entity_id: related_invoice.accounting_entity_id,
+            fiscal_document_type: type,
+            invoice_number,
+            invoice_type: type,
+            status: 'draft',
+            customer_id: related_invoice.customer_id,
+            customer_name: related_invoice.customer_name,
+            customer_tax_id: related_invoice.customer_tax_id,
+            customer_address: related_invoice.customer_address ?? Prisma.DbNull,
+            customer_document_type: related_invoice.customer_document_type,
+            customer_verification_digit: related_invoice.customer_verification_digit,
+            customer_email: related_invoice.customer_email,
+            customer_phone: related_invoice.customer_phone,
+            customer_tax_regime: related_invoice.customer_tax_regime,
+            customer_fiscal_responsibilities: related_invoice.customer_fiscal_responsibilities ?? Prisma.DbNull,
+            customer_person_type: related_invoice.customer_person_type,
+            related_invoice_id: related_invoice.id,
+            resolution_id,
+            subtotal_amount: recalculated.subtotal_amount,
+            discount_amount: recalculated.discount_amount,
+            tax_amount: recalculated.tax_amount,
+            total_amount: recalculated.total_amount,
+            currency: related_invoice.currency,
+            foreign_currency: related_invoice.foreign_currency,
+            foreign_total_amount: foreignTotalAmount,
+            exchange_rate: related_invoice.exchange_rate,
+            exchange_rate_date: related_invoice.exchange_rate_date,
+            operation_type: related_invoice.operation_type,
+            aiu_contract_object: related_invoice.aiu_contract_object,
+            aiu_regime: related_invoice.aiu_regime,
+            aiu_minimum_percent: related_invoice.aiu_minimum_percent,
+            aiu_taxable_matrix: recalculated.aiu_taxable_matrix ?? related_invoice.aiu_taxable_matrix ?? Prisma.DbNull,
+            profile_id: related_invoice.profile_id,
+            profile_version: related_invoice.profile_version,
+            issue_date,
+            created_by_user_id: context.user_id,
+            notes: dto.notes || dto.reason || refund_link?.default_reason || null,
+            refund_id: refund_link?.refund.id ?? null,
+            note_concept_code: dto.note_concept_code ?? refund_link?.concept_code ?? null,
+          },
+        });
+        await tx.invoice_items.createMany({
+          data: recalculated.items.map((item) => ({ ...item, invoice_id: created.id })),
+        });
+        const createdItems = await tx.invoice_items.findMany({
+          where: { invoice_id: created.id },
+          select: { id: true, source_invoice_item_id: true },
+          orderBy: { id: 'asc' },
+        });
+        const createdBySource = new Map(createdItems.map((item) => [item.source_invoice_item_id, item.id]));
+        const taxRows = recalculated.taxes.map((taxRow) => {
+          const sourceItemId = taxRow.line_index === undefined
+            ? undefined
+            : recalculated.resolved_lines[taxRow.line_index]?.item.source_invoice_item_id;
+          const invoiceItemId = sourceItemId === undefined ? null : createdBySource.get(sourceItemId);
+          if (sourceItemId !== undefined && invoiceItemId === undefined) {
+            throw new VendixHttpException(ErrorCodes.INVOICING_CALC_006, undefined, {
+              detail: 'created_tax_line_missing', source_invoice_item_id: sourceItemId,
+            });
+          }
           return {
             invoice_id: created.id,
-            tax_rate_id: tax_item.tax_rate_id,
-            tax_name: tax_item.tax_name,
-            // F-212 — la nota es copista pura: el `tax_rate` que recibe
-            // viaja tal cual a `invoice_taxes` (`Decimal(5,2)`,
-            // PORCENTAJE). Por eso la nota 170 heredó el `0.19` de la
-            // factura 67. Este es un SEGUNDO escritor: no pasa por
-            // `buildInvoiceTaxCreateInput`, así que necesita el mismo
-            // desambiguador que el escritor de facturas.
-            tax_rate: normalizeInvoiceTaxRate(
-              tax_item.tax_rate,
-              tax_item.tax_type,
-            ),
-            taxable_amount: new Prisma.Decimal(tax_item.taxable_amount!),
-            tax_amount: new Prisma.Decimal(tax_item.tax_amount!),
-            // QUI-INC — sin `??` y sin ningún `as`. `resolveNoteTaxTypes`
-            // ya lo resolvió contra la fila fuente (el propio tributo del
-            // documento padre, o la `tax_categories` del `tax_rate_id`),
-            // y si no había de dónde resolverlo la nota no llegó hasta
-            // acá. El `?? 'iva'` que había en este punto no podía
-            // distinguir «tributo genuinamente sin tipar» de «tributo INC
-            // cuyo tipo nadie propagó»: acreditaba con IVA lo que se
-            // facturó como INC, en un documento que va firmado a la DIAN.
-            tax_type: tax_item.tax_type,
-            invoice_item_id:
-              tax_item.line_index != null
-                ? (created_items[tax_item.line_index]?.id ?? null)
-                : null,
+            tax_rate_id: taxRow.tax_rate_id,
+            tax_name: taxRow.tax_name,
+            tax_rate: taxRow.tax_rate,
+            taxable_amount: taxRow.taxable_amount,
+            tax_amount: taxRow.tax_amount,
+            tax_type: taxRow.tax_type,
+            is_inclusive: taxRow.is_inclusive,
+            invoice_item_id: invoiceItemId ?? null,
           };
         });
-        // Mismo `tx` que el `create` de arriba — NO `withoutScope()`: usar el
-        // cliente `baseClient` fuera de esta transacción escribiría en una
-        // conexión/transacción DISTINTA y el `invoices.create` de arriba
-        // podría comitear sin sus impuestos si esta llamada fallara después.
-        // `invoice_taxes` sigue sin registrar en `StorePrismaService`, así
-        // que no hay wrapper de scoping que perder: `created.id` y los ids de
-        // `created_items` ya se validaron en scope, ambos recién creados en
-        // esta misma transacción bajo el tenant de este servicio.
-        await tx.invoice_taxes.createMany({
-          data: tax_rows,
-        });
+        if (taxRows.length > 0) await tx.invoice_taxes.createMany({ data: taxRows });
+        if (refund_selection && refund_selection.bridge_rows.length > 0) {
+          await tx.credit_note_refund_items.createMany({
+            data: refund_selection.bridge_rows.map((row) => ({
+              credit_note_id: created.id,
+              refund_item_id: row.refund_item_id,
+              covered_qty: row.covered_qty,
+              covered_amount: row.covered_amount,
+            })),
+            skipDuplicates: false,
+          });
+        }
         const refetched = await tx.invoices.findFirst({
-          where: { id: created.id },
+          where: {
+            id: created.id,
+            organization_id: context.organization_id,
+            store_id: context.store_id,
+            accounting_entity_id: related_invoice.accounting_entity_id,
+          },
           include: INVOICE_INCLUDE,
         });
-        if (!refetched) {
-          throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
-        }
-        created = refetched;
-      }
-
-      return created;
-    });
-
-    // Paso 7 — puente refund↔NC por línea. `withoutScope()` + ids ya
-    // verificados: el modelo no está registrado en `StorePrismaService`
-    // (ese archivo quedó fuera del scope de este paso) y no necesita
-    // estarlo — los dos extremos ya se validaron en scope (la nota nació en
-    // esta tienda, los `refund_items` se leyeron por el refund scopeado),
-    // así que la escritura va anclada al tenant por construcción.
-    // `skipDuplicates` cubre el reintento tras un fallo parcial (la guarda
-    // anti-doble-vínculo impide el duplicado real). Si esto falla, la nota
-    // YA existe: se lanza para que el fallo sea visible —nunca silencioso—
-    // y el operador anule el borrador y reintente.
-    if (refund_link && refund_link.bridge_rows.length > 0) {
-      await this.prisma
-        .withoutScope()
-        .credit_note_refund_items.createMany({
-          data: refund_link.bridge_rows.map((row) => ({
-            credit_note_id: note.id,
-            refund_item_id: row.refund_item_id,
-            covered_qty: row.covered_qty,
-            covered_amount: row.covered_amount,
-          })),
-          skipDuplicates: true,
-        });
+        if (!refetched) throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+        return refetched;
+      });
+      this.event_emitter.emit('invoice.created', {
+        invoice_id: note.id,
+        invoice_number: note.invoice_number,
+        invoice_type: type,
+        related_invoice_id: related_invoice.id,
+      });
+      this.logger.log(`${type === 'credit_note' ? 'Credit' : 'Debit'} note ${note.invoice_number} created for invoice #${related_invoice.id}`);
+      return note;
+    } catch (error) {
+      throw await this.throwIfDuplicateRefundLink(error, refund_link);
     }
-
-    this.event_emitter.emit('invoice.created', {
-      invoice_id: note.id,
-      invoice_number: note.invoice_number,
-      invoice_type: type,
-      related_invoice_id: related_invoice.id,
-    });
-
-    this.logger.log(
-      `${type === 'credit_note' ? 'Credit' : 'Debit'} note ${note.invoice_number} created for invoice #${related_invoice.id}`,
-    );
-    return note;
   }
 
-  /**
-   * QUI-INC — resuelve el tipo fiscal de cada tributo de la nota EN SU FILA
-   * FUENTE, nunca en el punto de escritura.
-   *
-   * ## Por qué no vale un `?? 'iva'` junto al `create`
-   *
-   * En la capa de LECTURA «sin tipar significa IVA» es la regla correcta
-   * (`vendix-tax-typing`): toda fila histórica sin `tax_type` se agrega como
-   * IVA. Pero junto a un `prisma.create` ese mismo default deja de ser una
-   * lectura y pasa a ser una ESCRITURA: no puede distinguir «el tributo venía
-   * genuinamente sin clasificar» de «el tributo es INC y nadie propagó su
-   * tipo», y convierte el segundo caso en el primero. Así nació la factura
-   * electrónica de la tienda 105 declarando ante la DIAN un «IVA del 8 %»,
-   * tarifa que para IVA no existe en Colombia.
-   *
-   * ## La cascada
-   *
-   * 1. El tributo YA trae un tipo válido del `tax_type_enum` → se usa. Es el
-   *    caso normal: la copia total y la parcial derivada leen
-   *    `invoice_taxes.tax_type` del documento padre, que es la fila fuente de
-   *    esta nota (lo que se acredita es lo que se facturó).
-   * 2. No lo trae, pero sí un `tax_rate_id` → se resuelve contra el CATÁLOGO
-   *    (`tax_rates` → `tax_categories.tax_type`), que es la dueña única de la
-   *    columna. Ahí el `?? IVA` sí significa algo: es una categoría de verdad
-   *    sin clasificar. Mismo criterio que `payments.service.ts`.
-   * 3. Ni tipo ni id de catálogo → NO se inventa: se rechaza la nota. Una
-   *    nota crédito es un documento electrónico firmado; acreditar un tributo
-   *    distinto del facturado es un descuadre fiscal, no un detalle de forma.
-   *
-   * El lookup del catálogo va `withoutScope()` + filtro explícito de tienda
-   * (tarifa de la tienda o global, `store_id IS NULL`) porque el scope
-   * automático de `StorePrismaService` exige `store_id = <tienda>` y dejaría
-   * invisible la tarifa global/organizacional — que es justamente el caso que
-   * se está intentando resolver.
-   */
   /**
    * Release-853 (paso 8) — traduce el P2002 del índice parcial único
    * `invoices_refund_id_active_credit_note_key` al error de "refund ya
@@ -982,7 +835,11 @@ export class CreditNotesService {
         where: {
           refund_id: refund_link.refund.id,
           invoice_type: 'credit_note',
-          status: { in: ['draft', 'validated', 'sent', 'accepted'] },
+          OR: [
+            { status: { in: ['draft', 'validated', 'sent', 'accepted'] } },
+            { credit_limit_reserved_at: { not: null } },
+            { transmission_status: { in: ['queued', 'signing', 'signed', 'submitted', 'retrying', 'error', 'contingency'] } },
+          ],
         },
         select: { id: true, invoice_number: true, status: true },
       });
@@ -1022,100 +879,60 @@ export class CreditNotesService {
   ): Promise<ResolvedRefundLink | null> {
     const refund_id = (dto as CreateCreditNoteDto).refund_id;
     if (refund_id == null) return null;
-
-    // Sólo la NC acredita devoluciones: la ND aumenta el valor facturado.
-    // Inalcanzable por validación (`refund_id` no existe en el DTO de débito
-    // y el pipe global lo rechaza), pero el servicio no confía en el pipe.
     if (type !== 'credit_note') {
-      throw new VendixHttpException(
-        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
-        `El reembolso #${refund_id} no puede vincularse a una nota débito: sólo la nota crédito acredita devoluciones.`,
-        { refund_id },
-      );
+      throw new VendixHttpException(ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED, undefined, { refund_id });
     }
-
-    // Guiada o manual, no mezcla: con líneas explícitas no hay mapeo honesto
-    // de vuelta a `refund_items` y el puente mentiría la cobertura.
-    if (dto.items?.length) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_CALC_001,
-        `La nota vinculada al reembolso #${refund_id} deriva sus líneas del reembolso: no envíes \`items\` explícitos. Omitelos para la NC guiada, u omite \`refund_id\` para la manual.`,
-        { refund_id },
-      );
+    if (dto.items !== undefined) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_NOTE_SOURCE_001, undefined, {
+        reason: 'refund_and_manual_items_are_mutually_exclusive', refund_id,
+      });
     }
-
-    // `refunds` scopea por relación (`orders.store_id`): un refund ajeno
-    // responde 404, no 403 — mismo contrato que el resto del servicio.
     const refund = await this.prisma.refunds.findFirst({
       where: { id: refund_id },
       include: { refund_items: true },
     });
-    if (!refund) {
-      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
-    }
-
-    // Release-853 (paso 8): sólo se acredita ante la DIAN un reembolso
-    // REAL — estado dentro del ledger (`completed`/`pending_approval`/
-    // `processing`). Un `failed`/`cancelled` no movió dinero y acreditarlo
-    // descuadraría la cobertura. No es 404: el refund SÍ existe (el
-    // operador lo ve en la lista); el error dice por qué no acredita.
+    if (!refund) throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
     if (!(REFUND_LEDGER_STATES as readonly string[]).includes(refund.state)) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_CALC_001,
-        `El reembolso #${refund.id} está en estado «${refund.state}»: sólo se puede acreditar un reembolso en estado válido (completed, pending_approval, processing).`,
-        { refund_id: refund.id, refund_state: refund.state },
-      );
+      throw new VendixHttpException(ErrorCodes.INVOICING_CALC_001, undefined, {
+        refund_id: refund.id, refund_state: refund.state,
+      });
     }
-
-    // Sin orden en la factura padre no hay ancla: las líneas del refund
-    // cuelgan de `order_items` y sin orden no hay contra qué cruzarlas.
     if (related_invoice.order_id == null) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_CALC_001,
-        `El reembolso #${refund.id} no puede vincularse: la factura que esta nota corrige no nació de una orden y las líneas del reembolso no tienen contra qué cruzarse. Emite la nota manual (sin \`refund_id\`).`,
-        { refund_id: refund.id, related_invoice_id: related_invoice.id },
-      );
+      throw new VendixHttpException(ErrorCodes.INVOICING_CALC_001, undefined, {
+        refund_id: refund.id, related_invoice_id: related_invoice.id, reason: 'source_invoice_has_no_order',
+      });
     }
-
     if (refund.order_id !== related_invoice.order_id) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_CALC_001,
-        `El reembolso #${refund.id} es de la orden #${refund.order_id} pero la factura que esta nota corrige es de la orden #${related_invoice.order_id}: una NC acredita devoluciones de su propia orden.`,
-        {
-          refund_id: refund.id,
-          refund_order_id: refund.order_id,
-          related_invoice_id: related_invoice.id,
-          invoice_order_id: related_invoice.order_id,
-        },
-      );
+      throw new VendixHttpException(ErrorCodes.INVOICING_CALC_001, undefined, {
+        refund_id: refund.id,
+        refund_order_id: refund.order_id,
+        related_invoice_id: related_invoice.id,
+        invoice_order_id: related_invoice.order_id,
+      });
     }
 
-    // Anti-doble-vínculo: dos NC vivas sobre el mismo refund duplicarían
-    // `nc_covered_qty` en el endpoint de cobertura. Sólo cuentan las vivas
-    // (`draft`/`validated`/`sent`/`accepted`): una rechazada/anulada no
-    // acreditó un peso, igual que en el saldo acreditable.
     const live_link = await this.prisma.invoices.findFirst({
       where: {
         refund_id: refund.id,
         invoice_type: 'credit_note',
-        status: { in: ['draft', 'validated', 'sent', 'accepted'] },
+        OR: [
+          { status: { in: ['draft', 'validated', 'sent', 'accepted'] } },
+          { credit_limit_reserved_at: { not: null } },
+          { transmission_status: { in: ['queued', 'signing', 'signed', 'submitted', 'retrying', 'error', 'contingency'] } },
+        ],
       },
       select: { id: true, invoice_number: true, status: true },
     });
     if (live_link) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_CALC_001,
-        `El reembolso #${refund.id} ya lo acredita la nota crédito ${live_link.invoice_number ?? `#${live_link.id}`} (estado «${live_link.status}»). Anula esa nota antes de emitir otra sobre el mismo reembolso.`,
-        {
-          refund_id: refund.id,
-          credit_note_id: live_link.id,
-          credit_note_status: live_link.status,
-        },
-      );
+      throw new VendixHttpException(ErrorCodes.INVOICING_CALC_001, undefined, {
+        refund_id: refund.id,
+        credit_note_id: live_link.id,
+        credit_note_status: live_link.status,
+      });
     }
 
-    // Snapshot de la orden en scope: precio y descripción salen de acá,
-    // cantidad y montos del refund.
+    // Identity/lineage snapshot only. Prices and fiscal values are never read
+    // from order rows; refund amounts and source-invoice snapshots are the inputs.
     const order_items = await this.prisma.order_items.findMany({
       where: { order_id: refund.order_id },
       select: {
@@ -1124,82 +941,12 @@ export class CreditNotesService {
         product_variant_id: true,
         product_name: true,
         quantity: true,
-        unit_price: true,
       },
     });
-
-    const derived_items: CreateInvoiceItemDto[] = [];
-    const bridge_rows: ResolvedRefundLink['bridge_rows'] = [];
-    for (const ri of refund.refund_items) {
-      if (!(Number(ri.quantity) > 0)) continue;
-      const oi = order_items.find((o) => o.id === ri.order_item_id);
-      if (!oi) continue;
-      const unit_price = Number(oi.unit_price);
-      const discount = Number(ri.discount_amount ?? 0);
-      const tax = Number(ri.tax_amount ?? 0);
-      derived_items.push({
-        ...(oi.product_id != null && oi.product_id > 0
-          ? { product_id: oi.product_id }
-          : {}),
-        ...(oi.product_variant_id != null
-          ? { product_variant_id: oi.product_variant_id }
-          : {}),
-        description: oi.product_name ?? `Ítem ${oi.id}`,
-        quantity: Number(ri.quantity),
-        unit_price,
-        discount_amount: discount,
-        tax_amount: tax,
-      });
-      bridge_rows.push({
-        refund_item_id: ri.id,
-        covered_qty: Number(ri.quantity),
-        covered_amount:
-          ri.refund_amount != null
-            ? new Prisma.Decimal(ri.refund_amount)
-            : new Prisma.Decimal(
-                Number(ri.quantity) * unit_price - discount + tax,
-              ),
-      });
-    }
-
-    // Release-853 (paso 8): el envío devuelto SIEMPRE se acredita cuando
-    // `shipping_refund > 0`, haya líneas o no — antes un refund con líneas
-    // + envío perdía el envío en la NC. Línea libre, sin puente (no hay
-    // `refund_item` que cubrir).
-    // Paso 2 (shipping-tax A1): con impuesto en el envío la línea sale en
-    // forma INCLUIDA (`unit_price` = bruto devuelto, `is_inclusive: true`).
-    // Sin el flag heredaba la inclusividad de la gemela de la factura —que
-    // el motor persiste en forma base (`is_inclusive: false`)— y el kernel
-    // sumaba el impuesto ENCIMA del bruto (15.000 ⇒ 16.200: la NC superaba
-    // la factura y se rechazaba). La cuota proporcional viaja sólo como
-    // pista (el kernel gana y avisa si difiere); sin impuesto la línea
-    // queda igual que hoy.
-    if (Number(refund.shipping_refund ?? 0) > 0) {
-      derived_items.push(await this.resolveRefundShippingLine(refund));
-    }
-
-    // Sin líneas y sin envío no hay nada que acreditar: caer al copiado
-    // TOTAL acreditaría la factura entera por un reembolso vacío.
-    if (derived_items.length === 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_CALC_001,
-        `El reembolso #${refund.id} no tiene líneas ni envío que acreditar: no hay nada de donde derivar la nota. Emite la nota manual (sin \`refund_id\`).`,
-        { refund_id: refund.id },
-      );
-    }
-
-    // '2' anulación si el refund cubre la orden completa, '1' devolución
-    // parcial en cualquier otro caso (mismo criterio del frontend).
-    const covers_whole_order =
-      order_items.length > 0 &&
-      order_items.every((oi) => {
-        const qty = Number(
-          refund.refund_items.find((ri) => ri.order_item_id === oi.id)
-            ?.quantity ?? 0,
-        );
-        return qty >= Number(oi.quantity);
-      });
-
+    const covers_whole_order = order_items.length > 0 && order_items.every((orderItem) => {
+      const refundedQuantity = refund.refund_items.find((row) => row.order_item_id === orderItem.id)?.quantity ?? 0;
+      return new Prisma.Decimal(refundedQuantity).greaterThanOrEqualTo(new Prisma.Decimal(orderItem.quantity));
+    });
     const default_reason = (
       `Reembolso #${refund.id} de la orden #${refund.order_id}` +
       (refund.reason ? ` — ${refund.reason}` : '')
@@ -1207,26 +954,31 @@ export class CreditNotesService {
 
     return {
       refund: { id: refund.id, order_id: refund.order_id },
-      derived_items,
+      refund_snapshot: {
+        id: refund.id,
+        order_id: refund.order_id,
+        shipping_refund: refund.shipping_refund,
+        refund_items: refund.refund_items.map((item) => ({
+          id: item.id,
+          order_item_id: item.order_item_id,
+          quantity: item.quantity,
+          discount_amount: item.discount_amount,
+          tax_amount: item.tax_amount,
+          refund_amount: item.refund_amount,
+        })),
+      },
+      order_items: order_items.map((item) => ({
+        id: item.id,
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        product_name: item.product_name ?? '',
+        quantity: item.quantity,
+      })),
       concept_code: covers_whole_order ? '2' : '1',
       default_reason,
-      bridge_rows,
     };
   }
 
-  /**
-   * Paso 2 (shipping-tax A1) — línea libre «Reembolso de envío» de una NC
-   * guiada. Lee la copia congelada de la orden (`orders.shipping_tax_*`):
-   * con impuesto, la línea va incluida con la cuota proporcional del helper
-   * del paso 1 como pista; sin copia o sin impuesto, idéntica a la de hoy
-   * (fail-open: una copia ilegible jamás bloquea la nota).
-   *
-   * Los previos son los `shipping_refund` de los OTROS reembolsos
-   * completados de la orden —la misma reconstrucción determinista que
-   * `refund-calculation.service.ts`—, así el que completa el envío cierra
-   * al centavo contra la copia. La pista nunca bloquea: el kernel del
-   * carril parcial la reemplaza y deja aviso si difiere.
-   */
   private async resolveRefundShippingLine(refund: {
     id: number;
     order_id: number;
@@ -1447,7 +1199,7 @@ export class CreditNotesService {
    * sino que el cuerpo referencia uno que no es de quien escribe.
    */
   private async assertNoteLinesResolvable(
-    items: CreateCreditNoteDto['items'],
+    items: readonly CreateInvoiceItemDto[] | undefined,
   ): Promise<void> {
     if (!items?.length) return;
 

@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -56,4 +57,22 @@ export class ActivateStorePlanDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+  /**
+   * Fecha de inicio del período (`YYYY-MM-DD`, día calendario en Bogotá).
+   * Opcional: permite anclar el período a un pago ya hecho hasta 31 días
+   * atrás. Sin ella el período arranca "ahora".
+   */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'starts_at must be a YYYY-MM-DD date',
+  })
+  starts_at?: string;
+
+  /**
+   * Acepta que el monto recibido sea menor al total de la factura. Requiere
+   * `notes` con el motivo; sin este flag un monto menor se rechaza.
+   */
+  @IsOptional()
+  @IsBoolean()
+  accept_partial_payment?: boolean;
 }

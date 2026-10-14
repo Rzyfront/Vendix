@@ -136,6 +136,33 @@ export function dianRate(value: DianNumericInput): string {
 }
 
 /**
+ * Porcentaje de un descuento o cargo — `cbc:MultiplierFactorNumeric`
+ * (FBE05 línea / FAQ06 documento: 1..1, 0 a 100, 0–2 decimales).
+ *
+ * Se deriva de los importes (`amount ÷ base × 100`), nunca se captura aparte,
+ * y trunca a 2 decimales con el mismo `applyScale` del resto del kernel
+ * (Anexo §11.2 prohíbe redondear). Tope 100.00; base <= 0 (o importe
+ * negativo) da `'0.00'` en vez de dividir por cero.
+ *
+ * ```ts
+ * dianAllowanceFactor('75630.25', '285714.29') // '26.47'
+ * dianAllowanceFactor('5', '0')                // '0.00'
+ * ```
+ */
+export function dianAllowanceFactor(
+  amount: DianNumericInput,
+  base: DianNumericInput,
+): string {
+  const base_decimal = toDecimal(base);
+  const amount_decimal = toDecimal(amount);
+  if (!base_decimal.greaterThan(0) || !amount_decimal.greaterThan(0)) {
+    return applyScale(new Decimal(0));
+  }
+  const factor = amount_decimal.dividedBy(base_decimal).times(100);
+  return applyScale(factor.greaterThan(100) ? new Decimal(100) : factor);
+}
+
+/**
  * Sums already-formatted or raw amounts and returns the DIAN-formatted total.
  *
  * Used to make `LegalMonetaryTotal/LineExtensionAmount` the exact sum of the

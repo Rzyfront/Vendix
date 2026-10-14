@@ -1,10 +1,28 @@
 import { SplitAccountsPanelComponent } from '../../../restaurant-ops/tables/components/split-accounts-panel/split-accounts-panel.component';
-import type { SplitFinancialAccount, SplitResult } from '../../../restaurant-ops/tables/interfaces';
-import { Component, DestroyRef, Injector, afterNextRender, computed, effect, inject, signal } from '@angular/core';
+import type {
+  SplitFinancialAccount,
+  SplitResult,
+} from '../../../restaurant-ops/tables/interfaces';
+import {
+  Component,
+  DestroyRef,
+  Injector,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../environments/environment';
-import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
+import {
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+  FormControl,
+  Validators,
+} from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -29,7 +47,10 @@ import { OrdersService } from '../../services/orders.service';
 // `payload.data.order_id` en el cliente.
 import { OrderDetailSseService } from '../../services/order-detail-sse.service';
 import { AddressPayload } from '../../../../../../shared/components';
-import { formatDateOnlyUTC, formatStoreDateTime } from '../../../../../../shared/utils/date.util';
+import {
+  formatDateOnlyUTC,
+  formatStoreDateTime,
+} from '../../../../../../shared/utils/date.util';
 import {
   InvoiceStatusCardComponent,
   InvoiceCardData,
@@ -58,7 +79,6 @@ import {
   RefundCoverageResult,
   RefundCoverageLine,
   ResolveRefundPayload,
-  FastTrackOrderDto,
   AssignShippingMethodDto,
   ReactivateOrderDto,
   OrderInvoiceSnapshot,
@@ -76,29 +96,58 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
-import {
-  KitchenTicketsService,
-} from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
-import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
-import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
+import {
+  AlertBannerComponent,
+  DialogService,
+  ModalComponent,
+  ToastService,
+  TimelineComponent,
+  type PaymentSubmit,
+} from '../../../../../../shared/components';
+import {
+  TimelineStep,
+  TimelineVariant,
+} from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { SelectorComponent, type SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import {
+  buildRefundNoteSourceMapping,
+  buildRefundNoteRetryDto,
+  matchesRefundNoteIssueResult,
+  refundNoteCreateFailureState,
+  refundNoteCreatedState,
+  refundNoteIssueFailureState,
+  type RefundItemSourceCandidate,
+  type RefundNoteState,
+} from './refund-note-mapping.util';
 
 /** The finish guard returns its current KDS snapshot, which may be newer than this page's order. */
 export function pendingKitchenLabelsFromError(error: unknown): string[] {
-  const details = (error as { details?: { pending_items?: unknown } } | null)?.details;
+  const details = (error as { details?: { pending_items?: unknown } } | null)
+    ?.details;
   if (!Array.isArray(details?.pending_items)) return [];
   return details.pending_items.flatMap((item: unknown) => {
     if (!item || typeof item !== 'object') return [];
-    const row = item as { product_name?: unknown; variant_label?: unknown; quantity?: unknown };
-    if (typeof row.product_name !== 'string' || !row.product_name.trim()) return [];
-    const variant = typeof row.variant_label === 'string' && row.variant_label.trim()
-      ? ` (${row.variant_label.trim()})` : '';
-    const quantity = typeof row.quantity === 'number' && row.quantity > 1
-      ? ` ×${row.quantity}` : '';
+    const row = item as {
+      product_name?: unknown;
+      variant_label?: unknown;
+      quantity?: unknown;
+    };
+    if (typeof row.product_name !== 'string' || !row.product_name.trim())
+      return [];
+    const variant =
+      typeof row.variant_label === 'string' && row.variant_label.trim()
+        ? ` (${row.variant_label.trim()})`
+        : '';
+    const quantity =
+      typeof row.quantity === 'number' && row.quantity > 1
+        ? ` ×${row.quantity}`
+        : '';
     return [`${row.product_name}${variant}${quantity}`];
   });
 }
@@ -113,17 +162,31 @@ import {
   StickyHeaderBadgeColor,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
-import { StorePaymentMethod, PaymentMethodState } from '../../../settings/payments/interfaces/payment-methods.interface';
+import {
+  StorePaymentMethod,
+  PaymentMethodState,
+} from '../../../settings/payments/interfaces/payment-methods.interface';
 import { ShippingMethodsService } from '../../../settings/shipping/services/shipping-methods.service';
 import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipping-methods.interface';
 import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
-import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
-import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
+import {
+  CurrencyFormatService,
+  CurrencyPipe,
+} from '../../../../../../shared/pipes/currency';
+import {
+  ItemCancellationModalComponent,
+  previewItemCancellation,
+  type ItemCancellationSubmit,
+} from '../../../../../../shared/components';
 import {
   OrderPaymentModalComponent,
   type OrderPendingPaymentPreset,
 } from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
+import {
+  OrderCompleteModalComponent,
+  OrderCompletionSubmission,
+} from '../../components/order-complete-modal.component';
 // Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
@@ -133,7 +196,10 @@ import {
   ResolveCustomerRequest,
   ResolveCustomerResult,
 } from '../../../customers/services/customers.service';
-import { CreateCustomerRequest, Customer } from '../../../customers/models/customer.model';
+import {
+  CreateCustomerRequest,
+  Customer,
+} from '../../../customers/models/customer.model';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   VexiUiHost,
@@ -172,7 +238,10 @@ import {
   shouldAutoPrintDispatchTicket,
   type ShouldAutoPrintDispatchTicketContext,
 } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
-import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
+import {
+  parseVariantAttributes,
+  VariantAttribute,
+} from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import {
@@ -203,16 +272,24 @@ const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<string>([
  */
 const ACTION_REASON_FALLBACK: Record<string, string> = {
   FORBIDDEN: 'Solo un administrador o encargado puede realizar esta acción.',
-  SPLIT_ACCOUNT_LOCKED: 'Esta orden tiene una cuenta independiente activa; gestiona el cobro desde el panel de cuentas.',
-  ORDER_HAS_PENDING_KITCHEN_ITEMS: 'Hay platos pendientes en cocina. Espera a que se completen antes de finalizar.',
-  ORD_PAY_CREDIT_ORDER_001: 'Esta es una orden a crédito; usa Registrar Pago de crédito.',
-  ORD_PAYMENT_CANCEL_FINISHED_001: 'La orden ya está finalizada; usa un reembolso para devolver el dinero.',
-  ORD_PAYMENT_CANCEL_INVOICED_001: 'Esta orden ya tiene una factura electrónica emitida; no se puede anular el pago.',
-  ORD_FAST_TRACK_INVALID_STATE_001: 'La orden en su estado actual no admite procesar en cadena.',
-  ORD_FINISH_UNPAID_BALANCE_001: 'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
+  SPLIT_ACCOUNT_LOCKED:
+    'Esta orden tiene una cuenta independiente activa; gestiona el cobro desde el panel de cuentas.',
+  ORDER_HAS_PENDING_KITCHEN_ITEMS:
+    'Hay platos pendientes en cocina. Espera a que se completen antes de finalizar.',
+  ORD_PAY_CREDIT_ORDER_001:
+    'Esta es una orden a crédito; usa Registrar Pago de crédito.',
+  ORD_PAYMENT_CANCEL_FINISHED_001:
+    'La orden ya está finalizada; usa un reembolso para devolver el dinero.',
+  ORD_PAYMENT_CANCEL_INVOICED_001:
+    'Esta orden ya tiene una factura electrónica emitida; no se puede anular el pago.',
+  ORD_FAST_TRACK_INVALID_STATE_001:
+    'La orden en su estado actual no admite procesar en cadena.',
+  ORD_FINISH_UNPAID_BALANCE_001:
+    'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
 };
 
-const GENERIC_ACTION_DISABLED_REASON = 'No disponible en el estado actual de la orden.';
+const GENERIC_ACTION_DISABLED_REASON =
+  'No disponible en el estado actual de la orden.';
 
 export interface LifecycleStep {
   key: string;
@@ -220,30 +297,56 @@ export interface LifecycleStep {
   status: 'completed' | 'current' | 'upcoming' | 'terminal';
 }
 
-export const ORDER_DELIVERY_STEP_LABELS: Record<DeliveryType, Record<string, string>> = {
+export const ORDER_DELIVERY_STEP_LABELS: Record<
+  DeliveryType,
+  Record<string, string>
+> = {
   home_delivery: {
-    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
-    shipped: 'Enviada', delivered: 'Entregada', finished: 'Finalizada',
+    created: 'Creada',
+    pending_payment: 'Pago Pendiente',
+    processing: 'Procesando',
+    shipped: 'Enviada',
+    delivered: 'Entregada',
+    finished: 'Finalizada',
   },
   pickup: {
-    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
-    shipped: 'Lista para recogida', delivered: 'Recogida en tienda', finished: 'Finalizada',
+    created: 'Creada',
+    pending_payment: 'Pago Pendiente',
+    processing: 'Preparando',
+    shipped: 'Lista para recogida',
+    delivered: 'Recogida en tienda',
+    finished: 'Finalizada',
   },
   direct_delivery: {
-    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
-    shipped: 'Entregada en mostrador', delivered: 'Entregada en mostrador', finished: 'Finalizada',
+    created: 'Creada',
+    pending_payment: 'Pago Pendiente',
+    processing: 'Procesando',
+    shipped: 'Entregada en mostrador',
+    delivered: 'Entregada en mostrador',
+    finished: 'Finalizada',
   },
   dine_in: {
-    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
-    shipped: 'Servida en mesa', delivered: 'Servida en mesa', finished: 'Finalizada',
+    created: 'Creada',
+    pending_payment: 'Pago Pendiente',
+    processing: 'Preparando',
+    shipped: 'Servida en mesa',
+    delivered: 'Servida en mesa',
+    finished: 'Finalizada',
   },
   other: {
-    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
-    shipped: 'Despachada', delivered: 'Entregada', finished: 'Finalizada',
+    created: 'Creada',
+    pending_payment: 'Pago Pendiente',
+    processing: 'Procesando',
+    shipped: 'Despachada',
+    delivered: 'Entregada',
+    finished: 'Finalizada',
   },
 };
 
-export const ORDER_DELIVERY_CONFIG: Record<DeliveryType, { label: string; icon: string }> = {
+export const ORDER_DELIVERY_CONFIG: Record<
+  DeliveryType,
+  { label: string; icon: string }
+> = {
   home_delivery: { label: 'Envío a domicilio', icon: 'truck' },
   pickup: { label: 'Recogida en tienda', icon: 'map-pin' },
   direct_delivery: { label: 'Entrega directa en mostrador', icon: 'package' },
@@ -264,11 +367,16 @@ type ItemCancellationDestination = 'waste' | 'reuse';
 type ItemCancellationMode = 'cancel' | 'reverse';
 
 /** Contra entrega is a collection promise, never the final tender. */
-export function isCodAwaitingConfirmation(order: Pick<Order, 'payments'> | null | undefined): boolean {
-  return !!order?.payments?.some((payment) =>
-    payment.state === 'pending' &&
-    (payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY' ||
-      payment.store_payment_method?.system_payment_method?.type === 'cash_on_delivery'),
+export function isCodAwaitingConfirmation(
+  order: Pick<Order, 'payments'> | null | undefined,
+): boolean {
+  return !!order?.payments?.some(
+    (payment) =>
+      payment.state === 'pending' &&
+      (payment.store_payment_method?.system_payment_method?.processing_mode ===
+        'ON_DELIVERY' ||
+        payment.store_payment_method?.system_payment_method?.type ===
+          'cash_on_delivery'),
   );
 }
 
@@ -280,7 +388,10 @@ export function isCodAwaitingConfirmation(order: Pick<Order, 'payments'> | null 
  * método), nunca confirma con un clic. UI advisory, API authoritative.
  */
 export function isManualPaymentPending(
-  order: Pick<Order, 'state' | 'payments' | 'remaining_balance'> | null | undefined,
+  order:
+    | Pick<Order, 'state' | 'payments' | 'remaining_balance'>
+    | null
+    | undefined,
 ): boolean {
   if (!order || order.state !== 'pending_payment') return false;
   if (Number(order.remaining_balance ?? 0) > 0) return true;
@@ -293,29 +404,58 @@ export function isManualPaymentPending(
 }
 
 /** Con división activa los importes quedan fijados (el backend responde 409 SPLIT_ACCOUNT_LOCKED al cambiarlos). */
-export function isOrderSplitLocked(order: { active_financial_split_id?: number | null } | null | undefined): boolean {
+export function isOrderSplitLocked(
+  order: { active_financial_split_id?: number | null } | null | undefined,
+): boolean {
   return !!order?.active_financial_split_id;
 }
 
-export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
+export function isOrderEligibleForSplitCreation(
+  order: Order | null,
+  hasRefunds = false,
+): boolean {
   if (!order || order.active_financial_split_id) return false;
   if (['cancelled', 'refunded'].includes(order.state)) return false;
-  if (order.payment_form === '2' || order.credit_type || order.order_installments?.length) return false;
-  if (!order.order_items?.some((item) => item.cancelled_at == null)) return false;
-  if (order.payments?.some((payment) =>
-    ['pending', 'refunded', 'partially_refunded', 'disputed'].includes(payment.state))) return false;
-  if (order.invoices?.some((invoice) => !['cancelled', 'voided'].includes(invoice.status ?? ''))) return false;
+  if (
+    order.payment_form === '2' ||
+    order.credit_type ||
+    order.order_installments?.length
+  )
+    return false;
+  if (!order.order_items?.some((item) => item.cancelled_at == null))
+    return false;
+  if (
+    order.payments?.some((payment) =>
+      ['pending', 'refunded', 'partially_refunded', 'disputed'].includes(
+        payment.state,
+      ),
+    )
+  )
+    return false;
+  if (
+    order.invoices?.some(
+      (invoice) => !['cancelled', 'voided'].includes(invoice.status ?? ''),
+    )
+  )
+    return false;
   if (hasRefunds) return false;
   const settled = (order.payments ?? [])
-    .filter((payment) => payment.state === 'succeeded' || payment.state === 'captured')
+    .filter(
+      (payment) =>
+        payment.state === 'succeeded' || payment.state === 'captured',
+    )
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   return Number(order.grand_total || 0) - settled > 0.01;
 }
 
 /** Mirror the backend's settled-payment gate; UI is advisory, API remains authoritative. */
-export function isOrderItemCancellationPaid(order: Pick<Order, 'payments'> | null): boolean {
+export function isOrderItemCancellationPaid(
+  order: Pick<Order, 'payments'> | null,
+): boolean {
   return !!order?.payments?.some((payment) =>
-    ['succeeded', 'captured', 'partially_refunded', 'refunded'].includes(payment.state),
+    ['succeeded', 'captured', 'partially_refunded', 'refunded'].includes(
+      payment.state,
+    ),
   );
 }
 
@@ -324,12 +464,23 @@ export function cancellationBody(
   reason: string,
   destination: ItemCancellationDestination,
   preparedFired: boolean,
-): { reason: string; cancellation_type?: 'after_fire_reused' | 'after_fire_waste'; destination?: 'waste' | 'restock' } {
+): {
+  reason: string;
+  cancellation_type?: 'after_fire_reused' | 'after_fire_waste';
+  destination?: 'waste' | 'restock';
+} {
   if (mode === 'reverse') {
-    return { reason, destination: destination === 'reuse' ? 'restock' : 'waste' };
+    return {
+      reason,
+      destination: destination === 'reuse' ? 'restock' : 'waste',
+    };
   }
   return preparedFired
-    ? { reason, cancellation_type: destination === 'reuse' ? 'after_fire_reused' : 'after_fire_waste' }
+    ? {
+        reason,
+        cancellation_type:
+          destination === 'reuse' ? 'after_fire_reused' : 'after_fire_waste',
+      }
     : { reason };
 }
 
@@ -340,7 +491,9 @@ export function cancellationBody(
  * sin copia del modo) se leen como incluido: el régimen anterior era
  * solo-incluido. Pura para spec sin TestBed.
  */
-export function shippingTaxModePrefix(isInclusive: unknown): 'Incluye' | 'Base +' {
+export function shippingTaxModePrefix(
+  isInclusive: unknown,
+): 'Incluye' | 'Base +' {
   return isInclusive === false ? 'Base +' : 'Incluye';
 }
 
@@ -351,10 +504,11 @@ export function shippingTaxModePrefix(isInclusive: unknown): 'Incluye' | 'Base +
  * never rewrites the order's real state or any displayed label. Pure for
  * spec sin TestBed.
  */
-export const LIFECYCLE_STATE_ALIASES: Partial<Record<OrderState, OrderState>> = {
-  draft: 'created',
-  pending_delivery: 'processing',
-};
+export const LIFECYCLE_STATE_ALIASES: Partial<Record<OrderState, OrderState>> =
+  {
+    draft: 'created',
+    pending_delivery: 'processing',
+  };
 
 export function lifecycleLookupState(state: OrderState): OrderState {
   return LIFECYCLE_STATE_ALIASES[state] ?? state;
@@ -372,7 +526,10 @@ export function kitchenStateForItem(
   const items = item.kitchen_ticket_items;
   if (!items || items.length === 0) return null;
   const inFlight = items.find(
-    (k) => k.status === 'pending' || k.status === 'in_preparation' || k.status === 'ready',
+    (k) =>
+      k.status === 'pending' ||
+      k.status === 'in_preparation' ||
+      k.status === 'ready',
   );
   if (inFlight) return inFlight;
   return items[0];
@@ -391,7 +548,9 @@ export function isItemActionEnabled(
   item: Pick<OrderItem, 'available_actions'>,
   code: 'deliver' | 'cancel' | 'reverse_delivered' | 'resend',
 ): boolean {
-  return !!item.available_actions?.some((a) => a.code === code && a.enabled === true);
+  return !!item.available_actions?.some(
+    (a) => a.code === code && a.enabled === true,
+  );
 }
 
 /** Código de error/`reason` del backend cuando finalizar exige cobrar antes. */
@@ -405,16 +564,24 @@ export const ORD_FINISH_UNPAID_BALANCE_CODE = 'ORD_FINISH_UNPAID_BALANCE_001';
  * Pura para spec sin TestBed.
  */
 export function getUnpaidBalanceForFinish(
-  order: Pick<Order, 'grand_total' | 'remaining_balance' | 'payment_form' | 'payments'>,
+  order: Pick<
+    Order,
+    'grand_total' | 'remaining_balance' | 'payment_form' | 'payments'
+  >,
 ): number {
   if (order.payment_form === '2') return 0;
   if (order.grand_total === undefined || order.grand_total === null) return 0;
   const grand = Number(order.grand_total);
   if (!(grand > 0)) return 0;
   const payments = order.payments ?? [];
-  const settledPayments = payments.filter((p) => SETTLED_PAYMENT_STATES_FE.has(p.state));
+  const settledPayments = payments.filter((p) =>
+    SETTLED_PAYMENT_STATES_FE.has(p.state),
+  );
   if (settledPayments.length === 0) return grand;
-  const settled = settledPayments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
+  const settled = settledPayments.reduce(
+    (sum, p) => sum + Number(p.amount ?? 0),
+    0,
+  );
   if (settled >= grand - 0.01) return 0;
   return Math.max(0, Number(order.remaining_balance ?? 0));
 }
@@ -443,9 +610,13 @@ export function getUnpaidBalanceForFinish(
  * - `fast_track`: checkbox standalone (`canFastTrack`), nunca un botón.
  */
 export function buildOrderActionButtons(
-  order: Pick<Order, 'state' | 'delivery_type' | 'available_actions' | 'payments'>,
+  order: Pick<
+    Order,
+    'state' | 'delivery_type' | 'available_actions' | 'payments'
+  >,
 ): OrderActionConfig[] {
-  const backendActions: OrderAvailableAction[] | undefined = order.available_actions;
+  const backendActions: OrderAvailableAction[] | undefined =
+    order.available_actions;
   if (!backendActions || backendActions.length === 0) return [];
 
   const delivery = order.delivery_type || 'direct_delivery';
@@ -470,52 +641,135 @@ export function buildOrderActionButtons(
 
   const configFor = (
     code: string,
-  ): { label: string; icon: string; variant: OrderActionConfig['variant']; weight: number } | null => {
+  ): {
+    label: string;
+    icon: string;
+    variant: OrderActionConfig['variant'];
+    weight: number;
+  } | null => {
     switch (code) {
       case 'edit_order':
-        return { label: 'Modificar Orden', icon: 'edit', variant: 'info', weight: 10 };
+        return {
+          label: 'Modificar Orden',
+          icon: 'edit',
+          variant: 'info',
+          weight: 10,
+        };
       case 'pay':
-        return { label: isCodAwaitingConfirmation(order) ? 'Confirmar Pago' : 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
+        return {
+          label: isCodAwaitingConfirmation(order)
+            ? 'Confirmar Pago'
+            : 'Registrar Pago',
+          icon: 'credit-card',
+          variant: 'primary',
+          weight: 20,
+        };
       case 'credit_payment':
-        return { label: 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
+        return {
+          label: 'Registrar Pago',
+          icon: 'credit-card',
+          variant: 'primary',
+          weight: 20,
+        };
       case 'confirm_payment':
-        return { label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary', weight: 20 };
+        return {
+          label: 'Confirmar Pago',
+          icon: 'check-circle',
+          variant: 'primary',
+          weight: 20,
+        };
       case 'dispatch_order':
-        return { label: 'Despachar Orden', icon: 'truck', variant: 'primary', weight: 30 };
+        return {
+          label: 'Despachar Orden',
+          icon: 'truck',
+          variant: 'primary',
+          weight: 30,
+        };
       case 'manual_ship':
-        return { label: 'Despachar Orden', icon: 'truck', variant: 'primary', weight: 30 };
+        return {
+          label: 'Despachar Orden',
+          icon: 'truck',
+          variant: 'primary',
+          weight: 30,
+        };
       case 'ready_for_pickup':
         // Ver nota de la función: solo la ocurrencia de `pending_payment`
         // pertenece a este arreglo de botones.
         if (order.state !== 'pending_payment') return null;
-        return { label: 'Lista para recogida', icon: 'package', variant: 'primary', weight: 30 };
+        return {
+          label: 'Lista para recogida',
+          icon: 'package',
+          variant: 'primary',
+          weight: 30,
+        };
       case 'direct_deliver':
-        return { label: 'Entregar directamente', icon: 'package-check', variant: 'warning', weight: 32 };
+        return {
+          label: 'Entregar directamente',
+          icon: 'package-check',
+          variant: 'warning',
+          weight: 32,
+        };
       case 'collect_payment':
         // Restaura el viejo boton "Pasar a Cobro" (commit cbebc40db8f): una
         // orden `processing` sin fulfillment (ni domicilio ni cocina) no
         // tiene otra via a `shipped`, donde `pay` vuelve a estar disponible.
         // Mismo id/handler que el `ship` original (`openShipModal`).
-        return { label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary', weight: 30 };
+        return {
+          label: 'Pasar a Cobro',
+          icon: 'credit-card',
+          variant: 'primary',
+          weight: 30,
+        };
       case 'mark_delivered': {
-        const label = delivery === 'home_delivery'
-          ? 'Marcar como Entregado'
-          : delivery === 'pickup'
-            ? 'Confirmar recogida en tienda'
-            : 'Confirmar Entrega';
-        const icon = delivery === 'home_delivery' ? 'package-check' : delivery === 'pickup' ? 'user-check' : 'check-circle';
+        const label =
+          delivery === 'home_delivery'
+            ? 'Marcar como Entregado'
+            : delivery === 'pickup'
+              ? 'Confirmar recogida en tienda'
+              : 'Confirmar Entrega';
+        const icon =
+          delivery === 'home_delivery'
+            ? 'package-check'
+            : delivery === 'pickup'
+              ? 'user-check'
+              : 'check-circle';
         return { label, icon, variant: 'primary', weight: 40 };
       }
       case 'confirm_delivery':
-        return { label: 'Finalizar Orden', icon: 'check-circle', variant: 'success', weight: 45 };
+        return {
+          label: 'Finalizar Orden',
+          icon: 'check-circle',
+          variant: 'success',
+          weight: 45,
+        };
       case 'cancel_payment':
-        return { label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning', weight: 50 };
+        return {
+          label: 'Cancelar Pago',
+          icon: 'credit-card',
+          variant: 'warning',
+          weight: 50,
+        };
       case 'refund':
-        return { label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning', weight: 60 };
+        return {
+          label: 'Procesar Reembolso',
+          icon: 'rotate-ccw',
+          variant: 'warning',
+          weight: 60,
+        };
       case 'cancel':
-        return { label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger', weight: 90 };
+        return {
+          label: 'Cancelar Orden',
+          icon: 'x-circle',
+          variant: 'danger',
+          weight: 90,
+        };
       case 'reactivate':
-        return { label: 'Reactivar Orden', icon: 'rotate-ccw', variant: 'warning', weight: 90 };
+        return {
+          label: 'Reactivar Orden',
+          icon: 'rotate-ccw',
+          variant: 'warning',
+          weight: 90,
+        };
       default:
         return null;
     }
@@ -537,7 +791,10 @@ export function buildOrderActionButtons(
         } as OrderActionConfig,
       };
     })
-    .filter((entry): entry is { weight: number; button: OrderActionConfig } => entry !== null)
+    .filter(
+      (entry): entry is { weight: number; button: OrderActionConfig } =>
+        entry !== null,
+    )
     .sort((a, b) => a.weight - b.weight)
     .map((entry) => entry.button);
 }
@@ -550,7 +807,10 @@ export function buildOrderActionButtons(
  * rows sharing `resource: 'orders'` — those must NOT be deduped away as if
  * they were a repeated order-creation event. Pure for spec sin TestBed.
  */
-export function isOrderCreateLog(log: any, orderId: number | null | undefined): boolean {
+export function isOrderCreateLog(
+  log: any,
+  orderId: number | null | undefined,
+): boolean {
   const isCreate = log?.action?.toUpperCase?.() === 'CREATE';
   return !!isCreate && orderId != null && log?.new_values?.id === orderId;
 }
@@ -587,7 +847,10 @@ export function isConfirmedStateTransition(
   oldState: string | null | undefined,
   newState: string | null | undefined,
 ): boolean {
-  return log?.metadata?.method === 'FLOW' || (oldState != null && oldState !== newState);
+  return (
+    log?.metadata?.method === 'FLOW' ||
+    (oldState != null && oldState !== newState)
+  );
 }
 
 /**
@@ -630,13 +893,15 @@ export function cancelPaymentCopy(state: string | null | undefined): {
     return {
       confirm:
         '¿Estás seguro de cancelar el pago de esta orden? La orden conserva su estado y podrás registrar el pago de nuevo.',
-      success: 'Pago cancelado exitosamente. La orden conserva su estado; registra el pago de nuevo.',
+      success:
+        'Pago cancelado exitosamente. La orden conserva su estado; registra el pago de nuevo.',
     };
   }
   return {
     confirm:
       '¿Estás seguro de cancelar el pago de esta orden? La orden volverá al estado "Creada" y podrás registrar el pago de nuevo. Los productos ya entregados no se vuelven a descontar del inventario.',
-    success: 'Pago cancelado exitosamente. La orden ha vuelto a estado "Creada".',
+    success:
+      'Pago cancelado exitosamente. La orden ha vuelto a estado "Creada".',
   };
 }
 
@@ -651,7 +916,10 @@ export function cancelPaymentCopy(state: string | null | undefined): {
  * whether a row is a refund.
  */
 export function orderEventLabel(
-  evt: Pick<OrderEvent, 'event_type' | 'from_state' | 'to_state' | 'amount' | 'payload'>,
+  evt: Pick<
+    OrderEvent,
+    'event_type' | 'from_state' | 'to_state' | 'amount' | 'payload'
+  >,
   formatAmount: (amount: number | string | null | undefined) => string,
 ): string {
   if (evt.event_type === 'state_changed') {
@@ -669,7 +937,10 @@ export function orderEventLabel(
     return number ? `Factura emitida — ${number}` : 'Factura emitida';
   }
   if (evt.event_type === 'kitchen_fired') {
-    const base = evt.payload?.['resend'] === true ? 'Reenviado a cocina' : 'Enviado a cocina';
+    const base =
+      evt.payload?.['resend'] === true
+        ? 'Reenviado a cocina'
+        : 'Enviado a cocina';
     const itemIds = evt.payload?.['order_item_ids'];
     const count = Array.isArray(itemIds) ? itemIds.length : 0;
     if (count === 0) return base;
@@ -721,7 +992,9 @@ export function orderEventActorLabel(
 export function isRefundOrderEvent(
   evt: Pick<OrderEvent, 'event_type'>,
 ): boolean {
-  return evt.event_type === 'refund_created' || evt.event_type === 'refund_resolved';
+  return (
+    evt.event_type === 'refund_created' || evt.event_type === 'refund_resolved'
+  );
 }
 
 /**
@@ -774,6 +1047,7 @@ export interface InvoiceCardView {
     ItemCancellationModalComponent,
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
+    OrderCompleteModalComponent,
     CustomerModalComponent,
     ChangeTitularSearchModalComponent,
     InvoiceDetailComponent,
@@ -786,6 +1060,7 @@ export interface InvoiceCardView {
     ShippingAddressModalComponent,
     ResendDishModalComponent,
     NgClass,
+    SelectorComponent,
   ],
   templateUrl: './order-details-page.component.html',
   styleUrls: ['./order-details-page.component.css'],
@@ -844,7 +1119,10 @@ export class OrderDetailsPageComponent {
     },
     refresh: () => {
       this.refreshOrder();
-      return { status: 'ok' as const, message: 'Recargué el detalle de la orden.' };
+      return {
+        status: 'ok' as const,
+        message: 'Recargué el detalle de la orden.',
+      };
     },
     whenReady: () => vexiWhenReady(() => this.isLoading()),
   };
@@ -867,14 +1145,20 @@ export class OrderDetailsPageComponent {
     const alert = resolveFiscalAlert(code);
     // Con división activa la orden principal es informativa: no se ofrece
     // emitir su factura desde el banner.
-    if (this.order()?.active_financial_split_id && alert.action.kind === 'emit-invoice') {
+    if (
+      this.order()?.active_financial_split_id &&
+      alert.action.kind === 'emit-invoice'
+    ) {
       return null;
     }
     return alert;
   });
   readonly appliedTierSummary = computed(() => {
     const order = this.order();
-    const groups = new Map<string, { name: string; total: number; count: number }>();
+    const groups = new Map<
+      string,
+      { name: string; total: number; count: number }
+    >();
     for (const item of order?.order_items ?? []) {
       const name = item.applied_price_tier_name_snapshot;
       if (!name) continue;
@@ -893,11 +1177,13 @@ export class OrderDetailsPageComponent {
    * base según el canal que creó la orden.
    */
   readonly grossSubtotal = computed(() =>
-    (this.order()?.order_items ?? []).filter((item) => item.cancelled_at == null).reduce(
-      (sum, item) =>
-        sum + Number(item.final_total_price ?? item.total_price ?? 0),
-      0,
-    ),
+    (this.order()?.order_items ?? [])
+      .filter((item) => item.cancelled_at == null)
+      .reduce(
+        (sum, item) =>
+          sum + Number(item.final_total_price ?? item.total_price ?? 0),
+        0,
+      ),
   );
 
   // ── Discount snapshots (read-only from order; never recalculated) ──
@@ -924,7 +1210,8 @@ export class OrderDetailsPageComponent {
   );
 
   readonly hasDiscountSnapshot = computed(
-    () => this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
+    () =>
+      this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
   );
 
   // ── CP-REFUND-FLOW-REDESIGN paso 8: neto derivado + cobertura ──
@@ -938,7 +1225,10 @@ export class OrderDetailsPageComponent {
   readonly refundedQtyByLine = computed(() => {
     const byLine = new Map<number, number>();
     for (const refund of this.orderRefunds()) {
-      if (!['completed', 'pending_approval', 'processing'].includes(refund.state)) continue;
+      if (
+        !['completed', 'pending_approval', 'processing'].includes(refund.state)
+      )
+        continue;
       for (const ri of refund.refund_items ?? []) {
         byLine.set(
           ri.order_item_id,
@@ -980,7 +1270,9 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     if (!order) return false;
     if (!['delivered', 'finished'].includes(order.state)) return false;
-    return (order.order_items ?? []).some((item) => this.lineRefundRemaining(item) > 0);
+    return (order.order_items ?? []).some(
+      (item) => this.lineRefundRemaining(item) > 0,
+    );
   });
 
   /** Aviso obligatorio FE→NC del paso 7 (`null` = sin FE aceptada descubierta). */
@@ -1041,9 +1333,18 @@ export class OrderDetailsPageComponent {
   readonly enabledDispatchMethods = computed<DispatchMethod[]>(() => {
     const dispatch = this.settingsFacade.dispatch();
     const methods: Array<{ method: DispatchMethod; flag: boolean }> = [
-      { method: 'with-note', flag: dispatch?.enable_dispatch_with_remision ?? true },
-      { method: 'direct', flag: dispatch?.enable_dispatch_direct_delivery ?? true },
-      { method: 'to-dispatch', flag: dispatch?.enable_dispatch_to_pool ?? true },
+      {
+        method: 'with-note',
+        flag: dispatch?.enable_dispatch_with_remision ?? true,
+      },
+      {
+        method: 'direct',
+        flag: dispatch?.enable_dispatch_direct_delivery ?? true,
+      },
+      {
+        method: 'to-dispatch',
+        flag: dispatch?.enable_dispatch_to_pool ?? true,
+      },
     ];
     return methods.filter((m) => m.flag).map((m) => m.method);
   });
@@ -1057,7 +1358,10 @@ export class OrderDetailsPageComponent {
    * id de la ruta activa para construir la navegación.
    */
   showDispatchGeneratedModal = signal(false);
-  dispatchGeneratedContext = signal<{ dispatchNoteId: number; routeId: number | null }>({
+  dispatchGeneratedContext = signal<{
+    dispatchNoteId: number;
+    routeId: number | null;
+  }>({
     dispatchNoteId: 0,
     routeId: null,
   });
@@ -1090,7 +1394,9 @@ export class OrderDetailsPageComponent {
    */
   showTitularSearchModal = signal(false);
   /** Prellenado (RUES / documento digitado) para el alta de titular. */
-  changeCustomerInitialValues = signal<Partial<CreateCustomerRequest> | null>(null);
+  changeCustomerInitialValues = signal<Partial<CreateCustomerRequest> | null>(
+    null,
+  );
   /**
    * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
    * persiste contra el cliente resuelto antes del PATCH titular; se limpia
@@ -1139,7 +1445,9 @@ export class OrderDetailsPageComponent {
    */
   readonly unfiredPreparedItems = this.pendingKitchenItems;
   /** True if the active store is a restaurant (industries cascade). */
-  readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
+  readonly isRestaurant = computed<boolean>(() =>
+    this.authFacade.isRestaurant(),
+  );
   /**
    * C.7 (§5.3, base gross) — esta superficie pinta líneas en BRUTO
    * (`final_total_price ?? total_price`): el pie no lleva Subtotal ni fila
@@ -1184,8 +1492,11 @@ export class OrderDetailsPageComponent {
    */
   readonly shippingTaxPrefix = computed<string>(() =>
     shippingTaxModePrefix(
-      (this.order() as unknown as { shipping_tax_is_inclusive?: unknown } | null)
-        ?.shipping_tax_is_inclusive,
+      (
+        this.order() as unknown as {
+          shipping_tax_is_inclusive?: unknown;
+        } | null
+      )?.shipping_tax_is_inclusive,
     ),
   );
   /**
@@ -1220,7 +1531,9 @@ export class OrderDetailsPageComponent {
    * mesero elige motivo y confirma.
    */
   resendItemId = signal<number | null>(null);
-  readonly showResendModal = computed<boolean>(() => this.resendItemId() !== null);
+  readonly showResendModal = computed<boolean>(
+    () => this.resendItemId() !== null,
+  );
   /**
    * Ítem actualmente elegido para reenvío (`null` = modal cerrado).
    * Alimenta `[cancellationType]` del modal para el texto de remake
@@ -1242,7 +1555,9 @@ export class OrderDetailsPageComponent {
 
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
-  readonly isCodPending = computed(() => isCodAwaitingConfirmation(this.order()));
+  readonly isCodPending = computed(() =>
+    isCodAwaitingConfirmation(this.order()),
+  );
   /**
    * Sin pago `pending` por confirmar y con saldo abierto (pagos liquidados <
    * total, excepto venta a crédito): "Confirmar pago" no tiene nada que
@@ -1255,41 +1570,62 @@ export class OrderDetailsPageComponent {
     const payments = order.payments ?? [];
     if (payments.some((payment) => payment?.state === 'pending')) return false;
     const settled = payments
-      .filter((payment) => payment && ['succeeded', 'captured'].includes(String(payment.state)))
+      .filter(
+        (payment) =>
+          payment && ['succeeded', 'captured'].includes(String(payment.state)),
+      )
       .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
     return (Number(order.grand_total) || 0) - settled >= 0.01;
   });
   /** Fase 2 (paso 8): cobro manual pendiente → "Registrar pago" por `flow/pay`. */
-  readonly isManualPayPending = computed(() => isManualPaymentPending(this.order()));
-  readonly codActualMethods = computed(() => this.paymentMethods().filter((method) => {
-    const catalog = method.system_payment_method as { type?: string; processing_mode?: string } | null;
-    if (!catalog || catalog.processing_mode === 'ON_DELIVERY') return false;
-    return ['cash', 'bank_transfer', 'voucher'].includes(catalog.type ?? '') ||
-      (catalog.type === 'card' && catalog.processing_mode === 'DIRECT');
-  }));
+  readonly isManualPayPending = computed(() =>
+    isManualPaymentPending(this.order()),
+  );
+  readonly codActualMethods = computed(() =>
+    this.paymentMethods().filter((method) => {
+      const catalog = method.system_payment_method as {
+        type?: string;
+        processing_mode?: string;
+      } | null;
+      if (!catalog || catalog.processing_mode === 'ON_DELIVERY') return false;
+      return (
+        ['cash', 'bank_transfer', 'voucher'].includes(catalog.type ?? '') ||
+        (catalog.type === 'card' && catalog.processing_mode === 'DIRECT')
+      );
+    }),
+  );
   /**
    * Pago online manual `pending` que "Registrar pago" confirma en sitio (el
    * backend lo pasa a `succeeded` en vez de anularlo): su método y la cuenta
    * bancaria a la que el cliente transfirió se preseleccionan en el modal.
    * Contra entrega no aplica (su marcador se anula y se crea el pago real).
    */
-  readonly manualPendingPaymentPreset = computed<OrderPendingPaymentPreset | null>(() => {
-    if (!this.isManualPayPending() || this.isCodPending()) return null;
-    const pending = this.order()?.payments?.find((payment) => {
-      if (payment.state !== 'pending') return false;
-      const system = payment.store_payment_method?.system_payment_method as
-        | { type?: string; processing_mode?: string }
-        | null
-        | undefined;
-      if (!system || system.processing_mode === 'ON_DELIVERY') return false;
-      return !['wallet', 'wompi'].includes(system.type ?? '');
+  readonly manualPendingPaymentPreset =
+    computed<OrderPendingPaymentPreset | null>(() => {
+      if (!this.isManualPayPending() || this.isCodPending()) return null;
+      const pending = this.order()?.payments?.find((payment) => {
+        if (payment.state !== 'pending') return false;
+        const system = payment.store_payment_method?.system_payment_method as
+          | { type?: string; processing_mode?: string }
+          | null
+          | undefined;
+        if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+        return !['wallet', 'wompi'].includes(system.type ?? '');
+      });
+      if (!pending) return null;
+      const rawMethodId =
+        pending.store_payment_method_id ??
+        pending.store_payment_method?.id ??
+        null;
+      const methodId = rawMethodId != null ? Number(rawMethodId) : null;
+      const bankAccountId =
+        (pending as { bank_account_id?: number | null }).bank_account_id ??
+        null;
+      return {
+        store_payment_method_id: methodId,
+        bank_account_id: bankAccountId,
+      };
     });
-    if (!pending) return null;
-    const rawMethodId = pending.store_payment_method_id ?? pending.store_payment_method?.id ?? null;
-    const methodId = rawMethodId != null ? Number(rawMethodId) : null;
-    const bankAccountId = (pending as { bank_account_id?: number | null }).bank_account_id ?? null;
-    return { store_payment_method_id: methodId, bank_account_id: bankAccountId };
-  });
   /**
    * Métodos del modal de cobro. En contra entrega / registro manual son los
    * medios realmente recibidos (`codActualMethods`) MÁS el método original del
@@ -1297,17 +1633,30 @@ export class OrderDetailsPageComponent {
    * registrarlo tal como el cliente lo pagó.
    */
   readonly payModalMethods = computed<StorePaymentMethod[]>(() => {
-    if (!this.isCodPending() && !this.isManualPayPending()) return this.paymentMethods();
+    if (!this.isCodPending() && !this.isManualPayPending())
+      return this.paymentMethods();
     const base = this.codActualMethods();
-    const originalId = this.manualPendingPaymentPreset()?.store_payment_method_id;
-    if (originalId == null || base.some((method) => Number(method.id) === originalId)) return base;
-    const original = this.paymentMethods().find((method) => Number(method.id) === originalId);
+    const originalId =
+      this.manualPendingPaymentPreset()?.store_payment_method_id;
+    if (
+      originalId == null ||
+      base.some((method) => Number(method.id) === originalId)
+    )
+      return base;
+    const original = this.paymentMethods().find(
+      (method) => Number(method.id) === originalId,
+    );
     return original ? [...base, original] : base;
   });
   readonly canCreateFinancialSplit = computed(() => {
-    return isOrderEligibleForSplitCreation(this.order(), this.orderRefunds().length > 0) &&
+    return (
+      isOrderEligibleForSplitCreation(
+        this.order(),
+        this.orderRefunds().length > 0,
+      ) &&
       (this.hasNamedPermission('store:table_sessions:update') ||
-        this.hasNamedPermission('store:pos:access'));
+        this.hasNamedPermission('store:pos:access'))
+    );
   });
 
   // Shipping method assignment
@@ -1320,7 +1669,12 @@ export class OrderDetailsPageComponent {
 
   // Shipping rate auto-calculation
   isCalculatingRate = signal(false);
-  calculatedRate = signal<{ rate_id: number; cost: number; rate_name?: string; zone?: string } | null>(null);
+  calculatedRate = signal<{
+    rate_id: number;
+    cost: number;
+    rate_name?: string;
+    zone?: string;
+  } | null>(null);
   manualCostOverride = signal(false);
 
   // Fast-track
@@ -1333,7 +1687,6 @@ export class OrderDetailsPageComponent {
    */
   readonly showSplitConfig = signal(false);
   fastTrackEnabled = signal(false);
-  fastTrackForm!: FormGroup;
 
   // Reactive forms (ship, deliver, cancel — pay and refund are in their own components)
   shipForm!: FormGroup;
@@ -1359,7 +1712,11 @@ export class OrderDetailsPageComponent {
     try {
       const parsed = JSON.parse(order.internal_notes);
       if (parsed && typeof parsed === 'object') {
-        return (parsed._flow_metadata ? { ...parsed._flow_metadata, ...parsed } : parsed) as OrderFlowMetadata;
+        return (
+          parsed._flow_metadata
+            ? { ...parsed._flow_metadata, ...parsed }
+            : parsed
+        ) as OrderFlowMetadata;
       }
       return {};
     } catch {
@@ -1412,7 +1769,12 @@ export class OrderDetailsPageComponent {
     if (!raw) return '';
     try {
       const parsed = JSON.parse(raw);
-      const text = parsed?.notes || parsed?._flow_metadata?.original_notes || parsed?.original_notes || parsed?.staff_notes || '';
+      const text =
+        parsed?.notes ||
+        parsed?._flow_metadata?.original_notes ||
+        parsed?.original_notes ||
+        parsed?.staff_notes ||
+        '';
       return typeof text === 'string' ? text.trim() : '';
     } catch {
       return raw.trim();
@@ -1424,7 +1786,11 @@ export class OrderDetailsPageComponent {
     if (!raw) return '';
     try {
       const parsed = JSON.parse(raw);
-      const text = parsed?.notes || parsed?._flow_metadata?.original_notes || parsed?.original_notes || '';
+      const text =
+        parsed?.notes ||
+        parsed?._flow_metadata?.original_notes ||
+        parsed?.original_notes ||
+        '';
       return typeof text === 'string' ? text.trim() : '';
     } catch {
       return raw.trim();
@@ -1457,7 +1823,10 @@ export class OrderDetailsPageComponent {
 
   readonly stepLabels = computed<Record<string, string>>(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-    return ORDER_DELIVERY_STEP_LABELS[delivery] || ORDER_DELIVERY_STEP_LABELS.direct_delivery;
+    return (
+      ORDER_DELIVERY_STEP_LABELS[delivery] ||
+      ORDER_DELIVERY_STEP_LABELS.direct_delivery
+    );
   });
 
   readonly lifecycleSteps = computed<LifecycleStep[]>(() => {
@@ -1480,7 +1849,9 @@ export class OrderDetailsPageComponent {
       ];
     }
 
-    const currentIndex = this.HAPPY_PATH.indexOf(this.lifecycleLookupState(state));
+    const currentIndex = this.HAPPY_PATH.indexOf(
+      this.lifecycleLookupState(state),
+    );
     if (currentIndex === -1) return [];
 
     return this.HAPPY_PATH.map((key, i) => ({
@@ -1499,7 +1870,10 @@ export class OrderDetailsPageComponent {
 
   readonly channelConfig = computed(() => {
     const channel = this.order()?.channel;
-    const configs: Record<string, { label: string; icon: string; color: string }> = {
+    const configs: Record<
+      string,
+      { label: string; icon: string; color: string }
+    > = {
       pos: { label: 'POS', icon: 'monitor', color: 'blue' },
       ecommerce: { label: 'E-commerce', icon: 'shopping-cart', color: 'green' },
       whatsapp: { label: 'WhatsApp', icon: 'message-circle', color: 'emerald' },
@@ -1511,14 +1885,22 @@ export class OrderDetailsPageComponent {
 
   readonly deliveryConfig = computed(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-    return ORDER_DELIVERY_CONFIG[delivery] || ORDER_DELIVERY_CONFIG.direct_delivery;
+    return (
+      ORDER_DELIVERY_CONFIG[delivery] || ORDER_DELIVERY_CONFIG.direct_delivery
+    );
   });
 
   readonly showShippingAssignment = computed(() => {
     const order = this.order();
     if (!order) return false;
     if (order.delivery_type === 'dine_in') return false;
-    const terminalStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    const terminalStates: OrderState[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
     if (terminalStates.includes(order.state as OrderState)) return false;
     if (order.delivery_type === 'direct_delivery') return false;
     return !order.shipping_method_id;
@@ -1544,18 +1926,32 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     if (!order) return false;
     if (order.delivery_type === 'dine_in') return false;
-    const lockedStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
-    return !lockedStates.includes(order.state as OrderState) && order.delivery_type !== 'direct_delivery';
+    const lockedStates: OrderState[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
+    return (
+      !lockedStates.includes(order.state as OrderState) &&
+      order.delivery_type !== 'direct_delivery'
+    );
   });
 
   readonly selectedShippingMethod = computed(() => {
     const id = this.selectedShippingMethodId();
     if (!id) return null;
-    return this.shippingMethods().find(m => m.id === id) || null;
+    return this.shippingMethods().find((m) => m.id === id) || null;
   });
 
   readonly shippingRatesForSelectedMethod = computed<ShippingRate[]>(() => {
-    const m = this.selectedShippingMethod() as (StoreShippingMethod & { shipping_rates?: ShippingRate[]; rates?: ShippingRate[] }) | null;
+    const m = this.selectedShippingMethod() as
+      | (StoreShippingMethod & {
+          shipping_rates?: ShippingRate[];
+          rates?: ShippingRate[];
+        })
+      | null;
     if (!m) return [];
     return m.shipping_rates ?? m.rates ?? [];
   });
@@ -1575,7 +1971,8 @@ export class OrderDetailsPageComponent {
   readonly blockedByMissingShipping = computed(() => {
     const o = this.order();
     if (!o) return false;
-    const needsShipping = !o.delivery_type ||
+    const needsShipping =
+      !o.delivery_type ||
       !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(o.delivery_type);
     const terminal = ['cancelled', 'refunded', 'finished'].includes(o.state);
     return needsShipping && !o.shipping_method_id && !terminal;
@@ -1606,8 +2003,16 @@ export class OrderDetailsPageComponent {
   readonly blockedByMissingAddress = computed<boolean>(() => {
     const o = this.order();
     if (!o) return false;
-    const terminal = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'].includes(o.state);
-    return this.requiresShippingAddress() && !this.hasShippingAddress() && !terminal;
+    const terminal = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ].includes(o.state);
+    return (
+      this.requiresShippingAddress() && !this.hasShippingAddress() && !terminal
+    );
   });
 
   /**
@@ -1621,7 +2026,9 @@ export class OrderDetailsPageComponent {
   readonly canFastTrack = computed(() => {
     const o = this.order();
     if (!o) return false;
-    const backendEntry = o.available_actions?.find((a) => a.code === 'fast_track');
+    const backendEntry = o.available_actions?.find(
+      (a) => a.code === 'fast_track',
+    );
     if (backendEntry) return backendEntry.enabled;
     if (['finished', 'cancelled', 'refunded'].includes(o.state)) return false;
     if (this.blockedByMissingShipping()) return false;
@@ -1641,7 +2048,8 @@ export class OrderDetailsPageComponent {
 
     // Sort ascending by created_at (oldest first)
     const sorted = [...logs].sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
 
     // B3 (release-855) — the backend's `isCreateOperation` (audit
@@ -1709,7 +2117,8 @@ export class OrderDetailsPageComponent {
    * la orden en `processing` cuando la cocina termina.
    */
   readonly requiresDispatchFlow = computed<boolean>(
-    () => (this.order()?.delivery_type || 'direct_delivery') === 'home_delivery',
+    () =>
+      (this.order()?.delivery_type || 'direct_delivery') === 'home_delivery',
   );
 
   /**
@@ -1732,8 +2141,10 @@ export class OrderDetailsPageComponent {
     });
   });
 
-  readonly kitchenBlocksWholeOrder = computed<boolean>(() =>
-    this.pendingKitchenItems().length > 0 || this.undeliveredKitchenItems().length > 0,
+  readonly kitchenBlocksWholeOrder = computed<boolean>(
+    () =>
+      this.pendingKitchenItems().length > 0 ||
+      this.undeliveredKitchenItems().length > 0,
   );
 
   /**
@@ -1766,7 +2177,8 @@ export class OrderDetailsPageComponent {
     (this.order()?.payments ?? []).some(
       (p) =>
         p.state === 'pending' &&
-        p.store_payment_method?.system_payment_method?.processing_mode === 'ONLINE',
+        p.store_payment_method?.system_payment_method?.processing_mode ===
+          'ONLINE',
     ),
   );
 
@@ -1781,7 +2193,9 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     if (!order) return 0;
     const blockedByBackend = !!order.available_actions?.some(
-      (a) => a.code === 'confirm_delivery' && a.reason === ORD_FINISH_UNPAID_BALANCE_CODE,
+      (a) =>
+        a.code === 'confirm_delivery' &&
+        a.reason === ORD_FINISH_UNPAID_BALANCE_CODE,
     );
     // Con división activa los pagos viven en las cuentas, no en la orden: el
     // espejo local (`payments` vacío => saldo = total) esconde «Finalizar» aun
@@ -1810,7 +2224,10 @@ export class OrderDetailsPageComponent {
 
   /** `pay` ofrecido y habilitado por el backend (no en processing). */
   readonly canRegisterUnpaidPayment = computed(
-    () => !!this.order()?.available_actions?.some((a) => a.code === 'pay' && a.enabled === true),
+    () =>
+      !!this.order()?.available_actions?.some(
+        (a) => a.code === 'pay' && a.enabled === true,
+      ),
   );
 
   /**
@@ -1859,7 +2276,8 @@ export class OrderDetailsPageComponent {
         type: 'alert',
         color: 'warning',
         icon: 'map-pin',
-        label: 'Esta orden no tiene dirección de entrega. Agrégala antes de despachar.',
+        label:
+          'Esta orden no tiene dirección de entrega. Agrégala antes de despachar.',
       } as OrderActionConfig);
     }
 
@@ -1908,7 +2326,8 @@ export class OrderDetailsPageComponent {
       'cancel',
     ]);
     const buttons = buildOrderActionButtons(order).filter(
-      (b) => !(order.active_financial_split_id && SPLIT_HIDDEN_BUTTONS.has(b.id)),
+      (b) =>
+        !(order.active_financial_split_id && SPLIT_HIDDEN_BUTTONS.has(b.id)),
     );
 
     // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
@@ -1940,13 +2359,20 @@ export class OrderDetailsPageComponent {
    */
   actionDisabledReason(action: OrderActionConfig): string {
     if (!action.reason) return GENERIC_ACTION_DISABLED_REASON;
-    return ERROR_MESSAGES[action.reason] ?? ACTION_REASON_FALLBACK[action.reason] ?? GENERIC_ACTION_DISABLED_REASON;
+    return (
+      ERROR_MESSAGES[action.reason] ??
+      ACTION_REASON_FALLBACK[action.reason] ??
+      GENERIC_ACTION_DISABLED_REASON
+    );
   }
 
   private cancellationPolicyMessage(order: Order | null): string {
     const code = order?.cancellation_policy?.reason_code;
     if (code) {
-      return ERROR_MESSAGES[code] ?? 'No se puede cancelar esta orden. Recarga el detalle para consultar el motivo.';
+      return (
+        ERROR_MESSAGES[code] ??
+        'No se puede cancelar esta orden. Recarga el detalle para consultar el motivo.'
+      );
     }
     return order
       ? `La orden en estado ${this.formatStatus(order.state)} no admite cancelación. Recarga el detalle para consultar las acciones disponibles.`
@@ -2010,14 +2436,25 @@ export class OrderDetailsPageComponent {
     if (!order) return [];
 
     const state = order.state;
-    const stateOrder = ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'];
+    const stateOrder = [
+      'created',
+      'pending_payment',
+      'processing',
+      'shipped',
+      'delivered',
+      'finished',
+    ];
     // B13 (release-855) — same `draft`/`pending_delivery` alias as
     // `lifecycleSteps` above; see `LIFECYCLE_STATE_ALIASES`.
     const stateIndex = stateOrder.indexOf(this.lifecycleLookupState(state));
 
     const steps = [
       { key: 'received', label: 'Orden recibida', status: 'pending' as string },
-      { key: 'preparing', label: 'Preparando envio', status: 'pending' as string },
+      {
+        key: 'preparing',
+        label: 'Preparando envio',
+        status: 'pending' as string,
+      },
       { key: 'in_transit', label: 'En camino', status: 'pending' as string },
       { key: 'delivered', label: 'Entregado', status: 'pending' as string },
     ];
@@ -2052,12 +2489,14 @@ export class OrderDetailsPageComponent {
     // if sortedTimeline ever returns a non-array, coerce.
     if (!Array.isArray(logs) || logs.length === 0) {
       const order = this.order();
-      return [{
-        key: 'created',
-        label: 'Orden Creada',
-        status: 'current' as const,
-        date: order ? this.formatDate(order.created_at) : '',
-      }];
+      return [
+        {
+          key: 'created',
+          label: 'Orden Creada',
+          status: 'current' as const,
+          date: order ? this.formatDate(order.created_at) : '',
+        },
+      ];
     }
     // order-truth-and-invoice-tz plan, Step 7 — `legacy:false` renders
     // ONLY from `order_events` (OrderEvent[]): deterministic label map by
@@ -2068,31 +2507,41 @@ export class OrderDetailsPageComponent {
       return events.map((evt, i) => ({
         key: `evt-${evt.id ?? i}`,
         label: this.getOrderEventLabel(evt),
-        status: i === events.length - 1 ? 'current' as const : 'completed' as const,
-        date: formatStoreDateTime(evt.created_at, this.settingsFacade.timezone()),
+        status:
+          i === events.length - 1
+            ? ('current' as const)
+            : ('completed' as const),
+        date: formatStoreDateTime(
+          evt.created_at,
+          this.settingsFacade.timezone(),
+        ),
         data: evt,
       }));
     }
     return logs.map((log, i) => ({
       key: `log-${i}`,
       label: this.getTimelineLabel(log),
-      status: i === logs.length - 1 ? 'current' as const : 'completed' as const,
+      status:
+        i === logs.length - 1 ? ('current' as const) : ('completed' as const),
       date: this.formatDate(log.created_at),
       data: log,
     }));
   });
 
   readonly lifecycle_steps_timeline = computed<TimelineStep[]>(() =>
-    this.lifecycleSteps().map(step => ({
+    this.lifecycleSteps().map((step) => ({
       ...step,
-      variant: step.status === 'terminal'
-        ? (step.key === 'cancelled' ? 'danger' : 'warning') as TimelineVariant
-        : 'default' as TimelineVariant,
+      variant:
+        step.status === 'terminal'
+          ? ((step.key === 'cancelled'
+              ? 'danger'
+              : 'warning') as TimelineVariant)
+          : ('default' as TimelineVariant),
     })),
   );
 
   readonly tracking_steps_timeline = computed<TimelineStep[]>(() =>
-    this.trackingSteps().map(step => ({
+    this.trackingSteps().map((step) => ({
       key: step.key,
       label: step.label,
       status: step.status as TimelineStep['status'],
@@ -2103,12 +2552,12 @@ export class OrderDetailsPageComponent {
   // ── Credit Order Computed Signals ────────────────────────────
   readonly isCreditOrder = computed(() => this.order()?.payment_form === '2');
 
-  readonly isInstallmentCredit = computed(() =>
-    this.isCreditOrder() && this.order()?.credit_type === 'installments'
+  readonly isInstallmentCredit = computed(
+    () => this.isCreditOrder() && this.order()?.credit_type === 'installments',
   );
 
-  readonly isFreeCredit = computed(() =>
-    this.isCreditOrder() && this.order()?.credit_type === 'free'
+  readonly isFreeCredit = computed(
+    () => this.isCreditOrder() && this.order()?.credit_type === 'free',
   );
 
   readonly creditTotal = computed(() => {
@@ -2119,7 +2568,9 @@ export class OrderDetailsPageComponent {
 
   readonly totalPaid = computed(() => Number(this.order()?.total_paid) || 0);
 
-  readonly remainingBalance = computed(() => Number(this.order()?.remaining_balance) || 0);
+  readonly remainingBalance = computed(
+    () => Number(this.order()?.remaining_balance) || 0,
+  );
 
   readonly paymentProgress = computed(() => {
     const total = this.creditTotal();
@@ -2130,9 +2581,14 @@ export class OrderDetailsPageComponent {
   readonly nextInstallment = computed(() => {
     const installments = this.order()?.order_installments;
     if (!installments) return null;
-    return installments.find(
-      (i) => i.state === 'overdue' || i.state === 'pending' || i.state === 'partial'
-    ) || null;
+    return (
+      installments.find(
+        (i) =>
+          i.state === 'overdue' ||
+          i.state === 'pending' ||
+          i.state === 'partial',
+      ) || null
+    );
   });
 
   readonly overdueCount = computed(() => {
@@ -2154,7 +2610,14 @@ export class OrderDetailsPageComponent {
       const gt = Number(this.order()?.grand_total) || 0;
       return twi > gt ? Math.round((twi - gt) * 100) / 100 : 0;
     }
-    return Math.round(installments.reduce((sum: number, i: any) => sum + (Number(i.interest_amount) || 0), 0) * 100) / 100;
+    return (
+      Math.round(
+        installments.reduce(
+          (sum: number, i: any) => sum + (Number(i.interest_amount) || 0),
+          0,
+        ) * 100,
+      ) / 100
+    );
   });
 
   readonly effectiveInterestPercent = computed(() => {
@@ -2201,7 +2664,12 @@ export class OrderDetailsPageComponent {
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    { id: 'print', label: 'Imprimir ticket', variant: 'outline', icon: 'printer' },
+    {
+      id: 'print',
+      label: 'Imprimir ticket',
+      variant: 'outline',
+      icon: 'printer',
+    },
     // Tiquete de despacho del gate (`formatType: 'dispatch_ticket'` desde
     // los datos de la orden). Siempre habilitado.
     {
@@ -2337,7 +2805,9 @@ export class OrderDetailsPageComponent {
     );
 
     this.currencySymbol = this.currencyService.currencySymbol;
-    this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
+    this.isPrivilegedUser.set(
+      this.authFacade.isAdmin() || this.authFacade.isOwner(),
+    );
 
     this.shippingAssignForm = this.fb.group({
       shipping_method_id: [null],
@@ -2381,25 +2851,6 @@ export class OrderDetailsPageComponent {
       .get('target_state')
       ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((state) => this.syncResolvePayoutValidators(state));
-
-    this.fastTrackForm = this.fb.group({
-      payment: this.fb.group({
-        // Holds the StorePaymentMethod.id (string) selected via [ngValue]="pm.id";
-        // coerced to number for store_payment_method_id at submit time.
-        payment_method_id: this.fb.control<string | null>(null),
-        amount: this.fb.control<number | null>(null),
-        reference: this.fb.control<string>(''),
-      }),
-      ship: this.fb.group({
-        tracking_number: this.fb.control<string>(''),
-        carrier: this.fb.control<string>(''),
-        notes: this.fb.control<string>(''),
-      }),
-      deliver: this.fb.group({
-        delivered_to: this.fb.control<string>(''),
-        delivery_notes: this.fb.control<string>(''),
-      }),
-    });
 
     // Una sola lectura por montaje del detalle: `is_live` cambia cuando el
     // comerciante promueve a producción desde Configuración fiscal, no
@@ -2462,13 +2913,13 @@ export class OrderDetailsPageComponent {
         ofType(InvoicingActions.createCreditNoteFailure),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe((failure) => this.onRefundNoteCreateFailed(failure.error));
+      .subscribe((failure) => this.onRefundNoteCreateFailed(failure));
     this.invoicingActions$
       .pipe(
         ofType(InvoicingActions.issueNoteSuccess),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(() => this.onRefundNoteIssued());
+      .subscribe(({ invoice }) => this.onRefundNoteIssued(invoice));
     this.invoicingActions$
       .pipe(
         ofType(InvoicingActions.issueNoteFailure),
@@ -2476,44 +2927,34 @@ export class OrderDetailsPageComponent {
       )
       .subscribe((failure) => this.onRefundNoteIssueFailed(failure.error));
 
-    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
-      this.orderId = params.get('id');
-      // QUI-885: al cambiar de orden se cierra la configuración de reparto.
-      this.showSplitConfig.set(false);
-      // QUI-886: se capturan los query params que el listado preservó en la
-      // URL del detalle para devolverlos en "Volver".
-      const qp = this.route.snapshot.queryParamMap;
-      const back: Record<string, string> = {};
-      for (const key of qp.keys) {
-        const value = qp.get(key);
-        if (value != null) back[key] = value;
-      }
-      this.listReturnQuery.set(Object.keys(back).length > 0 ? back : undefined);
-      if (this.orderId) {
-        // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
-        // Idempotente: si navegamos a otra orden, connect() cierra la
-        // anterior y abre una nueva.
-        this.orderDetailSse.connect(Number(this.orderId));
-        this.loadData();
-      }
-    });
-
-    // Bug 2 — preselect the first payment method in the fast-track modal.
-    // paymentMethods() loads async, so we cannot set it in openFastTrackModal().
-    // This effect reacts to the methods list, the modal being open, and the
-    // order's payment state (hasSuccessfulPayment reads the order() signal),
-    // patching the control only while it is still empty.
-    effect(() => {
-      const methods = this.paymentMethods();
-      if (
-        this.showFastTrackModal() &&
-        !this.hasSuccessfulPayment() &&
-        methods.length > 0 &&
-        this.fastTrackForm.get('payment')?.get('payment_method_id')?.value == null
-      ) {
-        this.fastTrackForm.get('payment')?.patchValue({ payment_method_id: methods[0].id });
-      }
-    });
+    this.route.paramMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        this.refundNoteState.set(null);
+        this.refundSourceChoices.set({});
+        this.refundShippingChoice.set(null);
+        this.orderId = params.get('id');
+        // QUI-885: al cambiar de orden se cierra la configuración de reparto.
+        this.showSplitConfig.set(false);
+        // QUI-886: se capturan los query params que el listado preservó en la
+        // URL del detalle para devolverlos en "Volver".
+        const qp = this.route.snapshot.queryParamMap;
+        const back: Record<string, string> = {};
+        for (const key of qp.keys) {
+          const value = qp.get(key);
+          if (value != null) back[key] = value;
+        }
+        this.listReturnQuery.set(
+          Object.keys(back).length > 0 ? back : undefined,
+        );
+        if (this.orderId) {
+          // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
+          // Idempotente: si navegamos a otra orden, connect() cierra la
+          // anterior y abre una nueva.
+          this.orderDetailSse.connect(Number(this.orderId));
+          this.loadData();
+        }
+      });
 
     // Carril B - B3: cuando llega un evento relevante al SSE, re-hidrata el
     // detalle. `lastRelevantEvent()` ya filtra por order_id en el cliente;
@@ -2535,7 +2976,11 @@ export class OrderDetailsPageComponent {
   }
 
   /** Resumen de la división para la franja informativa de la orden principal. */
-  readonly splitSummary = signal<{ accounts: number; total: number; paid: number } | null>(null);
+  readonly splitSummary = signal<{
+    accounts: number;
+    total: number;
+    paid: number;
+  } | null>(null);
 
   /**
    * Scroll + foco al panel de cuentas (`#splitAccountsAnchor`), mismo patrón
@@ -2579,7 +3024,14 @@ export class OrderDetailsPageComponent {
     } else {
       this.splitSummary.set(null);
     }
-    this.order.update((order) => order ? { ...order, active_financial_split_id: result?.split_group_id ?? null } : order);
+    this.order.update((order) =>
+      order
+        ? {
+            ...order,
+            active_financial_split_id: result?.split_group_id ?? null,
+          }
+        : order,
+    );
   }
 
   onFinancialAccountsChanged(result: SplitResult | null): void {
@@ -2608,7 +3060,7 @@ export class OrderDetailsPageComponent {
           // and "$0" totals).
           const orderData =
             order && typeof order === 'object' && 'success' in order
-              ? (order as any).data ?? order
+              ? ((order as any).data ?? order)
               : order;
           this.order.set({
             ...orderData,
@@ -2620,16 +3072,22 @@ export class OrderDetailsPageComponent {
             tip_amount: Number(orderData.tip_amount ?? 0),
             total_paid: Number(orderData.total_paid) || 0,
             remaining_balance: Number(orderData.remaining_balance) || 0,
-            total_with_interest: orderData.total_with_interest ? Number(orderData.total_with_interest) : undefined,
-            interest_rate: orderData.interest_rate ? Number(orderData.interest_rate) : undefined,
-            order_installments: (orderData.order_installments || []).map((inst: any) => ({
-              ...inst,
-              amount: Number(inst.amount),
-              capital_amount: Number(inst.capital_amount),
-              interest_amount: Number(inst.interest_amount),
-              amount_paid: Number(inst.amount_paid),
-              remaining_balance: Number(inst.remaining_balance),
-            })),
+            total_with_interest: orderData.total_with_interest
+              ? Number(orderData.total_with_interest)
+              : undefined,
+            interest_rate: orderData.interest_rate
+              ? Number(orderData.interest_rate)
+              : undefined,
+            order_installments: (orderData.order_installments || []).map(
+              (inst: any) => ({
+                ...inst,
+                amount: Number(inst.amount),
+                capital_amount: Number(inst.capital_amount),
+                interest_amount: Number(inst.interest_amount),
+                amount_paid: Number(inst.amount_paid),
+                remaining_balance: Number(inst.remaining_balance),
+              }),
+            ),
             order_items: (orderData.order_items || []).map((item: any) => ({
               ...item,
               unit_price: Number(item.unit_price),
@@ -2675,9 +3133,14 @@ export class OrderDetailsPageComponent {
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment
-          const needsPayment = orderData.state === 'draft' || orderData.state === 'created' ||
+          const needsPayment =
+            orderData.state === 'draft' ||
+            orderData.state === 'created' ||
             orderData.payment_form === '2' ||
-            (orderData.state === 'shipped' && !(orderData.payments || []).some((p: any) => p.state === 'succeeded'));
+            (orderData.state === 'shipped' &&
+              !(orderData.payments || []).some(
+                (p: any) => p.state === 'succeeded',
+              ));
           if (needsPayment) {
             this.loadPaymentMethods();
           }
@@ -2869,12 +3332,16 @@ export class OrderDetailsPageComponent {
     const dto: PayOrderDto & { bank_account_id?: number } = {
       store_payment_method_id: submit.storePaymentMethodId,
       payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
-      ...(submit.amountReceived != null ? { amount_received: submit.amountReceived } : {}),
+      ...(submit.amountReceived != null
+        ? { amount_received: submit.amountReceived }
+        : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
       // Cuenta bancaria del cobro escalar (transferencia): el backend la valida
       // y la persiste; en el registro manual es la cuenta preseleccionada del
       // pago online (o la que el cajero cambió).
-      ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
+      ...(submit.bankAccountId != null
+        ? { bank_account_id: submit.bankAccountId }
+        : {}),
     };
 
     // Cobro multimétodo de contado: con 2+ tramos se envía `payments[]` y se
@@ -2892,9 +3359,13 @@ export class OrderDetailsPageComponent {
       dto.payments = legs.map((leg) => ({
         store_payment_method_id: leg.storePaymentMethodId,
         amount: leg.amount,
-        ...(leg.amountReceived != null ? { amount_received: leg.amountReceived } : {}),
+        ...(leg.amountReceived != null
+          ? { amount_received: leg.amountReceived }
+          : {}),
         ...(leg.reference ? { payment_reference: leg.reference } : {}),
-        ...(leg.bankAccountId != null ? { bank_account_id: leg.bankAccountId } : {}),
+        ...(leg.bankAccountId != null
+          ? { bank_account_id: leg.bankAccountId }
+          : {}),
       }));
     }
 
@@ -2903,7 +3374,8 @@ export class OrderDetailsPageComponent {
     // (it charges the full order total), so only attach it for the credit path…
     if (isCredit) {
       dto.amount = submit.amount;
-      if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+      if (submit.installmentId != null)
+        dto.installment_id = submit.installmentId;
     } else if (this.isManualPayPending()) {
       // …and for the Fase 2 (paso 8) manual-registration lane, where `flow/pay`
       // charges `amount`: partial when below the balance, exact otherwise.
@@ -2936,47 +3408,45 @@ export class OrderDetailsPageComponent {
       ? this.ordersService.flowCreditPayment(this.orderId, dto)
       : this.ordersService.flowPayOrder(this.orderId, dto);
 
-    request$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (res) => {
-          this.showPayModal.set(false);
-          this.isProcessingAction.set(false);
-          const changeMsg = res.payment?.change
-            ? ` — Cambio: ${this.currencyService.format(res.payment.change)}`
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => {
+        this.showPayModal.set(false);
+        this.isProcessingAction.set(false);
+        const changeMsg = res.payment?.change
+          ? ` — Cambio: ${this.currencyService.format(res.payment.change)}`
+          : '';
+        this.toastService.success(`Pago registrado exitosamente${changeMsg}`);
+        this.loadData();
+      },
+      error: (err: unknown) => {
+        this.isProcessingAction.set(false);
+        this.payModalError.set(err);
+        // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
+        // (store-orders.service): un `Error` con el `errorCode` de
+        // superficie en camelCase y el `HttpErrorResponse` crudo en
+        // `cause`. Se lee el wrapper primero y se cae a `parseApiError`
+        // sobre la causa (mismo patrón que `isTitularLockedError`):
+        // pasarle el wrapper tal cual siempre da `errorCode: null`.
+        const wrapped = err as {
+          errorCode?: string | null;
+          cause?: unknown;
+        } | null;
+        const parsed = parseApiError(wrapped?.cause ?? err);
+        const surface = wrapped?.errorCode ?? parsed.errorCode ?? '';
+        const causeDetails = parsed.details as { cause_code?: unknown } | null;
+        const cause =
+          typeof causeDetails?.cause_code === 'string'
+            ? causeDetails.cause_code
             : '';
-          this.toastService.success(`Pago registrado exitosamente${changeMsg}`);
-          this.loadData();
-        },
-        error: (err: unknown) => {
-          this.isProcessingAction.set(false);
-          this.payModalError.set(err);
-          // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
-          // (store-orders.service): un `Error` con el `errorCode` de
-          // superficie en camelCase y el `HttpErrorResponse` crudo en
-          // `cause`. Se lee el wrapper primero y se cae a `parseApiError`
-          // sobre la causa (mismo patrón que `isTitularLockedError`):
-          // pasarle el wrapper tal cual siempre da `errorCode: null`.
-          const wrapped = err as {
-            errorCode?: string | null;
-            cause?: unknown;
-          } | null;
-          const parsed = parseApiError(wrapped?.cause ?? err);
-          const surface = wrapped?.errorCode ?? parsed.errorCode ?? '';
-          const causeDetails = parsed.details as { cause_code?: unknown } | null;
-          const cause =
-            typeof causeDetails?.cause_code === 'string'
-              ? causeDetails.cause_code
-              : '';
-          const code = this.MULTI_TENDER_COPY[surface] ? surface : cause;
-          const message =
-            (code && this.MULTI_TENDER_COPY[code]) ||
-            parsed.userMessage ||
-            (err as { message?: string })?.message ||
-            'Error al registrar el pago';
-          this.toastService.error(message);
-        },
-      });
+        const code = this.MULTI_TENDER_COPY[surface] ? surface : cause;
+        const message =
+          (code && this.MULTI_TENDER_COPY[code]) ||
+          parsed.userMessage ||
+          (err as { message?: string })?.message ||
+          'Error al registrar el pago';
+        this.toastService.error(message);
+      },
+    });
   }
 
   openShipModal(): void {
@@ -3009,7 +3479,9 @@ export class OrderDetailsPageComponent {
         this.isProcessingAction.set(false);
         this.isManualShipMode.set(false);
         this.toastService.success(
-          isManual ? 'Orden despachada sin confirmar pago' : 'Orden marcada como enviada',
+          isManual
+            ? 'Orden despachada sin confirmar pago'
+            : 'Orden marcada como enviada',
         );
         this.loadData();
       },
@@ -3036,7 +3508,9 @@ export class OrderDetailsPageComponent {
    */
   openDispatchSelector(): void {
     if (this.kitchenBlocksWholeOrder()) {
-      this.toastService.warning('Entrega o cancela los platos pendientes de cocina antes de despachar toda la orden.');
+      this.toastService.warning(
+        'Entrega o cancela los platos pendientes de cocina antes de despachar toda la orden.',
+      );
       return;
     }
     // Gate obligatorio: un envío a domicilio sin dirección no se puede
@@ -3070,17 +3544,17 @@ export class OrderDetailsPageComponent {
 
   /** Nombre del cliente para el subtítulo del modal de dirección. */
   readonly shippingAddressCustomerName = computed<string>(() => {
-    const o = this.order() as
-      | {
-          customer?: { name?: string; first_name?: string; last_name?: string };
-          customer_name?: string;
-        }
-      | null;
+    const o = this.order() as {
+      customer?: { name?: string; first_name?: string; last_name?: string };
+      customer_name?: string;
+    } | null;
     if (!o) return '';
     return (
       o.customer?.name ||
       o.customer_name ||
-      [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') ||
+      [o.customer?.first_name, o.customer?.last_name]
+        .filter(Boolean)
+        .join(' ') ||
       ''
     );
   });
@@ -3146,7 +3620,10 @@ export class OrderDetailsPageComponent {
    * refleje los cambios. A diferencia del modo crear, NO hace
    * `PATCH /store/orders/:id` (la relación ya existe — solo mutamos la address).
    */
-  onShippingAddressEdit(event: { addressId: number; payload: UpdateAddressPayload }): void {
+  onShippingAddressEdit(event: {
+    addressId: number;
+    payload: UpdateAddressPayload;
+  }): void {
     const order = this.order();
     if (!order || this.savingShippingAddress()) return;
     this.savingShippingAddress.set(true);
@@ -3163,7 +3640,9 @@ export class OrderDetailsPageComponent {
         error: (err: unknown) => {
           this.savingShippingAddress.set(false);
           const message =
-            err instanceof Error ? err.message : 'No se pudo actualizar la dirección';
+            err instanceof Error
+              ? err.message
+              : 'No se pudo actualizar la dirección';
           this.toastService.error(message);
         },
       });
@@ -3200,7 +3679,9 @@ export class OrderDetailsPageComponent {
         error: (err: unknown) => {
           this.savingShippingAddress.set(false);
           const message =
-            err instanceof Error ? err.message : 'No se pudo asignar la dirección';
+            err instanceof Error
+              ? err.message
+              : 'No se pudo asignar la dirección';
           this.toastService.error(message);
         },
       });
@@ -3315,12 +3796,17 @@ export class OrderDetailsPageComponent {
         }),
       );
       await firstValueFrom(
-        this.dispatchNotesService.deliver(note.id, { courier_name: courierName }),
+        this.dispatchNotesService.deliver(note.id, {
+          courier_name: courierName,
+        }),
       );
       this.toastService.success('Orden entregada');
       this.loadData();
     } catch (err: any) {
-      this.showDeliveryStockError(err, 'No se pudo completar la entrega directa');
+      this.showDeliveryStockError(
+        err,
+        'No se pudo completar la entrega directa',
+      );
     } finally {
       this.isProcessingAction.set(false);
     }
@@ -3536,7 +4022,11 @@ export class OrderDetailsPageComponent {
     // Fase 2 (paso 8): un pago manual nunca se confirma con un clic — se
     // REGISTRA (monto + método) por el modal de cobro (`flow/pay`). El backend
     // rechaza al personal en `confirm-payment` con 409 en este caso.
-    if (this.isCodPending() || this.isManualPayPending() || this.hasUnregisteredBalance()) {
+    if (
+      this.isCodPending() ||
+      this.isManualPayPending() ||
+      this.hasUnregisteredBalance()
+    ) {
       this.openPayModal();
       return;
     }
@@ -3571,8 +4061,13 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.message || 'Error al confirmar el pago');
-              if ((err as { errorCode?: string | null })?.errorCode === 'ORD_CONFIRM_PAYMENT_NO_PAYMENT_001') {
+              this.toastService.error(
+                err.message || 'Error al confirmar el pago',
+              );
+              if (
+                (err as { errorCode?: string | null })?.errorCode ===
+                'ORD_CONFIRM_PAYMENT_NO_PAYMENT_001'
+              ) {
                 this.loadData();
                 this.openPayModal();
               }
@@ -3612,14 +4107,19 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              if ((err as { errorCode?: string | null })?.errorCode === ORD_FINISH_UNPAID_BALANCE_CODE) {
+              if (
+                (err as { errorCode?: string | null })?.errorCode ===
+                ORD_FINISH_UNPAID_BALANCE_CODE
+              ) {
                 this.toastService.error(
-                  (err as Error)?.message || 'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
+                  (err as Error)?.message ||
+                    'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
                 );
                 this.loadData();
                 return;
               }
-              const pendingKitchen = (err as { errorCode?: string | null })?.errorCode ===
+              const pendingKitchen =
+                (err as { errorCode?: string | null })?.errorCode ===
                 'ORDER_HAS_PENDING_KITCHEN_ITEMS';
               const dishes = pendingKitchen
                 ? pendingKitchenLabelsFromError(err)
@@ -3640,7 +4140,8 @@ export class OrderDetailsPageComponent {
     this.dialogService
       .confirm({
         title: 'Lista para recogida sin pago',
-        message: '¿Marcar esta orden como lista para recogida sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
+        message:
+          '¿Marcar esta orden como lista para recogida sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
         confirmText: 'Marcar como lista',
         cancelText: 'Cancelar',
         confirmVariant: 'primary',
@@ -3655,12 +4156,16 @@ export class OrderDetailsPageComponent {
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
-              this.toastService.success('Orden marcada como lista para recogida');
+              this.toastService.success(
+                'Orden marcada como lista para recogida',
+              );
               this.loadData();
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.message || 'Error al actualizar el estado de la orden');
+              this.toastService.error(
+                err.message || 'Error al actualizar el estado de la orden',
+              );
             },
           });
       });
@@ -3715,7 +4220,9 @@ export class OrderDetailsPageComponent {
    * (leer `form.value` dentro de un `computed` no se recomputa: no es
    * un signal). Reusar queda preseleccionado; el operador puede cambiarlo.
    */
-  readonly cancelKitchenDisposition = signal<KitchenDisposition | null>('reuse');
+  readonly cancelKitchenDisposition = signal<KitchenDisposition | null>(
+    'reuse',
+  );
 
   /**
    * Gate del botón confirmar (además de `cancelForm.invalid`, que el
@@ -3759,7 +4266,9 @@ export class OrderDetailsPageComponent {
 
     // La decisión solo viaja con ≥1 plato avanzado; sin fired o solo
     // pendientes el body queda `{ reason }` y se conserva el reintegro automático.
-    const disposition = this.cancelRequiresDisposition() ? this.cancelKitchenDisposition() : null;
+    const disposition = this.cancelRequiresDisposition()
+      ? this.cancelKitchenDisposition()
+      : null;
     const payload: FlowCancelOrderDto = {
       ...this.cancelForm.value,
       ...(disposition != null ? { kitchenDisposition: disposition } : {}),
@@ -3795,7 +4304,9 @@ export class OrderDetailsPageComponent {
           this.toastService.error(
             forbidden
               ? 'Requiere permiso de cancelar comandas (owner/admin)'
-              : (err as Error)?.message || parsed.userMessage || 'Error al cancelar la orden',
+              : (err as Error)?.message ||
+                  parsed.userMessage ||
+                  'Error al cancelar la orden',
           );
         },
       });
@@ -3904,14 +4415,17 @@ export class OrderDetailsPageComponent {
       payout_reference?: string | null;
       payout_channel?: string | null;
     };
-    const targetState = (formValue.target_state ?? 'completed') as 'completed' | 'failed';
+    const targetState = (formValue.target_state ?? 'completed') as
+      | 'completed'
+      | 'failed';
     const payload: ResolveRefundPayload = {
       target_state: targetState,
       resolution_notes: (formValue.resolution_notes ?? '').trim(),
     };
     if (targetState === 'completed') {
       payload.payout_reference = (formValue.payout_reference ?? '').trim();
-      payload.payout_channel = formValue.payout_channel as ResolveRefundPayload['payout_channel'];
+      payload.payout_channel =
+        formValue.payout_channel as ResolveRefundPayload['payout_channel'];
     }
 
     this.ordersFlowService
@@ -3984,8 +4498,13 @@ export class OrderDetailsPageComponent {
           // Backend may return a list of missing products under
           // err.error.details.missing. Surface them so the operator knows
           // exactly what to restock before retrying.
-          const missing: Array<{ product_name: string; available: number; required: number }> | undefined =
-            err?.error?.details?.missing;
+          const missing:
+            | Array<{
+                product_name: string;
+                available: number;
+                required: number;
+              }>
+            | undefined = err?.error?.details?.missing;
           const base = err.message || 'Error al reactivar la orden';
           if (Array.isArray(missing) && missing.length > 0) {
             const list = missing
@@ -4003,65 +4522,41 @@ export class OrderDetailsPageComponent {
   }
 
   openFastTrackModal(): void {
-    if (this.paymentMethods().length === 0) {
-      this.loadPaymentMethods();
-    }
-    const order = this.order();
-    if (order && !this.hasSuccessfulPayment()) {
-      this.fastTrackForm.get('payment')?.patchValue({ amount: Number(order.grand_total) || 0 });
-    }
+    if (this.paymentMethods().length === 0) this.loadPaymentMethods();
     this.showFastTrackModal.set(true);
   }
 
-  submitFastTrack(): void {
+  submitFastTrack(submission: OrderCompletionSubmission): void {
     if (!this.orderId) return;
-
-    const paymentGroup = this.fastTrackForm.get('payment')!.value as { payment_method_id: string | null; amount: number | null; reference: string };
-    const shipGroup = this.fastTrackForm.get('ship')!.value as Record<string, unknown>;
-    const deliverGroup = this.fastTrackForm.get('deliver')!.value as Record<string, unknown>;
-
-    const dto: FastTrackOrderDto = {};
-    if (!this.hasSuccessfulPayment() && paymentGroup.payment_method_id) {
-      // PayOrderDto expects store_payment_method_id (number), payment_type
-      // and amount_received/payment_reference — NOT the legacy
-      // payment_method_id/amount/reference names. POS flow defaults to 'direct'.
-      dto.payment = {
-        store_payment_method_id: Number(paymentGroup.payment_method_id),
-        payment_type: 'direct',
-        amount_received: Number(paymentGroup.amount) || undefined,
-        payment_reference: paymentGroup.reference || undefined,
-      };
-    }
-    const shipClean = this.compactObject(shipGroup);
-    if (Object.keys(shipClean).length) dto.ship = shipClean as any;
-    const deliverClean = this.compactObject(deliverGroup);
-    if (Object.keys(deliverClean).length) dto.deliver = deliverClean as any;
-
     this.isProcessingAction.set(true);
-    this.ordersService
-      .flowFastTrack(this.orderId, dto)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.isProcessingAction.set(false);
-          this.showFastTrackModal.set(false);
-          this.fastTrackEnabled.set(false);
+    const process$ = submission.shipping
+      ? this.ordersService
+          .assignShippingMethod(this.orderId, submission.shipping)
+          .pipe(
+            switchMap(() =>
+              this.ordersService.flowFastTrack(this.orderId!, submission.flow),
+            ),
+          )
+      : this.ordersService.flowFastTrack(this.orderId, submission.flow);
+    process$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (result) => {
+        this.isProcessingAction.set(false);
+        this.showFastTrackModal.set(false);
+        this.fastTrackEnabled.set(false);
+        if (result?.state === 'finished') {
           this.toastService.success('Orden procesada exitosamente');
-          this.loadData();
-        },
-        error: (err) => {
-          this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al procesar la orden');
-        },
-      });
-  }
-
-  private compactObject<T extends Record<string, any>>(obj: T): Partial<T> {
-    const out: any = {};
-    Object.keys(obj).forEach(k => {
-      if (obj[k] !== '' && obj[k] !== null && obj[k] !== undefined) out[k] = obj[k];
+        } else {
+          this.toastService.info(
+            'La orden quedó despachada y pendiente de entrega. Confirma la entrega cuando el cliente reciba el pedido.',
+          );
+        }
+        this.loadData();
+      },
+      error: (err) => {
+        this.isProcessingAction.set(false);
+        this.toastService.error(err.message || 'Error al procesar la orden');
+      },
     });
-    return out;
   }
 
   openRefundModal(): void {
@@ -4070,7 +4565,9 @@ export class OrderDetailsPageComponent {
     // (banner fiscal `open-refund`, link por línea) y llamadas directas.
     const order = this.order();
     if (!order || !['delivered', 'finished'].includes(order.state)) {
-      this.toastService.info('Solo se pueden reembolsar órdenes entregadas o finalizadas.');
+      this.toastService.info(
+        'Solo se pueden reembolsar órdenes entregadas o finalizadas.',
+      );
       return;
     }
     if (!this.hasRefundableBalance()) {
@@ -4232,10 +4729,7 @@ export class OrderDetailsPageComponent {
         'explicit',
       );
     } catch (err) {
-      console.error(
-        '[QUI-764b] Error al imprimir tiquete de despacho:',
-        err,
-      );
+      console.error('[QUI-764b] Error al imprimir tiquete de despacho:', err);
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
     }
   }
@@ -4260,8 +4754,7 @@ export class OrderDetailsPageComponent {
     const el = document.getElementById('gestionEnvioAnchor');
     if (!el) return;
     const reduceMotion =
-      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ??
-      false;
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
     el.scrollIntoView({
       behavior: reduceMotion ? 'auto' : 'smooth',
       block: 'start',
@@ -4298,7 +4791,8 @@ export class OrderDetailsPageComponent {
       // y para llevar. Same flag, mismo origen, mismo predicado compartido
       // con el POS.
       counterEnabled:
-        this.settingsFacade.receipts()?.print_dispatch_ticket_on_counter ?? false,
+        this.settingsFacade.receipts()?.print_dispatch_ticket_on_counter ??
+        false,
       deliveryType: order.delivery_type,
       isShippingSale: (order as any)?.isShippingSale,
     };
@@ -4311,7 +4805,10 @@ export class OrderDetailsPageComponent {
       );
     } catch (err) {
       // El servicio ya mostró el toast persistente; aquí sólo dejamos rastro.
-      console.error('[QUI-731] Auto-print del tiquete de despacho no completó:', err);
+      console.error(
+        '[QUI-731] Auto-print del tiquete de despacho no completó:',
+        err,
+      );
     }
   }
 
@@ -4334,7 +4831,8 @@ export class OrderDetailsPageComponent {
       dispatchedQty: Number(item.quantity || 0),
     }));
 
-    const relationAddress = order.addresses_orders_shipping_address_idToaddresses;
+    const relationAddress =
+      order.addresses_orders_shipping_address_idToaddresses;
     let address: Address | null = null;
     if (relationAddress?.address_line1?.toString().trim()) {
       address = relationAddress;
@@ -4378,7 +4876,8 @@ export class OrderDetailsPageComponent {
     // `status: { not: 'voided' }` del lado servidor.
     // Si dispatchNotes() aún no cargó, queda vacío (sin línea).
     const courierName =
-      this.dispatchNotes().find((n) => !!n.courier_name?.trim())
+      this.dispatchNotes()
+        .find((n) => !!n.courier_name?.trim())
         ?.courier_name?.trim() || undefined;
 
     // QUI-889 (rev 868) — instante real del despacho: última remisión no
@@ -4391,9 +4890,7 @@ export class OrderDetailsPageComponent {
       .filter((n) => n.status !== 'draft' && n.status !== 'voided')
       .sort((a, b) => instantOf(b) - instantOf(a))[0];
     const dispatchAt = latestDispatch
-      ? new Date(
-          latestDispatch.confirmed_at ?? latestDispatch.created_at,
-        )
+      ? new Date(latestDispatch.confirmed_at ?? latestDispatch.created_at)
       : null;
 
     return {
@@ -4445,7 +4942,8 @@ export class OrderDetailsPageComponent {
       .getByOrder(numericOrderId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (notes) => this.dispatchNotes.set(Array.isArray(notes) ? notes : []),
+        next: (notes) =>
+          this.dispatchNotes.set(Array.isArray(notes) ? notes : []),
         error: () => this.dispatchNotes.set([]),
       });
   }
@@ -4464,7 +4962,9 @@ export class OrderDetailsPageComponent {
     const stop = (note.dispatch_route_stops ?? []).find(
       (s) => s.status !== 'released' && !!s.route,
     );
-    return stop?.route ? { id: stop.route.id, route_number: stop.route.route_number } : null;
+    return stop?.route
+      ? { id: stop.route.id, route_number: stop.route.route_number }
+      : null;
   }
 
   /** Navigate to the dispatch-note (remisión) detail page. */
@@ -4492,7 +4992,7 @@ export class OrderDetailsPageComponent {
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (methods) => {
-            this.shippingMethods.set(methods.filter(m => m.is_active));
+            this.shippingMethods.set(methods.filter((m) => m.is_active));
             this.isLoadingShippingMethods.set(false);
           },
           error: () => {
@@ -4508,7 +5008,10 @@ export class OrderDetailsPageComponent {
     this.selectedShippingRateId.set(null);
     this.calculatedRate.set(null);
     this.manualCostOverride.set(false);
-    this.shippingAssignForm.patchValue({ shipping_method_id: methodId, shipping_cost: 0 });
+    this.shippingAssignForm.patchValue({
+      shipping_method_id: methodId,
+      shipping_cost: 0,
+    });
 
     const order = this.order();
     const address = order?.addresses_orders_shipping_address_idToaddresses;
@@ -4516,12 +5019,14 @@ export class OrderDetailsPageComponent {
 
     if (!address || items.length === 0) {
       this.manualCostOverride.set(true);
-      this.toastService.warning('Sin direccion o items: ingresa el costo manualmente');
+      this.toastService.warning(
+        'Sin direccion o items: ingresa el costo manualmente',
+      );
       return;
     }
 
     this.isCalculatingRate.set(true);
-    const payloadItems = items.map(i => ({
+    const payloadItems = items.map((i) => ({
       product_id: Number(i.product_id),
       quantity: Number(i.quantity),
       price: Number(i.unit_price),
@@ -4538,7 +5043,7 @@ export class OrderDetailsPageComponent {
       .subscribe({
         next: (options: PosShippingOption[]) => {
           this.isCalculatingRate.set(false);
-          const match = options.find(o => o.method_id === methodId);
+          const match = options.find((o) => o.method_id === methodId);
           if (match && (match as any).rate_id) {
             this.calculatedRate.set({
               rate_id: (match as any).rate_id,
@@ -4546,16 +5051,22 @@ export class OrderDetailsPageComponent {
               rate_name: (match as any).rate_name,
               zone: (match as any).zone_name,
             });
-            this.shippingAssignForm.patchValue({ shipping_cost: Number(match.cost) });
+            this.shippingAssignForm.patchValue({
+              shipping_cost: Number(match.cost),
+            });
           } else {
             this.manualCostOverride.set(true);
-            this.toastService.warning('Este metodo no tiene tarifa para la direccion del cliente. Ingresa el costo manual.');
+            this.toastService.warning(
+              'Este metodo no tiene tarifa para la direccion del cliente. Ingresa el costo manual.',
+            );
           }
         },
         error: () => {
           this.isCalculatingRate.set(false);
           this.manualCostOverride.set(true);
-          this.toastService.error('No se pudo calcular la tarifa. Ingresa el costo manual.');
+          this.toastService.error(
+            'No se pudo calcular la tarifa. Ingresa el costo manual.',
+          );
         },
       });
   }
@@ -4563,7 +5074,9 @@ export class OrderDetailsPageComponent {
   toggleManualCost(checked: boolean): void {
     this.manualCostOverride.set(checked);
     if (!checked && this.calculatedRate()) {
-      this.shippingAssignForm.patchValue({ shipping_cost: this.calculatedRate()!.cost });
+      this.shippingAssignForm.patchValue({
+        shipping_cost: this.calculatedRate()!.cost,
+      });
     }
   }
 
@@ -4594,7 +5107,9 @@ export class OrderDetailsPageComponent {
         },
         error: (err) => {
           this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al asignar metodo de envio');
+          this.toastService.error(
+            err.message || 'Error al asignar metodo de envio',
+          );
         },
       });
   }
@@ -4630,7 +5145,9 @@ export class OrderDetailsPageComponent {
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
-              this.toastService.success(`Cuota #${installmentNumber} condonada exitosamente`);
+              this.toastService.success(
+                `Cuota #${installmentNumber} condonada exitosamente`,
+              );
               this.loadData();
             },
             error: (err: any) => {
@@ -4699,13 +5216,17 @@ export class OrderDetailsPageComponent {
       .then((confirmed: boolean) => {
         if (!confirmed || !this.orderId) return;
         if (this.order()?.cancellation_policy?.can_cancel_payment !== true) {
-          this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+          this.toastService.warning(
+            this.cancellationPolicyMessage(this.order()),
+          );
           return;
         }
 
         this.isProcessingAction.set(true);
         this.ordersService
-          .flowCancelPayment(this.orderId, { reason: 'Cancelado desde panel de administración' })
+          .flowCancelPayment(this.orderId, {
+            reason: 'Cancelado desde panel de administración',
+          })
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
@@ -4724,7 +5245,9 @@ export class OrderDetailsPageComponent {
   editOrderInPos(): void {
     const order = this.order();
     if (!order || order.active_financial_split_id) return;
-    this.router.navigate(['/admin/pos'], { queryParams: { editOrder: order.id } });
+    this.router.navigate(['/admin/pos'], {
+      queryParams: { editOrder: order.id },
+    });
   }
 
   getShippingTypeBadgeClass(type: string): string {
@@ -4777,9 +5300,7 @@ export class OrderDetailsPageComponent {
   paymentCancellationLabel(payment: Payment): string | null {
     if (payment?.state !== 'cancelled') return null;
     const code = (
-      payment.gateway_response as
-        | { cancellation_reason?: unknown }
-        | undefined
+      payment.gateway_response as { cancellation_reason?: unknown } | undefined
     )?.cancellation_reason;
     switch (code) {
       case 'finish_blocked_insufficient_stock':
@@ -4829,7 +5350,11 @@ export class OrderDetailsPageComponent {
     // B3 (release-855): `RefundState` colisiona por valor con `OrderState`
     // en `processing`/`cancelled` — sin `isRefundAuditRow` una transición real
     // de orden a `processing` se etiquetaba "Reembolso en proceso".
-    if (newState && this.isRefundStateValue(newState) && this.isRefundAuditRow(log)) {
+    if (
+      newState &&
+      this.isRefundStateValue(newState) &&
+      this.isRefundAuditRow(log)
+    ) {
       const label = this.refundStateLabel(newState);
       return `Reembolso ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
     }
@@ -4858,7 +5383,10 @@ export class OrderDetailsPageComponent {
       // (p. ej. `deliverOrderItem`, o una edición de notas/dirección) trae el
       // mismo `state` en `old_values` y `new_values`. Sin este guard, esas
       // filas se etiquetaban con el label de transición igual.
-      if (isConfirmedStateTransition(log, oldState, newState) && stateLabels[newState]) {
+      if (
+        isConfirmedStateTransition(log, oldState, newState) &&
+        stateLabels[newState]
+      ) {
         return stateLabels[newState];
       }
     }
@@ -4887,7 +5415,9 @@ export class OrderDetailsPageComponent {
    * formatter needs `this.currencyService`.
    */
   getOrderEventLabel(evt: OrderEvent): string {
-    return orderEventLabel(evt, (amount) => this.currencyService.format(amount));
+    return orderEventLabel(evt, (amount) =>
+      this.currencyService.format(amount),
+    );
   }
 
   /** Thin delegator to the pure `orderEventActorLabel()`. */
@@ -4921,9 +5451,9 @@ export class OrderDetailsPageComponent {
    * then the most recent row (highest id). Returns `null` if the
    * item has never been fired to the kitchen.
    */
-  kitchenStateFor(item: OrderItem):
-    | { status: string; kitchen_ticket_id?: number }
-    | null {
+  kitchenStateFor(
+    item: OrderItem,
+  ): { status: string; kitchen_ticket_id?: number } | null {
     return kitchenStateForItem(item); // items are pre-sorted desc by the backend include
   }
 
@@ -5000,7 +5530,9 @@ export class OrderDetailsPageComponent {
             res.kitchen_ticket_ids ?? [res.kitchen_ticket_id],
           );
           if (res?.stock_warnings?.length) {
-            this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
+            this.toastService.warning(
+              formatStockWarningSummary(res.stock_warnings),
+            );
           }
           // Re-fetch the order so the kitchen_ticket_items badges update.
           this.refreshOrder();
@@ -5124,7 +5656,8 @@ export class OrderDetailsPageComponent {
   private isTitularLockedError(error: unknown): string | null {
     const code =
       (error as { errorCode?: string | null } | null)?.errorCode ??
-      parseApiError((error as { cause?: unknown } | null)?.cause ?? error).errorCode;
+      parseApiError((error as { cause?: unknown } | null)?.cause ?? error)
+        .errorCode;
     return code === 'ORD_EDIT_NOT_ALLOWED_001' ||
       code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001' ||
       code === 'ORD_TITULAR_INVOICED_001' ||
@@ -5157,8 +5690,12 @@ export class OrderDetailsPageComponent {
    * "Crear cliente nuevo" desde el buscar-primero: conserva el flujo actual
    * (lookup → resolve → PATCH en `onChangeCustomerSave`).
    */
-  onTitularSearchCreateNew(prefill?: Partial<CreateCustomerRequest> | void): void {
-    this.changeCustomerInitialValues.set((prefill as Partial<CreateCustomerRequest> | undefined) ?? null);
+  onTitularSearchCreateNew(
+    prefill?: Partial<CreateCustomerRequest> | void,
+  ): void {
+    this.changeCustomerInitialValues.set(
+      (prefill as Partial<CreateCustomerRequest> | undefined) ?? null,
+    );
     this.showTitularSearchModal.set(false);
     this.pendingChangeCustomerAddress.set(null);
     this.showChangeCustomerModal.set(true);
@@ -5330,7 +5867,9 @@ export class OrderDetailsPageComponent {
    */
   readonly fastTrackSplitBlocked = computed(() => {
     if (!this.splitLocked()) return false;
-    const entry = this.order()?.available_actions?.find((a) => a.code === 'fast_track');
+    const entry = this.order()?.available_actions?.find(
+      (a) => a.code === 'fast_track',
+    );
     const summary = this.splitSummary();
     const fullyPaid = !!summary && summary.paid >= summary.total - 0.01;
     return !(entry?.enabled === true && fullyPaid);
@@ -5341,8 +5880,7 @@ export class OrderDetailsPageComponent {
   readonly canUseReverseDelivered = computed(() =>
     this.hasNamedPermission('store:orders:order_flow:cancel_delivered'),
   );
-  readonly reverseDisabledReason =
-    'Solo un encargado puede reversar entregas';
+  readonly reverseDisabledReason = 'Solo un encargado puede reversar entregas';
 
   /** Patrón `hasPermission` de `pos-cart.component.ts` (con bypass super_admin). */
   private hasNamedPermission(permission: string): boolean {
@@ -5388,9 +5926,10 @@ export class OrderDetailsPageComponent {
    */
   onResendConfirmed(event: { reason: 'lost_command' | 'remake_dish' }): void {
     this.resendItemId.set(null);
-    const verb = event.reason === 'lost_command'
-      ? 'Comanda reencolada a cocina'
-      : 'Plato reencolado a cocina';
+    const verb =
+      event.reason === 'lost_command'
+        ? 'Comanda reencolada a cocina'
+        : 'Plato reencolado a cocina';
     this.toastService.success(verb);
     this.refreshOrder();
   }
@@ -5525,11 +6064,15 @@ export class OrderDetailsPageComponent {
     let delivered = 0;
     try {
       for (const item of items) {
-        await firstValueFrom(this.ordersFlowService.deliverOrderItem(orderId, item.id));
+        await firstValueFrom(
+          this.ordersFlowService.deliverOrderItem(orderId, item.id),
+        );
         delivered++;
       }
       this.toastService.success(
-        delivered === 1 ? '1 plato entregado' : `${delivered} platos entregados`,
+        delivered === 1
+          ? '1 plato entregado'
+          : `${delivered} platos entregados`,
       );
     } catch (err: unknown) {
       this.showDeliveryStockError(err, 'No se pudo marcar como entregado');
@@ -5545,7 +6088,11 @@ export class OrderDetailsPageComponent {
     const ids = new Set<number>();
     for (const it of this.order()?.order_items ?? []) {
       for (const row of it.kitchen_ticket_items ?? []) {
-        if (row.status === 'cancelled' || row.kitchen_ticket?.status === 'cancelled') continue;
+        if (
+          row.status === 'cancelled' ||
+          row.kitchen_ticket?.status === 'cancelled'
+        )
+          continue;
         ids.add(row.kitchen_ticket_id);
       }
     }
@@ -5561,18 +6108,26 @@ export class OrderDetailsPageComponent {
   private showDeliveryStockError(error: unknown, fallback: string): void {
     const raw = (error as { cause?: unknown } | null)?.cause ?? error;
     const parsed = parseApiError(raw);
-    const firstProduct = parsed.stockShortages?.find((item) => item.product_id > 0);
+    const firstProduct = parsed.stockShortages?.find(
+      (item) => item.product_id > 0,
+    );
     if (parsed.stockShortages?.length) {
       this.toastService.show({
         description: parsed.userMessage,
         variant: 'error',
         duration: 8000,
-        ...(firstProduct ? {
-          action: {
-            label: 'Ver producto',
-            onClick: () => void this.router.navigate(['/admin/products/edit', firstProduct.product_id]),
-          },
-        } : {}),
+        ...(firstProduct
+          ? {
+              action: {
+                label: 'Ver producto',
+                onClick: () =>
+                  void this.router.navigate([
+                    '/admin/products/edit',
+                    firstProduct.product_id,
+                  ]),
+              },
+            }
+          : {}),
       });
       return;
     }
@@ -5589,26 +6144,40 @@ export class OrderDetailsPageComponent {
    * del botón Cancelar mientras corre el backend.
    */
   readonly cancellingItemId = signal<number | null>(null);
-  readonly cancellationTarget = signal<{ item: OrderItem; mode: ItemCancellationMode } | null>(null);
+  readonly cancellationTarget = signal<{
+    item: OrderItem;
+    mode: ItemCancellationMode;
+  } | null>(null);
   // D.4 — motivo/destino viven en el modal compartido (dueño del form);
   // acá solo quedan target, error de red y preview.
   readonly cancellationError = signal<string | null>(null);
-  readonly cancellationModalOpen = computed(() => this.cancellationTarget() !== null);
-  readonly cancellationPaid = computed(() => isOrderItemCancellationPaid(this.order()));
+  readonly cancellationModalOpen = computed(
+    () => this.cancellationTarget() !== null,
+  );
+  readonly cancellationPaid = computed(() =>
+    isOrderItemCancellationPaid(this.order()),
+  );
 
   readonly cancellationPreparedFired = computed(() => {
     const item = this.cancellationTarget()?.item;
-    return item?.products?.product_type === 'prepared' && item.inventory_consumed_at_fire === true;
+    return (
+      item?.products?.product_type === 'prepared' &&
+      item.inventory_consumed_at_fire === true
+    );
   });
 
   readonly cancellationNeedsDisposition = computed(() => {
     const item = this.cancellationTarget()?.item;
-    return this.cancellationPreparedFired() &&
-      (item ? this.kitchenStateFor(item)?.status !== 'pending' : false);
+    return (
+      this.cancellationPreparedFired() &&
+      (item ? this.kitchenStateFor(item)?.status !== 'pending' : false)
+    );
   });
 
-  readonly canReuseCancellation = computed(() =>
-    this.cancellationTarget()?.mode === 'reverse' || this.cancellationNeedsDisposition(),
+  readonly canReuseCancellation = computed(
+    () =>
+      this.cancellationTarget()?.mode === 'reverse' ||
+      this.cancellationNeedsDisposition(),
   );
 
   /**
@@ -5620,19 +6189,26 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     const target = this.cancellationTarget();
     if (!order || !target) return null;
-    return previewItemCancellation(order.order_items ?? [], target.item.id, order);
+    return previewItemCancellation(
+      order.order_items ?? [],
+      target.item.id,
+      order,
+    );
   });
 
   private cancellationBlockedByPayment(): boolean {
     if (!isOrderItemCancellationPaid(this.order())) return false;
     this.closeItemCancellationModal();
-    this.toastService.warning('La orden ya fue cobrada. Usa Reembolso para devolver el plato.');
+    this.toastService.warning(
+      'La orden ya fue cobrada. Usa Reembolso para devolver el plato.',
+    );
     this.openRefundModal();
     return true;
   }
 
   closeItemCancellationModal(): void {
-    if (this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
+    if (this.cancellingItemId() !== null || this.reversingItemId() !== null)
+      return;
     this.cancellationTarget.set(null);
     this.cancellationError.set(null);
   }
@@ -5717,7 +6293,9 @@ export class OrderDetailsPageComponent {
                 error: (err: unknown) => {
                   this.cancellingItemId.set(null);
                   this.toastService.error(
-                    typeof err === 'string' ? err : 'Error al cancelar el plato',
+                    typeof err === 'string'
+                      ? err
+                      : 'Error al cancelar el plato',
                   );
                   console.error('Cancel item failed', err);
                 },
@@ -5762,7 +6340,10 @@ export class OrderDetailsPageComponent {
     this.openItemCancellationModal(item, 'reverse');
   }
 
-  private openItemCancellationModal(item: OrderItem, mode: ItemCancellationMode): void {
+  private openItemCancellationModal(
+    item: OrderItem,
+    mode: ItemCancellationMode,
+  ): void {
     if (!this.order()?.id || this.cancellationTarget()) return;
     this.cancellationError.set(null);
     this.cancellationTarget.set({ item, mode });
@@ -5772,34 +6353,50 @@ export class OrderDetailsPageComponent {
     if (this.cancellationBlockedByPayment()) return;
     const target = this.cancellationTarget();
     const orderId = this.order()?.id;
-    if (!target || !orderId || this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
+    if (
+      !target ||
+      !orderId ||
+      this.cancellingItemId() !== null ||
+      this.reversingItemId() !== null
+    )
+      return;
     const reason = result.reason.trim();
     if (reason.length < 3 || reason.length > 500) {
-      this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
+      this.cancellationError.set(
+        'El motivo debe tener entre 3 y 500 caracteres.',
+      );
       return;
     }
     let body: ReturnType<typeof cancellationBody>;
     try {
-      body = cancellationBody(target.mode, reason, result.destination,
-        this.cancellationNeedsDisposition());
+      body = cancellationBody(
+        target.mode,
+        reason,
+        result.destination,
+        this.cancellationNeedsDisposition(),
+      );
     } catch (err) {
       this.cancellationError.set((err as Error).message);
       return;
     }
-    const request: Observable<unknown> = target.mode === 'reverse'
-      ? this.http.post(
-          `${environment.apiUrl}/store/orders/${orderId}/flow/items/${target.item.id}/cancel-delivered`,
-          body,
-        )
-      : this.ordersFlowService.cancelOrderItem(orderId, target.item.id, body);
-    const inFlight = target.mode === 'reverse' ? this.reversingItemId : this.cancellingItemId;
+    const request: Observable<unknown> =
+      target.mode === 'reverse'
+        ? this.http.post(
+            `${environment.apiUrl}/store/orders/${orderId}/flow/items/${target.item.id}/cancel-delivered`,
+            body,
+          )
+        : this.ordersFlowService.cancelOrderItem(orderId, target.item.id, body);
+    const inFlight =
+      target.mode === 'reverse' ? this.reversingItemId : this.cancellingItemId;
     inFlight.set(target.item.id);
     this.cancellationError.set(null);
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         inFlight.set(null);
         this.closeItemCancellationModal();
-        this.toastService.success(target.mode === 'reverse' ? 'Entrega reversada' : 'Plato cancelado');
+        this.toastService.success(
+          target.mode === 'reverse' ? 'Entrega reversada' : 'Plato cancelado',
+        );
         this.refreshOrder();
       },
       error: (err: unknown) => {
@@ -5807,11 +6404,15 @@ export class OrderDetailsPageComponent {
         const parsed = parseApiError(err);
         if (parsed.errorCode === 'ORD_ITEM_CANCEL_PAID_001') {
           this.closeItemCancellationModal();
-          this.toastService.warning('La orden ya fue cobrada. Usa Reembolso para devolver el plato.');
+          this.toastService.warning(
+            'La orden ya fue cobrada. Usa Reembolso para devolver el plato.',
+          );
           this.openRefundModal();
           return;
         }
-        this.cancellationError.set(parsed.userMessage || 'No se pudo cancelar el plato');
+        this.cancellationError.set(
+          parsed.userMessage || 'No se pudo cancelar el plato',
+        );
       },
     });
   }
@@ -5910,7 +6511,8 @@ export class OrderDetailsPageComponent {
             this.refundedQtyByLine().get(item.id) ?? 0,
             Number(item.refunded_qty) || 0,
           );
-    const ncCoveredQty = coverage != null ? Number(coverage.nc_covered_qty) || 0 : 0;
+    const ncCoveredQty =
+      coverage != null ? Number(coverage.nc_covered_qty) || 0 : 0;
     return {
       refundedQty,
       quantity,
@@ -5995,7 +6597,9 @@ export class OrderDetailsPageComponent {
         if (order) void this.autoPrintDispatchTicket(order);
       },
       error: (err: any) => {
-        this.toastService.error(err?.message || 'No se pudo despachar la orden');
+        this.toastService.error(
+          err?.message || 'No se pudo despachar la orden',
+        );
       },
     });
   }
@@ -6021,7 +6625,9 @@ export class OrderDetailsPageComponent {
         this.loadData();
       },
       error: (err: any) => {
-        this.toastService.error(err?.message || 'No se pudo finalizar la orden');
+        this.toastService.error(
+          err?.message || 'No se pudo finalizar la orden',
+        );
         if (err?.errorCode === ORD_FINISH_UNPAID_BALANCE_CODE) this.loadData();
       },
     });
@@ -6085,9 +6691,7 @@ export class OrderDetailsPageComponent {
   private readonly reinvoiceable = computed(() => {
     const invoice = this.orderInvoice();
     return (
-      !invoice ||
-      invoice.status === 'cancelled' ||
-      invoice.status === 'voided'
+      !invoice || invoice.status === 'cancelled' || invoice.status === 'voided'
     );
   });
 
@@ -6189,12 +6793,18 @@ export class OrderDetailsPageComponent {
     if (inv.dian_status === 'rejected') return 'Rechazada DIAN';
     if (inv.dian_status === 'pending') return 'Pendiente DIAN';
     switch (inv.status) {
-      case 'draft': return 'Borrador';
-      case 'validated': return 'Validada';
-      case 'sent': return 'Enviada';
-      case 'accepted': return 'Aceptada';
-      case 'rejected': return 'Rechazada';
-      default: return 'En proceso';
+      case 'draft':
+        return 'Borrador';
+      case 'validated':
+        return 'Validada';
+      case 'sent':
+        return 'Enviada';
+      case 'accepted':
+        return 'Aceptada';
+      case 'rejected':
+        return 'Rechazada';
+      default:
+        return 'En proceso';
     }
   }
 
@@ -6334,51 +6944,59 @@ export class OrderDetailsPageComponent {
       const accounts = this.splitAccounts().filter(
         (a) => a.role === 'payable' && a.id != null,
       );
-      const fromAccounts: InvoiceCardView[] = accounts.map((acc): InvoiceCardView => {
-        const accountId = acc.id as number;
-        const key = `acc-${accountId}`;
-        const known = byAccount.get(accountId);
-        const embedded = acc.invoice;
-        const inv: OrderAccountInvoice | null = known
-          ? known
-          : embedded
-            ? {
-                id: embedded.id,
-                invoice_number: embedded.invoice_number,
-                status: embedded.status,
-                dian_status: embedded.dian_status,
-                grand_total: String(embedded.grand_total),
-                financial_account_id: accountId,
-                account_label: acc.label,
-                customer_name: acc.customer_name ?? acc.customer_alias ?? null,
-              }
-            : null;
-        const paid = acc.payment_state === 'paid';
-        return {
-          emitKey: key,
-          accountId,
-          accountInvoice: inv,
-          notes: [],
-          canCreditNote: inv?.dian_status === 'accepted',
-          emitMode: inv
-            ? this.cardEmitMode(key, inv.id, inv.status, inv.dian_status)
-            : paid
-              ? this.cardEmitMode(key, null, null, null)
-              : 'none',
-          data: {
-            key,
-            invoiceId: inv?.id ?? null,
-            invoiceNumber: inv?.invoice_number ?? null,
-            status: inv?.status ?? null,
-            dianStatus: inv?.dian_status ?? null,
-            total: inv ? Number(inv.grand_total) || 0 : Number(acc.grand_total) || 0,
-            customerName:
-              inv?.customer_name ?? acc.customer_name ?? acc.customer_alias ?? null,
-            date: null,
-            accountLabel: acc.label || inv?.account_label || null,
-          },
-        };
-      });
+      const fromAccounts: InvoiceCardView[] = accounts.map(
+        (acc): InvoiceCardView => {
+          const accountId = acc.id as number;
+          const key = `acc-${accountId}`;
+          const known = byAccount.get(accountId);
+          const embedded = acc.invoice;
+          const inv: OrderAccountInvoice | null = known
+            ? known
+            : embedded
+              ? {
+                  id: embedded.id,
+                  invoice_number: embedded.invoice_number,
+                  status: embedded.status,
+                  dian_status: embedded.dian_status,
+                  grand_total: String(embedded.grand_total),
+                  financial_account_id: accountId,
+                  account_label: acc.label,
+                  customer_name:
+                    acc.customer_name ?? acc.customer_alias ?? null,
+                }
+              : null;
+          const paid = acc.payment_state === 'paid';
+          return {
+            emitKey: key,
+            accountId,
+            accountInvoice: inv,
+            notes: [],
+            canCreditNote: inv?.dian_status === 'accepted',
+            emitMode: inv
+              ? this.cardEmitMode(key, inv.id, inv.status, inv.dian_status)
+              : paid
+                ? this.cardEmitMode(key, null, null, null)
+                : 'none',
+            data: {
+              key,
+              invoiceId: inv?.id ?? null,
+              invoiceNumber: inv?.invoice_number ?? null,
+              status: inv?.status ?? null,
+              dianStatus: inv?.dian_status ?? null,
+              total: inv
+                ? Number(inv.grand_total) || 0
+                : Number(acc.grand_total) || 0,
+              customerName:
+                inv?.customer_name ??
+                acc.customer_name ??
+                acc.customer_alias ??
+                null,
+              date: null,
+              accountLabel: acc.label || inv?.account_label || null,
+            },
+          };
+        },
+      );
       if (fromAccounts.length > 0) return fromAccounts;
       // El panel aún no reportó cuentas: se pintan al menos las facturadas.
       return this.accountInvoices().map((inv): InvoiceCardView => {
@@ -6474,11 +7092,17 @@ export class OrderDetailsPageComponent {
   /** El «Facturar» de la orden simple vuelve a mostrar el estado en vuelo
    *  bajo la clave 'order' aunque la tarjeta sea la de «order-new». */
   cardEmitting(card: InvoiceCardView): boolean {
-    return this.emittingKeys().has(card.emitKey === 'order-new' ? 'order' : card.emitKey);
+    return this.emittingKeys().has(
+      card.emitKey === 'order-new' ? 'order' : card.emitKey,
+    );
   }
 
   cardError(card: InvoiceCardView): string | null {
-    return this.emitErrors()[card.emitKey === 'order-new' ? 'order' : card.emitKey] ?? null;
+    return (
+      this.emitErrors()[
+        card.emitKey === 'order-new' ? 'order' : card.emitKey
+      ] ?? null
+    );
   }
 
   openCardDetail(card: InvoiceCardView): void {
@@ -6615,7 +7239,11 @@ export class OrderDetailsPageComponent {
     const parsed = new Date(note.issue_date);
     return Number.isNaN(parsed.getTime())
       ? note.issue_date
-      : parsed.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
+      : parsed.toLocaleDateString('es-CO', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        });
   }
 
   /**
@@ -6625,14 +7253,9 @@ export class OrderDetailsPageComponent {
    * sin NC viva que ya los cubra. Solo puede haber un flujo activo a la vez;
    * el resto de cards sigue ofreciendo "Emitir nota crédito".
    */
-  readonly refundNoteState = signal<{
-    refundId: number;
-    stage: 'creating' | 'ask' | 'issuing';
-    noteId?: number;
-    noteNumber?: string | null;
-    noteTotal?: number;
-    error?: string | null;
-  } | null>(null);
+  readonly refundNoteState = signal<RefundNoteState | null>(null);
+  readonly refundSourceChoices = signal<Record<number, number | null>>({});
+  readonly refundShippingChoice = signal<number | null>(null);
 
   readonly refundNoteCandidateIds = computed<Set<number>>(() => {
     const ids = new Set<number>();
@@ -6672,10 +7295,17 @@ export class OrderDetailsPageComponent {
 
   /** 1 clic: crea la NC con el detalle del reembolso y pregunta si emitirla. */
   startRefundNote(refund: RefundRecord): void {
-    if (this.refundNoteState() || !this.acceptedInvoice()) return;
-    const invoiceId = this.order()?.invoices?.[0]?.id;
+    if (this.refundNoteState()) return;
+    const invoiceId = this.acceptedInvoice()?.id;
     if (!invoiceId) return;
-    this.refundNoteState.set({ refundId: refund.id, stage: 'creating', error: null });
+    this.refundSourceChoices.set({});
+    this.refundShippingChoice.set(null);
+    this.refundNoteState.set({
+      refundId: refund.id,
+      invoiceId,
+      stage: 'creating',
+      error: null,
+    });
     this.store.dispatch(
       InvoicingActions.createCreditNote({
         dto: this.buildRefundNoteDto(refund, invoiceId),
@@ -6686,7 +7316,8 @@ export class OrderDetailsPageComponent {
   /** La NC nació: mostrar "¿Emitirla ahora?" en vez de cerrar en silencio. */
   onRefundNoteCreated(invoice: Invoice): void {
     const state = this.refundNoteState();
-    if (!state || state.stage !== 'creating') return;
+    const nextState = refundNoteCreatedState(state, invoice);
+    if (nextState === state) return;
     // El modal de detalle pudo crear su propia nota a la vez: la suya la
     // atiende su panel (B.1); esta card solo reclama el éxito que pidió.
     if (this.showInvoiceDetailModal()) {
@@ -6694,19 +7325,58 @@ export class OrderDetailsPageComponent {
       this.loadInvoiceNotes();
       return;
     }
-    this.refundNoteState.set({
-      ...state,
-      stage: 'ask',
-      noteId: invoice.id,
-      noteNumber: invoice.invoice_number,
-      noteTotal: Number(invoice.total_amount),
-    });
+    this.refundNoteState.set(nextState);
   }
 
-  onRefundNoteCreateFailed(error: string): void {
+  onRefundNoteCreateFailed(failure: { error: string; errorCode?: string | null; details?: unknown }): void {
     const state = this.refundNoteState();
-    if (!state || state.stage !== 'creating') return;
-    this.refundNoteState.set({ ...state, stage: 'ask', error });
+    const nextState = refundNoteCreateFailureState(state, failure);
+    if (nextState === state) return;
+    if (nextState?.stage === 'mapping') {
+      this.refundSourceChoices.set({});
+      this.refundShippingChoice.set(null);
+    }
+    this.refundNoteState.set(nextState);
+  }
+
+  refundMappingOptions(candidates: RefundItemSourceCandidate['source_candidates']): SelectorOption[] {
+    return candidates.map((candidate) => ({
+      value: candidate.source_invoice_item_id,
+      label: `Línea #${candidate.source_invoice_item_id} · ${candidate.description}`,
+    }));
+  }
+
+  setRefundSourceChoice(refundItemId: number, value: string | number | null): void {
+    const selected = Number(value);
+    this.refundSourceChoices.update((choices) => ({ ...choices, [refundItemId]: Number.isSafeInteger(selected) && selected > 0 ? selected : null }));
+  }
+
+  setRefundShippingChoice(value: string | number | null): void {
+    const selected = Number(value);
+    this.refundShippingChoice.set(Number.isSafeInteger(selected) && selected > 0 ? selected : null);
+  }
+
+  refundMappingReady(): boolean {
+    const state = this.refundNoteState();
+    return !!state?.mapping && buildRefundNoteSourceMapping(
+      state.mapping, this.refundSourceChoices(), this.refundShippingChoice(),
+    ) !== null;
+  }
+
+  retryRefundNoteWithSources(): void {
+    const state = this.refundNoteState();
+    if (!state || state.stage !== 'mapping' || !state.mapping) return;
+    const refund = this.orderRefunds().find((candidate) => candidate.id === state.refundId);
+    if (!refund || this.acceptedInvoice()?.id !== state.invoiceId) return;
+    const dto = buildRefundNoteRetryDto(
+      state, this.refundSourceChoices(), this.refundShippingChoice(),
+      this.buildRefundNoteDto(refund, state.invoiceId),
+    );
+    if (!dto) return;
+    this.refundNoteState.set({ ...state, stage: 'creating', error: null });
+    this.store.dispatch(InvoicingActions.createCreditNote({
+      dto,
+    }));
   }
 
   /** Emitirla de una vía `POST :id/issue`; "Después" la deja en borrador. */
@@ -6719,10 +7389,13 @@ export class OrderDetailsPageComponent {
 
   dismissRefundNote(): void {
     this.refundNoteState.set(null);
+    this.refundSourceChoices.set({});
+    this.refundShippingChoice.set(null);
   }
 
-  onRefundNoteIssued(): void {
-    if (!this.refundNoteState()) return;
+  onRefundNoteIssued(invoice: Invoice): void {
+    const state = this.refundNoteState();
+    if (!matchesRefundNoteIssueResult(state, invoice.id)) return;
     // Mismo cruce que en onRefundNoteCreated: con el modal abierto, el éxito
     // puede ser suyo; la card suelta el flujo y refresca en vez de afirmar.
     this.refundNoteState.set(null);
@@ -6732,8 +7405,8 @@ export class OrderDetailsPageComponent {
 
   onRefundNoteIssueFailed(error: string): void {
     const state = this.refundNoteState();
-    if (!state) return;
-    this.refundNoteState.set({ ...state, stage: 'ask', error });
+    const nextState = refundNoteIssueFailureState(state, error);
+    if (nextState !== state) this.refundNoteState.set(nextState);
   }
 
   /**
@@ -6763,7 +7436,8 @@ export class OrderDetailsPageComponent {
     if (!orderItems.length) return false;
     return orderItems.every((oi) => {
       const qty = Number(
-        (refund.refund_items ?? []).find((ri) => ri.order_item_id === oi.id)?.quantity ?? 0,
+        (refund.refund_items ?? []).find((ri) => ri.order_item_id === oi.id)
+          ?.quantity ?? 0,
       );
       return qty >= Number(oi.quantity);
     });
@@ -6893,7 +7567,12 @@ export class OrderDetailsPageComponent {
    * camino de creación en producto). Con división activa se factura por cuenta.
    */
   createInvoiceFromOrder(): void {
-    if (this.order()?.active_financial_split_id) { this.toastService.info('Crea la factura desde cada cuenta independiente.'); return; }
+    if (this.order()?.active_financial_split_id) {
+      this.toastService.info(
+        'Crea la factura desde cada cuenta independiente.',
+      );
+      return;
+    }
     if (!this.orderId || this.hasSalesInvoice()) return;
     this.runEmit('order', null);
   }
@@ -6901,7 +7580,10 @@ export class OrderDetailsPageComponent {
   /** Acción «Facturar» / «Reintentar» de una tarjeta de factura. */
   emitFromCard(card: InvoiceCardView): void {
     if (card.accountId == null && this.hasSalesInvoice()) return;
-    this.runEmit(card.emitKey === 'order-new' ? 'order' : card.emitKey, card.accountId);
+    this.runEmit(
+      card.emitKey === 'order-new' ? 'order' : card.emitKey,
+      card.accountId,
+    );
   }
 
   /**

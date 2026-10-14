@@ -4,6 +4,7 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { PlatformProfilesService } from './platform-profiles.service';
+import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
 import {
   DIAN_PROFILE_TEMPLATES,
   findDianProfileTemplate,
@@ -69,6 +70,7 @@ export class PlatformInvoicingService {
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
     private readonly platformOrg: PlatformOrgService,
     private readonly platformProfiles: PlatformProfilesService,
+    private readonly payments: PlatformInvoicePaymentsService,
   ) {}
 
   private get prismaClient(): PrismaClient | Prisma.TransactionClient {
@@ -628,6 +630,7 @@ document_type: args.dto.customer.document_type ?? '31',
       | null;
     documentType: 'sales_invoice' | 'support_document' | null;
     q: string | null;
+    collectionStatus?: 'overdue' | 'pending' | 'partial' | 'paid' | null;
     page: number;
     limit: number;
   }): Promise<{
@@ -652,33 +655,71 @@ document_type: args.dto.customer.document_type ?? '31',
         { error_message: { contains: q, mode: 'insensitive' } },
       ];
     }
-    const [rows, total] = await Promise.all([
-      this.prismaClient.fiscal_transmissions.findMany({
-        where,
+    const select = {
+      id: true,
+      document_type: true,
+      source_type: true,
+      document_number: true,
+      transmission_status: true,
+      dian_status: true,
+      accounting_status: true,
+      retry_count: true,
+      cufe: true,
+      sent_at: true,
+      accepted_at: true,
+      rejected_at: true,
+      error_message: true,
+      created_at: true,
+      organization_id: true,
+      accounting_entity_id: true,
+    } as const;
+
+    let rows: any[];
+    let total: number;
+
+    if (args.collectionStatus) {
+      // El estado de cobro se deriva de evidencias (no es columna): se calcula
+      // sobre las facturas aceptadas del filtro y recién después se pagina.
+      const candidates = await this.prismaClient.fiscal_transmissions.findMany({
+        where: { ...where, source_type: 'platform_invoice' },
         orderBy: { id: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-        select: {
-          id: true,
-          document_type: true,
-          source_type: true,
-          document_number: true,
-          transmission_status: true,
-          dian_status: true,
-          accounting_status: true,
-          retry_count: true,
-          cufe: true,
-          sent_at: true,
-          accepted_at: true,
-          rejected_at: true,
-          error_message: true,
-          created_at: true,
-          organization_id: true,
-          accounting_entity_id: true,
-        },
-      }),
-      this.prismaClient.fiscal_transmissions.count({ where }),
-    ]);
+        select,
+      });
+      const collection = await this.payments.collectionForTransmissions(
+        candidates as any[],
+      );
+      const matching = (candidates as any[]).filter(
+        (r) => collection.get(r.id)?.collection_status === args.collectionStatus,
+      );
+      total = matching.length;
+      rows = matching
+        .slice((page - 1) * limit, page * limit)
+        .map((r) => ({ ...r, ...collection.get(r.id) }));
+    } else {
+      const [pageRows, count] = await Promise.all([
+        this.prismaClient.fiscal_transmissions.findMany({
+          where,
+          orderBy: { id: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+          select,
+        }),
+        this.prismaClient.fiscal_transmissions.count({ where }),
+      ]);
+      const collection = await this.payments.collectionForTransmissions(
+        pageRows as any[],
+      );
+      rows = (pageRows as any[]).map((r) => ({
+        ...r,
+        total: null,
+        amount_paid: null,
+        balance_due: null,
+        due_date: null,
+        collection_status: null,
+        ...collection.get(r.id),
+      }));
+      total = count;
+    }
     return { rows, total, page, limit };
   }
 

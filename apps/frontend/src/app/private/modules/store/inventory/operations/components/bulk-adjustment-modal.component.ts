@@ -1,5 +1,6 @@
 import { Component, signal, inject, input, output, DestroyRef, computed } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { EMPTY, expand } from 'rxjs';
 
 import { FormsModule } from '@angular/forms';
 
@@ -24,6 +25,25 @@ interface BulkResultItem {
   quantity_before?: number;
   quantity_after?: number;
   quantity_change?: number;
+}
+
+/** Máximo de filas por página del commit (contrato del backend). */
+const BULK_ADJUSTMENT_PAGE_SIZE = 100;
+const BULK_ADJUSTMENT_MAX_FILE_MB = 20;
+
+interface BulkAnalysisResult {
+  session_id: string;
+  total: number;
+  valid: number;
+  failed: number;
+  errors: { row_number: number; sku: string; message: string }[];
+}
+
+interface BulkUploadPage extends BulkUploadResult {
+  total: number;
+  offset: number;
+  limit: number;
+  done: boolean;
 }
 
 interface BulkUploadResult {
@@ -57,7 +77,7 @@ interface BulkUploadResult {
       <div class="p-4 md:p-6">
         <!-- Step Indicator -->
         <div class="flex items-center justify-center gap-2 mb-6">
-          @for (s of [1, 2, 3]; track s) {
+          @for (s of [1, 2, 3, 4]; track s) {
             <div
               class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors"
               [class.bg-primary]="step() >= s"
@@ -65,7 +85,7 @@ interface BulkUploadResult {
               [class.bg-gray-200]="step() < s"
               [class.text-gray-500]="step() < s"
             >{{ s }}</div>
-            @if (s < 3) {
+            @if (s < 4) {
               <div
                 class="w-12 h-0.5 transition-colors"
                 [class.bg-primary]="step() > s"
@@ -153,7 +173,7 @@ interface BulkUploadResult {
                   Haga clic o arrastre un archivo aquí
                 </p>
                 <p class="text-xs text-gray-400 mt-1">
-                  Formatos aceptados: Excel (.xlsx, .xls) o CSV
+                  Formatos aceptados: Excel (.xlsx, .xls) o CSV · Máx. 10.000 filas · 20 MB
                 </p>
               } @else {
                 <app-icon name="file-spreadsheet" [size]="40" class="mx-auto mb-3 text-primary"></app-icon>
@@ -172,8 +192,42 @@ interface BulkUploadResult {
           </div>
         }
 
-        <!-- Step 3: Results -->
-        @if (step() === 3) {
+        <!-- Step 3: Review analysis -->
+        @if (step() === 3 && analysis()) {
+          <div class="space-y-4">
+            <h3 class="text-base font-semibold text-gray-800">Revisión</h3>
+            <div class="grid grid-cols-3 gap-3">
+              <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-2xl font-bold text-gray-800">{{ analysis()!.total }}</p>
+                <p class="text-xs text-gray-500">Filas</p>
+              </div>
+              <div class="bg-green-50 rounded-lg p-3 text-center">
+                <p class="text-2xl font-bold text-green-600">{{ analysis()!.valid }}</p>
+                <p class="text-xs text-gray-500">Válidas</p>
+              </div>
+              <div class="bg-red-50 rounded-lg p-3 text-center">
+                <p class="text-2xl font-bold text-red-600">{{ analysis()!.failed }}</p>
+                <p class="text-xs text-gray-500">Con errores</p>
+              </div>
+            </div>
+            @if (analysis()!.errors.length > 0) {
+              <div class="max-h-48 overflow-y-auto bg-red-50 border border-red-200 rounded-lg p-3">
+                <p class="text-sm font-medium text-red-800 mb-2">Errores por fila:</p>
+                @for (e of analysis()!.errors; track $index) {
+                  <p class="text-xs text-red-700">
+                    Fila {{ e.row_number }} ({{ e.sku || '-' }}): {{ e.message }}
+                  </p>
+                }
+              </div>
+            }
+            <p class="text-xs text-gray-500">
+              Se aplicarán las {{ analysis()!.valid }} filas válidas en lotes de {{ pageSize }}.
+            </p>
+          </div>
+        }
+
+        <!-- Step 4: Results -->
+        @if (step() === 4) {
           <div class="space-y-4">
             <h3 class="text-base font-semibold text-gray-800">Resultado</h3>
 
@@ -184,11 +238,36 @@ interface BulkUploadResult {
                   [size]="36"
                   class="text-primary animate-spin"
                 ></app-icon>
-                <p class="text-sm text-gray-900 font-medium">Procesando ajustes...</p>
+                <p class="text-sm text-gray-900 font-medium">
+                  Guardando {{ progress().doneRows }} de {{ progress().totalRows }}
+                </p>
+                <div class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+                  <div class="flex items-center justify-between text-[11px] text-gray-600">
+                    <span>Lotes de {{ pageSize }} filas</span>
+                    <span class="font-semibold text-primary">{{ progressPercent() }}%</span>
+                  </div>
+                  <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                    <div
+                      class="h-full rounded-full bg-primary transition-all"
+                      [style.width.%]="progressPercent()"
+                    ></div>
+                  </div>
+                </div>
               </div>
             }
 
-            @if (uploadResult()) {
+            @if (uploadError() && !isUploading()) {
+              <div class="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 text-xs text-red-700">
+                <p class="flex-1">{{ uploadError() }}</p>
+                @if (retryOffset() !== null) {
+                  <app-button variant="outline" size="sm" (clicked)="retryUpload()">
+                    Reintentar desde la fila {{ retryOffset()! + 2 }}
+                  </app-button>
+                }
+              </div>
+            }
+
+            @if (uploadResult() && !isUploading()) {
               <!-- Summary -->
               <div class="grid grid-cols-3 gap-3">
                 <div class="bg-gray-50 rounded-lg p-3 text-center">
@@ -268,15 +347,15 @@ interface BulkUploadResult {
       <div slot="footer">
         <div class="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
           <div>
-            @if (step() > 1 && step() < 3) {
+            @if (step() > 1 && step() < 4 && !isAnalyzing()) {
               <app-button variant="outline" (clicked)="previousStep()">
                 Atrás
               </app-button>
             }
           </div>
           <div class="flex items-center gap-3">
-            <app-button variant="outline" (clicked)="onClose()">
-              {{ step() === 3 ? 'Cerrar' : 'Cancelar' }}
+            <app-button variant="outline" [disabled]="isUploading()" (clicked)="onClose()">
+              {{ step() === 4 && !isUploading() ? 'Cerrar' : 'Cancelar' }}
             </app-button>
 
             @if (step() === 1) {
@@ -292,11 +371,21 @@ interface BulkUploadResult {
             @if (step() === 2) {
               <app-button
                 variant="primary"
-                [disabled]="!selectedFile() || isUploading()"
-                [loading]="isUploading()"
-                (clicked)="uploadFile()"
+                [disabled]="!selectedFile() || isAnalyzing()"
+                [loading]="isAnalyzing()"
+                (clicked)="analyzeFile()"
               >
-                Subir y Aplicar
+                Analizar archivo
+              </app-button>
+            }
+
+            @if (step() === 3) {
+              <app-button
+                variant="primary"
+                [disabled]="!analysis() || analysis()!.valid === 0"
+                (clicked)="confirmUpload()"
+              >
+                Aplicar {{ analysis()?.valid || 0 }} ajustes
               </app-button>
             }
           </div>
@@ -324,6 +413,21 @@ export class BulkAdjustmentModalComponent {
   readonly description = signal<string>('');
   readonly selectedFile = signal<File | null>(null);
   readonly uploadResult = signal<BulkUploadResult | null>(null);
+  readonly isAnalyzing = signal(false);
+  readonly analysis = signal<BulkAnalysisResult | null>(null);
+  readonly uploadError = signal<string | null>(null);
+  readonly pageSize = BULK_ADJUSTMENT_PAGE_SIZE;
+  private readonly progressState = signal({ doneRows: 0, totalRows: 0 });
+  readonly progress = this.progressState.asReadonly();
+  readonly progressPercent = computed(() => {
+    const p = this.progressState();
+    return p.totalRows > 0
+      ? Math.min(100, Math.round((p.doneRows / p.totalRows) * 100))
+      : 0;
+  });
+  /** Offset (base 0) desde el que se puede reintentar tras una página fallida. */
+  readonly retryOffset = signal<number | null>(null);
+  private sessionId: string | null = null;
 
   readonly failedItems = computed<BulkResultItem[]>(() => {
     const r = this.uploadResult();
@@ -340,10 +444,14 @@ export class BulkAdjustmentModalComponent {
   ];
 
   nextStep(): void {
-    if (this.step() < 3) this.step.set(this.step() + 1);
+    if (this.step() < 2) this.step.set(this.step() + 1);
   }
 
   previousStep(): void {
+    if (this.step() === 3) {
+      this.cancelSession();
+      this.analysis.set(null);
+    }
     if (this.step() > 1) this.step.set(this.step() - 1);
   }
 
@@ -375,7 +483,7 @@ export class BulkAdjustmentModalComponent {
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
     if (input.files?.length) {
-      this.selectedFile.set(input.files[0]);
+      this.setFile(input.files[0]);
     }
   }
 
@@ -388,7 +496,7 @@ export class BulkAdjustmentModalComponent {
     event.preventDefault();
     event.stopPropagation();
     if (event.dataTransfer?.files.length) {
-      this.selectedFile.set(event.dataTransfer.files[0]);
+      this.setFile(event.dataTransfer.files[0]);
     }
   }
 
@@ -397,45 +505,163 @@ export class BulkAdjustmentModalComponent {
     this.selectedFile.set(null);
   }
 
-  uploadFile(): void {
+  private setFile(file: File): void {
+    if (file.size > BULK_ADJUSTMENT_MAX_FILE_MB * 1024 * 1024) {
+      this.toast_service.error(
+        `El archivo excede el límite de ${BULK_ADJUSTMENT_MAX_FILE_MB} MB`,
+      );
+      return;
+    }
+    this.selectedFile.set(file);
+  }
+
+  /** Paso 2 -> 3: analiza el archivo y abre la sesión sin aplicar nada. */
+  analyzeFile(): void {
     const file = this.selectedFile();
     const locId = this.selectedLocationId();
     if (!file || !locId) return;
 
-    this.isUploading.set(true);
-    this.step.set(3);
+    this.isAnalyzing.set(true);
+    this.uploadError.set(null);
 
-    this.inventory_service.uploadBulkAdjustments(
-      file,
-      Number(locId),
-      this.selectedAdjustmentType() || 'count_variance',
-      this.description() || undefined,
-    )
+    this.inventory_service
+      .analyzeBulkAdjustments(
+        file,
+        Number(locId),
+        this.selectedAdjustmentType() || 'count_variance',
+        this.description() || undefined,
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          const result = response.data as BulkUploadResult;
-          this.uploadResult.set(result);
-          this.isUploading.set(false);
+          const result = response.data as BulkAnalysisResult;
+          if (result.total > 10000) {
+            this.sessionId = result.session_id;
+            this.cancelSession();
+            this.toast_service.error('El archivo excede el límite de 10.000 filas');
+            this.isAnalyzing.set(false);
+            return;
+          }
+          this.sessionId = result.session_id;
+          this.analysis.set(result);
+          this.isAnalyzing.set(false);
+          this.step.set(3);
+        },
+        error: (err) => {
+          this.toast_service.error(err || 'Error al analizar el archivo');
+          this.isAnalyzing.set(false);
+        },
+      });
+  }
 
+  /** Paso 3 -> 4: commit paginado de 100 en 100. */
+  confirmUpload(): void {
+    this.uploadResult.set(null);
+    this.progressState.set({
+      doneRows: 0,
+      totalRows: this.analysis()?.total ?? 0,
+    });
+    this.runCommit(0);
+  }
+
+  retryUpload(): void {
+    const offset = this.retryOffset();
+    if (offset === null) return;
+    this.runCommit(offset);
+  }
+
+  private runCommit(startOffset: number): void {
+    const sessionId = this.sessionId;
+    const locId = this.selectedLocationId();
+    if (!sessionId || !locId) return;
+
+    const location_id = Number(locId);
+    const type = this.selectedAdjustmentType() || 'count_variance';
+    const desc = this.description() || undefined;
+    const limit = BULK_ADJUSTMENT_PAGE_SIZE;
+    let nextOffset = startOffset;
+    let lastDone = false;
+
+    this.isUploading.set(true);
+    this.uploadError.set(null);
+    this.retryOffset.set(null);
+    this.step.set(4);
+
+    const fetchPage = (offset: number) =>
+      this.inventory_service.uploadBulkAdjustmentsSessionPage(
+        sessionId,
+        location_id,
+        offset,
+        limit,
+        type,
+        desc,
+      );
+
+    fetchPage(startOffset)
+      .pipe(
+        expand((response) => {
+          const page = response.data as BulkUploadPage;
+          return page.done ? EMPTY : fetchPage(page.offset + page.limit);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (response) => {
+          const page = response.data as BulkUploadPage;
+          lastDone = page.done;
+          nextOffset = page.offset + page.limit;
+          this.progressState.update((p) => ({
+            totalRows: page.total > 0 ? page.total : p.totalRows,
+            doneRows: Math.min(page.total, nextOffset),
+          }));
+          const prev = this.uploadResult();
+          this.uploadResult.set({
+            success: (prev?.success ?? true) && (page.failed ?? 0) === 0,
+            total_processed:
+              (prev?.total_processed ?? 0) + (page.total_processed ?? 0),
+            successful: (prev?.successful ?? 0) + (page.successful ?? 0),
+            failed: (prev?.failed ?? 0) + (page.failed ?? 0),
+            results: [...(prev?.results ?? []), ...(page.results ?? [])],
+          });
+        },
+        error: (err) => {
+          this.isUploading.set(false);
+          this.retryOffset.set(nextOffset);
+          this.uploadError.set(
+            `Se detuvo en la fila ${nextOffset + 2}: ${
+              typeof err === 'string' ? err : err?.message || 'error de red'
+            }`,
+          );
+          this.toast_service.error('Error al aplicar los ajustes');
+          if ((this.uploadResult()?.successful ?? 0) > 0) this.completed.emit();
+        },
+        complete: () => {
+          this.isUploading.set(false);
+          const result = this.uploadResult();
+          if (!lastDone) return;
+          this.sessionId = null; // el backend ya borró el archivo (done)
           if (result?.failed === 0) {
             this.toast_service.success(
               `${result.successful} ajustes aplicados exitosamente`,
             );
           } else {
             this.toast_service.warning(
-              `${result?.successful} exitosos, ${result?.failed} con errores`,
+              `${result?.successful ?? 0} exitosos, ${result?.failed ?? 0} con errores`,
             );
           }
-
           this.completed.emit();
         },
-        error: (err) => {
-          this.toast_service.error(err || 'Error al procesar el archivo');
-          this.isUploading.set(false);
-          this.step.set(2);
-        },
       });
+  }
+
+  private cancelSession(): void {
+    const id = this.sessionId;
+    if (!id) return;
+    this.sessionId = null;
+    this.inventory_service
+      .cancelBulkAdjustmentSession(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ error: () => undefined });
   }
 
   getFailedItems(): BulkResultItem[] {
@@ -449,6 +675,8 @@ export class BulkAdjustmentModalComponent {
   }
 
   onClose(): void {
+    // Cierre antes de confirmar o con reintento pendiente: libera el archivo temporal.
+    this.cancelSession();
     this.resetState();
     this.isOpenChange.emit(false);
   }
@@ -457,6 +685,11 @@ export class BulkAdjustmentModalComponent {
     this.step.set(1);
     this.selectedFile.set(null);
     this.uploadResult.set(null);
+    this.analysis.set(null);
+    this.uploadError.set(null);
+    this.retryOffset.set(null);
+    this.progressState.set({ doneRows: 0, totalRows: 0 });
+    this.isAnalyzing.set(false);
     this.isUploading.set(false);
     this.isDownloading.set(false);
     this.description.set('');

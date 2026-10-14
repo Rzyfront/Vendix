@@ -22,7 +22,10 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { RequestContextService } from '@common/context/request-context.service';
-import { BulkEmployeeUploadDto } from './dto/bulk-employee.dto';
+import {
+  BulkEmployeeUploadDto,
+  BulkEmployeeUploadSessionDto,
+} from './dto/bulk-employee.dto';
 
 @Controller('store/payroll/employees/bulk')
 @UseGuards(PermissionsGuard)
@@ -90,7 +93,7 @@ export class EmployeesBulkController {
   async uploadEmployeesFromFile(
     @UploadedFile(
       new ParseFilePipe({
-        validators: [new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 })],
+        validators: [new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 })],
       }),
     )
     file: any,
@@ -140,7 +143,7 @@ export class EmployeesBulkController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+          new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 }), // 20MB
         ],
       }),
     )
@@ -168,7 +171,7 @@ export class EmployeesBulkController {
   @Post('upload-session')
   @Permissions('store:payroll:employees:bulk:upload')
   async uploadFromSession(
-    @Body() body: { session_id: string },
+    @Body() body: BulkEmployeeUploadSessionDto,
     @Req() req: AuthenticatedRequest,
   ) {
     const context = RequestContextService.getContext();
@@ -184,6 +187,7 @@ export class EmployeesBulkController {
       body.session_id,
       storeId,
       req.user,
+      { offset: body.offset, limit: body.limit },
     );
 
     if (result.failed > 0) {

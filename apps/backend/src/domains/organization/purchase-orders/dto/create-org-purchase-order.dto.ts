@@ -21,7 +21,7 @@ import { purchase_order_status_enum, tax_type_enum } from '@prisma/client';
 
 import {
   IsValidFreightAndTax,
-  PURCHASE_ORDER_ITEMS_MAX,
+  PURCHASE_ORDER_CREATE_ITEMS_MAX,
   SHIPPING_COST_ALLOCATIONS,
   ShippingCostAllocation,
   toOptionalBoolean,
@@ -344,7 +344,7 @@ export class CreateOrgPurchaseOrderDto {
   })
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(PURCHASE_ORDER_ITEMS_MAX)
+  @ArrayMaxSize(PURCHASE_ORDER_CREATE_ITEMS_MAX)
   @ValidateNested({ each: true })
   @Type(() => CreateOrgPurchaseOrderItemDto)
   items!: CreateOrgPurchaseOrderItemDto[];

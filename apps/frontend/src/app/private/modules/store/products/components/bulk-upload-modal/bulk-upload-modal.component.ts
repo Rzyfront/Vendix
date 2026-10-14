@@ -131,7 +131,7 @@ import {
                   Sube el archivo
                 </p>
                 <p class="text-[11px] text-violet-700">
-                  Excel (.xlsx, .xls) o CSV. Máx. 1000 conceptos por archivo.
+                  Excel (.xlsx, .xls) o CSV. Máx. 10.000 conceptos por archivo.
                 </p>
               </div>
             </div>
@@ -343,7 +343,7 @@ import {
               <p class="text-[11px] text-blue-800 leading-relaxed">
                 <span class="font-medium">Descarga la plantilla</span>, completa
                 los datos de tus productos o servicios y sube el archivo.
-                Formatos: .xlsx, .xls, .csv · Máx. 1000 conceptos.
+                Formatos: .xlsx, .xls, .csv · Máx. 10.000 conceptos.
               </p>
             </div>
 
@@ -1890,8 +1890,8 @@ export class BulkUploadModalComponent {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      this.toastService.error('El archivo excede el límite de 5 MB');
+    if (file.size > 20 * 1024 * 1024) {
+      this.toastService.error('El archivo excede el límite de 20 MB');
       return;
     }
 

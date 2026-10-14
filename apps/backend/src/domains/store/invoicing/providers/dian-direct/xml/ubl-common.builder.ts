@@ -34,6 +34,7 @@ import { resolveFiscalResponsibilityFlags } from 'src/common/helpers/vat-respons
 import { DIAN_FINAL_CONSUMER_NAME } from '../../../validators/customer-fiscal-identity.validator';
 import { normalizeAcquirerDocumentType } from '../../../utils/acquirer-identity.resolver';
 import { createHash } from 'crypto';
+import { dianAllowanceFactor } from '@common/money-kernel';
 import {
   DianNumericInput,
   dianAmount,
@@ -399,6 +400,12 @@ interface DianTaxGrouping {
  * Shared UBL 2.1 element builders for Colombian electronic invoicing.
  * Used by both invoice and credit note builders.
  */
+/**
+ * `cbc:AllowanceChargeReasonCode` del descuento de documento (tabla 13.3.9,
+ * FAQ04): `11` = otro descuento.
+ */
+const DOCUMENT_ALLOWANCE_REASON_CODE = '11';
+
 export class UblCommonBuilder {
   /** DIAN scheme agency attributes shared by every sts:* identifier. */
   private static readonly DIAN_SCHEME_AGENCY_NAME =
@@ -1864,21 +1871,100 @@ export class UblCommonBuilder {
     if (toDecimal(discount).isZero()) return;
 
     const line_extension = dianLineExtensionTotal(data.items);
+    // Una sola secuencia por documento (FBE02): las líneas numeran 1..N sobre
+    // sus descuentos y el de documento sigue a continuación. Este grupo se
+    // emite ANTES de las líneas en el XML, así que el número se deriva del
+    // conteo de descuentos de línea en vez de un estado compartido entre
+    // documentos.
+    const id = UblCommonBuilder.countLineAllowances(data.items) + 1;
+    UblCommonBuilder.emitAllowanceCharge(parent, {
+      id,
+      charge_indicator: false,
+      reason_code: DOCUMENT_ALLOWANCE_REASON_CODE,
+      reason: 'Descuento a nivel de documento',
+      amount: discount,
+      base: line_extension,
+      currency,
+    });
+  }
+
+  /**
+   * Cantidad de `cac:AllowanceCharge` de línea que `buildDocumentLines` emite
+   * para estos ítems (uno por línea con descuento distinto de cero).
+   */
+  static countLineAllowances(items: Array<{ discount_amount: string }>): number {
+    return items.filter((item) => !toDecimal(item.discount_amount).isZero())
+      .length;
+  }
+
+  /**
+   * Emisor único de `cac:AllowanceCharge` (línea y documento). Hijos en el
+   * orden del content model de `AllowanceChargeType`: ID, ChargeIndicator,
+   * [AllowanceChargeReasonCode, AllowanceChargeReason], MultiplierFactorNumeric,
+   * Amount, BaseAmount. Rechazo FBE01/FAQ01 si falta alguno de los obligatorios.
+   */
+  private static emitAllowanceCharge(
+    parent: any,
+    input: {
+      id: number;
+      charge_indicator: boolean;
+      reason_code?: string;
+      reason?: string;
+      amount: DianNumericInput;
+      base: DianNumericInput;
+      currency: string;
+    },
+  ): void {
     const allowance = parent.ele(UBL_NAMESPACES.CAC, 'AllowanceCharge');
-    allowance.ele(UBL_NAMESPACES.CBC, 'ID').txt('1');
-    // false = allowance (discount); true would make it a charge.
-    allowance.ele(UBL_NAMESPACES.CBC, 'ChargeIndicator').txt('false');
+    allowance.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(input.id));
+    // false = allowance (discount); true = charge.
     allowance
-      .ele(UBL_NAMESPACES.CBC, 'AllowanceChargeReason')
-      .txt('Descuento a nivel de documento');
+      .ele(UBL_NAMESPACES.CBC, 'ChargeIndicator')
+      .txt(input.charge_indicator ? 'true' : 'false');
+    if (input.reason_code) {
+      allowance
+        .ele(UBL_NAMESPACES.CBC, 'AllowanceChargeReasonCode')
+        .txt(input.reason_code);
+    }
+    if (input.reason) {
+      allowance.ele(UBL_NAMESPACES.CBC, 'AllowanceChargeReason').txt(input.reason);
+    }
+    allowance
+      .ele(UBL_NAMESPACES.CBC, 'MultiplierFactorNumeric')
+      .txt(dianAllowanceFactor(input.amount, input.base));
     allowance
       .ele(UBL_NAMESPACES.CBC, 'Amount')
-      .att('currencyID', currency)
-      .txt(discount);
+      .att('currencyID', input.currency)
+      .txt(dianAmount(input.amount));
     allowance
       .ele(UBL_NAMESPACES.CBC, 'BaseAmount')
-      .att('currencyID', currency)
-      .txt(line_extension);
+      .att('currencyID', input.currency)
+      .txt(dianAmount(input.base));
+  }
+
+  /**
+   * Allowance de línea de un documento, con el siguiente `cbc:ID` de la
+   * secuencia del documento. Lo reutilizan las líneas comunes y la nota de
+   * ajuste del documento soporte.
+   */
+  static buildLineAllowanceCharge(
+    line: any,
+    item: UblDocumentLine,
+    currency: string,
+    id: number,
+  ): void {
+    // Importe sobre el que se calculó el descuento: la línea ANTES de
+    // restarlo. Se deriva del mismo helper que el importe neto para que
+    // lleve el divisor de la *price unit*; escrito a mano como
+    // `cantidad × precio` declaraba una base N veces mayor que el
+    // `cbc:LineExtensionAmount` de su propia línea.
+    UblCommonBuilder.emitAllowanceCharge(line, {
+      id,
+      charge_indicator: false,
+      amount: item.discount_amount,
+      base: dianLineGross(item),
+      currency,
+    });
   }
 
   /**
@@ -2258,6 +2344,7 @@ export class UblCommonBuilder {
         | 'DebitedQuantity';
     },
   ): void {
+    let allowance_id = 0;
     items.forEach((item, index) => {
       const line = parent.ele(UBL_NAMESPACES.CAC, options.line_element);
       line.ele(UBL_NAMESPACES.CBC, 'ID').txt(String(index + 1));
@@ -2292,23 +2379,16 @@ export class UblCommonBuilder {
         .att('currencyID', currency)
         .txt(dianLineExtension(item));
 
-      // Allowance/charge for discount
+      // Allowance/charge for discount. `cbc:ID` consecutivo por documento
+      // (FBE02), contador local a esta llamada: nada persiste entre documentos.
       if (!toDecimal(item.discount_amount).isZero()) {
-        const allowance = line.ele(UBL_NAMESPACES.CAC, 'AllowanceCharge');
-        allowance.ele(UBL_NAMESPACES.CBC, 'ChargeIndicator').txt('false');
-        allowance
-          .ele(UBL_NAMESPACES.CBC, 'Amount')
-          .att('currencyID', currency)
-          .txt(dianAmount(item.discount_amount));
-        // Importe sobre el que se calculó el descuento: la línea ANTES de
-        // restarlo. Se deriva del mismo helper que el importe neto para que
-        // lleve el divisor de la *price unit*; escrito a mano como
-        // `cantidad × precio` declaraba una base N veces mayor que el
-        // `cbc:LineExtensionAmount` de su propia línea.
-        allowance
-          .ele(UBL_NAMESPACES.CBC, 'BaseAmount')
-          .att('currencyID', currency)
-          .txt(dianLineGross(item));
+        allowance_id += 1;
+        UblCommonBuilder.buildLineAllowanceCharge(
+          line,
+          item,
+          currency,
+          allowance_id,
+        );
       }
 
       // `cac:TaxTotal` de línea — ausente cuando la línea lo pide.

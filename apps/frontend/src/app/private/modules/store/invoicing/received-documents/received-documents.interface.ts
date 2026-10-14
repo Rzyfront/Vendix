@@ -1,14 +1,52 @@
+import { RECEIVED_EMAIL_REASON_CODES, type ReceivedEmailStatus } from './received-email-reception.interface';
+
 export type ReceivedDocumentsScope = 'store' | 'organization';
 export type ReceivedDocumentType = 'invoice' | 'credit_note' | 'debit_note' | 'non_electronic';
 export type ReceivedDocumentPaymentCondition = 'cash' | 'credit' | 'unknown';
 export type StructuralValidationStatus = 'pending' | 'valid' | 'needs_review' | 'invalid';
 export type SignatureValidationStatus = 'unsigned' | 'not_verified';
 export type DianValidationStatus = 'not_checked';
+export type ReceivedDocumentInboxState = 'new' | 'requires_review' | 'accepted' | 'reclaimed';
+export type ReceivedDocumentLegalStatus = 'none' | 'accepted' | 'reclaimed' | 'conflict' | 'not_applicable';
+
+export interface ReceivedDocumentInboxSummary {
+  new: number;
+  requires_review: number;
+  accepted: number;
+  reclaimed: number;
+  total: number;
+  as_of: string;
+}
+
+/** Safe reader-facing health; never connection credentials, URLs or cursors. */
+export interface ReceivedDocumentReceptionStatus {
+  email?: ReceivedEmailStatus;
+  dian_active: boolean;
+  configured: boolean;
+  active_connections: number;
+  channels: Array<'api_poll' | 'webhook'>;
+  last_received_at: string | null;
+  last_synced_at: string | null;
+  next_sync_at: string | null;
+  last_run: {
+    status: string;
+    received_count: number;
+    duplicate_count: number;
+    error_count: number;
+    finished_at: string | null;
+  } | null;
+  error_code: 'RECEPTION_CONNECTION_ERROR' | null;
+  requires_operational_store: boolean;
+}
 
 export interface ReceivedDocumentQuery {
   page?: number;
   limit?: number;
   search?: string;
+  inbox_state?: ReceivedDocumentInboxState;
+  legal_status?: ReceivedDocumentLegalStatus;
+  document_type?: ReceivedDocumentType;
+  sort?: 'inbox';
   processing_status?: string;
   validation_status?: string;
   review_status?: string;
@@ -74,11 +112,27 @@ export interface ReceivedDocumentEvent {
   result?: unknown;
 }
 
+/** Safe server-authored email trace; no AR XML, message checkpoint, raw body or document links. */
+export interface ReceivedDocumentReceiptEvidence {
+  included: boolean;
+  reference_matches: boolean;
+  response_code: string | null;
+}
+export interface ReceivedDocumentEmailReception {
+  document_type_code: string | null;
+  profile_execution_id: string | null;
+  uuid_scheme_name: string | null;
+  receipt_evidence: ReceivedDocumentReceiptEvidence;
+}
+
 export interface ReceivedDocument {
   id: number;
   store_id: number | null;
   document_type: ReceivedDocumentType;
   source_channel: string;
+  fiscal_document_type_code?: string | null;
+  email_transport_received?: boolean;
+  email_reception?: ReceivedDocumentEmailReception | null;
   issuer_tax_id: string;
   issuer_name: string;
   receiver_tax_id: string;
@@ -114,6 +168,11 @@ export interface ReceivedDocument {
   version: number;
   created_at: string;
   updated_at: string;
+  arrived_at?: string;
+  inbox_state?: ReceivedDocumentInboxState;
+  legal_status?: ReceivedDocumentLegalStatus;
+  event_delivery_status?: string;
+  blocking_reasons?: string[];
   accepted_at?: string | null;
   confirmed_goods_at?: string | null;
   files?: ReceivedDocumentFile[];
@@ -479,4 +538,37 @@ export interface ReceivedDocumentScanStatus {
   result?: ReceivedDocumentScanJobResult;
   error?: string;
   error_code?: string;
+}
+
+/** A hidden fiscal duplicate is a notice, never a document or a navigable identifier. */
+export interface ReceivedDocumentSafeNotice {
+  outcome: 'duplicate_other_store';
+  created: false;
+  message: string;
+}
+export type ReceivedDocumentCreateResult = ReceivedDocument | ReceivedDocumentSafeNotice;
+export function isReceivedDocumentSafeNotice(value: ReceivedDocumentCreateResult): value is ReceivedDocumentSafeNotice {
+  return 'outcome' in value && value.outcome === 'duplicate_other_store';
+}
+
+/** Validate the additive email block before any reception CTA reads it. Legacy health remains valid. */
+export function isValidReceivedReceptionHealth(value: unknown): value is ReceivedDocumentReceptionStatus {
+  if (typeof value !== 'object' || value === null) return false;
+  const status = value as ReceivedDocumentReceptionStatus;
+  const dateOrNull = (date: unknown): boolean => date === null || (typeof date === 'string' && Number.isFinite(Date.parse(date)));
+  const count = (number: unknown): boolean => typeof number === 'number' && Number.isSafeInteger(number) && number >= 0;
+  const email = status.email;
+  const validEmail = email === undefined || (typeof email === 'object' && email !== null
+    && typeof email.pilot_available === 'boolean' && typeof email.configured === 'boolean' && typeof email.enabled === 'boolean'
+    && count(email.active_inboxes) && count(email.not_processed_count)
+    && ['inactive', 'waiting', 'working', 'paused', 'attention'].includes(email.state)
+    && dateOrNull(email.first_valid_received_at) && dateOrNull(email.last_email_at) && dateOrNull(email.last_valid_received_at)
+    && (email.last_error_code === null || RECEIVED_EMAIL_REASON_CODES.some((code) => code === email.last_error_code)));
+  return validEmail && typeof status.dian_active === 'boolean' && typeof status.configured === 'boolean'
+    && typeof status.requires_operational_store === 'boolean' && count(status.active_connections)
+    && Array.isArray(status.channels) && status.channels.every((channel) => channel === 'api_poll' || channel === 'webhook')
+    && dateOrNull(status.last_received_at) && dateOrNull(status.last_synced_at) && dateOrNull(status.next_sync_at)
+    && (status.error_code === null || status.error_code === 'RECEPTION_CONNECTION_ERROR')
+    && (status.last_run === null || (typeof status.last_run === 'object' && typeof status.last_run.status === 'string'
+      && count(status.last_run.received_count) && count(status.last_run.duplicate_count) && count(status.last_run.error_count) && dateOrNull(status.last_run.finished_at)));
 }

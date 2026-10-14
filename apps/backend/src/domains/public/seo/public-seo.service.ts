@@ -124,18 +124,20 @@ Disallow: /
   // ---------------------------------------------------------------------------
 
   private buildVendixLandingSitemap(base_url: string): string {
-    const now = new Date().toISOString();
+    const baseDomain = DomainConfigService.getBaseDomain();
+    const canonicalBase =
+      base_url === `https://www.${baseDomain}`
+        ? `https://${baseDomain}`
+        : base_url;
 
+    // /ayuda, /pqr and /legal/* exist in the SPA, but the CDN currently serves
+    // them with HTTP 404; restore them to the sitemap when the CDN is fixed.
     const urls = [
       { path: '/', priority: '1.0', changefreq: 'weekly' },
-      { path: '/ayuda', priority: '0.6', changefreq: 'monthly' },
-      { path: '/pqr', priority: '0.4', changefreq: 'monthly' },
-      { path: '/legal/terminos', priority: '0.3', changefreq: 'yearly' },
-      { path: '/legal/privacidad', priority: '0.3', changefreq: 'yearly' },
-      { path: '/legal/cookies', priority: '0.3', changefreq: 'yearly' },
     ];
 
-    return this.buildSitemapXml(base_url, urls, now);
+    // Generation/cache time is not an editorial modification date.
+    return this.buildSitemapXml(canonicalBase, urls);
   }
 
   private async buildOrgLandingSitemap(
@@ -221,14 +223,13 @@ ${product_entries}
   private buildSitemapXml(
     base_url: string,
     urls: Array<{ path: string; priority: string; changefreq: string }>,
-    lastmod: string,
+    lastmod?: string,
   ): string {
     const entries = urls
       .map(
         (u) => `  <url>
     <loc>${escapeXml(base_url + u.path)}</loc>
-    <lastmod>${lastmod}</lastmod>
-    <changefreq>${u.changefreq}</changefreq>
+${lastmod ? `    <lastmod>${lastmod}</lastmod>\n` : ''}    <changefreq>${u.changefreq}</changefreq>
     <priority>${u.priority}</priority>
   </url>`,
       )

@@ -1,0 +1,14 @@
+{
+  "rootDir": "..",
+  "testRegex": "test/qui920-deferred-cash-close-race.e2e-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "testEnvironment": "node",
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "moduleNameMapper": {
+    "^src/(.*)$": "<rootDir>/src/$1",
+    "^@common/(.*)$": "<rootDir>/src/common/$1"
+  },
+  "maxWorkers": 1
+}

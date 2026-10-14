@@ -179,7 +179,12 @@ describe('InvoicingService.createFromOrder — forma base con impuesto incluido'
     expect(data.total_amount.toString()).toBe('54420');
 
     const flow = new InvoiceFlowService(
-      ...(Array.from({ length: 11 }, () => ({})) as [any, any, any, any, any, any, any, any, any, any, any]),
+      ...(Array.from({ length: 12 }, (_, index) => index === 11 ? {
+        assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+        reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+        ensureForSend: jest.fn().mockResolvedValue(undefined),
+        transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+      } : {}) as [any, any, any, any, any, any, any, any, any, any, any, any]),
     );
     const emitted = (invoice: any) => {
       const overrides: Map<number, any> = (

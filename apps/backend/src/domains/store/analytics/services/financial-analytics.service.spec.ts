@@ -13,7 +13,11 @@ type MockStorePrismaService = {
   order_items: { findMany: jest.Mock };
   refunds: { aggregate: jest.Mock };
   expenses: { aggregate: jest.Mock; findMany: jest.Mock };
-  cash_register_sessions: { findMany: jest.Mock };
+  cash_register_sessions: {
+    findMany: jest.Mock;
+    count: jest.Mock;
+    aggregate: jest.Mock;
+  };
   store_settings: { findFirst: jest.Mock };
   organizations: { findFirst: jest.Mock };
   accounting_entities: { findFirst: jest.Mock };
@@ -49,7 +53,11 @@ describe('FinancialAnalyticsService', () => {
       order_items: { findMany: jest.fn() },
       refunds: { aggregate: jest.fn() },
       expenses: { aggregate: jest.fn(), findMany: jest.fn() },
-      cash_register_sessions: { findMany: jest.fn() },
+      cash_register_sessions: {
+        findMany: jest.fn(),
+        count: jest.fn(),
+        aggregate: jest.fn(),
+      },
       store_settings: { findFirst: jest.fn() },
       organizations: { findFirst: jest.fn() },
       accounting_entities: { findFirst: jest.fn() },
@@ -1257,6 +1265,83 @@ describe('FinancialAnalyticsService', () => {
       // Nullable string columns are null (never ''), single-typed.
       expect(row.closed_by_name).toBeNull();
       expect(row.register_name).toBe('Caja 1');
+    });
+  });
+
+  describe('getCashSessionsReport (QUI-543)', () => {
+    const SESSION_OPEN = {
+      status: 'open',
+      opened_at: new Date('2026-07-08T15:30:00.000Z'),
+      closed_at: null,
+      opening_amount: 50,
+      expected_closing_amount: null,
+      actual_closing_amount: null,
+      difference: null,
+      register: { name: 'Caja 1' },
+      opened_by_user: { first_name: 'Ana', last_name: 'Ruiz' },
+      closed_by_user: null,
+      movements: [
+        { type: 'sale', amount: 120.5 },
+        { type: 'sale', amount: 80 },
+      ],
+    };
+    const SESSION_CLOSED = {
+      status: 'closed',
+      opened_at: new Date('2026-07-07T15:30:00.000Z'),
+      closed_at: new Date('2026-07-07T23:45:00.000Z'),
+      opening_amount: 100,
+      expected_closing_amount: 500,
+      actual_closing_amount: 498.77,
+      difference: -1.23,
+      register: { name: 'Caja 2' },
+      opened_by_user: { first_name: 'Luis', last_name: 'Paz' },
+      closed_by_user: { first_name: 'Ana', last_name: 'Ruiz' },
+      movements: [{ type: 'sale', amount: 400 }],
+    };
+
+    beforeEach(() => {
+      prisma.cash_register_sessions.count.mockResolvedValue(2);
+      prisma.cash_register_sessions.aggregate.mockResolvedValue({
+        _sum: {
+          opening_amount: 100,
+          expected_closing_amount: 500,
+          actual_closing_amount: 498.77,
+          difference: -1.23,
+        },
+        _count: { id: 1 },
+      });
+      prisma.cash_register_sessions.findMany.mockResolvedValue([
+        SESSION_OPEN,
+        SESSION_CLOSED,
+      ]);
+    });
+
+    it('exposes the canonical keys the registry expects (names + totals)', async () => {
+      const report = await service.getCashSessionsReport(QUERY as any);
+
+      expect(report.meta.pagination.total).toBe(2);
+      expect(report.data).toHaveLength(2);
+
+      const [open, closed] = report.data;
+      expect(open.register_name).toBe('Caja 1');
+      expect(open.opened_by_name).toBe('Ana Ruiz');
+      expect(open.closed_by_name).toBeNull();
+      expect(open.total_sales).toBe(200.5);
+      expect(open.total_expenses).toBe(0);
+      expect(closed.register_name).toBe('Caja 2');
+      expect(closed.closed_by_name).toBe('Ana Ruiz');
+      expect(closed.total_sales).toBe(400);
+      // Legacy screen-only keys are gone: the row IS the canonical shape.
+      expect(open).not.toHaveProperty('session_id');
+      expect(open).not.toHaveProperty('sales_total');
+      expect(open).not.toHaveProperty('total_movements');
+    });
+
+    it('screen rows are identical to export rows (pantalla == archivo)', async () => {
+      const report = await service.getCashSessionsReport(QUERY as any);
+      const exported = await service.getCashSessionsForExport(QUERY as any);
+
+      expect(report.data).toEqual(exported);
     });
   });
 

@@ -5,6 +5,15 @@ export interface ErrorCodeEntry {
 }
 
 export const ErrorCodes = {
+  // Dedicated email intake; independent of API/webhook connection contracts.
+  EMAIL_RECEPTION_UNAVAILABLE: { code: 'EMAIL_RECEPTION_UNAVAILABLE', httpStatus: 503, devMessage: 'La recepción por correo no está disponible para esta tienda.' },
+  EMAIL_RECEPTION_CONSENT_REQUIRED: { code: 'EMAIL_RECEPTION_CONSENT_REQUIRED', httpStatus: 400, devMessage: 'Confirma la política vigente para activar o cambiar tu dirección.' },
+  EMAIL_RECEPTION_FISCAL_GATE: { code: 'EMAIL_RECEPTION_FISCAL_GATE', httpStatus: 403, devMessage: 'Completa la configuración fiscal de tu negocio para recibir facturas.' },
+  EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED: { code: 'EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED', httpStatus: 403, devMessage: 'La suscripción no permite agregar documentos ahora.' },
+  EMAIL_RECEPTION_PAUSED: { code: 'EMAIL_RECEPTION_PAUSED', httpStatus: 409, devMessage: 'La recepción por correo está pausada.' },
+  EMAIL_RECEPTION_NOT_FOUND: { code: 'EMAIL_RECEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la configuración de recepción por correo.' },
+  EMAIL_RECEPTION_VERSION_CONFLICT: { code: 'EMAIL_RECEPTION_VERSION_CONFLICT', httpStatus: 409, devMessage: 'La configuración cambió. Vuelve a cargarla antes de guardar.' },
+
   // System
   SYS_INTERNAL_001: {
     code: 'SYS_INTERNAL_001',
@@ -1644,7 +1653,7 @@ export const ErrorCodes = {
   INV_BULK_002: {
     code: 'INV_BULK_002',
     httpStatus: 400,
-    devMessage: 'Bulk upload batch size exceeded (max 1000)',
+    devMessage: 'Bulk upload batch size exceeded (max 10000)',
   },
   INV_LOCATION_NOT_IN_STORE: {
     code: 'INV_LOCATION_NOT_IN_STORE',
@@ -3344,6 +3353,18 @@ export const ErrorCodes = {
     devMessage:
       'Credit note exceeds the remaining creditable balance of its parent invoice',
   },
+  INVOICING_NOTE_SOURCE_001: {
+    code: 'INVOICING_NOTE_SOURCE_001',
+    httpStatus: 422,
+    devMessage:
+      'Invoice note source item is missing, ambiguous, or does not belong to the corrected invoice',
+  },
+  INVOICING_NOTE_LIMIT_001: {
+    code: 'INVOICING_NOTE_LIMIT_001',
+    httpStatus: 422,
+    devMessage:
+      'Credit note exceeds the remaining source-item or invoice credit limit',
+  },
   /**
    * VENTA COBRADA SIN DOCUMENTO FISCAL — el dinero entró pero la venta no
    * quedó respaldada por ningún documento fiscal emitido.
@@ -4735,7 +4756,7 @@ export const ErrorCodes = {
   BULK_PROD_LIMIT_EXCEEDED: {
     code: 'BULK_PROD_LIMIT_EXCEEDED',
     httpStatus: 400,
-    devMessage: 'File exceeds maximum product limit (1000)',
+    devMessage: 'File exceeds maximum product limit (10000)',
   },
   BULK_PROD_SESSION_EXPIRED: {
     code: 'BULK_PROD_SESSION_EXPIRED',
@@ -5073,6 +5094,11 @@ export const ErrorCodes = {
     devMessage:
       'Se requiere informacion de pago para procesar la orden completa.',
   },
+  ORD_CASH_SESSION_ORDER_STALE_001: {
+    code: 'ORD_CASH_SESSION_ORDER_STALE_001',
+    httpStatus: 409,
+    devMessage: 'La orden cambió mientras se procesaba desde el cierre de caja.',
+  },
 
   // ===== SaaS Subscriptions =====
   SUBSCRIPTION_001: {
@@ -5182,6 +5208,18 @@ export const ErrorCodes = {
     code: 'SUBSCRIPTION_VALIDATION',
     httpStatus: 400,
     devMessage: 'Subscription checkout validation failed',
+  },
+  SUBSCRIPTION_ACTIVATION_START_RANGE: {
+    code: 'SUBSCRIPTION_ACTIVATION_START_RANGE',
+    httpStatus: 400,
+    devMessage:
+      'La fecha de inicio del período debe estar entre hoy menos 31 días y hoy',
+  },
+  SUBSCRIPTION_ACTIVATION_UNDERPAYMENT: {
+    code: 'SUBSCRIPTION_ACTIVATION_UNDERPAYMENT',
+    httpStatus: 400,
+    devMessage:
+      'El monto recibido es menor que el total a cobrar; marca "Aceptar pago parcial" e indica una nota',
   },
   SUBSCRIPTION_PAY_001: {
     code: 'SUBSCRIPTION_PAY_001',
@@ -6181,6 +6219,38 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
+
+  // QUI-920 — guardia transaccional al cerrar caja con órdenes pendientes.
+  CASH_SESSION_PENDING_001: {
+    code: 'CASH_SESSION_PENDING_001',
+    httpStatus: 409,
+    devMessage: 'An explicit decision is required while pending orders remain',
+  },
+  CASH_SESSION_PENDING_002: {
+    code: 'CASH_SESSION_PENDING_002',
+    httpStatus: 409,
+    devMessage: 'Pending orders changed or remain after the resolved decision',
+  },
+  CASH_SESSION_PENDING_003: {
+    code: 'CASH_SESSION_PENDING_003',
+    httpStatus: 400,
+    devMessage: 'A non-empty reason is required to override pending orders',
+  },
+  CASH_SESSION_PENDING_004: {
+    code: 'CASH_SESSION_PENDING_004',
+    httpStatus: 409,
+    devMessage: 'Legacy session tracking is unavailable; an audited override is required',
+  },
+  CASH_SESSION_PENDING_005: {
+    code: 'CASH_SESSION_PENDING_005',
+    httpStatus: 409,
+    devMessage: 'Unresolved sale or refund cash movements remain for this session',
+  },
+  CASH_SESSION_PENDING_006: {
+    code: 'CASH_SESSION_PENDING_006',
+    httpStatus: 409,
+    devMessage: 'The cash session is already closed',
   },
 
   // Caja registradora — cobro sin sesión del operador

@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { SessionsService } from '../../cash-registers/sessions/sessions.service';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 
-interface PaymentReceivedInput {
+export interface PaymentReceivedInput {
   store_id: number;
   organization_id?: number;
   route_id: number;
@@ -14,6 +16,18 @@ interface PaymentReceivedInput {
   payment_method: string;
   user_id: number | undefined;
   withholding_breakdown?: { retefuente?: number; reteiva?: number; reteica?: number };
+}
+
+export interface RecordedCashMovementEvent {
+  movement_id: number;
+  session_id: number;
+  store_id: number;
+  organization_id: number | null;
+  type: 'sale';
+  amount: number;
+  reference: string | null;
+  notes: string | null;
+  user_id: number;
 }
 
 interface RefundInput {
@@ -53,9 +67,65 @@ export class CashSettlementService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly sessions: SessionsService,
   ) {}
 
-  async emitPaymentReceived(input: PaymentReceivedInput) {
+  /** Persists COD cash in the caller's stop transaction under the close lock. */
+  async recordCashMovement(
+    tx: any,
+    input: PaymentReceivedInput,
+  ): Promise<RecordedCashMovementEvent | null> {
+    if (input.payment_method !== 'cash' || !input.user_id) return null;
+    const session = await this.findOpenCashSession(input.store_id, input.user_id);
+    if (!session) {
+      await this.sessions.assertSessionForSales(input.user_id);
+      return null;
+    }
+    const locked = await tx.$queryRaw<{ id: number }[]>`
+      SELECT id FROM cash_register_sessions
+      WHERE id = ${session.id} AND store_id = ${input.store_id} AND status = 'open'
+      FOR UPDATE
+    `;
+    if (locked.length !== 1) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    }
+    const movement = await tx.cash_register_movements.create({
+      data: {
+        session_id: session.id,
+        store_id: input.store_id,
+        user_id: input.user_id,
+        type: 'sale',
+        amount: input.amount,
+        payment_method: 'cash',
+        reference: `dispatch_route:${input.route_id}:stop:${input.stop_id}`,
+        notes: `Recaudo planilla #${input.route_id} parada #${input.stop_id}`,
+      },
+    });
+    const store = await tx.stores.findUnique({
+      where: { id: input.store_id },
+      select: { organization_id: true },
+    });
+    return {
+      movement_id: movement.id,
+      session_id: session.id,
+      store_id: input.store_id,
+      organization_id: input.organization_id ?? store?.organization_id ?? null,
+      type: 'sale',
+      amount: input.amount,
+      reference: movement.reference,
+      notes: movement.notes,
+      user_id: input.user_id,
+    };
+  }
+
+  emitCashMovementRecorded(event: RecordedCashMovementEvent | null): void {
+    if (event) this.eventEmitter.emit('cash_register.movement', event);
+  }
+
+  async emitPaymentReceived(
+    input: PaymentReceivedInput,
+    options: { cashMovementHandled?: boolean } = {},
+  ) {
     // Resolve organization_id from store if missing
     let organization_id = input.organization_id;
     if (!organization_id) {
@@ -70,36 +140,33 @@ export class CashSettlementService {
     }
 
     // Persist cash_register_movements if payment_method is cash
-    if (input.payment_method === 'cash' && input.user_id) {
-      const session = await this.findOpenCashSession(
-        input.store_id,
-        input.user_id,
-      );
-      if (session) {
-        const movement = await this.prisma.cash_register_movements.create({
-          data: {
-            session_id: session.id,
-            store_id: input.store_id,
-            user_id: input.user_id,
-            type: 'sale',
-            amount: input.amount,
-            payment_method: 'cash',
-            reference: `dispatch_route:${input.route_id}:stop:${input.stop_id}`,
-            notes: `Recaudo planilla #${input.route_id} parada #${input.stop_id}`,
-          },
-        });
-        this.eventEmitter.emit('cash_register.movement', {
-          movement_id: movement.id,
-          session_id: session.id,
-          store_id: input.store_id,
-          organization_id,
-          type: 'sale',
-          amount: input.amount,
-          reference: movement.reference,
-          notes: movement.notes,
-          user_id: input.user_id,
-        });
-      } else {
+    if (
+      !options.cashMovementHandled &&
+      input.payment_method === 'cash' &&
+      input.user_id
+    ) {
+      let movementEvent: RecordedCashMovementEvent | null = null;
+      try {
+        movementEvent = await this.prisma.$transaction((tx) =>
+          this.recordCashMovement(tx, { ...input, organization_id }),
+        );
+      } catch (error) {
+        // Legacy post-commit callers cannot roll back their business action.
+        // A raced close therefore keeps the prior behavior (no movement,
+        // payment event continues); transactional callers use recordCashMovement
+        // directly and fail closed so their mutation rolls back.
+        if (
+          !(error instanceof VendixHttpException) ||
+          error.errorCode !== ErrorCodes.CASH_SESSION_REQUIRED_001.code
+        ) {
+          throw error;
+        }
+        this.logger.warn(
+          `[emitPaymentReceived] Cash session closed before route movement could be recorded for store ${input.store_id} user ${input.user_id}`,
+        );
+      }
+      if (movementEvent) this.emitCashMovementRecorded(movementEvent);
+      else {
         this.logger.warn(
           `[emitPaymentReceived] No open cash session for store ${input.store_id} user ${input.user_id} — cash movement not recorded`,
         );
@@ -307,8 +374,8 @@ export class CashSettlementService {
     return created;
   }
 
-  private async findOpenCashSession(store_id: number, opened_by: number) {
-    return this.prisma.cash_register_sessions.findFirst({
+  private async findOpenCashSession(store_id: number, opened_by: number, db: any = this.prisma) {
+    return db.cash_register_sessions.findFirst({
       where: {
         store_id,
         status: 'open',

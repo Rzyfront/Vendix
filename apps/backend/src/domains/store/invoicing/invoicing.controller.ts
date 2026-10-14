@@ -43,6 +43,7 @@ import {
   CreateDebitNoteDto,
 } from './credit-notes/dto/create-credit-note.dto';
 import { RegisterDianEventDto } from './dto/register-dian-event.dto';
+import { NoteContextQueryDto } from './credit-notes/dto/note-context-query.dto';
 
 /*
  * NOTA sobre el guard: hasta este cambio la clase no declaraba `PermissionsGuard`,
@@ -369,6 +370,16 @@ export class InvoicingController {
   async listNotes(@Param('id', ParseIntPipe) id: number) {
     const result =
       await this.credit_notes_service.findNotesByRelatedInvoice(id);
+    return this.response_service.success(result);
+  }
+
+  @Get(':id/note-context')
+  @Permissions('invoicing:read')
+  async getNoteContext(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: NoteContextQueryDto,
+  ) {
+    const result = await this.credit_notes_service.getNoteContext(id, query.note_type);
     return this.response_service.success(result);
   }
 

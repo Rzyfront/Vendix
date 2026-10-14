@@ -13,6 +13,12 @@
   </section>
   <app-modal [(isOpen)]="open" [title]="selectedTitle()" subtitle="Confirma cuidadosamente esta acción legal." size="md" [fullScreenOnMobile]="true" [dialog]="true" [canClose]="canClose" (closed)="onClose(false)">
     <div class="space-y-4 p-1">
+      <dl class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+        <div><dt class="text-text-secondary">Factura</dt><dd class="font-medium">{{ document().invoice_number || 'Sin número' }}</dd></div>
+        <div><dt class="text-text-secondary">Proveedor</dt><dd class="font-medium">{{ document().issuer_name || 'No identificado' }} · {{ document().issuer_tax_id || 'NIT no informado' }}</dd></div>
+      </dl>
+      @if (selected() === '033') { <p class="text-sm text-text-secondary">Confirmar solicita la aceptación expresa de esta factura ante la DIAN. No es una revisión interna ni una aceptación de propuesta.</p> }
+      @if (selected() === '031') { <p class="text-sm text-text-secondary">Confirmar presenta un reclamo legal de esta factura ante la DIAN con el concepto elegido. No equivale a rechazar un evento fallido.</p> }
       @if (checking()) { <p class="text-sm" role="status">Verificando habilitación para este código…</p> }
       @if (readiness(); as state) {
         @if (state.ready) { <p class="rounded-lg border border-success/30 bg-success-light p-3 text-sm" role="status">La validación actual permite continuar. El servidor volverá a validar antes de enviar.</p> }
@@ -27,7 +33,7 @@
       }
       <p class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm">La acción transmitirá un evento legal a la DIAN. No implica contabilización ni recepción de inventario.</p>
       @if (error()) { <p class="text-sm text-error" role="alert">{{ error() }}</p> }
-      @if (result(); as response) { <p class="text-sm" role="status">Respuesta: {{ response.status }}@if (response.event_number) { · Evento {{ response.event_number }}} @if (response.duplicate) { · solicitud duplicada idempotente }</p> }
+      @if (result(); as response) { <p class="text-sm" role="status">Respuesta: {{ resultStatusLabel(response.status) }}@if (response.event_number) { · Evento {{ response.event_number }}} @if (response.duplicate) { · solicitud duplicada idempotente }</p> }
       <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <button type="button" class="min-h-11 rounded-lg border border-border px-4 py-2" [disabled]="pending()" (click)="onClose(false)">Cancelar</button>
         <button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 font-semibold text-white disabled:opacity-50" [disabled]="!canEmit()" (click)="emit()">{{ pending() ? 'Enviando…' : uncertain() ? 'Reintentar con la misma clave' : 'Confirmar y enviar' }}</button>

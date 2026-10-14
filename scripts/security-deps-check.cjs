@@ -73,8 +73,10 @@ function checkBaseline(baseline, currentRoot) {
   const starts = ['apps/mobile', 'node_modules/@shopify/react-native-skia'];
   assert.deepEqual(dependencyGraph(currentRoot, starts), dependencyGraph(previousRoot, starts),
     'A root-lock change affected an excluded mobile dependency chain');
-  const mobileChanges = git('diff', '--name-only', baseline, '--', 'apps/mobile', '.github/workflows/ci.yml');
-  assert.equal(mobileChanges.trim(), '', 'Mobile files or existing ci.yml changed');
+  const mobileManifestOrCiChanges = git('diff', '--name-only', baseline, '--',
+    'apps/mobile/package.json', 'apps/mobile/package-lock.json', '.github/workflows/ci.yml');
+  assert.equal(mobileManifestOrCiChanges.trim(), '',
+    'Mobile dependency manifests or existing ci.yml changed');
   const previous = JSON.parse(git('show', baseline + ':package.json')).overrides;
   const current = read('package.json').overrides;
   for (const [name, value] of Object.entries(previous)) {
@@ -87,7 +89,7 @@ function checkBaseline(baseline, currentRoot) {
   for (const name of Object.keys(current)) {
     assert.ok(name in previous || allowed.has(name), 'Unapproved root override: ' + name);
   }
-  console.log('PASS: mobile dependency graph, mobile files, ci.yml and existing overrides unchanged');
+  console.log('PASS: mobile dependency graph, mobile manifests, ci.yml and existing overrides unchanged');
 }
 function main() {
   const locks = LOCKS.map(read);

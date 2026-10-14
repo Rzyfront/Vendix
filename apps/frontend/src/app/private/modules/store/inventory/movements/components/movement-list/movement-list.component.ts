@@ -3,6 +3,7 @@ import { Component, input, output, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { isInboundMovement as resolveMovementDirection } from '../../utils/movement-direction.util';
 
 // Shared Components
 import {
@@ -21,19 +22,6 @@ import {
 
 // Interfaces
 import { InventoryMovement, MovementType } from '../../../interfaces';
-
-/**
- * Tipos que sólo existen como salida. Sirven para desempatar las filas
- * históricas, que se escribieron con `to_location_id` relleno en los dos
- * sentidos y por eso no llevan la dirección en la fila.
- */
-const OUTBOUND_ONLY_TYPES = new Set<string>([
-  'stock_out',
-  'sale',
-  'damage',
-  'expiration',
-  'consumption',
-]);
 
 @Component({
   selector: 'app-movement-list',
@@ -266,36 +254,8 @@ export class MovementListComponent {
     return labels[type] || type;
   }
 
-  /**
-   * Dirección real del movimiento.
-   *
-   * La verdad está en las dos patas de ubicación: sale de donde dice
-   * `from_location_id` y entra a donde dice `to_location_id`. Un traslado lleva
-   * las dos. Adivinarla por el tipo era el bug: un `adjustment` que subía el
-   * stock de 100 a 120 se pintaba "−20", porque `adjustment` no está en la lista
-   * de entradas.
-   *
-   * Las filas históricas se escribieron siempre con `to_location_id` relleno y
-   * `from_location_id` en null, incluso en las salidas, así que para ellas no
-   * hay dirección recuperable y se conserva la heurística por tipo.
-   */
   private isInboundMovement(item: any): boolean {
-    const from = item?.from_location_id ?? null;
-    const to = item?.to_location_id ?? null;
-
-    // 1) Sólo pata de origen → salió. Concluyente, y es la forma de TODA fila
-    //    nueva de salida.
-    if (from != null && to == null) return false;
-
-    // 2) Las dos patas → traslado; se muestra desde la pata de destino.
-    if (from != null && to != null) return true;
-
-    // 3) Sólo pata de destino: puede ser una entrada nueva o una fila histórica
-    //    (el legado rellenaba `to_location_id` en los dos sentidos). Los tipos
-    //    que sólo existen en un sentido zanjan el caso; `adjustment` es el único
-    //    ambiguo y se resuelve como entrada, porque toda salida nueva ya cayó
-    //    por la regla 1.
-    return !OUTBOUND_ONLY_TYPES.has(item?.movement_type);
+    return resolveMovementDirection(item);
   }
 
   formatQuantity(value: number, item?: any): string {

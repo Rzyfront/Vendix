@@ -44,6 +44,41 @@ import {
   PlatformInvoicePdfLocation,
 } from '../interfaces/platform-invoice-document.interface';
 
+export type PlatformInvoicePaymentMethod =
+  | 'cash'
+  | 'bank_transfer'
+  | 'card'
+  | 'other';
+
+export interface RegisterPlatformInvoicePaymentDto {
+  amount: number;
+  /** YYYY-MM-DD */
+  paid_at: string;
+  payment_method: PlatformInvoicePaymentMethod;
+  reference?: string;
+  notes?: string;
+}
+
+export interface PlatformInvoicePayment {
+  id: number;
+  amount: string;
+  paid_at: string;
+  payment_method: PlatformInvoicePaymentMethod | string;
+  reference: string | null;
+  notes: string | null;
+  journal_entry_id: number | null;
+  created_at: string;
+}
+
+/** Filas del listado de facturas de plataforma (`GET fiscal/invoices`). */
+export interface ListPlatformInvoicesQuery {
+  page?: number;
+  limit?: number;
+  status?: string;
+  q?: string;
+  collection_status?: 'overdue' | 'pending' | 'partial' | 'paid';
+}
+
 @Injectable({ providedIn: 'root' })
 export class FiscalBillingAdminService {
   private http = inject(HttpClient);
@@ -684,5 +719,55 @@ export class FiscalBillingAdminService {
         ApiEnvelope<PlatformDianEvent>
       >(`${this.base}/sales-invoices/${id}/events`, dto)
       .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Listado de facturas de plataforma —
+   * `GET superadmin/subscriptions/fiscal/invoices`. Cada fila trae `total`,
+   * `amount_paid`, `balance_due`, `due_date` y `collection_status`.
+   */
+  listPlatformInvoices(
+    query: ListPlatformInvoicesQuery = {},
+  ): Observable<PaginatedEnvelope<SubscriptionFiscalTransmission>> {
+    let params = new HttpParams();
+    if (query.page) params = params.set('page', String(query.page));
+    if (query.limit) params = params.set('limit', String(query.limit));
+    if (query.status) params = params.set('status', query.status);
+    if (query.q?.trim()) params = params.set('q', query.q.trim());
+    if (query.collection_status) {
+      params = params.set('collection_status', query.collection_status);
+    }
+    return this.http.get<PaginatedEnvelope<SubscriptionFiscalTransmission>>(
+      `${this.base}/invoices`,
+      { params },
+    );
+  }
+
+  /**
+   * Registra un pago contra una factura de plataforma aceptada —
+   * `POST superadmin/subscriptions/fiscal/platform-invoices/:id/payments`
+   * (`id` = `fiscal_transmissions.id`). Devuelve el DETALLE actualizado (misma
+   * forma que el GET de detalle). 409 si la factura no está aceptada o el
+   * monto excede el saldo.
+   */
+  registerPlatformInvoicePayment<TDetail = unknown>(
+    id: number,
+    dto: RegisterPlatformInvoicePaymentDto,
+  ): Observable<TDetail> {
+    return this.http
+      .post<ApiEnvelope<TDetail>>(
+        `${this.base}/platform-invoices/${id}/payments`,
+        dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** `GET superadmin/subscriptions/fiscal/platform-invoices/:id/payments`. */
+  listPlatformInvoicePayments(id: number): Observable<PlatformInvoicePayment[]> {
+    return this.http
+      .get<
+        ApiEnvelope<PlatformInvoicePayment[]>
+      >(`${this.base}/platform-invoices/${id}/payments`)
+      .pipe(map((res) => res.data ?? []));
   }
 }

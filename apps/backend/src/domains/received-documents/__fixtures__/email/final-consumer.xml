@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:UBLVersionID>2.1</cbc:UBLVersionID><cbc:CustomizationID>10</cbc:CustomizationID><cbc:ProfileID>DIAN 2.1: Factura Electrónica de Venta</cbc:ProfileID><cbc:ProfileExecutionID>1</cbc:ProfileExecutionID>
+  <cbc:ID>FE-final-consumer</cbc:ID><cbc:UUID schemeID="1" schemeName="CUFE-SHA384">8b949b5c6f17697fa86e6f8897c9f644f5eb0b5d39a11ae8b4e848336df597c1e8d757dd44b6144a07568805dcd7becb</cbc:UUID>
+  <cbc:IssueDate>2026-10-13</cbc:IssueDate><cbc:IssueTime>12:34:00-05:00</cbc:IssueTime><cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode><cbc:Note>DOCUMENTO SINTÉTICO SIN VALIDEZ FISCAL NI FIRMA</cbc:Note><cbc:DocumentCurrencyCode>COP</cbc:DocumentCurrencyCode>
+  
+  <cac:AccountingSupplierParty><cac:Party><cac:PartyTaxScheme><cbc:RegistrationName>Proveedor Sintético Café SAS</cbc:RegistrationName>
+      <cbc:CompanyID schemeName="31" schemeID="8">900123456</cbc:CompanyID><cbc:TaxLevelCode>R-99-PN</cbc:TaxLevelCode>
+      <cac:TaxScheme><cbc:ID>01</cbc:ID><cbc:Name>IVA</cbc:Name></cac:TaxScheme></cac:PartyTaxScheme>
+      <cac:PartyLegalEntity><cbc:RegistrationName>Proveedor Sintético Café SAS</cbc:RegistrationName><cbc:CompanyID schemeName="31" schemeID="8">900123456</cbc:CompanyID></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party><cac:PartyTaxScheme><cbc:RegistrationName>Comprador Sintético Bogotá SAS</cbc:RegistrationName>
+      <cbc:CompanyID schemeName="13">222222222222</cbc:CompanyID><cbc:TaxLevelCode>R-99-PN</cbc:TaxLevelCode>
+      <cac:TaxScheme><cbc:ID>01</cbc:ID><cbc:Name>IVA</cbc:Name></cac:TaxScheme></cac:PartyTaxScheme>
+      <cac:PartyLegalEntity><cbc:RegistrationName>Comprador Sintético Bogotá SAS</cbc:RegistrationName><cbc:CompanyID schemeName="13">222222222222</cbc:CompanyID></cac:PartyLegalEntity></cac:Party></cac:AccountingCustomerParty>
+  <cac:PaymentMeans><cbc:ID>1</cbc:ID><cbc:PaymentMeansCode>10</cbc:PaymentMeansCode></cac:PaymentMeans>
+  <cac:TaxTotal><cbc:TaxAmount currencyID="COP">19000.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount currencyID="COP">100000.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="COP">19000.00</cbc:TaxAmount><cac:TaxCategory><cbc:Percent>19</cbc:Percent><cac:TaxScheme><cbc:ID>01</cbc:ID><cbc:Name>IVA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="COP">100000.00</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="COP">100000.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="COP">119000.00</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="COP">119000.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="NIU">2</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="COP">100000.00</cbc:LineExtensionAmount><cac:TaxTotal><cbc:TaxAmount currencyID="COP">19000.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount currencyID="COP">100000.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="COP">19000.00</cbc:TaxAmount><cac:TaxCategory><cbc:Percent>19</cbc:Percent><cac:TaxScheme><cbc:ID>01</cbc:ID><cbc:Name>IVA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal><cac:Item><cbc:Description>Café de prueba, lote ficticio</cbc:Description></cac:Item><cac:Price><cbc:PriceAmount currencyID="COP">50000.00</cbc:PriceAmount><cbc:BaseQuantity unitCode="NIU">1</cbc:BaseQuantity></cac:Price></cac:InvoiceLine>
+</Invoice>

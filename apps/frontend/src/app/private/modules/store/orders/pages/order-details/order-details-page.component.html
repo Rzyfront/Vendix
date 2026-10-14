@@ -2186,6 +2186,54 @@
                             <p class="text-xs font-semibold text-text-primary">
                               Creando nota crédito con el detalle del reembolso…
                             </p>
+                          } @else if (refundNoteState()?.stage === 'mapping') {
+                            <div class="space-y-3" role="group" aria-label="Seleccionar origen de líneas de la nota crédito">
+                              <p class="text-xs font-semibold text-text-primary">
+                                Seleccione la línea de la factura aceptada que corresponde a cada elemento del reembolso.
+                                No se enviarán precios ni impuestos desde esta pantalla.
+                              </p>
+                              @for (item of refundNoteState()?.mapping?.refund_item_candidates ?? []; track item.refund_item_id) {
+                                <div>
+                                  <label class="mb-1 block text-xs font-medium text-text-secondary" [for]="'refund-source-' + item.refund_item_id">
+                                    {{ item.description }} — origen de factura requerido
+                                  </label>
+                                  <app-selector
+                                    [id]="'refund-source-' + item.refund_item_id"
+                                    [options]="refundMappingOptions(item.source_candidates)"
+                                    [value]="refundSourceChoices()[item.refund_item_id]"
+                                    (valueChange)="setRefundSourceChoice(item.refund_item_id, $event)"
+                                    [required]="true"
+                                    [label]="'Origen para ' + item.description"
+                                    placeholder="Seleccione una línea de la factura"
+                                  />
+                                </div>
+                              }
+                              @if ((refundNoteState()?.mapping?.shipping_source_candidates?.length ?? 0) > 1) {
+                                <div>
+                                  <label class="mb-1 block text-xs font-medium text-text-secondary" for="refund-shipping-source">
+                                    Envío — origen de factura requerido
+                                  </label>
+                                  <app-selector
+                                    id="refund-shipping-source"
+                                    [options]="refundMappingOptions(refundNoteState()!.mapping!.shipping_source_candidates)"
+                                    [value]="refundShippingChoice()"
+                                    (valueChange)="setRefundShippingChoice($event)"
+                                    [required]="true"
+                                    label="Origen de factura para el envío"
+                                    placeholder="Seleccione una línea de envío"
+                                  />
+                                </div>
+                              }
+                              <p class="text-[11px] text-text-secondary" role="status">
+                                La nota conservará los valores fiscales de la factura original; la selección solo identifica sus líneas.
+                              </p>
+                              <div class="flex flex-wrap gap-2">
+                                <app-button variant="ghost" size="sm" (clicked)="dismissRefundNote()">Cancelar</app-button>
+                                <app-button variant="primary" size="sm" [disabled]="!refundMappingReady()" (clicked)="retryRefundNoteWithSources()">
+                                  Crear nota con estas fuentes
+                                </app-button>
+                              </div>
+                            </div>
                           } @else if (refundNoteState()?.stage === 'issuing') {
                             <p class="text-xs font-semibold text-text-primary">
                               Emitiendo {{ refundNoteState()?.noteNumber }} a la DIAN…
@@ -3614,112 +3662,14 @@
       />
     }
 
-    <!-- FAST-TRACK MODAL -->
-    <app-modal
+    <app-order-complete-modal
       [isOpen]="showFastTrackModal()"
-      (closed)="showFastTrackModal.set(false)"
-      title="Procesar orden completa"
-      size="md"
-    >
-      <div class="p-4 space-y-4" [formGroup]="fastTrackForm">
-        <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-3">
-          <app-icon name="alert-triangle" size="18" class="text-amber-600 mt-0.5"></app-icon>
-          <div>
-            <p class="text-sm font-bold text-amber-800">Accion en cadena</p>
-            <p class="text-xs text-amber-700 mt-0.5">
-              Se ejecutaran pago (si falta), despacho, entrega y finalizacion. Si un paso falla,
-              la orden queda en el ultimo estado completado.
-            </p>
-          </div>
-        </div>
-
-        @if (!hasSuccessfulPayment()) {
-          <div formGroupName="payment" class="space-y-2">
-            <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider">Pago</h4>
-            <label class="block text-sm font-bold text-gray-700">Metodo de pago</label>
-            <select
-              formControlName="payment_method_id"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
-            >
-              <option [ngValue]="null">Seleccionar metodo…</option>
-              @for (pm of paymentMethods(); track pm.id) {
-                <option [ngValue]="pm.id">{{ pm.display_name }}</option>
-              }
-            </select>
-            <label class="block text-sm font-bold text-gray-700 mt-2">Monto</label>
-            <input
-              type="number"
-              formControlName="amount"
-              min="0"
-              step="0.01"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
-            />
-            <label class="block text-sm font-bold text-gray-700 mt-2">Referencia (opcional)</label>
-            <input
-              type="text"
-              formControlName="reference"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
-            />
-          </div>
-        } @else {
-          <p class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
-            Pago ya confirmado.
-          </p>
-        }
-
-        <div formGroupName="ship" class="space-y-2">
-          <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider">Envio (opcional)</h4>
-          <label class="block text-sm font-bold text-gray-700">Numero de rastreo</label>
-          <input
-            type="text"
-            formControlName="tracking_number"
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
-          />
-          <label class="block text-sm font-bold text-gray-700 mt-2">Transportista</label>
-          <input
-            type="text"
-            formControlName="carrier"
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
-          />
-          <label class="block text-sm font-bold text-gray-700 mt-2">Notas</label>
-          <textarea
-            formControlName="notes"
-            rows="2"
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm resize-none"
-          ></textarea>
-        </div>
-
-        <div formGroupName="deliver" class="space-y-2">
-          <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider">Entrega (opcional)</h4>
-          <label class="block text-sm font-bold text-gray-700">Recibido por</label>
-          <input
-            type="text"
-            formControlName="delivered_to"
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
-          />
-          <label class="block text-sm font-bold text-gray-700 mt-2">Notas de entrega</label>
-          <textarea
-            formControlName="delivery_notes"
-            rows="2"
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm resize-none"
-          ></textarea>
-        </div>
-      </div>
-
-      <div
-        slot="footer"
-        class="flex items-center justify-end gap-2 p-4 border-t border-border"
-      >
-        <app-button variant="outline" (clicked)="showFastTrackModal.set(false)">Cancelar</app-button>
-        <app-button
-          variant="outline-warning"
-          (clicked)="submitFastTrack()"
-          [disabled]="isProcessingAction()"
-        >
-          {{ isProcessingAction() ? 'Procesando…' : 'Procesar todo' }}
-        </app-button>
-      </div>
-    </app-modal>
+      (isOpenChange)="showFastTrackModal.set($event)"
+      [order]="orderData"
+      [paymentMethods]="paymentMethods()"
+      [busy]="isProcessingAction()"
+      (submitted)="submitFastTrack($event)"
+    />
 
     <!-- Recarga con la orden visible: overlay sobre el contenido (sin quitar ni
          insertar bloques => cero salto de layout). Bloquea clics mientras

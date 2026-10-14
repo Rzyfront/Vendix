@@ -1,26 +1,15 @@
+# Rafael, 2026-10-14 01:39: «ningún job debe tardar más de ~5 minutos;
+# corta todo lo que sea necesario». PR/push conservan sólo gates rápidos,
+# con timeout de 10 min como margen (no como duración objetivo).
+# Las suites completas de los siete carriles POS + products viven en
+# backend-full-tests.yml (nocturno/manual, NO requerido para merge).
+# Se retira del camino de merge el antiguo Jest global, ya deshabilitado.
 name: CI
 
 on:
   pull_request:
     branches: [main, develop]
-  # F-172 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): este
-  # bloque `push:` existe por una decisión explícita del usuario del 2026-09-13,
-  # y REVIERTE lo que F-156 había concluido en la ronda 2 ("no se añade push:,
-  # duplicaría los doce jobs sin añadir señal"). Aquel razonamiento era correcto
-  # BAJO EL SUPUESTO de que todo trabajo llega por PR. El plan QUI-832 commitea
-  # directo sobre `develop`, sin rama y sin PR, así que sin este disparador el
-  # job `backend-test-scoped` -- la única compuerta del carril POS -- no vería
-  # ni uno solo de los commits de las fases B, C y D.
-  #
-  # Sólo `develop`: `main` recibe trabajo por PR de release (git-workflow R10) y
-  # ahí `pull_request` ya dispara.
-  #
-  # OJO (F-193, medido en la corrida 34792807926): este bloque obligó a añadir
-  # `actions/checkout` al job `changes`. `dorny/paths-filter` resuelve un
-  # `pull_request` contra la API de GitHub sin tocar el árbol, pero un `push` lo
-  # resuelve con git LOCAL (`before..after`) -- sin checkout muere con exit 128
-  # y arrastra los doce jobs que dependen de él. Este comentario afirmaba lo
-  # contrario hasta que la primera corrida real lo falsificó en ocho segundos.
+  # Develop admite commits directos; main ya se valida por PR de release.
   push:
     branches: [develop]
 
@@ -28,45 +17,38 @@ permissions:
   contents: read
   pull-requests: read
 
-# Los builds de AOT y de nest tardan minutos, así que un PR que recibe varios
-# pushes seguidos no necesita terminar los runs viejos.
+# Push a develop y PR con ese mismo head SHA comparten grupo: el último run
+# cancela al anterior, incluso entre eventos. No se ejecutan ambos completos.
+# Un SHA nuevo tiene otro grupo y no cancela automáticamente el SHA anterior.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 env:
   NODE_VERSION: '24'
 
 jobs:
-  changes:
-    name: Detect Changes
+  audits:
+    name: Audits
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
       mobile: ${{ steps.filter.outputs.mobile }}
       backend: ${{ steps.filter.outputs.backend }}
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
     steps:
-      # OBLIGATORIO desde que existe el disparador `push` (F-193, ronda 3).
-      # `dorny/paths-filter` resuelve los cambios de un `pull_request` contra la
-      # API de GitHub, sin necesitar el arbol -- por eso este job funcionó dos
-      # años sin checkout. En un evento `push` NO usa la API: compara
-      # `github.event.before..after` con git LOCAL, y sin checkout muere en la
-      # primera orden con `fatal: not a git repository` (exit 128), tumbando el
-      # job y saltándose los doce restantes. Medido en la corrida 34792807926,
-      # el primer `push` a `develop` de este workflow.
+      # F-193: paths-filter necesita checkout en push (diff con git local).
+      # Historia completa también para state-refresh (origin/BASE_REF...HEAD).
+      # Sin base explícita se conserva la resolución histórica de paths-filter.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          # `shared` son entradas que alimentan el build de las TRES apps sin
-          # vivir en el directorio de ninguna. Van incluidas en los tres
-          # filtros a propósito: un `package-lock.json` regenerado en otro SO
-          # rompe los tres builds y no toca ni un archivo de `apps/**`, así que
-          # sin esto quedaría fuera de todo gate (pasó en el PR #444). El
-          # propio ci.yml está incluido para que cambiarlo se autoverifique.
-          #
-          # Cambiar sólo código de una app sigue corriendo únicamente el build
-          # de esa app.
+          # Entradas compartidas gatean las tres apps; cada app conserva su filtro.
           filters: |
             shared: &shared
               - 'package.json'
@@ -75,9 +57,11 @@ jobs:
               - 'tsconfig*.json'
               - '.npmrc'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/backend-full-tests.yml'
             frontend:
               - *shared
               - 'apps/frontend/**'
+              - 'scripts/zoneless-audit.sh'
               - 'scripts/state-refresh-audit.sh'
               - 'scripts/industry-parity-audit.sh'
             mobile:
@@ -92,179 +76,42 @@ jobs:
               - 'scripts/prisma-singleton-audit.sh'
               - 'scripts/industry-parity-audit.sh'
               - 'scripts/check-tools-no-prisma.sh'
-
-  zoneless-audit:
-    name: Zoneless Audit
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    # Pass the PR's actual base ref to the audit script so it diffs against
-    # the right integration branch (main or dev). Without this, the script
-    # would diff against origin/main by default, flagging pre-existing
-    # legacy patterns in dev that are not part of this PR.
-    env:
-      BASE_REF: ${{ github.event.pull_request.base.ref }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Need full history so `origin/<BASE_REF>` is available locally
-          # for the script's `git diff origin/<BASE_REF>...HEAD` call.
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
-      # vacío rompe el action con 'Caching for false is not supported'.
-      # Ver docs/setup-node@v4 — omitir el parámetro es la forma soportada
-      # de desactivar npm caching.
-      - run: npm ci
-      - run: chmod +x scripts/zoneless-audit.sh
-      - run: ./scripts/zoneless-audit.sh
+          cache: 'npm'
+      # Las siete auditorías sólo requieren bash/grep/node, no npm ci ni build.
+      # !cancelled() ejecuta las siguientes aunque otra falle; sin
+      # continue-on-error, cualquier fallo conserva el job rojo.
+      - name: Zoneless Audit
+        if: ${{ !cancelled() && steps.filter.outputs.frontend == 'true' }}
+        run: bash scripts/zoneless-audit.sh
+      - name: State Refresh Audit
+        if: ${{ !cancelled() && steps.filter.outputs.frontend == 'true' }}
+        run: bash scripts/state-refresh-audit.sh
+      - name: TZ Audit
+        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        run: bash scripts/tz-audit.sh
+      - name: Tenant Host Audit
+        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        run: bash scripts/tenant-host-audit.sh
+      - name: Prisma Singleton Audit
+        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        run: bash scripts/prisma-singleton-audit.sh
+      - name: Tools No-Prisma Gate
+        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        run: bash scripts/check-tools-no-prisma.sh
+      - name: Industry Parity Audit
+        if: ${{ !cancelled() && (steps.filter.outputs.backend == 'true' || steps.filter.outputs.frontend == 'true' || steps.filter.outputs.mobile == 'true') }}
+        run: bash scripts/industry-parity-audit.sh
 
-  state-refresh-audit:
-    name: State Refresh Audit
+  backend-build:
+    name: Backend Build (prisma + nest)
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    # QUI-554: un componente que muta por HTTP directo dentro de un módulo con
-    # NgRx se salta la cadena acción → effect → refresh, así que "guardé y no se
-    # ve" pasa el code review porque el POST sí funciona. Guard de puro grep
-    # sobre el árbol (sin build ni deps). Falla sólo por los archivos del PR; la
-    # deuda preexistente se reporta como warning.
-    env:
-      BASE_REF: ${{ github.event.pull_request.base.ref }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Historia completa: el script hace `git diff origin/<BASE_REF>...HEAD`.
-          fetch-depth: 0
-      - run: chmod +x scripts/state-refresh-audit.sh
-      - run: ./scripts/state-refresh-audit.sh
-
-  tz-audit:
-    name: TZ Audit
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    # Pure grep guard over the checked-out tree (no build/deps needed): fails if
-    # any module reintroduces UTC day/month bucketing outside the store-timezone
-    # primitive (QUI-487). See scripts/tz-audit.sh + docs/architecture/store-timezone.md.
-    steps:
-      - uses: actions/checkout@v4
-      - run: chmod +x scripts/tz-audit.sh
-      - run: ./scripts/tz-audit.sh
-
-  tenant-host-audit:
-    name: Tenant Host Audit
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    # Pure grep guard over the checked-out tree (no build/deps needed): fails if
-    # any module resolves the tenant hostname outside the primitive (QUI-564).
-    # `x-forwarded-host` carries a FIXED value injected by CloudFront in prod, so
-    # reading it first serves the platform's assets to every tenant domain.
-    # See scripts/tenant-host-audit.sh + apps/backend/src/common/utils/tenant-hostname.util.ts.
-    steps:
-      - uses: actions/checkout@v4
-      - run: chmod +x scripts/tenant-host-audit.sh
-      - run: ./scripts/tenant-host-audit.sh
-
-  prisma-singleton-audit:
-    name: Prisma Singleton Audit
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    # Guard sobre el árbol (sin build ni deps; solo node): falla si algún *.module.ts
-    # declara Global/Organization/Store/EcommercePrismaService en providers/exports
-    # fuera de PrismaModule (@Global). Cada re-declaración crea un PrismaClient +
-    # pg.Pool nuevo (~68 MB de heap; en prod llegaron a 27 instancias).
-    # See scripts/prisma-singleton-audit.sh.
-    steps:
-      - uses: actions/checkout@v4
-      - run: chmod +x scripts/prisma-singleton-audit.sh
-      - run: ./scripts/prisma-singleton-audit.sh
-
-  tools-no-prisma:
-    name: Tools No-Prisma Gate
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    # Pure grep guard over the checked-out tree (no build/deps needed): fails
-    # if the literal `prisma.` appears under
-    # `apps/backend/src/ai-engine/tools/domains/` — tools are thin wrappers
-    # over domain services and never touch the database directly (T6, Vexi
-    # 190-tools step 15). Deliberately naive: comments and specs count too, so
-    # even a boast about it trips the gate. See scripts/check-tools-no-prisma.sh.
-    steps:
-      - uses: actions/checkout@v4
-      - run: chmod +x scripts/check-tools-no-prisma.sh
-      - run: ./scripts/check-tools-no-prisma.sh
-
-  industry-parity-audit:
-    name: Industry Parity Audit
-    runs-on: ubuntu-latest
-    needs: changes
-    # Corre si cambia CUALQUIERA de las tres apps: `industry_enum` vive en el
-    # backend y está espejado a mano en web y en móvil, así que la deriva puede
-    # nacer en cualquiera de los tres lados.
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.mobile == 'true'
-    # Pure grep guard over the checked-out tree (no build/deps needed): fails if
-    # `industry_enum` (schema.prisma, la verdad) y sus tres espejos a mano
-    # dejan de coincidir. NINGÚN tipo une el enum de Prisma con los espejos de
-    # web y móvil — viven en proyectos tsconfig distintos y ninguno importa
-    # `@prisma/client` — así que ni tsc ni los builds detectan esta deriva.
-    # Peor: en el móvil el `Record<StoreIndustry, string[]>` la ESCONDE, porque
-    # `StoreIndustry` se deriva de la propia lista del archivo; compila perfecto
-    # y en runtime la industria nueva se queda sin reglas de ocultamiento.
-    # Encontrado el 2026-08-23 al agregar `construction`: de cinco copias, dos
-    # llevaban rancias (`gym` faltaba en el wizard de onboarding desde que se
-    # agregó esa industria). See scripts/industry-parity-audit.sh.
-    steps:
-      - uses: actions/checkout@v4
-      - run: chmod +x scripts/industry-parity-audit.sh
-      - run: ./scripts/industry-parity-audit.sh
-
-  mobile-typecheck:
-    name: Mobile Typecheck
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.mobile == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
-      # vacío rompe el action con 'Caching for false is not supported'. Sin
-      # este parámetro el action funciona correctamente y desactiva cache
-      # por defecto. Ver docs/setup-node@v4.
-      - run: npm ci
-      - run: npx tsc --noEmit
-        working-directory: apps/mobile
-
-  # ---------------------------------------------------------------------------
-  # Builds de producción, uno por app y sólo si esa app cambió.
-  #
-  # Por qué existen: hasta ahora el CI eran dos greps y un `tsc` de mobile.
-  # Ninguno compilaba, así que toda una clase de errores llegaba a `dev` con
-  # los checks en verde:
-  #
-  #   - Angular sólo reporta en AOT (`ng build --configuration production`) el
-  #     acceso a miembros `private` desde plantilla (TS2341) y los
-  #     `templateUrl` que apuntan a archivos inexistentes. En modo dev (JIT)
-  #     ambos pasan. Los dos casos llegaron a ramas distintas.
-  #   - `nest build` sin un `prisma generate` previo typechequea contra el
-  #     cliente Prisma anterior. Un cambio de schema puede dar 0 errores en
-  #     local y 17 después de regenerar, que es exactamente lo que rompe la
-  #     imagen de producción.
-  # ---------------------------------------------------------------------------
-
-  frontend-build:
-    name: Frontend Build (prod)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    timeout-minutes: 30
+    needs: audits
+    if: needs.audits.outputs.backend == 'true'
+    # Última corrida: ~4 min, secuencia de producción intacta.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -272,115 +119,136 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      # Mismo comando que `deploy-s3.yml` corre para publicar a producción: si
-      # esto pasa, el deploy compila.
+      # Generar ANTES de compilar: tipos del schema actual; no requiere DB.
+      - name: Generar Prisma Client
+        working-directory: apps/backend
+        run: npx prisma generate
+      # nest build excluye specs; este paso mantiene el gate de tipos de tests.
+      - name: Typecheck de specs (buildcheck:types)
+        working-directory: apps/backend
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run buildcheck:types
+      - name: nest build
+        working-directory: apps/backend
+        run: npm run build
+
+  backend-test-pr-regressions:
+    name: Backend Tests (PR regressions)
+    runs-on: ubuntu-latest
+    needs: audits
+    if: needs.audits.outputs.backend == 'true'
+    timeout-minutes: 10
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      PR_BASE: ${{ github.event.pull_request.base.ref }}
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Diff contra el head real, no el merge sintético de pull_request.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Decidir antes de instalar/generar: los skips cuestan sólo checkout.
+      - name: Seleccionar specs backend cambiados (máximo 25)
+        id: specs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          if [[ "$PR_BASE" == 'main' ]]; then
+            echo "PR base main: release ya probado en develop; regresiones omitidas. Cobertura POS/products en backend-full-tests.yml." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -n "$PR_BASE" ]]; then
+            comparison="$BASE_SHA...HEAD"
+          else
+            # Primer push: árbol vacío; pushes normales: before..HEAD.
+            if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+              BASE_SHA="$(git hash-object -t tree /dev/null)"
+            fi
+            comparison="$BASE_SHA..HEAD"
+          fi
+          list="$RUNNER_TEMP/backend-pr-regression-specs.paths"
+          git diff --name-only -z --diff-filter=ACMRT "$comparison" -- ':(glob)apps/backend/src/**/*.spec.ts' > "$list"
+          mapfile -d '' -t specs < "$list"
+          count="${#specs[@]}"
+          if (( count == 0 )); then
+            echo "Sin specs backend cambiados; regresiones omitidas." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if (( count > 25 )); then
+            echo "Regresiones omitidas: $count specs cambiados superan el tope de 25. Ejecutar backend-full-tests.yml (nocturno/manual, POS + products)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for spec in "${specs[@]}"; do
+            test -f "$spec"
+            echo "Regression spec: $spec"
+          done
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "Regresiones: $count specs cambiados, Jest con 2 workers." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        if: steps.specs.outputs.run == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+        if: steps.specs.outputs.run == 'true'
+      - name: Generar Prisma Client (regresiones de PR)
+        if: steps.specs.outputs.run == 'true'
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: Jest paralelo — specs backend cambiados
+        if: steps.specs.outputs.run == 'true'
+        working-directory: apps/backend
+        shell: bash
+        # ~1 min de setup + máximo 4 min de Jest. Agotar el presupuesto falla,
+        # no oculta regresiones con un verde. No usar test:path (runInBand).
+        timeout-minutes: 4
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t changed < "$RUNNER_TEMP/backend-pr-regression-specs.paths"
+          specs=()
+          for spec in "${changed[@]}"; do
+            specs+=("${spec#apps/backend/}")
+          done
+          # F1: rutas exactas, no regex OR; además exigir que Jest descubra
+          # TODAS antes de ejecutar (una ruta ignorada no puede quedar verde).
+          npx jest --listTests --json --maxWorkers=2 --runTestsByPath "${specs[@]}" > "$RUNNER_TEMP/backend-pr-discovered.json"
+          node - "$RUNNER_TEMP/backend-pr-discovered.json" "${specs[@]}" <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const found = new Set(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
+          const missing = process.argv.slice(3).filter(spec => !found.has(path.resolve(spec)));
+          if (missing.length) {
+            console.error('Jest no descubrió todos los specs cambiados:', missing);
+            process.exit(1);
+          }
+          JS
+          npx jest --ci --maxWorkers=2 --runTestsByPath "${specs[@]}"
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    needs: audits
+    if: needs.audits.outputs.frontend == 'true'
+    # Estimación: build medido ~3 min + Karma <=2 min, menos el setup duplicado.
+    # Se conserva el subconjunto zoneless ya acotado, nunca la suite global.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # Mismo build AOT que deploy-s3.yml.
       - name: Build AOT de producción
         working-directory: apps/frontend
         run: npm run build:prod
-
-  frontend-test:
-    name: Frontend Tests (karma zoneless)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    timeout-minutes: 20
-    # Este job NO existia: habia ~40 specs en apps/frontend y cero corridas en
-    # CI, asi que un spec roto llegaba a `dev` con todos los checks verdes. Es
-    # una compuerta de verdad -- sin `continue-on-error`: si un spec falla, el
-    # PR se pone rojo. Un job que no puede ponerse rojo no es una compuerta.
-    #
-    # `--watch=false` es obligatorio: el default del builder
-    # (@angular/build:karma) es `watch: true`, que nunca termina y colgaria el
-    # runner hasta el timeout.
-    #
-    # `--browsers=ChromeHeadlessNoSandbox` usa el customLauncher declarado en
-    # `apps/frontend/karma.conf.js` (--no-sandbox --headless --disable-gpu
-    # --disable-dev-shm-usage). Sin --no-sandbox Chrome no arranca dentro del
-    # runner, y sin --disable-dev-shm-usage se cae por /dev/shm pequeno. El
-    # binario lo autodetecta karma-chrome-launcher: la imagen ubuntu-latest
-    # trae google-chrome-stable preinstalado.
-    #
-    # `karma.conf.js` sube `browserNoActivityTimeout` de 30s (default) a 60s,
-    # que es el margen que necesita un runner de CI cargado. OJO: eso NO cura el
-    # corte de la suite. Medido: con 30s da "Disconnected, because no message in
-    # 30000 ms" y `Executed 172 of 399 ... DISCONNECTED`; con 180s da `Executed
-    # 111 of 412 ... DISCONNECTED (3 mins 2.038 secs / 1.881 secs)`. O sea que
-    # tras ~1,9s de tests algo bloquea el hilo del navegador de forma indefinida
-    # y subir el umbral solo alarga la espera. Se reproduce igual CON Zone.js
-    # (172/399) y SIN (189/399): el cuelgue PREEXISTE al arnes zoneless y es un
-    # defecto aparte, todavia sin dueno. Mientras viva, este job puede terminar
-    # en DISCONNECTED -- que no es SUCCESS ni FAILED, sino cobertura apagada
-    # disfrazada de corrida. Subconjuntos aislados si completan (120 de 120),
-    # asi que el culpable es un spec concreto, no el arnes.
-    #
-    # ACTUALIZACION 2026-08-24 (medida por G.5): el defecto de arriba dejo
-    # de ser teorico. La corrida 32777772796 (2026-08-24T21:07:36Z, PR #699
-    # `dev` -> `main`, el release gate del equipo y el UNICO disparo real de
-    # este job hasta hoy porque los PRs anteriores no tocaban frontend) fallo
-    # en 3m0s con "Process completed with exit code 1": un PR ajeno bloqueado
-    # por este defecto, no por su propio cambio.
-    #
-    # Reproducido en local DOS veces con este mismo comando: el DISCONNECTED
-    # de arriba ahora ademas revienta el arnes. `@angular/build`
-    # (karma/application_builder.js:269) lanza `TypeError [ERR_INVALID_STATE]:
-    # Invalid state: Controller is already closed` al cerrar el servidor de
-    # Karma tras el desconecte, y el proceso termina con exit 1 en vez de solo
-    # reportar DISCONNECTED -- un modo de fallo nuevo, no visto en las
-    # corridas que documentaron el DISCONNECTED de arriba.
-    #
-    # O sea que HOY este job se pone rojo en el 100% de los PRs que tocan
-    # frontend, sin importar el cambio -- lo opuesto exacto de "un job que no
-    # puede ponerse rojo no es una compuerta": un job que SIEMPRE se pone rojo
-    # tampoco lo es, porque entrena al equipo a ignorar el check. NOTA: ni
-    # `main` ni `dev` tienen branch protection (medido via API, ambas 404 "Branch
-    # not protected"), asi que este rojo no bloquea el merge a nivel de GitHub
-    # -- es una senal ignorable, que es exactamente el riesgo descrito arriba.
-    # El `if:` y el no usar `continue-on-error` se dejan intactos: es una
-    # decision ya escrita en este archivo y no se voltea sin acuerdo de quien
-    # la escribio. Lo que falta para que esto vuelva a ser una compuerta de
-    # verdad es arreglar (o excluir) el spec que dispara el cuelgue -- los
-    # subconjuntos aislados si completan (120 de 120) -- no una decision de
-    # este workflow.
-    #
-    # El arnes corre SIN Zone.js (target `test` con "polyfills": []), igual que
-    # el build de produccion. Ver apps/frontend/src/test-init.ts.
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      - name: ng test (PR scope — specs touched in this PR)
+      # Sin Zone.js; watch=false para terminar y launcher CI sin sandbox.
+      - name: Karma zoneless (subconjunto de regresiones)
         working-directory: apps/frontend
-        # Scope to only the specs touched by this PR's commits. Other
-        # specs (NgRx Store, Breadcrumb analytics, etc.) fail in
-        # origin/dev and are tracked in separate tickets — not in
-        # scope of QUI-723.
-        #
-        # F-217 (QUI-832): esta lista es literal, no un patron. Mientras
-        # `pos-cart.service.spec.ts` no estuvo aca, este job se puso VERDE sin
-        # ejecutar una sola de las specs de impuesto del carrito POS — el verde
-        # decia "los 3 archivos de la lista pasan", no "el frontend pasa", y se
-        # leyo como lo segundo. Las tres bocas del IVA inclusivo (alta/fusion,
-        # tarifa de cliente) viven en ese archivo; sin este `--include` su
-        # cobertura era invisible para la compuerta. Medido local con Chrome
-        # real: 16 de 16 en verde. Toda spec nueva que deba GATEAR necesita su
-        # propia linea aca; escribirla y no agregarla es escribir un test que
-        # CI nunca corre.
-        #
-        # Cierre de QUI-832 (2026-09-15): las otras cinco specs que el plan
-        # escribio o migro entran aca por el mismo motivo. La del shell de
-        # cobro estaba ademas ROJA de nacimiento y nadie lo vio porque nunca
-        # corrio: `fakeAsync()` no existe sin `zone.js/testing` —la app es
-        # zoneless— y al evaluarse como argumento de `it()` tumbaba el archivo
-        # entero; y el doble de `app-pos-payment-step` no declaraba el input
-        # `takeawayOrder` que la plantilla enlaza (NG0303). Con las dos
-        # reparaciones: 139 de 139 en verde con la lista completa.
-        #
-        # QUI-855: el POP (carrito multi-impuesto, escaner, adjunto y
-        # revalidacion IA) entra entero por glob: sus 142 specs pasan en verde
-        # local y las nuevas del modulo quedan gateadas sin otra linea.
         run: >-
           npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
           --progress=false
@@ -420,12 +288,13 @@ jobs:
           --include='**/shared/directives/pull-to-refresh.directive.spec.ts'
           --include='**/reviews/review-summary.component.spec.ts'
 
-  backend-build:
-    name: Backend Build (prisma + nest)
+  mobile:
+    name: Mobile
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    timeout-minutes: 20
+    needs: audits
+    if: needs.audits.outputs.mobile == 'true'
+    # Ambos jobs previos <=2 min; compartir setup estima <=4 min combinados.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -433,509 +302,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      # `prisma generate` ANTES de compilar, en ese orden y no al revés: es la
-      # secuencia de `apps/backend/Dockerfile` (líneas 9 y 11) y es lo que hace
-      # que el typecheck corra contra el cliente del schema de este PR y no
-      # contra el que quedó en node_modules. No necesita base de datos: el
-      # bloque `datasource` de schema.prisma no declara `url`.
-      - name: Generar Prisma Client
-        working-directory: apps/backend
-        run: npx prisma generate
-      # F-161 (plan CP-pos-exclusive-tax-double-charge, QUI-832): cierra el
-      # hueco que describe el comentario de abajo -- el arnés `buildcheck:types`
-      # (`tsconfig.check.json`) existía desde el paso A.3, pero ninguna compuerta
-      # lo invocaba. Va ANTES de `nest build` a propósito: medido en frío (sin
-      # `tsBuildInfoFile` previo, que es el caso en cualquier checkout limpio
-      # como este runner) entre ~22 s y ~74 s según la carga concurrente de la
-      # máquina -- tres corridas independientes en la misma máquina dieron
-      # 73,81 s, 40,69 s y 22,37 s; en caliente, segundos. `nest build` tarda
-      # minutos. Typechequea `src/`, `prisma/**` y specs vía `include` explícito
-      # (ronda 3, F4: antes era por exclusión y sumaba `test/**`, que corre bajo
-      # otro runner). Así falla rápido si un cambio (p.ej. ensanchar el retorno
-      # de `TaxesService.calculateProductTaxes` en la fase B de este plan) rompe
-      # la firma que usa un spec, antes de gastar tiempo en el build de
-      # producción de abajo.
-      - name: Typecheck de specs (buildcheck:types)
-        working-directory: apps/backend
-        # El heap por defecto de Node ya no alcanza para src + specs (OOM
-        # "Ineffective mark-compacts", exit 134 en el PR #881); el runner tiene 16 GB.
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
-        run: npm run buildcheck:types
-      # SALVEDAD (KG-9(a)) -- actualizado por F-161: el paso de arriba ya cierra
-      # la mitad de este hueco, así que lo que sigue describe sólo lo que AÚN no
-      # cubre `nest build`. `apps/backend/tsconfig.build.json` sigue excluyendo
-      # `**/*spec.ts`, así que ni `nest build` aquí ni `npm run buildcheck:be` en
-      # local compilan las specs -- ya no es un problema para el typecheck,
-      # porque el paso de arriba las tipa antes de llegar aquí. Lo que sigue SIN
-      # ninguna compuerta en CI es la EJECUCIÓN de esas specs (jest corriendo las
-      # aserciones, no sólo tipando) para la MAYORÍA del backend. Desde F-123 y
-      # F-113 hay dos compuertas de ejecución, y ninguna cubre todo:
-      # `backend-test-scoped` corre de verdad 36 suites (`payments`, `orders`,
-      # `tables`, `taxes`), y `backend-test` -- el único que correría las 401
-      # (conteo medido 2026-09-13, `find apps/backend/src -name '*.spec.ts' |
-      # wc -l`) -- sigue con `if: false`. O sea: fuera de esos cuatro directorios la
-      # ejecución de los specs NO tiene compuerta. Cualquier afirmación de
-      # "cobertura completa" apoyada sólo en este job hereda esta salvedad y
-      # debe decirlo.
-      - name: nest build
-        working-directory: apps/backend
-        run: npm run build
-
-  backend-test-pr-regressions:
-    name: Backend Tests (PR regressions)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    timeout-minutes: 30
-    env:
-      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-      NODE_OPTIONS: --max-old-space-size=6144
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      - name: Generar Prisma Client (regresiones de PR)
-        working-directory: apps/backend
-        run: npx prisma generate
-      # Additive gate: existing POS/products jobs remain unchanged. Run each
-      # touched spec separately so an unmatched path cannot hide behind another.
-      - name: Ejecutar cada spec backend cambiado por esta PR
-        shell: bash
-        run: |
-          set -euo pipefail
-          list="$RUNNER_TEMP/backend-pr-regression-specs.txt"
-          git diff --name-only --diff-filter=ACMRT "$BASE_SHA" HEAD -- ':(glob)apps/backend/src/**/*.spec.ts' > "$list"
-          if [[ ! -s "$list" ]]; then
-            echo "No backend specs changed; existing backend gates still apply."
-          fi
-          while IFS= read -r spec; do
-            test -f "$spec"
-            echo "Regression spec: $spec"
-            (cd apps/backend && npm run test:path -- "${spec#apps/backend/}")
-          done < "$list"
-
-  backend-test-scoped:
-    # F-123 y F-113 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832).
-    # Ambos hallazgos dicen lo mismo: el plan promete tests de regresión y hoy
-    # NINGÚN spec del backend se ejecuta en CI, así que esos tests pasarían en
-    # la máquina de quien los escriba y nadie los volvería a correr. El defecto
-    # original (eca276ce6, 2026-09-10) no tocó un solo spec de payments y llegó
-    # a producción; sin este job el siguiente viaja igual.
-    #
-    # Este job NO toca el `if: false` de `backend-test` (abajo). Aquella
-    # decisión tiene dueño y fecha (@lider-dev, 14-ago) y su precondición
-    # ("re-enable when baseline tests fixed") sigue sin cumplirse. Este job es
-    # su contrario: no intenta correr las 401 suites del repo (conteo medido
-    # 2026-09-13, `find apps/backend/src -name '*.spec.ts' | wc -l`), corre
-    # SÓLO la superficie del plan, y su línea base está VERDE -- medida, no
-    # supuesta.
-    #
-    # Alcance, y por qué es ése: `payments` (12 specs, donde vive el doble
-    # cobro), `orders` (17, el carril que persiste), `tables` (3, el carril de
-    # mesa de ADR-08) y `taxes` (4, el kernel). 36 suites, 706 tests.
-    #
-    # F-211 (D.13, plan CP-pos-exclusive-tax-double-charge, QUI-832,
-    # 2026-09-14): `print-formats` (35 specs) e `invoicing` (93 specs) se
-    # SUMAN a este job. Todo el trabajo de C.3/C.4/C.5/C.6 de ese plan
-    # -- la regla anti-huérfana del compositor, las etiquetas, el borrado de
-    # los cuatro emisores locales, la paridad del ticket -- vive en
-    # `print-formats`, y un commit de 34 archivos (`491033241`) lo tocó
-    # entero sin que un solo spec de ese dominio corriera en el servidor.
-    # `invoicing` se había dejado fuera antes por su costo (ver la nota
-    # histórica de abajo), y además tenía 4 rojos preexistentes en
-    # `invoice-delivery.service.spec.ts` -- reproducidos el 2026-09-14 sobre
-    # HEAD `58ac6793b` limpio en un worktree efímero, así que no eran ruido
-    # de este plan. Encender la compuerta sobre un rojo permanente es
-    # garantizar que alguien la vuelva a apagar; por eso el orden fue
-    # arreglar esos 4 primero (mismo PR) y sólo entonces añadir el paso.
-    # Con eso: 164 suites en este job (36 + 35 + 93), verde.
-    #
-    # Nota histórica -- por qué `invoicing` se había dejado fuera: tiene 93
-    # specs él solo, más que los otros cuatro directorios originales juntos.
-    # Medido entonces: una corrida local `--runInBand` de los cinco pasó de 30
-    # minutos sin terminar, mientras que los cuatro originales tardaban
-    # `real 260,31 s` (36/36 suites, 706/706 tests, verde, 2026-09-13). Sigue
-    # siendo cierto que el directorio es pesado; lo que cambió es que dejarlo
-    # fuera de CI significaba que el dominio que este plan reescribe no tenía
-    # puerta. Si el tiempo total del job se vuelve un problema real, la salida
-    # es partir el job con `strategy: matrix` (ver más abajo), no volver a
-    # sacar `invoicing`.
-    #
-    # Si algún día este job roza el timeout, la salida NO es apagarlo -- eso
-    # devuelve el repo al estado que F-113 describe. Es partirlo por dominio
-    # con `strategy: matrix`, como propone el punto 3(b) del comentario largo
-    # de `backend-test`.
-    #
-    # MEMORIA -- F-182 (ronda 3). `--runInBand` fuerza el camino en-banda del
-    # scheduler de jest, y ahí `workerIdleMemoryLimit` (`package.json`, 1024MB)
-    # NO se aplica: el reciclado por memoria vive en el pool de workers, que
-    # en-banda no existe (`@jest/core/build/testSchedulerHelper.js`). O sea: la
-    # protección que el repo configuró contra el OOM que apagó `backend-test`
-    # no cubre a este job. Pico de RSS medido en las 36 suites: 2588 MB contra
-    # un techo de heap de 4288 MB. Pasa hoy con margen, y el margen se consume
-    # solo según crezca el carril. Cuando falle será un `FatalProcessOutOfMemory`
-    # idéntico al de `backend-test`, y la salida NO es subir el heap: es volver
-    # a un pool con `--maxWorkers=2` y `workerIdleMemoryLimit`, pagando el
-    # arranque a cambio del reciclado.
-    # OJO: este `name:` es el IDENTIFICADOR que el ruleset de ramas fija como
-    # required status check. Si se renombra, el check obligatorio deja de
-    # reportar y TODOS los PRs quedan bloqueados esperando un nombre que ya no
-    # existe. Por eso no lleva cifras dentro: el alcance concreto (cuántas specs
-    # de cuántas) va al `$GITHUB_STEP_SUMMARY` del último paso, que se puede
-    # actualizar sin tocar nada. Decía «sólo payments/orders/tables/taxes (36 de
-    # 401 specs)» y ese 401 caduca cada vez que alguien añade una spec.
-    name: Backend Tests (carril POS)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    # F-220: 30 minutos era el techo, no el margen. Medido en dos corridas
-    # consecutivas del mismo job: `a2777f21a` cerro en VERDE a los 29m19s --41
-    # segundos por debajo del limite-- y `427b7b076` se corto a los 30m18s
-    # dentro de `jest -- invoicing`, con los otros cinco carriles ya en verde.
-    # O sea que el resultado del job no lo decidia el codigo sino el reloj: la
-    # unica compuerta de backend venia siendo un volado. Un `cancelled` se lee
-    # igual que el `cancelled` que deja un push encadenado, asi que ademas
-    # confundia las dos causas. PR #860 (2026-09-27): con el arbol ampliado,
-    # 45 min cancelaron el job en `jest — invoicing` tras 86/111 specs verdes
-    # de ese carril y los otros cinco carriles verdes. Faltaban ~25 specs a
-    # ~12s cada una, mas cierre/subida de artefactos: 75 min deja margen real
-    # sobre los ~51 min proyectados sin cambiar el nombre del check requerido.
-    # El arreglo de fondo es partir los seis carriles en jobs
-    # paralelos (hoy corren en serie en un solo runner), pero eso cambia los
-    # required status checks del ruleset y no se toca sin acuerdo.
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      # Los specs importan tipos del cliente de Prisma; sin esto fallan al
-      # compilar en ts-jest. No necesita base de datos.
-      - name: Generar Prisma Client (para tipos en specs)
-        working-directory: apps/backend
-        run: npx prisma generate
-      # `test:path` (apps/backend/package.json, paso A.3, reescrito en la ronda 3
-      # F2 como scripts/test-path.sh) es `jest --runInBand` y propaga el código
-      # de salida real. La razón de usarlo en vez de `buildcheck:test` de la
-      # raíz es de CONVENIENCIA Y ALCANCE, no que el otro mienta: el README
-      # (`apps/backend/README.md`) documenta que `buildcheck:test` de la raíz sí
-      # propaga el código de salida real de jest incluso ante un fallo de
-      # aserción -- el hallazgo F-162 falsificó la afirmación anterior de este
-      # comentario ("imprime FAIL y sale 0"). Lo único donde ese script puede
-      # dar un falso verde es corriendo la suite COMPLETA sin filtro con pool de
-      # workers (OOM de un worker), que no es este caso: aquí siempre se acota a
-      # un directorio.
-      #
-      # F1 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): estos
-      # `run:` van SEPARADOS a propósito, uno por directorio, y no es
-      # redundancia para "juntarlos de nuevo" -- medido: los argumentos
-      # posicionales de jest son un OR de regex, no una lista de rutas. Con una
-      # ruta buena y una mala en la MISMA invocación, jest corre las que casan y
-      # sale 0 sin avisar de la que no casó:
-      #   npx jest --runInBand src/domains/store/taxes src/domains/store/tablez
-      #     -> EXIT=0 (101 tests, corrió sólo `taxes`)
-      #   npx jest --runInBand src/domains/store/tablez
-      #     -> EXIT=1 ("0 matches")
-      # Con todas las rutas juntas en un solo `run:`, un rename de directorio
-      # (o un typo) deja la compuerta midiendo N-1 de N en verde. Separados,
-      # cada `name:` dice en el log de Checks cuál falló sin abrir nada. F-211
-      # suma `print-formats` e `invoicing` a la misma lista, mismo patrón.
-      # G5 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): cada
-      # paso escribe SU log a un archivo además de a stdout, para que comparar
-      # dos corridas no exija leer el log crudo del job a ojo (se sube como
-      # artefacto más abajo). `set -o pipefail` es explícito y no un supuesto
-      # del shell por defecto de GitHub Actions: sin él, `cmd | tee archivo`
-      # devuelve el código de salida de `tee` (casi siempre 0), no el de jest,
-      # y la compuerta quedaría verde aunque jest fallara. Medido: con
-      # `set -o pipefail` el `$?` de la línea es el de `npm run test:path`
-      # (que a su vez propaga el de jest, ver F1 arriba), con `tee` fallando
-      # sólo si no puede escribir el archivo.
-      - name: jest — payments
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/domains/store/payments 2>&1 | tee jest-logs/payments.log
-      - name: jest — orders
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/domains/store/orders 2>&1 | tee jest-logs/orders.log
-      - name: jest — tables
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/domains/store/tables 2>&1 | tee jest-logs/tables.log
-      - name: jest — taxes
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/domains/store/taxes 2>&1 | tee jest-logs/taxes.log
-      # F-211 (D.13, QUI-832, 2026-09-14): el dominio que este plan reescribe
-      # (C.3/C.4/C.5/C.6 -- compositor, etiquetas, emisores locales, paridad
-      # de ticket) no tenía puerta en CI. Mismo patrón que los cuatro pasos
-      # de arriba.
-      - name: jest — print-formats
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/domains/store/print-formats 2>&1 | tee jest-logs/print-formats.log
-      # F-211 (D.13, QUI-832, 2026-09-14): antes fuera del job por costo (ver
-      # la nota histórica más arriba). Sus 4 rojos preexistentes en
-      # `invoice-delivery.service.spec.ts` se arreglaron en el mismo PR que
-      # añade este paso -- nunca se encendió una compuerta sobre un rojo
-      # permanente.
-      - name: jest — invoicing
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/domains/store/invoicing 2>&1 | tee jest-logs/invoicing.log
-      # QUI-855: el kernel de dinero (`purchase-line-taxes` y sus hermanos) lo
-      # consumen compras y el frontend; sus 4 specs (59 tests) pasan en verde.
-      - name: jest — money-kernel
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/common/money-kernel 2>&1 | tee jest-logs/money-kernel.log
-      # G5: artefacto de los logs de arriba. `if: always()` para que
-      # quede subido incluso si un paso de jest falló. Acción fijada por
-      # etiqueta (`@v4`), igual que `actions/checkout` y `actions/setup-node`
-      # en este mismo archivo — no se introduce una convención nueva aquí.
-      - name: Subir logs de jest (artefacto)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-test-scoped-jest-logs
-          path: apps/backend/jest-logs/
-          retention-days: 14
-      # Sin esto el job no deja ningún rastro legible en la pestaña Checks sin
-      # abrir el log crudo paso por paso. `if: always()` para que el resumen
-      # aparezca también cuando uno de los pasos de arriba falló. F-211
-      # (D.13, QUI-832, 2026-09-14): la lista y el `find` de abajo se
-      # ensanchan a los seis subdominios reales del job, no sólo los cuatro
-      # originales.
-      - name: Resumen en Checks
-        if: always()
-        working-directory: apps/backend
-        run: |
-          echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Corre 6 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\` + \`src/common/money-kernel\`." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| | specs |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing src/common/money-kernel -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "El resto del backend **no se ejecuta en ningun job** salvo \`products\` (job aparte, ver \`Backend Tests (products)\`); \`backend-test\` sigue en \`if: false\`." >> "$GITHUB_STEP_SUMMARY"
-
-  backend-test-products:
-    # F-219 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832): el
-    # dominio `products` (12 specs, 250 tests) no corría en NINGÚN job de CI
-    # -- ni en `backend-test-scoped` (payments/orders/tables/taxes/
-    # print-formats/invoicing) ni en `backend-test` (deshabilitado con
-    # `if: false` más abajo). Así fue como tres defectos de arnés
-    # preexistentes (CACHE_MANAGER sin doblar en products.service.spec.ts,
-    # Prisma mockeado sin `units_of_measure` en products-bulk.service.spec.ts,
-    # dos excepciones sin atrapar en products-bulk.controller.spec.ts tras un
-    # cambio deliberado del controller) acumularon 65 pruebas rojas sin que
-    # ningún run verde lo reflejara.
-    #
-    # Job PROPIO, y no un séptimo paso de `backend-test-scoped`, a propósito:
-    # medido en local (2026-09-14) con las 3 causas ya arregladas y el
-    # cliente de Prisma regenerado, `products` tarda 145 s (12/12 suites,
-    # 245/250 tests, 5 skips preexistentes ajenos a este hallazgo). Sumarlo
-    # en serie a `backend-test-scoped` -- que ya corrió en 36m35s contra su
-    # techo de 45 min, o sea con sólo 8m25s de margen tras el crecimiento de
-    # F-211 -- lo dejaría en ~39 min con un margen de apenas ~6 min (13%):
-    # el mismo patrón que F-220 ya documentó como un volado (29m19s verde vs
-    # 30m18s cortado fue la razón de subir aquel techo de 30 a 45). Un job
-    # nuevo corre en PARALELO al carril POS -- no le suma un segundo -- y no
-    # es un required status check hasta que alguien lo añada al ruleset de
-    # ramas: corre pero no bloquea, que es lo que hace falta para observar su
-    # propia estabilidad antes de exigirlo.
-    name: Backend Tests (products)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    # 20 min: mismo presupuesto que `backend-build` (arriba) para un setup
-    # equivalente (checkout + npm ci + prisma generate). El propio jest de
-    # `products` mide 145 s en local; incluso con un runner de CI más lento y
-    # el arranque de ts-jest, este techo deja margen amplio.
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      - name: Generar Prisma Client (para tipos en specs)
-        working-directory: apps/backend
-        run: npx prisma generate
-      - name: jest — products
-        working-directory: apps/backend
-        run: |
-          mkdir -p jest-logs
-          set -o pipefail
-          npm run test:path -- src/domains/store/products 2>&1 | tee jest-logs/products.log
-      - name: Subir logs de jest (artefacto)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-test-products-jest-logs
-          path: apps/backend/jest-logs/
-          retention-days: 14
-
-  backend-test:
-    # Hotfix post-PR-576: `tsconfig.build.json` excluye `**/*spec.ts` y
-    # este workflow no corría jest, así que specs como el de QUI-649
-    # (4 errores TS2554 de aridad en `reservations.service.spec.ts`)
-    # llegaron a producción sin que nadie lo detectara. Ahora jest
-    # corre en cada PR que toque apps/backend.
-    name: Backend Tests (jest)
-    runs-on: ubuntu-latest
-    needs: changes
-    #
-    # ---------------------------------------------------------------------
-    # PROPUESTA PARA @lider-dev sobre este `if: false` (2026-08-24, paso G.5)
-    # ---------------------------------------------------------------------
-    # NO se toca el flag. Es una decision con dueno y fecha, y su precondicion
-    # ("re-enable when baseline tests fixed") NO esta cumplida. Lo que sigue es
-    # lo medido, para que la decision se tome con datos y no con impresiones.
-    #
-    # 1. Tu diagnostico del 14-ago ("JEST too heavy for GH runners") queda
-    #    CONFIRMADO por medicion, no era una impresion. AVISO DE HONESTIDAD: la
-    #    suite completa NO se llego a medir; la corrida se corto a los 720 s
-    #    (exit 143) SIN imprimir los renglones `Test Suites:` / `Tests:`, asi
-    #    que lo de abajo es una MUESTRA, no un total. Con los topes de
-    #    apps/backend/package.json (--maxWorkers=2 --workerIdleMemoryLimit=
-    #    1024MB) alcanzaron a reportarse 7 suites de las 309 del repo, con
-    #    tiempos medidos por suite de 58,988 s / 67,758 s / 69,959 s /
-    #    74,678 s / 79,339 s / 82,564 s (la septima nunca arranco). A ese
-    #    ritmo -- 6 suites ejecutadas en los 720 s que duro la corrida -- las
-    #    309 specs pedirian del orden de 10 HORAS, contra el
-    #    `timeout-minutes: 25` de este job. Ademas un worker murio con
-    #    `FatalProcessOutOfMemory` de V8 (heap 2043 MB de 2053 MB).
-    #
-    # 2. La linea base esta ROJA, y de las dos maneras que hay que distinguir.
-    #    Las 7 suites de la muestra dieron FAIL, ninguna PASS:
-    #    - Fallo de asercion (el test corre y no cuadra) -- 39, repartidos en 6
-    #      suites: AuditService 15, PromotionalApplyService 6,
-    #      ReservationsService (state machine) 5, ReservationsService (create)
-    #      5, AuthService Login Flow 4, ProductsBulkController 3,
-    #      AuditController 1. Ejemplos: `audit.controller.spec.ts` espera el
-    #      prefijo 'admin/audit' y recibe 'superadmin/admin/audit' (el
-    #      controlador cambio de namespace y el spec no);
-    #      `reservations.service.spec.ts` espera BadRequestException y recibe
-    #      NotFoundException.
-    #    - "Test suite failed to run" (CERO tests ejecutados, que es cobertura
-    #      apagada y NO un test rojo) -- 1: `audit.module.spec.ts`, y su causa
-    #      es colateral: "A jest worker process was terminated by another
-    #      process: signal=SIGTERM", o sea el OOM del punto 1. Esta categoria es
-    #      la peligrosa porque NO aparece en el conteo de "Tests": una suite que
-    #      no arranca se lee como verde si solo se mira esa linea.
-    #    - Aparte, `audit.service.spec.ts` falla con "Nest can't resolve
-    #      dependencies of SuperAdminAuditService ... GlobalPrismaService at
-    #      index [0]": el TestBed se quedo atras del constructor real.
-    #
-    # 3. Por tanto la propuesta NO es "reactivar y listo", ni ahora ni con este
-    #    contenido. Es esta secuencia, y el flag se voltea al final y lo
-    #    volteas tu:
-    #      (a) Arreglar las suites rojas por lotes, empezando por las 5 de
-    #          arriba, que son las unicas medidas. Cada lote se verifica con
-    #          `npm run buildcheck:test -- src/<ruta>` (--runInBand, ~1,5 GB).
-    #      (b) Atacar el coste: 128-224 s por suite es tiempo de arranque de
-    #          ts-jest reconstruyendo el programa TypeScript por worker. Los
-    #          candidatos son `isolatedModules`/SWC como transform, o partir
-    #          este job por dominio con `matrix:` para que ningun shard pase de
-    #          los 25 minutos.
-    #      (c) Solo cuando (a) y (b) esten hechas y una corrida completa termine
-    #          en verde dentro del timeout, quitar el `if: false`.
-    #
-    # 4. Mientras tanto la Fase G NO se queda sin compuerta automatica: el job
-    #    `frontend-test` (arriba) es nuevo y SI corre, y el typecheck de las
-    #    specs del backend sigue cubierto en local por `buildcheck:test` por
-    #    dominio. Lo que este job cubriria y hoy nadie cubre en CI es la
-    #    ejecucion de los 309 specs del backend.
-    #
-    # 5. SEGUNDA MUESTRA (2026-08-24, mismo paso G.5, `--maxWorkers=4` en vez de
-    #    2 por indicacion expresa -- con `--runInBand` ni el dominio de
-    #    facturacion solo cabe en 10 min). Misma conclusion que el punto 1,
-    #    con mas cobertura: se detuvo manualmente tras 38 suites (de 309),
-    #    otra vez SIN llegar a imprimir `Test Suites:` / `Tests:` -- sigue
-    #    siendo MUESTRA, no total. 14 PASS, 24 FAIL:
-    #    - 22 suites con fallo de asercion: 113 aserciones (bullet) rotas en
-    #      total (promedio ~5 por suite; incluye las 6 suites y 39 aserciones
-    #      ya contadas en el punto 1 -- misma deuda, mas visible).
-    #    - 2 suites con 'Test suite failed to run' (cobertura apagada, no un
-    #      test rojo): `audit.module.spec.ts` (ya conocido, OOM/SIGTERM de un
-    #      worker) y un HALLAZGO NUEVO -- `analytics-metrics.contract.spec.ts`
-    #      no compila: TS2339, 'Property total_units does not exist on type
-    #      CostCoverage' (y lo mismo con warns_when_partial, x2). Es la
-    #      salvedad KG-9(a) en vivo: `tsconfig.build.json` excluye los specs
-    #      del `nest build`, asi que este error de tipos es invisible para
-    #      todo el resto de este workflow y solo lo agarra jest.
-    #    - Rendimiento: 38 suites en ~11 min con `-w4` (vs. ~7 en 12 min con
-    #      `-w2` del punto 1) es un indicio de mejora, NO una extrapolacion
-    #      confiable a las 309 -- una sola muestra parcial no fija un ETA.
-    #    Conclusion sin cambios: la linea base sigue solidamente roja (24 de
-    #      38 en esta muestra) y la secuencia del punto 3 sigue siendo la via.
-    #      El `if: false` NO se toca.
-    # ---------------------------------------------------------------------
-    if: false  # disabled per @lider-dev WhatsApp 2026-08-14 (JEST too heavy for GH runners). Re-enable when baseline tests fixed.
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      - name: Generar Prisma Client (para tipos en specs)
-        working-directory: apps/backend
-        run: npx prisma generate
-      - name: jest (acotado, --runInBand)
-        # El script `buildcheck:test` (raíz del monorepo) acepta `--test <path>`
-        # para filtrar, o suite completa. Aquí corremos la suite entera con
-        # pool acotado por el script (maxWorkers=2, workerIdleMemoryLimit=1GB).
-        # Antes apuntaba a apps/backend y fallaba con "Missing script".
-        run: npm run buildcheck:test -- --test
-
-  mobile-build:
-    name: Mobile Build (expo export)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.mobile == 'true'
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      # Complementa a `mobile-typecheck`: `tsc` resuelve por tipos, Metro
-      # resuelve por módulo real, así que esto atrapa el import que existe para
-      # TypeScript pero no se puede bundlear. No usa EAS ni credenciales.
-      #
-      # EXPO_NO_DOTENV=1 porque el runner no tiene los `.env*` locales
-      # (`.env.web` está gitignoreado) y sin el flag expo intenta cargarlos.
+      - name: Typecheck
+        working-directory: apps/mobile
+        run: npx tsc --noEmit
+      # Metro valida módulos reales; no EAS, credenciales ni .env locales.
       - name: expo export
         working-directory: apps/mobile
         env:

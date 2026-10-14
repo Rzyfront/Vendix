@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CloseSessionDto {
@@ -19,4 +19,16 @@ export class CloseSessionDto {
   @IsNumber()
   @Type(() => Number)
   expected_closing_amount_seen?: number;
+
+  @IsOptional()
+  @IsIn(['resolved', 'override'])
+  pending_decision?: 'resolved' | 'override';
+
+  @IsOptional()
+  @IsString()
+  pending_fingerprint?: string;
+
+  @IsOptional()
+  @IsString()
+  override_reason?: string;
 }
