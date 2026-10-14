@@ -87,12 +87,13 @@ export class CashSessionCloseDataProvider implements IDocumentDataProvider {
         name: true,
         legal_name: true,
         logo_url: true,
-        phone: true,
-        email: true,
+        // `stores` no tiene phone/email: salen de la dirección y de la organización.
         addresses: { take: 1 },
-        organizations: { select: { tax_id: true, legal_name: true } },
+        organizations: {
+          select: { tax_id: true, legal_name: true, email: true, phone: true },
+        },
       },
-    } as any);
+    });
     const tz = await resolveStoreTimezone(this.prisma, storeId);
     const signedLogo = await signStoreLogoUrl(
       this.s3Service,
@@ -339,8 +340,8 @@ export class CashSessionCloseDataProvider implements IDocumentDataProvider {
         name: store?.name || 'Vendix',
         legal_name: store?.legal_name || store?.organizations?.legal_name,
         tax_id: store?.organizations?.tax_id,
-        phone: store?.phone,
-        email: store?.email,
+        phone: addr.phone_number || store?.organizations?.phone || undefined,
+        email: store?.organizations?.email || undefined,
         address: addr.address_line1
           ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim()
           : undefined,

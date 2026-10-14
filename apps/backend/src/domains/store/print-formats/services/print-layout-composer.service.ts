@@ -2434,7 +2434,7 @@ export class PrintLayoutComposerService {
     .section-cash-session-report .csr-title { font-size: 8pt; font-weight: bold; text-transform: uppercase; margin: 8px 0 2px; padding-top: 4px; border-top: 1px dashed #000; }
     .section-cash-session-report table.csr-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 0; }
     .section-cash-session-report table.csr-table td { padding: 1px 0; vertical-align: top; overflow-wrap: anywhere; border: 0; }
-    .section-cash-session-report td.csr-amt { width: 40%; text-align: right; white-space: nowrap; padding-left: 6px; }
+    .section-cash-session-report td.csr-amt { width: 40%; text-align: right; white-space: nowrap; overflow: hidden; padding-left: 6px; }
     .section-cash-session-report .csr-sub td.csr-label { padding-left: 8px; }
     .section-cash-session-report .csr-strong td { font-weight: bold; }
     .section-cash-session-report .csr-empty { font-size: 7.5pt; overflow-wrap: anywhere; }
