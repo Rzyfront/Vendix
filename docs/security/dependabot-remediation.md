@@ -140,8 +140,11 @@ al ref analizado por Dependabot; aceptar solo estas nueve alertas con autorizaci
 
 ## Qué verificará CI y qué no está demostrado
 
-Workflow nuevo: `.github/workflows/security-deps-validation.yml`. No ejecutado todavía,
-porque no se hizo push/PR. Activación: PR a develop o dispatch con SHA explícito de baseline.
+> **2026-10-13:** el workflow `.github/workflows/security-deps-validation.yml` se retiró de CI por decisión
+> de Rafael (16 shards de backend por PR, demasiado costoso). La política de locks sigue disponible
+> manualmente: `node scripts/security-deps-check.cjs --baseline <sha>`.
+
+Workflow original (retirado): `.github/workflows/security-deps-validation.yml`. Activación: PR a develop o dispatch con SHA explícito de baseline.
 
 - Instalaciones limpias root, limitadas a workspaces B/F sin incluir dependencias raíz,
   y staging independiente de B/F. Scripts de instalación de terceros deshabilitados;
