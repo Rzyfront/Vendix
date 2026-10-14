@@ -135,6 +135,10 @@ const validateDefinitionV2: ValidateFunction = ajv.compile(definitionV2Schema);
  */
 function checkColumnsWidthSum100(definition: any): unknown | null {
   if (!Array.isArray(definition?.columns)) return null;
+  // Sin columnas (`[]`) no hay nada que sumar: formatos sin tabla de ítems
+  // (`cash_session_close`) las declaran vacías. Una tabla con TODAS sus
+  // columnas deshabilitadas sigue fallando abajo (hay columnas, suman 0).
+  if (definition.columns.length === 0) return null;
   const enabled = definition.columns.filter(
     (c: any) => c && c.enabled !== false,
   );

@@ -383,6 +383,21 @@ export const WITHHOLDING_EMPLOYEE_CERTIFICATE_ADAPTER = freezeAdapter({
   requiredFields: [],
 } as FormatAdapter);
 
+/**
+ * Reporte de cierre de caja — 80mm térmico, no fiscal, impresión manual
+ * (sin auto-print). Regiones mínimas: encabezado, logo y pie; el cuerpo es
+ * la sección `cash_session_report`.
+ */
+export const CASH_SESSION_CLOSE_ADAPTER = freezeAdapter({
+  formatType: 'cash_session_close',
+  label: 'Cierre de Caja',
+  category: 'Ventas POS',
+  defaultPaper: 'thermal_80',
+  availableRegions: ['header', 'logo', 'footer'],
+  fiscal: false,
+  requiredFields: [],
+} as FormatAdapter);
+
 /** Frozen tuple — the registry consumes this order directly. */
 export const ALL_ADAPTERS: ReadonlyArray<Readonly<FormatAdapter>> = Object.freeze([
   POS_SALE_TICKET_ADAPTER,
@@ -402,4 +417,5 @@ export const ALL_ADAPTERS: ReadonlyArray<Readonly<FormatAdapter>> = Object.freez
   WITHHOLDING_PRACTICED_ADAPTER,
   WITHHOLDING_SUFFERED_ADAPTER,
   WITHHOLDING_EMPLOYEE_CERTIFICATE_ADAPTER,
+  CASH_SESSION_CLOSE_ADAPTER,
 ]);

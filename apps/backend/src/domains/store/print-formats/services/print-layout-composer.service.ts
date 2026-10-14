@@ -167,6 +167,10 @@ export class PrintLayoutComposerService {
         return this.renderFooterSection(section, data, mode);
       case 'dispatch_ticket':
         return this.renderDispatchTicketSection(section, data, mode);
+      // Reporte de cierre de caja (`cash_session_close`): cuerpo completo desde
+      // `custom_variables.cash_report` (cifras de `SessionsService.getCloseReport`).
+      case 'cash_session_report':
+        return this.renderCashSessionReportSection(section, data);
       // C.3 QUI-733 — la sección `table_info` ("Mesa, Mesero y Turno") se
       // declara en la plantilla SIN `fields`; sin este caso caía al
       // `default: renderGenericFieldsSection`, que devuelve '' cuando no hay
@@ -1554,6 +1558,259 @@ export class PrintLayoutComposerService {
   }
 
   /**
+   * Cuerpo del reporte de cierre de caja (`cash_session_close`). Espejo en
+   * backend de `CashSessionReportPrintService.buildBody` (frontend): mismos
+   * bloques y textos, con el rediseño (consolidado + desglose de efectivo) y
+   * el respaldo legacy cuando el backend no manda esos bloques. NO recalcula:
+   * pinta lo que trae `custom_variables.cash_report`.
+   *
+   * Cada bloque es una tabla (fija por el reset global `table-layout: fixed`)
+   * con la etiqueta a la izquierda y el monto en una columna porcentual
+   * `nowrap` (`.csr-amt`), de modo que nada excede el ancho imprimible.
+   */
+  private renderCashSessionReportSection(
+    section: any,
+    data: StandardPrintDataModel,
+  ): string {
+    const r = (data.custom_variables as any)?.cash_report;
+    if (!r || typeof r !== 'object') return '';
+    const esc = (v: unknown): string => this.compiler.escapeHtml(v);
+    const sid = section?.id || 'sec_cash_report';
+    const symbol: string = r.currency?.symbol || '$';
+    const fmt = (n: unknown): string => {
+      const v = Number(n ?? 0) || 0;
+      const abs = Math.abs(v).toLocaleString('es-CO', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+      return esc(`${v < 0 ? '-' : ''}${symbol}${abs}`);
+    };
+    const num = (n: unknown): string => esc(String(Number(n ?? 0) || 0));
+    const methodLabels: Record<string, string> = {
+      cash: 'Efectivo',
+      card: 'Tarjeta',
+      bank_transfer: 'Transferencia',
+      voucher: 'Datáfono',
+      wompi: 'Wompi',
+      wallet: 'Wallet',
+      paypal: 'PayPal',
+      original_payment: 'Medio de pago original',
+      original: 'Medio de pago original',
+      store_credit: 'Saldo a favor',
+      unknown: 'Sin especificar',
+    };
+    const method = (m: string): string => methodLabels[m] ?? m;
+    const outflowLabels: Record<string, string> = {
+      refund: 'Reembolso',
+      cancellation: 'Anulación',
+      withdrawal: 'Retiro',
+    };
+    const diffLabel = (d: number | null | undefined): string =>
+      d == null ? 'Diferencia' : d > 0 ? 'Sobrante' : d < 0 ? 'Faltante' : 'Diferencia';
+
+    const row = (label: string, amount: string, cls = ''): string =>
+      `<tr class="${cls}"><td class="csr-label">${esc(label)}</td><td class="csr-amt">${amount}</td></tr>`;
+    const table = (rows: string): string =>
+      `<table class="csr-table">${rows}</table>`;
+    const empty = (text: string): string =>
+      `<div class="csr-empty">${esc(text)}</div>`;
+    const block = (title: string, inner: string): string =>
+      `<div class="csr-title">${esc(title)}</div>${inner}`;
+
+    const s = r.session || {};
+    const sl = r.sales_summary ?? r.sales ?? {};
+    const hasSplit = sl.product_taxes != null;
+    const taxProduct = hasSplit ? Number(sl.product_taxes) : Number(sl.taxes ?? 0);
+    const taxShipping = Number(sl.shipping_taxes ?? 0);
+    const cancelled = r.sales_summary?.cancelled;
+
+    const sales = table(
+      row('Órdenes', num(sl.orders_count)) +
+        row('Pagos', num(sl.payments_count)) +
+        row('Subtotal', fmt(sl.subtotal)) +
+        row('Descuentos', fmt(sl.discounts)) +
+        row(hasSplit ? 'Impuestos productos' : 'Impuestos', fmt(taxProduct)) +
+        (taxShipping > 0 ? row('Impuesto domicilios', fmt(taxShipping)) : '') +
+        row('Envíos', fmt(sl.shipping)) +
+        row('Propinas', fmt(sl.tips)) +
+        row('Total cobrado', fmt(sl.grand_total), 'csr-strong') +
+        row('Ticket promedio', fmt(sl.average_ticket)) +
+        (cancelled && cancelled.count > 0
+          ? row(`Canceladas / reembolsadas (${cancelled.count})`, fmt(cancelled.total))
+          : ''),
+    );
+
+    const header =
+      `<div class="csr-h1">CIERRE DE CAJA</div>` +
+      `<div class="csr-meta">${esc(s.register?.name || 'Caja')} · Sesión #${esc(s.id)}</div>` +
+      `<div class="csr-meta">Abrió: ${esc(s.opened_by?.name || '—')} · ${esc(s.opened_at_formatted || '')}</div>` +
+      `<div class="csr-meta">Cerró: ${esc(s.closed_by?.name || '—')} · ${s.closed_at_formatted ? esc(s.closed_at_formatted) : '—'}</div>` +
+      (s.closing_notes ? `<div class="csr-notes">${esc(s.closing_notes)}</div>` : '');
+
+    let top: string;
+    if (r.consolidated && r.cash_breakdown) {
+      const c = r.consolidated;
+      const b = r.cash_breakdown;
+      const consolidated =
+        (c.rows || [])
+          .map((m: any) => {
+            const dif = m.difference;
+            return (
+              table(row(method(m.method), fmt(m.expected), 'csr-strong')) +
+              `<div class="csr-empty">Entró ${fmt(m.entered)} · Salió ${fmt(m.exited)}</div>` +
+              (m.counted != null
+                ? `<div class="csr-empty">Contado ${fmt(m.counted)}${dif != null ? ` · ${esc(diffLabel(dif))} ${fmt(dif)}` : ''}</div>`
+                : '')
+            );
+          })
+          .join('') +
+        table(row('TOTAL', fmt(c.totals?.expected), 'csr-strong')) +
+        `<div class="csr-empty">Entró ${fmt(c.totals?.entered)} · Salió ${fmt(c.totals?.exited)}</div>`;
+
+      const integrity =
+        r.integrity && r.integrity.sales_match === false
+          ? `<div class="csr-note">${(Array.isArray(r.integrity.notes) && r.integrity.notes.length > 0
+              ? r.integrity.notes
+              : ['Las ventas no cuadran con los pagos de la sesión.']
+            )
+              .map((n: string) => esc(n))
+              .join('<br>')}</div>`
+          : '';
+
+      const lines: Array<{ label: string; amount: number; sign: string }> = [
+        { label: 'Base de apertura', amount: b.opening, sign: '+' },
+        { label: 'Ventas en efectivo', amount: b.sales, sign: '+' },
+        { label: 'Ingresos manuales', amount: b.cash_in, sign: '+' },
+        { label: 'Reembolsos', amount: b.refunds, sign: '−' },
+        { label: 'Anulaciones / cancelaciones', amount: b.cancellations, sign: '−' },
+        { label: 'Retiros', amount: b.withdrawals, sign: '−' },
+      ];
+      const breakdown = table(
+        lines
+          .filter((l, i) => i === 0 || Number(l.amount) !== 0)
+          .map((l) => row(`${l.sign} ${l.label}`, fmt(l.amount)))
+          .join('') +
+          row('= Debe tener', fmt(b.expected), 'csr-strong') +
+          (b.counted != null ? row('Contado', fmt(b.counted), 'csr-strong') : '') +
+          (b.difference != null ? row(diffLabel(b.difference), fmt(b.difference), 'csr-strong') : ''),
+      );
+
+      const outflows: any[] = Array.isArray(r.outflows) ? r.outflows : [];
+      const outflowsHtml =
+        outflows.length > 0
+          ? outflows
+              .map((o) => {
+                const ord = o.order_number ? ` #${o.order_number}` : o.order_id ? ` #${o.order_id}` : '';
+                const detail = [o.reason, o.user_name].filter(Boolean).join(' · ');
+                return (
+                  table(
+                    row(
+                      `${o.at_formatted || ''} ${outflowLabels[o.kind] ?? o.kind}${ord}`.trim(),
+                      fmt(o.amount),
+                    ),
+                  ) +
+                  `<div class="csr-empty">${esc(method(o.payment_method))}${detail ? ` · ${esc(detail)}` : ''}</div>`
+                );
+              })
+              .join('')
+          : empty('Sin salidas');
+
+      top =
+        block('Lo que debe haber', consolidated) +
+        integrity +
+        block('Cómo se llega al efectivo', breakdown) +
+        block('Salidas de la sesión', outflowsHtml) +
+        block('Ventas', sales);
+    } else {
+      // Respaldo legacy (backend sin consolidado / desglose).
+      const pms: any[] = Array.isArray(r.payment_methods) ? r.payment_methods : [];
+      const methods =
+        pms.length > 0
+          ? table(pms.map((m) => row(`${method(m.method)} (${m.count})`, fmt(m.total))).join(''))
+          : empty('Sin pagos registrados');
+      const cash = r.cash || {};
+      const diff = cash.difference;
+      const cashHtml = table(
+        row('Apertura', fmt(cash.opening)) +
+          row('Ventas en efectivo', fmt(cash.cash_sales)) +
+          row(`Entradas (${cash.cash_in?.count ?? 0})`, fmt(cash.cash_in?.total)) +
+          row(`Salidas (${cash.cash_out?.count ?? 0})`, fmt(cash.cash_out?.total)) +
+          row(`Reembolsos en efectivo (${cash.cash_refunds?.count ?? 0})`, fmt(cash.cash_refunds?.total)) +
+          row('Esperado', fmt(cash.expected), 'csr-strong') +
+          (cash.declared != null ? row('Declarado', fmt(cash.declared), 'csr-strong') : '') +
+          (diff != null ? row(diffLabel(diff), fmt(Math.abs(diff)), 'csr-strong') : ''),
+      );
+      const ret = r.returns;
+      const refundsCount = ret?.refunds_count ?? r.refunds?.count ?? 0;
+      const refundsTotal = ret?.refunds_total ?? r.refunds?.total ?? 0;
+      const refundsTax = ret?.refunds_tax ?? 0;
+      const cancelledCount = ret?.payments_cancelled_count ?? r.refunds?.payment_cancellations?.count ?? 0;
+      const cancelledTotal = ret?.payments_cancelled_total ?? r.refunds?.payment_cancellations?.total ?? 0;
+      const hasReturns =
+        refundsCount > 0 || refundsTotal > 0 || refundsTax > 0 || cancelledCount > 0 || cancelledTotal > 0;
+      const returnsHtml = hasReturns
+        ? block(
+            'Devoluciones',
+            table(
+              row(`Reembolsos (${refundsCount})`, fmt(refundsTotal)) +
+                (r.refunds?.by_method || [])
+                  .map((m: any) => row(`${method(m.method)} (${m.count})`, fmt(m.total), 'csr-sub'))
+                  .join('') +
+                row('Impuesto reembolsado', fmt(refundsTax)) +
+                row(`Pagos anulados (${cancelledCount})`, fmt(cancelledTotal)),
+            ),
+          )
+        : '';
+      const netHtml = r.net
+        ? block(
+            'Neto',
+            table(
+              row('Ventas netas', fmt(r.net.net_sales), 'csr-strong') +
+                row('Impuesto neto', fmt(r.net.net_taxes)),
+            ),
+          )
+        : '';
+      const pc = r.pending_collection;
+      const pendingHtml =
+        pc && pc.count > 0
+          ? `<div class="csr-notes"><b>${esc(
+              `${pc.count} ${pc.count === 1 ? 'orden entregada o despachada con saldo por cobrar' : 'órdenes entregadas o despachadas con saldo por cobrar'}: `,
+            )}${fmt(pc.total)}</b></div>`
+          : '';
+      top =
+        block('Métodos de pago', methods) +
+        block('Efectivo', cashHtml) +
+        block('Ventas cobradas', sales) +
+        returnsHtml +
+        netHtml +
+        pendingHtml;
+    }
+
+    const d = r.discounts || { orders_with_discount: 0, total: 0, promotions: [], coupons: [], other: { count: 0, total: 0 } };
+    const promotions: any[] = d.promotions || [];
+    const coupons: any[] = d.coupons || [];
+    const discounts =
+      table(
+        row(`Total (${d.orders_with_discount ?? 0} órdenes)`, fmt(d.total), 'csr-strong') +
+          promotions.map((p) => row(`Promoción: ${p.name} (${p.count})`, fmt(p.total), 'csr-sub')).join('') +
+          coupons.map((c) => row(`Cupón: ${c.code} (${c.count})`, fmt(c.total), 'csr-sub')).join('') +
+          (d.other?.count > 0 ? row(`Otros descuentos (${d.other.count})`, fmt(d.other.total), 'csr-sub') : ''),
+      ) +
+      (promotions.length === 0 ? empty('Sin promociones') : '') +
+      (coupons.length === 0 ? empty('Sin cupones') : '');
+
+    return `
+      <div class="print-section section-cash-session-report" data-section-id="${esc(sid)}">
+        ${header}
+        ${top}
+        ${block('Descuentos', discounts)}
+        <div class="csr-meta csr-printed">Impreso: ${esc(r.printed_at_formatted || '')}</div>
+        <div class="csr-sign"><div>Firma cajero</div><div>Firma supervisor</div></div>
+      </div>
+    `;
+  }
+
+  /**
    * C.3 QUI-733 — render propio de la sección `table_info` ("Mesa, Mesero y
    * Turno"). Lee `document.table_number` / `document.waiter_name` del modelo
    * de impresión (los providers ya los pueblan) y los muestra como bloque de
@@ -2170,6 +2427,22 @@ export class PrintLayoutComposerService {
       color: #6b7280;
       margin: 6px 0;
     }
+
+    /* Reporte de cierre de caja: tablas fijas, monto nowrap en columna % */
+    .section-cash-session-report .csr-h1 { font-size: 11pt; font-weight: bold; text-align: center; letter-spacing: 1px; margin: 0 0 2px; }
+    .section-cash-session-report .csr-meta { font-size: 7.5pt; text-align: center; margin: 2px 0; }
+    .section-cash-session-report .csr-title { font-size: 8pt; font-weight: bold; text-transform: uppercase; margin: 8px 0 2px; padding-top: 4px; border-top: 1px dashed #000; }
+    .section-cash-session-report table.csr-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 0; }
+    .section-cash-session-report table.csr-table td { padding: 1px 0; vertical-align: top; overflow-wrap: anywhere; border: 0; }
+    .section-cash-session-report td.csr-amt { width: 40%; text-align: right; white-space: nowrap; padding-left: 6px; }
+    .section-cash-session-report .csr-sub td.csr-label { padding-left: 8px; }
+    .section-cash-session-report .csr-strong td { font-weight: bold; }
+    .section-cash-session-report .csr-empty { font-size: 7.5pt; overflow-wrap: anywhere; }
+    .section-cash-session-report .csr-note { font-size: 7.5pt; border: 1px solid #000; padding: 2px 4px; margin-top: 4px; overflow-wrap: anywhere; }
+    .section-cash-session-report .csr-notes { font-size: 7.5pt; font-style: italic; margin-top: 4px; overflow-wrap: anywhere; }
+    .section-cash-session-report .csr-printed { margin-top: 8px; }
+    .section-cash-session-report .csr-sign { margin-top: 26px; }
+    .section-cash-session-report .csr-sign div { border-top: 1px solid #000; text-align: center; font-size: 7.5pt; margin-top: 26px; padding-top: 2px; }
 
     /* Token pills and interactive canvas outline styles */
     .vendix-token-pill {

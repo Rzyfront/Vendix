@@ -160,6 +160,7 @@ export const ALL_FORMAT_TYPES: print_format_type_enum[] = [
   'withholding_practiced',
   'withholding_suffered',
   'withholding_employee_certificate',
+  'cash_session_close',
 ];
 
 export const FORMAT_TYPE_METADATA: Record<
@@ -182,6 +183,7 @@ export const FORMAT_TYPE_METADATA: Record<
   withholding_practiced: { name: 'Certificado Retención Practicada', category: 'Tributario', icon: 'file-minus', engine: 'html' },
   withholding_suffered: { name: 'Certificado Retención Sufrida', category: 'Tributario', icon: 'file-plus', engine: 'html' },
   withholding_employee_certificate: { name: 'Certificado Laboral Empleado', category: 'Tributario', icon: 'file-badge', engine: 'html' },
+  cash_session_close: { name: 'Cierre de Caja', category: 'Ventas POS', icon: 'wallet', engine: 'html' },
 };
 
 @Injectable()
