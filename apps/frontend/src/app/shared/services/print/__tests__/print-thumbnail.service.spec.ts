@@ -73,7 +73,7 @@ describe('PrintThumbnailService [print-editor-dsk P6]', () => {
     expect(resolveCategory('unknown_thing')).toBe('Logística');
   });
 
-  it('PRINT_FORMAT_CATEGORY_MAP covers all 11 format_types', () => {
+  it('PRINT_FORMAT_CATEGORY_MAP covers all 12 format_types', () => {
     const expected = [
       'pos_sale_ticket',
       'sales_order_invoice',
@@ -86,6 +86,7 @@ describe('PrintThumbnailService [print-editor-dsk P6]', () => {
       'fiscal_electronic_invoice',
       'fiscal_credit_note',
       'kitchen_ticket',
+      'cash_session_close',
     ];
     for (const fmt of expected) {
       expect(PRINT_FORMAT_CATEGORY_MAP[fmt]).toBeTruthy();

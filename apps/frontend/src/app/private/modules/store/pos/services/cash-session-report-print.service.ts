@@ -49,7 +49,16 @@ export class CashSessionReportPrintService {
   private readonly authFacade = inject(AuthFacade);
   private readonly settings = inject(StoreSettingsFacade);
 
+  /**
+   * Imprime por el Print Gateway (formato configurable `cash_session_close`).
+   * Si el gateway no está disponible o falla (resuelve null), cae al render
+   * local. Si ambos fallan, el error del render local se propaga y el caller
+   * muestra el toast.
+   */
   async print(report: CashSessionCloseReport): Promise<void> {
+    const viaGateway = await this.tryGateway(report.session.id);
+    if (viaGateway) return;
+
     await this.ensureCurrencyLoaded();
     await this.documentPrint.print({
       document: 'pos_ticket',
@@ -58,6 +67,20 @@ export class CashSessionReportPrintService {
       styles: REPORT_PRINT_STYLES,
       trigger: 'explicit',
     });
+  }
+
+  private async tryGateway(sessionId: number): Promise<boolean> {
+    try {
+      const result = await this.documentPrint.printViaGateway({
+        formatType: 'cash_session_close',
+        documentId: sessionId,
+        title: `Cierre de caja #${sessionId}`,
+        trigger: 'explicit',
+      });
+      return result !== null;
+    } catch {
+      return false;
+    }
   }
 
   buildBody(r: CashSessionCloseReport): string {

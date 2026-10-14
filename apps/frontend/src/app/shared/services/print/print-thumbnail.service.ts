@@ -34,6 +34,7 @@ const CATEGORY_COLORS: Record<string, string> = {
  */
 export const PRINT_FORMAT_CATEGORY_MAP: Record<string, string> = {
   pos_sale_ticket: 'Ventas POS',
+  cash_session_close: 'Ventas POS',
   sales_order_invoice: 'Ventas',
   dispatch_note: 'Logística',
   dispatch_ticket: 'Logística',

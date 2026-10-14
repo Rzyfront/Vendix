@@ -14,7 +14,8 @@ export type PrintFormatType =
   | 'dispatch_route'
   | 'withholding_practiced'
   | 'withholding_suffered'
-  | 'withholding_employee_certificate';
+  | 'withholding_employee_certificate'
+  | 'cash_session_close';
 
 export type PrintPaperFormat =
   | 'thermal_80'
