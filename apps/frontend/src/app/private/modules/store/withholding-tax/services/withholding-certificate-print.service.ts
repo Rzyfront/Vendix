@@ -39,11 +39,39 @@ const WITHHOLDING_CERTIFICATE_PRINT_STYLES = `
       background: #fff;
     }
     .container {
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 24px;
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
-    table { border-collapse: collapse; }
+    .container, .container * { box-sizing: border-box; min-width: 0; }
+    .container img { max-width: 100%; height: auto; }
+    .container table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+    .container td, .container th, .container p, .container h1, .container h2, .container h3, .container span {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+    .container .vx-flex-row { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+    .container .vx-flex-row > * { flex: 1 1 auto; min-width: 0; }
+    .container .vx-cards { display: flex; flex-wrap: wrap; gap: 16px; }
+    .container .vx-cards > * { flex: 1 1 140px; min-width: 0; }
+    .container .vx-totals { width: 100%; max-width: 300px; margin-left: auto; }
+    .container .vx-totals.vx-totals-wide { max-width: 340px; }
+    @media (max-width: 80mm), print and (max-width: 90mm) {
+      .container { font-size: 11px; }
+      .container h1 { font-size: 15px !important; }
+      .container h2 { font-size: 13px !important; }
+      .container [style*="padding: 16px"], .container [style*="padding: 14px"] { padding: 6px !important; }
+      .container [style*="margin-bottom: 24px"] { margin-bottom: 10px !important; }
+      .container th, .container td { padding: 3px 2px !important; font-size: 10px !important; }
+      .container [style*="Courier"] { font-size: 10px !important; }
+      .container .vx-flex-row { gap: 2px 6px; }
+      .container .vx-flex-row > * { flex-basis: 100%; text-align: left !important; }
+      .container .vx-cards { gap: 6px; }
+      .container .vx-cards > * { flex-basis: 100%; }
+      .container .vx-totals, .container .vx-totals.vx-totals-wide { max-width: 100%; }
+    }
 `;
 
 /**
@@ -174,14 +202,14 @@ export class WithholdingCertificatePrintService {
     </div>
 
     <!-- Parties -->
-    <div style="display: flex; gap: 16px; margin-bottom: 24px;">
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px;">
+    <div class="vx-cards" style="margin-bottom: 24px;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px;">
         <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Agente Retenedor</h3>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${storeName}</p>
         ${storeTaxId ? `<p style="margin: 2px 0 0; font-size: 13px; color: #6b7280;">NIT: ${storeTaxId}</p>` : ''}
         ${storeAddress ? `<p style="margin: 2px 0 0; font-size: 12px; color: #6b7280;">${storeAddress}</p>` : ''}
       </div>
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px;">
         <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Beneficiario (Sujeto de Retención)</h3>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${cert.supplier_name}</p>
         ${cert.supplier_nit ? `<p style="margin: 2px 0 0; font-size: 13px; color: #6b7280;">NIT: ${cert.supplier_nit}</p>` : ''}
@@ -189,14 +217,14 @@ export class WithholdingCertificatePrintService {
     </div>
 
     <!-- Monthly Breakdown -->
-    <table style="width: 100%; margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+    <table style="width: 100%; table-layout: fixed; margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
       <thead>
         <tr style="background: #f3f4f6;">
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 100px;">Mes</th>
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Concepto</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 120px;">Base</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 80px;">Tarifa</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 120px;">Valor Retenido</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 12%;">Mes</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 28%;">Concepto</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 22%;">Base</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 12%;">Tarifa</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 26%;">Valor Retenido</th>
         </tr>
       </thead>
       <tbody>
@@ -209,12 +237,12 @@ export class WithholdingCertificatePrintService {
 
     <!-- Totals -->
     <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
-      <div style="width: 300px;">
-        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+      <div class="vx-totals">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Total Base</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${this.currencyService.format(Number(cert.total_base) || 0)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 16px; font-weight: 700;">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 16px; font-weight: 700;">
           <span>Total Retenido</span>
           <span style="font-family: 'Courier New', monospace;">${this.currencyService.format(Number(cert.total_withheld) || 0)}</span>
         </div>
@@ -279,14 +307,14 @@ export class WithholdingCertificatePrintService {
     </div>
 
     <!-- Parties -->
-    <div style="display: flex; gap: 16px; margin-bottom: 24px;">
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px;">
+    <div class="vx-cards" style="margin-bottom: 24px;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px;">
         <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Sujeto de Retención (Beneficiario)</h3>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${storeName}</p>
         ${storeTaxId ? `<p style="margin: 2px 0 0; font-size: 13px; color: #6b7280;">NIT: ${storeTaxId}</p>` : ''}
         ${storeAddress ? `<p style="margin: 2px 0 0; font-size: 12px; color: #6b7280;">${storeAddress}</p>` : ''}
       </div>
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px;">
         <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Agente Retenedor (${counterpartyLabel})</h3>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${cert.counterparty_name}</p>
         ${cert.counterparty_nit ? `<p style="margin: 2px 0 0; font-size: 13px; color: #6b7280;">NIT/CC: ${cert.counterparty_nit}</p>` : ''}
@@ -294,15 +322,15 @@ export class WithholdingCertificatePrintService {
     </div>
 
     <!-- Monthly Breakdown -->
-    <table style="width: 100%; margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+    <table style="width: 100%; table-layout: fixed; margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
       <thead>
         <tr style="background: #f3f4f6;">
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 90px;">Mes</th>
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Concepto</th>
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 100px;">Tipo</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 120px;">Base</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 80px;">Tarifa</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 120px;">Valor Retenido</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 11%;">Mes</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 22%;">Concepto</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 11%;">Tipo</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 20%;">Base</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 12%;">Tarifa</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 24%;">Valor Retenido</th>
         </tr>
       </thead>
       <tbody>
@@ -315,12 +343,12 @@ export class WithholdingCertificatePrintService {
 
     <!-- Totals -->
     <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
-      <div style="width: 300px;">
-        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+      <div class="vx-totals">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Total Base</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${this.currencyService.format(Number(cert.total_base) || 0)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 16px; font-weight: 700;">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 16px; font-weight: 700;">
           <span>Total Retenido</span>
           <span style="font-family: 'Courier New', monospace;">${this.currencyService.format(Number(cert.total_withheld) || 0)}</span>
         </div>
@@ -380,13 +408,13 @@ export class WithholdingCertificatePrintService {
     </div>
 
     <!-- Parties -->
-    <div style="display: flex; gap: 16px; margin-bottom: 24px;">
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px;">
+    <div class="vx-cards" style="margin-bottom: 24px;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px;">
         <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Agente Retenedor (Empleador)</h3>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${cert.employer_name}</p>
         ${cert.employer_nit ? `<p style="margin: 2px 0 0; font-size: 13px; color: #6b7280;">NIT: ${cert.employer_nit}</p>` : ''}
       </div>
-      <div style="flex: 1; background: #f9fafb; border-radius: 8px; padding: 16px;">
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px;">
         <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Beneficiario (Empleado)</h3>
         <p style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">${cert.employee_name}</p>
         ${cert.employee_document_number ? `<p style="margin: 2px 0 0; font-size: 13px; color: #6b7280;">${(cert.employee_document_type || 'CC').toUpperCase()}: ${cert.employee_document_number}</p>` : ''}
@@ -394,14 +422,14 @@ export class WithholdingCertificatePrintService {
     </div>
 
     <!-- Monthly Breakdown -->
-    <table style="width: 100%; margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+    <table style="width: 100%; table-layout: fixed; margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
       <thead>
         <tr style="background: #f3f4f6;">
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 100px;">Mes</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Salario</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Aporte Salud</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Aporte Pensión</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Retefuente</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 12%;">Mes</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 22%;">Salario</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 22%;">Aporte Salud</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 22%;">Aporte Pensión</th>
+          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; width: 22%;">Retefuente</th>
         </tr>
       </thead>
       <tbody>
@@ -414,20 +442,20 @@ export class WithholdingCertificatePrintService {
 
     <!-- Totals -->
     <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
-      <div style="width: 340px;">
-        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+      <div class="vx-totals vx-totals-wide">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Total Ingresos Salariales</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${this.currencyService.format(Number(cert.total_salaries) || 0)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Total Aportes a Salud</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${this.currencyService.format(Number(cert.total_health_deduction) || 0)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Total Aportes a Pensión</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${this.currencyService.format(Number(cert.total_pension_deduction) || 0)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 16px; font-weight: 700;">
+        <div class="vx-flex-row" style="justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 16px; font-weight: 700;">
           <span>Total Retención en la Fuente</span>
           <span style="font-family: 'Courier New', monospace;">${this.currencyService.format(Number(cert.total_withholding) || 0)}</span>
         </div>

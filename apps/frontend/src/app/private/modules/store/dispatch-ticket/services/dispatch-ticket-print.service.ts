@@ -357,11 +357,18 @@ export class DispatchTicketPrintService {
     const items = data.items
       .map(
         (it, i) =>
-          `<tr><td>${i + 1}</td><td>${it.sku}</td><td>${it.productName}</td>` +
-          `<td>${it.orderedQty}</td><td>${it.dispatchedQty}</td></tr>`,
+          `<tr><td style="width: 6%;">${i + 1}</td><td style="width: 20%;">${it.sku}</td><td style="width: 38%;">${it.productName}</td>` +
+          `<td style="width: 18%;">${it.orderedQty}</td><td style="width: 18%;">${it.dispatchedQty}</td></tr>`,
       )
       .join('');
     return `
+      <style>
+        .dt-items { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 9px; }
+        .dt-items th, .dt-items td { overflow-wrap: anywhere; word-break: break-word; padding: 1px 2px; text-align: left; vertical-align: top; }
+        .dt-header, .dt-customer, .dt-footer { font-size: 10px; overflow-wrap: anywhere; }
+        .dt-header h1 { font-size: 13px; margin: 0 0 2px; }
+        .dt-footer .signature { border-bottom: 1px solid #000; height: 28px; max-width: 100%; }
+      </style>
       <header class="dt-header">
         <h1>${data.storeName}</h1>
         <p>Orden #${data.orderNumber} — ${data.dateFormatted}</p>
@@ -374,7 +381,7 @@ export class DispatchTicketPrintService {
         ${data.courierName ? `<p>Domiciliario: ${data.courierName}</p>` : ''}
       </section>
       <table class="dt-items">
-        <thead><tr><th>#</th><th>SKU</th><th>Producto</th><th>Cant.pedida</th><th>Cant.despachada</th></tr></thead>
+        <thead><tr><th style="width: 6%;">#</th><th style="width: 20%;">SKU</th><th style="width: 38%;">Producto</th><th style="width: 18%;">Pedida</th><th style="width: 18%;">Desp.</th></tr></thead>
         <tbody>${items}</tbody>
       </table>
       <footer class="dt-footer">

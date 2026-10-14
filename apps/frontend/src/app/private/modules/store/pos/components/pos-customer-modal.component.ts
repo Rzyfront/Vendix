@@ -37,6 +37,7 @@ import {
   DocumentTypeOption,
 } from '../../../../../shared/constants/document-types';
 import { computeNitDv } from '../../../../../shared/utils/nit.util';
+import { DocumentPrintService } from '../../../../../shared/services/print';
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosQueueService, QueueEntry } from '../services/pos-queue.service';
 import {
@@ -798,6 +799,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   private toastService = inject(ToastService);
   private storeContextService = inject(StoreContextService);
   private queueService = inject(PosQueueService);
+  private documentPrint = inject(DocumentPrintService);
 
   constructor() {
     this.customerForm = this.createCustomerForm();
@@ -1340,30 +1342,36 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   printQueueQr(): void {
     const queueQrData = this.queueQrData();
     if (!queueQrData) return;
-    const win = window.open('', '_blank', 'width=400,height=500');
-    if (!win) return;
-    win.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>QR Cola Virtual</title>
-        <style>
-          body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; }
-          img { width: 250px; height: 250px; }
-          p { font-size: 12px; color: #555; margin-top: 8px; word-break: break-all; text-align: center; max-width: 280px; }
-          h2 { font-size: 16px; margin-bottom: 12px; }
-          @media print { body { min-height: auto; } }
-        </style>
-      </head>
-      <body>
+    const esc = (value: string): string =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const body = `
+      <div class="queue-qr">
         <h2>Registro en Cola Virtual</h2>
-        <img src="${queueQrData.qr_data_url}" alt="QR Cola">
-        <p>${queueQrData.url}</p>
-        <script>window.onload = function() { window.print(); window.close(); }<\/script>
-      </body>
-      </html>
-    `);
-    win.document.close();
+        <img src="${esc(queueQrData.qr_data_url)}" alt="QR Cola">
+        <p>${esc(queueQrData.url)}</p>
+      </div>
+    `;
+    void this.documentPrint
+      .print({
+        document: 'pos_ticket',
+        body,
+        title: 'QR Cola Virtual',
+        styles: `
+          .queue-qr { text-align: center; font-family: sans-serif; }
+          .queue-qr h2 { font-size: 14px; margin: 0 0 8px; overflow-wrap: anywhere; }
+          .queue-qr img { width: 100%; max-width: 100%; height: auto; }
+          .queue-qr p { font-size: 10px; color: #000; margin: 6px 0 0; overflow-wrap: anywhere; word-break: break-all; }
+        `,
+        trigger: 'explicit',
+      })
+      .catch((error: unknown) => {
+        console.error('Error printing queue QR:', error);
+        this.toastService.error('Error al imprimir el QR');
+      });
   }
 
   // queueEnabled is now an @Input from the parent POS component

@@ -761,6 +761,8 @@ export interface PrintDocumentConfig {
   format: PrintFormat;
   /** Page margin in millimetres. Ignored on roll formats. */
   margin_mm?: number;
+  /** Printable width of a roll in mm (kernel clamps to [paper-16, paper-4]). */
+  printable_width_mm?: number;
   /** Printed copies. 0 = do not print. */
   copies?: number;
 }

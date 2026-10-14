@@ -163,7 +163,7 @@ export class PosTicketService {
     return {
       ...this.defaultPrinterConfig,
       type: paper.isRoll ? 'thermal' : 'standard',
-      paperWidth: paper.widthMm,
+      paperWidth: paper.contentWidthMm,
       format: paper.format,
       // 0 copies means "do not print"; the callers that ask for an explicit
       // print still get one, so clamp to at least 1 here.
@@ -494,7 +494,7 @@ export class PosTicketService {
     // inline lo que es igual en pantalla e impresión (tipografía, ancho,
     // fondo blanco).
     let html = `
-      <div class="ticket" style="font-family: monospace; max-width: ${printer.paperWidth}mm; margin: 0 auto; padding: 10px; background: white;">
+      <div class="ticket" style="font-family: monospace; width: 100%; box-sizing: border-box; overflow-wrap: anywhere; padding: 0; background: white;">
     `;
 
     if (printer.printHeader) {
@@ -524,7 +524,7 @@ export class PosTicketService {
         <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid ${ink('#333')}; padding-bottom: 10px;">
       `;
       if (store.logo) {
-        html += `<img src="${store.logo}" style="max-width: 100px; margin-bottom: 10px;" alt="Logo" />`;
+        html += `<img src="${store.logo}" style="max-width: min(100px, 100%); height: auto; margin-bottom: 10px;" alt="Logo" />`;
       }
       if (heading) {
         html += `
@@ -589,7 +589,7 @@ export class PosTicketService {
 
     html += `
       <div style="margin-bottom: 15px;">
-        <table style="width: 100%; font-size: 11px; border-collapse: collapse;">
+        <table style="width: 100%; table-layout: fixed; font-size: 11px; border-collapse: collapse;">
           <tbody>
     `;
 
@@ -634,10 +634,10 @@ export class PosTicketService {
         : '';
       html += `
         <tr>
-          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}${serialLine}${takeawayLine}</td>
-          <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
-          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${unitSuffix}</td>
-          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>
+          <td style="width: 38%; padding: 2px; vertical-align: top; overflow-wrap: anywhere;">${item.name}${tierLine}${packageLine}${serialLine}${takeawayLine}</td>
+          <td style="width: 14%; text-align: center; padding: 2px; overflow-wrap: anywhere;">${qtyDisplay}</td>
+          <td style="width: 24%; text-align: right; padding: 2px; overflow-wrap: anywhere;">${this.currencyService.format(item.unitPrice)}${unitSuffix}</td>
+          <td style="width: 24%; text-align: right; padding: 2px; overflow-wrap: anywhere;">${this.currencyService.format(item.totalPrice)}</td>
         </tr>
       `;
     });
@@ -674,7 +674,7 @@ export class PosTicketService {
 
     html += `
       <div style="margin-bottom: 15px;">
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+        <table style="width: 100%; table-layout: fixed; font-size: 12px; border-collapse: collapse;">
           ${
             showSubtotal
               ? `
@@ -723,9 +723,9 @@ export class PosTicketService {
         .map(
           (line) => `
           <tr>
-            <td style="padding: 2px; vertical-align: top;">${line.product_name}</td>
-            <td style="text-align: center; padding: 2px;">Devueltos: ${line.refunded_qty}</td>
-            <td style="text-align: right; padding: 2px;">-${this.currencyService.format(line.refunded_amount)}</td>
+            <td style="width: 44%; padding: 2px; vertical-align: top; overflow-wrap: anywhere;">${line.product_name}</td>
+            <td style="width: 28%; text-align: center; padding: 2px; overflow-wrap: anywhere;">Devueltos: ${line.refunded_qty}</td>
+            <td style="width: 28%; text-align: right; padding: 2px; overflow-wrap: anywhere;">-${this.currencyService.format(line.refunded_amount)}</td>
           </tr>
         `,
         )
@@ -734,12 +734,12 @@ export class PosTicketService {
       <hr style="border: 1px dashed #000; margin: 10px 0;">
       <div style="margin-bottom: 15px;">
         <p style="margin: 2px 0; font-size: 12px; font-weight: bold;">REEMBOLSOS</p>
-        <table style="width: 100%; font-size: 11px; border-collapse: collapse;">
+        <table style="width: 100%; table-layout: fixed; font-size: 11px; border-collapse: collapse;">
           <tbody>
             ${refundLineRows}
           </tbody>
         </table>
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 4px;">
+        <table style="width: 100%; table-layout: fixed; font-size: 12px; border-collapse: collapse; margin-top: 4px;">
           <tr>
             <td style="text-align: left; padding: 2px;">Reembolsado:</td>
             <td style="text-align: right; padding: 2px;">-${this.currencyService.format(refundsSection.refunded_total)}</td>
@@ -785,7 +785,7 @@ export class PosTicketService {
           <hr style="border: 1px dashed #000; margin: 10px 0;">
           <div style="text-align: center; margin: 10px 0;">
             <p style="margin: 2px 0; font-size: 11px; font-weight: bold;">Solicite su factura electrónica</p>
-            <img src="${qrDataUrl}" style="width: 160px; height: 160px; margin: 8px auto;" />
+            <img src="${qrDataUrl}" style="width: min(160px, 100%); height: auto; margin: 8px auto;" />
             <p style="margin: 2px 0; font-size: 10px;">Escanee el código QR o visite:</p>
             <p style="margin: 4px 0; font-size: 9px; word-break: break-all;">${qrUrl}</p>
           </div>

@@ -12,6 +12,30 @@ import { PrintFormatType } from '../../../core/models/print-formats.model';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 import { PrintGatewayClientService } from './print-gateway-client.service';
 import { MmToPxService } from './mm-to-px.service';
+import {
+  PrintGeometryMargins,
+  resolvePrintGeometry,
+} from '../../../core/lib/print-geometry';
+
+/**
+ * Defensive CSS injected into every gateway-rendered document. It never touches
+ * `@page`: the backend owns paper and margins, this only stops an overflowing
+ * image / table / long word from escaping the printable width.
+ */
+const GATEWAY_GUARD_STYLE =
+  '<style data-vx-print-guard>' +
+  'html,body{max-width:100%;overflow-wrap:anywhere;}' +
+  'img,svg{max-width:100%;height:auto;}' +
+  'table{table-layout:fixed;}' +
+  '</style>';
+
+/** Base guard stylesheet shared by every locally composed print document. */
+const BASE_GUARD_CSS = `
+            .vx-print-root *, .vx-print-root *::before, .vx-print-root *::after { box-sizing: border-box; max-width: 100%; }
+            .vx-print-root table { table-layout: fixed; width: 100%; }
+            .vx-print-root td, .vx-print-root th { overflow-wrap: anywhere; }
+            .vx-print-root img, .vx-print-root svg, .vx-print-root canvas { max-width: 100%; height: auto; }
+            .vx-print-root pre { white-space: pre-wrap; }`;
 
 /**
  * Upper bound for the print iframe's `load` event. `document.write` + `close()`
@@ -63,8 +87,10 @@ export interface PrintOverrides {
    * live row passes the canonical number here.
    */
   copies?: number;
-  /** Page margin in millimetres. Ignored on roll formats, same as the stored one. */
+  /** Page margin in millimetres (sheets: at least 5 mm; rolls: top/bottom only). */
   marginMm?: number;
+  /** Printable width of a roll in millimetres; clamped by the geometry kernel. */
+  printableWidthMm?: number;
 }
 
 /**
@@ -76,8 +102,19 @@ export interface ResolvedPrintConfig {
   format: PrintFormat;
   /** Value of the CSS `@page size` rule. */
   pageSize: string;
-  /** Printable width in millimetres — what a body should size itself to. */
-  widthMm: number;
+  /** Physical paper (page) width in millimetres. */
+  paperWidthMm: number;
+  /**
+   * @deprecated Alias of `paperWidthMm`, kept so older consumers keep compiling.
+   * Do NOT size a body to it: use `contentWidthMm`.
+   */
+  readonly widthMm: number;
+  /** Width a body must size itself to: paper minus side margins. */
+  contentWidthMm: number;
+  /** Width the printer head can physically print (rolls) or content (sheets). */
+  printableWidthMm: number;
+  /** Effective margin per side, in millimetres. */
+  margins: PrintGeometryMargins;
   /**
    * Continuous roll (`size: <w>mm auto`): the sheet grows with the content, so
    * one block is always exactly one page. Fixed-height formats can fragment a
@@ -85,7 +122,10 @@ export interface ResolvedPrintConfig {
    * only a lower bound.
    */
   isRoll: boolean;
-  /** Effective page margin in millimetres. Always 0 on roll formats. */
+  /**
+   * Uniform summary of the page margin in mm (the largest side). Per-side
+   * values live in `margins`.
+   */
   marginMm: number;
   /** Copies resolved from settings. May be 0 — see `PrintTrigger`. */
   copies: number;
@@ -216,6 +256,26 @@ export class DocumentPrintService {
   }
 
   /**
+   * Single hook for every gateway-rendered document: expands copies and injects
+   * the defensive overflow guard. Does not alter `@page`.
+   */
+  private prepareGatewayHtml(documentHtml: string, copies: number): string {
+    return this.withGatewayPrintGuard(this.expandGatewayHtmlCopies(documentHtml, copies));
+  }
+
+  /** Injects `GATEWAY_GUARD_STYLE` once, last in `<head>` (idempotent). */
+  withGatewayPrintGuard(documentHtml: string): string {
+    if (documentHtml.includes('data-vx-print-guard')) return documentHtml;
+    if (/<\/head\s*>/i.test(documentHtml)) {
+      return documentHtml.replace(/<\/head\s*>/i, (m) => `${GATEWAY_GUARD_STYLE}${m}`);
+    }
+    if (/<body\b/i.test(documentHtml)) {
+      return documentHtml.replace(/<body\b/i, (m) => `${GATEWAY_GUARD_STYLE}${m}`);
+    }
+    return `${GATEWAY_GUARD_STYLE}${documentHtml}`;
+  }
+
+  /**
    * Print Formats is the authority for automatic printing. Read the detail on
    * each decision (rather than trusting the auth/settings snapshot) so a
    * merchant's latest enable/auto-print choice is honoured. Manual printing
@@ -268,7 +328,6 @@ export class DocumentPrintService {
       overrides?.format ?? configured?.format ?? legacy.format ?? fallback.format;
     const format: PrintFormat =
       requested && PRINT_PAGE_GEOMETRY[requested] ? requested : fallback.format;
-    const geometry = PRINT_PAGE_GEOMETRY[format];
 
     const requestedCopies =
       overrides?.copies ?? configured?.copies ?? legacy.copies ?? fallback.copies;
@@ -277,24 +336,37 @@ export class DocumentPrintService {
         ? Math.max(0, Math.trunc(requestedCopies))
         : 1;
 
-    // A margin on a roll is meaningless — the roll has no fixed sheet to inset
-    // from — and applying it would just eat printable width on 58 mm paper.
     const requestedMargin =
       overrides?.marginMm ?? configured?.margin_mm ?? fallback.margin_mm;
-    const marginMm =
-      geometry.is_roll ||
-      typeof requestedMargin !== 'number' ||
-      !Number.isFinite(requestedMargin)
-        ? 0
-        : Math.max(0, requestedMargin);
+    const geometry = resolvePrintGeometry({
+      format,
+      margin_mm:
+        typeof requestedMargin === 'number' && Number.isFinite(requestedMargin)
+          ? requestedMargin
+          : null,
+      printable_width_mm:
+        overrides?.printableWidthMm ?? configured?.printable_width_mm ?? null,
+    });
+    const { margins } = geometry;
 
     return {
       document,
       format,
       pageSize: geometry.page_size,
-      widthMm: geometry.width_mm,
+      paperWidthMm: geometry.paper_width_mm,
+      get widthMm(): number {
+        return geometry.paper_width_mm;
+      },
+      contentWidthMm: geometry.content_width_mm,
+      printableWidthMm: geometry.printable_width_mm,
+      margins,
       isRoll: geometry.is_roll,
-      marginMm,
+      marginMm: Math.max(
+        margins.top,
+        margins.right,
+        margins.bottom,
+        margins.left,
+      ),
       copies,
     };
   }
@@ -313,22 +385,27 @@ export class DocumentPrintService {
     bodyHtml: string,
     opts?: { title?: string; styles?: string },
   ): string {
-    const margin = config.marginMm > 0 ? `${config.marginMm}mm` : '0';
+    const { top, right, bottom, left } = config.margins;
+    const margin = `${top}mm ${right}mm ${bottom}mm ${left}mm`;
+    const content = `${config.contentWidthMm}mm`;
 
     return `
       <html>
         <head>
+          <meta charset="utf-8">
           <title>${opts?.title ?? ''}</title>
           <style>
             /* Without an explicit @page size the driver falls back to its own
                default paper and centres an 80 mm ticket on a letter sheet. */
             @page { size: ${config.pageSize}; margin: ${margin}; }
             html, body { margin: 0; padding: 0; }
+            .vx-print-root { width: ${content}; max-width: ${content}; margin: 0 auto; box-sizing: border-box; overflow-wrap: anywhere; }
+            ${BASE_GUARD_CSS}
             @media print { html, body { background: #fff; } }
             ${opts?.styles ?? ''}
           </style>
         </head>
-        <body>${bodyHtml}</body>
+        <body><div class="vx-print-root">${bodyHtml}</div></body>
       </html>
     `;
   }
@@ -402,7 +479,7 @@ export class DocumentPrintService {
         // was asked for is the source of truth.
         const requestedFormat = params.formatType as unknown as PrintFormat;
         const copies = this.normalizeGatewayCopies(response.copies);
-        await this.sendToPrinter(this.expandGatewayHtmlCopies(response.html, copies));
+        await this.sendToPrinter(this.prepareGatewayHtml(response.html, copies));
         return {
           documents: 1,
           pages: copies,
@@ -487,7 +564,7 @@ export class DocumentPrintService {
 
     const requestedFormat = resolved.format_type as unknown as PrintFormat;
     const copies = this.normalizeGatewayCopies(response.copies);
-    await this.sendToPrinter(this.expandGatewayHtmlCopies(response.html, copies));
+    await this.sendToPrinter(this.prepareGatewayHtml(response.html, copies));
     return {
       documents: 1,
       pages: copies,
@@ -526,7 +603,7 @@ export class DocumentPrintService {
    */
   async printGatewayHtml(documentHtml: string, copies = 1): Promise<void> {
     const normalizedCopies = this.normalizeGatewayCopies(copies);
-    await this.printHtmlDocument(this.expandGatewayHtmlCopies(documentHtml, normalizedCopies));
+    await this.sendToPrinter(this.prepareGatewayHtml(documentHtml, normalizedCopies));
   }
 
   /**
@@ -537,7 +614,7 @@ export class DocumentPrintService {
   private withPendingFeNotice(documentHtml: string): string {
     const notice =
       '<div style="border:1.5px dashed #000;text-align:center;font-family:Arial,sans-serif;' +
-      'font-size:11px;font-weight:bold;padding:6px;margin:0 0 8px;">' +
+      'font-size:11px;font-weight:bold;padding:6px;margin:0 0 8px;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;">' +
       'COPIA INFORMATIVA — NO ES FACTURA ELECTRÓNICA</div>';
     if (/<body[^>]*>/i.test(documentHtml)) {
       return documentHtml.replace(/<body[^>]*>/i, (m) => `${m}${notice}`);
