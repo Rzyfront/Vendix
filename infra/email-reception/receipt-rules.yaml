@@ -1,0 +1,527 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Vendix approved email reception P0. Adds one disabled SES rule to an EXISTING
+  rule set; no identity, MX, rule-set activation, backend principal or fiscal lifecycle.
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [production, staging]
+  ResourcePrefix:
+    Type: String
+    Default: vendix-email
+    AllowedPattern: '[a-z][a-z0-9-]{2,35}'
+  ReceiptRuleSetName:
+    Type: String
+    Description: Existing rule set inspected and approved by operator; never created or activated here.
+    AllowedPattern: '[A-Za-z0-9]([A-Za-z0-9._-]{0,62}[A-Za-z0-9])?'
+  ReceiptRuleEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+  AfterReceiptRuleName:
+    Type: String
+    Default: ''
+    Description: Optional existing rule after which this rule is inserted; review order and Stop behavior first.
+  BackendPrincipalArn:
+    Type: String
+    AllowedPattern: 'arn:aws:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+'
+    Description: Existing same-account backend identity; this stack does not attach managed policies.
+  OperatorPrincipalArn:
+    Type: String
+    AllowedPattern: 'arn:aws:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+'
+    Description: Separate existing same-account operator authorized for native DLQ redrive.
+  OriginalObjectArn:
+    Type: String
+    Description: Existing fiscal bucket object namespace only; must differ from inbound bucket.
+    AllowedPattern: 'arn:aws:s3:::[a-z0-9.-]+/organizations/[0-9*]+/fiscal-entities/[0-9*]+/received-documents/\*'
+  OperationsEmail:
+    Type: String
+    AllowedPattern: '[^\s@]+@[^\s@]+\.[^\s@]+'
+    Description: Accountable human/operations mailbox; alert subscription must be confirmed.
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 25
+    MinValue: 1
+    Description: Conservative monthly budget for SES/S3/SNS/SQS across this AWS account, NOT isolated tenant cost.
+  QueueAgeSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 60
+  QueueBacklogMessages:
+    Type: Number
+    Default: 100
+    MinValue: 1
+  MemoryPercentThreshold:
+    Type: Number
+    Default: 80
+    MinValue: 1
+    MaxValue: 100
+Mappings:
+  Domains:
+    production: {Name: recepcion.vendix.online}
+    staging: {Name: recepcion-stg.vendix.online}
+  SupportedRegion:
+    us-east-1: {Name: us-east-1}
+Rules:
+  ApprovedDeploymentRegion:
+    Assertions:
+      - Assert: {Fn::Equals: [{Ref: 'AWS::Region'}, us-east-1]}
+        AssertDescription: Only the approved SES receiving region us-east-1 is supported.
+  DistinctIdentities:
+    Assertions:
+      - Assert:
+          Fn::Not:
+            - Fn::Equals: [{Ref: BackendPrincipalArn}, {Ref: OperatorPrincipalArn}]
+        AssertDescription: Backend must not administer DLQ redrive.
+Conditions:
+  EnableReceiptRule:
+    Fn::Equals: [{Ref: ReceiptRuleEnabled}, 'true']
+  HasAfterRule:
+    Fn::Not:
+      - Fn::Equals: [{Ref: AfterReceiptRuleName}, '']
+Resources:
+  InboundBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName:
+        Fn::Sub: '${ResourcePrefix}-${Environment}-${AWS::AccountId}-raw'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: RawMaximumThirtyDays
+            Status: Enabled
+            Prefix: raw/
+            ExpirationInDays: 30
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 1}
+          - Id: TerminalNonInvoiceSevenDays
+            Status: Enabled
+            Prefix: raw/
+            TagFilters: [{Key: email-reception-classification, Value: non-invoice}]
+            ExpirationInDays: 7
+          - Id: TerminalSpamSevenDays
+            Status: Enabled
+            Prefix: raw/
+            TagFilters: [{Key: email-reception-classification, Value: spam}]
+            ExpirationInDays: 7
+      Tags:
+        - {Key: EmailReception, Value: {Ref: Environment}}
+  InboundBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: {Ref: InboundBucket}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SESWriteRawFromApprovedRule
+            Effect: Allow
+            Principal: {Service: ses.amazonaws.com}
+            Action: s3:PutObject
+            Resource: {Fn::Sub: '${InboundBucket.Arn}/raw/*'}
+            Condition:
+              StringEquals: {'AWS:SourceAccount': {Ref: 'AWS::AccountId'}}
+              ArnEquals:
+                'AWS:SourceArn':
+                  Fn::Sub: 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${ReceiptRuleSetName}:receipt-rule/${ResourcePrefix}-${Environment}'
+          - Sid: DenyPlaintextTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - {Fn::GetAtt: [InboundBucket, Arn]}
+              - {Fn::Sub: '${InboundBucket.Arn}/*'}
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+  ReceiptTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: {Fn::Sub: '${ResourcePrefix}-${Environment}-receipts'}
+      Tags: [{Key: EmailReception, Value: {Ref: Environment}}]
+  ReceiptTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [{Ref: ReceiptTopic}]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SESPublishFromApprovedRule
+            Effect: Allow
+            Principal: {Service: ses.amazonaws.com}
+            Action: sns:Publish
+            Resource: {Ref: ReceiptTopic}
+            Condition:
+              StringEquals: {'AWS:SourceAccount': {Ref: 'AWS::AccountId'}}
+              ArnEquals:
+                'AWS:SourceArn':
+                  Fn::Sub: 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${ReceiptRuleSetName}:receipt-rule/${ResourcePrefix}-${Environment}'
+          - Sid: DenyPublishOutsideApprovedRule
+            Effect: Deny
+            Principal: '*'
+            Action: sns:Publish
+            Resource: {Ref: ReceiptTopic}
+            Condition:
+              ArnNotEquals:
+                'aws:SourceArn':
+                  Fn::Sub: 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${ReceiptRuleSetName}:receipt-rule/${ResourcePrefix}-${Environment}'
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: {Fn::Sub: '${ResourcePrefix}-${Environment}-dlq'}
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      RedriveAllowPolicy:
+        redrivePermission: byQueue
+        # Deterministic ARN avoids Queue -> DLQ -> Queue resource dependency cycle.
+        sourceQueueArns:
+          - {Fn::Sub: 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ResourcePrefix}-${Environment}-inbound'}
+      Tags: [{Key: EmailReception, Value: {Ref: Environment}}]
+  InboundQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: {Fn::Sub: '${ResourcePrefix}-${Environment}-inbound'}
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: {Fn::GetAtt: [DeadLetterQueue, Arn]}
+        maxReceiveCount: 5
+      Tags: [{Key: EmailReception, Value: {Ref: Environment}}]
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [{Ref: InboundQueue}, {Ref: DeadLetterQueue}]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: OnlyExpectedSNSDelivery
+            Effect: Allow
+            Principal: {Service: sns.amazonaws.com}
+            Action: sqs:SendMessage
+            Resource: {Fn::GetAtt: [InboundQueue, Arn]}
+            Condition:
+              ArnEquals: {'aws:SourceArn': {Ref: ReceiptTopic}}
+              StringEquals: {'aws:SourceAccount': {Ref: 'AWS::AccountId'}}
+          - Sid: BackendInternalRetryOnly
+            Effect: Allow
+            Principal: {AWS: {Ref: BackendPrincipalArn}}
+            Action: sqs:SendMessage
+            Resource: {Fn::GetAtt: [InboundQueue, Arn]}
+          - Sid: SeparateOperatorRedrive
+            Effect: Allow
+            Principal: {AWS: {Ref: OperatorPrincipalArn}}
+            Action: sqs:SendMessage
+            Resource: {Fn::GetAtt: [InboundQueue, Arn]}
+          - Sid: DenyUnapprovedSender
+            Effect: Deny
+            Principal: '*'
+            Action: sqs:SendMessage
+            Resource: {Fn::GetAtt: [InboundQueue, Arn]}
+            Condition:
+              ArnNotEquals:
+                'aws:SourceArn': {Ref: ReceiptTopic}
+                'aws:PrincipalArn': [{Ref: BackendPrincipalArn}, {Ref: OperatorPrincipalArn}]
+          - Sid: DenyNonTLS
+            Effect: Deny
+            Principal: '*'
+            Action: 'sqs:*'
+            Resource:
+              - {Fn::GetAtt: [InboundQueue, Arn]}
+              - {Fn::GetAtt: [DeadLetterQueue, Arn]}
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+  ReceiptSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: QueuePolicy
+    Properties:
+      TopicArn: {Ref: ReceiptTopic}
+      Protocol: sqs
+      Endpoint: {Fn::GetAtt: [InboundQueue, Arn]}
+      RawMessageDelivery: false
+  ReceiptRule:
+    Type: AWS::SES::ReceiptRule
+    DependsOn: [InboundBucketPolicy, ReceiptTopicPolicy, ReceiptSubscription]
+    Properties:
+      RuleSetName: {Ref: ReceiptRuleSetName}
+      After:
+        Fn::If: [HasAfterRule, {Ref: AfterReceiptRuleName}, {Ref: 'AWS::NoValue'}]
+      Rule:
+        Name: {Fn::Sub: '${ResourcePrefix}-${Environment}'}
+        Enabled: {Fn::If: [EnableReceiptRule, true, false]}
+        ScanEnabled: true
+        TlsPolicy: Optional
+        Recipients:
+          - {Fn::FindInMap: [Domains, {Ref: Environment}, Name]}
+        Actions:
+          - S3Action:
+              BucketName: {Ref: InboundBucket}
+              ObjectKeyPrefix: raw/
+              TopicArn: {Ref: ReceiptTopic}
+              # Intentionally no KmsKeyArn: AES256 is server-side on bucket.
+          - StopAction: {Scope: RuleSet}
+  BackendPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Attach manually only to approved existing backend principal; no DLQ administration.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ConsumeAndInternalRetry
+            Effect: Allow
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility, sqs:GetQueueAttributes, sqs:SendMessage]
+            Resource: {Fn::GetAtt: [InboundQueue, Arn]}
+          - Sid: ReadAndClassifyRawAfterDurableResult
+            Effect: Allow
+            Action: [s3:GetObject, s3:GetObjectTagging, s3:PutObjectTagging]
+            Resource: {Fn::Sub: '${InboundBucket.Arn}/raw/*'}
+          - Sid: ExistingFiscalOriginalNamespaceOnly
+            Effect: Allow
+            Action: [s3:GetObject, s3:PutObject]
+            Resource: {Ref: OriginalObjectArn}
+          - Sid: ReceptionMetricsOnly
+            Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+            Condition: {StringEquals: {'cloudwatch:namespace': Vendix/EmailReception}}
+  OperatorRedrivePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Separate operator permission; never attach to backend identity.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: NativeDLQAdministration
+            Effect: Allow
+            Action: [sqs:StartMessageMoveTask, sqs:CancelMessageMoveTask, sqs:ListMessageMoveTasks, sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes]
+            Resource: {Fn::GetAtt: [DeadLetterQueue, Arn]}
+          - Sid: RedriveDestination
+            Effect: Allow
+            Action: [sqs:SendMessage, sqs:GetQueueAttributes]
+            Resource: {Fn::GetAtt: [InboundQueue, Arn]}
+  OperationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: {Fn::Sub: '${ResourcePrefix}-${Environment}-operations'}
+      Tags: [{Key: EmailReception, Value: {Ref: Environment}}]
+  OperationsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: {Ref: OperationsTopic}
+      Protocol: email
+      Endpoint: {Ref: OperationsEmail}
+  OperationsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [{Ref: OperationsTopic}]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudWatchAlertsFromThisAccount
+            Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: sns:Publish
+            Resource: {Ref: OperationsTopic}
+            Condition:
+              StringEquals: {'aws:SourceAccount': {Ref: 'AWS::AccountId'}}
+              ArnLike:
+                'aws:SourceArn': {Fn::Sub: 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*'}
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: {Fn::Sub: '${ResourcePrefix}-${Environment}-account-mail-services'}
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: {Amount: {Ref: MonthlyBudgetUsd}, Unit: USD}
+        CostFilters:
+          Service: [Amazon Simple Email Service, Amazon Simple Queue Service, Amazon Simple Notification Service, Amazon Simple Storage Service]
+      NotificationsWithSubscribers:
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: {Ref: OperationsEmail}}]
+        - Notification: {NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: {Ref: OperationsEmail}}]
+  # Custom alarms require the metric publisher prepared in P0.5 (documented gap).
+  DLQVisibleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Email reception DLQVisibleAlarm; owner is OperationsEmail,
+        confirm SNS subscription before pilot.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - DeadLetterQueue
+              - QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: OperationsTopic
+      OKActions:
+        - Ref: OperationsTopic
+  QueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Email reception QueueAgeAlarm; owner is OperationsEmail,
+        confirm SNS subscription before pilot.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - InboundQueue
+              - QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold:
+        Ref: QueueAgeSeconds
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: OperationsTopic
+      OKActions:
+        - Ref: OperationsTopic
+  QueueBacklogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Email reception QueueBacklogAlarm; owner is OperationsEmail,
+        confirm SNS subscription before pilot.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - InboundQueue
+              - QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold:
+        Ref: QueueBacklogMessages
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: OperationsTopic
+      OKActions:
+        - Ref: OperationsTopic
+  ConsumerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Email reception ConsumerErrorsAlarm; owner is OperationsEmail,
+        confirm SNS subscription before pilot.
+      Namespace: Vendix/EmailReception
+      MetricName: ConsumerErrors
+      Dimensions:
+        - Name: Environment
+          Value:
+            Ref: Environment
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: OperationsTopic
+      OKActions:
+        - Ref: OperationsTopic
+  StorageErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Email reception StorageErrorsAlarm; owner is OperationsEmail,
+        confirm SNS subscription before pilot.
+      Namespace: Vendix/EmailReception
+      MetricName: StorageErrors
+      Dimensions:
+        - Name: Environment
+          Value:
+            Ref: Environment
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: OperationsTopic
+      OKActions:
+        - Ref: OperationsTopic
+  ConsumerHeartbeatAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Email reception ConsumerHeartbeatAlarm; owner is
+        OperationsEmail, confirm SNS subscription before pilot.
+      Namespace: Vendix/EmailReception
+      MetricName: ConsumerHeartbeat
+      Dimensions:
+        - Name: Environment
+          Value:
+            Ref: Environment
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - Ref: OperationsTopic
+      OKActions:
+        - Ref: OperationsTopic
+  ConsumerMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Email reception ConsumerMemoryAlarm; owner is OperationsEmail,
+        confirm SNS subscription before pilot.
+      Namespace: Vendix/EmailReception
+      MetricName: ConsumerMemoryPercent
+      Dimensions:
+        - Name: Environment
+          Value:
+            Ref: Environment
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold:
+        Ref: MemoryPercentThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: OperationsTopic
+      OKActions:
+        - Ref: OperationsTopic
+
+Outputs:
+  ApprovedRegion:
+    Description: Mapping intentionally only supports us-east-1; other regions fail template resolution.
+    Value: {Fn::FindInMap: [SupportedRegion, {Ref: 'AWS::Region'}, Name]}
+  Domain:
+    Value: {Fn::FindInMap: [Domains, {Ref: Environment}, Name]}
+  InboundBucketName: {Value: {Ref: InboundBucket}}
+  ReceiptTopicArn: {Value: {Ref: ReceiptTopic}}
+  QueueUrl: {Value: {Ref: InboundQueue}}
+  QueueArn: {Value: {Fn::GetAtt: [InboundQueue, Arn]}}
+  DeadLetterQueueArn: {Value: {Fn::GetAtt: [DeadLetterQueue, Arn]}}
+  BackendPolicyArn: {Value: {Ref: BackendPolicy}}
+  OperatorRedrivePolicyArn: {Value: {Ref: OperatorRedrivePolicy}}
+  OperationsTopicArn: {Value: {Ref: OperationsTopic}}
+  ReceiptRuleName: {Value: {Fn::Sub: '${ResourcePrefix}-${Environment}'}}

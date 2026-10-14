@@ -1,3 +1,5 @@
+import { DocumentEmailInboxService } from './document-email-inbox.service';
+import type { DocumentEmailStatus } from '../interfaces/document-email-reception.interface';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
@@ -15,6 +17,7 @@ export interface ReceivedDocumentInboxSummary {
 }
 
 export interface ReceivedDocumentReceptionStatus {
+  email: DocumentEmailStatus;
   dian_active: boolean;
   configured: boolean;
   active_connections: number;
@@ -39,7 +42,7 @@ const safeCount = (value: number): number => Number.isSafeInteger(value) && valu
 /** Receives an already-authorized scope; never resolves/creates entities or loads connection secrets. */
 @Injectable()
 export class ReceivedDocumentInboxStatusService {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(private readonly prisma: GlobalPrismaService, private readonly emailInboxes: DocumentEmailInboxService) {}
 
   async summary(scope: ReceivedDocumentInboxScope, query: ReceivedDocumentQueryDto): Promise<ReceivedDocumentInboxSummary> {
     if (scope.accounting_entity_id == null) {
@@ -62,7 +65,9 @@ export class ReceivedDocumentInboxStatusService {
     scope: ReceivedDocumentInboxScope,
     context: ReceivedDocumentsReadContext,
   ): Promise<ReceivedDocumentReceptionStatus> {
+    const email = await this.emailInboxes.status(context);
     const empty: ReceivedDocumentReceptionStatus = {
+      email,
       dian_active: false, configured: false, active_connections: 0, channels: [],
       last_received_at: null, last_synced_at: null, next_sync_at: null,
       last_run: null, error_code: null,

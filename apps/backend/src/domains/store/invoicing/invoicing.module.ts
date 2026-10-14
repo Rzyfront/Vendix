@@ -48,6 +48,7 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
+import { StoreDocumentEmailReceptionController } from '../../received-documents/store-document-email-reception.controller';
 import { StoreReceivedDocumentsController } from '../../received-documents/store-received-documents.controller';
 import { StoreDocumentReceptionConnectionsController } from '../../received-documents/store-document-reception-connections.controller';
 
@@ -93,6 +94,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // The nested `connections` collection must precede the parent
     // `received-documents/:id` route for the same Express registration-order reason.
     StoreDocumentReceptionConnectionsController,
+    StoreDocumentEmailReceptionController,
     StoreReceivedDocumentsController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva

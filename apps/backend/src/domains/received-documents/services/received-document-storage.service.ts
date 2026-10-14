@@ -8,6 +8,8 @@ import { isSafeS3Key } from '@common/helpers/s3-url.helper';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { S3Service } from '@common/services/s3.service';
+import type { PreparedEmailEvidence } from '../interfaces/received-document.interface';
+import { decodeEmailXml } from './document-email-xml-decoder.util';
 
 export interface ReceivedDocumentStorageContext {
   organization_id: number;
@@ -90,6 +92,59 @@ export class ReceivedDocumentStorageService {
   ): Promise<StoredReceivedDocumentFile> {
     this.validateContext(context, documentId);
     const mimeType = this.validateFile(file);
+    return this.storeFile(context, documentId, file, mimeType);
+  }
+
+  /** Internal evidence path: original bytes, including Latin1/AR/ZIP, are never transcoded. */
+  async uploadEvidence(
+    context: ReceivedDocumentStorageContext,
+    documentId: number,
+    evidence: PreparedEmailEvidence,
+  ): Promise<StoredReceivedDocumentFile> {
+    this.validateContext(context, documentId);
+    const file: ReceivedDocumentUploadFile = {
+      buffer: evidence.bytes, originalname: evidence.filename,
+      mimetype: evidence.mime_type, size: evidence.bytes?.length,
+    };
+    this.validateFileMetadata(file);
+    const sha256 = createHash('sha256').update(file.buffer).digest('hex');
+    if (!/^[a-f\d]{64}$/i.test(evidence.sha256) || sha256 !== evidence.sha256.toLowerCase()) {
+      throw new VendixHttpException(ErrorCodes.SYS_VALIDATION_001, 'La huella de la evidencia no coincide con sus bytes originales.');
+    }
+    const mimeType = file.mimetype?.toLowerCase().trim();
+    if (!mimeType) throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+    if (evidence.role === 'zip') {
+      if (mimeType !== 'application/zip' || !file.buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) {
+        throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+      }
+    } else if (evidence.role === 'representation') {
+      if (mimeType !== 'application/pdf' || this.detectMime(file.buffer) !== 'application/pdf') {
+        throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+      }
+    } else {
+      if (!['container', 'commercial', 'dian_receipt'].includes(evidence.role) ||
+          !['application/xml', 'text/xml'].includes(mimeType)) {
+        throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+      }
+      const decoded = decodeEmailXml(file.buffer);
+      const source = decoded.xml.trimStart();
+      const root = /^(?:<\?xml\b[^?]*\?>\s*)?<(?:[A-Za-z_][\w.-]*:)?(Invoice|CreditNote|DebitNote|AttachedDocument|ApplicationResponse)(?:\s|>)/.exec(source)?.[1];
+      const rootMatchesRole = evidence.role === 'commercial' ? ['Invoice', 'CreditNote', 'DebitNote'].includes(root ?? '')
+        : evidence.role === 'container' ? root === 'AttachedDocument' : root === 'ApplicationResponse';
+      if (!rootMatchesRole || /<!\s*(?:DOCTYPE|ENTITY)\b/i.test(source) ||
+          (evidence.encoding != null && evidence.encoding !== decoded.encoding)) {
+        throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+      }
+    }
+    return this.storeFile(context, documentId, file, mimeType);
+  }
+
+  private async storeFile(
+    context: ReceivedDocumentStorageContext,
+    documentId: number,
+    file: ReceivedDocumentUploadFile,
+    mimeType: string,
+  ): Promise<StoredReceivedDocumentFile> {
     const fileName = this.sanitizeFileName(file.originalname);
     const sha256 = createHash('sha256').update(file.buffer).digest('hex');
     const fileKey = this.buildKey(context, documentId, sha256, fileName);
@@ -169,7 +224,7 @@ export class ReceivedDocumentStorageService {
     }
   }
 
-  private validateFile(file: ReceivedDocumentUploadFile): SupportedMime {
+  private validateFileMetadata(file: ReceivedDocumentUploadFile): void {
     if (
       !file ||
       !Buffer.isBuffer(file.buffer) ||
@@ -206,7 +261,10 @@ export class ReceivedDocumentStorageService {
         'El nombre del archivo contiene una ruta no permitida.',
       );
     }
+  }
 
+  private validateFile(file: ReceivedDocumentUploadFile): SupportedMime {
+    this.validateFileMetadata(file);
     const mimeType = file.mimetype?.toLowerCase().trim();
     if (!SUPPORTED_MIME_TYPES.has(mimeType as SupportedMime)) {
       throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);

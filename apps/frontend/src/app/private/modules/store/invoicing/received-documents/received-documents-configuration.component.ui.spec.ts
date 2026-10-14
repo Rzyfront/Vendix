@@ -1,12 +1,16 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-const component = readFileSync(join(__dirname, 'received-documents-configuration.component.ts'), 'utf8');
-const wizard = readFileSync(join(__dirname, 'received-documents-configuration-wizard.component.ts'), 'utf8');
-const activation = readFileSync(join(__dirname, 'received-buyer-event-activation.component.ts'), 'utf8');
-const activationTemplate = readFileSync(join(__dirname, 'received-buyer-event-activation.component.html'), 'utf8');
-const connections = readFileSync(join(__dirname, 'document-reception-connections.component.ts'), 'utf8');
-const orgConfig = readFileSync(join(__dirname, '../../../organization/invoicing/pages/dian-config/org-dian-config.component.ts'), 'utf8');
+import component from './received-documents-configuration.component.ts?source' with { loader: 'text' };
+import wizard from './received-documents-configuration-wizard.component.ts?source' with { loader: 'text' };
+import activation from './received-buyer-event-activation.component.ts?source' with { loader: 'text' };
+import activationTemplate from './received-buyer-event-activation.component.html?source' with { loader: 'text' };
+import connections from './document-reception-connections.component.ts?source' with { loader: 'text' };
+import emailWizard from './received-email-reception-wizard.component.ts?source' with { loader: 'text' };
+import page from './received-documents-page.component.ts?source' with { loader: 'text' };
+import facade from './received-documents-inbox.facade.ts?source' with { loader: 'text' };
+import form from './received-document-form.component.ts?source' with { loader: 'text' };
+import backendEmail from '../../../../../../../../backend/src/domains/received-documents/interfaces/document-email-reception.interface.ts?source' with { loader: 'text' };
+import orgConfig from '../../../organization/invoicing/pages/dian-config/org-dian-config.component.ts?source' with { loader: 'text' };
+import { RECEIVED_EMAIL_REASON_CODES, type ReceivedEmailReasonCode } from './received-email-reception.interface';
+import { isReceivedDocumentSafeNotice, isValidReceivedReceptionHealth } from './received-documents.interface';
 
 describe('received documents configuration UI source guards (static, not E2E)', () => {
   it('preserves the organization configuration surface for its existing consumer', () => {
@@ -200,5 +204,128 @@ describe('received documents configuration UI source guards (static, not E2E)', 
       expect(source).toContain('<app-button');
       expect(source).not.toContain('customClasses="min-h-11"');
     }
+  });
+});
+
+
+describe('email reception P0.9 integration source/contract guards (not browser QA)', () => {
+  it('matches all 32 backend reasons without importing backend runtime into frontend', () => {
+    const body = backendEmail.match(/DOCUMENT_EMAIL_REASON_CODES = \[([\s\S]*?)\] as const/)?.[1] ?? '';
+    const codes: ReceivedEmailReasonCode[] = [...body.matchAll(/'([A-Z_]+)'/g)].map((match) => {
+      const code = RECEIVED_EMAIL_REASON_CODES.find((allowed) => allowed === match[1]);
+      if (code === undefined) throw new Error(`Unknown backend email reason: ${match[1]}`);
+      return code;
+    });
+    expect(codes.length).toBe(32);
+    expect([...RECEIVED_EMAIL_REASON_CODES]).toEqual(codes);
+  });
+  it('opens only a store pilot with operational configuration permission, independent of fiscal editing', () => {
+    expect(page).toContain("this.scope === 'store' && this.canRead()");
+    expect(page).toContain("this.auth.hasPermission('invoicing:received:connections:configure')");
+    expect(page).toContain('this.inbox.health()?.email?.pilot_available === true');
+    expect(page).toContain('this.inbox.health()?.dian_active !== true) return;');
+    expect(page).not.toContain('canWriteFiscalInStore');
+    expect(component).toContain('Integraciones avanzadas (para desarrolladores)');
+    expect(component).toContain('<details');
+    expect(component).not.toContain('<details open');
+  });
+  it('keeps private alias reads cancellable and tied to configure/context, never read-only aliases', () => {
+    expect(page).toContain('this.addressRequest?.unsubscribe()');
+    expect(page).toContain('generation !== this.addressGeneration || key !== this.emailAddressContextKey()');
+    expect(page).toContain('!this.emailAvailable() || !this.canConfigureEmail()');
+    expect(page).toContain('this.addressSnapshotKey() === this.emailAddressContextKey()');
+    expect(facade).toContain('if (!isValidReceivedReceptionHealth(value)) throw new Error');
+    expect(facade).toContain('this.health.set(health.value)');
+  });
+  it('buffers inbox membership during wizard and keeps it open after the first valid invoice', () => {
+    expect(page).toContain('(protectedChange)="emailWizardProtected.set($event)"');
+    expect(page).toContain('this.manualFormOpen() || this.emailWizardOpen() || this.emailWizardProtected() || this.listFocused()');
+    const completed = page.match(/onEmailCompleted\(\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(completed).toContain('this.inbox.refreshAfterMutation()');
+    expect(completed).not.toContain('emailWizardOpen.set(false)');
+  });
+  it('uses only readonly stores lookup then the existing authenticated switch, never organization email mutations', () => {
+    expect(orgConfig).toContain("this.auth.hasPermission('organization:stores:read')");
+    expect(orgConfig).toContain('this.operationalStores.getStores({ limit: 200 })');
+    expect(orgConfig).toContain('generation !== this.receptionStoresGeneration || key !== this.receptionStoreContext()');
+    expect(orgConfig).toContain("this.environmentSwitch.performEnvironmentSwitch('STORE_ADMIN', slug)");
+    expect(orgConfig).toContain('if (!success)');
+    expect(orgConfig).not.toContain('ReceivedEmailReceptionService');
+    expect(orgConfig).not.toContain("new CustomEvent('switchEnvironment'");
+  });
+  it('handles a hidden-store duplicate before any document id or navigation', () => {
+    expect(isReceivedDocumentSafeNotice({ outcome: 'duplicate_other_store', created: false, message: 'Registrado en otra tienda.' })).toBe(true);
+    expect(page).toContain('if (isReceivedDocumentSafeNotice(response.data))');
+    const submit = form.match(/next: \(response\) => \{([\s\S]*?)\n      \},/)?.[1] ?? '';
+    expect(submit.indexOf('isReceivedDocumentSafeNotice(response.data)')).toBeLessThan(submit.indexOf('response.data.id'));
+    expect(submit).toContain('this.duplicateNotice.emit()');
+    expect(submit).toContain('return;');
+  });
+  it('uses 44px wizard button targets locally without touching shared buttons', () => {
+    const buttons = [...emailWizard.matchAll(/<app-button\b[^>]*>/g)].map(([tag]) => tag);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) expect(button).toContain('customClasses="min-h-11"');
+    expect(emailWizard).toContain('RECEIVED_EMAIL_DIAN_BADGE');
+  });
+  it('fails closed on malformed additive email health while preserving legacy channels and four counters', () => {
+    const legacy = { dian_active: true, configured: false, active_connections: 0, channels: ['api_poll', 'webhook'],
+      last_received_at: null, last_synced_at: null, next_sync_at: null, last_run: null, error_code: null, requires_operational_store: false };
+    const email = { pilot_available: true, configured: true, enabled: true, active_inboxes: 1, state: 'waiting',
+      first_valid_received_at: null, last_email_at: null, last_valid_received_at: null, last_error_code: null, not_processed_count: 0 };
+    expect(isValidReceivedReceptionHealth(legacy)).toBe(true);
+    expect(isValidReceivedReceptionHealth({ ...legacy, email })).toBe(true);
+    expect(isValidReceivedReceptionHealth({ ...legacy, email: { ...email, pilot_available: 'true' } })).toBe(false);
+    expect(isValidReceivedReceptionHealth({ ...legacy, email: { ...email, last_error_code: 'UNKNOWN_CODE' } })).toBe(false);
+    expect(isValidReceivedReceptionHealth({ ...legacy, channels: ['email'], email })).toBe(false);
+    expect((page.match(/<app-stats /g) ?? []).length).toBe(4);
+  });
+});
+
+
+describe('email reception pause and address rotation source guards (static, not browser QA)', () => {
+  it('offers configured pause/resume and address change only through the current pilot configure gate', () => {
+    expect(emailWizard).toContain('Pausar recepción');
+    expect(emailWizard).toContain('Reanudar recepción');
+    expect(emailWizard).toContain('Cambiar tu correo de facturas');
+    expect(emailWizard).toContain("this.status()?.pilot_available === true && this.snapshotKey() === this.liveKey()");
+    expect(emailWizard).toContain('this.mayConfigure() && this.canRead() && !this.busy()');
+    expect(emailWizard).toContain('configuration?.configured === true && !!configuration.address');
+    expect(emailWizard).toContain('Number.isSafeInteger(configuration.version)');
+    expect(emailWizard).toContain('this.api.update({ expected_version: version, enabled: false })');
+    expect(emailWizard).toContain('this.api.update({ expected_version: version, enabled: true })');
+    expect(emailWizard).toContain('if (!this.mayManageAddress() || this.rotateConfirmationOpen()');
+  });
+
+  it('requires local confirmation and the captured CAS version, clearing plaintext before the rotate request', () => {
+    expect(emailWizard).toContain('La dirección anterior dejará de recibir nuevos correos. Actualiza Gmail, Outlook y tus proveedores. Los documentos ya recibidos se conservan');
+    expect(emailWizard).toContain('readonly rotateConfirmationOpen = signal(false)');
+    expect(emailWizard).toContain('this.rotateVersion = this.configurationForContext()!.version; this.rotateKey = this.liveKey()');
+    expect(emailWizard).toContain('this.rotateKey !== this.liveKey()');
+    expect(emailWizard).toContain('this.rotateVersion !== this.configurationForContext()?.version');
+    expect(emailWizard).toContain('this.api.rotateAddress({ expected_version: expectedVersion, confirmed: true })');
+    const confirm = emailWizard.match(/confirmRotate\(\): void \{([\s\S]*?)\n  refresh\(\)/)?.[1] ?? '';
+    expect(confirm.indexOf('this.clearCodeTimer(); this.gmailCode.set(null)')).toBeGreaterThan(-1);
+    expect(confirm.indexOf('this.gmailCode.set(null)')).toBeLessThan(confirm.indexOf('this.api.rotateAddress('));
+    expect(confirm).toContain("() => { this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = ''; this.step.set(0); this.provider.set(null); }");
+    expect(emailWizard).toContain("!this.rotateConfirmationOpen() && provider === 'gmail'");
+  });
+
+  it('keeps nested confirmation protected, cancellable on context close and persistent on mutation failure', () => {
+    expect(emailWizard).toContain('<app-modal [(isOpen)]="rotateConfirmationOpen"');
+    expect(emailWizard).toContain('[canClose]="canCloseModal" (cancel)="closeRotateConfirmation()"');
+    expect(emailWizard).toContain('[disabled]="busy()" (clicked)="closeRotateConfirmation()">Cancelar');
+    expect(emailWizard).toContain('[loading]="busy()" (clicked)="confirmRotate()">Cambiar dirección');
+    expect(emailWizard).toContain('if (this.busy()) return;');
+    expect(emailWizard).toContain('this.closeRotateConfirmation(); this.isOpen.set(false)');
+    const invalidation = emailWizard.match(/private invalidate\(\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(invalidation).toContain("this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = '';");
+    const mutation = emailWizard.match(/private mutate\([\s\S]*?\n  private copy/)?.[0] ?? '';
+    expect(mutation).toContain('onSuccess?: () => void');
+    expect(mutation.indexOf('this.configuration.set(configuration)')).toBeLessThan(mutation.indexOf('onSuccess?.()'));
+    expect(mutation).toContain('this.mutationError.set(failure)');
+    const refresh = emailWizard.match(/refresh\(\): void \{([\s\S]*?)\n  copyAddress/)?.[1] ?? '';
+    expect(refresh).not.toContain('this.mutationError.set(null)');
+    expect(emailWizard).toContain('Conservamos la última dirección consultada');
+    expect(mutation).not.toContain('this.completed.emit()');
   });
 });

@@ -1,4 +1,4 @@
-import { evaluateBuyerEventReadiness, BuyerEventReadinessInput } from './received-document-buyer-event-policy';
+import { evaluateBuyerEventReadiness, receivedFiscalDocumentTypeCode, BuyerEventReadinessInput } from './received-document-buyer-event-policy';
 
 const validInput = (event_code: string): BuyerEventReadinessInput => ({
   event_code,
@@ -19,6 +19,24 @@ const validInput = (event_code: string): BuyerEventReadinessInput => ({
 });
 
 describe('evaluateBuyerEventReadiness', () => {
+  it.each(['030', '031', '032', '033'])('blocks POS20 from FEV buyer event %s regardless of otherwise sufficient readiness', (event_code) => {
+    const input = validInput(event_code);
+    Object.assign(input, { fiscal_document_type_code: '20', has_prior_acknowledgement: event_code !== '030',
+      has_prior_goods_receipt: ['031', '033'].includes(event_code), claim_reason: 'Diferencia informada' });
+    expect(evaluateBuyerEventReadiness(input)).toEqual({ ready: false, blockers: ['document_pos_not_eligible'] });
+  });
+
+  it.each([undefined, null, '01', '02', '03', '04'])('preserves legacy/FEV eligibility for type code %s', (fiscal_document_type_code) => {
+    expect(evaluateBuyerEventReadiness({ ...validInput('030'), fiscal_document_type_code })).toEqual({ ready: true, blockers: [] });
+  });
+
+  it('resolves either internal fiscal marker and does not override a known POS marker with FEV metadata', () => {
+    expect(receivedFiscalDocumentTypeCode({ email_reception: { document_type_code: '20' } })).toBe('20');
+    expect(receivedFiscalDocumentTypeCode({ fiscal_document_type_code: '20' })).toBe('20');
+    expect(receivedFiscalDocumentTypeCode({ fiscal_document_type_code: '20', email_reception: { document_type_code: '01' } })).toBe('20');
+    for (const metadata of [undefined, null, {}, { email_reception: null }]) expect(receivedFiscalDocumentTypeCode(metadata)).toBeNull();
+  });
+
   it.each(['030', '031', '032', '033'])('permits eligible event %s', (event_code) => {
     const input = validInput(event_code);
     if (event_code === '031') {

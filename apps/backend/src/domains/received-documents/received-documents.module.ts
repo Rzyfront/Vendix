@@ -38,6 +38,14 @@ import { DianDirectModule } from '../store/invoicing/providers/dian-direct/dian-
 import { ReceivedBuyerEventReservationService } from './services/received-buyer-event-reservation.service';
 import { ReceivedBuyerEventPayloadService } from './services/received-buyer-event-payload.service';
 import { ReceivedBuyerEventDispatchService } from './services/received-buyer-event-dispatch.service';
+import { DocumentEmailInboxService } from './services/document-email-inbox.service';
+import { DocumentEmailGmailCodeService } from './services/document-email-gmail-code.service';
+import { DocumentEmailHistoryService } from './services/document-email-history.service';
+import { DocumentEmailMimeService } from './services/document-email-mime.service';
+import { DocumentEmailZipService } from './services/document-email-zip.service';
+import { DocumentEmailAttachmentService } from './services/document-email-attachment.service';
+import { DocumentEmailSqsConsumerService } from './services/document-email-sqs-consumer.service';
+import { DOCUMENT_EMAIL_PROCESSOR } from './interfaces/document-email-reception.interface';
 import { ReceivedDocumentInboxStatusService } from './services/received-document-inbox-status.service';
 
 /** Shared reception pipeline; this module also owns narrow read-only evidence routes. */
@@ -52,6 +60,14 @@ import { ReceivedDocumentInboxStatusService } from './services/received-document
   ],
   controllers: [PublicDocumentReceptionWebhookController, StoreReceivedDocumentAccountingController, OrganizationReceivedDocumentAccountingController, SuperAdminReceivedBuyerEventsController],
   providers: [
+    DocumentEmailInboxService,
+    DocumentEmailGmailCodeService,
+    DocumentEmailHistoryService,
+    DocumentEmailMimeService,
+    DocumentEmailZipService,
+    DocumentEmailAttachmentService,
+    DocumentEmailSqsConsumerService,
+    { provide: DOCUMENT_EMAIL_PROCESSOR, useExisting: DocumentEmailAttachmentService },
     FiscalContextResolverService,
     ReceivedDocumentsContextService,
     ReceivedDocumentAccountingEvidenceService,
@@ -84,6 +100,9 @@ import { ReceivedDocumentInboxStatusService } from './services/received-document
     DocumentReceptionRunResolutionService,
   ],
   exports: [
+    DocumentEmailInboxService,
+    DocumentEmailGmailCodeService,
+    DocumentEmailHistoryService,
     ReceivedDocumentsContextService,
     ReceivedDocumentAccountingEvidenceService,
     ReceivedBuyerEventEnablementService,

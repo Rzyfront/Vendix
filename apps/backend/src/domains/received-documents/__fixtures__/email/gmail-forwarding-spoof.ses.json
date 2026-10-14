@@ -1,0 +1,60 @@
+{
+  "notificationType": "Received",
+  "mail": {
+    "timestamp": "2026-10-13T17:34:00.000Z",
+    "source": "attacker@example.invalid",
+    "messageId": "synthetic-ses-gmail-spoof",
+    "destination": [
+      "untrusted-to@example.invalid"
+    ],
+    "headersTruncated": false,
+    "headers": [
+      {
+        "name": "From",
+        "value": "attacker@example.invalid"
+      },
+      {
+        "name": "To",
+        "value": "untrusted-to@example.invalid"
+      }
+    ],
+    "commonHeaders": {
+      "from": [
+        "attacker@example.invalid"
+      ],
+      "to": [
+        "untrusted-to@example.invalid"
+      ],
+      "messageId": "<synthetic-gmail-spoof@example.invalid>",
+      "subject": "Synthetic fixture"
+    }
+  },
+  "receipt": {
+    "timestamp": "2026-10-13T17:34:00.000Z",
+    "processingTimeMillis": 10,
+    "recipients": [
+      "facturas-00112233445566778899aabbccddeeff@recepcion.vendix.online"
+    ],
+    "spamVerdict": {
+      "status": "PASS"
+    },
+    "virusVerdict": {
+      "status": "PASS"
+    },
+    "spfVerdict": {
+      "status": "FAIL"
+    },
+    "dkimVerdict": {
+      "status": "FAIL"
+    },
+    "dmarcVerdict": {
+      "status": "FAIL"
+    },
+    "action": {
+      "type": "S3",
+      "topicArn": "arn:aws:sns:us-east-1:123456789012:email-reception-fixture-prod",
+      "bucketName": "vendix-email-fixture-prod",
+      "objectKey": "raw/synthetic-ses-gmail-spoof"
+    }
+  }
+}

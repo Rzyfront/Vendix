@@ -10,6 +10,7 @@ import { describeApiFailure } from '../utils/invoicing-errors.util';
 import { DocumentReceptionConnectionsComponent } from './document-reception-connections.component';
 import { ReceivedBuyerEventActivationComponent } from './received-buyer-event-activation.component';
 import { ReceivedDocumentsService } from './received-documents.service';
+import { isValidReceivedReceptionHealth } from './received-documents.interface';
 import type { ReceivedDocumentReceptionStatus, ReceivedDocumentsScope } from './received-documents.interface';
 
 /** Safe reception health is independent from the administrative credentials surface. */
@@ -20,6 +21,22 @@ import type { ReceivedDocumentReceptionStatus, ReceivedDocumentsScope } from './
   template: `
     @if (canRead()) {
       <div class="w-full space-y-4">
+        @if (scope() === 'store' && health()?.email?.pilot_available) {
+          <app-card [responsive]="true">
+            <section class="space-y-2" aria-label="Recepción por correo">
+              <h2 class="text-base font-semibold text-text-primary">Recepción por correo</h2>
+              <p class="text-sm text-text-secondary">Activa tu dirección Vendix desde el Buzón y reenvía las facturas de tus proveedores. No necesitas compartir la contraseña de tu correo.</p>
+              @if (canConfigureEmail()) {
+                <a routerLink="/admin/invoicing/received-documents" [queryParams]="{ setup: 'email' }" class="inline-flex min-h-11 items-center font-medium text-primary underline">Abrir asistente</a>
+              } @else {
+                <p class="text-sm text-text-secondary">Solicita la configuración a una persona con permiso para administrar la recepción de esta tienda.</p>
+              }
+            </section>
+          </app-card>
+        }
+        <details class="rounded-lg border border-border p-3">
+          <summary class="flex min-h-11 cursor-pointer items-center font-semibold text-text-primary">Integraciones avanzadas (para desarrolladores)</summary>
+          <div class="mt-3 space-y-4">
         <app-card [responsive]="true">
           <section aria-labelledby="reception-connections-title" class="space-y-3">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -97,6 +114,8 @@ import type { ReceivedDocumentReceptionStatus, ReceivedDocumentsScope } from './
           </section>
         </app-card>
 
+          </div>
+        </details>
         <app-card [responsive]="true">
           <section aria-labelledby="reception-legal-title" class="space-y-2">
             <h2 id="reception-legal-title" class="text-base font-semibold text-text-primary">Habilitación de eventos legales</h2>
@@ -147,6 +166,10 @@ export class ReceivedDocumentsConfigurationComponent {
     && !this.healthLoading() && !this.healthError() && this.health()?.dian_active === true
     && this.auth.hasPermission(`${this.permissionPrefix()}:connections:configure`),
   );
+  // Email authorization is operational: a read-only organization fiscal editor must not disable its store's inbox.
+  readonly canConfigureEmail = computed(() => this.scope() === 'store' && !this.isSuperAdmin() && this.scopeReady()
+    && this.canRead() && !this.healthError() && this.health()?.email?.pilot_available === true
+    && this.auth.hasPermission('invoicing:received:connections:configure'));
   readonly canConfigureDian = computed(() => !this.readOnly() && !this.isSuperAdmin()
     && this.auth.hasPermission(this.scope() === 'store' ? 'invoicing:write' : 'organization:invoicing:dian:write'));
   readonly receptionQuery = computed(() => ({ store_id: this.scope() === 'organization' ? this.selectedStoreId() : null }));
@@ -229,17 +252,7 @@ export class ReceivedDocumentsConfigurationComponent {
   }
 
   private isValidHealth(value: unknown): value is ReceivedDocumentReceptionStatus {
-    if (typeof value !== 'object' || value === null) return false;
-    const status = value as ReceivedDocumentReceptionStatus;
-    const dateOrNull = (date: unknown): boolean => date === null || (typeof date === 'string' && Number.isFinite(Date.parse(date)));
-    const count = (number: unknown): boolean => typeof number === 'number' && Number.isSafeInteger(number) && number >= 0;
-    return typeof status.dian_active === 'boolean' && typeof status.configured === 'boolean'
-      && typeof status.requires_operational_store === 'boolean' && count(status.active_connections)
-      && Array.isArray(status.channels) && status.channels.every((channel) => channel === 'api_poll' || channel === 'webhook')
-      && dateOrNull(status.last_received_at) && dateOrNull(status.last_synced_at) && dateOrNull(status.next_sync_at)
-      && (status.error_code === null || status.error_code === 'RECEPTION_CONNECTION_ERROR')
-      && (status.last_run === null || (typeof status.last_run === 'object' && typeof status.last_run.status === 'string'
-        && count(status.last_run.received_count) && count(status.last_run.duplicate_count) && count(status.last_run.error_count) && dateOrNull(status.last_run.finished_at)));
+    return isValidReceivedReceptionHealth(value);
   }
 
   private permissionPrefix(): string {

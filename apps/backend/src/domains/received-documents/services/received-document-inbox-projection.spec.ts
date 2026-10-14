@@ -94,7 +94,7 @@ describe('received document inbox projection', () => {
     const row = document({ accepted_at: arrived, events: [event('030', 'unknown')] });
     expect(matches(row as unknown as Record<string, unknown>, legalStatusWhere('accepted') as Record<string, unknown>)).toBe(true);
     expect(projectReceivedDocumentInbox(row).inbox_state).toBe('requires_review');
-    const base = inboxBaseWhere({ organization_id: 3, accounting_entity_id: null, store_id: 21 }, { page: 1, limit: 25 });
+    const base = inboxBaseWhere({ organization_id: 3, accounting_entity_id: null, store_id: 21 }, {});
     expect(base).toMatchObject({ organization_id: 3, accounting_entity_id: { in: [] }, store_id: 21 });
     const list = inboxListWhere({ organization_id: 3, accounting_entity_id: 8, store_id: 21 }, { page: 1, limit: 25, inbox_state: 'requires_review', legal_status: 'accepted' });
     expect(list.AND).toEqual(expect.arrayContaining([inboxStateWhere('requires_review'), legalStatusWhere('accepted')]));
