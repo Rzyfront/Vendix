@@ -4,7 +4,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import * as bcrypt from 'bcrypt';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
@@ -24,6 +23,7 @@ import {
 } from './dto/create-invoice.dto';
 import { TaxFiscalType } from '../taxes/dto';
 import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
+import { CustomersService } from '../customers/customers.service';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import {
@@ -936,6 +936,8 @@ export class InvoicingService {
     private readonly withholdingFlow: WithholdingFlowService,
     /** Optional in TS to keep existing unit-test construction source-compatible; Nest resolves it from ProfilesModule. */
     private readonly profileAccountingValidator?: ProfileAccountingValidator,
+    /** Optional in TS for the same reason; Nest resolves it from CustomersModule. */
+    private readonly customersService?: CustomersService,
   ) {}
 
   /**
@@ -2863,23 +2865,14 @@ export class InvoicingService {
   }
 
   /**
-   * QUI-690 — Inline customer creation for the XXL invoice-create modal.
+   * QUI-690 — Cliente capturado en línea en Facturas → Nueva factura.
    *
-   * Mirrors a subset of `CustomersService.create()`:
-   *   - Normalize persona (JURIDICA → first/last forced null, legal_name kept).
-   *   - Generate unique username seed + temporary password.
-   *   - Assign the `customer` system role via `user_roles`.
-   *
-   * Deliberately simpler than `CustomersService.create()`:
-   *   - Skips email/document dedup queries (DTO validators + DB unique
-   *     constraints catch duplicates and surface as P2002 → controller maps
-   *     to SYS_CONFLICT_001).
-   *   - Skips store existence check (the caller's ALS context already
-   *     guarantees a valid store; an invalid context would fail elsewhere).
-   *
-   * Trade-off: this path produces a customer row that the bulk-edit and
-   * dedup flows don't know about until the next request re-queries. For
-   * the XXL modal flow (single user, single invoice) this is acceptable.
+   * Delega en `CustomersService.resolveInlineCustomer`, que aplica las MISMAS
+   * reglas que el modal de clientes (persona jurídica ⇔ NIT, razón social
+   * obligatoria, nombres en '' para jurídica, split NIT/DV, rol `customer` y
+   * vínculo `store_users`) y reutiliza el cliente si el documento ya existe en
+   * la organización. Antes este método mantenía un alta paralela sin
+   * deduplicar: un NIT repetido o un nombre NULL terminaban en 500.
    */
   private async createInlineCustomer(
     context: {
@@ -2888,95 +2881,26 @@ export class InvoicingService {
     },
     dto: CreateCustomerDto,
   ): Promise<number> {
-    const organization_id = Number(context.organization_id);
     const store_id = Number(context.store_id);
 
-    if (!organization_id || !store_id) {
+    if (!Number(context.organization_id) || !store_id) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
         'Contexto de tienda requerido para crear cliente inline',
       );
     }
-
-    const customerRole = await this.prisma.roles.findFirst({
-      where: { name: 'customer', is_system_role: true },
-    });
-    if (!customerRole) {
+    if (!this.customersService) {
       throw new VendixHttpException(
-        ErrorCodes.CUST_CREATE_001,
-        'El rol de sistema "customer" no existe — seed requerido',
+        ErrorCodes.SYS_VALIDATION_001,
+        'Alta de cliente en línea no disponible en este contexto',
       );
     }
 
-    const isJuridica = dto.person_type === 'JURIDICA';
-    const effectiveEmail = dto.email?.trim() || null;
-
-    // Username: email → document_number → first_name → synthetic. Uniqueness
-    // enforced by a small loop with a numeric suffix. Inline-only path; the
-    // full `CustomersService.create()` uses a more robust generator.
-    const baseUsername =
-      effectiveEmail?.split('@')[0] ??
-      dto.document_number ??
-      dto.first_name ??
-      `customer-${Date.now()}`;
-    let username = baseUsername.toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    if (!username) username = `customer-${Date.now()}`;
-    let attempt = 0;
-    while (
-      await this.prisma.users.findFirst({
-        where: { username, organization_id },
-        select: { id: true },
-      })
-    ) {
-      attempt += 1;
-      username = `${baseUsername}-${attempt}`;
-    }
-
-    const tempPassword = `tmp-${Math.random().toString(36).slice(2, 12)}`;
-    const hashedPassword = await bcrypt.hash(tempPassword, 10);
-
-    const created = await this.prisma.users.create({
-      data: {
-        organization_id,
-        main_store_id: store_id,
-        username,
-        email: effectiveEmail,
-        // `users.first_name/last_name` son NOT NULL: para jurídica se guarda ''
-        // (igual que `CustomersService.create`); un null hacía que Prisma
-        // rechazara el `data` («Argument `organizations` is missing») y la
-        // factura con cliente NIT nuevo respondía 500.
-        first_name: isJuridica ? '' : (dto.first_name ?? ''),
-        last_name: isJuridica ? '' : (dto.last_name ?? ''),
-        legal_name: dto.legal_name ?? null,
-        document_type: (dto.document_type ?? null) as any,
-        document_number: dto.document_number ?? null,
-        verification_digit: dto.verification_digit ?? null,
-        phone: dto.phone ?? null,
-        tax_regime: (dto.tax_regime ?? null) as any,
-        person_type: (dto.person_type ?? null) as any,
-        fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
-        ciiu_code: dto.ciiu_code ?? null,
-        is_withholding_agent: dto.is_withholding_agent ?? false,
-        password: hashedPassword,
-        state: 'active',
-        email_verified: false,
-      },
-      select: { id: true },
-    });
-
-    // `user_roles` sólo tiene `user_id`, `role_id` y `store_id`; el tenant se
-    // deriva del usuario y de la tienda. Pasar `organization_id` hacía que
-    // Prisma rechazara el `data` completo, así que el cliente inline se creaba
-    // sin rol y la factura fallaba después con «Error interno».
-    await this.prisma.user_roles.create({
-      data: {
-        user_id: created.id,
-        role_id: customerRole.id,
-        store_id,
-      },
-    });
-
-    return created.id;
+    const { customer_id } = await this.customersService.resolveInlineCustomer(
+      store_id,
+      dto,
+    );
+    return customer_id;
   }
 
   /**
