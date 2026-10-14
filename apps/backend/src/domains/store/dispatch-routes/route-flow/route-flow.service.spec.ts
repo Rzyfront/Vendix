@@ -61,8 +61,17 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     prismaMock = {
       dispatch_routes: {
         findFirst: jest.fn(),
+        findFirstOrThrow: jest.fn(),
         update: jest.fn(),
       },
+      // D11: close() bloquea ruta y sesión con SELECT ... FOR UPDATE.
+      lockedRouteStatus: 'in_transit',
+      lockedSessionRows: [] as any[],
+      $queryRaw: jest.fn((strings: TemplateStringsArray) =>
+        strings.join('?').includes('FROM dispatch_routes')
+          ? [{ id: ROUTE_ID, status: prismaMock.lockedRouteStatus }]
+          : prismaMock.lockedSessionRows,
+      ),
       dispatch_route_stops: {
         findFirst: jest.fn(),
         update: jest.fn(),
@@ -105,6 +114,9 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     cashSettlementMock = {
       recordCashMovement: jest.fn().mockResolvedValue(null),
       emitCashMovementRecorded: jest.fn(),
+      isCashRegisterRequired: jest.fn().mockResolvedValue(false),
+      recordRouteCloseMovements: jest.fn().mockResolvedValue([]),
+      listOpenSessions: jest.fn().mockResolvedValue([]),
       emitPaymentReceived: jest.fn(),
       emitCreditSale: jest.fn(),
       emitRefundCompleted: jest.fn(),
@@ -160,8 +172,9 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       }),
       { cashMovementHandled: true },
     );
-    expect(cashSettlementMock.recordCashMovement).toHaveBeenCalledTimes(1);
-    expect(cashSettlementMock.emitCashMovementRecorded).toHaveBeenCalledWith(null);
+    // D8: la liquidación en ruta NO registra movimiento de caja (se difiere al cierre).
+    expect(cashSettlementMock.recordCashMovement).not.toHaveBeenCalled();
+    expect(cashSettlementMock.recordRouteCloseMovements).not.toHaveBeenCalled();
     expect(cashSettlementMock.emitCreditSale).not.toHaveBeenCalled();
     expect(cashSettlementMock.emitWithholding).not.toHaveBeenCalled();
 
@@ -577,6 +590,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         shipping_method_id: null,
       });
       prismaMock.dispatch_routes.findFirst.mockResolvedValue(route);
+      prismaMock.dispatch_routes.findFirstOrThrow.mockResolvedValue(route);
       prismaMock.dispatch_routes.update.mockImplementation((args: any) => ({
         ...route,
         ...args.data,
@@ -621,6 +635,184 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         service.close(ROUTE_ID, { declared_cash: 0 } as any),
       ).rejects.toThrow(/parada\(s\) sin liquidar/);
 
+      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── D2: despacho solo por el encargado ────────────────────────────────
+  describe('dispatch() — solo el encargado (D2)', () => {
+    const dispatchableStop = () =>
+      buildStop({
+        dispatch_note: {
+          ...buildStop().dispatch_note,
+          customer_address: { address_line1: 'Calle 1', city: 'Bogota' },
+        },
+      });
+    const draftRoute = (overrides: any = {}) =>
+      buildRoute({
+        status: 'draft',
+        stops: [dispatchableStop()],
+        is_primary_driver_external: false,
+        driver_user_id: 9,
+        driver_user: { id: 9, first_name: 'Ana', last_name: 'Ruiz' },
+        ...overrides,
+      });
+
+    it('no encargado: 403 DISPATCH_ROUTE_NOT_RESPONSIBLE con el nombre del encargado', async () => {
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(draftRoute());
+      const err: any = await service.dispatch(ROUTE_ID).catch((e) => e);
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('DISPATCH_ROUTE_NOT_RESPONSIBLE');
+      expect(err.getStatus()).toBe(403);
+      expect(err.message).toContain('Ana Ruiz');
+      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
+    });
+
+    it('encargado: despacha OK', async () => {
+      context.user_id = 9;
+      const route = draftRoute();
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(route);
+      prismaMock.dispatch_routes.update.mockResolvedValue({
+        ...route,
+        status: 'dispatched',
+      });
+      const res = await service.dispatch(ROUTE_ID);
+      expect(res.status).toBe('dispatched');
+    });
+
+    it('conductor externo: cualquier usuario con permiso despacha', async () => {
+      const route = draftRoute({
+        is_primary_driver_external: true,
+        driver_user_id: null,
+        driver_user: null,
+        external_driver_name: 'Pedro',
+        external_driver_id_number: '123',
+      });
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(route);
+      prismaMock.dispatch_routes.update.mockResolvedValue({
+        ...route,
+        status: 'dispatched',
+      });
+      const res = await service.dispatch(ROUTE_ID);
+      expect(res.status).toBe('dispatched');
+    });
+  });
+
+  // ── D8: settle sin caja ───────────────────────────────────────────────
+  it('settle con caja habilitada y sin sesión: OK y sin movimiento de caja', async () => {
+    cashSettlementMock.isCashRegisterRequired.mockResolvedValue(true);
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'delivered',
+      collected_amount: 200,
+      payment_method: 'cash',
+    } as any);
+    expect(cashSettlementMock.recordCashMovement).not.toHaveBeenCalled();
+    expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledTimes(1);
+  });
+
+  // ── D9–D11: cierre contra caja ────────────────────────────────────────
+  describe('close() — contra caja elegida', () => {
+    const stops = [
+      {
+        id: 1,
+        route_id: ROUTE_ID,
+        status: 'delivered',
+        result: 'delivered',
+        is_prepaid: false,
+        payment_method: 'cash',
+        collected_amount: new Prisma.Decimal(200),
+        anticipo_amount: new Prisma.Decimal(0),
+        change_amount: new Prisma.Decimal(0),
+        withholding_amount: new Prisma.Decimal(0),
+        credit_amount: new Prisma.Decimal(0),
+        dispatch_note: null,
+      },
+    ];
+    const route = () =>
+      buildRoute({
+        stops,
+        vehicle_id: null,
+        external_carrier_supplier_id: null,
+        shipping_method_id: null,
+      });
+    beforeEach(() => {
+      const r = route();
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(r);
+      prismaMock.dispatch_routes.findFirstOrThrow.mockResolvedValue(r);
+      prismaMock.dispatch_routes.update.mockImplementation((a: any) => ({
+        ...r,
+        ...a.data,
+      }));
+    });
+
+    it('caja requerida sin sesión: 400 DISPATCH_ROUTE_CASH_SESSION_REQUIRED', async () => {
+      cashSettlementMock.isCashRegisterRequired.mockResolvedValue(true);
+      const err: any = await service
+        .close(ROUTE_ID, { declared_cash: 200 } as any)
+        .catch((e) => e);
+      expect(err.errorCode).toBe('DISPATCH_ROUTE_CASH_SESSION_REQUIRED');
+      expect(err.getStatus()).toBe(400);
+      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
+    });
+
+    it('sesión no abierta / de otra tienda: 409 DISPATCH_ROUTE_CASH_SESSION_INVALID', async () => {
+      prismaMock.lockedSessionRows = [];
+      const err: any = await service
+        .close(ROUTE_ID, {
+          declared_cash: 200,
+          cash_register_session_id: 77,
+        } as any)
+        .catch((e) => e);
+      expect(err.errorCode).toBe('DISPATCH_ROUTE_CASH_SESSION_INVALID');
+      expect(err.getStatus()).toBe(409);
+      expect(cashSettlementMock.recordRouteCloseMovements).not.toHaveBeenCalled();
+      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
+    });
+
+    it('cierre válido: movimientos con responsable = opened_by y persiste sesión/responsable', async () => {
+      prismaMock.lockedSessionRows = [{ id: 77, opened_by: 33 }];
+      await service.close(ROUTE_ID, {
+        declared_cash: 200,
+        cash_register_session_id: 77,
+      } as any);
+      expect(cashSettlementMock.recordRouteCloseMovements).toHaveBeenCalledWith(
+        prismaMock,
+        expect.objectContaining({
+          store_id: STORE_ID,
+          route_id: ROUTE_ID,
+          session_id: 77,
+          responsible_user_id: 33,
+        }),
+      );
+      expect(prismaMock.dispatch_routes.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'closed',
+            settlement_cash_session_id: 77,
+            settlement_cash_user_id: 33,
+            cash_settled_at: expect.any(Date),
+          }),
+        }),
+      );
+    });
+
+    it('sin caja requerida y sin sesión: cierra sin movimientos', async () => {
+      await service.close(ROUTE_ID, { declared_cash: 200 } as any);
+      expect(cashSettlementMock.recordRouteCloseMovements).not.toHaveBeenCalled();
+      const data = prismaMock.dispatch_routes.update.mock.calls[0][0].data;
+      expect(data.settlement_cash_session_id).toBeUndefined();
+    });
+
+    it('doble close: ruta ya cerrada bajo lock => 409 DISPATCH_ROUTE_ALREADY_CLOSED', async () => {
+      prismaMock.lockedRouteStatus = 'closed';
+      const err: any = await service
+        .close(ROUTE_ID, { declared_cash: 200 } as any)
+        .catch((e) => e);
+      expect(err.errorCode).toBe('DISPATCH_ROUTE_ALREADY_CLOSED');
+      expect(err.getStatus()).toBe(409);
+      expect(cashSettlementMock.recordRouteCloseMovements).not.toHaveBeenCalled();
       expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
     });
   });

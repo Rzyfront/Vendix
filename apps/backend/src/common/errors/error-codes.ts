@@ -4613,6 +4613,42 @@ export const ErrorCodes = {
     devMessage:
       'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
   },
+  DISPATCH_ROUTE_NOT_RESPONSIBLE: {
+    code: 'DISPATCH_ROUTE_NOT_RESPONSIBLE',
+    httpStatus: 403,
+    devMessage:
+      'Only the route responsible user can dispatch this route',
+  },
+  DISPATCH_ROUTE_TRACKING_FORBIDDEN: {
+    code: 'DISPATCH_ROUTE_TRACKING_FORBIDDEN',
+    httpStatus: 403,
+    devMessage:
+      'Only the internal responsible user of an in-progress route can publish its position',
+  },
+  DISPATCH_ROUTE_TRACKING_NOT_ACTIVE: {
+    code: 'DISPATCH_ROUTE_TRACKING_NOT_ACTIVE',
+    httpStatus: 409,
+    devMessage:
+      'Route tracking is only available while the route is dispatched or in transit',
+  },
+  DISPATCH_ROUTE_CASH_SESSION_REQUIRED: {
+    code: 'DISPATCH_ROUTE_CASH_SESSION_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'The store requires a cash register: choose an open cash session to settle the route collection',
+  },
+  DISPATCH_ROUTE_CASH_SESSION_INVALID: {
+    code: 'DISPATCH_ROUTE_CASH_SESSION_INVALID',
+    httpStatus: 409,
+    devMessage:
+      'The selected cash session is not open or does not belong to this store',
+  },
+  DISPATCH_ROUTE_ALREADY_CLOSED: {
+    code: 'DISPATCH_ROUTE_ALREADY_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'The route is already closed',
+  },
   DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION: {
     code: 'DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION',
     httpStatus: 400,

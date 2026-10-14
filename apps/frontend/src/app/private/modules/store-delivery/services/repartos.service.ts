@@ -20,6 +20,7 @@ import type {
   RouteHistoryResponse,
   SettleStopDto,
 } from '../interfaces/repartos.interface';
+import type { PublishPositionPoint } from '../../store/planillas-rutas/interfaces/route-tracking.interface';
 import type { DispatchNote } from '../../store/dispatch-notes/interfaces/dispatch-note.interface';
 import type { DispatchNoteAddressPayload } from '../../../../shared/components/dispatch-note-address-editor/dispatch-note-address-editor.service';
 
@@ -106,6 +107,20 @@ export class RepartosService {
         map((r) => r.data as DispatchRoute),
         catchError((e) => this.handleError(e)),
       );
+  }
+
+  /**
+   * `POST /store/carrier/route/tracking/positions` — publica la posición GPS
+   * del repartidor en su ruta en curso. Devuelve el error HTTP ORIGINAL (sin
+   * normalizar): el publisher inspecciona `status` 403/409 para detenerse.
+   */
+  publishMyRoutePositions(
+    batch: PublishPositionPoint[],
+  ): Observable<unknown> {
+    return this.http.post<unknown>(
+      `${this.apiUrl}/store/carrier/route/tracking/positions`,
+      { positions: batch },
+    );
   }
 
   // ── Paradas ──────────────────────────────────────────────────────────────

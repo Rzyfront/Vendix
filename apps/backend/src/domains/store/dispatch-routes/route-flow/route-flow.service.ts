@@ -42,6 +42,13 @@ const ROUTE_INCLUDE = {
     select: { id: true, first_name: true, last_name: true, document_number: true },
   },
   origin_location: { select: { id: true, name: true, code: true } },
+  // D11: caja/responsable contra la que se asentó el recaudo al cerrar.
+  settlement_cash_session: {
+    select: { id: true, register: { select: { id: true, name: true } } },
+  },
+  settlement_cash_user: {
+    select: { id: true, first_name: true, last_name: true },
+  },
   stops: {
     orderBy: { stop_sequence: 'asc' as const },
     include: {
@@ -453,6 +460,25 @@ export class RouteFlowService {
       );
     }
 
+    // D2: solo el encargado (conductor interno) puede despachar. Con conductor
+    // primario externo cualquiera con el permiso despacha. Sin user_id de
+    // request (caller de sistema) no se aplica el guard.
+    if (
+      user_id &&
+      !route.is_primary_driver_external &&
+      route.driver_user_id &&
+      route.driver_user_id !== user_id
+    ) {
+      const du = route.driver_user;
+      const driver_name = du
+        ? `${du.first_name ?? ''} ${du.last_name ?? ''}`.trim()
+        : '';
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_NOT_RESPONSIBLE,
+        `Solo el encargado de la ruta${driver_name ? ` (${driver_name})` : ''} puede despacharla`,
+      );
+    }
+
     // Per-stop delivery-address gate (defense in depth): sub-task 2 already
     // blocks createFromOrder/createFromSalesOrder when the order has no address,
     // but legacy remisiones (created before this rule) may still lack one. We
@@ -759,14 +785,10 @@ export class RouteFlowService {
           withholding_breakdown: dto.withholding_breakdown,
         }
       : null;
-    let cashMovementEvent: Awaited<
-      ReturnType<CashSettlementService['recordCashMovement']>
-    > = null;
+    // D8: el recaudo en ruta NO exige ni registra caja. El movimiento de caja
+    // se asienta al cerrar la planilla (`close` → recordRouteCloseMovements).
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      if (paymentInput) {
-        cashMovementEvent = await this.cashSettlement.recordCashMovement(tx, paymentInput);
-      }
       const updated_stop = await tx.dispatch_route_stops.update({
         where: { id: stopId },
         data: {
@@ -829,7 +851,6 @@ export class RouteFlowService {
 
     // Emit domain events to drive accounting / AR / notifications.
     // Only for non-prepaid stops with actual collection (DERIVED prepaid).
-    this.cashSettlement.emitCashMovementRecorded(cashMovementEvent);
     if (!stopIsPrepaid) {
       if (paymentInput) {
         await this.cashSettlement.emitPaymentReceived(paymentInput, {
@@ -1132,6 +1153,9 @@ export class RouteFlowService {
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
 
+    if (route.status === 'closed') {
+      throw new VendixHttpException(ErrorCodes.DISPATCH_ROUTE_ALREADY_CLOSED);
+    }
     if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede cerrar una planilla en estado '${route.status}'`,
@@ -1148,25 +1172,94 @@ export class RouteFlowService {
       );
     }
 
-    // Use the same pure aggregator the live-updates use, so close-time totals
-    // match the per-stop refresh in `settleStop`/`releaseStop` byte-for-byte.
-    const total_collected = aggregateRouteTotals(route.stops).total_collected;
-    const total_changes = aggregateRouteTotals(route.stops).total_changes;
-    const total_withholdings = aggregateRouteTotals(route.stops).total_withholdings;
-    const total_credit = aggregateRouteTotals(route.stops).total_credit;
+    // D9: caja obligatoria cuando la tienda la exige (400 antes de abrir la tx).
+    const cash_required = await this.cashSettlement.isCashRegisterRequired();
+    const session_id = dto.cash_register_session_id;
+    if (cash_required && !session_id) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_CASH_SESSION_REQUIRED,
+      );
+    }
 
     const declared_cash = Number(dto.declared_cash);
-    // cash_variance = declared_cash - cash collected.
-    // We treat as cash any collected_amount on a non-prepaid stop whose
-    // payment_method is null/'cash' (the conservative default for COD DSD).
-    // Stops paid via transfer/card are excluded from the cash reconciliation.
-    // Formula centralized in the analytics contract (single source of truth,
-    // PLAN-analytics-despachos-2026-09-12 Paso 1) — same result, byte-for-byte
-    // (see the parity test in analytics-metrics.contract.spec.ts).
-    const cash_collected = computeCashCollected(route.stops);
-    const cash_variance = declared_cash - cash_collected;
+    let total_collected = 0;
+    let total_changes = 0;
+    let total_withholdings = 0;
+    let total_credit = 0;
+    let cash_variance = 0;
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // D11: lock de la ruta + re-chequeo de estado bajo lock (doble envío).
+      const locked = await tx.$queryRaw<{ id: number; status: string }[]>`
+        SELECT id, status FROM dispatch_routes
+        WHERE id = ${id} AND store_id = ${store_id}
+        FOR UPDATE
+      `;
+      if (locked.length !== 1) {
+        throw new NotFoundException(`Planilla #${id} no encontrada`);
+      }
+      const locked_status = locked[0].status;
+      if (locked_status === 'closed') {
+        throw new VendixHttpException(ErrorCodes.DISPATCH_ROUTE_ALREADY_CLOSED);
+      }
+      if (!['dispatched', 'in_transit'].includes(locked_status)) {
+        throw new BadRequestException(
+          `No se puede cerrar una planilla en estado '${locked_status}'`,
+        );
+      }
+
+      // Paradas re-leídas bajo lock para que totales y movimientos no usen un
+      // snapshot previo a la liquidación concurrente de una parada.
+      const fresh = this.withDerivedStopPrepaid(
+        await tx.dispatch_routes.findFirstOrThrow({
+          where: { id, store_id },
+          include: ROUTE_INCLUDE,
+        }),
+      );
+      const non_terminal = fresh.stops.filter(
+        (s) =>
+          !['delivered', 'partial', 'rejected', 'released'].includes(s.status),
+      );
+      if (non_terminal.length > 0) {
+        throw new BadRequestException(
+          `Hay ${non_terminal.length} parada(s) sin liquidar. Liquida o libera todas las paradas antes de cerrar.`,
+        );
+      }
+
+      // Same pure aggregator the live-updates use, so close-time totals match
+      // the per-stop refresh in `settleStop`/`releaseStop` byte-for-byte.
+      const agg = aggregateRouteTotals(fresh.stops);
+      total_collected = agg.total_collected;
+      total_changes = agg.total_changes;
+      total_withholdings = agg.total_withholdings;
+      total_credit = agg.total_credit;
+      // cash_variance = declared_cash - cash collected (fórmula única en el
+      // contrato de analytics; solo efectivo de paradas no prepagas).
+      cash_variance = declared_cash - computeCashCollected(fresh.stops);
+
+      let settlement_cash_user_id: number | undefined;
+      if (session_id) {
+        const sessions = await tx.$queryRaw<{ id: number; opened_by: number }[]>`
+          SELECT id, opened_by FROM cash_register_sessions
+          WHERE id = ${session_id} AND store_id = ${store_id} AND status = 'open'
+          FOR UPDATE
+        `;
+        if (sessions.length !== 1) {
+          throw new VendixHttpException(
+            ErrorCodes.DISPATCH_ROUTE_CASH_SESSION_INVALID,
+          );
+        }
+        settlement_cash_user_id = Number(sessions[0].opened_by);
+        await this.cashSettlement.recordRouteCloseMovements(tx, {
+          store_id,
+          route_id: id,
+          route_number: fresh.route_number,
+          session_id,
+          responsible_user_id: settlement_cash_user_id as number,
+          stops: fresh.stops,
+        });
+      }
+
       const updated_route = await tx.dispatch_routes.update({
         where: { id },
         data: {
@@ -1179,7 +1272,14 @@ export class RouteFlowService {
           total_credit,
           declared_cash,
           cash_variance,
-          notes: dto.notes ?? route.notes,
+          notes: dto.notes ?? fresh.notes,
+          ...(session_id
+            ? {
+                settlement_cash_session_id: session_id,
+                settlement_cash_user_id,
+                cash_settled_at: new Date(),
+              }
+            : {}),
           updated_at: new Date(),
         },
         include: ROUTE_INCLUDE,
@@ -1236,6 +1336,17 @@ export class RouteFlowService {
       `Planilla #${id} cerrada. Recaudado=${total_collected} Variance=${cash_variance}`,
     );
     return this.withDerivedStopPrepaid(updated);
+  }
+
+  /** D12: opciones del cierre — ¿caja obligatoria? + sesiones abiertas de la tienda. */
+  async getCloseOptions(id: number) {
+    const store_id = this.getStoreId();
+    await this.getRoute(id, store_id); // 404 si no es de la tienda
+    const [cash_required, sessions] = await Promise.all([
+      this.cashSettlement.isCashRegisterRequired(),
+      this.cashSettlement.listOpenSessions(store_id),
+    ]);
+    return { cash_required, sessions };
   }
 
   /**

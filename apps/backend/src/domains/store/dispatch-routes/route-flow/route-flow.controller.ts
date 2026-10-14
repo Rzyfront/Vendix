@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Get,
   Patch,
   Body,
   Param,
@@ -110,6 +111,13 @@ export class RouteFlowController {
       result,
       'Orden de paradas actualizado',
     );
+  }
+
+  @Get(':id/close-options')
+  @Permissions('store:dispatch_routes:close')
+  async closeOptions(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.routeFlowService.getCloseOptions(id);
+    return this.responseService.success(result, 'Opciones de cierre');
   }
 
   @Post(':id/close')

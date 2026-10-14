@@ -12,6 +12,8 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { DispatchRoutesService } from '../dispatch-routes/dispatch-routes.service';
 import { RouteFlowService } from '../dispatch-routes/route-flow/route-flow.service';
+import { RouteTrackingService } from '../dispatch-routes/tracking/route-tracking.service';
+import { PublishPositionsDto } from '../dispatch-routes/tracking/dto/publish-positions.dto';
 import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { CreateFromOrderDto } from '../dispatch-notes/dto/create-from-order.dto';
 import { UpdateDispatchNoteAddressDto } from '../dispatch-notes/dto';
@@ -98,6 +100,7 @@ export class CarrierDeliveryService {
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly routeFlowService: RouteFlowService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly routeTrackingService: RouteTrackingService,
   ) {}
 
   // ── Context helper ──────────────────────────────────────────────────────
@@ -181,6 +184,15 @@ export class CarrierDeliveryService {
   async dispatch() {
     const route = await this.requireMyActiveRoute();
     return this.routeFlowService.dispatch(route.id);
+  }
+
+  /**
+   * Publicar la posición del repartidor en MI ruta activa. El servicio de
+   * tracking valida estado (dispatched|in_transit) y que el usuario sea el driver.
+   */
+  async publishPositions(dto: PublishPositionsDto) {
+    const route = await this.requireMyActiveRoute();
+    return this.routeTrackingService.publishPositions(route.id, dto);
   }
 
   /** Iniciar una parada de MI ruta (pending → in_progress). */
