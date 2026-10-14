@@ -388,6 +388,13 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'planillas/:id/recorrido',
+            loadComponent: () =>
+              import('../../private/modules/store/planillas-rutas/pages/planilla-route-view-page/planilla-route-view-page.component').then(
+                (c) => c.PlanillaRouteViewPageComponent,
+              ),
+          },
+          {
             path: 'planillas/:id',
             loadComponent: () =>
               import('../../private/modules/store/planillas-rutas/pages/planilla-detail-page/planilla-detail-page.component').then(
