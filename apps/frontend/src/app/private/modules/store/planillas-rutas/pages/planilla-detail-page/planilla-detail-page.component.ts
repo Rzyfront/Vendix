@@ -2,8 +2,10 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -36,6 +38,7 @@ import { RouteSheetScannerModalComponent } from '../../components/route-sheet-sc
 import { StopDetailModalComponent } from '../../components/stop-detail-modal/stop-detail-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { RoutePositionPublisherService } from '../../services/route-position-publisher.service';
 import { AddNotesModalComponent } from '../../components/add-notes-modal/add-notes-modal.component';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -388,6 +391,28 @@ export class PlanillaDetailPageComponent {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly positionPublisher = inject(RoutePositionPublisherService);
+
+  /**
+   * The responsible (internal driver) shares live position while the route is
+   * in progress; spectators never touch geolocation. The publisher outlives
+   * this page on purpose (see RoutePositionPublisherService).
+   */
+  private readonly publishPositionEffect = effect(() => {
+    const r = this.route();
+    if (!r) return;
+    const responsible = this.responsibleUserId();
+    const run =
+      responsible !== null &&
+      responsible === this.currentUserId() &&
+      (r.status === 'dispatched' || r.status === 'in_transit');
+    untracked(() => {
+      if (run) this.positionPublisher.start(r.id);
+      else if (this.positionPublisher.currentRouteId === r.id) {
+        this.positionPublisher.stop();
+      }
+    });
+  });
 
   /** Logged-in user id (null while the session is loading). */
   private readonly currentUserId = computed<number | null>(() => {

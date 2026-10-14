@@ -26,6 +26,11 @@ export class RoutePositionPublisherService {
   readonly lastLocal = signal<{ lat: number; lng: number } | null>(null);
 
   private routeId: number | null = null;
+
+  /** Route currently being published (null when idle). */
+  get currentRouteId(): number | null {
+    return this.routeId;
+  }
   private watchId: number | null = null;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private buffer: PublishPositionPoint[] = [];

@@ -608,15 +608,20 @@ export class PlanillaRouteViewPageComponent {
       clearInterval(timer);
       this.watchHandle?.close();
       this.watchHandle = null;
-      this.publisher.stop();
+      // The publisher is NOT stopped here on purpose: the responsible keeps
+      // sharing position while the route is in progress even if they leave
+      // this page (it stops on 403/409 or when the route stops being active).
     });
 
     // Only the responsible, on an in-progress route, publishes position.
     effect(() => {
+      const loaded = !!this.route();
       const run = this.isResponsible() && this.inProgress();
       untracked(() => {
         if (run) this.publisher.start(this.routeId());
-        else this.publisher.stop();
+        else if (loaded && this.publisher.currentRouteId === this.routeId()) {
+          this.publisher.stop();
+        }
       });
     });
 
