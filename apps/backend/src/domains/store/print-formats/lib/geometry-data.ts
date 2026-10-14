@@ -12,33 +12,43 @@
  * the data survive any build pipeline.
  */
 
+/**
+ * `printable_width_mm`: ancho realmente imprimible del cabezal. Rollo:
+ * 576 puntos @203dpi = 72 mm (80 mm); 384 puntos = 48 mm (58 mm); algunas
+ * Xprinter de 512 puntos ~ 64 mm. Hojas: width_mm - 2 x 5 mm.
+ */
 export default {
   thermal_80: {
     width_mm: 80,
+    printable_width_mm: 72,
     is_roll: true,
     css_page_size: '80mm auto',
     height_mm: null,
   },
   thermal_58: {
     width_mm: 58,
+    printable_width_mm: 48,
     is_roll: true,
     css_page_size: '58mm auto',
     height_mm: null,
   },
   a4: {
     width_mm: 210,
+    printable_width_mm: 200,
     is_roll: false,
     css_page_size: 'A4 portrait',
     height_mm: 297,
   },
   letter: {
     width_mm: 216,
+    printable_width_mm: 206,
     is_roll: false,
     css_page_size: 'letter portrait',
     height_mm: 279,
   },
   half_letter: {
     width_mm: 216,
+    printable_width_mm: 206,
     is_roll: false,
     css_page_size: '216mm 140mm',
     height_mm: 140,

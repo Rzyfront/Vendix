@@ -34,6 +34,11 @@ export interface PrintPaperConfig {
   height_mm?: number;
   is_roll: boolean;
   /**
+   * Ancho imprimible del cabezal en mm; solo rollo. Rango [ancho-16, ancho-4].
+   * Si falta, rige el de la definición del papel (80→72, 58→48).
+   */
+  printable_width_mm?: number;
+  /**
    * Margen uniforme. El composer v2 prefiere los márgenes por lado
    * (`margin_top_mm`, etc.) cuando están presentes; si faltan, aplica
    * `margin_mm` uniformemente. Sigue siendo un campo real y requerido por
