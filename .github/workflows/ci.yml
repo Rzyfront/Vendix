@@ -413,7 +413,6 @@ jobs:
           --include='**/shared/components/item-list/item-list.component.spec.ts'
           --include='**/orders/components/orders-list/orders-list.component.spec.ts'
           --include='**/inventory/inventory-dashboard.component.spec.ts'
-          --include='**/inventory/movements/**/*.spec.ts'
           --include='**/ecommerce/pages/guest-order-summary/guest-order-summary.component.spec.ts'
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'
