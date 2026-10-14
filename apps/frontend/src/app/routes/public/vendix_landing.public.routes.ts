@@ -1,7 +1,24 @@
 import { Routes } from '@angular/router';
 import { pricingRoutes } from '../../public/pricing/pricing.routes';
+import { SECTOR_GUIDES_ENABLED } from '../../public/landing/guides/sector-guides.config';
+
+const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
+  ? [
+      'comandas-restaurantes',
+      'ventas-mayoristas-al-detal',
+      'preparar-demostracion',
+    ].map((guideKey) => ({
+      path: `guias/${guideKey}`,
+      loadComponent: () =>
+        import('../../public/landing/guides/sector-guide.component').then(
+          (c) => c.SectorGuideComponent,
+        ),
+      data: { guideKey },
+    }))
+  : [];
 
 export const vendixLandingPublicRoutes: Routes = [
+  ...sectorGuideRoutes,
   {
     path: '',
     loadComponent: () =>
