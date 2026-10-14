@@ -154,6 +154,9 @@ jobs:
       - name: nest build
         working-directory: apps/backend
         run: npm run build
+      - name: assert build assets
+        working-directory: apps/backend
+        run: node scripts/assert-build-assets.js
 
   backend-test-pr-regressions:
     name: Backend Tests (PR regressions)

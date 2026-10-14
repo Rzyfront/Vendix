@@ -60,9 +60,9 @@ Tres valores posibles, dos malos:
 - **`true`** — Express toma el PRIMER elemento de `X-Forwarded-For`, que es exactamente el
   que escribe el cliente. Falsificación trivial. Nunca.
 - **`N` (número pelado)** — confía en los N saltos más cercanos *incondicionalmente*. El
-  problema: **una conexión directa también es el salto 0**. El contenedor publica
-  `-p 3000:3000` y los security groups abren el puerto a `0.0.0.0/0`, así que cualquiera
-  le habla al backend saltándose nginx, y su XFF se acepta como si viniera del proxy.
+  problema: **una conexión directa también es el salto 0**. Antes del blue/green el contenedor publicaba
+  `-p 3000:3000` y los security groups abrían el puerto a `0.0.0.0/0`, así que cualquiera
+  le hablaba al backend saltándose nginx, y su XFF se acepta como si viniera del proxy.
   Reproducido: `curl -H 'X-Forwarded-For: 6.6.6.6' http://localhost:3000/api/health`
   devolvía `client_ip: 6.6.6.6`.
 - **Predicado** — `(addr, hop) => hop === 0 ? isPrivateAddress(addr) : hop < hops`.
@@ -80,16 +80,22 @@ Si algún día necesitás más margen, la solución no es tocar el número sino 
 **dirección** — los rangos de egreso conocidos del gateway — dentro de
 `createTrustProxyPredicate`. Ese es el punto de extensión previsto.
 
-## Topología de producción (verificada 2026-09-01)
+## Topología de producción (verificada 2026-09-01; blue/green documentado 2026-10-14)
 
 ```
 navegador ──HTTPS──> api.vendix.online (32.195.142.115 = EIP del EC2)
                        └─> nginx en el HOST (systemd, /etc/nginx/conf.d/vendix.conf)
-                             proxy_pass http://127.0.0.1:3000
+                             proxy_pass http://vendix_api;
+                             upstream vendix_api { server 127.0.0.1:<3001|3002>; }
+                               (/etc/nginx/conf.d/vendix-upstream.conf)
                              X-Forwarded-For $proxy_add_x_forwarded_for   ← AÑADE
-                             └─> contenedor vendix-backend (0.0.0.0:3000->3000)
+                             └─> contenedor vendix-backend-blue (127.0.0.1:3001->3000)
+                                 o vendix-backend-green (127.0.0.1:3002->3000), solo uno activo
                                    peer visto = gateway del bridge Docker (privado)
 ```
+
+El puerto 3000 ya NO se publica en el host. El primer deploy tras el cambio aún puede
+tener el legado `vendix-backend` en 3000 hasta que se retire.
 
 **Un solo proxy propio ⇒ `TRUST_PROXY_HOPS=1`.**
 
@@ -214,7 +220,7 @@ Las dos garantías del caso directo de producción se verifican por otro lado:
    subredes Docker. Un atacante externo llega al contenedor con su IP pública real.
    ```bash
    ssh -i keys/vendix-production-key.pem ec2-user@<EIP> \
-     'sudo iptables -t nat -L DOCKER -n | grep 3000; sudo iptables -t nat -L POSTROUTING -n'
+     'sudo iptables -t nat -L DOCKER -n | grep -E "300[0-2]"; sudo iptables -t nat -L POSTROUTING -n'
    ```
 2. **El predicado rechaza un salto 0 público** — cubierto por `client-ip.util.spec.ts` contra
    la librería `proxy-addr` real, la misma que usa Express por dentro.
@@ -239,11 +245,11 @@ acceso al contenedor; `KEYS rl:login:*` no debe ser un censo de usuarios.
 
 ## Deuda conocida
 
-- **Puerto 3000 abierto a `0.0.0.0/0`** en `vendix-ec2-sg` (`sg-02be590feb1192274`) y
-  `vendix-ec2-backend` (`sg-042c482ccb85b3d80`). El predicado hace que un golpe directo se
-  cuente contra la IP real del atacante, así que el rate limit funciona — pero el puerto
-  abierto igual saltea TLS, nginx y cualquier WAF. Cerrarlo es defensa en profundidad y no
-  rompe nada: nginx entra por `127.0.0.1:3000`, no por la IP pública.
+- ~~Puerto 3000 abierto a `0.0.0.0/0`~~ **Resuelta con el deploy blue/green** (2026-10-14):
+  los slots publican sólo en `127.0.0.1:3001/3002` y el 3000 se cierra en los security groups
+  (`vendix-ec2-sg`, `vendix-ec2-backend`). Verificar tras el primer deploy que el legado
+  `vendix-backend` en 3000 ya no existe y que la regla del SG fue retirada. El predicado
+  sigue siendo la defensa del salto 0.
 - El predicado decide por **conteo** a partir del salto 1. Confiar por **dirección** (rangos
   de egreso del gateway) es la evolución natural cuando haya un gateway real.
 

@@ -14,7 +14,9 @@
  *
  * Modo de uso:
  *   - Producción (vía docker exec, según la práctica del runbook):
- *     ssh ... 'sudo docker exec -i vendix-backend node -e "
+ *     (blue/green: resolver el slot activo; cae al legado `vendix-backend`)
+ *     ssh ... 'API=$(sudo docker ps --filter "name=^/vendix-backend-(blue|green)\$" --filter status=running --format "{{.Names}}" | head -1); API=${API:-vendix-backend};
+ *       sudo docker exec -i $API node -e "
  *       const { runPreDeployGate } = require('./dist/scripts/fiscal-ssot/dian-pre-deploy-gate');
  *       runPreDeployGate().then(r => process.exit(r.differences > 0 ? 1 : 0));
  *     "'

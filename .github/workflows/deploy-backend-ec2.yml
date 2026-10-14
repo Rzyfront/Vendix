@@ -218,34 +218,71 @@ jobs:
             sudo docker exec vendix-redis redis-cli CONFIG REWRITE || true
           fi
 
-          echo "🛑 Stopping current containers..."
-          sudo docker stop vendix-backend || true
-          sudo docker rm vendix-backend || true
-          sudo docker stop vendix-backend-worker || true
-          sudo docker rm vendix-backend-worker || true
-
-          # QUI-674 — SEPARACIÓN API / WORKER
+          # DEPLOY BLUE/GREEN (patron estandar de NGINX en un solo host)
           #
-          # La API y los 11 workers de BullMQ (más todos los @Cron) compartían un
-          # solo proceso Node, así que un job CPU-bound congelaba el event loop y
-          # nginx devolvía 504 en rutas triviales. Se despliegan como DOS
-          # contenedores desde LA MISMA imagen y con el MISMO comando: lo único
+          # nginx enruta la API por 'upstream vendix_api', definido en su propio
+          # archivo (/etc/nginx/conf.d/vendix-upstream.conf) con un unico server:
+          # el puerto del slot activo. Dos slots fijos de API:
+          #   vendix-backend-blue  -> 127.0.0.1:3001
+          #   vendix-backend-green -> 127.0.0.1:3002
+          # (3000 = contenedor legado 'vendix-backend', solo en la transicion).
+          # El puerto INTERNO del contenedor es siempre 3000: PORT no cambia
+          # porque el puente Vexi (internal-http.ts) llama a 127.0.0.1:PORT.
+          #
+          # Secuencia: arrancar el slot inactivo, validarlo por health, conmutar
+          # nginx con reload (graceful), verificar el health publico, drenar y
+          # solo entonces detener el slot viejo. Si algo falla antes de conmutar,
+          # el slot activo nunca dejo de servir.
+          #
+          # TODAS las variables y sustituciones de este bloque van con barra
+          # invertida: el heredoc es SIN comillas y lo expande el runner de
+          # GitHub; un signo de dolar sin escapar nunca llega al EC2.
+
+          UPSTREAM_FILE=/etc/nginx/conf.d/vendix-upstream.conf
+          NEW_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          # (0) Preflight de memoria: la API nueva convive un rato con la vieja
+          # (y con el worker de 2560m) en un host de ~7.8 GB. Sin margen, abortar
+          # SIN tocar nada.
+          echo "🧮 Preflight: checking available memory..."
+          free -m
+          AVAIL_MB=\$(free -m | awk '/^Mem:/ {print \$7}')
+          if [ "\${AVAIL_MB:-0}" -lt 2500 ]; then
+            echo "❌ Only \${AVAIL_MB:-0} MB available (need >= 2500 MB to run two APIs side by side). Aborting before touching any container."
+            exit 1
+          fi
+          echo "✅ \$AVAIL_MB MB available"
+
+          # QUI-674 — SEPARACION API / WORKER
+          #
+          # La API y los 11 workers de BullMQ (mas todos los @Cron) compartian un
+          # solo proceso Node, asi que un job CPU-bound congelaba el event loop y
+          # nginx devolvia 504 en rutas triviales. Se despliegan como DOS
+          # contenedores desde LA MISMA imagen y con el MISMO comando: lo unico
           # que cambia es VENDIX_PROCESS_ROLE.
           #
           # El rol viaja SIEMPRE por -e, que gana sobre --env-file, para que un
-          # valor rancio en /opt/vendix/.env nunca decida qué hace un contenedor.
+          # valor rancio en /opt/vendix/.env nunca decida que hace un contenedor.
           #
-          # 'start_api' es una función y no dos bloques copiados porque el camino
-          # de respaldo de abajo vuelve a arrancar la API con otro rol: duplicar
-          # 15 líneas de -e es la forma segura de que las dos copias se separen.
+          # start_api <nombre> <puerto_host> <rol> <imagen>
+          # Es una funcion y no bloques copiados para que el camino blue/green y
+          # el camino legado no se separen en sus -e. En slots la API solo se
+          # publica en loopback (127.0.0.1:<puerto>:3000); el camino legado
+          # (puerto 3000) conserva la publicacion historica 3000:3000.
           start_api() {
+            local name="\$1" host_port="\$2" role="\$3" image="\$4" publish
+            if [ "\$host_port" = "3000" ]; then
+              publish="3000:3000"
+            else
+              publish="127.0.0.1:\$host_port:\${PORT:-3000}"
+            fi
             sudo docker run -d \\
-              --name vendix-backend \\
+              --name "\$name" \\
               --network vendix-net \\
               --restart unless-stopped \\
-              -p 3000:3000 \\
+              -p "\$publish" \\
               --env-file /opt/vendix/.env \\
-              -e VENDIX_PROCESS_ROLE="\$1" \\
+              -e VENDIX_PROCESS_ROLE="\$role" \\
               -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
               -e BASE_DOMAIN="\$BASE_DOMAIN" \\
               -e FRONTEND_URL="\$FRONTEND_URL" \\
@@ -266,40 +303,155 @@ jobs:
               -e EMAIL_RECEPTION_RAW_BUCKET="\$EMAIL_RECEPTION_RAW_BUCKET" \\
               -e EMAIL_RECEPTION_RAW_PREFIX="\$EMAIL_RECEPTION_RAW_PREFIX" \\
               -e EMAIL_RECEPTION_DIAN_STATUS_ENABLED="\$EMAIL_RECEPTION_DIAN_STATUS_ENABLED" \\
-              $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+              "\$image"
           }
 
-          echo "🚀 Starting new container (role: api)..."
-          start_api api
+          # wait_api_ready <puerto_host> <nombre>: hasta 120 s esperando health 200
+          # Y el ancla API_READY en los logs (misma idea que WORKER_READY).
+          wait_api_ready() {
+            local port="\$1" name="\$2"
+            local end=\$((SECONDS + 120))
+            while [ \$SECONDS -lt \$end ]; do
+              if curl -fsS -o /dev/null --max-time 5 "http://127.0.0.1:\$port/api/health" 2>/dev/null \
+                && sudo docker logs "\$name" 2>&1 | grep -q "API_READY pid="; then
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
 
-          echo "⏳ Waiting for container to start (40s)..."
-          sleep 40
+          # Camino legado (sin vendix-upstream.conf): comportamiento historico,
+          # stop/rm de vendix-backend y arranque en 3000. Solo para no romper un
+          # host que aun no tenga el upstream de nginx.
+          legacy_deploy_api() {
+            echo "🛑 Stopping legacy vendix-backend..."
+            sudo docker stop vendix-backend || true
+            sudo docker rm vendix-backend || true
+            echo "🚀 Starting vendix-backend on 3000 (role: api)..."
+            start_api vendix-backend 3000 api "\$NEW_IMAGE"
+            if wait_api_ready 3000 vendix-backend; then
+              echo "✅ Legacy API is healthy"
+            else
+              echo "❌ Legacy API did NOT become healthy — logs:"
+              sudo docker logs vendix-backend --tail 80 || true
+              exit 1
+            fi
+          }
 
-          # OJO: el filtro 'name=' de docker es una SUBCADENA, así que
-          # "vendix-backend" también casaría con "vendix-backend-worker" y esta
-          # comprobación daría por sana una API caída mientras viviera el worker.
-          # El ancla ^/.../$ (con la barra inicial, como en el bloque de Redis)
-          # es lo que la mantiene siendo una comprobación de la API.
-          echo "🔍 Checking if container is running..."
-          if sudo docker ps --filter "name=^/vendix-backend\$" --filter "status=running" -q | grep -q .; then
-            echo "✅ Container is running"
+          # (a) Slot activo = el puerto que figura en el upstream de nginx.
+          ACTIVE_NAME=""
+          if sudo test -f "\$UPSTREAM_FILE"; then
+            ACTIVE_PORT=\$(sudo cat "\$UPSTREAM_FILE" | sed -nE 's/.*server[[:space:]]+127\.0\.0\.1:([0-9]+).*/\1/p' | head -n1)
+            case "\$ACTIVE_PORT" in
+              3001) ACTIVE_NAME=vendix-backend-blue ;;
+              3002) ACTIVE_NAME=vendix-backend-green ;;
+              3000) ACTIVE_NAME=vendix-backend ;;
+              *) echo "⚠️  Could not read a known port from \$UPSTREAM_FILE (got '\$ACTIVE_PORT'); deploying to blue." ;;
+            esac
+            if [ "\$ACTIVE_NAME" = "vendix-backend-blue" ]; then
+              TARGET_NAME=vendix-backend-green
+              TARGET_PORT=3002
+            else
+              TARGET_NAME=vendix-backend-blue
+              TARGET_PORT=3001
+            fi
+            echo "🔀 Active: \${ACTIVE_NAME:-none} (port \${ACTIVE_PORT:-n/a}) -> deploying to \$TARGET_NAME on \$TARGET_PORT"
+
+            # (b) Limpiar restos del slot destino y arrancarlo con la imagen nueva.
+            sudo docker rm -f "\$TARGET_NAME" 2>/dev/null || true
+            echo "🚀 Starting \$TARGET_NAME (role: api) on 127.0.0.1:\$TARGET_PORT..."
+            start_api "\$TARGET_NAME" "\$TARGET_PORT" api "\$NEW_IMAGE"
+
+            # (c) La API nueva es su propio smoke test. Si no queda sana, nunca se
+            # conmuta: el slot activo sigue sirviendo.
+            echo "⏳ Waiting for \$TARGET_NAME to be healthy (up to 120s)..."
+            if wait_api_ready "\$TARGET_PORT" "\$TARGET_NAME"; then
+              echo "✅ \$TARGET_NAME is healthy"
+            else
+              echo "❌ \$TARGET_NAME did NOT become healthy — logs:"
+              sudo docker logs --tail 80 "\$TARGET_NAME" || true
+              sudo docker rm -f "\$TARGET_NAME" || true
+              echo "❌ Aborting. The active API (\${ACTIVE_NAME:-none}) keeps serving; nginx was not touched."
+              exit 1
+            fi
+
+            # (d) Conmutar nginx: copia del upstream, escribir el nuevo, nginx -t y
+            # reload graceful (los workers viejos terminan sus peticiones).
+            UPSTREAM_BAK=\$(mktemp)
+            sudo cp -p "\$UPSTREAM_FILE" "\$UPSTREAM_BAK"
+            echo "upstream vendix_api { server 127.0.0.1:\$TARGET_PORT; }" | sudo tee "\$UPSTREAM_FILE" > /dev/null
+            if ! { sudo nginx -t && sudo nginx -s reload; }; then
+              echo "❌ nginx test/reload failed — restoring previous upstream."
+              sudo cp -p "\$UPSTREAM_BAK" "\$UPSTREAM_FILE"
+              sudo nginx -s reload || true
+              sudo docker rm -f "\$TARGET_NAME" || true
+              exit 1
+            fi
+            echo "🔁 nginx now points to \$TARGET_NAME (127.0.0.1:\$TARGET_PORT)"
+
+            # (e) Health publico por la ruta real (TLS + nginx + upstream nuevo).
+            PUBLIC_OK=0
+            for ATTEMPT in 1 2 3; do
+              if curl -fsS -o /dev/null --max-time 10 https://api.vendix.online/api/health; then
+                PUBLIC_OK=1
+                break
+              fi
+              echo "⚠️  Public health attempt \$ATTEMPT/3 failed"
+              sleep 3
+            done
+            if [ "\$PUBLIC_OK" != "1" ]; then
+              echo "❌ Public health check failed after switch — rolling nginx back to the previous upstream."
+              sudo cp -p "\$UPSTREAM_BAK" "\$UPSTREAM_FILE"
+              sudo nginx -t && sudo nginx -s reload
+              sudo docker rm -f "\$TARGET_NAME" || true
+              echo "↩️  Previous API (\${ACTIVE_NAME:-none}) is still running and serving."
+              exit 1
+            fi
+            echo "✅ Public health OK on \$TARGET_NAME"
+
+            # (f) Drenaje y retiro del slot viejo. Las conexiones SSE viejas quedan
+            # sin eventos nuevos en esta ventana (fan-out en memoria). La API no
+            # maneja SIGTERM, por eso el -t 30 es un tope, no un cierre ordenado.
+            # El slot viejo queda DETENIDO, no borrado: el container prune del
+            # proximo deploy lo limpia.
+            echo "⏳ Draining old API for 30s..."
+            sleep 30
+            if [ -n "\$ACTIVE_NAME" ]; then
+              echo "🛑 Stopping old API (\$ACTIVE_NAME)..."
+              sudo docker stop -t 30 "\$ACTIVE_NAME" || true
+            fi
+            ACTIVE_NAME="\$TARGET_NAME"
           else
-            echo "❌ Container is NOT running — checking logs:"
-            sudo docker logs vendix-backend --tail 50
-            exit 1
+            echo "⚠️  \$UPSTREAM_FILE not found — falling back to the legacy single-container deploy on port 3000 (NOT zero-downtime)."
+            legacy_deploy_api
+            ACTIVE_NAME=vendix-backend
           fi
 
-          # --- Contenedor worker: ADITIVO, nunca aborta el despliegue ---
+          # (g) Recien con la API nueva sirviendo: seeds y worker EN SERIE.
+          # Los seeds corren aqui (y no antes) para no sumar 512m a la ventana en
+          # que conviven dos APIs.
+          echo "🌱 Running production seeds in isolated container..."
+          sudo docker run --rm \
+            --memory=512m \
+            --network=host \
+            --env-file /opt/vendix/.env \
+            -e DATABASE_URL="\$DATABASE_URL" \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            sh -c "npx --yes tsx prisma/seed-production.ts"
+          echo "✅ Seeds completed!"
+
+          # --- Contenedor worker: reemplazo en SERIE (nunca dos a la vez) ---
           #
-          # Presupuesto de memoria: la caja es una t3.medium (~4 GiB nominales)
-          # que ya reparte entre backend (~1.9 GiB), Redis (--maxmemory 1gb),
-          # nginx y el SO. El worker no sirve HTTP ni sostiene SSE, pero carga el
-          # MISMO grafo de módulos (cliente Prisma incluido), que es el grueso del
-          # heap en reposo; el set de pruebas DIAN añade apenas unos MB de XML.
-          # Presupuesto de memoria del worker — MEDIDO en producción, no estimado.
+          # Dos workers simultaneos duplicarian los @Cron (no hay lock
+          # distribuido), por eso el viejo se detiene ANTES de arrancar el nuevo.
+          # La imagen del worker actual se captura antes de borrarlo: si el nuevo
+          # no queda arriba, se relanza el anterior.
           #
-          # El worker NO es un proceso ligero: carga el 'AppModule' ÍNTEGRO (el
-          # mismo grafo que la API, cliente Prisma incluido), así que su coste de
+          # Presupuesto de memoria del worker — MEDIDO en produccion, no estimado.
+          #
+          # El worker NO es un proceso ligero: carga el 'AppModule' INTEGRO (el
+          # mismo grafo que la API, cliente Prisma incluido), asi que su coste de
           # arranque es casi el de la API. Los 768m/640 originales se eligieron
           # como "punto de partida medible" y resultaron insuficientes por un
           # factor de ~3:
@@ -313,75 +465,78 @@ jobs:
           # ('--max-old-space-size=2048' en la API, 1024 en el worker con 1536m
           # de contenedor).
           #
-          # Estos valores asumen t3.large (8 GiB). En la t3.medium anterior
-          # (3.86 GiB, ~1.6 GiB disponibles con la API en 1.73 GiB) NO cabían y
-          # el worker quedaba en crash-loop permanente; el gate de más abajo lo
-          # detecta y devuelve la API a 'all', pero eso es degradación, no
-          # solución. Si se vuelve a bajar el tipo de instancia, hay que bajar
-          # estos números o el worker no arrancará jamás.
+          # Estos valores asumen un host de ~7.8 GiB. Si se vuelve a bajar el tipo
+          # de instancia, hay que bajar estos numeros o el worker no arrancara
+          # jamas (crash-loop permanente; el gate de abajo lo detecta).
           #
-          # --memory-swap deja 512m de colchón sobre el límite de RAM para
+          # --memory-swap deja 512m de colchon sobre el limite de RAM para
           # absorber un pico puntual sin que el cgroup mate el proceso.
           #
           # --stop-timeout 60: en el cierre ordenado BullMQ espera a que termine
           # el job en vuelo. Sin esto docker manda SIGKILL a los 10 s y el lock
-          # queda huérfano — que con maxStalledCount:0 significa job fallido.
-          echo "⚙️  Starting worker container (role: worker)..."
-          WORKER_UP=0
-          if sudo docker run -d \\
-            --name vendix-backend-worker \\
-            --network vendix-net \\
-            --restart unless-stopped \\
-            --memory=2560m \\
-            --memory-swap=3072m \\
-            --stop-timeout 60 \\
-            --env-file /opt/vendix/.env \\
-            -e VENDIX_PROCESS_ROLE=worker \\
-            -e NODE_OPTIONS="--max-old-space-size=2048" \\
-            -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
-            -e BASE_DOMAIN="\$BASE_DOMAIN" \\
-            -e FRONTEND_URL="\$FRONTEND_URL" \\
-            -e NODE_ENV="\$NODE_ENV" \\
-            -e GOOGLE_GEOCODING_API_KEY="\$GOOGLE_GEOCODING_API_KEY" \\
-            -e GOOGLE_GEOCODING_MONTHLY_CAP="\$GOOGLE_GEOCODING_MONTHLY_CAP" \\
-            -e EMAIL_RECEPTION_ENABLED="\$EMAIL_RECEPTION_ENABLED" \\
-            -e EMAIL_RECEPTION_STORE_ALLOWLIST="\$EMAIL_RECEPTION_STORE_ALLOWLIST" \\
-            -e EMAIL_RECEPTION_ENVIRONMENT="\$EMAIL_RECEPTION_ENVIRONMENT" \\
-            -e EMAIL_RECEPTION_DOMAIN="\$EMAIL_RECEPTION_DOMAIN" \\
-            -e EMAIL_RECEPTION_AWS_REGION="\$EMAIL_RECEPTION_AWS_REGION" \\
-            -e EMAIL_RECEPTION_SQS_QUEUE_URL="\$EMAIL_RECEPTION_SQS_QUEUE_URL" \\
-            -e EMAIL_RECEPTION_SNS_TOPIC_ARN="\$EMAIL_RECEPTION_SNS_TOPIC_ARN" \\
-            -e EMAIL_RECEPTION_RAW_BUCKET="\$EMAIL_RECEPTION_RAW_BUCKET" \\
-            -e EMAIL_RECEPTION_RAW_PREFIX="\$EMAIL_RECEPTION_RAW_PREFIX" \\
-            -e EMAIL_RECEPTION_DIAN_STATUS_ENABLED="\$EMAIL_RECEPTION_DIAN_STATUS_ENABLED" \\
-            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG; then
-            # PR 2 — gate robusto. set +e local para que un fallo del gate no
-            # aborte el script antes del fallback a 'all' (bash de GitHub
-            # Actions corre con set -e implícito).
-            # Todas las variables van con \$: este bloque viaja dentro de un
-            # heredoc SIN comillas ('<< ENDSSH', línea 81), así que un '$' sin
-            # escapar lo expande el runner de GitHub y NUNCA llega al EC2. Sin
-            # los escapes, 'while [ \$SECONDS -lt \$END ]' se enviaba como
-            # 'while [ 0 -lt ]' (test inválido → el bucle no entra) y el
-            # 'docker inspect' se ejecutaba en el runner, no en la instancia.
-            set +e
-            END=\$((SECONDS + 90))
-            WORKER_READY=0
-            while [ \$SECONDS -lt \$END ]; do
+          # queda huerfano — que con maxStalledCount:0 significa job fallido.
+          #
+          # start_worker <imagen>
+          start_worker() {
+            sudo docker run -d \\
+              --name vendix-backend-worker \\
+              --network vendix-net \\
+              --restart unless-stopped \\
+              --memory=2560m \\
+              --memory-swap=3072m \\
+              --stop-timeout 60 \\
+              --env-file /opt/vendix/.env \\
+              -e VENDIX_PROCESS_ROLE=worker \\
+              -e NODE_OPTIONS="--max-old-space-size=2048" \\
+              -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
+              -e BASE_DOMAIN="\$BASE_DOMAIN" \\
+              -e FRONTEND_URL="\$FRONTEND_URL" \\
+              -e NODE_ENV="\$NODE_ENV" \\
+              -e GOOGLE_GEOCODING_API_KEY="\$GOOGLE_GEOCODING_API_KEY" \\
+              -e GOOGLE_GEOCODING_MONTHLY_CAP="\$GOOGLE_GEOCODING_MONTHLY_CAP" \\
+              -e EMAIL_RECEPTION_ENABLED="\$EMAIL_RECEPTION_ENABLED" \\
+              -e EMAIL_RECEPTION_STORE_ALLOWLIST="\$EMAIL_RECEPTION_STORE_ALLOWLIST" \\
+              -e EMAIL_RECEPTION_ENVIRONMENT="\$EMAIL_RECEPTION_ENVIRONMENT" \\
+              -e EMAIL_RECEPTION_DOMAIN="\$EMAIL_RECEPTION_DOMAIN" \\
+              -e EMAIL_RECEPTION_AWS_REGION="\$EMAIL_RECEPTION_AWS_REGION" \\
+              -e EMAIL_RECEPTION_SQS_QUEUE_URL="\$EMAIL_RECEPTION_SQS_QUEUE_URL" \\
+              -e EMAIL_RECEPTION_SNS_TOPIC_ARN="\$EMAIL_RECEPTION_SNS_TOPIC_ARN" \\
+              -e EMAIL_RECEPTION_RAW_BUCKET="\$EMAIL_RECEPTION_RAW_BUCKET" \\
+              -e EMAIL_RECEPTION_RAW_PREFIX="\$EMAIL_RECEPTION_RAW_PREFIX" \\
+              -e EMAIL_RECEPTION_DIAN_STATUS_ENABLED="\$EMAIL_RECEPTION_DIAN_STATUS_ENABLED" \\
+              "\$1"
+          }
+
+          # wait_worker_ready: gate robusto, hasta 90 s por el ancla WORKER_READY.
+          # Se llama dentro de un if, asi que set -e no aborta el script a mitad
+          # del gate.
+          wait_worker_ready() {
+            local end=\$((SECONDS + 90))
+            local restarts
+            while [ \$SECONDS -lt \$end ]; do
               if sudo docker logs vendix-backend-worker 2>&1 | grep -q "WORKER_READY pid="; then
-                WORKER_READY=1
-                break
+                return 0
               fi
-              # Si el contenedor ya reinició (OOM o crash temprano antes del
+              # Si el contenedor ya reinicio (OOM o crash temprano antes del
               # ancla), abortamos el loop: no se va a estabilizar solo.
-              RESTARTS=\$(sudo docker inspect -f '{{.State.RestartCount}}' vendix-backend-worker 2>/dev/null || echo 0)
-              if [ "\$RESTARTS" -gt 0 ]; then
-                echo "⚠️  Worker restarted (\$RESTARTS times) before emitting WORKER_READY anchor."
-                break
+              restarts=\$(sudo docker inspect -f '{{.State.RestartCount}}' vendix-backend-worker 2>/dev/null || echo 0)
+              if [ "\$restarts" -gt 0 ]; then
+                echo "⚠️  Worker restarted (\$restarts times) before emitting WORKER_READY anchor."
+                return 1
               fi
               sleep 2
             done
-            if [ "\$WORKER_READY" = "1" ]; then
+            return 1
+          }
+
+          PREV_WORKER_IMAGE=\$(sudo docker inspect -f '{{.Config.Image}}' vendix-backend-worker 2>/dev/null || true)
+          echo "⚙️  Replacing worker (previous image: \${PREV_WORKER_IMAGE:-none})..."
+          sudo docker stop vendix-backend-worker || true
+          sudo docker rm vendix-backend-worker || true
+
+          WORKER_UP=0
+          if start_worker "\$NEW_IMAGE"; then
+            if wait_worker_ready; then
               WORKER_UP=1
               echo "✅ Worker container is running and ready (WORKER_READY anchor found)"
               sudo docker logs vendix-backend-worker --tail 20 || true
@@ -389,43 +544,28 @@ jobs:
               echo "⚠️  Worker container is NOT healthy — logs:"
               sudo docker logs vendix-backend-worker --tail 50 || true
             fi
-            set -e
           else
             echo "⚠️  Could not start the worker container."
           fi
 
-          # RESPALDO: sin worker, nadie ejecutaría cobros, recordatorios,
-          # provisiones ni reintentos — y en silencio, porque una API sana no
-          # emite ningún error por ello. Si el worker no quedó arriba, la API
-          # vuelve al rol histórico 'all' y el despliegue sigue adelante: el
-          # cambio es aditivo, así que su peor desenlace es el comportamiento de
-          # siempre, nunca un backend a medias.
-          if [ "\$WORKER_UP" = "1" ]; then
-            echo "🧵 Split API/worker activo: la API corre sin workers ni @Cron."
-          else
-            echo "⚠️  El worker no quedó arriba — devolviendo la API al rol 'all'..."
-            sudo docker rm -f vendix-backend || true
-            start_api all
-            echo "⏳ Waiting for API fallback to start (40s)..."
-            sleep 40
-            if sudo docker ps --filter "name=^/vendix-backend\$" --filter "status=running" -q | grep -q .; then
-              echo "✅ API corriendo en modo 'all' (comportamiento histórico)."
+          if [ "\$WORKER_UP" != "1" ]; then
+            # Sin worker nadie ejecutaria cobros, recordatorios, provisiones ni
+            # reintentos, y en silencio. Se relanza el worker anterior y el deploy
+            # termina en rojo. NO se toca la API (no hay fallback a rol 'all':
+            # duplicaria los @Cron al convivir con el worker).
+            sudo docker rm -f vendix-backend-worker || true
+            if [ -n "\$PREV_WORKER_IMAGE" ]; then
+              echo "↩️  Relaunching previous worker image: \$PREV_WORKER_IMAGE"
+              start_worker "\$PREV_WORKER_IMAGE" || echo "❌ Could not relaunch the previous worker."
             else
-              echo "❌ API is NOT running — checking logs:"
-              sudo docker logs vendix-backend --tail 50
-              exit 1
+              echo "❌ There was no previous worker image to relaunch."
             fi
+            echo "❌ New worker did not come up — failing the deploy (API \$ACTIVE_NAME keeps serving)."
+            exit 1
           fi
 
-          echo "🌱 Running production seeds in isolated container..."
-          sudo docker run --rm \
-            --memory=512m \
-            --network=host \
-            --env-file /opt/vendix/.env \
-            -e DATABASE_URL="\$DATABASE_URL" \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            sh -c "npx --yes tsx prisma/seed-production.ts"
-          echo "✅ Seeds completed!"
+          echo "🧵 Split API/worker activo: la API (\$ACTIVE_NAME) corre sin workers ni @Cron."
+          sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 
           echo "🧹 Cleaning up old images..."
           sudo docker image prune -f
@@ -434,4 +574,4 @@ jobs:
         ENDSSH
 
         echo "🎉 Backend deployment to EC2 completed successfully!"
-        echo "🌐 Backend URL: http://$EC2_PUBLIC_IP:3000"
+        echo "🌐 Backend URL: https://api.vendix.online (API bound to 127.0.0.1 on the active blue/green slot)"
