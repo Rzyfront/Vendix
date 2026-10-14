@@ -214,7 +214,7 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     width_mm: 215.9,
     printable_width_mm: 205.9,
     height_mm: 139.7,
-    margin_mm: 4.94, // 14 pt del builder — más estrecho a propósito
+    margin_mm: 4.94, // histórico 14 pt; el builder hoy usa max(14 pt, 5 mm)
     font_scale: 0.66,
     is_roll: false,
     qr_min_side_mm: QR_MIN_SIDE_MM,
@@ -229,7 +229,7 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     width_mm: 80,
     printable_width_mm: 72,
     height_mm: null, // se mide por documento
-    margin_mm: 3.53, // 10 pt del builder
+    margin_mm: 3.53, // histórico; el builder deriva el lateral de resolvePrintGeometry (4 mm)
     font_scale: 0.82,
     is_roll: true,
     qr_min_side_mm: QR_MIN_SIDE_MM,
@@ -244,7 +244,7 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     width_mm: 58,
     printable_width_mm: 48,
     height_mm: null,
-    margin_mm: 2.47, // 7 pt del builder
+    margin_mm: 2.47, // histórico; el builder deriva el lateral de resolvePrintGeometry (5 mm)
     font_scale: 0.74,
     is_roll: true,
     qr_min_side_mm: QR_MIN_SIDE_MM,
