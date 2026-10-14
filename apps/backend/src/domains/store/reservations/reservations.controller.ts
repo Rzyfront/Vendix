@@ -98,6 +98,7 @@ export class ReservationsController {
       {
         provider_id: query.provider_id,
         product_variant_id: query.product_variant_id,
+        station_id: query.station_id,
         include_booked: query.include_booked,
       },
     );
@@ -598,13 +599,7 @@ export class ReservationsController {
   @Delete(':id')
   @Permissions('store:reservations:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    const booking = await this.reservationsService.findOne(id);
-    if (booking.status !== 'pending') {
-      throw new BadRequestException(
-        'Solo se pueden eliminar reservas en estado pendiente',
-      );
-    }
-    await this.reservationsService['prisma'].bookings.delete({ where: { id } });
+    await this.reservationsService.deleteBooking(id);
     return this.responseService.success(null, 'Reserva eliminada exitosamente');
   }
 }

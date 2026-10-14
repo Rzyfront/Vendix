@@ -1099,6 +1099,14 @@ export class UpdateProductDto {
   @Type(() => Boolean)
   requires_booking?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Indica que el servicio requiere asignación de estación física para reservar o iniciar atención.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_station?: boolean;
+
   @IsOptional()
   @IsEnum(BookingMode)
   booking_mode?: BookingMode;

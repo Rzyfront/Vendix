@@ -12,6 +12,7 @@ import {
   RequestContextService,
   RequestContext,
 } from '../context/request-context.service';
+import { redactSensitiveRoute } from '../utils/sensitive-route.util';
 
 @Injectable()
 export class RequestContextInterceptor implements NestInterceptor {
@@ -103,7 +104,7 @@ export class RequestContextInterceptor implements NestInterceptor {
     }
 
     this.logger.debug(
-      `Context Initialized: store_id=${contextObj.store_id}, user_id=${contextObj.user_id}, request_id=${contextObj.request_id}, path=${req.originalUrl}`,
+      `Context Initialized: store_id=${contextObj.store_id}, user_id=${contextObj.user_id}, request_id=${contextObj.request_id}, path=${redactSensitiveRoute(req.originalUrl)}`,
     );
 
     // Always run within AsyncLocalStorage to ensure a request-safe context

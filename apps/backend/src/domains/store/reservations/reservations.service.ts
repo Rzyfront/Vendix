@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -22,6 +23,8 @@ import { PriceResolverService } from '../products/services/price-resolver.servic
 import { TablesService } from '../tables/tables.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 
 @Injectable()
 export class ReservationsService {
@@ -38,6 +41,7 @@ export class ReservationsService {
     private readonly tableSessionsService: TableSessionsService,
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     private readonly orderHistory: OrderHistoryService,
+    @Optional() private readonly allocationCoordinator?: ServiceAllocationCoordinator,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -77,6 +81,7 @@ export class ReservationsService {
         service_duration_minutes: true,
         base_price: true,
         is_consultation: true,
+        requires_station: true,
         consultation_template_id: true,
         preconsultation_template_id: true,
         product_images: {
@@ -162,6 +167,7 @@ export class ReservationsService {
         id: true,
         name: true,
         requires_booking: true,
+        requires_station: true,
         service_duration_minutes: true,
         booking_mode: true,
         base_price: true,
@@ -203,6 +209,10 @@ export class ReservationsService {
       throw new BadRequestException(
         'Este producto/servicio no requiere reserva',
       );
+    }
+
+    if (product.requires_station && !this.allocationCoordinator) {
+      throw new VendixHttpException(ErrorCodes.STATION_012, 'No se pudo validar la asignación requerida para este servicio.');
     }
 
     // 2. Resolver provider_id
@@ -306,7 +316,7 @@ export class ReservationsService {
     //    storefront antes de la reserva), no tocamos orders aquí: la
     //    reserva solo apunta a la fila existente.
     let preCreatedOrder: { id: number } | null = null;
-    if (!dto.order_id && !dto.skip_order_creation) {
+    if (!dto.order_id && !dto.skip_order_creation && !product.requires_station) {
       const priceResult = this.priceResolverService.resolvePrice({
         product: {
           base_price: Number(product.base_price),
@@ -416,6 +426,20 @@ export class ReservationsService {
             include: this.BOOKING_INCLUDE,
           });
 
+          if (product.requires_station) {
+            await this.allocationCoordinator!.allocateBooking(tx, {
+              storeId: store_id,
+              bookingId: created.id,
+              productId: dto.product_id,
+              productVariantId: dto.product_variant_id,
+              stationId: dto.station_id,
+              providerId: resolvedProviderId,
+              date: dto.date,
+              startTime: dto.start_time,
+              endTime: dto.end_time,
+            });
+          }
+
           return await this.mapBooking(created);
         },
         { isolationLevel: 'Serializable' },
@@ -443,6 +467,58 @@ export class ReservationsService {
         }
       }
       throw err;
+    }
+
+    // Station-required services need a committed booking allocation before
+    // the order writer is allowed to persist the service line. OrdersService
+    // validates and links this booking inside its own order transaction.
+    if (product.requires_station && !dto.order_id && !dto.skip_order_creation && booking) {
+      const priceResult = this.priceResolverService.resolvePrice({
+        product: {
+          base_price: Number(product.base_price), is_on_sale: product.is_on_sale,
+          sale_price: product.sale_price != null ? Number(product.sale_price) : null,
+          track_inventory: product.track_inventory,
+        },
+        variant: selectedVariant ? {
+          price_override: selectedVariant.price_override != null ? Number(selectedVariant.price_override) : null,
+          is_on_sale: selectedVariant.is_on_sale,
+          sale_price: selectedVariant.sale_price != null ? Number(selectedVariant.sale_price) : null,
+          track_inventory_override: selectedVariant.track_inventory_override,
+        } : undefined,
+      });
+      try {
+        const createdOrder = await this.ordersService.create({
+          customer_id: dto.customer_id,
+          items: [{
+            product_id: dto.product_id,
+            product_variant_id: dto.product_variant_id,
+            booking_id: booking.id,
+            product_name: product.name || 'Servicio',
+            quantity: 1,
+            unit_price: priceResult.unitPrice,
+            total_price: priceResult.unitPrice,
+          }],
+          subtotal: priceResult.unitPrice,
+          total_amount: priceResult.unitPrice,
+          internal_notes: `Reserva ${booking_number}`,
+          channel: dto.channel || 'pos',
+          skip_schedule_validation: true,
+        } as any, context?.user_id);
+        booking = await this.findOne(booking.id);
+        if (!booking.order_id && createdOrder?.id) {
+          throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'La orden no quedó vinculada a la reserva asignada.');
+        }
+      } catch (error) {
+        try {
+          await this.prisma.$transaction(async (tx) => {
+            await this.allocationCoordinator!.releaseBooking(tx, store_id, booking!.id, 'cancelled');
+            await tx.bookings.update({ where: { id: booking!.id }, data: { status: booking_status_enum.cancelled, updated_at: new Date() } });
+          });
+        } catch (compensationError) {
+          this.logger.error(`Failed to release station booking ${booking.id} after order creation failed: ${compensationError instanceof Error ? compensationError.message : 'unknown error'}`);
+        }
+        throw error;
+      }
     }
 
     // 7. Marcar la mesa como reservada si se asignó una tabla
@@ -487,6 +563,8 @@ export class ReservationsService {
     notes?: string;
     cart_item_id?: string;
     order_id?: number;
+    station_id?: number;
+    provider_id?: number;
   }) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -500,6 +578,7 @@ export class ReservationsService {
         id: true,
         name: true,
         requires_booking: true,
+        requires_station: true,
         booking_mode: true,
       },
     });
@@ -512,6 +591,9 @@ export class ReservationsService {
       throw new BadRequestException(
         'Este producto/servicio no requiere reserva',
       );
+    }
+    if (product.requires_station && !this.allocationCoordinator) {
+      throw new VendixHttpException(ErrorCodes.STATION_012, 'No se pudo validar la asignación requerida para este servicio.');
     }
 
     if (dto.product_variant_id) {
@@ -545,8 +627,9 @@ export class ReservationsService {
 
     const booking_number = await this.generateBookingNumber(store_id, dto.date);
 
-    const booking = await this.prisma.bookings.create({
-      data: {
+    const booking = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.bookings.create({
+        data: {
         store_id,
         customer_id: dto.customer_id,
         product_id: dto.product_id,
@@ -566,8 +649,25 @@ export class ReservationsService {
         expires_at: expiresAt,
         created_by_user_id: context?.user_id,
         updated_at: new Date(),
-      },
-      include: this.BOOKING_INCLUDE,
+        },
+        include: this.BOOKING_INCLUDE,
+      });
+      if (product.requires_station) {
+        await this.allocationCoordinator!.allocateBooking(tx, {
+          storeId: store_id,
+          bookingId: created.id,
+          productId: dto.product_id,
+          productVariantId: dto.product_variant_id,
+          stationId: dto.station_id,
+          providerId: dto.provider_id,
+          date: dto.date,
+          startTime: dto.start_time,
+          endTime: dto.end_time,
+          expiresAt,
+          state: 'held',
+        });
+      }
+      return created;
     });
 
     return await this.mapBooking(booking);
@@ -576,23 +676,33 @@ export class ReservationsService {
   async confirmHold(id: number) {
     const booking = await this.findOne(id);
 
-    if (booking.expires_at && new Date(booking.expires_at) < new Date()) {
-      await this.prisma.bookings.delete({ where: { id } });
-      throw new BadRequestException(
-        'La reserva temporal ha expirado. Por favor selecciona un horario nuevamente.',
-      );
+    const product = await this.prisma.products.findFirst({
+      where: { id: booking.product_id },
+      select: { requires_station: true },
+    });
+    if (product?.requires_station && !this.allocationCoordinator) {
+      throw new VendixHttpException(ErrorCodes.STATION_012);
     }
 
-    const updated = await this.mapBooking(
-      await this.prisma.bookings.update({
-        where: { id },
-        data: {
-          expires_at: null,
-          updated_at: new Date(),
-        },
-        include: this.BOOKING_INCLUDE,
-      }),
-    );
+    if (booking.expires_at && new Date(booking.expires_at) < new Date()) {
+      await this.prisma.$transaction(async (tx) => {
+        if (product?.requires_station) await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'expired');
+        await tx.bookings.update({ where: { id }, data: { status: booking_status_enum.cancelled, expires_at: null, updated_at: new Date() } });
+      });
+      throw new VendixHttpException(product?.requires_station ? ErrorCodes.STATION_011 : ErrorCodes.BOOK_CONFIRM_001);
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (product?.requires_station) {
+        const allocation = await tx.service_allocations.findFirst({
+          where: { store_id: booking.store_id, booking_id: id, state: 'held', expires_at: { gt: new Date() } },
+          select: { id: true },
+        });
+        if (!allocation) throw new VendixHttpException(ErrorCodes.STATION_011);
+        await tx.service_allocations.update({ where: { id: allocation.id }, data: { state: 'confirmed', expires_at: null, updated_at: new Date() } });
+      }
+      return this.mapBooking(await tx.bookings.update({ where: { id }, data: { expires_at: null, updated_at: new Date() }, include: this.BOOKING_INCLUDE }));
+    });
 
     return updated;
   }
@@ -969,18 +1079,43 @@ export class ReservationsService {
       booking.id,
     );
 
-    const updated = await this.mapBooking(
-      await this.prisma.bookings.update({
+    const product = await this.prisma.products.findFirst({
+      where: { id: booking.product_id },
+      select: { requires_station: true },
+    });
+    if (product?.requires_station && !this.allocationCoordinator) {
+      throw new VendixHttpException(ErrorCodes.STATION_012);
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (product?.requires_station) {
+        await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'cancelled');
+      }
+      const saved = await tx.bookings.update({
         where: { id },
-        data: {
-          date: new Date(dto.date),
-          start_time: dto.start_time,
-          end_time: dto.end_time,
-          updated_at: new Date(),
-        },
+        data: { date: new Date(dto.date), start_time: dto.start_time, end_time: dto.end_time, updated_at: new Date() },
         include: this.BOOKING_INCLUDE,
-      }),
-    );
+      });
+      if (product?.requires_station) {
+        const oldAllocation = await tx.service_allocations.findFirst({
+          where: { store_id: booking.store_id, booking_id: id, state: 'cancelled' },
+          select: { station_id: true, provider_id: true },
+          orderBy: { id: 'desc' },
+        });
+        await this.allocationCoordinator!.allocateBooking(tx, {
+          storeId: booking.store_id,
+          bookingId: id,
+          productId: booking.product_id,
+          productVariantId: booking.product_variant_id,
+          stationId: dto.station_id ?? oldAllocation?.station_id,
+          providerId: booking.provider_id ?? oldAllocation?.provider_id,
+          date: dto.date,
+          startTime: dto.start_time,
+          endTime: dto.end_time,
+          excludeBookingId: id,
+        });
+      }
+      return this.mapBooking(saved);
+    });
 
     // Side-effect opcional: si el cliente lo pide (`reopen_order=true` desde
     // ecommerce) y el pedido asociado está cancelado, lo reactivamos a
@@ -1158,27 +1293,30 @@ export class ReservationsService {
       );
     }
 
-    const updated = await this.mapBooking(
-      await this.prisma.bookings.update({
+    const product = await this.prisma.products.findFirst({ where: { id: booking.product_id }, select: { requires_station: true } });
+    if (product?.requires_station && !this.allocationCoordinator) throw new VendixHttpException(ErrorCodes.STATION_012);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (product?.requires_station) await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, booking.id, 'cancelled');
+      const saved = await tx.bookings.update({
         where: { id: booking.id },
-        data: {
-          date: request.requested_date,
-          start_time: request.requested_start_time,
-          end_time: request.requested_end_time,
-          updated_at: new Date(),
-        },
+        data: { date: request.requested_date, start_time: request.requested_start_time, end_time: request.requested_end_time, updated_at: new Date() },
         include: this.BOOKING_INCLUDE,
-      }),
-    );
-
-    await this.prisma.booking_reschedule_requests.update({
-      where: { id: requestId },
-      data: {
-        status: 'approved',
-        decided_by_user_id: ctx.decidedByUserId,
-        decided_at: new Date(),
-        decision_reason: ctx.decisionReason ?? null,
-      },
+      });
+      if (product?.requires_station) {
+        const previous = await tx.service_allocations.findFirst({ where: { store_id: booking.store_id, booking_id: booking.id, state: 'cancelled' }, orderBy: { id: 'desc' }, select: { station_id: true } });
+        await this.allocationCoordinator!.allocateBooking(tx, {
+          storeId: booking.store_id, bookingId: booking.id, productId: booking.product_id,
+          productVariantId: booking.product_variant_id, stationId: previous?.station_id,
+          providerId: booking.provider_id, date: this.formatDateOnly(request.requested_date),
+          startTime: request.requested_start_time, endTime: request.requested_end_time,
+          excludeBookingId: booking.id,
+        });
+      }
+      await tx.booking_reschedule_requests.update({
+        where: { id: requestId },
+        data: { status: 'approved', decided_by_user_id: ctx.decidedByUserId, decided_at: new Date(), decision_reason: ctx.decisionReason ?? null },
+      });
+      return this.mapBooking(saved);
     });
 
     this.eventEmitter.emit('booking.rescheduled', {
@@ -1657,16 +1795,38 @@ export class ReservationsService {
       );
     }
 
-    return await this.mapBooking(
-      await this.prisma.bookings.update({
+    const product = await this.prisma.products.findFirst({
+      where: { id: booking.product_id },
+      select: { requires_station: true },
+    });
+    if (product?.requires_station && !this.allocationCoordinator) {
+      throw new VendixHttpException(ErrorCodes.STATION_012);
+    }
+    return this.prisma.$transaction(async (tx) => {
+      if (product?.requires_station && ['cancelled', 'no_show', 'completed'].includes(targetStatus)) {
+        await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, targetStatus === 'cancelled' ? 'cancelled' : 'released');
+      }
+      return this.mapBooking(await tx.bookings.update({
         where: { id },
-        data: {
-          status: targetStatus as booking_status_enum,
-          updated_at: new Date(),
-        },
+        data: { status: targetStatus as booking_status_enum, updated_at: new Date() },
         include: this.BOOKING_INCLUDE,
-      }),
-    );
+      }));
+    });
+  }
+
+  async deleteBooking(id: number) {
+    const booking = await this.findOne(id);
+    if (booking.status !== 'pending') throw new BadRequestException('Solo se pueden eliminar reservas en estado pendiente');
+    const product = await this.prisma.products.findFirst({ where: { id: booking.product_id }, select: { requires_station: true } });
+    if (product?.requires_station && !this.allocationCoordinator) throw new VendixHttpException(ErrorCodes.STATION_012);
+    await this.prisma.$transaction(async (tx) => {
+      if (product?.requires_station) {
+        await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'cancelled');
+        await tx.bookings.update({ where: { id }, data: { status: booking_status_enum.cancelled, expires_at: null, updated_at: new Date() } });
+      } else {
+        await tx.bookings.delete({ where: { id } });
+      }
+    });
   }
 
   /**

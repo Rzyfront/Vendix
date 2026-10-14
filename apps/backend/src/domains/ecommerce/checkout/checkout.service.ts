@@ -211,6 +211,16 @@ export class CheckoutService {
     });
   }
 
+  private async cancelCheckoutBookings(bookingIds: number[]): Promise<void> {
+    for (const bookingId of bookingIds) {
+      try {
+        await this.reservationsService.cancel(bookingId);
+      } catch (error) {
+        this.logger.error(`Could not release booking ${bookingId} during checkout compensation: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
+    }
+  }
+
   /**
    * Paso 14 — precio de tarifa por tipo, misma selección del cotizador
    * (`shipping-calculator.service.ts`): `free` ⇒ 0; `weight_based` ⇒ base +
@@ -1719,6 +1729,37 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
     }
 
+    // A station-required service is a scheduled sale: every cart unit needs
+    // exactly one matching booking in this checkout request. Validate the
+    // cart/booking relationship before creating an order or payment.
+    const requiredServiceUnits = new Map<string, number>();
+    const cartUnits = new Map<string, number>();
+    for (const item of cart_items) {
+      const key = `${item.product_id}:${item.product_variant_id ?? ''}`;
+      cartUnits.set(key, (cartUnits.get(key) ?? 0) + Number(item.quantity));
+      if (item.product?.requires_station) {
+        requiredServiceUnits.set(key, (requiredServiceUnits.get(key) ?? 0) + Number(item.quantity));
+      }
+    }
+    const submittedBookingUnits = new Map<string, number>();
+    for (const booking of dto.bookings ?? []) {
+      const key = `${booking.product_id}:${booking.product_variant_id ?? ''}`;
+      submittedBookingUnits.set(key, (submittedBookingUnits.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of submittedBookingUnits) {
+      if (count > (cartUnits.get(key) ?? 0)) {
+        throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'La reserva no corresponde a una unidad del carrito.');
+      }
+    }
+    for (const [key, units] of requiredServiceUnits) {
+      if ((submittedBookingUnits.get(key) ?? 0) !== units) {
+        throw new VendixHttpException(
+          ErrorCodes.SERVICE_BOOKING_001,
+          'Cada unidad de servicio con estación requiere una reserva compatible antes del pago.',
+        );
+      }
+    }
+
     const cart_currency =
       cart?.currency || (await this.settingsService.getStoreCurrency());
 
@@ -2275,6 +2316,30 @@ export class CheckoutService {
       guest_customer,
       resolved_customer_id,
     );
+    // Reserve all submitted appointments before order/payment creation. Any
+    // allocation error now aborts checkout without leaving a payable order.
+    const createdBookingIds: number[] = [];
+    try {
+      for (const booking of dto.bookings ?? []) {
+        const created = await this.reservationsService.create({
+          customer_id: resolved_customer_id ?? undefined,
+          product_id: booking.product_id,
+          product_variant_id: booking.product_variant_id,
+          station_id: booking.station_id,
+          provider_id: booking.provider_id,
+          date: booking.date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+          channel: order_channel_enum.ecommerce,
+          skip_order_creation: true,
+        });
+        createdBookingIds.push(created.id);
+      }
+    } catch (error) {
+      await this.cancelCheckoutBookings(createdBookingIds);
+      throw error;
+    }
+
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
       data: {
@@ -2375,7 +2440,29 @@ export class CheckoutService {
       include: {
         order_items: true,
       },
+    }).catch(async (error) => {
+      await this.cancelCheckoutBookings(createdBookingIds);
+      throw error;
     });
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        for (const bookingId of createdBookingIds) {
+          const linked = await tx.bookings.updateMany({
+            where: { id: bookingId, store_id: order.store_id, order_id: null },
+            data: { order_id: order.id, updated_at: new Date() },
+          });
+          if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
+        }
+      });
+    } catch (error) {
+      await this.prisma.orders.updateMany({
+        where: { id: order.id, store_id: order.store_id },
+        data: { state: 'cancelled', updated_at: new Date() },
+      });
+      await this.cancelCheckoutBookings(createdBookingIds);
+      throw error;
+    }
 
     // Persist applied promotions + coupon usage. We do this OUTSIDE the order
     // create call so the snapshot/coupon flow doesn't tangle with order_items
@@ -2461,6 +2548,13 @@ export class CheckoutService {
           bank_account_id: resolved_bank_account_id,
         },
         select: { id: true },
+      }).catch(async (error) => {
+        await this.prisma.orders.updateMany({
+          where: { id: order.id, store_id: order.store_id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+        await this.cancelCheckoutBookings(createdBookingIds);
+        throw error;
       });
     }
     const payment_id_with_receipt: number | null =
@@ -2512,34 +2606,7 @@ export class CheckoutService {
       }
     }
 
-    // Create bookings for bookable services
-    if (dto.bookings && dto.bookings.length > 0) {
-      const user_id = RequestContextService.getUserId();
-      for (const booking of dto.bookings) {
-        try {
-          await this.reservationsService.create({
-            customer_id: user_id!,
-            product_id: booking.product_id,
-            product_variant_id: booking.product_variant_id,
-            date: booking.date,
-            start_time: booking.start_time,
-            end_time: booking.end_time,
-            channel: order_channel_enum.ecommerce,
-            order_id: order.id,
-            skip_availability_check: false,
-          });
-          this.logger.log(
-            `Booking created for product ${booking.product_id} linked to order ${order.id}`,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to create booking for product ${booking.product_id}: ${error.message}`,
-          );
-          // Don't fail the entire checkout if a booking fails
-          // The order is already created; booking can be retried manually
-        }
-      }
-    }
+    // Bookings were allocated before order creation and linked atomically above.
 
     // pending_shipping_assignment: nunca facturar DIAN automáticamente — el
     // envío ($0 en este punto) todavía no está acordado con el comprador, y

@@ -125,14 +125,15 @@ export class BusinessHoursService {
    */
   async loadStoreHours(
     storeId: number,
+    prisma: StorePrismaService = this.prisma,
   ): Promise<Map<number, { start_time: string; end_time: string }>> {
     // Try the POS settings JSON first (single source of truth).
-    const fromPos = await this.loadStoreHoursFromPosSettings(storeId);
+    const fromPos = await this.loadStoreHoursFromPosSettings(storeId, prisma);
     if (fromPos.size > 0) return fromPos;
 
     // Fallback: legacy store_business_hours table for stores that
     // haven't been migrated to the unified POS settings yet.
-    const rows = await this.prisma.store_business_hours.findMany({
+    const rows = await prisma.store_business_hours.findMany({
       where: { store_id: storeId, is_active: true },
       select: { day_of_week: true, start_time: true, end_time: true },
     });
@@ -161,13 +162,14 @@ export class BusinessHoursService {
    */
   async loadStoreWindows(
     storeId: number,
+    prisma: StorePrismaService = this.prisma,
   ): Promise<Map<number, Array<{ start_time: string; end_time: string }>>> {
     // Try the POS settings JSON first (single source of truth).
-    const fromPos = await this.loadStoreWindowsFromPosSettings(storeId);
+    const fromPos = await this.loadStoreWindowsFromPosSettings(storeId, prisma);
     if (fromPos.size > 0) return fromPos;
 
     // Fallback: legacy store_business_hours table.
-    const rows = await this.prisma.store_business_hours.findMany({
+    const rows = await prisma.store_business_hours.findMany({
       where: { store_id: storeId, is_active: true },
       select: { day_of_week: true, start_time: true, end_time: true },
       orderBy: [{ day_of_week: 'asc' }, { start_time: 'asc' }],
@@ -196,8 +198,9 @@ export class BusinessHoursService {
    */
   private async loadStoreWindowsFromPosSettings(
     storeId: number,
+    prisma: StorePrismaService = this.prisma,
   ): Promise<Map<number, Array<{ start_time: string; end_time: string }>>> {
-    const row = await this.prisma.store_settings.findUnique({
+    const row = await prisma.store_settings.findUnique({
       where: { store_id: storeId },
       select: { settings: true },
     });
@@ -271,8 +274,9 @@ export class BusinessHoursService {
    */
   private async loadStoreHoursFromPosSettings(
     storeId: number,
+    prisma: StorePrismaService = this.prisma,
   ): Promise<Map<number, { start_time: string; end_time: string }>> {
-    const row = await this.prisma.store_settings.findUnique({
+    const row = await prisma.store_settings.findUnique({
       where: { store_id: storeId },
       select: { settings: true },
     });

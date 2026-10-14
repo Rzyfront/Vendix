@@ -3912,6 +3912,16 @@ export class ProductsService {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
 
+      const effectiveProductType =
+        sanitizedDto.product_type ?? existingProduct.product_type;
+      const effectiveRequiresStation =
+        sanitizedDto.requires_station ?? existingProduct.requires_station;
+      if (effectiveRequiresStation && effectiveProductType !== ProductType.SERVICE) {
+        throw new BadRequestException(
+          'Solo los productos de tipo servicio pueden requerir una estación',
+        );
+      }
+
       // Cross-cutting gate: only stores whose industries support ingredients
       // may set is_ingredient=true. Gate against the product's own store, then
       // re-sanitize so neutralized sale fields stay coherent if it flipped off.

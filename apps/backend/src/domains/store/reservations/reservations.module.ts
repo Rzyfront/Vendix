@@ -11,6 +11,7 @@ import { AppointmentQueueModule } from './appointment-queue/appointment-queue.mo
 import { BusinessHoursService } from './business-hours/business-hours.service';
 import { BusinessHoursController } from './business-hours/business-hours.controller';
 import { ReservationsController } from './reservations.controller';
+import { StationAvailabilityController } from './station-availability.controller';
 import { ProvidersService } from './providers/providers.service';
 import { ProvidersController } from './providers/providers.controller';
 import { ProviderScheduleService } from './providers/provider-schedule.service';
@@ -23,6 +24,7 @@ import { S3Module } from '@common/services/s3.module';
 import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
+import { ServiceAllocationModule } from './service-allocation.module';
 
 @Module({
   imports: [
@@ -34,10 +36,12 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     TablesModule,
     AppointmentQueueModule,
     OrderHistoryModule,
+    ServiceAllocationModule,
   ],
   controllers: [
     ProvidersController,
     ReservationsController,
+    StationAvailabilityController,
     BusinessHoursController,
   ],
   providers: [

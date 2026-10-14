@@ -838,8 +838,11 @@ export class TableSessionsService {
         id: number;
         state: string;
         active_financial_split_id: number | null;
+        service_session_id: number | null;
+        currency: string | null;
+        tip_amount: Prisma.Decimal | number | null;
       }> = await tx.$queryRaw`
-        SELECT id, state, active_financial_split_id FROM orders
+        SELECT id, state, active_financial_split_id, service_session_id, currency, tip_amount FROM orders
         WHERE id = ${session.order_id} AND store_id = ${storeId}
         FOR UPDATE
       `;
@@ -983,6 +986,7 @@ export class TableSessionsService {
         const createdItem = await tx.order_items.create({
           data: {
             order_id: session.order_id,
+            service_session_id: lockedOrders[0].service_session_id,
             product_id: item.product_id,
             product_variant_id: item.product_variant_id ?? null,
             product_name: product.name,
@@ -1192,12 +1196,39 @@ export class TableSessionsService {
         return acc + Number(it.tax_amount_item ?? 0) * multiplier;
       }, 0);
 
+      const nextGrandTotal = subtotal + tax;
+      const serviceSessionId = lockedOrders[0].service_session_id;
+      if (serviceSessionId != null) {
+        const budget = await tx.service_budgets.findFirst({
+          where: { store_id: storeId, session_id: serviceSessionId },
+          orderBy: { version: 'desc' },
+          select: { amount: true, currency: true },
+        });
+        // A service session must have its initialized baseline budget before
+        // any table/QR writer can raise the order total. This table writer's
+        // grand_total deliberately excludes tips, so compare it as-is.
+        if (
+          !budget ||
+          budget.currency !== lockedOrders[0].currency ||
+          new Prisma.Decimal(nextGrandTotal).greaterThan(budget.amount)
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_001,
+            'El total supera el límite vigente o no hay un presupuesto válido para esta sesión de servicio.',
+            { order_id: session.order_id, service_session_id: serviceSessionId },
+          );
+        }
+      }
+
       await tx.orders.update({
         where: { id: session.order_id },
         data: {
           subtotal_amount: new Prisma.Decimal(subtotal),
           tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(subtotal + tax),
+          grand_total: new Prisma.Decimal(nextGrandTotal),
+          ...(serviceSessionId != null
+            ? { service_version: { increment: 1 } }
+            : {}),
           updated_at: new Date(),
         },
       });
@@ -2817,6 +2848,8 @@ export class TableSessionsService {
               id: true,
               order_number: true,
               store_id: true,
+              service_session_id: true,
+              currency: true,
               subtotal_amount: true,
               tax_amount: true,
               discount_amount: true,
@@ -2875,6 +2908,33 @@ export class TableSessionsService {
             Number(payment.orders.total_paid || 0) >=
               Number(payment.orders.grand_total || 0),
         };
+      }
+
+      if (payment.orders.service_session_id != null) {
+        const budget = await tx.service_budgets.findFirst({
+          where: {
+            store_id: storeId,
+            session_id: payment.orders.service_session_id,
+          },
+          orderBy: { version: 'desc' },
+          select: { amount: true, currency: true },
+        });
+        const authorizedTotal = new Prisma.Decimal(payment.orders.grand_total)
+          .minus(payment.orders.tip_amount ?? 0);
+        if (
+          !budget ||
+          budget.currency !== payment.orders.currency ||
+          authorizedTotal.greaterThan(budget.amount)
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_001,
+            'No se puede confirmar el pago: el total supera el presupuesto vigente o no hay un presupuesto válido.',
+            {
+              order_id: payment.orders.id,
+              service_session_id: payment.orders.service_session_id,
+            },
+          );
+        }
       }
 
       // 5. Transition + balance update.
@@ -2948,7 +3008,7 @@ export class TableSessionsService {
         newTotalPaid: orderTotalPaid,
         shouldProject: orderTotalPaid >= Number(order.grand_total || 0),
       };
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     // The payment and order balance are committed before B.1 opens its own
     // transaction. A succeeded retry repairs a missed projection; B.1 keeps
