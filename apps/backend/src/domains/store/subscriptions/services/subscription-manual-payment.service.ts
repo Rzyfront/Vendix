@@ -30,6 +30,8 @@ export class SubscriptionManualPaymentService {
       recordedByUserId: number;
       /** Base period end handed to the reactivation seam (optional). */
       periodEnd?: Date;
+      /** Explicit period start anchor; only honored together with periodEnd. */
+      periodStart?: Date;
       /** Plan whose billing cycle governs the derived period (optional). */
       planId?: number;
       /** Merged into payment metadata and the `manual_payment` event payload. */
@@ -126,6 +128,7 @@ export class SubscriptionManualPaymentService {
             reason: `manual_payment_invoice_${invoiceId}`,
             triggeredByUserId: opts.recordedByUserId,
             periodEnd: opts.periodEnd,
+            periodStart: opts.periodStart,
             planId: opts.planId,
             payload: {
               manual_payment: true,

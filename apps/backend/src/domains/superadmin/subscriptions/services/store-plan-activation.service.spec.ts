@@ -325,6 +325,8 @@ describe('StorePlanActivationService', () => {
       expect(upd.data.next_billing_at.getTime()).toBe(
         upd.data.current_period_end.getTime(),
       );
+      const arg = h.manual.recordManualPayment.mock.calls[0][1];
+      expect(arg.periodStart.toISOString()).toBe(start.toISOString());
     });
 
     it('starts_at out of range: rejects and never opens the transaction', async () => {
@@ -428,6 +430,7 @@ describe('StorePlanActivationService', () => {
       const res = await h.svc.activatePlan(1, { plan_id: 7 }, 99);
       const arg = h.manual.recordManualPayment.mock.calls[0][1];
       expect(arg.extraMetadata.partial_payment).toBeUndefined();
+      expect(arg.periodStart).toBeUndefined();
       expect(res).toHaveProperty('period_start');
       expect(res).toHaveProperty('period_end');
     });

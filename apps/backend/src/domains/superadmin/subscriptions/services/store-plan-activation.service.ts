@@ -295,6 +295,7 @@ export class StorePlanActivationService {
               : new Prisma.Decimal(invoice.total),
           recordedByUserId: actorUserId,
           periodEnd: invoice.period_end,
+          ...(dto.starts_at ? { periodStart } : {}),
           planId: plan.id,
           extraMetadata,
         });
@@ -303,6 +304,7 @@ export class StorePlanActivationService {
           reason: 'superadmin_plan_activation',
           triggeredByUserId: actorUserId,
           periodEnd,
+          ...(dto.starts_at ? { periodStart } : {}),
           planId: plan.id,
           payload: { ...extraMetadata, reference: dto.reference ?? null },
         });
