@@ -70,7 +70,12 @@ export class CashSettlementService {
     private readonly sessions: SessionsService,
   ) {}
 
-  /** Persists COD cash in the caller's stop transaction under the close lock. */
+  /**
+   * @deprecated D8: el recaudo en ruta ya NO registra movimiento de caja por
+   * parada; los movimientos se registran al cierre de la planilla contra la
+   * sesión elegida (`recordRouteCloseMovements`). Sin callers de producción.
+   * Se conserva solo por compatibilidad con specs/rutas en vuelo.
+   */
   async recordCashMovement(
     tx: any,
     input: PaymentReceivedInput,
@@ -118,13 +123,154 @@ export class CashSettlementService {
     };
   }
 
+  /**
+   * ¿La tienda exige caja? Misma lectura que `SessionsService.assertSessionForSales`
+   * (`pos.cash_register.enabled`): sin usuario esa función lanza
+   * CASH_SESSION_REQUIRED_001 si y solo si la caja está habilitada, así que se
+   * reutiliza sin duplicar la lectura de settings ni tocar el módulo.
+   */
+  async isCashRegisterRequired(): Promise<boolean> {
+    try {
+      await this.sessions.assertSessionForSales();
+      return false;
+    } catch (error) {
+      if (
+        error instanceof VendixHttpException &&
+        error.errorCode === ErrorCodes.CASH_SESSION_REQUIRED_001.code
+      ) {
+        return true;
+      }
+      throw error;
+    }
+  }
+
+  /** Sesiones de caja abiertas de la tienda (picker del cierre de planilla). */
+  async listOpenSessions(store_id: number) {
+    const rows = await this.prisma.cash_register_sessions.findMany({
+      where: { store_id, status: 'open' },
+      orderBy: { opened_at: 'desc' },
+      select: {
+        id: true,
+        cash_register_id: true,
+        opened_at: true,
+        register: { select: { id: true, name: true } },
+        opened_by_user: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+      },
+    });
+    return rows.map((r: any) => ({
+      id: r.id,
+      register_id: r.cash_register_id,
+      register_name: r.register?.name ?? null,
+      opened_by: {
+        id: r.opened_by_user?.id,
+        name:
+          `${r.opened_by_user?.first_name ?? ''} ${r.opened_by_user?.last_name ?? ''}`.trim(),
+      },
+      opened_at: r.opened_at,
+    }));
+  }
+
+  /**
+   * D10: asienta el recaudo de la ruta en la sesión elegida, un movimiento
+   * `sale` por método de pago, dentro de la tx de cierre (la sesión ya viene
+   * bloqueada FOR UPDATE por el llamador).
+   *
+   * - Solo paradas delivered/partial, no prepagas, con collected+anticipo > 0.
+   * - Excluye paradas con movimiento legado `dispatch_route:{id}:stop:{stopId}`
+   *   (rutas en vuelo con código previo).
+   * - Idempotente por `reference` (`dispatch_route:{id}:close:{method}`).
+   * - NO emite `cash_register.movement`: el listener solo entiende
+   *   cash_in/cash_out y trataría un `sale` como retiro; el asiento del
+   *   recaudo ya lo genera `payment.received` (igual que POS, que tampoco lo
+   *   emite para sus movimientos `sale`).
+   */
+  async recordRouteCloseMovements(
+    tx: any,
+    input: {
+      store_id: number;
+      route_id: number;
+      route_number: string;
+      session_id: number;
+      responsible_user_id: number;
+      stops: Array<{
+        id: number;
+        result?: string | null;
+        is_prepaid: boolean;
+        payment_method?: string | null;
+        collected_amount?: unknown;
+        anticipo_amount?: unknown;
+      }>;
+    },
+  ) {
+    const eligible = input.stops.filter(
+      (s) =>
+        (s.result === 'delivered' || s.result === 'partial') && !s.is_prepaid,
+    );
+    if (eligible.length === 0) return [];
+
+    const legacyRefs = eligible.map(
+      (s) => `dispatch_route:${input.route_id}:stop:${s.id}`,
+    );
+    const legacy = await tx.cash_register_movements.findMany({
+      where: { store_id: input.store_id, reference: { in: legacyRefs } },
+      select: { reference: true },
+    });
+    const legacySet = new Set<string>(legacy.map((m: any) => m.reference));
+
+    const byMethod = new Map<string, { amount: number; stops: number }>();
+    for (const s of eligible) {
+      if (legacySet.has(`dispatch_route:${input.route_id}:stop:${s.id}`)) continue;
+      const amount =
+        Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0);
+      if (!(amount > 0)) continue;
+      const method = s.payment_method || 'cash';
+      const cur = byMethod.get(method) ?? { amount: 0, stops: 0 };
+      cur.amount += amount;
+      cur.stops += 1;
+      byMethod.set(method, cur);
+    }
+
+    const created: Array<{
+      id: number;
+      payment_method: string;
+      amount: number;
+      reference: string;
+    }> = [];
+    for (const [method, agg] of byMethod) {
+      const amount = Math.round(agg.amount * 100) / 100;
+      if (!(amount > 0)) continue;
+      const reference = `dispatch_route:${input.route_id}:close:${method}`;
+      const existing = await tx.cash_register_movements.findFirst({
+        where: { store_id: input.store_id, reference },
+        select: { id: true },
+      });
+      if (existing) continue;
+      const movement = await tx.cash_register_movements.create({
+        data: {
+          session_id: input.session_id,
+          store_id: input.store_id,
+          user_id: input.responsible_user_id,
+          type: 'sale',
+          amount,
+          payment_method: method,
+          reference,
+          notes: `Recaudo planilla ${input.route_number} (${agg.stops} paradas)`,
+        },
+      });
+      created.push({ id: movement.id, payment_method: method, amount, reference });
+    }
+    return created;
+  }
+
   emitCashMovementRecorded(event: RecordedCashMovementEvent | null): void {
     if (event) this.eventEmitter.emit('cash_register.movement', event);
   }
 
   async emitPaymentReceived(
     input: PaymentReceivedInput,
-    options: { cashMovementHandled?: boolean } = {},
+    _options: { cashMovementHandled?: boolean } = {},
   ) {
     // Resolve organization_id from store if missing
     let organization_id = input.organization_id;
@@ -139,39 +285,10 @@ export class CashSettlementService {
       this.logger.warn(`[emitPaymentReceived] No organization_id for store ${input.store_id}`);
     }
 
-    // Persist cash_register_movements if payment_method is cash
-    if (
-      !options.cashMovementHandled &&
-      input.payment_method === 'cash' &&
-      input.user_id
-    ) {
-      let movementEvent: RecordedCashMovementEvent | null = null;
-      try {
-        movementEvent = await this.prisma.$transaction((tx) =>
-          this.recordCashMovement(tx, { ...input, organization_id }),
-        );
-      } catch (error) {
-        // Legacy post-commit callers cannot roll back their business action.
-        // A raced close therefore keeps the prior behavior (no movement,
-        // payment event continues); transactional callers use recordCashMovement
-        // directly and fail closed so their mutation rolls back.
-        if (
-          !(error instanceof VendixHttpException) ||
-          error.errorCode !== ErrorCodes.CASH_SESSION_REQUIRED_001.code
-        ) {
-          throw error;
-        }
-        this.logger.warn(
-          `[emitPaymentReceived] Cash session closed before route movement could be recorded for store ${input.store_id} user ${input.user_id}`,
-        );
-      }
-      if (movementEvent) this.emitCashMovementRecorded(movementEvent);
-      else {
-        this.logger.warn(
-          `[emitPaymentReceived] No open cash session for store ${input.store_id} user ${input.user_id} — cash movement not recorded`,
-        );
-      }
-    }
+    // D8: NO se registra `cash_register_movements` aquí. El recaudo en ruta se
+    // asienta en caja al CERRAR la planilla (`recordRouteCloseMovements`), contra
+    // la sesión que el usuario elige. `options.cashMovementHandled` se conserva
+    // por compatibilidad de firma y ya no tiene efecto.
 
     // Emit payment.received so existing listeners create auto-entries, AR, notifications
     // NOTE: `order_id` is intentionally null for dispatch_route. The legacy
